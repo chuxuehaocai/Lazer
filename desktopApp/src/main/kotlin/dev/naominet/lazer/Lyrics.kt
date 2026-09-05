@@ -2,10 +2,12 @@ package dev.naominet.lazer
 
 /**
  * One timed lyric line. [timeMs] is the start offset within the track.
+ * [translation] is the optional translated lyric for the same line.
  */
 data class TimedLyricLine(
     val timeMs: Long,
     val text: String,
+    val translation: String? = null,
 )
 
 private val LrcStampPattern = Regex("""\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?]""")
@@ -43,6 +45,29 @@ internal fun parseLrc(lrc: String?): List<TimedLyricLine> {
         }
     }
     return lines.sortedBy { it.timeMs }
+}
+
+/**
+ * Attaches translated lyric lines to their matching original lines.
+ *
+ * The Gateway returns the translation LRC as a separate [TimedLyricLine] list, usually with the
+ * same timestamps as the original. When timestamps differ slightly, the nearest translation within
+ * one second is used so the current line still has a useful translation.
+ */
+internal fun mergeLyrics(
+    lyrics: List<TimedLyricLine>,
+    translatedLyrics: List<TimedLyricLine>,
+): List<TimedLyricLine> {
+    if (lyrics.isEmpty()) return emptyList()
+    if (translatedLyrics.isEmpty()) return lyrics
+    val sortedTranslations = translatedLyrics.sortedBy { it.timeMs }
+    return lyrics.map { line ->
+        val translation = sortedTranslations
+            .minByOrNull { kotlin.math.abs(it.timeMs - line.timeMs) }
+            ?.takeIf { kotlin.math.abs(it.timeMs - line.timeMs) <= 1_000L }
+            ?.text
+        line.copy(translation = translation)
+    }
 }
 
 /** Binary search: last line whose timeMs <= [positionMs], or -1. */

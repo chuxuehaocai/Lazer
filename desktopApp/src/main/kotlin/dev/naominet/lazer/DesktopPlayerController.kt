@@ -322,8 +322,11 @@ class DesktopPlayerController(
         lyricsLoading = true
         lyricsJob = scope.launch {
             try {
-                val raw = gateway.lyrics(songId).lrc?.lyric
-                val parsed = parseLrc(raw)
+                val response = gateway.lyrics(songId)
+                val parsed = mergeLyrics(
+                    lyrics = parseLrc(response.lrc?.lyric),
+                    translatedLyrics = parseLrc(response.tlyric?.lyric),
+                )
                 if (nowPlaying?.id != songId) return@launch
                 lyrics = parsed
                 lyricsLoading = false

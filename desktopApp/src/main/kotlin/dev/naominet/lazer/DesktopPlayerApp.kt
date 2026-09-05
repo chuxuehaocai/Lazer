@@ -1611,8 +1611,9 @@ private fun LyricsOverlay(
     val positionMs = controller.positionMillis
     val activeIndex = findCurrentLyricIndex(lines, positionMs)
 
-    // 2× type size needs a taller pitch; keep lines comfortably spaced and centered.
-    val rowPitchPx = with(density) { 88.dp.toPx() }
+    // Original lyric plus its translation share one row, so keep a taller pitch and center
+    // the original lyric line within each row.
+    val rowPitchPx = with(density) { 112.dp.toPx() }
     val baseFontSp = 34.sp
     val baseLineHeightSp = 48.sp
 
@@ -1827,7 +1828,7 @@ private fun LyricsOverlay(
                             val visualIndex = if (rowPitchPx <= 0f) 0f else lyricScroll / rowPitchPx
                             lines.forEachIndexed { index, line ->
                                 val lineCenterPx = centerYPx + index * rowPitchPx - lyricScroll
-                                if (lineCenterPx < -80f || lineCenterPx > heightPx + 80f) return@forEachIndexed
+                                if (lineCenterPx < -120f || lineCenterPx > heightPx + 120f) return@forEachIndexed
 
                                 val distance = kotlin.math.abs(index - visualIndex)
                                 val focus = if (activeIndex < 0) 0f else (1f - distance).coerceAtLeast(0f)
@@ -1835,13 +1836,15 @@ private fun LyricsOverlay(
                                 val scale = (0.92f + focus * 0.16f + ambient * 0.03f).coerceIn(0.90f, 1.14f)
                                 val alpha = ((130f * ambient + 125f * focus) / 255f).coerceIn(0.125f, 1f)
                                 val color = lerpColor(colors.onSurfaceVariant, colors.onSurface, focus)
+                                val hasTranslation = !line.translation.isNullOrBlank()
+                                val rowHeight = if (hasTranslation) 100.dp else 48.dp
                                 val yDp = with(density) { lineCenterPx.toDp() } - 24.dp
 
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .offset(y = yDp)
-                                        .height(48.dp)
+                                        .height(rowHeight)
                                         .padding(horizontal = 20.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable {
@@ -1850,26 +1853,51 @@ private fun LyricsOverlay(
                                             controller.seekToLyric(index)
                                             lyricScroll = index * rowPitchPx
                                         },
-                                    contentAlignment = Alignment.Center,
+                                    contentAlignment = if (hasTranslation) Alignment.TopCenter else Alignment.Center,
                                 ) {
-                                    Text(
-                                        text = line.text,
-                                        modifier = Modifier.graphicsLayer {
-                                            scaleX = scale
-                                            scaleY = scale
-                                            this.alpha = alpha
-                                            transformOrigin = TransformOrigin.Center
-                                        },
-                                        style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontWeight = if (focus > 0.55f) FontWeight.SemiBold else FontWeight.Normal,
-                                            fontSize = baseFontSp,
-                                            lineHeight = baseLineHeightSp,
-                                        ),
-                                        color = color,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
+                                        Text(
+                                            text = line.text,
+                                            modifier = Modifier.graphicsLayer {
+                                                scaleX = scale
+                                                scaleY = scale
+                                                this.alpha = alpha
+                                                transformOrigin = TransformOrigin.Center
+                                            },
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontWeight = if (focus > 0.55f) FontWeight.SemiBold else FontWeight.Normal,
+                                                fontSize = baseFontSp,
+                                                lineHeight = baseLineHeightSp,
+                                            ),
+                                            color = color,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (hasTranslation) {
+                                            Spacer(Modifier.height(6.dp))
+                                            Text(
+                                                text = line.translation.orEmpty(),
+                                                modifier = Modifier.graphicsLayer {
+                                                    scaleX = scale
+                                                    scaleY = scale
+                                                    this.alpha = alpha
+                                                    transformOrigin = TransformOrigin.Center
+                                                },
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontSize = 16.sp,
+                                                    lineHeight = 21.sp,
+                                                    fontWeight = FontWeight.Normal,
+                                                ),
+                                                color = color.copy(alpha = 0.84f),
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
