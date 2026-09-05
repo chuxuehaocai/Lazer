@@ -1,0 +1,1013 @@
+package dev.naominet.lazer
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import dev.naominet.lazer.gateway.AudioQuality
+import dev.naominet.lazer.gateway.NeteaseMusicGateway
+import dev.naominet.lazer.gateway.model.Playlist
+import dev.naominet.lazer.gateway.model.QrCheckResponse
+import dev.naominet.lazer.gateway.model.Song
+import dev.naominet.lazer.gateway.model.UserProfile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.swing.Swing
+import kotlin.math.roundToInt
+
+data class TrackItem(
+    val id: Long,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val durationMillis: Long,
+    val coverUrl: String?,
+) {
+    val durationLabel: String
+        get() = formatDuration(durationMillis)
+}
+
+data class PlaylistItem(
+    val id: Long,
+    val title: String,
+    val subtitle: String,
+    val coverUrl: String?,
+    val trackCount: Int,
+    val creatorName: String? = null,
+    /** True for the account's private "liked songs" collection (sidebar 我喜欢). */
+    val isLikedCollection: Boolean = false,
+)
+
+enum class LoginMethod { QR_CODE, PASSWORD }
+
+enum class QrLoginState {
+    IDLE,
+    CREATING,
+    WAITING_FOR_SCAN,
+    WAITING_FOR_CONFIRMATION,
+    EXPIRED,
+    AUTHORIZED,
+    ERROR,
+}
+
+class DesktopPlayerController(
+    private val gateway: NeteaseMusicGateway = NeteaseMusicGateway(
+        sessionStore = DesktopGatewaySessionStore(),
+    ),
+) {
+    private val controllerJob = SupervisorJob()
+    private val scope = CoroutineScope(controllerJob + Dispatchers.Swing)
+    private val playlistCache = DesktopPlaylistCache()
+    private var searchJob: Job? = null
+    private var playJob: Job? = null
+    private var playlistJob: Job? = null
+    private var lyricsJob: Job? = null
+    private var paletteJob: Job? = null
+    private var qrLoginJob: Job? = null
+    private var started = false
+    private val audioPlayer = DesktopAudioPlayer(
+        onProgress = { value -> scope.launch { progress = value } },
+        onCompleted = {
+            scope.launch {
+                progress = 1f
+                when {
+                    repeat -> nowPlaying?.let { resolveAndPlay(it) } ?: run { isPlaying = false }
+                    effectiveQueue().isEmpty() -> isPlaying = false
+                    else -> playNext()
+                }
+            }
+        },
+        onError = { error ->
+            scope.launch {
+                isPlaying = false
+                streamUrl = null
+                statusMessage = error.toFriendlyMessage("系统音频输出没有打开，请检查声音设备")
+            }
+        },
+    )
+
+    var isDark by mutableStateOf(DesktopSettings.isDark)
+        private set
+    var isLoading by mutableStateOf(false)
+        private set
+    var statusMessage by mutableStateOf<String?>(null)
+        private set
+    var searchQuery by mutableStateOf("")
+        private set
+    var featuredPlaylists by mutableStateOf<List<PlaylistItem>>(emptyList())
+        private set
+    var userPlaylists by mutableStateOf<List<PlaylistItem>>(emptyList())
+        private set
+    var recentTracks by mutableStateOf<List<TrackItem>>(emptyList())
+        private set
+    var likedTracks by mutableStateOf<List<TrackItem>>(emptyList())
+        private set
+    var searchResults by mutableStateOf<List<TrackItem>>(emptyList())
+        private set
+    var activePlaylist by mutableStateOf<PlaylistItem?>(null)
+        private set
+    val activePlaylistTitle: String?
+        get() = activePlaylist?.title
+    var nowPlaying by mutableStateOf<TrackItem?>(null)
+        private set
+    var isPlaying by mutableStateOf(false)
+        private set
+    var progress by mutableFloatStateOf(0f)
+        private set
+    /** True while the user is dragging the seek bar — freezes display smoothing. */
+    var isSeeking by mutableStateOf(false)
+        private set
+    var volume by mutableFloatStateOf(0.72f)
+        private set
+    var audioQuality by mutableStateOf(AudioQuality.EXHIGH)
+        private set
+    var streamUrl by mutableStateOf<String?>(null)
+        private set
+    var streamBitrate by mutableStateOf<Int?>(null)
+        private set
+    var isLiked by mutableStateOf(false)
+        private set
+    var shuffle by mutableStateOf(false)
+        private set
+    var repeat by mutableStateOf(false)
+        private set
+
+    var lyrics by mutableStateOf<List<TimedLyricLine>>(emptyList())
+        private set
+    var lyricsLoading by mutableStateOf(false)
+        private set
+    var lyricsError by mutableStateOf<String?>(null)
+        private set
+    var isLyricsVisible by mutableStateOf(false)
+        private set
+    /** Album-art-derived colors driving the lyric fluid mesh. */
+    var lyricMeshColors by mutableStateOf(CoverPalette.defaultMesh)
+        private set
+
+    /** Playback position derived from progress and the current track duration. */
+    val positionMillis: Long
+        get() {
+            val duration = nowPlaying?.durationMillis ?: return 0L
+            return (duration * progress.toDouble()).toLong().coerceIn(0L, duration)
+        }
+
+    val currentLyricIndex: Int
+        get() = findCurrentLyricIndex(lyrics, positionMillis)
+
+    var currentUser by mutableStateOf<UserProfile?>(null)
+        private set
+    val isSignedIn: Boolean
+        get() = currentUser != null
+
+    var isLoginVisible by mutableStateOf(false)
+        private set
+    var loginMethod by mutableStateOf(LoginMethod.QR_CODE)
+        private set
+    var qrLoginState by mutableStateOf(QrLoginState.IDLE)
+        private set
+    var qrImageData by mutableStateOf<String?>(null)
+        private set
+    var qrFallbackUrl by mutableStateOf<String?>(null)
+        private set
+    var loginIdentifier by mutableStateOf("")
+        private set
+    var loginPassword by mutableStateOf("")
+        private set
+    var loginError by mutableStateOf<String?>(null)
+        private set
+    var isSubmittingLogin by mutableStateOf(false)
+        private set
+    private var activeRequests by mutableIntStateOf(0)
+
+    fun start() {
+        if (started) return
+        started = true
+        // Older builds cached `/recommend/resource` entries before its `picUrl` field was mapped.
+        // Do not let those empty-cover records mask a fresh public/recommended playlist request.
+        featuredPlaylists = playlistCache.loadPlaylists(FEATURED_CACHE_KEY)
+            .filter { !it.coverUrl.isNullOrBlank() }
+        recentTracks = playlistCache.loadTracks(RECENT_TRACKS_CACHE_ID)?.tracks.orEmpty()
+        if (nowPlaying == null) nowPlaying = recentTracks.firstOrNull()
+        nowPlaying?.let { track ->
+            loadCoverPalette(track.coverUrl, track.id)
+            if (lyrics.isEmpty()) loadLyrics(track.id)
+        }
+        scope.launch {
+            beginRequest("正在连接音乐服务…")
+            try {
+                val restoredProfile = if (!gateway.sessionCookie.isNullOrBlank()) {
+                    runCatching { gateway.loginStatus().data?.profile }.getOrNull()
+                } else {
+                    null
+                }
+
+                if (restoredProfile != null) {
+                    currentUser = restoredProfile
+                    syncUserLibrary(restoredProfile)
+                } else {
+                    if (!gateway.sessionCookie.isNullOrBlank()) gateway.clearSession()
+                    runCatching { gateway.anonymousLogin() }
+                    loadPublicLibrary()
+                    gateway.clearSession()
+                }
+                statusMessage = null
+            } catch (error: Throwable) {
+                statusMessage = error.toFriendlyMessage("暂时无法连接音乐服务")
+            } finally {
+                endRequest()
+            }
+        }
+    }
+
+    fun dispose() {
+        searchJob?.cancel()
+        playJob?.cancel()
+        playlistJob?.cancel()
+        lyricsJob?.cancel()
+        paletteJob?.cancel()
+        qrLoginJob?.cancel()
+        audioPlayer.close()
+        controllerJob.cancel()
+        gateway.close()
+    }
+
+    fun toggleTheme() {
+        isDark = !isDark
+        DesktopSettings.isDark = isDark
+    }
+
+    fun updateSearchQuery(query: String) {
+        searchQuery = query
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            searchResults = emptyList()
+            return
+        }
+        searchJob = scope.launch {
+            delay(320)
+            beginRequest("正在理解你的描述…")
+            try {
+                val response = gateway.search(query, limit = 24, useCloudSearch = true)
+                searchResults = response.result?.songs.orEmpty().map { it.toTrackItem() }
+                statusMessage = if (searchResults.isEmpty()) "换一种说法试试" else null
+            } catch (error: Throwable) {
+                statusMessage = error.toFriendlyMessage("搜索没有完成，请稍后重试")
+            } finally {
+                endRequest()
+            }
+        }
+    }
+
+    fun useIntentSuggestion(suggestion: String) {
+        updateSearchQuery(suggestion)
+    }
+
+    fun playTrack(track: TrackItem) {
+        nowPlaying = track
+        progress = 0f
+        isLiked = likedTracks.any { it.id == track.id }
+        if (recentTracks.none { it.id == track.id }) {
+            recentTracks = listOf(track) + recentTracks.take(39)
+        }
+        loadLyrics(track.id)
+        loadCoverPalette(track.coverUrl, track.id)
+        resolveAndPlay(track)
+    }
+
+    fun openLyrics() {
+        isLyricsVisible = true
+        val track = nowPlaying ?: return
+        if (lyrics.isEmpty() && !lyricsLoading) {
+            loadLyrics(track.id)
+        }
+    }
+
+    fun closeLyrics() {
+        isLyricsVisible = false
+    }
+
+    /** Jump playback to the start of a lyric line. */
+    fun seekToLyric(index: Int) {
+        val line = lyrics.getOrNull(index) ?: return
+        val track = nowPlaying ?: return
+        if (track.durationMillis <= 0L) return
+        val url = streamUrl
+        progress = (line.timeMs.toDouble() / track.durationMillis.toDouble()).toFloat().coerceIn(0f, 1f)
+        isSeeking = false
+        if (url.isNullOrBlank()) {
+            resolveAndPlay(track, resumeProgress = progress)
+        } else {
+            isPlaying = true
+            audioPlayer.play(
+                url = url,
+                durationMillis = track.durationMillis,
+                fromProgress = progress,
+                volume = volume,
+                playWhenReady = true,
+            )
+        }
+    }
+
+    private fun loadLyrics(songId: Long) {
+        lyricsJob?.cancel()
+        lyrics = emptyList()
+        lyricsError = null
+        lyricsLoading = true
+        lyricsJob = scope.launch {
+            try {
+                val raw = gateway.lyrics(songId).lrc?.lyric
+                val parsed = parseLrc(raw)
+                if (nowPlaying?.id != songId) return@launch
+                lyrics = parsed
+                lyricsLoading = false
+                lyricsError = if (parsed.isEmpty()) "这首歌暂时没有歌词" else null
+            } catch (error: Throwable) {
+                if (nowPlaying?.id != songId) return@launch
+                lyrics = emptyList()
+                lyricsLoading = false
+                lyricsError = error.toFriendlyMessage("歌词没有加载成功")
+            }
+        }
+    }
+
+    private fun loadCoverPalette(coverUrl: String?, trackId: Long) {
+        paletteJob?.cancel()
+        paletteJob = scope.launch(Dispatchers.IO) {
+            val seed = CoverPalette.extractSeedFromUrl(coverUrl)
+            val mesh = CoverPalette.meshColorsFromSeed(seed)
+            launch(Dispatchers.Swing) {
+                if (nowPlaying?.id == trackId) {
+                    lyricMeshColors = mesh
+                }
+            }
+        }
+    }
+
+    fun togglePlayPause() {
+        val track = nowPlaying ?: recentTracks.firstOrNull() ?: return
+        if (nowPlaying == null) {
+            playTrack(track)
+            return
+        }
+        if (isPlaying) {
+            isPlaying = false
+            audioPlayer.pause()
+        } else if (streamUrl == null) {
+            resolveAndPlay(track)
+        } else {
+            isPlaying = true
+            audioPlayer.resume()
+        }
+    }
+
+    fun playPrevious() {
+        val list = effectiveQueue()
+        if (list.isEmpty()) return
+        val currentId = nowPlaying?.id
+        val index = list.indexOfFirst { it.id == currentId }.let { if (it < 0) 0 else it }
+        playTrack(list[(index - 1 + list.size) % list.size])
+    }
+
+    fun playNext() {
+        val list = effectiveQueue()
+        if (list.isEmpty()) return
+        val currentId = nowPlaying?.id
+        val index = list.indexOfFirst { it.id == currentId }.let { if (it < 0) 0 else it }
+        playTrack(list[(index + 1) % list.size])
+    }
+
+    fun seekTo(value: Float) {
+        isSeeking = true
+        progress = value.coerceIn(0f, 1f)
+    }
+
+    fun commitSeek() {
+        val url = streamUrl ?: return
+        val track = nowPlaying ?: return
+        audioPlayer.play(
+            url = url,
+            durationMillis = track.durationMillis,
+            fromProgress = progress,
+            volume = volume,
+            playWhenReady = isPlaying,
+        )
+        isSeeking = false
+    }
+
+    /** Browse playlists shown in the library strip / sidebar, without the dedicated liked entry. */
+    fun browsePlaylists(): List<PlaylistItem> = userPlaylists.filterNot { it.isLikedCollection }
+
+    fun likedPlaylist(): PlaylistItem? =
+        userPlaylists.firstOrNull { it.isLikedCollection }
+            ?: userPlaylists.firstOrNull { it.title.endsWith("喜欢的音乐") }
+
+    /** Sidebar 「我喜欢」— open the private liked collection so track order matches NetEase. */
+    fun openLikedCollection() {
+        val profile = currentUser
+        if (profile == null) {
+            openLogin()
+            return
+        }
+        val liked = likedPlaylist()
+        if (liked != null) {
+            openPlaylist(liked)
+            return
+        }
+        // Fallback: rebuild from /likelist while preserving the returned id order.
+        playlistJob?.cancel()
+        playlistJob = scope.launch {
+            beginRequest("正在打开我喜欢…")
+            try {
+                val likedIds = gateway.likedSongIds(profile.userId).ids
+                val details = if (likedIds.isEmpty()) {
+                    emptyList()
+                } else {
+                    gateway.songDetails(likedIds).songs
+                        .associateBy { it.id }
+                        .let { byId -> likedIds.mapNotNull { id -> byId[id]?.toTrackItem() } }
+                }
+                likedTracks = details
+                val synthetic = PlaylistItem(
+                    id = LIKED_FALLBACK_PLAYLIST_ID,
+                    title = "我喜欢",
+                    subtitle = "${details.size} 首 · ${profile.nickname}",
+                    coverUrl = details.firstOrNull()?.coverUrl,
+                    trackCount = details.size,
+                    creatorName = profile.nickname,
+                    isLikedCollection = true,
+                )
+                showPlaylist(synthetic, details)
+                statusMessage = if (details.isEmpty()) "这里还很安静" else null
+            } catch (error: Throwable) {
+                statusMessage = error.toFriendlyMessage("喜欢的歌曲没有同步完成")
+            } finally {
+                endRequest()
+            }
+        }
+    }
+
+    fun updateVolume(value: Float) {
+        volume = value.coerceIn(0f, 1f)
+        audioPlayer.setVolume(volume)
+    }
+
+    fun updateAudioQuality(quality: AudioQuality) {
+        if (audioQuality == quality) return
+        audioQuality = quality
+        val track = nowPlaying ?: return
+        if (isPlaying || streamUrl != null) resolveAndPlay(track, resumeProgress = progress)
+    }
+
+    fun toggleLiked() {
+        val track = nowPlaying ?: return
+        val user = currentUser
+        if (user == null) {
+            openLogin()
+            return
+        }
+        val next = !isLiked
+        isLiked = next
+        likedTracks = if (next) {
+            listOf(track) + likedTracks.filterNot { it.id == track.id }
+        } else {
+            likedTracks.filterNot { it.id == track.id }
+        }
+        scope.launch {
+            runCatching { gateway.updateSongLiked(track.id, user.userId, next) }
+                .onFailure {
+                    isLiked = !next
+                    statusMessage = "喜欢状态未能同步，请重试"
+                }
+        }
+    }
+
+    fun toggleShuffle() {
+        shuffle = !shuffle
+    }
+
+    fun toggleRepeat() {
+        repeat = !repeat
+    }
+
+    fun openPlaylist(playlist: PlaylistItem) {
+        playlistJob?.cancel()
+        // Publish the header immediately so the detail sheet doesn't flash empty.
+        activePlaylist = playlist
+        val cached = playlistCache.loadTracks(playlist.id)
+        if (cached != null && cached.tracks.isNotEmpty()) {
+            showPlaylist(playlist, cached.tracks)
+            statusMessage = if (cached.complete) "已从本地打开，正在检查更新…" else "已从本地打开 ${cached.tracks.size} 首，继续加载…"
+        } else {
+            recentTracks = emptyList()
+        }
+        playlistJob = scope.launch {
+            beginRequest("正在打开「${playlist.title}」…")
+            try {
+                val tracks = loadCompletePlaylist(playlist)
+                if (tracks.isNotEmpty()) {
+                    showPlaylist(playlist, tracks)
+                    if (playlist.isLikedCollection) {
+                        likedTracks = tracks
+                    }
+                }
+                statusMessage = if (tracks.isEmpty()) "这个歌单暂时没有歌曲" else null
+            } catch (error: Throwable) {
+                statusMessage = error.toFriendlyMessage("歌单没有同步完成")
+            } finally {
+                endRequest()
+            }
+        }
+    }
+
+    fun syncLibrary() {
+        val profile = currentUser ?: run {
+            openLogin()
+            return
+        }
+        scope.launch {
+            beginRequest("正在同步你的歌单…")
+            try {
+                syncUserLibrary(profile)
+                statusMessage = "歌单已同步"
+                delay(1_600)
+                if (statusMessage == "歌单已同步") statusMessage = null
+            } catch (error: Throwable) {
+                statusMessage = error.toFriendlyMessage("歌单没有同步完成")
+            } finally {
+                endRequest()
+            }
+        }
+    }
+
+    fun openLogin() {
+        isLoginVisible = true
+        loginMethod = LoginMethod.QR_CODE
+        loginError = null
+        if (qrLoginState !in setOf(QrLoginState.CREATING, QrLoginState.WAITING_FOR_SCAN, QrLoginState.WAITING_FOR_CONFIRMATION)) {
+            startQrLogin()
+        }
+    }
+
+    fun closeLogin() {
+        isLoginVisible = false
+        qrLoginJob?.cancel()
+        qrLoginState = QrLoginState.IDLE
+    }
+
+    fun selectLoginMethod(method: LoginMethod) {
+        loginMethod = method
+        loginError = null
+        if (method == LoginMethod.PASSWORD) {
+            qrLoginJob?.cancel()
+            qrLoginState = QrLoginState.IDLE
+        }
+        if (method == LoginMethod.QR_CODE && qrLoginState !in setOf(
+                QrLoginState.CREATING,
+                QrLoginState.WAITING_FOR_SCAN,
+                QrLoginState.WAITING_FOR_CONFIRMATION,
+            )
+        ) {
+            startQrLogin()
+        }
+    }
+
+    fun updateLoginIdentifier(value: String) {
+        loginIdentifier = value
+        loginError = null
+    }
+
+    fun updateLoginPassword(value: String) {
+        loginPassword = value
+        loginError = null
+    }
+
+    fun startQrLogin() {
+        qrLoginJob?.cancel()
+        qrLoginJob = scope.launch {
+            qrLoginState = QrLoginState.CREATING
+            qrImageData = null
+            qrFallbackUrl = null
+            loginError = null
+            try {
+                val key = gateway.createQrKey(platform = "web").data?.unikey.orEmpty()
+                check(key.isNotBlank()) { "二维码密钥为空" }
+                val code = gateway.createQrCode(key, includeImage = true, platform = "web").data
+                qrImageData = code?.qrimg
+                qrFallbackUrl = code?.qrurl?.let(::normalizeGatewayQrLoginUrl)
+                check(!qrImageData.isNullOrBlank() || !qrFallbackUrl.isNullOrBlank()) { "二维码内容为空" }
+                qrLoginState = QrLoginState.WAITING_FOR_SCAN
+
+                while (isActive) {
+                    delay(1_800)
+                    val result = gateway.checkQrCode(key, platform = "web")
+                    when (result.code) {
+                        QrCheckResponse.EXPIRED_CODE -> {
+                            qrLoginState = QrLoginState.EXPIRED
+                            return@launch
+                        }
+                        QrCheckResponse.WAITING_FOR_SCAN_CODE -> qrLoginState = QrLoginState.WAITING_FOR_SCAN
+                        QrCheckResponse.WAITING_FOR_CONFIRMATION_CODE -> qrLoginState = QrLoginState.WAITING_FOR_CONFIRMATION
+                        QrCheckResponse.AUTHORIZED_CODE -> {
+                            qrLoginState = QrLoginState.AUTHORIZED
+                            // Close the sheet immediately; library sync continues in the background.
+                            finishSignInAndClose()
+                            return@launch
+                        }
+                        else -> {
+                            loginError = result.message ?: result.msg ?: "二维码登录失败（${result.code}）"
+                            qrLoginState = QrLoginState.ERROR
+                            return@launch
+                        }
+                    }
+                }
+            } catch (error: Throwable) {
+                qrLoginState = QrLoginState.ERROR
+                loginError = error.toFriendlyMessage("二维码生成失败，请重新生成")
+            }
+        }
+    }
+
+    fun submitPasswordLogin() {
+        val identifier = loginIdentifier.trim()
+        if (identifier.isBlank() || loginPassword.isBlank()) {
+            loginError = "请输入手机号或邮箱，以及密码"
+            return
+        }
+        scope.launch {
+            isSubmittingLogin = true
+            loginError = null
+            try {
+                val response = if ('@' in identifier) {
+                    gateway.loginWithEmail(identifier, loginPassword)
+                } else {
+                    gateway.loginWithPhonePassword(
+                        phone = identifier.removePrefix("+86").replace(" ", ""),
+                        password = loginPassword,
+                        countryCode = "86",
+                    )
+                }
+                if (response.code !in 200..299 || gateway.sessionCookie.isNullOrBlank()) {
+                    error(response.failureMessage ?: "账号或密码不正确")
+                }
+                finishSignInAndClose(response.profile)
+            } catch (error: Throwable) {
+                loginError = error.toFriendlyMessage("登录没有完成，请检查账号与密码")
+            } finally {
+                isSubmittingLogin = false
+            }
+        }
+    }
+
+    fun logout() {
+        scope.launch {
+            beginRequest("正在退出…")
+            try {
+                runCatching { gateway.logoutSession() }
+            } finally {
+                gateway.clearSession()
+                currentUser = null
+                userPlaylists = emptyList()
+                likedTracks = emptyList()
+                isLiked = false
+                activePlaylist = null
+                runCatching { gateway.anonymousLogin() }
+                runCatching { loadPublicLibrary() }
+                gateway.clearSession()
+                statusMessage = null
+                endRequest()
+            }
+        }
+    }
+
+    /**
+     * Resolves the signed-in profile, closes the login UI immediately, then syncs
+     * the library in the background so the sheet never waits on playlist fetches.
+     */
+    private suspend fun finishSignInAndClose(profileHint: UserProfile? = null) {
+        val profile = resolveSignedInProfile(profileHint)
+        currentUser = profile
+        loginPassword = ""
+        loginError = null
+        isLoginVisible = false
+        qrLoginState = QrLoginState.IDLE
+        qrLoginJob?.cancel()
+
+        scope.launch {
+            beginRequest("正在同步你的音乐…")
+            try {
+                runCatching { syncUserLibrary(profile) }
+                    .onSuccess {
+                        statusMessage = "歌单已同步"
+                        delay(1_600)
+                        if (statusMessage == "歌单已同步") statusMessage = null
+                    }
+                    .onFailure { statusMessage = "登录成功，歌单稍后再同步" }
+            } finally {
+                endRequest()
+            }
+        }
+    }
+
+    private suspend fun resolveSignedInProfile(profileHint: UserProfile? = null): UserProfile {
+        val loginStatus = if (profileHint == null || profileHint.userId <= 0) {
+            gateway.loginStatus().data
+        } else {
+            null
+        }
+        val profile = profileHint?.takeIf { it.userId > 0 }
+            ?: loginStatus?.profile?.takeIf { it.userId > 0 }
+            ?: loginStatus?.account?.id
+                ?.takeIf { it > 0 }
+                ?.let { gateway.userDetail(it).profile }
+        check(profile != null && profile.userId > 0) { "没有读取到用户资料" }
+        return profile
+    }
+
+    private suspend fun loadPublicLibrary() {
+        val playlists = ensurePlaylistCovers(
+            gateway.topPlaylists(limit = 12).playlists.map { it.toPlaylistItem() },
+        )
+        featuredPlaylists = playlists
+        playlistCache.savePlaylists(FEATURED_CACHE_KEY, playlists)
+        if (recentTracks.isEmpty() && playlists.isNotEmpty()) {
+            val tracks = runCatching {
+                gateway.playlistTracks(playlists.first().id, limit = 18).songs.map { it.toTrackItem() }
+            }.getOrDefault(emptyList())
+            recentTracks = tracks
+            playlistCache.saveTracks(RECENT_TRACKS_CACHE_ID, tracks, complete = false)
+            if (nowPlaying == null) nowPlaying = tracks.firstOrNull()
+        }
+        if (recentTracks.isEmpty()) {
+            val fmTracks = runCatching { gateway.personalFm().data.map { it.toTrackItem() } }
+                .getOrDefault(emptyList())
+            recentTracks = fmTracks
+            playlistCache.saveTracks(RECENT_TRACKS_CACHE_ID, fmTracks, complete = false)
+            if (nowPlaying == null) nowPlaying = fmTracks.firstOrNull()
+        }
+    }
+
+    private suspend fun syncUserLibrary(profile: UserProfile) {
+        val cacheKey = userPlaylistCacheKey(profile.userId)
+        if (userPlaylists.isEmpty()) {
+            userPlaylists = playlistCache.loadPlaylists(cacheKey).orEmpty()
+        }
+        val personal = loadAllUserPlaylists(profile.userId, cacheKey)
+        userPlaylists = personal
+
+        // `/recommend/resource` sometimes omits picUrl/coverImgUrl for radar-style lists.
+        // Always resolve covers before publishing to the home strip.
+        val recommended = runCatching {
+            ensurePlaylistCovers(gateway.dailyRecommendedPlaylists().recommend.map { it.toPlaylistItem() })
+        }.getOrDefault(emptyList())
+        if (recommended.isNotEmpty()) {
+            featuredPlaylists = (recommended + featuredPlaylists)
+                .distinctBy { it.id }
+                .let { ensurePlaylistCovers(it) }
+                .take(12)
+            playlistCache.savePlaylists(FEATURED_CACHE_KEY, featuredPlaylists)
+        } else if (featuredPlaylists.isEmpty() || featuredPlaylists.all { it.coverUrl.isNullOrBlank() }) {
+            loadPublicLibrary()
+        } else {
+            featuredPlaylists = ensurePlaylistCovers(featuredPlaylists)
+            playlistCache.savePlaylists(FEATURED_CACHE_KEY, featuredPlaylists)
+        }
+
+        // Prefer the private liked playlist order; /song/detail alone does not keep likelist order.
+        val liked = personal.firstOrNull { it.isLikedCollection }
+        likedTracks = when {
+            liked != null -> runCatching {
+                gateway.playlistTracks(liked.id, limit = 200).songs.map { it.toTrackItem() }
+            }.getOrDefault(likedTracks)
+            else -> {
+                val likedIds = runCatching { gateway.likedSongIds(profile.userId).ids.take(200) }
+                    .getOrDefault(emptyList())
+                if (likedIds.isEmpty()) {
+                    emptyList()
+                } else {
+                    runCatching {
+                        val byId = gateway.songDetails(likedIds).songs.associateBy { it.id }
+                        likedIds.mapNotNull { id -> byId[id]?.toTrackItem() }
+                    }.getOrDefault(emptyList())
+                }
+            }
+        }
+
+        val dailyTracks = runCatching { gateway.dailyRecommendedSongs().data?.dailySongs.orEmpty().map { it.toTrackItem() } }
+            .getOrDefault(emptyList())
+        if (dailyTracks.isNotEmpty()) {
+            recentTracks = dailyTracks
+            playlistCache.saveTracks(RECENT_TRACKS_CACHE_ID, dailyTracks, complete = false)
+            if (nowPlaying == null) nowPlaying = dailyTracks.first()
+        } else if (recentTracks.isEmpty() && personal.isNotEmpty()) {
+            recentTracks = runCatching {
+                gateway.playlistTracks(personal.first().id, limit = 24).songs.map { it.toTrackItem() }
+            }.getOrDefault(emptyList())
+            playlistCache.saveTracks(RECENT_TRACKS_CACHE_ID, recentTracks, complete = false)
+            if (nowPlaying == null) nowPlaying = recentTracks.firstOrNull()
+        }
+        isLiked = nowPlaying?.let { current -> likedTracks.any { it.id == current.id } } ?: false
+    }
+
+    private fun resolveAndPlay(track: TrackItem, resumeProgress: Float = 0f) {
+        playJob?.cancel()
+        audioPlayer.stop()
+        playJob = scope.launch {
+            beginRequest("正在准备 ${audioQuality.label} 音质…")
+            try {
+                val requested = gateway.songUrls(listOf(track.id), quality = audioQuality).data.firstOrNull()
+                val songUrl = if (needsMp3PlaybackFallback(requested?.type, requested?.url)) {
+                    gateway.songUrls(listOf(track.id), quality = AudioQuality.EXHIGH).data.firstOrNull()
+                } else {
+                    requested
+                }
+                streamUrl = songUrl?.url
+                streamBitrate = songUrl?.br
+                val playableUrl = songUrl?.url
+                if (playableUrl.isNullOrBlank()) {
+                    isPlaying = false
+                    statusMessage = "这个音质暂不可用，换一种试试"
+                } else {
+                    progress = resumeProgress
+                    isPlaying = true
+                    statusMessage = null
+                    audioPlayer.play(
+                        url = playableUrl,
+                        durationMillis = track.durationMillis,
+                        fromProgress = resumeProgress,
+                        volume = volume,
+                    )
+                }
+            } catch (error: Throwable) {
+                isPlaying = false
+                statusMessage = error.toFriendlyMessage("播放没有开始，请稍后重试")
+            } finally {
+                endRequest()
+            }
+        }
+    }
+
+    private suspend fun loadCompletePlaylist(playlist: PlaylistItem): List<TrackItem> {
+        val expectedCount = playlist.trackCount.coerceAtLeast(0)
+        val allAtOnce = runCatching {
+            gateway.playlistTracks(playlist.id, limit = null).songs.map { it.toTrackItem() }
+        }
+        val combined = allAtOnce.getOrDefault(emptyList()).distinctBy { it.id }.toMutableList()
+        var reachedEnd = false
+        if (combined.isNotEmpty()) {
+            showPlaylist(playlist, combined)
+            val complete = expectedCount == 0 || combined.size >= expectedCount
+            playlistCache.saveTracks(playlist.id, combined, complete)
+            if (complete) return combined
+        }
+
+        var offset = combined.size
+        while (expectedCount == 0 || combined.size < expectedCount) {
+            val page = gateway.playlistTracks(
+                id = playlist.id,
+                limit = PLAYLIST_PAGE_SIZE,
+                offset = offset,
+            ).songs.map { it.toTrackItem() }
+            if (page.isEmpty()) break
+            val knownIds = combined.asSequence().map { it.id }.toHashSet()
+            combined += page.filterNot { it.id in knownIds }
+            offset += page.size
+            showPlaylist(playlist, combined)
+            val complete = page.size < PLAYLIST_PAGE_SIZE || (expectedCount > 0 && combined.size >= expectedCount)
+            playlistCache.saveTracks(playlist.id, combined, complete)
+            statusMessage = if (expectedCount > 0) {
+                "已加载 ${combined.size.coerceAtMost(expectedCount)} / $expectedCount 首…"
+            } else {
+                "已加载 ${combined.size} 首…"
+            }
+            if (complete) {
+                reachedEnd = true
+                break
+            }
+        }
+        val complete = reachedEnd || expectedCount == 0 || combined.size >= expectedCount
+        playlistCache.saveTracks(playlist.id, combined, complete)
+        return combined
+    }
+
+    private suspend fun loadAllUserPlaylists(userId: Long, cacheKey: String): List<PlaylistItem> {
+        val combined = mutableListOf<PlaylistItem>()
+        var offset = 0
+        do {
+            val response = gateway.userPlaylists(userId, limit = USER_PLAYLIST_PAGE_SIZE, offset = offset)
+            val page = response.playlist.map { it.toPlaylistItem() }
+            combined += page.filterNot { incoming -> combined.any { it.id == incoming.id } }
+            userPlaylists = combined.toList()
+            playlistCache.savePlaylists(cacheKey, userPlaylists)
+            offset += page.size
+        } while (response.more && page.isNotEmpty())
+        return combined
+    }
+
+    /**
+     * Some Gateway playlist payloads only carry a cover on `/playlist/detail`.
+     * Fill missing artwork so the home strip never publishes bare gradient tiles when a cover exists.
+     */
+    private suspend fun ensurePlaylistCovers(playlists: List<PlaylistItem>): List<PlaylistItem> {
+        if (playlists.isEmpty()) return playlists
+        return playlists.map { playlist ->
+            if (!playlist.coverUrl.isNullOrBlank()) return@map playlist
+            val detailCover = runCatching {
+                gateway.playlistDetail(playlist.id).playlist?.resolvedCoverUrl()
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+            if (detailCover == null) playlist else playlist.copy(coverUrl = detailCover)
+        }
+    }
+
+    private fun showPlaylist(playlist: PlaylistItem, tracks: List<TrackItem>) {
+        activePlaylist = playlist.copy(trackCount = tracks.size.takeIf { it > 0 } ?: playlist.trackCount)
+        recentTracks = tracks
+        if (nowPlaying == null) nowPlaying = tracks.firstOrNull()
+        isLiked = nowPlaying?.let { current -> likedTracks.any { it.id == current.id } } ?: false
+    }
+
+    private fun effectiveQueue(): List<TrackItem> {
+        val base = when {
+            searchResults.isNotEmpty() -> searchResults
+            recentTracks.isNotEmpty() -> recentTracks
+            else -> listOfNotNull(nowPlaying)
+        }
+        return if (shuffle) base.shuffled() else base
+    }
+
+    private fun beginRequest(message: String? = null) {
+        activeRequests += 1
+        isLoading = true
+        if (message != null) statusMessage = message
+    }
+
+    private fun endRequest() {
+        activeRequests = (activeRequests - 1).coerceAtLeast(0)
+        isLoading = activeRequests > 0
+    }
+
+    private companion object {
+        const val PLAYLIST_PAGE_SIZE = 500
+        const val USER_PLAYLIST_PAGE_SIZE = 100
+        const val FEATURED_CACHE_KEY = "featured"
+        const val RECENT_TRACKS_CACHE_ID = -1L
+        const val LIKED_FALLBACK_PLAYLIST_ID = -5L
+
+        fun userPlaylistCacheKey(userId: Long): String = "user-$userId"
+    }
+}
+
+private fun Song.toTrackItem(): TrackItem = TrackItem(
+    id = id,
+    title = name.ifBlank { "未知歌曲" },
+    artist = artists.joinToString(" / ") { it.name }.ifBlank { "未知艺术家" },
+    album = album?.name.orEmpty().ifBlank { "未知专辑" },
+    durationMillis = durationMillis ?: 0L,
+    coverUrl = album?.picUrl ?: album?.blurPictureUrl,
+)
+
+private fun Playlist.toPlaylistItem(): PlaylistItem {
+    val creatorName = creator?.nickname?.takeIf { it.isNotBlank() }
+    val liked = specialType == LIKED_SPECIAL_TYPE || name.endsWith("喜欢的音乐")
+    return PlaylistItem(
+        id = id,
+        title = name.ifBlank { "未命名歌单" },
+        subtitle = buildString {
+            if (trackCount != null) append("$trackCount 首")
+            if (creatorName != null) {
+                if (isNotEmpty()) append(" · ")
+                append(creatorName)
+            }
+            if (isEmpty()) append(description?.take(24) ?: "精选歌单")
+        },
+        coverUrl = resolvedCoverUrl(),
+        trackCount = trackCount ?: 0,
+        creatorName = creatorName,
+        isLikedCollection = liked,
+    )
+}
+
+private const val LIKED_SPECIAL_TYPE = 5
+
+/** Prefer non-blank cover fields; empty strings must not mask `picUrl`. */
+private fun Playlist.resolvedCoverUrl(): String? =
+    sequenceOf(coverImgUrl, picUrl)
+        .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+        .firstOrNull()
+
+private fun Throwable.toFriendlyMessage(fallback: String): String =
+    message?.takeIf { it.isNotBlank() && it.length <= 120 } ?: fallback
+
+internal fun formatDuration(millis: Long): String {
+    if (millis <= 0L) return "00:00"
+    val totalSeconds = (millis / 1000.0).roundToInt()
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%02d:%02d".format(minutes, seconds)
+}
