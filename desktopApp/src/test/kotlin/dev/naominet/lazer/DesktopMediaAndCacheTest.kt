@@ -1,16 +1,32 @@
 package dev.naominet.lazer
 
+import java.awt.Insets
+import java.awt.Rectangle
 import java.nio.file.Files
 import java.util.Comparator
 import java.util.ServiceLoader
 import javax.sound.sampled.spi.AudioFileReader
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DesktopMediaAndCacheTest {
+    @Test
+    fun `global wheel motion keeps the lyric inertia curve`() {
+        val motion = WheelInertiaMotion()
+
+        assertEquals(36f, motion.impulse(1f), 0.0001f)
+        assertEquals(28f, motion.advance(1f / 60f), 0.0001f)
+        assertEquals(25.2f, motion.advance(1f / 60f), 0.0001f)
+
+        // A second wheel tick adds to the existing tail instead of restarting it.
+        assertEquals(36f, motion.impulse(1f), 0.0001f)
+        assertEquals(50.68f, motion.advance(1f / 60f), 0.0001f)
+    }
+
     @Test
     fun `playlist and track cache round trip unicode metadata`() {
         val directory = Files.createTempDirectory("lazer-playlist-cache-test")
@@ -49,9 +65,81 @@ class DesktopMediaAndCacheTest {
     }
 
     @Test
+    fun `only a real tail EOF advances to the next track`() {
+        assertFalse(shouldCompleteAfterEof(240_000, fromProgress = 0f, playedMillis = 90_000))
+        assertFalse(shouldCompleteAfterEof(240_000, fromProgress = 0.5f, playedMillis = 70_000))
+        assertTrue(shouldCompleteAfterEof(240_000, fromProgress = 0f, playedMillis = 236_000))
+        assertTrue(shouldCompleteAfterEof(240_000, fromProgress = 0.75f, playedMillis = 58_000))
+    }
+
+    @Test
+    fun `lyric seeks cannot land exactly at or beyond EOF`() {
+        assertEquals(0.5f, lyricSeekProgress(120_000, 240_000), 0.0001f)
+        assertEquals(239f / 240f, lyricSeekProgress(999_000, 240_000), 0.0001f)
+        assertEquals(0f, lyricSeekProgress(-1_000, 240_000), 0.0001f)
+    }
+
+    @Test
+    fun `audio cache keys are stable and progress is bounded`() {
+        assertEquals("42-320000-mp3.audio", audioCacheFileName(42, "320000-mp3"))
+        assertEquals("42-a_b.audio", audioCacheFileName(42, "a/b"))
+        assertEquals("abcdef", audioCacheVariant(320_000, "ABCDEF", "mp3"))
+        assertEquals("320000-mp3", audioCacheVariant(320_000, null, "MP3"))
+        assertEquals(0f, bufferedFraction(1, 0), 0f)
+        assertEquals(0.5f, bufferedFraction(50, 100), 0.0001f)
+        assertEquals(1f, bufferedFraction(150, 100), 0f)
+    }
+
+    @Test
+    fun `audio cache streams a growing file and survives a restart`() {
+        val directory = Files.createTempDirectory("lazer-audio-cache-test")
+        val source = directory.resolve("source.audio")
+        val cacheDirectory = directory.resolve("cache")
+        val payload = ByteArray(192 * 1024) { index -> (index * 31).toByte() }
+        try {
+            Files.write(source, payload)
+            val firstCache = DesktopAudioCache(cacheDirectory) { _, _ -> }
+            val firstRead = firstCache.open(
+                trackId = 7,
+                variantKey = "test",
+                url = source.toUri().toString(),
+                expectedBytes = payload.size.toLong(),
+            ).use { it.readBytes() }
+            firstCache.close()
+            assertArrayEquals(payload, firstRead)
+
+            Files.delete(source)
+            val restartedCache = DesktopAudioCache(cacheDirectory) { _, _ -> }
+            val cachedRead = restartedCache.open(
+                trackId = 7,
+                variantKey = "test",
+                url = source.toUri().toString(),
+                expectedBytes = payload.size.toLong(),
+            ).use { it.readBytes() }
+            restartedCache.close()
+            assertArrayEquals(payload, cachedRead)
+        } finally {
+            Files.walk(directory).use { paths ->
+                paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
+            }
+        }
+    }
+
+    @Test
+    fun `maximize uses the selected monitor work area`() {
+        assertEquals(
+            Rectangle(1920, 30, 1880, 1010),
+            workAreaBounds(
+                screen = Rectangle(1920, 0, 1920, 1080),
+                insets = Insets(30, 0, 40, 40),
+            ),
+        )
+    }
+
+    @Test
     fun `artwork urls upgrade scheme and add size param once`() {
         assertEquals(
-            "https://p1.music.126.net/cover.jpg?param=360y360",
+            "https://p1.music.126.net/cover.jpg?param=256y256",
             "http://p1.music.126.net/cover.jpg".toArtworkUrlForTest(),
         )
         assertEquals(
@@ -59,8 +147,12 @@ class DesktopMediaAndCacheTest {
             "https://p1.music.126.net/cover.jpg?param=140y140".toArtworkUrlForTest(),
         )
         assertEquals(
-            "https://p1.music.126.net/cover.jpg?param=360y360",
+            "https://p1.music.126.net/cover.jpg?param=256y256",
             "//p1.music.126.net/cover.jpg".toArtworkUrlForTest(),
+        )
+        assertEquals(
+            "https://p1.music.126.net/cover.jpg?param=96y96",
+            "http://p1.music.126.net/cover.jpg?param=360y360".toPaletteArtworkUrl(),
         )
     }
 
@@ -104,5 +196,5 @@ internal fun String.toArtworkUrlForTest(): String {
         else -> trimmed
     }
     if ("param=" in withScheme) return withScheme
-    return withScheme + if ('?' in withScheme) "&param=360y360" else "?param=360y360"
+    return withScheme + if ('?' in withScheme) "&param=256y256" else "?param=256y256"
 }

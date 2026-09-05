@@ -10,12 +10,12 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Album-art seed extraction and a small tonal ladder for the lyric fluid mesh.
+ * Album-art seed extraction and a small tonal ladder for the lyric color flow.
  * Ported from listclient's MonetColor.seedFromPixels + paperScheme accents.
  */
 internal object CoverPalette {
     val defaultSeed: Color = Color(0xFF5F91AC)
-    val defaultMesh: List<Color> = listOf(
+    val defaultFlow: List<Color> = listOf(
         Color(0xFFA9C8D8),
         Color(0xFFC5D5CE),
         Color(0xFFB88769),
@@ -26,19 +26,22 @@ internal object CoverPalette {
     fun extractSeedFromUrl(coverUrl: String?): Color {
         if (coverUrl.isNullOrBlank()) return defaultSeed
         return runCatching {
-            val secure = coverUrl.replaceFirst("http://", "https://")
-                .let { if (it.startsWith("//")) "https:$it" else it }
-            val connection = URI(secure).toURL().openConnection().apply {
+            val connection = URI(coverUrl.toPaletteArtworkUrl()).toURL().openConnection().apply {
                 connectTimeout = 8_000
                 readTimeout = 8_000
                 setRequestProperty("User-Agent", "Lazer/1.0")
             }
-            val image = ImageIO.read(connection.getInputStream()) ?: return defaultSeed
-            seedFromImage(image)
+            val image = connection.getInputStream().buffered(16 * 1024).use(ImageIO::read)
+                ?: return defaultSeed
+            try {
+                seedFromImage(image)
+            } finally {
+                image.flush()
+            }
         }.getOrDefault(defaultSeed)
     }
 
-    fun meshColorsFromSeed(seed: Color): List<Color> {
+    fun flowColorsFromSeed(seed: Color): List<Color> {
         val (h, s, l) = rgbToHsl(seed)
         val cPrimary = (s * 0.70f + 0.12f).coerceIn(0.22f, 0.55f)
         val ht = (h + 48f) % 360f
@@ -77,7 +80,29 @@ internal object CoverPalette {
                     val g = (p shr 8) and 0xFF
                     val b = p and 0xFF
                     ar += r; ag += g; ab += b; an++
-                    val (hue, sat, light) = rgbToHsl(r / 255f, g / 255f, b / 255f)
+                    val rf = r / 255f
+                    val gf = g / 255f
+                    val bf = b / 255f
+                    val maxc = max(rf, max(gf, bf))
+                    val minc = min(rf, min(gf, bf))
+                    val light = (maxc + minc) / 2f
+                    val delta = maxc - minc
+                    val sat = if (delta <= 1e-4f) {
+                        0f
+                    } else if (light > 0.5f) {
+                        delta / (2f - maxc - minc)
+                    } else {
+                        delta / (maxc + minc)
+                    }
+                    val hue = if (delta <= 1e-4f) {
+                        0f
+                    } else {
+                        when (maxc) {
+                            rf -> (gf - bf) / delta + if (gf < bf) 6f else 0f
+                            gf -> (bf - rf) / delta + 2f
+                            else -> (rf - gf) / delta + 4f
+                        } * 60f
+                    }
                     if (sat >= 0.15f && light in 0.12f..0.92f) {
                         val midBias = 1.0 - abs(light - 0.5) * 1.6
                         val weight = sat * max(0.05, midBias)
@@ -164,4 +189,16 @@ internal object CoverPalette {
         val d = ((b - a + 540f) % 360f) - 180f
         return ((a + d * t) % 360f + 360f) % 360f
     }
+}
+
+private val ArtworkSizeParameter = Regex("([?&]param=)\\d+y\\d+", RegexOption.IGNORE_CASE)
+
+/** Palette sampling never needs the full album image resident in memory. */
+internal fun String.toPaletteArtworkUrl(): String {
+    val secure = trim().replaceFirst("http://", "https://")
+        .let { if (it.startsWith("//")) "https:$it" else it }
+    if (ArtworkSizeParameter.containsMatchIn(secure)) {
+        return secure.replace(ArtworkSizeParameter) { match -> match.groupValues[1] + "96y96" }
+    }
+    return secure + if ('?' in secure) "&param=96y96" else "?param=96y96"
 }

@@ -1,20 +1,15 @@
 package dev.naominet.lazer
 
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.pow
 
@@ -23,26 +18,18 @@ import kotlin.math.pow
  */
 @Composable
 fun rememberScrollInertiaController(): ScrollInertiaController {
-    val scope = rememberCoroutineScope()
     val controller = remember { ScrollInertiaController() }
     LaunchedEffect(controller) {
-        var last = 0L
+        var previousFrameNs = 0L
         while (true) {
             withFrameNanos { now ->
-                if (last == 0L) {
-                    last = now
-                    return@withFrameNanos
+                val dt = if (previousFrameNs == 0L) {
+                    1f / 60f
+                } else {
+                    ((now - previousFrameNs) / 1_000_000_000.0).toFloat().coerceIn(0.001f, 0.05f)
                 }
-                val dt = ((now - last) / 1_000_000_000.0).toFloat().coerceIn(0f, 0.05f)
-                last = now
-                val listState = controller.target
-                val velocity = controller.velocity
-                if (listState != null && abs(velocity) > 0.35f) {
-                    val step = velocity * dt * 60f
-                    scope.launch { listState.scrollBy(step) }
-                    controller.velocity = velocity * 0.90f.pow(dt * 60f)
-                    if (abs(controller.velocity) < 0.35f) controller.velocity = 0f
-                }
+                previousFrameNs = now
+                controller.advance(dt)
             }
         }
     }
@@ -50,18 +37,47 @@ fun rememberScrollInertiaController(): ScrollInertiaController {
 }
 
 class ScrollInertiaController {
-    @Volatile
-    var target: LazyListState? = null
+    private val motion = WheelInertiaMotion()
+    private var target: ScrollableState? = null
 
-    @Volatile
-    var velocity: Float = 0f
-
-    fun bind(listState: LazyListState) {
-        target = listState
+    fun impulse(scrollState: ScrollableState, delta: Float) {
+        if (target !== scrollState) {
+            stop()
+            target = scrollState
+        }
+        scrollState.dispatchRawDelta(motion.impulse(delta))
     }
 
-    fun impulse(deltaY: Float) {
-        velocity = (velocity + deltaY * 28f).coerceIn(-110f, 110f)
+    internal fun advance(dt: Float) {
+        val movement = motion.advance(dt)
+        if (movement != 0f) target?.dispatchRawDelta(movement)
+    }
+
+    fun stop() {
+        motion.stop()
+        target = null
+    }
+}
+
+/** The exact wheel motion model shared by lyrics and every scrollable list. */
+internal class WheelInertiaMotion {
+    private var velocity = 0f
+
+    fun impulse(delta: Float): Float {
+        velocity = (velocity + delta * WheelInertiaDefaults.VelocityMultiplier)
+            .coerceIn(-WheelInertiaDefaults.MaximumVelocity, WheelInertiaDefaults.MaximumVelocity)
+        return delta * WheelInertiaDefaults.DirectMultiplier
+    }
+
+    fun advance(dt: Float): Float {
+        if (abs(velocity) <= WheelInertiaDefaults.StopVelocity) {
+            velocity = 0f
+            return 0f
+        }
+        val movement = velocity * dt * 60f
+        velocity *= WheelInertiaDefaults.DecayPerFrame.pow(dt * 60f)
+        if (abs(velocity) < WheelInertiaDefaults.StopVelocity) velocity = 0f
+        return movement
     }
 
     fun stop() {
@@ -69,27 +85,38 @@ class ScrollInertiaController {
     }
 }
 
+internal object WheelInertiaDefaults {
+    const val DirectMultiplier = 36f
+    const val VelocityMultiplier = 28f
+    const val MaximumVelocity = 110f
+    const val StopVelocity = 0.35f
+    const val DecayPerFrame = 0.90f
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun Modifier.scrollInertia(
-    listState: LazyListState,
+    scrollState: ScrollableState,
     controller: ScrollInertiaController,
+    orientation: Orientation = Orientation.Vertical,
     enabled: Boolean = true,
     onUserScroll: (() -> Unit)? = null,
 ): Modifier {
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(listState) {
-        controller.bind(listState)
-    }
     if (!enabled) return this
     return this.onPointerEvent(PointerEventType.Scroll) { event ->
-        val dy = event.changes.fold(0f) { acc, c -> acc + c.scrollDelta.y }
-        if (dy != 0f) {
+        val delta = event.changes.fold(0f) { acc, change ->
+            val scroll = change.scrollDelta
+            acc + when (orientation) {
+                Orientation.Vertical -> scroll.y
+                // Keep a normal vertical wheel moving the surrounding page. Horizontal
+                // trackpad/shift-wheel input belongs to the nested playlist strip.
+                Orientation.Horizontal -> scroll.x
+            }
+        }
+        if (delta != 0f) {
             event.changes.forEach { it.consume() }
             onUserScroll?.invoke()
-            controller.bind(listState)
-            controller.impulse(dy)
-            scope.launch { listState.scrollBy(dy * 36f) }
+            controller.impulse(scrollState, delta)
         }
     }
 }

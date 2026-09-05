@@ -1,13 +1,23 @@
 package dev.naominet.lazer
 
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -43,9 +53,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.WindowScope
-import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.AsyncImage
 import dev.naominet.lazer.gateway.AudioQuality
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.*
 import kotlin.math.absoluteValue
 import kotlin.math.pow
@@ -100,51 +111,73 @@ fun WindowScope.DesktopPlayerApp(
             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         ) {
             PaperBackground {
-                // When lyrics are open, only compose the lyrics surface — never the main
-                // chrome underneath. That is the only reliable way to stop click-through
-                // on Compose Desktop (sibling hit-testing still leaks otherwise).
-                if (controller.isLyricsVisible) {
-                    Column(Modifier.fillMaxSize()) {
-                        WindowTitleBar(
-                            maximized = isWindowMaximized,
-                            onMinimize = onMinimizeWindow,
-                            onToggleMaximize = onToggleMaximizeWindow,
-                            onClose = onCloseWindow,
-                        )
-                        LyricsOverlay(
-                            controller = controller,
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                        )
-                    }
-                } else {
-                    Column(Modifier.fillMaxSize()) {
-                        WindowTitleBar(
-                            maximized = isWindowMaximized,
-                            onMinimize = onMinimizeWindow,
-                            onToggleMaximize = onToggleMaximizeWindow,
-                            onClose = onCloseWindow,
-                        )
-                        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                            val compactNavigation = maxWidth < 1100.dp
-                            Row(Modifier.fillMaxSize()) {
-                                NavigationPanel(
-                                    controller = controller,
-                                    selectedDestination = destination,
-                                    compact = compactNavigation,
-                                    onDestinationSelected = { destination = it },
-                                    onPlaylistSelected = {
-                                        destination = DesktopDestination.LIBRARY
-                                        controller.openPlaylist(it)
-                                    },
-                                )
-                                MainContent(
-                                    controller = controller,
-                                    destination = destination,
-                                    modifier = Modifier.weight(1f),
-                                )
+                Column(Modifier.fillMaxSize()) {
+                    WindowTitleBar(
+                        maximized = isWindowMaximized,
+                        onMinimize = onMinimizeWindow,
+                        onToggleMaximize = onToggleMaximizeWindow,
+                        onClose = onCloseWindow,
+                    )
+                    AnimatedContent(
+                        targetState = controller.isLyricsVisible,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        transitionSpec = {
+                            if (targetState) {
+                                (
+                                    fadeIn(tween(220)) +
+                                        slideInVertically(
+                                            spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow,
+                                            ),
+                                        ) { height -> height / 14 }
+                                    ) togetherWith (
+                                    fadeOut(tween(170)) + scaleOut(tween(220), targetScale = 0.985f)
+                                    )
+                            } else {
+                                (
+                                    fadeIn(tween(220)) + scaleIn(tween(260), initialScale = 0.985f)
+                                    ) togetherWith (
+                                    fadeOut(tween(150)) +
+                                        slideOutVertically(
+                                            spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow,
+                                            ),
+                                        ) { height -> height / 14 }
+                                    )
+                            }
+                        },
+                        contentKey = { lyricsVisible -> lyricsVisible },
+                        label = "main-lyrics-page",
+                    ) { lyricsVisible ->
+                        if (lyricsVisible) {
+                            LyricsOverlay(controller = controller, modifier = Modifier.fillMaxSize())
+                        } else {
+                            Column(Modifier.fillMaxSize()) {
+                                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                                    val compactNavigation = maxWidth < 1100.dp
+                                    Row(Modifier.fillMaxSize()) {
+                                        NavigationPanel(
+                                            controller = controller,
+                                            selectedDestination = destination,
+                                            compact = compactNavigation,
+                                            onDestinationSelected = { destination = it },
+                                            onPlaylistSelected = {
+                                                destination = DesktopDestination.LIBRARY
+                                                controller.openPlaylist(it)
+                                            },
+                                        )
+                                        MainContent(
+                                            controller = controller,
+                                            destination = destination,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                                PlayerBar(controller)
                             }
                         }
-                        PlayerBar(controller)
                     }
                 }
 
@@ -169,21 +202,38 @@ private fun WindowScope.WindowTitleBar(
         modifier = Modifier.fillMaxWidth().height(42.dp).background(colors.surface.copy(alpha = 0.9f)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        WindowDraggableArea(Modifier.weight(1f).fillMaxHeight()) {
-            Row(
-                Modifier.fillMaxSize().padding(start = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(20.dp).clip(RoundedCornerShape(7.dp)).background(colors.primaryContainer), contentAlignment = Alignment.Center) {
-                    Text("L", style = MaterialTheme.typography.labelSmall, color = colors.onPrimaryContainer, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.width(8.dp))
-                Text("Lazer", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
-            }
+        val titleModifier = Modifier.weight(1f).fillMaxHeight()
+        if (maximized) {
+            Box(titleModifier) { WindowTitleIdentity() }
+        } else {
+            WindowDraggableArea(titleModifier) { WindowTitleIdentity() }
         }
         WindowControlButton(Icons.Outlined.Remove, "最小化", onMinimize)
         WindowControlButton(if (maximized) Icons.Outlined.FilterNone else Icons.Outlined.CropSquare, if (maximized) "还原" else "最大化", onToggleMaximize)
         WindowControlButton(Icons.Outlined.Close, "关闭", onClose, close = true)
+    }
+}
+
+@Composable
+private fun WindowTitleIdentity() {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxSize().padding(start = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(20.dp).clip(RoundedCornerShape(7.dp)).background(colors.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "L",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onPrimaryContainer,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text("Lazer", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
     }
 }
 
@@ -225,6 +275,8 @@ private fun NavigationPanel(
     onPlaylistSelected: (PlaylistItem) -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val playlistScrollState = rememberScrollState()
+    val inertia = LocalScrollInertia.current
     // width() (not requiredWidth) so a narrow window can still shrink the rail.
     val railWidth = if (compact) 72.dp else 208.dp
     Surface(
@@ -290,7 +342,8 @@ private fun NavigationPanel(
                     Column(
                         modifier = Modifier
                             .weight(1f, fill = false)
-                            .verticalScroll(rememberScrollState()),
+                            .verticalScroll(playlistScrollState)
+                            .scrollInertia(playlistScrollState, inertia),
                         horizontalAlignment = if (compact) Alignment.CenterHorizontally else Alignment.Start,
                         verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 0.dp),
                     ) {
@@ -384,7 +437,6 @@ private fun BrandMark(compact: Boolean) {
             Spacer(Modifier.width(10.dp))
             Column {
                 Text("Lazer", style = MaterialTheme.typography.titleLarge)
-                Text("留一处给音乐", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
             }
         }
     }
@@ -577,7 +629,7 @@ private fun NaturalLanguageField(
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) {
                         Text(
-                            "说一句你现在想听的，比如「雨夜、安静、不要人声」",
+                            "搜索...",
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.onSurfaceVariant,
                             maxLines = 1,
@@ -767,60 +819,80 @@ private fun LibraryPage(controller: DesktopPlayerController, modifier: Modifier 
     val browsing = controller.browsePlaylists()
     val listState = rememberLazyListState()
     val inertia = LocalScrollInertia.current
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxWidth().scrollInertia(listState, inertia),
-        contentPadding = PaddingValues(top = 22.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        when {
-            !controller.isSignedIn -> {
-                item { PageHeading("你的音乐库", "登录后，歌单会出现在这里。") }
-                item { SignInInvitation(controller::openLogin) }
-            }
-            browsing.isEmpty() && active == null -> {
-                item {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        PageHeading("你的音乐库", "歌单与收藏已通过 Gateway 保持同步。")
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = controller::syncLibrary) {
-                            Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("同步歌单")
-                        }
-                    }
+    val currentTrackIndex = if (active?.isLikedCollection == false) {
+        controller.recentTracks.indexOfFirst { it.id == controller.nowPlaying?.id }
+    } else {
+        -1
+    }
+    val scope = rememberCoroutineScope()
+    Box(modifier = modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().scrollInertia(listState, inertia),
+            contentPadding = PaddingValues(
+                top = 22.dp,
+                bottom = if (currentTrackIndex >= 0) 96.dp else 28.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            when {
+                !controller.isSignedIn -> {
+                    item { PageHeading("你的音乐库", "登录后，歌单会出现在这里。") }
+                    item { SignInInvitation(controller::openLogin) }
                 }
-                item { QuietEmptyState("还没有歌单", "在网易云音乐中新建歌单后，再点一次同步歌单。") }
-            }
-            active != null && (active.isLikedCollection.not()) -> {
-                item { PlaylistDetailHeader(active, onPlayAll = { active.let { controller.recentTracks.firstOrNull()?.let(controller::playTrack) } }) }
-                if (controller.recentTracks.isEmpty()) {
+                browsing.isEmpty() && active == null -> {
                     item {
-                        QuietEmptyState(
-                            if (controller.isLoading) "正在整理歌曲" else "这个歌单还是空的",
-                            if (controller.isLoading) "封面与曲目正在同步。" else "换一个歌单看看。",
-                        )
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            PageHeading("你的音乐库", "歌单与收藏已通过 Gateway 保持同步。")
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = controller::syncLibrary) {
+                                Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("同步歌单")
+                            }
+                        }
                     }
-                } else {
-                    itemsIndexed(controller.recentTracks, key = { _, track -> track.id }) { index, track ->
-                        TrackRow(track, track.id == controller.nowPlaying?.id, { controller.playTrack(track) }, index + 1)
-                    }
+                    item { QuietEmptyState("还没有歌单", "在网易云音乐中新建歌单后，再点一次同步歌单。") }
                 }
-            }
-            else -> {
-                item {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        PageHeading("你的音乐库", "点开一个歌单，封面与曲目会出现在这里。")
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = controller::syncLibrary) {
-                            Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("同步歌单")
+                active != null && (active.isLikedCollection.not()) -> {
+                    item { PlaylistDetailHeader(active, onPlayAll = { active.let { controller.recentTracks.firstOrNull()?.let(controller::playTrack) } }) }
+                    if (controller.recentTracks.isEmpty()) {
+                        item {
+                            QuietEmptyState(
+                                if (controller.isLoading) "正在整理歌曲" else "这个歌单还是空的",
+                                if (controller.isLoading) "封面与曲目正在同步。" else "换一个歌单看看。",
+                            )
+                        }
+                    } else {
+                        itemsIndexed(controller.recentTracks, key = { _, track -> track.id }) { index, track ->
+                            TrackRow(track, track.id == controller.nowPlaying?.id, { controller.playTrack(track) }, index + 1)
                         }
                     }
                 }
-                item { PlaylistStrip(browsing, controller::openPlaylist) }
+                else -> {
+                    item {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            PageHeading("你的音乐库", "点开一个歌单，封面与曲目会出现在这里。")
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = controller::syncLibrary) {
+                                Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("同步歌单")
+                            }
+                        }
+                    }
+                    item { PlaylistStrip(browsing, controller::openPlaylist) }
+                }
             }
+        }
+        if (currentTrackIndex >= 0) {
+            NowPlayingLocatorButton(
+                onClick = {
+                    inertia.stop()
+                    scope.launch { listState.animateScrollToItem(currentTrackIndex + 1) }
+                },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 22.dp, bottom = 22.dp),
+            )
         }
     }
 }
@@ -848,43 +920,73 @@ private fun LikedPage(controller: DesktopPlayerController, modifier: Modifier = 
     }
     val listState = rememberLazyListState()
     val inertia = LocalScrollInertia.current
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxWidth().scrollInertia(listState, inertia),
-        contentPadding = PaddingValues(top = 22.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        when {
-            !controller.isSignedIn -> {
-                item { PageHeading("我喜欢", "登录后，喜欢状态会和你的账号保持一致。") }
-                item { SignInInvitation(controller::openLogin) }
-            }
-            else -> {
-                item {
-                    PlaylistDetailHeader(
-                        playlist = playlist.copy(
-                            title = "我喜欢",
-                            trackCount = tracks.size.takeIf { it > 0 } ?: playlist.trackCount,
-                            coverUrl = playlist.coverUrl ?: tracks.firstOrNull()?.coverUrl,
-                        ),
-                        onPlayAll = { tracks.firstOrNull()?.let(controller::playTrack) },
-                    )
+    val currentTrackIndex = tracks.indexOfFirst { it.id == controller.nowPlaying?.id }
+    val scope = rememberCoroutineScope()
+    Box(modifier = modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().scrollInertia(listState, inertia),
+            contentPadding = PaddingValues(
+                top = 22.dp,
+                bottom = if (currentTrackIndex >= 0) 96.dp else 28.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            when {
+                !controller.isSignedIn -> {
+                    item { PageHeading("我喜欢", "登录后，喜欢状态会和你的账号保持一致。") }
+                    item { SignInInvitation(controller::openLogin) }
                 }
-                if (tracks.isEmpty()) {
+                else -> {
                     item {
-                        QuietEmptyState(
-                            if (controller.isLoading) "正在整理喜欢的歌" else "这里还很安静",
-                            if (controller.isLoading) "按你收藏时的顺序同步中。" else "播放一首歌，点亮播放栏里的心形即可收藏。",
+                        PlaylistDetailHeader(
+                            playlist = playlist.copy(
+                                title = "我喜欢",
+                                trackCount = tracks.size.takeIf { it > 0 } ?: playlist.trackCount,
+                                coverUrl = playlist.coverUrl ?: tracks.firstOrNull()?.coverUrl,
+                            ),
+                            onPlayAll = { tracks.firstOrNull()?.let(controller::playTrack) },
                         )
                     }
-                } else {
-                    itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
-                        TrackRow(track, track.id == controller.nowPlaying?.id, { controller.playTrack(track) }, index + 1)
+                    if (tracks.isEmpty()) {
+                        item {
+                            QuietEmptyState(
+                                if (controller.isLoading) "正在整理喜欢的歌" else "这里还很安静",
+                                if (controller.isLoading) "按你收藏时的顺序同步中。" else "播放一首歌，点亮播放栏里的心形即可收藏。",
+                            )
+                        }
+                    } else {
+                        itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
+                            TrackRow(track, track.id == controller.nowPlaying?.id, { controller.playTrack(track) }, index + 1)
+                        }
                     }
                 }
             }
         }
+        if (controller.isSignedIn && currentTrackIndex >= 0) {
+            NowPlayingLocatorButton(
+                onClick = {
+                    inertia.stop()
+                    scope.launch { listState.animateScrollToItem(currentTrackIndex + 1) }
+                },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 22.dp, bottom = 22.dp),
+            )
+        }
     }
+}
+
+@Composable
+private fun NowPlayingLocatorButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    ExtendedFloatingActionButton(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.primary,
+        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp, pressedElevation = 2.dp),
+        icon = { Icon(Icons.Outlined.MyLocation, null, Modifier.size(18.dp)) },
+        text = { Text("定位当前歌曲", style = MaterialTheme.typography.labelLarge) },
+    )
 }
 
 @Composable
@@ -1006,7 +1108,14 @@ private fun PlaylistStrip(playlists: List<PlaylistItem>, onPlaylistClick: (Playl
         }
         return
     }
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(end = 12.dp)) {
+    val listState = rememberLazyListState()
+    val inertia = LocalScrollInertia.current
+    LazyRow(
+        state = listState,
+        modifier = Modifier.fillMaxWidth().scrollInertia(listState, inertia, Orientation.Horizontal),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(end = 12.dp),
+    ) {
         items(playlists, key = { it.id }) { playlist ->
             PlaylistTile(playlist, onClick = { onPlaylistClick(playlist) })
         }
@@ -1064,17 +1173,14 @@ private fun Artwork(
         modifier.clip(shape).background(Brush.linearGradient(gradient)),
         contentAlignment = Alignment.Center,
     ) {
+        ArtworkFallback(title, gradient)
         if (sizedUrl != null) {
-            SubcomposeAsyncImage(
+            AsyncImage(
                 model = sizedUrl,
                 contentDescription = "$title 封面",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                loading = { ArtworkFallback(title, gradient) },
-                error = { ArtworkFallback(title, gradient) },
             )
-        } else {
-            ArtworkFallback(title, gradient)
         }
     }
 }
@@ -1102,17 +1208,14 @@ private fun UserAvatar(name: String, avatarUrl: String?, modifier: Modifier = Mo
         modifier.clip(CircleShape).background(colors.primaryContainer),
         contentAlignment = Alignment.Center,
     ) {
+        AvatarFallback(name)
         if (sizedUrl != null) {
-            SubcomposeAsyncImage(
+            AsyncImage(
                 model = sizedUrl,
                 contentDescription = "$name 的头像",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
-                loading = { AvatarFallback(name) },
-                error = { AvatarFallback(name) },
             )
-        } else {
-            AvatarFallback(name)
         }
     }
 }
@@ -1138,7 +1241,7 @@ private fun String.toArtworkUrl(): String {
         else -> trimmed
     }
     if ("param=" in withScheme) return withScheme
-    return withScheme + if ('?' in withScheme) "&param=360y360" else "?param=360y360"
+    return withScheme + if ('?' in withScheme) "&param=256y256" else "?param=256y256"
 }
 
 @Composable
@@ -1250,7 +1353,11 @@ private fun PlayerBar(controller: DesktopPlayerController) {
         targetValue = controller.progress.coerceIn(0f, 1f),
         animationSpec = when {
             controller.isSeeking || !controller.isPlaying -> snap()
-            else -> tween(durationMillis = 96, easing = LinearEasing)
+            else -> spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessHigh,
+                visibilityThreshold = 0.0001f,
+            )
         },
         label = "playback-progress",
     )
@@ -1335,6 +1442,7 @@ private fun PlayerBar(controller: DesktopPlayerController) {
                     Text(elapsed, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                     ThinSeekBar(
                         progress = if (controller.isSeeking) controller.progress else displayProgress,
+                        bufferedProgress = controller.bufferedProgress,
                         onSeek = controller::seekTo,
                         onSeekFinished = controller::commitSeek,
                         modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
@@ -1372,12 +1480,14 @@ private fun PlayerBar(controller: DesktopPlayerController) {
 @Composable
 private fun ThinSeekBar(
     progress: Float,
+    bufferedProgress: Float = progress,
     onSeek: (Float) -> Unit,
     onSeekFinished: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
     val fraction = progress.coerceIn(0f, 1f)
+    val bufferedFraction = maxOf(fraction, bufferedProgress.coerceIn(0f, 1f))
     BoxWithConstraints(
         modifier
             .height(14.dp)
@@ -1416,6 +1526,13 @@ private fun ThinSeekBar(
                 .height(3.dp)
                 .clip(CircleShape)
                 .background(colors.surfaceVariant.copy(alpha = 0.95f)),
+        )
+        Box(
+            Modifier
+                .fillMaxWidth(bufferedFraction)
+                .height(3.dp)
+                .clip(CircleShape)
+                .background(colors.onSurfaceVariant.copy(alpha = 0.34f)),
         )
         Box(
             Modifier
@@ -1606,10 +1723,11 @@ private fun LyricsOverlay(
     val colors = MaterialTheme.colorScheme
     val density = LocalDensity.current
     val lines = controller.lyrics
-    // Read progress every composition so the frame loop / UI stay in sync.
-    val playbackProgress = controller.progress
-    val positionMs = controller.positionMillis
-    val activeIndex = findCurrentLyricIndex(lines, positionMs)
+    // The lyric index observes the exact same playback position as the seek bar. derivedStateOf
+    // avoids recomposing the full lyric page for progress ticks that remain within one line.
+    val activeIndex by remember(lines, controller) {
+        derivedStateOf { findCurrentLyricIndex(lines, controller.positionMillis) }
+    }
 
     // Original lyric plus its translation share one row, so keep a taller pitch and center
     // the original lyric line within each row.
@@ -1620,21 +1738,22 @@ private fun LyricsOverlay(
     var followPlayback by remember { mutableStateOf(true) }
     var manualAtMs by remember { mutableLongStateOf(0L) }
     var lyricScroll by remember { mutableFloatStateOf(0f) }
-    var scrollVelocity by remember { mutableFloatStateOf(0f) }
-    var lyricMotionAtNs by remember { mutableStateOf(0L) }
+    val lyricWheelInertia = remember { WheelInertiaMotion() }
+    var lyricMotionAtNs by remember { mutableLongStateOf(0L) }
 
     val maxScroll = ((lines.size - 1).coerceAtLeast(0)) * rowPitchPx
 
     LaunchedEffect(lines.size, controller.nowPlaying?.id) {
         followPlayback = true
-        scrollVelocity = 0f
+        lyricWheelInertia.stop()
         val idx = findCurrentLyricIndex(controller.lyrics, controller.positionMillis).coerceAtLeast(0)
         lyricScroll = idx * rowPitchPx
         lyricMotionAtNs = 0L
     }
 
-    // Must read controller.* inside the frame callback — locals from composition go stale
-    // inside LaunchedEffect(Unit) and would freeze lyric sync.
+    // One persistent frame loop handles both follow motion and wheel inertia. It never cancels
+    // and relaunches competing scroll jobs, and the exponential approach restores the original
+    // non-linear lyric motion.
     LaunchedEffect(Unit) {
         while (true) {
             withFrameNanos { now ->
@@ -1645,40 +1764,30 @@ private fun LyricsOverlay(
                 }
                 lyricMotionAtNs = now
 
-                val liveLines = controller.lyrics
-                val liveMax = ((liveLines.size - 1).coerceAtLeast(0)) * rowPitchPx
-                val liveActive = findCurrentLyricIndex(liveLines, controller.positionMillis)
-
                 if (!followPlayback && System.currentTimeMillis() - manualAtMs > 3_500L) {
                     followPlayback = true
-                    scrollVelocity = 0f
+                    lyricWheelInertia.stop()
                 }
 
-                if (followPlayback && liveActive >= 0 && liveLines.isNotEmpty()) {
-                    val target = liveActive * rowPitchPx
-                    val k = (1.0 - kotlin.math.exp(-10.0 * dt)).toFloat()
-                    lyricScroll += (target - lyricScroll) * k
-                    scrollVelocity = 0f
-                    if (kotlin.math.abs(target - lyricScroll) < 0.05f) lyricScroll = target
-                } else if (!followPlayback) {
-                    if (kotlin.math.abs(scrollVelocity) > 0.35f) {
-                        lyricScroll += scrollVelocity * dt * 60f
-                        scrollVelocity *= 0.90f.pow(dt * 60f)
-                        if (kotlin.math.abs(scrollVelocity) < 0.35f) scrollVelocity = 0f
+                if (followPlayback) {
+                    val liveLines = controller.lyrics
+                    val liveIndex = findCurrentLyricIndex(liveLines, controller.positionMillis)
+                    if (liveIndex >= 0 && liveLines.isNotEmpty()) {
+                        val liveMax = ((liveLines.size - 1).coerceAtLeast(0)) * rowPitchPx
+                        val target = (liveIndex * rowPitchPx).coerceIn(0f, liveMax)
+                        val distance = target - lyricScroll
+                        if (kotlin.math.abs(distance) > 0.05f) {
+                            val approach = (1.0 - kotlin.math.exp(-11.0 * dt)).toFloat()
+                            lyricScroll += distance * approach
+                        } else {
+                            lyricScroll = target
+                        }
                     }
-                    lyricScroll = lyricScroll.coerceIn(0f, liveMax)
+                } else {
+                    val movement = lyricWheelInertia.advance(dt)
+                    if (movement != 0f) lyricScroll = (lyricScroll + movement).coerceIn(0f, maxScroll)
                 }
             }
-        }
-    }
-
-    // Force recomposition while lyrics are open so activeIndex tracks progress.
-    LaunchedEffect(controller.isLyricsVisible, controller.isPlaying) {
-        while (controller.isLyricsVisible) {
-            // Touch progress so Snapshot notices updates from the audio thread.
-            @Suppress("UNUSED_EXPRESSION")
-            controller.progress
-            delay(32)
         }
     }
 
@@ -1690,14 +1799,13 @@ private fun LyricsOverlay(
     fun onWheel(deltaY: Float) {
         if (lines.isEmpty() || deltaY == 0f) return
         markManualScroll()
-        scrollVelocity = (scrollVelocity + deltaY * 28f).coerceIn(-110f, 110f)
-        lyricScroll = (lyricScroll + deltaY * 36f).coerceIn(0f, maxScroll)
+        lyricScroll = (lyricScroll + lyricWheelInertia.impulse(deltaY)).coerceIn(0f, maxScroll)
     }
 
     fun onDrag(dy: Float) {
         if (lines.isEmpty()) return
         markManualScroll()
-        scrollVelocity = 0f
+        lyricWheelInertia.stop()
         lyricScroll = (lyricScroll - dy).coerceIn(0f, maxScroll)
     }
 
@@ -1705,8 +1813,8 @@ private fun LyricsOverlay(
     // underneath can receive clicks. This is a full page, not a translucent overlay.
     Box(modifier = modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(colors.background))
-        FluidMeshBackground(
-            colors = controller.lyricMeshColors,
+        AlbumFlowBackground(
+            colors = controller.lyricFlowColors,
             modifier = Modifier.fillMaxSize(),
             cornerRadius = 0.dp,
             veil = colors.background.copy(alpha = 0.38f),
@@ -1790,10 +1898,6 @@ private fun LyricsOverlay(
                             )
                         },
                 ) {
-                    // Keep a stable read of progress so this box recomposes with playback.
-                    @Suppress("UNUSED_VARIABLE")
-                    val tick = playbackProgress
-
                     val centerYPx = with(density) { (maxHeight * 0.46f).toPx() }
                     val heightPx = with(density) { maxHeight.toPx() }
 
@@ -1849,7 +1953,7 @@ private fun LyricsOverlay(
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable {
                                             followPlayback = true
-                                            scrollVelocity = 0f
+                                            lyricWheelInertia.stop()
                                             controller.seekToLyric(index)
                                             lyricScroll = index * rowPitchPx
                                         },

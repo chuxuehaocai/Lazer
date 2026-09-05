@@ -5,21 +5,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
-import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
+import coil3.memory.MemoryCache
 import coil3.network.ktor3.KtorNetworkFetcherFactory
 import coil3.request.crossfade
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.UserAgent
+import java.awt.Insets
+import java.awt.Rectangle
 import java.awt.Toolkit
 
 /**
@@ -49,20 +50,22 @@ fun main() = application {
                     ),
                 )
             }
-            .crossfade(true)
+            .memoryCache {
+                MemoryCache.Builder()
+                    .maxSizeBytes(16L * 1024L * 1024L)
+                    .weakReferencesEnabled(false)
+                    .build()
+            }
+            .crossfade(false)
             .build()
     }
     val windowState = rememberWindowState(
         position = WindowPosition.Aligned(Alignment.Center),
         size = DpSize(1280.dp, 820.dp),
     )
-    // Undecorated + WindowPlacement.Maximized covers the taskbar on Windows.
-    // Track a work-area "maximize" ourselves and keep placement Floating.
-    var isWorkAreaMaximized by remember { mutableStateOf(false) }
-    var restorePosition by remember {
-        mutableStateOf<WindowPosition>(WindowPosition.Aligned(Alignment.Center))
-    }
-    var restoreSize by remember { mutableStateOf(DpSize(1280.dp, 820.dp)) }
+    // Compose's maximized placement can cover the Windows taskbar for undecorated windows.
+    // Store native pixel bounds so maximize/restore also stays correct on mixed-DPI monitors.
+    var restoreBounds by remember { mutableStateOf<Rectangle?>(null) }
 
     Window(
         onCloseRequest = ::exitApplication,
@@ -71,35 +74,29 @@ fun main() = application {
         undecorated = true,
         transparent = true,
     ) {
-        val density = LocalDensity.current
         DesktopPlayerApp(
-            isWindowMaximized = isWorkAreaMaximized,
+            isWindowMaximized = restoreBounds != null,
             onMinimizeWindow = { windowState.isMinimized = true },
             onToggleMaximizeWindow = {
-                if (isWorkAreaMaximized) {
-                    windowState.placement = WindowPlacement.Floating
-                    windowState.position = restorePosition
-                    windowState.size = restoreSize
-                    isWorkAreaMaximized = false
+                val savedBounds = restoreBounds
+                if (savedBounds != null) {
+                    window.bounds = Rectangle(savedBounds)
+                    restoreBounds = null
                 } else {
-                    restorePosition = windowState.position
-                    restoreSize = windowState.size
                     val gc = window.graphicsConfiguration
-                    val screen = gc.bounds
                     val insets = Toolkit.getDefaultToolkit().getScreenInsets(gc)
-                    val pxX = screen.x + insets.left
-                    val pxY = screen.y + insets.top
-                    val pxW = (screen.width - insets.left - insets.right).coerceAtLeast(400)
-                    val pxH = (screen.height - insets.top - insets.bottom).coerceAtLeast(300)
-                    with(density) {
-                        windowState.placement = WindowPlacement.Floating
-                        windowState.position = WindowPosition(x = pxX.toDp(), y = pxY.toDp())
-                        windowState.size = DpSize(width = pxW.toDp(), height = pxH.toDp())
-                    }
-                    isWorkAreaMaximized = true
+                    restoreBounds = Rectangle(window.bounds)
+                    window.bounds = workAreaBounds(gc.bounds, insets)
                 }
             },
             onCloseWindow = ::exitApplication,
         )
     }
 }
+
+internal fun workAreaBounds(screen: Rectangle, insets: Insets): Rectangle = Rectangle(
+    screen.x + insets.left,
+    screen.y + insets.top,
+    (screen.width - insets.left - insets.right).coerceAtLeast(400),
+    (screen.height - insets.top - insets.bottom).coerceAtLeast(300),
+)

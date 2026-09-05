@@ -17,9 +17,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.swing.Swing
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
 
 data class TrackItem(
@@ -57,6 +60,9 @@ enum class QrLoginState {
     ERROR,
 }
 
+private data class PlaybackProgress(val token: Long, val value: Float)
+private data class CacheProgress(val trackId: Long, val value: Float)
+
 class DesktopPlayerController(
     private val gateway: NeteaseMusicGateway = NeteaseMusicGateway(
         sessionStore = DesktopGatewaySessionStore(),
@@ -72,10 +78,31 @@ class DesktopPlayerController(
     private var paletteJob: Job? = null
     private var qrLoginJob: Job? = null
     private var started = false
+    private val activePlaybackToken = AtomicLong(0L)
+    private val progressEvents = Channel<PlaybackProgress>(Channel.CONFLATED)
+    private val cacheProgressEvents = Channel<CacheProgress>(Channel.CONFLATED)
+    private val progressCollectorJob = scope.launch {
+        for (event in progressEvents) {
+            if (event.token == activePlaybackToken.get() && !isSeeking) {
+                progress = event.value
+            }
+        }
+    }
+    private val cacheProgressCollectorJob = scope.launch {
+        for (event in cacheProgressEvents) {
+            if (nowPlaying?.id == event.trackId) {
+                bufferedProgress = event.value.coerceIn(0f, 1f)
+            }
+        }
+    }
     private val audioPlayer = DesktopAudioPlayer(
-        onProgress = { value -> scope.launch { progress = value } },
-        onCompleted = {
+        // A conflated channel keeps at most one pending UI update. This prevents a busy Swing
+        // thread from accumulating one coroutine and captured object for every audio tick.
+        onProgress = { token, value -> progressEvents.trySend(PlaybackProgress(token, value)) },
+        onBuffered = { trackId, value -> cacheProgressEvents.trySend(CacheProgress(trackId, value)) },
+        onCompleted = { token ->
             scope.launch {
+                if (!activePlaybackToken.compareAndSet(token, 0L)) return@launch
                 progress = 1f
                 when {
                     repeat -> nowPlaying?.let { resolveAndPlay(it) } ?: run { isPlaying = false }
@@ -84,9 +111,11 @@ class DesktopPlayerController(
                 }
             }
         },
-        onError = { error ->
+        onError = { token, error ->
             scope.launch {
+                if (!activePlaybackToken.compareAndSet(token, 0L)) return@launch
                 isPlaying = false
+                isSeeking = false
                 streamUrl = null
                 statusMessage = error.toFriendlyMessage("系统音频输出没有打开，请检查声音设备")
             }
@@ -121,6 +150,9 @@ class DesktopPlayerController(
         private set
     var progress by mutableFloatStateOf(0f)
         private set
+    /** Fraction of the current encoded audio already available in the persistent local cache. */
+    var bufferedProgress by mutableFloatStateOf(0f)
+        private set
     /** True while the user is dragging the seek bar — freezes display smoothing. */
     var isSeeking by mutableStateOf(false)
         private set
@@ -132,6 +164,8 @@ class DesktopPlayerController(
         private set
     var streamBitrate by mutableStateOf<Int?>(null)
         private set
+    private var streamCacheVariant = "default"
+    private var streamExpectedBytes: Long? = null
     var isLiked by mutableStateOf(false)
         private set
     var shuffle by mutableStateOf(false)
@@ -147,8 +181,8 @@ class DesktopPlayerController(
         private set
     var isLyricsVisible by mutableStateOf(false)
         private set
-    /** Album-art-derived colors driving the lyric fluid mesh. */
-    var lyricMeshColors by mutableStateOf(CoverPalette.defaultMesh)
+    /** Album-art-derived colors driving the continuous lyric background. */
+    var lyricFlowColors by mutableStateOf(CoverPalette.defaultFlow)
         private set
 
     /** Playback position derived from progress and the current track duration. */
@@ -233,6 +267,11 @@ class DesktopPlayerController(
         lyricsJob?.cancel()
         paletteJob?.cancel()
         qrLoginJob?.cancel()
+        activePlaybackToken.set(0L)
+        progressEvents.close()
+        progressCollectorJob.cancel()
+        cacheProgressEvents.close()
+        cacheProgressCollectorJob.cancel()
         audioPlayer.close()
         controllerJob.cancel()
         gateway.close()
@@ -272,6 +311,11 @@ class DesktopPlayerController(
     fun playTrack(track: TrackItem) {
         nowPlaying = track
         progress = 0f
+        bufferedProgress = 0f
+        streamUrl = null
+        streamBitrate = null
+        streamCacheVariant = "default"
+        streamExpectedBytes = null
         isLiked = likedTracks.any { it.id == track.id }
         if (recentTracks.none { it.id == track.id }) {
             recentTracks = listOf(track) + recentTracks.take(39)
@@ -299,19 +343,20 @@ class DesktopPlayerController(
         val track = nowPlaying ?: return
         if (track.durationMillis <= 0L) return
         val url = streamUrl
-        progress = (line.timeMs.toDouble() / track.durationMillis.toDouble()).toFloat().coerceIn(0f, 1f)
-        isSeeking = false
+        val playWhenReady = isPlaying
+        isSeeking = true
+        progress = lyricSeekProgress(line.timeMs, track.durationMillis)
         if (url.isNullOrBlank()) {
-            resolveAndPlay(track, resumeProgress = progress)
+            isSeeking = false
+            resolveAndPlay(track, resumeProgress = progress, playWhenReady = playWhenReady)
         } else {
-            isPlaying = true
-            audioPlayer.play(
+            startAudioPlayback(
                 url = url,
-                durationMillis = track.durationMillis,
+                track = track,
                 fromProgress = progress,
-                volume = volume,
-                playWhenReady = true,
+                playWhenReady = playWhenReady,
             )
+            isSeeking = false
         }
     }
 
@@ -342,13 +387,13 @@ class DesktopPlayerController(
 
     private fun loadCoverPalette(coverUrl: String?, trackId: Long) {
         paletteJob?.cancel()
-        paletteJob = scope.launch(Dispatchers.IO) {
-            val seed = CoverPalette.extractSeedFromUrl(coverUrl)
-            val mesh = CoverPalette.meshColorsFromSeed(seed)
-            launch(Dispatchers.Swing) {
-                if (nowPlaying?.id == trackId) {
-                    lyricMeshColors = mesh
-                }
+        paletteJob = scope.launch {
+            val seed = runInterruptible(Dispatchers.IO) {
+                CoverPalette.extractSeedFromUrl(coverUrl)
+            }
+            val flow = CoverPalette.flowColorsFromSeed(seed)
+            if (nowPlaying?.id == trackId) {
+                lyricFlowColors = flow
             }
         }
     }
@@ -392,16 +437,16 @@ class DesktopPlayerController(
     }
 
     fun commitSeek() {
-        val url = streamUrl ?: return
-        val track = nowPlaying ?: return
-        audioPlayer.play(
-            url = url,
-            durationMillis = track.durationMillis,
-            fromProgress = progress,
-            volume = volume,
-            playWhenReady = isPlaying,
-        )
+        val track = nowPlaying
+        val url = streamUrl
+        val targetProgress = progress
         isSeeking = false
+        if (track == null) return
+        if (url.isNullOrBlank()) {
+            resolveAndPlay(track, resumeProgress = targetProgress, playWhenReady = isPlaying)
+        } else {
+            startAudioPlayback(url, track, targetProgress, playWhenReady = isPlaying)
+        }
     }
 
     /** Browse playlists shown in the library strip / sidebar, without the dedicated liked entry. */
@@ -465,7 +510,10 @@ class DesktopPlayerController(
         if (audioQuality == quality) return
         audioQuality = quality
         val track = nowPlaying ?: return
-        if (isPlaying || streamUrl != null) resolveAndPlay(track, resumeProgress = progress)
+        if (isPlaying || streamUrl != null) {
+            bufferedProgress = 0f
+            resolveAndPlay(track, resumeProgress = progress, playWhenReady = isPlaying)
+        }
     }
 
     fun toggleLiked() {
@@ -818,8 +866,13 @@ class DesktopPlayerController(
         isLiked = nowPlaying?.let { current -> likedTracks.any { it.id == current.id } } ?: false
     }
 
-    private fun resolveAndPlay(track: TrackItem, resumeProgress: Float = 0f) {
+    private fun resolveAndPlay(
+        track: TrackItem,
+        resumeProgress: Float = 0f,
+        playWhenReady: Boolean = true,
+    ) {
         playJob?.cancel()
+        activePlaybackToken.set(0L)
         audioPlayer.stop()
         playJob = scope.launch {
             beginRequest("正在准备 ${audioQuality.label} 音质…")
@@ -830,21 +883,24 @@ class DesktopPlayerController(
                 } else {
                     requested
                 }
+                if (nowPlaying?.id != track.id) return@launch
                 streamUrl = songUrl?.url
                 streamBitrate = songUrl?.br
+                streamCacheVariant = audioCacheVariant(songUrl?.br, songUrl?.md5, songUrl?.type)
+                streamExpectedBytes = songUrl?.size
                 val playableUrl = songUrl?.url
                 if (playableUrl.isNullOrBlank()) {
                     isPlaying = false
                     statusMessage = "这个音质暂不可用，换一种试试"
                 } else {
                     progress = resumeProgress
-                    isPlaying = true
+                    isPlaying = playWhenReady
                     statusMessage = null
-                    audioPlayer.play(
+                    startAudioPlayback(
                         url = playableUrl,
-                        durationMillis = track.durationMillis,
+                        track = track,
                         fromProgress = resumeProgress,
-                        volume = volume,
+                        playWhenReady = playWhenReady,
                     )
                 }
             } catch (error: Throwable) {
@@ -854,6 +910,26 @@ class DesktopPlayerController(
                 endRequest()
             }
         }
+    }
+
+    private fun startAudioPlayback(
+        url: String,
+        track: TrackItem,
+        fromProgress: Float,
+        playWhenReady: Boolean,
+    ) {
+        activePlaybackToken.set(0L)
+        val token = audioPlayer.play(
+            url = url,
+            trackId = track.id,
+            cacheVariant = streamCacheVariant,
+            expectedBytes = streamExpectedBytes,
+            durationMillis = track.durationMillis,
+            fromProgress = fromProgress.coerceIn(0f, 0.999f),
+            volume = volume,
+            playWhenReady = playWhenReady,
+        )
+        activePlaybackToken.set(token)
     }
 
     private suspend fun loadCompletePlaylist(playlist: PlaylistItem): List<TrackItem> {
@@ -1013,4 +1089,18 @@ internal fun formatDuration(millis: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%02d:%02d".format(minutes, seconds)
+}
+
+/** Keep lyric jumps inside the playable range even when an LRC tail exceeds track metadata. */
+internal fun lyricSeekProgress(timeMillis: Long, durationMillis: Long): Float {
+    if (durationMillis <= 0L) return 0f
+    val latestSeekMillis = (durationMillis - 1_000L).coerceAtLeast(0L)
+    val safeTimeMillis = timeMillis.coerceIn(0L, latestSeekMillis)
+    return (safeTimeMillis.toDouble() / durationMillis.toDouble()).toFloat().coerceIn(0f, 0.999f)
+}
+
+/** Stable cache variant: the content hash wins, with bitrate/type as a safe fallback. */
+internal fun audioCacheVariant(bitrate: Int?, md5: String?, mediaType: String?): String {
+    val hash = md5.orEmpty().trim().lowercase()
+    return if (hash.isNotEmpty()) hash else "${bitrate ?: 0}-${mediaType.orEmpty().lowercase().ifBlank { "audio" }}"
 }
