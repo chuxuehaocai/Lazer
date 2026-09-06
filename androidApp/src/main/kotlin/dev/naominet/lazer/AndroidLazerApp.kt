@@ -765,7 +765,8 @@ private fun NowPlayingPage(
     var seekProgress by remember(track.id) { mutableFloatStateOf(display) }
     LaunchedEffect(display, seeking) { if (!seeking) seekProgress = display }
 
-    Surface(Modifier.fillMaxSize().safeDrawingPadding(), color = colors.background) {
+    // Keep the visual background edge-to-edge; only the controls need to avoid system bars.
+    Surface(Modifier.fillMaxSize(), color = colors.background) {
         if (isLandscapeLayout()) {
             Box(Modifier.fillMaxSize()) {
                 AndroidAlbumFlowBackground(
@@ -774,7 +775,13 @@ private fun NowPlayingPage(
                     cornerRadius = 0.dp,
                     veil = Color(0xFF1D282D).copy(alpha = 0.38f),
                 )
-                Row(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 10.dp)) {
+                Row(
+                    Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 36.dp, vertical = 0.dp),
+                ) {
                     Column(Modifier.widthIn(min = 230.dp, max = 320.dp).fillMaxSize()) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "收起播放器", tint = Color(0xFFC7D3D5)) }
@@ -797,14 +804,14 @@ private fun NowPlayingPage(
                             Text(formatPlaybackTime(duration), style = MaterialTheme.typography.labelSmall, color = Color(0xFFC7D3D5))
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = onToggleLiked, modifier = Modifier.size(48.dp)) {
-                                Icon(if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, if (isLiked) "移出我喜欢" else "加入我喜欢", tint = if (isLiked) colors.primary else Color(0xFFE7ECEB))
-                            }
                             IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.SkipPrevious, "上一首", Modifier.size(30.dp), tint = Color(0xFFE7ECEB)) }
                             IconButton(onClick = onToggle, modifier = Modifier.size(60.dp), colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFFE7ECEB), contentColor = Color(0xFF1D282D))) {
                                 Icon(if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (snapshot.isPlaying) "暂停" else "播放", Modifier.size(32.dp))
                             }
                             IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.SkipNext, "下一首", Modifier.size(30.dp), tint = Color(0xFFE7ECEB)) }
+                            IconButton(onClick = onToggleLiked, modifier = Modifier.size(48.dp)) {
+                                Icon(if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, if (isLiked) "移出我喜欢" else "加入我喜欢", tint = if (isLiked) colors.primary else Color(0xFFE7ECEB))
+                            }
                         }
                     }
                     Spacer(Modifier.width(24.dp))
@@ -821,7 +828,13 @@ private fun NowPlayingPage(
                 }
             }
         } else {
-            Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 10.dp)) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+            ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "收起播放器", tint = colors.onSurfaceVariant) }
                 Text("正在播放", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
@@ -829,8 +842,15 @@ private fun NowPlayingPage(
             Spacer(Modifier.weight(0.4f))
             MobileArtwork(track.coverUrl, track.title, Modifier.fillMaxWidth().heightIn(max = 390.dp).height(320.dp), 30.dp)
             Spacer(Modifier.height(32.dp))
-            Text(track.title, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(track.title, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(track.artist, style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = onToggleLiked, modifier = Modifier.size(48.dp)) {
+                    Icon(if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, if (isLiked) "移出我喜欢" else "加入我喜欢", tint = if (isLiked) colors.primary else colors.onSurfaceVariant)
+                }
+            }
             Spacer(Modifier.height(28.dp))
             ThinSeekBar(
                 progress = seekProgress,
