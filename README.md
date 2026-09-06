@@ -214,4 +214,4 @@ LAZER_KEY_PASSWORD
 
 ## 许可证
 
-当前仓库未声明开源许可证。如需对外发布，请先补充许可证文件和版权信息。
+本项目采用 [MIT License](./LICENSE) 开源。 Copyright (c) 2026 Lazer contributors。
