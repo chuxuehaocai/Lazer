@@ -6,10 +6,13 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
@@ -121,6 +124,10 @@ private const val ROOT_ENTER_DURATION_MILLIS = 270
 private const val ROOT_EXIT_DURATION_MILLIS = 170
 private const val SETTINGS_ENTER_DURATION_MILLIS = 360
 private const val SETTINGS_EXIT_DURATION_MILLIS = 240
+private const val PLAYER_ENTER_DURATION_MILLIS = 360
+private const val PLAYER_EXIT_DURATION_MILLIS = 240
+private const val LYRICS_ENTER_DURATION_MILLIS = 320
+private const val LYRICS_EXIT_DURATION_MILLIS = 210
 private val LazerEnterEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 private val LazerExitEasing = CubicBezierEasing(0.4f, 0f, 1f, 1f)
 
@@ -818,7 +825,6 @@ private fun NowPlayingPage(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "收起播放器", tint = colors.onSurfaceVariant) }
                 Text("正在播放", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
-                IconButton(onClick = onLyrics) { Icon(Icons.Outlined.Lyrics, "打开歌词", tint = colors.onSurfaceVariant) }
             }
             Spacer(Modifier.weight(0.4f))
             MobileArtwork(track.coverUrl, track.title, Modifier.fillMaxWidth().heightIn(max = 390.dp).height(320.dp), 30.dp)
