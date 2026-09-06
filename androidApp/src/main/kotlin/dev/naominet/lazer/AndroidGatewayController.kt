@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -62,6 +63,7 @@ class AndroidGatewayController(context: Context) {
     private var playlistJob: Job? = null
     private var lyricJob: Job? = null
     private var qrLoginJob: Job? = null
+    private var postLoginSyncJob: Job? = null
 
     var destination by mutableStateOf(AndroidRootDestination.HOME)
         private set
@@ -178,6 +180,7 @@ class AndroidGatewayController(context: Context) {
         playlistJob?.cancel()
         lyricJob?.cancel()
         qrLoginJob?.cancel()
+        postLoginSyncJob?.cancel()
         gateway.close()
 
         settings.gatewayBaseUrl = normalized
@@ -457,6 +460,7 @@ class AndroidGatewayController(context: Context) {
     }
 
     fun logout() {
+        postLoginSyncJob?.cancel()
         scope.launch {
             AndroidPlaybackConnection.stopAndClearSession(appContext)
             try {
@@ -474,6 +478,7 @@ class AndroidGatewayController(context: Context) {
     }
 
     fun close() {
+        postLoginSyncJob?.cancel()
         scope.cancel()
         gateway.close()
     }
@@ -593,22 +598,29 @@ class AndroidGatewayController(context: Context) {
     private suspend fun finishLogin(profileHint: UserProfile? = null) {
         val profile = profileHint?.takeIf { it.userId > 0 } ?: resolveCurrentUser()
         check(profile != null && profile.userId > 0) { "未能确认登录状态" }
+        bootstrapJob?.cancelAndJoin()
+        bootstrapJob = null
         currentUser = profile
         loginPassword = ""
         loginCaptcha = ""
         isLoginVisible = false
-        qrLoginJob?.cancel()
+        qrLoginJob = null
         qrState = AndroidQrLoginState.IDLE
         qrImageData = null
         message = "登录成功，正在同步你的音乐"
-        isLoading = true
-        try {
-            loadSignedInContent(profile)
-            message = "歌单已同步"
-        } catch (_: Throwable) {
-            message = "登录成功，歌单会在下次打开时继续同步"
-        } finally {
-            isLoading = false
+        postLoginSyncJob?.cancel()
+        postLoginSyncJob = scope.launch {
+            isLoading = true
+            try {
+                loadSignedInContent(profile)
+                message = "歌单已同步"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                message = "登录成功，个人音乐暂时未能同步，请稍后重试"
+            } finally {
+                isLoading = false
+            }
         }
     }
 

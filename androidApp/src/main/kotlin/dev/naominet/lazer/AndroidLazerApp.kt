@@ -27,6 +27,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -89,6 +91,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -1216,8 +1219,21 @@ private fun ThinSeekBar(
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private fun LoginSheet(controller: AndroidGatewayController) {
     val colors = MaterialTheme.colorScheme
-    ModalBottomSheet(onDismissRequest = controller::closeLogin, containerColor = colors.surface, contentColor = colors.onSurface) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val contentScrollState = rememberScrollState()
+    ModalBottomSheet(
+        onDismissRequest = controller::closeLogin,
+        sheetState = sheetState,
+        containerColor = colors.surface,
+        contentColor = colors.onSurface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(contentScrollState)
+                .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
             Text("登录后继续", style = MaterialTheme.typography.headlineSmall)
             Text("先用验证码；遇到问题时再试密码或二维码。", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
