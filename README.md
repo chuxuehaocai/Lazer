@@ -16,6 +16,25 @@ Lazer 是一个基于 Kotlin Multiplatform 和 Compose Multiplatform 构建的�
 
 默认连接 [NeteaseCloudMusicApi Enhanced Gateway](https://music.naominet.dev/docs/)，支持配置为自托管或其他兼容 Gateway 地址。
 
+## Screenshot
+
+### 移动端
+
+<p align="center">
+  <img src="./pics/Screenshot_2026-09-06-20-54-13-731_dev.naominet..jpg" alt="Lazer 移动端截图 1" width="240">
+  <img src="./pics/Screenshot_2026-09-06-20-54-39-580_dev.naominet..jpg" alt="Lazer 移动端截图 2" width="240">
+  <img src="./pics/Screenshot_2026-09-06-20-54-48-911_dev.naominet..jpg" alt="Lazer 移动端截图 3" width="240">
+</p>
+
+### 桌面端
+
+<p align="center">
+  <img src="./pics/18ec2b5b-5b6d-4e88-af8a-91400e7afefa.png" alt="Lazer 桌面端截图 1" width="420">
+  <img src="./pics/ef15be70-f979-4e53-97c1-98135e170e6b.png" alt="Lazer 桌面端截图 2" width="420">
+  <img src="./pics/73976c13-a41e-4737-9ed1-7995b852a280.png" alt="Lazer 桌面端截图 3" width="420">
+  <img src="./pics/fd8fbadb-0d38-44e5-a657-325ce6a37acb.png" alt="Lazer 桌面端截图 4" width="420">
+</p>
+
 ## 功能
 
 - 音乐搜索、热门发现和推荐内容浏览
