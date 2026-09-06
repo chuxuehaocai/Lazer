@@ -9,13 +9,22 @@ plugins {
 dependencies {
     implementation(project(":shared"))
 
-    // Windows ARM64: explicit artifact. currentOs/host detection is broken on this platform
-    // in several JetBrains tools (IDEA ComposeJvm runner, Kotlin/Native HostManager).
+    // Select the Windows native runtime explicitly with -PwindowsArch=arm64|x64.
+    // The host architecture remains the default when no property is supplied.
     val osName = System.getProperty("os.name").orEmpty().lowercase()
     val osArch = System.getProperty("os.arch").orEmpty().lowercase()
-    val isWindowsArm = osName.contains("win") && (osArch.contains("aarch64") || osArch == "arm64")
-    if (isWindowsArm) {
-        implementation(compose.desktop.windows_arm64)
+    val hostWindowsArch = if (osArch.contains("aarch64") || osArch == "arm64") "arm64" else "x64"
+    val windowsArch = providers.gradleProperty("windowsArch").orElse(hostWindowsArch).get().lowercase()
+    require(windowsArch == "arm64" || windowsArch == "x64") {
+        "windowsArch must be arm64 or x64, but was '$windowsArch'"
+    }
+
+    if (osName.contains("win")) {
+        if (windowsArch == "arm64") {
+            implementation(compose.desktop.windows_arm64)
+        } else {
+            implementation(compose.desktop.windows_x64)
+        }
     } else {
         implementation(compose.desktop.currentOs)
     }
@@ -42,6 +51,9 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "dev.naominet.lazer"
             packageVersion = "1.0.0"
+            windows {
+                iconFile = project.file("src/main/resources/icon.ico")
+            }
             macOS {
                 bundleID = "dev.naominet.lazer"
                 appCategory = "public.app-category.music"
