@@ -34,7 +34,7 @@ class NeteaseMusicGatewayTest {
             closeHttpClient = false,
         )
 
-        gateway.getRaw("/search", mapOf("keywords" to "quiet"))
+        gateway.getRaw("/search", mapOf("keywords" to "quiet", "randomCNIP" to "false"))
     }
 
     @Test
@@ -151,6 +151,7 @@ class NeteaseMusicGatewayTest {
             assertEquals("13800138000", payload["phone"]?.toString()?.trim('"'))
             assertEquals("secret-password", payload["password"]?.toString()?.trim('"'))
             assertEquals("86", payload["countrycode"]?.toString()?.trim('"'))
+            assertEquals("true", payload["randomCNIP"]?.toString()?.trim('"'))
 
             respond(
                 content = """{"code":200,"cookie":"MUSIC_U=new-session","profile":{"userId":7,"nickname":"Lazer"}}""",

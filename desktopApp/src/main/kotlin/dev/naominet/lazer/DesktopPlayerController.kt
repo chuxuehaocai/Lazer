@@ -71,6 +71,7 @@ class DesktopPlayerController(
     private val controllerJob = SupervisorJob()
     private val scope = CoroutineScope(controllerJob + Dispatchers.Swing)
     private val playlistCache = DesktopPlaylistCache()
+    private val systemMediaSession = DesktopSystemMediaSession(::handleSystemMediaCommand)
     private var searchJob: Job? = null
     private var playJob: Job? = null
     private var playlistJob: Job? = null
@@ -85,6 +86,7 @@ class DesktopPlayerController(
         for (event in progressEvents) {
             if (event.token == activePlaybackToken.get() && !isSeeking) {
                 progress = event.value
+                publishSystemMedia()
             }
         }
     }
@@ -102,27 +104,53 @@ class DesktopPlayerController(
         onBuffered = { trackId, value -> cacheProgressEvents.trySend(CacheProgress(trackId, value)) },
         onCompleted = { token ->
             scope.launch {
-                if (!activePlaybackToken.compareAndSet(token, 0L)) return@launch
+                if (!activePlaybackToken.compareAndSet(token, 0L)) {
+                    PlaybackDebugLog.event("playback-complete-ignored", "token=$token active=${activePlaybackToken.get()}")
+                    return@launch
+                }
+                PlaybackDebugLog.event("playback-complete", "token=$token track=${nowPlaying?.id}")
                 progress = 1f
                 when {
-                    repeat -> nowPlaying?.let { resolveAndPlay(it) } ?: run { isPlaying = false }
-                    effectiveQueue().isEmpty() -> isPlaying = false
+                    repeat -> {
+                        nowPlaying?.let { resolveAndPlay(it) } ?: run { isPlaying = false }
+                        publishSystemMedia(forcePosition = true)
+                    }
+                    effectiveQueue().isEmpty() -> {
+                        isPlaying = false
+                        publishSystemMedia(forcePosition = true)
+                    }
                     else -> playNext()
                 }
             }
         },
         onError = { token, error ->
             scope.launch {
-                if (!activePlaybackToken.compareAndSet(token, 0L)) return@launch
+                if (!activePlaybackToken.compareAndSet(token, 0L)) {
+                    PlaybackDebugLog.event(
+                        "playback-error-ignored",
+                        "token=$token active=${activePlaybackToken.get()} error=${error.playbackDebugSummary()}",
+                    )
+                    return@launch
+                }
+                PlaybackDebugLog.event(
+                    "playback-error",
+                    "token=$token track=${nowPlaying?.id} seeking=$isSeeking progress=$progress error=${error.playbackDebugSummary()}",
+                )
                 isPlaying = false
                 isSeeking = false
                 streamUrl = null
                 statusMessage = error.toFriendlyMessage("系统音频输出没有打开，请检查声音设备")
+                publishSystemMedia(
+                    statusOverride = SystemMediaPlaybackStatus.STOPPED,
+                    forcePosition = true,
+                )
             }
         },
     )
 
     var isDark by mutableStateOf(DesktopSettings.isDark)
+        private set
+    var lyricFollowDelayMillis by mutableStateOf(DesktopSettings.lyricFollowDelayMillis)
         private set
     var isLoading by mutableStateOf(false)
         private set
@@ -223,12 +251,15 @@ class DesktopPlayerController(
     fun start() {
         if (started) return
         started = true
+        systemMediaSession.start()
+        systemMediaSession.setVolume(volume)
         // Older builds cached `/recommend/resource` entries before its `picUrl` field was mapped.
         // Do not let those empty-cover records mask a fresh public/recommended playlist request.
         featuredPlaylists = playlistCache.loadPlaylists(FEATURED_CACHE_KEY)
             .filter { !it.coverUrl.isNullOrBlank() }
         recentTracks = playlistCache.loadTracks(RECENT_TRACKS_CACHE_ID)?.tracks.orEmpty()
         if (nowPlaying == null) nowPlaying = recentTracks.firstOrNull()
+        publishSystemMedia(forcePosition = true)
         nowPlaying?.let { track ->
             loadCoverPalette(track.coverUrl, track.id)
             if (lyrics.isEmpty()) loadLyrics(track.id)
@@ -272,6 +303,7 @@ class DesktopPlayerController(
         progressCollectorJob.cancel()
         cacheProgressEvents.close()
         cacheProgressCollectorJob.cancel()
+        systemMediaSession.close()
         audioPlayer.close()
         controllerJob.cancel()
         gateway.close()
@@ -280,6 +312,11 @@ class DesktopPlayerController(
     fun toggleTheme() {
         isDark = !isDark
         DesktopSettings.isDark = isDark
+    }
+
+    fun updateLyricFollowDelay(value: Long) {
+        lyricFollowDelayMillis = normalizeLyricFollowDelayMillis(value)
+        DesktopSettings.lyricFollowDelayMillis = lyricFollowDelayMillis
     }
 
     fun updateSearchQuery(query: String) {
@@ -322,6 +359,10 @@ class DesktopPlayerController(
         }
         loadLyrics(track.id)
         loadCoverPalette(track.coverUrl, track.id)
+        publishSystemMedia(
+            statusOverride = SystemMediaPlaybackStatus.STOPPED,
+            forcePosition = true,
+        )
         resolveAndPlay(track)
     }
 
@@ -346,6 +387,10 @@ class DesktopPlayerController(
         val playWhenReady = isPlaying
         isSeeking = true
         progress = lyricSeekProgress(line.timeMs, track.durationMillis)
+        PlaybackDebugLog.event(
+            "lyric-seek",
+            "track=${track.id} line=$index target=$progress playing=$playWhenReady hasStream=${!url.isNullOrBlank()}",
+        )
         if (url.isNullOrBlank()) {
             isSeeking = false
             resolveAndPlay(track, resumeProgress = progress, playWhenReady = playWhenReady)
@@ -358,6 +403,7 @@ class DesktopPlayerController(
             )
             isSeeking = false
         }
+        publishSystemMedia(forcePosition = true)
     }
 
     private fun loadLyrics(songId: Long) {
@@ -407,12 +453,60 @@ class DesktopPlayerController(
         if (isPlaying) {
             isPlaying = false
             audioPlayer.pause()
+            publishSystemMedia(forcePosition = true)
         } else if (streamUrl == null) {
-            resolveAndPlay(track)
+            // Playback errors deliberately clear the stale URL, but the UI keeps the last
+            // confirmed position. Resume from that position instead of silently starting the
+            // audio at zero while lyrics and the seek bar remain further ahead.
+            val resumeProgress = progress.coerceIn(0f, 0.999f)
+            PlaybackDebugLog.event(
+                "playback-retry",
+                "track=${track.id} from=$resumeProgress reason=missing-stream",
+            )
+            resolveAndPlay(track, resumeProgress = resumeProgress, playWhenReady = true)
         } else {
             isPlaying = true
             audioPlayer.resume()
+            publishSystemMedia(forcePosition = true)
         }
+    }
+
+    private fun handleSystemMediaCommand(command: SystemMediaCommand) {
+        when (command) {
+            SystemMediaCommand.Play -> if (!isPlaying) togglePlayPause()
+            SystemMediaCommand.Pause -> if (isPlaying) togglePlayPause()
+            SystemMediaCommand.Toggle -> togglePlayPause()
+            SystemMediaCommand.Next -> playNext()
+            SystemMediaCommand.Previous -> playPrevious()
+            SystemMediaCommand.Stop -> stopFromSystemMedia()
+            is SystemMediaCommand.SeekBy -> seekFromSystemMedia(
+                systemSeekTargetMillis(positionMillis, command.offsetMillis, nowPlaying?.durationMillis ?: 0L),
+            )
+            is SystemMediaCommand.SetPosition -> seekFromSystemMedia(command.positionMillis)
+            is SystemMediaCommand.SetVolume -> updateVolume(command.volume.toFloat())
+        }
+    }
+
+    private fun stopFromSystemMedia() {
+        playJob?.cancel()
+        activePlaybackToken.set(0L)
+        audioPlayer.stop()
+        isPlaying = false
+        isSeeking = false
+        progress = 0f
+        streamUrl = null
+        streamBitrate = null
+        publishSystemMedia(
+            statusOverride = SystemMediaPlaybackStatus.STOPPED,
+            forcePosition = true,
+        )
+    }
+
+    private fun seekFromSystemMedia(positionMillis: Long) {
+        val durationMillis = nowPlaying?.durationMillis ?: return
+        if (durationMillis <= 0L) return
+        seekTo(systemPositionProgress(positionMillis, durationMillis))
+        commitSeek()
     }
 
     fun playPrevious() {
@@ -433,20 +527,32 @@ class DesktopPlayerController(
 
     fun seekTo(value: Float) {
         isSeeking = true
-        progress = value.coerceIn(0f, 1f)
+        progress = playableSeekProgress(value, nowPlaying?.durationMillis ?: 0L)
     }
 
     fun commitSeek() {
+        // Tap and drag recognizers may both finish one pointer sequence. Only the first commit is
+        // allowed to rebuild the audio pipeline.
+        if (!isSeeking) {
+            PlaybackDebugLog.event("seek-commit-ignored", "track=${nowPlaying?.id} reason=no-active-seek")
+            return
+        }
         val track = nowPlaying
         val url = streamUrl
-        val targetProgress = progress
+        val targetProgress = playableSeekProgress(progress, track?.durationMillis ?: 0L)
+        val playWhenReady = isPlaying
         isSeeking = false
+        PlaybackDebugLog.event(
+            "seek-commit",
+            "track=${track?.id} target=$targetProgress playing=$playWhenReady hasStream=${!url.isNullOrBlank()}",
+        )
         if (track == null) return
         if (url.isNullOrBlank()) {
-            resolveAndPlay(track, resumeProgress = targetProgress, playWhenReady = isPlaying)
+            resolveAndPlay(track, resumeProgress = targetProgress, playWhenReady = playWhenReady)
         } else {
-            startAudioPlayback(url, track, targetProgress, playWhenReady = isPlaying)
+            startAudioPlayback(url, track, targetProgress, playWhenReady = playWhenReady)
         }
+        publishSystemMedia(forcePosition = true)
     }
 
     /** Browse playlists shown in the library strip / sidebar, without the dedicated liked entry. */
@@ -504,6 +610,7 @@ class DesktopPlayerController(
     fun updateVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
         audioPlayer.setVolume(volume)
+        systemMediaSession.setVolume(volume)
     }
 
     fun updateAudioQuality(quality: AudioQuality) {
@@ -892,20 +999,30 @@ class DesktopPlayerController(
                 if (playableUrl.isNullOrBlank()) {
                     isPlaying = false
                     statusMessage = "这个音质暂不可用，换一种试试"
+                    publishSystemMedia(
+                        statusOverride = SystemMediaPlaybackStatus.STOPPED,
+                        forcePosition = true,
+                    )
                 } else {
-                    progress = resumeProgress
+                    val safeResumeProgress = playableSeekProgress(resumeProgress, track.durationMillis)
+                    progress = safeResumeProgress
                     isPlaying = playWhenReady
                     statusMessage = null
                     startAudioPlayback(
                         url = playableUrl,
                         track = track,
-                        fromProgress = resumeProgress,
+                        fromProgress = safeResumeProgress,
                         playWhenReady = playWhenReady,
                     )
+                    publishSystemMedia(forcePosition = true)
                 }
             } catch (error: Throwable) {
                 isPlaying = false
                 statusMessage = error.toFriendlyMessage("播放没有开始，请稍后重试")
+                publishSystemMedia(
+                    statusOverride = SystemMediaPlaybackStatus.STOPPED,
+                    forcePosition = true,
+                )
             } finally {
                 endRequest()
             }
@@ -925,11 +1042,15 @@ class DesktopPlayerController(
             cacheVariant = streamCacheVariant,
             expectedBytes = streamExpectedBytes,
             durationMillis = track.durationMillis,
-            fromProgress = fromProgress.coerceIn(0f, 0.999f),
+            fromProgress = playableSeekProgress(fromProgress, track.durationMillis),
             volume = volume,
             playWhenReady = playWhenReady,
         )
         activePlaybackToken.set(token)
+        PlaybackDebugLog.event(
+            "playback-start",
+            "token=$token track=${track.id} from=$fromProgress playing=$playWhenReady",
+        )
     }
 
     private suspend fun loadCompletePlaylist(playlist: PlaylistItem): List<TrackItem> {
@@ -1020,6 +1141,32 @@ class DesktopPlayerController(
         return if (shuffle) base.shuffled() else base
     }
 
+    private fun publishSystemMedia(
+        statusOverride: SystemMediaPlaybackStatus? = null,
+        forcePosition: Boolean = false,
+    ) {
+        val track = nowPlaying
+        val status = statusOverride ?: when {
+            track == null -> SystemMediaPlaybackStatus.STOPPED
+            isPlaying -> SystemMediaPlaybackStatus.PLAYING
+            streamUrl.isNullOrBlank() -> SystemMediaPlaybackStatus.STOPPED
+            else -> SystemMediaPlaybackStatus.PAUSED
+        }
+        systemMediaSession.publish(
+            snapshot = SystemMediaSnapshot(
+                trackId = track?.id,
+                title = track?.title,
+                artist = track?.artist,
+                album = track?.album,
+                coverUrl = track?.coverUrl,
+                durationMillis = track?.durationMillis ?: 0L,
+                playbackStatus = status,
+                positionMillis = positionMillis,
+            ),
+            forcePosition = forcePosition,
+        )
+    }
+
     private fun beginRequest(message: String? = null) {
         activeRequests += 1
         isLoading = true
@@ -1094,9 +1241,8 @@ internal fun formatDuration(millis: Long): String {
 /** Keep lyric jumps inside the playable range even when an LRC tail exceeds track metadata. */
 internal fun lyricSeekProgress(timeMillis: Long, durationMillis: Long): Float {
     if (durationMillis <= 0L) return 0f
-    val latestSeekMillis = (durationMillis - 1_000L).coerceAtLeast(0L)
-    val safeTimeMillis = timeMillis.coerceIn(0L, latestSeekMillis)
-    return (safeTimeMillis.toDouble() / durationMillis.toDouble()).toFloat().coerceIn(0f, 0.999f)
+    val requested = timeMillis.coerceAtLeast(0L).toDouble() / durationMillis.toDouble()
+    return playableSeekProgress(requested.toFloat(), durationMillis)
 }
 
 /** Stable cache variant: the content hash wins, with bitrate/type as a safe fallback. */

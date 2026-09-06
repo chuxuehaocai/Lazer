@@ -1,11 +1,15 @@
 package dev.naominet.lazer
 
+import dev.nucleusframework.media.control.MediaControlEvent
+import fr.delthas.javamp3.Sound
 import java.awt.Insets
 import java.awt.Rectangle
+import java.io.IOException
+import java.io.InputStream
 import java.nio.file.Files
 import java.util.Comparator
-import java.util.ServiceLoader
-import javax.sound.sampled.spi.AudioFileReader
+import javax.sound.sampled.AudioFormat
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
@@ -14,6 +18,43 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DesktopMediaAndCacheTest {
+    @Test
+    fun `system media buttons map to the player commands`() {
+        assertEquals(SystemMediaCommand.Play, MediaControlEvent.Play.toSystemMediaCommand())
+        assertEquals(SystemMediaCommand.Pause, MediaControlEvent.Pause.toSystemMediaCommand())
+        assertEquals(SystemMediaCommand.Toggle, MediaControlEvent.Toggle.toSystemMediaCommand())
+        assertEquals(SystemMediaCommand.Next, MediaControlEvent.Next.toSystemMediaCommand())
+        assertEquals(SystemMediaCommand.Previous, MediaControlEvent.Previous.toSystemMediaCommand())
+        assertEquals(SystemMediaCommand.Stop, MediaControlEvent.Stop.toSystemMediaCommand())
+        assertEquals(
+            SystemMediaCommand.SeekBy(-10_000L),
+            MediaControlEvent.SeekBy(-10_000L).toSystemMediaCommand(),
+        )
+        assertEquals(
+            SystemMediaCommand.SetPosition(42_000L),
+            MediaControlEvent.SetPosition(42_000L).toSystemMediaCommand(),
+        )
+        assertEquals(
+            SystemMediaCommand.SetVolume(0.4),
+            MediaControlEvent.SetVolume(0.4).toSystemMediaCommand(),
+        )
+        assertEquals(null, MediaControlEvent.Raise.toSystemMediaCommand())
+    }
+
+    @Test
+    fun `system media seeks stay in the playable timeline`() {
+        assertEquals(0f, systemPositionProgress(-1_000L, 240_000L), 0f)
+        assertEquals(0.5f, systemPositionProgress(120_000L, 240_000L), 0.0001f)
+        assertEquals(239f / 240f, systemPositionProgress(999_000L, 240_000L), 0.0001f)
+        assertEquals(0L, systemSeekTargetMillis(5_000L, -10_000L, 240_000L))
+        assertEquals(240_000L, systemSeekTargetMillis(235_000L, 10_000L, 240_000L))
+        assertEquals(0L, systemSeekTargetMillis(Long.MAX_VALUE, Long.MAX_VALUE, 0L))
+        assertEquals(
+            Long.MAX_VALUE,
+            systemSeekTargetMillis(Long.MAX_VALUE - 1L, Long.MAX_VALUE, Long.MAX_VALUE),
+        )
+    }
+
     @Test
     fun `global wheel motion keeps the lyric inertia curve`() {
         val motion = WheelInertiaMotion()
@@ -59,9 +100,9 @@ class DesktopMediaAndCacheTest {
     }
 
     @Test
-    fun `MP3 decoder is discoverable through Java Sound`() {
-        val readers = ServiceLoader.load(AudioFileReader::class.java).toList()
-        assertTrue(readers.any { it.javaClass.name.contains("MpegAudioFileReader") })
+    fun `streaming MP3 decoder is available without JLayer`() {
+        assertEquals("fr.delthas.javamp3.Sound", Sound::class.java.name)
+        assertTrue(runCatching { Class.forName("javazoom.jl.decoder.Decoder") }.isFailure)
     }
 
     @Test
@@ -73,10 +114,108 @@ class DesktopMediaAndCacheTest {
     }
 
     @Test
+    fun `audio output recovery handles errors closures and repeated zero writes`() {
+        assertFalse(shouldRecoverAudioOutput(null, outputOpen = true, consecutiveZeroWrites = 7))
+        assertTrue(shouldRecoverAudioOutput(null, outputOpen = true, consecutiveZeroWrites = 8))
+        assertTrue(shouldRecoverAudioOutput(null, outputOpen = false, consecutiveZeroWrites = 1))
+        assertTrue(
+            shouldRecoverAudioOutput(
+                IOException("device unavailable"),
+                outputOpen = true,
+                consecutiveZeroWrites = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `playback clock does not reset when the output line is rebuilt`() {
+        val timeline = OutputPlaybackTimeline(frameSize = 4, frameRate = 44_100f)
+        timeline.onBytesSubmitted(176_400)
+
+        assertEquals(500L, timeline.playedMillis(currentLineFrames = 22_050))
+        timeline.onLineReplaced()
+        assertEquals(1_000L, timeline.playedMillis(currentLineFrames = 0))
+        assertEquals(1_100L, timeline.playedMillis(currentLineFrames = 4_410))
+    }
+
+    @Test
+    fun `decoded seek preserves decoder state by reading instead of skipping`() = runBlocking {
+        var skipCalled = false
+        var emitted = 0
+        val input = object : InputStream() {
+            override fun read(): Int = if (emitted++ < 64) 0 else -1
+
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                if (emitted >= 64) return -1
+                val count = minOf(length, 64 - emitted)
+                repeat(count) { buffer[offset + it] = 0 }
+                emitted += count
+                return count
+            }
+
+            override fun skip(count: Long): Long {
+                skipCalled = true
+                throw ArrayIndexOutOfBoundsException("decoder state lost")
+            }
+        }
+
+        assertTrue(discardDecodedBytes(input, byteCount = 64) { true })
+        assertFalse(skipCalled)
+    }
+
+    @Test
+    fun `decoded seek always lands on a whole PCM frame`() {
+        val byteCount = decodedSeekByteCount(
+            durationMillis = 377_045L,
+            progress = 0.27103397f,
+            frameRate = 48_000f,
+            frameSize = 4,
+        )
+
+        assertEquals(19_620_864L, byteCount)
+        assertEquals(0L, byteCount % 4L)
+    }
+
+    @Test
+    fun `seek fade starts silent and reaches the original PCM level`() {
+        val format = AudioFormat(
+            AudioFormat.Encoding.PCM_SIGNED,
+            4_000f,
+            16,
+            2,
+            4,
+            4_000f,
+            false,
+        )
+        val pcm = ByteArray(4 * 4)
+        repeat(8) { sample ->
+            pcm[sample * 2] = 0x10
+            pcm[sample * 2 + 1] = 0x27
+        }
+        PcmSeekFadeIn(format, durationMillis = 1).apply(pcm, pcm.size)
+
+        fun sampleAt(index: Int): Int {
+            val low = pcm[index * 2].toInt() and 0xFF
+            val high = pcm[index * 2 + 1].toInt() and 0xFF
+            return ((high shl 8) or low).toShort().toInt()
+        }
+
+        assertEquals(0, sampleAt(0))
+        assertEquals(0, sampleAt(1))
+        assertEquals(3_333, sampleAt(2))
+        assertEquals(3_333, sampleAt(3))
+        assertEquals(6_667, sampleAt(4))
+        assertEquals(6_667, sampleAt(5))
+        assertEquals(10_000, sampleAt(6))
+        assertEquals(10_000, sampleAt(7))
+    }
+
+    @Test
     fun `lyric seeks cannot land exactly at or beyond EOF`() {
         assertEquals(0.5f, lyricSeekProgress(120_000, 240_000), 0.0001f)
         assertEquals(239f / 240f, lyricSeekProgress(999_000, 240_000), 0.0001f)
         assertEquals(0f, lyricSeekProgress(-1_000, 240_000), 0.0001f)
+        assertEquals(239f / 240f, playableSeekProgress(1f, 240_000), 0.0001f)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package dev.naominet.lazer
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.LocalContentColor
@@ -113,16 +114,19 @@ private val LazerTypography = Typography(
 )
 
 @Composable
-fun LazerTheme(isDark: Boolean, content: @Composable () -> Unit) {
+fun LazerTheme(
+    isDark: Boolean,
+    colorScheme: ColorScheme? = null,
+    content: @Composable () -> Unit,
+) {
+    val activeColorScheme = colorScheme ?: if (isDark) DarkColors else LightColors
     MaterialTheme(
-        colorScheme = if (isDark) DarkColors else LightColors,
+        colorScheme = activeColorScheme,
         typography = LazerTypography,
     ) {
         CompositionLocalProvider(
-            LocalContentColor provides if (isDark) LazerTokens.NightInk else LazerTokens.Ink,
-            LocalRippleConfiguration provides RippleConfiguration(
-                color = if (isDark) Color(0xFFEAF4F7) else LazerTokens.DeepBlue,
-            ),
+            LocalContentColor provides activeColorScheme.onBackground,
+            LocalRippleConfiguration provides RippleConfiguration(color = activeColorScheme.primary),
             content = content,
         )
     }

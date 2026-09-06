@@ -19,3 +19,9 @@ captures
 node_modules/
 .lazer/
 .gradle-codex/
+.android-codex/
+
+# Android release signing credentials and private keys
+keystore.properties
+*.jks
+*.keystore

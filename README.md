@@ -17,6 +17,8 @@ This is a Kotlin Multiplatform project targeting Android, iOS, Desktop (JVM).
 Use the run configurations provided by the run widget in your IDE's toolbar. You can also use these commands and options:
 
 - Android app: `./gradlew :androidApp:assembleDebug`
+  - `androidApp` can also be opened directly in IntelliJ IDEA or Android Studio; its standalone
+    Gradle entry point reuses the root version catalog and the sibling `shared` module.
 - Desktop app:
   - Hot reload: `./gradlew :desktopApp:hotRun --auto`
   - Standard run: `./gradlew :desktopApp:run`

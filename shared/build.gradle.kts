@@ -64,6 +64,9 @@ kotlin {
             implementation(libs.ktor.client.cio)
         }
         commonMain.dependencies {
+            // Gateway exposes JsonObject in a few raw-response methods, so consumers need this
+            // type on their compile classpath rather than only at the shared module's runtime.
+            api(libs.kotlinx.serialization.json)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)

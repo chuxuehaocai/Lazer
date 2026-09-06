@@ -1,6 +1,7 @@
 package dev.naominet.lazer
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -8,14 +9,16 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.*
@@ -99,6 +102,7 @@ fun WindowScope.DesktopPlayerApp(
         onDispose { controller.dispose() }
     }
     var destination by remember { mutableStateOf(DesktopDestination.HOME) }
+    var settingsVisible by remember { mutableStateOf(false) }
     val scrollInertia = rememberScrollInertiaController()
 
     LazerTheme(isDark = controller.isDark) {
@@ -167,6 +171,7 @@ fun WindowScope.DesktopPlayerApp(
                                                 destination = DesktopDestination.LIBRARY
                                                 controller.openPlaylist(it)
                                             },
+                                            onOpenSettings = { settingsVisible = true },
                                         )
                                         MainContent(
                                             controller = controller,
@@ -183,6 +188,12 @@ fun WindowScope.DesktopPlayerApp(
 
                 if (controller.isLoginVisible) {
                     LoginOverlay(controller)
+                }
+                if (settingsVisible) {
+                    DesktopSettingsDialog(
+                        controller = controller,
+                        onDismiss = { settingsVisible = false },
+                    )
                 }
             }
         }
@@ -273,6 +284,7 @@ private fun NavigationPanel(
     compact: Boolean,
     onDestinationSelected: (DesktopDestination) -> Unit,
     onPlaylistSelected: (PlaylistItem) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val playlistScrollState = rememberScrollState()
@@ -359,6 +371,39 @@ private fun NavigationPanel(
                 }
                 else -> Spacer(Modifier.weight(1f))
             }
+
+            Spacer(Modifier.weight(1f))
+            NavigationUtilityEntry(
+                icon = Icons.Outlined.Settings,
+                label = "设置",
+                compact = compact,
+                onClick = onOpenSettings,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NavigationUtilityEntry(
+    icon: ImageVector,
+    label: String,
+    compact: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .then(if (compact) Modifier.size(48.dp) else Modifier.fillMaxWidth())
+            .clip(RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (compact) 0.dp else 11.dp, vertical = if (compact) 0.dp else 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (compact) Arrangement.Center else Arrangement.Start,
+    ) {
+        Icon(icon, label, Modifier.size(19.dp), tint = colors.onSurfaceVariant)
+        if (!compact) {
+            Spacer(Modifier.width(11.dp))
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
         }
     }
 }
@@ -494,6 +539,41 @@ private fun MainContent(
             else -> LikedPage(controller, Modifier.weight(1f))
         }
     }
+}
+
+@Composable
+private fun DesktopSettingsDialog(
+    controller: DesktopPlayerController,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("歌词", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "手动滚动歌词后，经过所选时间恢复自动跟随。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    LYRIC_FOLLOW_DELAY_OPTIONS_MILLIS.forEachIndexed { index, delayMillis ->
+                        SegmentedButton(
+                            selected = controller.lyricFollowDelayMillis == delayMillis,
+                            onClick = { controller.updateLyricFollowDelay(delayMillis) },
+                            shape = SegmentedButtonDefaults.itemShape(
+                                index = index,
+                                count = LYRIC_FOLLOW_DELAY_OPTIONS_MILLIS.size,
+                            ),
+                            label = { Text(lyricFollowDelayLabel(delayMillis)) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+    )
 }
 
 @Composable
@@ -697,14 +777,6 @@ private fun HomePage(controller: DesktopPlayerController, modifier: Modifier = M
         contentPadding = PaddingValues(top = 18.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
-        item { ListeningHero(controller) }
-        item {
-            Column {
-                SectionHeading("从一句话开始", "不用记歌名，描述此刻就好")
-                Spacer(Modifier.height(10.dp))
-                IntentSuggestions(controller)
-            }
-        }
         item {
             Column {
                 SectionHeading(
@@ -721,54 +793,6 @@ private fun HomePage(controller: DesktopPlayerController, modifier: Modifier = M
                 tracks = controller.recentTracks.take(8),
                 onPlay = controller::playTrack,
             )
-        }
-    }
-}
-
-@Composable
-private fun ListeningHero(controller: DesktopPlayerController) {
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 184.dp),
-        shape = RoundedCornerShape(26.dp),
-        color = colors.primaryContainer.copy(alpha = 0.88f),
-    ) {
-        Row(Modifier.padding(horizontal = 28.dp, vertical = 25.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).widthIn(max = 600.dp)) {
-                Text(
-                    if (controller.isSignedIn) "${controller.currentUser?.nickname.orEmpty()}，把此刻交给音乐。" else "把此刻交给音乐。",
-                    style = MaterialTheme.typography.displaySmall,
-                    color = colors.onPrimaryContainer,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "不必浏览层层菜单。写下天气、心情或手边正在做的事，Lazer 会从音乐里找答案。",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = colors.onPrimaryContainer.copy(alpha = 0.76f),
-                )
-            }
-            Spacer(Modifier.width(24.dp))
-            Box(
-                Modifier
-                    .size(98.dp)
-                    .clip(CircleShape)
-                    .background(colors.surface.copy(alpha = 0.54f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    Modifier
-                        .size(58.dp)
-                        .clip(CircleShape)
-                        .background(colors.primary)
-                        .clickable {
-                            controller.nowPlaying?.let(controller::playTrack)
-                                ?: controller.recentTracks.firstOrNull()?.let(controller::playTrack)
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.PlayArrow, "播放", tint = colors.onPrimary, modifier = Modifier.size(30.dp))
-                }
-            }
         }
     }
 }
@@ -1100,6 +1124,7 @@ private fun SectionHeading(title: String, subtitle: String) {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun PlaylistStrip(playlists: List<PlaylistItem>, onPlaylistClick: (PlaylistItem) -> Unit) {
     if (playlists.isEmpty()) {
@@ -1110,29 +1135,124 @@ private fun PlaylistStrip(playlists: List<PlaylistItem>, onPlaylistClick: (Playl
     }
     val listState = rememberLazyListState()
     val inertia = LocalScrollInertia.current
-    LazyRow(
-        state = listState,
-        modifier = Modifier.fillMaxWidth().scrollInertia(listState, inertia, Orientation.Horizontal),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(end = 12.dp),
+    val scope = rememberCoroutineScope()
+    var stripHovered by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onPointerEvent(PointerEventType.Enter) { stripHovered = true }
+            .onPointerEvent(PointerEventType.Exit) { stripHovered = false },
     ) {
-        items(playlists, key = { it.id }) { playlist ->
-            PlaylistTile(playlist, onClick = { onPlaylistClick(playlist) })
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().scrollInertia(listState, inertia, Orientation.Horizontal),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(end = 12.dp),
+        ) {
+            items(playlists, key = { it.id }) { playlist ->
+                PlaylistTile(playlist, onClick = { onPlaylistClick(playlist) })
+            }
+        }
+        AnimatedVisibility(
+            visible = stripHovered && (listState.canScrollBackward || listState.canScrollForward),
+            modifier = Modifier.matchParentSize(),
+            enter = fadeIn(tween(durationMillis = 220, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(durationMillis = 140, easing = FastOutSlowInEasing)),
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                if (listState.canScrollBackward) {
+                    PlaylistStripScrollButton(
+                        icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                        description = "查看前面的歌单",
+                        modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
+                        onClick = {
+                            scope.launch {
+                                listState.animateScrollToItem(
+                                    (listState.firstVisibleItemIndex - 3).coerceAtLeast(0),
+                                )
+                            }
+                        },
+                    )
+                }
+                if (listState.canScrollForward) {
+                    PlaylistStripScrollButton(
+                        icon = Icons.AutoMirrored.Outlined.ArrowForward,
+                        description = "查看后面的歌单",
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 4.dp),
+                        onClick = {
+                            scope.launch {
+                                listState.animateScrollToItem(
+                                    (listState.firstVisibleItemIndex + 3).coerceAtMost(playlists.lastIndex),
+                                )
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
+private fun PlaylistStripScrollButton(
+    icon: ImageVector,
+    description: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(colors.surface.copy(alpha = 0.96f))
+            .border(1.dp, colors.outlineVariant.copy(alpha = 0.78f), CircleShape),
+        colors = IconButtonDefaults.iconButtonColors(
+            contentColor = colors.onSurface,
+        ),
+    ) {
+        Icon(icon, contentDescription = description, modifier = Modifier.size(19.dp))
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
 private fun PlaylistTile(playlist: PlaylistItem, onClick: () -> Unit) {
-    // Square cover — NetEase artwork is square; a short crop made covers look "missing".
-    Column(Modifier.width(148.dp).clickable(onClick = onClick)) {
-        Artwork(
-            playlist.id,
-            playlist.title,
-            playlist.coverUrl,
-            Modifier.fillMaxWidth().height(148.dp),
-            cornerRadius = 16.dp,
-        )
+    val colors = MaterialTheme.colorScheme
+    var hovered by remember { mutableStateOf(false) }
+    val maskAlpha by animateFloatAsState(
+        targetValue = if (hovered) 0.18f else 0f,
+        animationSpec = tween(durationMillis = if (hovered) 180 else 130, easing = FastOutSlowInEasing),
+        label = "playlist-tile-mask",
+    )
+    val coverShape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier
+            .width(148.dp)
+            .onPointerEvent(PointerEventType.Enter) { hovered = true }
+            .onPointerEvent(PointerEventType.Exit) { hovered = false }
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(148.dp)
+                .clip(coverShape),
+        ) {
+            Artwork(
+                playlist.id,
+                playlist.title,
+                playlist.coverUrl,
+                Modifier.matchParentSize(),
+                cornerRadius = 16.dp,
+            )
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(colors.scrim.copy(alpha = maskAlpha)),
+            )
+        }
         Spacer(Modifier.height(10.dp))
         Text(playlist.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(2.dp))
@@ -1488,34 +1608,36 @@ private fun ThinSeekBar(
     val colors = MaterialTheme.colorScheme
     val fraction = progress.coerceIn(0f, 1f)
     val bufferedFraction = maxOf(fraction, bufferedProgress.coerceIn(0f, 1f))
+    val currentOnSeek by rememberUpdatedState(onSeek)
+    val currentOnSeekFinished by rememberUpdatedState(onSeekFinished)
     BoxWithConstraints(
         modifier
             .height(14.dp)
             .fillMaxWidth()
             .pointerInput(Unit) {
-                detectTapGestures { offset ->
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
                     val width = size.width.coerceAtLeast(1)
-                    onSeek((offset.x / width).coerceIn(0f, 1f))
-                    onSeekFinished()
+                    currentOnSeek((down.position.x / width).coerceIn(0f, 1f))
+                    down.consume()
+
+                    var finished = false
+                    while (!finished) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change == null) {
+                            currentOnSeekFinished()
+                            finished = true
+                        } else {
+                            currentOnSeek((change.position.x / width).coerceIn(0f, 1f))
+                            change.consume()
+                            if (!change.pressed) {
+                                currentOnSeekFinished()
+                                finished = true
+                            }
+                        }
+                    }
                 }
-            }
-            .pointerInput(Unit) {
-                var lastX = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { offset ->
-                        val width = size.width.coerceAtLeast(1).toFloat()
-                        lastX = offset.x
-                        onSeek((offset.x / width).coerceIn(0f, 1f))
-                    },
-                    onHorizontalDrag = { change, _ ->
-                        val width = size.width.coerceAtLeast(1).toFloat()
-                        lastX = change.position.x
-                        onSeek((lastX / width).coerceIn(0f, 1f))
-                        change.consume()
-                    },
-                    onDragEnd = onSeekFinished,
-                    onDragCancel = onSeekFinished,
-                )
             },
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -1764,7 +1886,7 @@ private fun LyricsOverlay(
                 }
                 lyricMotionAtNs = now
 
-                if (!followPlayback && System.currentTimeMillis() - manualAtMs > 3_500L) {
+                if (!followPlayback && System.currentTimeMillis() - manualAtMs > controller.lyricFollowDelayMillis) {
                     followPlayback = true
                     lyricWheelInertia.stop()
                 }
@@ -1941,14 +2063,16 @@ private fun LyricsOverlay(
                                 val alpha = ((130f * ambient + 125f * focus) / 255f).coerceIn(0.125f, 1f)
                                 val color = lerpColor(colors.onSurfaceVariant, colors.onSurface, focus)
                                 val hasTranslation = !line.translation.isNullOrBlank()
-                                val rowHeight = if (hasTranslation) 100.dp else 48.dp
-                                val yDp = with(density) { lineCenterPx.toDp() } - 24.dp
+                                val rowHeight = if (hasTranslation) 124.dp else 74.dp
+                                val scaledRowHeight = rowHeight * scale
+                                val textWidthFraction = (1f / scale).coerceAtMost(1f)
+                                val yDp = with(density) { lineCenterPx.toDp() } - scaledRowHeight / 2
 
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .offset(y = yDp)
-                                        .height(rowHeight)
+                                        .height(scaledRowHeight)
                                         .padding(horizontal = 20.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable {
@@ -1964,8 +2088,10 @@ private fun LyricsOverlay(
                                     ) {
                                         Text(
                                             text = line.text,
-                                            modifier = Modifier.graphicsLayer {
-                                                scaleX = scale
+                                            modifier = Modifier
+                                                .fillMaxWidth(textWidthFraction)
+                                                .graphicsLayer {
+                                                    scaleX = scale
                                                 scaleY = scale
                                                 this.alpha = alpha
                                                 transformOrigin = TransformOrigin.Center
@@ -1995,7 +2121,7 @@ private fun LyricsOverlay(
                                                     lineHeight = 21.sp,
                                                     fontWeight = FontWeight.Normal,
                                                 ),
-                                                color = color.copy(alpha = 0.84f),
+                                                color = colors.onSurfaceVariant.copy(alpha = 0.96f),
                                                 textAlign = TextAlign.Center,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,

@@ -430,7 +430,10 @@ class NeteaseMusicGateway(
             // Gateway's documented contract for authenticated routes.
             sessionStore.cookie?.takeIf(String::isNotBlank)?.let { putIfAbsent("cookie", it) }
             config.realIp?.takeIf(String::isNotBlank)?.let { putIfAbsent("realIP", it) }
-            if (config.randomChineseIp) putIfAbsent("randomCNIP", "true")
+            // A caller must not accidentally turn this off for one route. Deployments that use a
+            // stable mainland `realIP` can explicitly disable it in GatewayConfig; otherwise
+            // every GET and POST carries the documented randomCNIP=true parameter.
+            if (config.randomChineseIp) put("randomCNIP", "true")
             config.userAgent?.takeIf(String::isNotBlank)?.let { putIfAbsent("ua", it) }
         }
 

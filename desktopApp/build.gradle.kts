@@ -28,18 +28,24 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.ktor3)
     implementation(libs.ktor.client.cio)
-    implementation(libs.mp3spi)
+    implementation(libs.javamp3)
+    implementation(libs.nucleus.media.control)
     testImplementation(libs.junit)
 }
 
 compose.desktop {
     application {
         mainClass = "dev.naominet.lazer.MainKt"
+        jvmArgs += listOf("--enable-native-access=ALL-UNNAMED")
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "dev.naominet.lazer"
             packageVersion = "1.0.0"
+            macOS {
+                bundleID = "dev.naominet.lazer"
+                appCategory = "public.app-category.music"
+            }
         }
     }
 }

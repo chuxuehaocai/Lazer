@@ -31,6 +31,16 @@ internal object DesktopSettings {
     var isDark: Boolean
         get() = DesktopStateFile.get("appearance.dark")?.toBooleanStrictOrNull() ?: false
         set(value) = DesktopStateFile.set("appearance.dark", value.toString())
+
+    var lyricFollowDelayMillis: Long
+        get() = normalizeLyricFollowDelayMillis(
+            DesktopStateFile.get("lyrics.follow_delay_millis")?.toLongOrNull()
+                ?: DEFAULT_LYRIC_FOLLOW_DELAY_MILLIS,
+        )
+        set(value) = DesktopStateFile.set(
+            "lyrics.follow_delay_millis",
+            normalizeLyricFollowDelayMillis(value).toString(),
+        )
 }
 
 private object DesktopStateFile {
