@@ -152,6 +152,8 @@ class DesktopPlayerController(
 
     var isDark by mutableStateOf(DesktopSettings.isDark)
         private set
+    var themeEngine by mutableStateOf(DesktopSettings.themeEngine)
+        private set
     var lyricFollowDelayMillis by mutableStateOf(DesktopSettings.lyricFollowDelayMillis)
         private set
     var gatewayBaseUrl by mutableStateOf(gateway.config.baseUrl)
@@ -327,6 +329,11 @@ class DesktopPlayerController(
     fun toggleTheme() {
         isDark = !isDark
         DesktopSettings.isDark = isDark
+    }
+
+    fun updateThemeEngine(value: LazerThemeEngine) {
+        themeEngine = value
+        DesktopSettings.themeEngine = value
     }
 
     fun updateLyricFollowDelay(value: Long) {

@@ -19,6 +19,10 @@ internal class AndroidSettingsStore(context: Context) {
         get() = preferences.getBoolean(KEY_SYSTEM_MONET, false)
         set(value) = preferences.edit().putBoolean(KEY_SYSTEM_MONET, value).apply()
 
+    var themeEngine: LazerThemeEngine
+        get() = parseLazerThemeEngine(preferences.getString(KEY_THEME_ENGINE, null))
+        set(value) = preferences.edit().putString(KEY_THEME_ENGINE, value.name).apply()
+
     var lyricFollowDelayMillis: Long
         get() = normalizeLyricFollowDelayMillis(
             preferences.getLong(KEY_LYRIC_FOLLOW_DELAY, DEFAULT_LYRIC_FOLLOW_DELAY_MILLIS),
@@ -39,6 +43,7 @@ internal class AndroidSettingsStore(context: Context) {
         const val PREFERENCES_NAME = "lazer.android.settings"
         const val KEY_DARK_THEME = "appearance.dark"
         const val KEY_SYSTEM_MONET = "appearance.system_monet"
+        const val KEY_THEME_ENGINE = "appearance.theme_engine"
         const val KEY_LYRIC_FOLLOW_DELAY = "lyrics.follow_delay_millis"
         const val KEY_GATEWAY_BASE_URL = "gateway.base_url"
     }

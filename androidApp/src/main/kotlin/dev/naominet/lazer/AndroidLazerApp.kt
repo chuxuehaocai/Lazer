@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -84,15 +85,14 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -126,11 +126,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.core.view.WindowCompat
 import coil3.compose.AsyncImage
 import dev.naominet.lazer.gateway.DEFAULT_GATEWAY_BASE_URL
 import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.Button as MiuixButton
+import top.yukonga.miuix.kmp.basic.ButtonColors as MiuixButtonColors
+import top.yukonga.miuix.kmp.basic.ButtonDefaults as MiuixButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card as MiuixCard
+import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
+import top.yukonga.miuix.kmp.basic.NavigationBarDisplayMode as MiuixNavigationBarDisplayMode
+import top.yukonga.miuix.kmp.basic.NavigationBarItem as MiuixNavigationBarItem
 import kotlin.math.roundToLong
 
 private const val PAGE_TRANSITION_MILLIS = LazerTokens.Motion.pageMillis
@@ -180,6 +188,97 @@ private fun Modifier.predictiveBackTransform(
 @Composable
 private fun isLandscapeLayout(): Boolean =
     LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+@Composable
+private fun ThemeButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    cornerRadius: Dp? = null,
+    content: @Composable RowScope.() -> Unit,
+) {
+    if (LocalLazerThemeEngine.current == LazerThemeEngine.MIUIX) {
+        val colors = MiuixButtonDefaults.buttonColorsPrimary()
+        CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides
+                if (enabled) colors.contentColor else colors.disabledContentColor,
+        ) {
+            MiuixButton(
+                onClick = onClick,
+                modifier = modifier,
+                enabled = enabled,
+                cornerRadius = cornerRadius ?: MiuixButtonDefaults.CornerRadius,
+                colors = colors,
+                content = content,
+            )
+        }
+    } else if (cornerRadius != null) {
+        Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            shape = RoundedCornerShape(cornerRadius),
+            content = content,
+        )
+    } else {
+        Button(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
+    }
+}
+
+@Composable
+private fun ThemeTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    if (LocalLazerThemeEngine.current == LazerThemeEngine.MIUIX) {
+        val textColors = MiuixButtonDefaults.textButtonColors()
+        val colors = MiuixButtonColors(
+            color = textColors.color,
+            disabledColor = textColors.disabledColor,
+            contentColor = textColors.textColor,
+            disabledContentColor = textColors.disabledTextColor,
+        )
+        CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides
+                if (enabled) colors.contentColor else colors.disabledContentColor,
+        ) {
+            MiuixButton(
+                onClick = onClick,
+                modifier = modifier,
+                enabled = enabled,
+                colors = colors,
+                content = content,
+            )
+        }
+    } else {
+        TextButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
+    }
+}
+
+@Composable
+private fun SettingsCard(content: @Composable () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    if (LocalLazerThemeEngine.current == LazerThemeEngine.MIUIX) {
+        CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides colors.onSurface) {
+            MiuixCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 18.dp,
+            ) {
+                content()
+            }
+        }
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            color = colors.surfaceContainerHigh,
+        ) {
+            content()
+        }
+    }
+}
 
 @Composable
 fun AndroidLazerApp() {
@@ -264,7 +363,11 @@ fun AndroidLazerApp() {
         }
     }
 
-    LazerTheme(isDark = controller.isDark, colorScheme = systemColorScheme) {
+    LazerTheme(
+        isDark = controller.isDark,
+        colorScheme = systemColorScheme,
+        engine = controller.themeEngine,
+    ) {
         val colors = MaterialTheme.colorScheme
         val view = LocalView.current
         val playFromQueue: (List<AndroidTrack>, AndroidTrack) -> Unit = { queue, track ->
@@ -624,7 +727,7 @@ private fun MePage(controller: AndroidGatewayController) {
                 else -> items(controller.userPlaylists.take(3), key = AndroidPlaylist::id) { PlaylistListRow(it, controller::openPlaylist) }
             }
             item {
-                TextButton(onClick = { controller.selectDestination(AndroidRootDestination.LIBRARY) }) {
+                ThemeTextButton(onClick = { controller.selectDestination(AndroidRootDestination.LIBRARY) }) {
                     Text("查看完整音乐库")
                 }
             }
@@ -660,20 +763,53 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
         }
         item { SectionTitle("外观") }
         item {
-            Surface(shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerHigh) {
+            SettingsCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Switch) {
+                            controller.updateThemeEngine(
+                                if (controller.themeEngine == LazerThemeEngine.MIUIX) {
+                                    LazerThemeEngine.MATERIAL3
+                                } else {
+                                    LazerThemeEngine.MIUIX
+                                },
+                            )
+                        }
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Miuix 组件风格", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "当前：${controller.themeEngine.label} · 切换后立即生效",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerThemeEngineSwitch(
+                        engine = controller.themeEngine,
+                        onEngineChange = controller::updateThemeEngine,
+                    )
+                }
+            }
+        }
+        item {
+            SettingsCard {
                 Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("界面", style = MaterialTheme.typography.titleSmall)
                         Text(if (controller.isDark) "深色外观" else "浅色外观", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                     }
-                    TextButton(onClick = controller::toggleTheme) {
+                    ThemeTextButton(onClick = controller::toggleTheme) {
                         Text(if (controller.isDark) "切换浅色" else "切换深色")
                     }
                 }
             }
         }
         item {
-            Surface(shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerHigh) {
+            SettingsCard {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -692,7 +828,8 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                         )
                     }
                     Spacer(Modifier.width(12.dp))
-                    Switch(
+                    LazerSwitch(
+                        engine = controller.themeEngine,
                         checked = controller.useSystemMonetColors && systemMonetAvailable,
                         onCheckedChange = null,
                         enabled = systemMonetAvailable,
@@ -702,7 +839,7 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
         }
         item { SectionTitle("歌词") }
         item {
-            Surface(shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerHigh) {
+            SettingsCard {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -719,7 +856,8 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                             color = colors.primary,
                         )
                     }
-                    Slider(
+                    LazerSlider(
+                        engine = controller.themeEngine,
                         value = followDelaySliderValue,
                         onValueChange = {
                             followDelaySliderValue = normalizeLyricFollowDelayMillis(it.roundToLong()).toFloat()
@@ -748,7 +886,7 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
         }
         item { SectionTitle("音乐服务") }
         item {
-            Surface(shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerHigh) {
+            SettingsCard {
                 Column(Modifier.fillMaxWidth().padding(18.dp)) {
                     Text("API 服务提供商", style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.height(3.dp))
@@ -775,11 +913,11 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { gatewayBaseUrlDraft = DEFAULT_GATEWAY_BASE_URL }) {
+                        ThemeTextButton(onClick = { gatewayBaseUrlDraft = DEFAULT_GATEWAY_BASE_URL }) {
                             Text("恢复默认")
                         }
                         Spacer(Modifier.width(8.dp))
-                        Button(
+                        ThemeButton(
                             onClick = {
                                 normalizedGatewayBaseUrl?.let { controller.updateGatewayBaseUrl(it) }
                             },
@@ -805,7 +943,7 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                 }
             }
             item {
-                TextButton(onClick = controller::logout) {
+                ThemeTextButton(onClick = controller::logout) {
                     Text("退出登录", color = colors.error)
                 }
             }
@@ -981,7 +1119,7 @@ private fun SignInInvitation(onSignIn: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(16.dp))
-            Button(onClick = onSignIn, shape = RoundedCornerShape(11.dp)) { Text("登录网易云音乐") }
+            ThemeButton(onClick = onSignIn, cornerRadius = 11.dp) { Text("登录网易云音乐") }
         }
     }
 }
@@ -1016,6 +1154,25 @@ private fun MiniPlayer(
 
 @Composable
 private fun BottomDock(selected: AndroidRootDestination, onSelect: (AndroidRootDestination) -> Unit) {
+    if (LocalLazerThemeEngine.current == LazerThemeEngine.MIUIX) {
+        MiuixNavigationBar(
+            modifier = Modifier.fillMaxWidth(),
+            showDivider = true,
+            defaultWindowInsetsPadding = true,
+            mode = MiuixNavigationBarDisplayMode.IconAndText,
+        ) {
+            AndroidRootDestination.entries.forEach { destination ->
+                MiuixNavigationBarItem(
+                    selected = selected == destination,
+                    onClick = { onSelect(destination) },
+                    icon = destination.icon(),
+                    label = destination.label,
+                )
+            }
+        }
+        return
+    }
+
     val colors = MaterialTheme.colorScheme
     Surface(Modifier.fillMaxWidth().navigationBarsPadding(), color = colors.background) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceAround) {
@@ -1171,7 +1328,7 @@ private fun NowPlayingPage(
                 IconButton(onClick = onNext, modifier = Modifier.size(50.dp)) { Icon(Icons.Filled.SkipNext, "下一首", Modifier.size(31.dp)) }
             }
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onLyrics, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            ThemeTextButton(onClick = onLyrics, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                 Icon(Icons.Outlined.Lyrics, null, Modifier.size(18.dp)); Spacer(Modifier.width(7.dp)); Text("歌词")
             }
             snapshot.message?.let { Text(it, Modifier.fillMaxWidth().padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = colors.error, textAlign = TextAlign.Center) }
@@ -1238,7 +1395,7 @@ private fun LoginSheet(controller: AndroidGatewayController) {
             Text("先用验证码；遇到问题时再试密码或二维码。", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 AndroidLoginMethod.entries.forEach { method ->
-                    TextButton(onClick = { controller.selectLoginMethod(method) }) {
+                    ThemeTextButton(onClick = { controller.selectLoginMethod(method) }) {
                         Text(method.label, color = if (method == controller.loginMethod) colors.primary else colors.onSurfaceVariant, fontWeight = if (method == controller.loginMethod) FontWeight.SemiBold else FontWeight.Normal)
                     }
                 }
@@ -1266,11 +1423,11 @@ private fun CaptchaLogin(controller: AndroidGatewayController) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
             Spacer(Modifier.width(10.dp))
-            TextButton(onClick = controller::sendCaptcha, enabled = !controller.isSendingCaptcha) {
+            ThemeTextButton(onClick = controller::sendCaptcha, enabled = !controller.isSendingCaptcha) {
                 Text(if (controller.isSendingCaptcha) "发送中" else if (controller.captchaSent) "重新发送" else "获取验证码")
             }
         }
-        Button(
+        ThemeButton(
             onClick = controller::submitCaptchaLogin,
             modifier = Modifier.fillMaxWidth(),
             enabled = !controller.isSubmittingLogin,
@@ -1287,7 +1444,7 @@ private fun PasswordLogin(controller: AndroidGatewayController) {
             visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
         )
-        Button(
+        ThemeButton(
             onClick = controller::submitPasswordLogin,
             modifier = Modifier.fillMaxWidth(),
             enabled = !controller.isSubmittingLogin,
@@ -1326,7 +1483,7 @@ private fun QrLogin(controller: AndroidGatewayController) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (controller.qrState == AndroidQrLoginState.EXPIRED || controller.qrState == AndroidQrLoginState.ERROR) {
-            TextButton(controller::startQrLogin) { Text("重新生成二维码") }
+            ThemeTextButton(controller::startQrLogin) { Text("重新生成二维码") }
         }
     }
 }

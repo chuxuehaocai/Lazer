@@ -73,6 +73,8 @@ class AndroidGatewayController(context: Context) {
         private set
     var useSystemMonetColors by mutableStateOf(settings.useSystemMonetColors)
         private set
+    var themeEngine by mutableStateOf(settings.themeEngine)
+        private set
     var lyricFollowDelayMillis by mutableStateOf(settings.lyricFollowDelayMillis)
         private set
     var gatewayBaseUrl by mutableStateOf(settings.gatewayBaseUrl)
@@ -164,6 +166,11 @@ class AndroidGatewayController(context: Context) {
     fun updateUseSystemMonetColors(enabled: Boolean) {
         useSystemMonetColors = enabled
         settings.useSystemMonetColors = enabled
+    }
+
+    fun updateThemeEngine(value: LazerThemeEngine) {
+        themeEngine = value
+        settings.themeEngine = value
     }
 
     fun updateLyricFollowDelay(value: Long) {

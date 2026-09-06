@@ -34,6 +34,10 @@ internal object DesktopSettings {
         get() = DesktopStateFile.get("appearance.dark")?.toBooleanStrictOrNull() ?: false
         set(value) = DesktopStateFile.set("appearance.dark", value.toString())
 
+    var themeEngine: LazerThemeEngine
+        get() = parseLazerThemeEngine(DesktopStateFile.get("appearance.theme_engine"))
+        set(value) = DesktopStateFile.set("appearance.theme_engine", value.name)
+
     var lyricFollowDelayMillis: Long
         get() = normalizeLyricFollowDelayMillis(
             DesktopStateFile.get("lyrics.follow_delay_millis")?.toLongOrNull()

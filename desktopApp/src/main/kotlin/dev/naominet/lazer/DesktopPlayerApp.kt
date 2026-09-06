@@ -108,7 +108,7 @@ fun WindowScope.DesktopPlayerApp(
     var settingsVisible by remember { mutableStateOf(false) }
     val scrollInertia = rememberScrollInertiaController()
 
-    LazerTheme(isDark = controller.isDark) {
+    LazerTheme(isDark = controller.isDark, engine = controller.themeEngine) {
         val frameShape = RoundedCornerShape(if (isWindowMaximized) 0.dp else 12.dp)
         CompositionLocalProvider(LocalScrollInertia provides scrollInertia) {
         Surface(
@@ -316,6 +316,7 @@ private fun NavigationPanel(
                     destination = destination,
                     selected = destination == selectedDestination,
                     compact = compact,
+                    themeEngine = controller.themeEngine,
                     onClick = { onDestinationSelected(destination) },
                 )
                 Spacer(Modifier.height(4.dp))
@@ -501,9 +502,11 @@ private fun NavigationEntry(
     destination: DesktopDestination,
     selected: Boolean,
     compact: Boolean,
+    themeEngine: LazerThemeEngine,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val selectedIconColor = if (themeEngine == LazerThemeEngine.MIUIX) Color.White else colors.primary
     Row(
         modifier = Modifier
             .then(if (compact) Modifier.size(48.dp) else Modifier.fillMaxWidth())
@@ -518,7 +521,7 @@ private fun NavigationEntry(
             destination.icon,
             contentDescription = destination.label,
             modifier = Modifier.size(19.dp),
-            tint = if (selected) colors.primary else colors.onSurfaceVariant,
+            tint = if (selected) selectedIconColor else colors.onSurfaceVariant,
         )
         if (!compact) {
             Spacer(Modifier.width(11.dp))
@@ -571,6 +574,38 @@ private fun DesktopSettingsDialog(
                 modifier = Modifier.widthIn(min = 480.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
+                Text("外观", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            controller.updateThemeEngine(
+                                if (controller.themeEngine == LazerThemeEngine.MIUIX) {
+                                    LazerThemeEngine.MATERIAL3
+                                } else {
+                                    LazerThemeEngine.MIUIX
+                                },
+                            )
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Miuix 组件风格", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "当前：${controller.themeEngine.label} · 切换后立即生效",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerThemeEngineSwitch(
+                        engine = controller.themeEngine,
+                        onEngineChange = controller::updateThemeEngine,
+                    )
+                }
+                HorizontalDivider()
                 Text("歌词", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "手动滚动歌词后，经过所选时间恢复自动跟随。",
@@ -586,7 +621,8 @@ private fun DesktopSettingsDialog(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
-                Slider(
+                LazerSlider(
+                    engine = controller.themeEngine,
                     value = followDelaySliderValue,
                     onValueChange = {
                         followDelaySliderValue = normalizeLyricFollowDelayMillis(it.roundToLong()).toFloat()

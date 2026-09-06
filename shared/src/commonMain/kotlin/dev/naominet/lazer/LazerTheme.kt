@@ -1,20 +1,123 @@
 package dev.naominet.lazer
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RippleConfiguration
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Slider as Material3Slider
+import androidx.compose.material3.Switch as Material3Switch
+import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
+import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
+import top.yukonga.miuix.kmp.theme.Colors as MiuixColors
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.TextStyles as MiuixTextStyles
+import top.yukonga.miuix.kmp.theme.darkColorScheme as miuixDarkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme as miuixLightColorScheme
+
+enum class LazerThemeEngine(val label: String) {
+    MATERIAL3("原生 Material 3"),
+    MIUIX("Miuix"),
+}
+
+fun parseLazerThemeEngine(value: String?): LazerThemeEngine =
+    LazerThemeEngine.entries.firstOrNull { it.name == value } ?: LazerThemeEngine.MATERIAL3
+
+val LocalLazerThemeEngine = staticCompositionLocalOf { LazerThemeEngine.MATERIAL3 }
+
+@Composable
+fun LazerThemeEngineSwitch(
+    engine: LazerThemeEngine,
+    onEngineChange: (LazerThemeEngine) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val useMiuix = engine == LazerThemeEngine.MIUIX
+    LazerSwitch(
+        engine = engine,
+        checked = useMiuix,
+        onCheckedChange = { enabled ->
+            onEngineChange(if (enabled) LazerThemeEngine.MIUIX else LazerThemeEngine.MATERIAL3)
+        },
+        modifier = modifier,
+    )
+}
+
+@Composable
+fun LazerSwitch(
+    engine: LazerThemeEngine,
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val useMiuix = engine == LazerThemeEngine.MIUIX
+    if (useMiuix) {
+        MiuixSwitch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = modifier,
+            enabled = enabled,
+        )
+    } else {
+        Material3Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = modifier,
+            enabled = enabled,
+        )
+    }
+}
+
+@Composable
+fun LazerSlider(
+    engine: LazerThemeEngine,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    valueRange: ClosedFloatingPointRange<Float> = 0f..1f,
+    steps: Int = 0,
+    onValueChangeFinished: (() -> Unit)? = null,
+) {
+    if (engine == LazerThemeEngine.MIUIX) {
+        MiuixSlider(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = modifier,
+            enabled = enabled,
+            valueRange = valueRange,
+            steps = steps,
+            onValueChangeFinished = onValueChangeFinished,
+            showKeyPoints = steps > 0,
+        )
+    } else {
+        Material3Slider(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = modifier,
+            enabled = enabled,
+            valueRange = valueRange,
+            steps = steps,
+            onValueChangeFinished = onValueChangeFinished,
+        )
+    }
+}
 
 /** Shared paper-and-blue tokens. All platform UIs inherit this theme. */
 object LazerTokens {
@@ -117,21 +220,163 @@ private val LazerTypography = Typography(
     labelSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 11.sp, lineHeight = 16.sp),
 )
 
+private val MiuixMaterialShapes = Shapes(
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(32.dp),
+)
+
 @Composable
 fun LazerTheme(
     isDark: Boolean,
     colorScheme: ColorScheme? = null,
+    engine: LazerThemeEngine = LazerThemeEngine.MATERIAL3,
     content: @Composable () -> Unit,
 ) {
-    val activeColorScheme = colorScheme ?: if (isDark) DarkColors else LightColors
+    CompositionLocalProvider(LocalLazerThemeEngine provides engine) {
+        if (engine == LazerThemeEngine.MIUIX) {
+            val miuixColors = remember(isDark, colorScheme) {
+                colorScheme?.toMiuixColors(isDark)
+                    ?: if (isDark) miuixDarkColorScheme() else miuixLightColorScheme()
+            }
+            MiuixTheme(
+                colors = miuixColors,
+                smoothRounding = true,
+            ) {
+                val miuixTextStyles = MiuixTheme.textStyles
+                val materialTypography = remember(miuixTextStyles) {
+                    miuixTextStyles.toMaterial3Typography()
+                }
+                LazerMaterialTheme(
+                    colorScheme = miuixColors.toMaterial3ColorScheme(isDark),
+                    typography = materialTypography,
+                    shapes = MiuixMaterialShapes,
+                    content = content,
+                )
+            }
+        } else {
+            LazerMaterialTheme(
+                colorScheme = colorScheme ?: if (isDark) DarkColors else LightColors,
+                shapes = Shapes(),
+                content = content,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LazerMaterialTheme(
+    colorScheme: ColorScheme,
+    typography: Typography = LazerTypography,
+    shapes: Shapes,
+    content: @Composable () -> Unit,
+) {
     MaterialTheme(
-        colorScheme = activeColorScheme,
-        typography = LazerTypography,
+        colorScheme = colorScheme,
+        typography = typography,
+        shapes = shapes,
     ) {
         CompositionLocalProvider(
-            LocalContentColor provides activeColorScheme.onBackground,
-            LocalRippleConfiguration provides RippleConfiguration(color = activeColorScheme.primary),
+            LocalContentColor provides colorScheme.onBackground,
+            LocalRippleConfiguration provides RippleConfiguration(color = colorScheme.primary),
             content = content,
         )
     }
+}
+
+private fun MiuixTextStyles.toMaterial3Typography(): Typography = Typography(
+    displaySmall = title1.copy(fontWeight = FontWeight.SemiBold),
+    headlineMedium = title2.copy(fontWeight = FontWeight.SemiBold),
+    headlineSmall = title3.copy(fontWeight = FontWeight.SemiBold),
+    titleLarge = title4.copy(fontWeight = FontWeight.SemiBold),
+    titleMedium = headline1.copy(fontWeight = FontWeight.Medium),
+    titleSmall = subtitle,
+    bodyLarge = paragraph,
+    bodyMedium = body1,
+    bodySmall = body2,
+    labelLarge = button.copy(fontWeight = FontWeight.Medium),
+    labelMedium = footnote1.copy(fontWeight = FontWeight.Medium),
+    labelSmall = footnote2,
+)
+
+private fun ColorScheme.toMiuixColors(isDark: Boolean): MiuixColors {
+    val base = if (isDark) miuixDarkColorScheme() else miuixLightColorScheme()
+    return base.copy(
+        primary = primary,
+        onPrimary = onPrimary,
+        primaryVariant = primary,
+        onPrimaryVariant = onPrimary,
+        error = error,
+        onError = onError,
+        errorContainer = errorContainer,
+        onErrorContainer = onErrorContainer,
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = onPrimaryContainer,
+        secondary = secondary,
+        onSecondary = onSecondary,
+        secondaryVariant = secondaryContainer,
+        onSecondaryVariant = onSecondaryContainer,
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = onSecondaryContainer,
+        secondaryContainerVariant = surfaceContainerHigh,
+        onSecondaryContainerVariant = onSurfaceVariant,
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = onTertiaryContainer,
+        tertiaryContainerVariant = surfaceContainerHigh,
+        background = background,
+        onBackground = onBackground,
+        onBackgroundVariant = onSurfaceVariant,
+        surface = surface,
+        onSurface = onSurface,
+        surfaceVariant = surfaceVariant,
+        onSurfaceSecondary = onSurface.copy(alpha = 0.8f),
+        onSurfaceVariantSummary = onSurfaceVariant,
+        onSurfaceVariantActions = onSurfaceVariant.copy(alpha = 0.72f),
+        surfaceContainer = surfaceContainer,
+        onSurfaceContainer = onSurface,
+        onSurfaceContainerVariant = onSurfaceVariant,
+        surfaceContainerHigh = surfaceContainerHigh,
+        onSurfaceContainerHigh = onSurfaceVariant,
+        surfaceContainerHighest = surfaceContainerHighest,
+        onSurfaceContainerHighest = onSurface,
+        outline = outline,
+        dividerLine = outlineVariant,
+        sliderBackground = onSurface.copy(alpha = if (isDark) 0.15f else 0.08f),
+    )
+}
+
+private fun MiuixColors.toMaterial3ColorScheme(isDark: Boolean): ColorScheme {
+    val base = if (isDark) darkColorScheme() else lightColorScheme()
+    return base.copy(
+        primary = primary,
+        onPrimary = onPrimary,
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = onPrimaryContainer,
+        secondary = secondaryVariant,
+        onSecondary = onSecondaryVariant,
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = onSecondaryContainer,
+        tertiary = primaryVariant,
+        onTertiary = onPrimary,
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = onTertiaryContainer,
+        background = background,
+        onBackground = onBackground,
+        surface = surface,
+        onSurface = onSurface,
+        surfaceVariant = surfaceVariant,
+        onSurfaceVariant = onSurfaceVariantSummary,
+        surfaceContainer = surfaceContainer,
+        surfaceContainerLow = surface,
+        surfaceContainerHigh = surfaceContainerHigh,
+        surfaceContainerHighest = surfaceContainerHighest,
+        outline = outline,
+        outlineVariant = dividerLine,
+        error = error,
+        onError = onError,
+        errorContainer = errorContainer,
+        onErrorContainer = onErrorContainer,
+    )
 }
