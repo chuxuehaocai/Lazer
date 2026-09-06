@@ -4,10 +4,13 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.naominet.lazer.gateway.GatewayConfig
 import dev.naominet.lazer.gateway.NeteaseMusicGateway
+import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
 import dev.naominet.lazer.gateway.model.Playlist
 import dev.naominet.lazer.gateway.model.Song
 import dev.naominet.lazer.gateway.model.UserProfile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,7 +51,11 @@ class AndroidGatewayController(context: Context) {
     private val appContext = context.applicationContext
     private val cache = AndroidPlaylistCache(appContext)
     private val settings = AndroidSettingsStore(appContext)
-    private val gateway = NeteaseMusicGateway(sessionStore = AndroidGatewaySessionStore(appContext))
+    private val gatewaySessionStore = AndroidGatewaySessionStore(appContext)
+    private var gateway = NeteaseMusicGateway(
+        config = GatewayConfig(baseUrl = settings.gatewayBaseUrl),
+        sessionStore = gatewaySessionStore,
+    )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var bootstrapJob: Job? = null
     private var searchJob: Job? = null
@@ -65,6 +72,8 @@ class AndroidGatewayController(context: Context) {
     var useSystemMonetColors by mutableStateOf(settings.useSystemMonetColors)
         private set
     var lyricFollowDelayMillis by mutableStateOf(settings.lyricFollowDelayMillis)
+        private set
+    var gatewayBaseUrl by mutableStateOf(settings.gatewayBaseUrl)
         private set
     var currentUser by mutableStateOf<UserProfile?>(null)
         private set
@@ -158,6 +167,38 @@ class AndroidGatewayController(context: Context) {
     fun updateLyricFollowDelay(value: Long) {
         lyricFollowDelayMillis = normalizeLyricFollowDelayMillis(value)
         settings.lyricFollowDelayMillis = lyricFollowDelayMillis
+    }
+
+    fun updateGatewayBaseUrl(value: String): Boolean {
+        val normalized = normalizeGatewayBaseUrl(value) ?: return false
+        if (normalized == gatewayBaseUrl) return true
+
+        bootstrapJob?.cancel()
+        searchJob?.cancel()
+        playlistJob?.cancel()
+        lyricJob?.cancel()
+        qrLoginJob?.cancel()
+        gateway.close()
+
+        settings.gatewayBaseUrl = normalized
+        gatewayBaseUrl = normalized
+        gateway = NeteaseMusicGateway(
+            config = GatewayConfig(baseUrl = normalized),
+            sessionStore = gatewaySessionStore,
+        )
+
+        activePlaylist = null
+        activePlaylistTracks = emptyList()
+        isPlaylistLoading = false
+        searchResults = emptyList()
+        lyrics = emptyList()
+        lyricsMessage = null
+        isLoginVisible = false
+        qrState = AndroidQrLoginState.IDLE
+        qrImageData = null
+        bootstrap()
+        message = "音乐服务已切换"
+        return true
     }
 
     fun isSongLiked(songId: Long): Boolean = songId in likedSongIds
@@ -444,12 +485,20 @@ class AndroidGatewayController(context: Context) {
             featuredPlaylists = cache.loadFeaturedPlaylists()
             homeTracks = cache.loadTracks(HOME_TRACKS_CACHE_ID)
             try {
-                currentUser = runCatching { resolveCurrentUser() }.getOrNull()
+                currentUser = try {
+                    resolveCurrentUser()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Throwable) {
+                    null
+                }
                 if (currentUser == null) {
                     loadPublicContent()
                 } else {
                     loadSignedInContent(currentUser!!)
                 }
+            } catch (error: CancellationException) {
+                throw error
             } catch (_: Throwable) {
                 message = "暂时无法连接音乐服务，请稍后再试"
             } finally {

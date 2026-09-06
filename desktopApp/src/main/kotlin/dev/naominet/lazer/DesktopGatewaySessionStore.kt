@@ -1,6 +1,8 @@
 package dev.naominet.lazer
 
 import dev.naominet.lazer.gateway.GatewaySessionStore
+import dev.naominet.lazer.gateway.DEFAULT_GATEWAY_BASE_URL
+import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -40,6 +42,15 @@ internal object DesktopSettings {
         set(value) = DesktopStateFile.set(
             "lyrics.follow_delay_millis",
             normalizeLyricFollowDelayMillis(value).toString(),
+        )
+
+    var gatewayBaseUrl: String
+        get() = normalizeGatewayBaseUrl(
+            DesktopStateFile.get("gateway.base_url") ?: DEFAULT_GATEWAY_BASE_URL,
+        ) ?: DEFAULT_GATEWAY_BASE_URL
+        set(value) = DesktopStateFile.set(
+            "gateway.base_url",
+            normalizeGatewayBaseUrl(value) ?: DEFAULT_GATEWAY_BASE_URL,
         )
 }
 

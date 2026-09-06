@@ -1,5 +1,28 @@
 package dev.naominet.lazer.gateway
 
+const val DEFAULT_GATEWAY_BASE_URL: String = "https://music.naominet.dev"
+
+private val GatewayBaseUrlPattern = Regex(
+    pattern = """^https?://(?:\[[0-9a-f:.]+]|[^\s/?#:@]+)(?::\d{1,5})?(?:/[^\s?#]*)?$""",
+    option = RegexOption.IGNORE_CASE,
+)
+
+/**
+ * Turns a user-entered Gateway origin into a stable base URL. Missing schemes use HTTPS; query
+ * parameters, fragments and embedded credentials are rejected so they cannot leak into requests.
+ */
+fun normalizeGatewayBaseUrl(value: String): String? {
+    val trimmed = value.trim()
+    if (trimmed.isEmpty()) return null
+    val candidate = when {
+        trimmed.startsWith("https://", ignoreCase = true) -> "https://${trimmed.substring(8)}"
+        trimmed.startsWith("http://", ignoreCase = true) -> "http://${trimmed.substring(7)}"
+        "://" in trimmed -> return null
+        else -> "https://$trimmed"
+    }.trimEnd('/')
+    return candidate.takeIf(GatewayBaseUrlPattern::matches)
+}
+
 /**
  * Connection settings for an API Enhanced Gateway instance.
  *
@@ -7,7 +30,7 @@ package dev.naominet.lazer.gateway
  * their own deployment instead, which is recommended for authenticated traffic.
  */
 data class GatewayConfig(
-    val baseUrl: String = "https://music.naominet.dev",
+    val baseUrl: String = DEFAULT_GATEWAY_BASE_URL,
     val realIp: String? = null,
     val randomChineseIp: Boolean = true,
     val userAgent: String? = null,

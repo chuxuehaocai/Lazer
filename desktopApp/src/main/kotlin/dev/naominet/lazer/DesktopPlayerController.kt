@@ -7,11 +7,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import dev.naominet.lazer.gateway.AudioQuality
+import dev.naominet.lazer.gateway.GatewayConfig
 import dev.naominet.lazer.gateway.NeteaseMusicGateway
+import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
 import dev.naominet.lazer.gateway.model.Playlist
 import dev.naominet.lazer.gateway.model.QrCheckResponse
 import dev.naominet.lazer.gateway.model.Song
 import dev.naominet.lazer.gateway.model.UserProfile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -64,9 +67,7 @@ private data class PlaybackProgress(val token: Long, val value: Float)
 private data class CacheProgress(val trackId: Long, val value: Float)
 
 class DesktopPlayerController(
-    private val gateway: NeteaseMusicGateway = NeteaseMusicGateway(
-        sessionStore = DesktopGatewaySessionStore(),
-    ),
+    private var gateway: NeteaseMusicGateway = createDesktopGateway(),
 ) {
     private val controllerJob = SupervisorJob()
     private val scope = CoroutineScope(controllerJob + Dispatchers.Swing)
@@ -78,6 +79,7 @@ class DesktopPlayerController(
     private var lyricsJob: Job? = null
     private var paletteJob: Job? = null
     private var qrLoginJob: Job? = null
+    private var bootstrapJob: Job? = null
     private var started = false
     private val activePlaybackToken = AtomicLong(0L)
     private val progressEvents = Channel<PlaybackProgress>(Channel.CONFLATED)
@@ -151,6 +153,8 @@ class DesktopPlayerController(
     var isDark by mutableStateOf(DesktopSettings.isDark)
         private set
     var lyricFollowDelayMillis by mutableStateOf(DesktopSettings.lyricFollowDelayMillis)
+        private set
+    var gatewayBaseUrl by mutableStateOf(gateway.config.baseUrl)
         private set
     var isLoading by mutableStateOf(false)
         private set
@@ -264,11 +268,22 @@ class DesktopPlayerController(
             loadCoverPalette(track.coverUrl, track.id)
             if (lyrics.isEmpty()) loadLyrics(track.id)
         }
-        scope.launch {
+        connectMusicService()
+    }
+
+    private fun connectMusicService() {
+        bootstrapJob?.cancel()
+        bootstrapJob = scope.launch {
             beginRequest("正在连接音乐服务…")
             try {
                 val restoredProfile = if (!gateway.sessionCookie.isNullOrBlank()) {
-                    runCatching { gateway.loginStatus().data?.profile }.getOrNull()
+                    try {
+                        gateway.loginStatus().data?.profile
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Throwable) {
+                        null
+                    }
                 } else {
                     null
                 }
@@ -277,12 +292,11 @@ class DesktopPlayerController(
                     currentUser = restoredProfile
                     syncUserLibrary(restoredProfile)
                 } else {
-                    if (!gateway.sessionCookie.isNullOrBlank()) gateway.clearSession()
-                    runCatching { gateway.anonymousLogin() }
                     loadPublicLibrary()
-                    gateway.clearSession()
                 }
                 statusMessage = null
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Throwable) {
                 statusMessage = error.toFriendlyMessage("暂时无法连接音乐服务")
             } finally {
@@ -292,6 +306,7 @@ class DesktopPlayerController(
     }
 
     fun dispose() {
+        bootstrapJob?.cancel()
         searchJob?.cancel()
         playJob?.cancel()
         playlistJob?.cancel()
@@ -317,6 +332,29 @@ class DesktopPlayerController(
     fun updateLyricFollowDelay(value: Long) {
         lyricFollowDelayMillis = normalizeLyricFollowDelayMillis(value)
         DesktopSettings.lyricFollowDelayMillis = lyricFollowDelayMillis
+    }
+
+    fun updateGatewayBaseUrl(value: String): Boolean {
+        val normalized = normalizeGatewayBaseUrl(value) ?: return false
+        if (normalized == gatewayBaseUrl) return true
+
+        bootstrapJob?.cancel()
+        searchJob?.cancel()
+        playlistJob?.cancel()
+        lyricsJob?.cancel()
+        qrLoginJob?.cancel()
+        gateway.close()
+
+        DesktopSettings.gatewayBaseUrl = normalized
+        gatewayBaseUrl = normalized
+        gateway = createDesktopGateway(normalized)
+        searchResults = emptyList()
+        isLoginVisible = false
+        qrLoginState = QrLoginState.IDLE
+        qrImageData = null
+        qrFallbackUrl = null
+        connectMusicService()
+        return true
     }
 
     fun updateSearchQuery(query: String) {
@@ -1188,6 +1226,12 @@ class DesktopPlayerController(
         fun userPlaylistCacheKey(userId: Long): String = "user-$userId"
     }
 }
+
+private fun createDesktopGateway(baseUrl: String = DesktopSettings.gatewayBaseUrl): NeteaseMusicGateway =
+    NeteaseMusicGateway(
+        config = GatewayConfig(baseUrl = baseUrl),
+        sessionStore = DesktopGatewaySessionStore(),
+    )
 
 private fun Song.toTrackItem(): TrackItem = TrackItem(
     id = id,

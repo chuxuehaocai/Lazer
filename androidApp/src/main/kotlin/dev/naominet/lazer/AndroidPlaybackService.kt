@@ -23,6 +23,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.annotation.RequiresApi
 import dev.naominet.lazer.gateway.AudioQuality
+import dev.naominet.lazer.gateway.GatewayConfig
 import dev.naominet.lazer.gateway.NeteaseMusicGateway
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -132,6 +133,8 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var mediaSession: MediaSession
     private lateinit var audioManager: AudioManager
+    private lateinit var gatewaySettings: AndroidSettingsStore
+    private lateinit var gatewaySessionStore: AndroidGatewaySessionStore
     private lateinit var gateway: NeteaseMusicGateway
     private var player: MediaPlayer? = null
     private var loadingGeneration = 0L
@@ -158,7 +161,9 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
 
     override fun onCreate() {
         super.onCreate()
-        gateway = NeteaseMusicGateway(sessionStore = AndroidGatewaySessionStore(applicationContext))
+        gatewaySettings = AndroidSettingsStore(applicationContext)
+        gatewaySessionStore = AndroidGatewaySessionStore(applicationContext)
+        gateway = createGateway(gatewaySettings.gatewayBaseUrl)
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) createNotificationChannel()
         mediaSession = MediaSession(this, "Lazer playback").apply {
@@ -290,6 +295,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
     }
 
     private suspend fun resolveStreamUrl(trackId: Long): String? {
+        refreshGatewayProvider()
         val attempts = listOf(
             AudioQuality.EXHIGH to false,
             AudioQuality.HIGHER to false,
@@ -307,6 +313,18 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         }
         return null
     }
+
+    private fun refreshGatewayProvider() {
+        val configuredBaseUrl = gatewaySettings.gatewayBaseUrl
+        if (gateway.config.baseUrl == configuredBaseUrl) return
+        gateway.close()
+        gateway = createGateway(configuredBaseUrl)
+    }
+
+    private fun createGateway(baseUrl: String): NeteaseMusicGateway = NeteaseMusicGateway(
+        config = GatewayConfig(baseUrl = baseUrl),
+        sessionStore = gatewaySessionStore,
+    )
 
     private fun resumeCurrent() {
         val currentPlayer = player

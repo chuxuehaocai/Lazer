@@ -59,9 +59,10 @@ internal fun AndroidLyricsPage(
     followDelayMillis: Long,
     onBack: () -> Unit,
     onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    Box(Modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize()) {
         AndroidAlbumFlowBackground(
             track = track,
             modifier = Modifier.fillMaxSize(),

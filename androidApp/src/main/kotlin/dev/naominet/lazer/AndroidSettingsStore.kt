@@ -1,6 +1,8 @@
 package dev.naominet.lazer
 
 import android.content.Context
+import dev.naominet.lazer.gateway.DEFAULT_GATEWAY_BASE_URL
+import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
 
 /** App-scoped preferences for Android presentation settings. */
 internal class AndroidSettingsStore(context: Context) {
@@ -25,10 +27,19 @@ internal class AndroidSettingsStore(context: Context) {
             .putLong(KEY_LYRIC_FOLLOW_DELAY, normalizeLyricFollowDelayMillis(value))
             .apply()
 
+    var gatewayBaseUrl: String
+        get() = normalizeGatewayBaseUrl(
+            preferences.getString(KEY_GATEWAY_BASE_URL, DEFAULT_GATEWAY_BASE_URL).orEmpty(),
+        ) ?: DEFAULT_GATEWAY_BASE_URL
+        set(value) = preferences.edit()
+            .putString(KEY_GATEWAY_BASE_URL, normalizeGatewayBaseUrl(value) ?: DEFAULT_GATEWAY_BASE_URL)
+            .apply()
+
     private companion object {
         const val PREFERENCES_NAME = "lazer.android.settings"
         const val KEY_DARK_THEME = "appearance.dark"
         const val KEY_SYSTEM_MONET = "appearance.system_monet"
         const val KEY_LYRIC_FOLLOW_DELAY = "lyrics.follow_delay_millis"
+        const val KEY_GATEWAY_BASE_URL = "gateway.base_url"
     }
 }

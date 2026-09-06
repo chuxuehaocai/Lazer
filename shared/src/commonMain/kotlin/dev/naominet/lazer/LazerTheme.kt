@@ -18,6 +18,10 @@ import androidx.compose.ui.unit.sp
 
 /** Shared paper-and-blue tokens. All platform UIs inherit this theme. */
 object LazerTokens {
+    /** One navigation tempo keeps every page change feeling like part of the same product. */
+    object Motion {
+        const val pageMillis = 280
+    }
     val Paper = Color(0xFFF7F5EF)
     val PaperRaised = Color(0xFFFCFAF5)
     val MistBlue = Color(0xFFA9C8D8)

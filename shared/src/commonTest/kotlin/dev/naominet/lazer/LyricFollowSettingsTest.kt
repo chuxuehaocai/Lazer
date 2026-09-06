@@ -6,16 +6,16 @@ import kotlin.test.assertEquals
 class LyricFollowSettingsTest {
     @Test
     fun normalizesPersistedDelayToNearestSupportedOption() {
-        assertEquals(1_500L, normalizeLyricFollowDelayMillis(Long.MIN_VALUE))
-        assertEquals(1_500L, normalizeLyricFollowDelayMillis(900L))
-        assertEquals(3_500L, normalizeLyricFollowDelayMillis(3_900L))
-        assertEquals(8_000L, normalizeLyricFollowDelayMillis(60_000L))
-        assertEquals(8_000L, normalizeLyricFollowDelayMillis(Long.MAX_VALUE))
+        assertEquals(500L, normalizeLyricFollowDelayMillis(Long.MIN_VALUE))
+        assertEquals(1_000L, normalizeLyricFollowDelayMillis(900L))
+        assertEquals(4_000L, normalizeLyricFollowDelayMillis(3_900L))
+        assertEquals(5_000L, normalizeLyricFollowDelayMillis(60_000L))
+        assertEquals(5_000L, normalizeLyricFollowDelayMillis(Long.MAX_VALUE))
     }
 
     @Test
     fun formatsWholeAndFractionalSeconds() {
-        assertEquals("1.5 秒", lyricFollowDelayLabel(1_500L))
+        assertEquals("0.5 秒", lyricFollowDelayLabel(500L))
         assertEquals("5 秒", lyricFollowDelayLabel(5_000L))
     }
 }

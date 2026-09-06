@@ -58,12 +58,15 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.WindowScope
 import coil3.compose.AsyncImage
 import dev.naominet.lazer.gateway.AudioQuality
+import dev.naominet.lazer.gateway.DEFAULT_GATEWAY_BASE_URL
+import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
 import kotlin.math.absoluteValue
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 import org.jetbrains.skia.Image as SkiaImage
 
 private val LocalScrollInertia = compositionLocalOf<ScrollInertiaController> {
@@ -341,38 +344,44 @@ private fun NavigationPanel(
             }
 
             val playlists = controller.browsePlaylists()
-            when {
-                playlists.isEmpty() && !compact -> {
-                    Text(
-                        if (controller.isSignedIn) "暂时没有歌单" else "登录后在这里同步收藏",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    )
-                }
-                playlists.isNotEmpty() -> {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f, fill = false)
-                            .verticalScroll(playlistScrollState)
-                            .scrollInertia(playlistScrollState, inertia),
-                        horizontalAlignment = if (compact) Alignment.CenterHorizontally else Alignment.Start,
-                        verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 0.dp),
-                    ) {
-                        playlists.take(if (compact) 16 else 12).forEach { playlist ->
-                            SidebarPlaylistRow(
-                                playlist = playlist,
-                                selected = controller.activePlaylist?.id == playlist.id,
-                                compact = compact,
-                                onClick = { onPlaylistSelected(playlist) },
-                            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.TopStart,
+            ) {
+                when {
+                    playlists.isEmpty() && !compact -> {
+                        Text(
+                            if (controller.isSignedIn) "暂时没有歌单" else "登录后在这里同步收藏",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
+                    playlists.isNotEmpty() -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(playlistScrollState)
+                                .scrollInertia(playlistScrollState, inertia),
+                            horizontalAlignment = if (compact) Alignment.CenterHorizontally else Alignment.Start,
+                            verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 0.dp),
+                        ) {
+                            playlists.forEach { playlist ->
+                                SidebarPlaylistRow(
+                                    playlist = playlist,
+                                    selected = controller.activePlaylist?.id == playlist.id,
+                                    compact = compact,
+                                    onClick = { onPlaylistSelected(playlist) },
+                                )
+                            }
                         }
                     }
                 }
-                else -> Spacer(Modifier.weight(1f))
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(8.dp))
             NavigationUtilityEntry(
                 icon = Icons.Outlined.Settings,
                 label = "设置",
@@ -546,28 +555,99 @@ private fun DesktopSettingsDialog(
     controller: DesktopPlayerController,
     onDismiss: () -> Unit,
 ) {
+    var followDelaySliderValue by remember(controller.lyricFollowDelayMillis) {
+        mutableFloatStateOf(controller.lyricFollowDelayMillis.toFloat())
+    }
+    var gatewayBaseUrlDraft by remember(controller.gatewayBaseUrl) {
+        mutableStateOf(controller.gatewayBaseUrl)
+    }
+    val displayedFollowDelay = normalizeLyricFollowDelayMillis(followDelaySliderValue.roundToLong())
+    val normalizedGatewayBaseUrl = normalizeGatewayBaseUrl(gatewayBaseUrlDraft)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("设置") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(
+                modifier = Modifier.widthIn(min = 480.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
                 Text("歌词", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "手动滚动歌词后，经过所选时间恢复自动跟随。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    LYRIC_FOLLOW_DELAY_OPTIONS_MILLIS.forEachIndexed { index, delayMillis ->
-                        SegmentedButton(
-                            selected = controller.lyricFollowDelayMillis == delayMillis,
-                            onClick = { controller.updateLyricFollowDelay(delayMillis) },
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = LYRIC_FOLLOW_DELAY_OPTIONS_MILLIS.size,
-                            ),
-                            label = { Text(lyricFollowDelayLabel(delayMillis)) },
-                        )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("恢复跟随", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        lyricFollowDelayLabel(displayedFollowDelay),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Slider(
+                    value = followDelaySliderValue,
+                    onValueChange = {
+                        followDelaySliderValue = normalizeLyricFollowDelayMillis(it.roundToLong()).toFloat()
+                    },
+                    onValueChangeFinished = {
+                        controller.updateLyricFollowDelay(displayedFollowDelay)
+                    },
+                    valueRange = MIN_LYRIC_FOLLOW_DELAY_MILLIS.toFloat()..MAX_LYRIC_FOLLOW_DELAY_MILLIS.toFloat(),
+                    steps = LYRIC_FOLLOW_DELAY_OPTIONS_MILLIS.size - 2,
+                )
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        lyricFollowDelayLabel(MIN_LYRIC_FOLLOW_DELAY_MILLIS),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        lyricFollowDelayLabel(MAX_LYRIC_FOLLOW_DELAY_MILLIS),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider()
+                Text("音乐服务", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "填写兼容服务的根地址。登录状态会继续沿用，请只使用你信任的提供商。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = gatewayBaseUrlDraft,
+                    onValueChange = { gatewayBaseUrlDraft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("服务地址") },
+                    placeholder = { Text(DEFAULT_GATEWAY_BASE_URL) },
+                    supportingText = if (gatewayBaseUrlDraft.isNotBlank() && normalizedGatewayBaseUrl == null) {
+                        { Text("请输入有效的 HTTP 或 HTTPS 地址") }
+                    } else {
+                        null
+                    },
+                    isError = gatewayBaseUrlDraft.isNotBlank() && normalizedGatewayBaseUrl == null,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = { gatewayBaseUrlDraft = DEFAULT_GATEWAY_BASE_URL }) {
+                        Text("恢复默认")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            normalizedGatewayBaseUrl?.let(controller::updateGatewayBaseUrl)
+                        },
+                        enabled = normalizedGatewayBaseUrl != null &&
+                            normalizedGatewayBaseUrl != controller.gatewayBaseUrl,
+                    ) {
+                        Text("保存")
                     }
                 }
             }

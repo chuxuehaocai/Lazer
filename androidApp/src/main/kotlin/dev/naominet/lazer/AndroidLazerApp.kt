@@ -3,8 +3,10 @@ package dev.naominet.lazer
 import android.app.Activity
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.util.Base64
-import androidx.activity.compose.BackHandler
+import androidx.activity.BackEventCompat
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -80,9 +82,13 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -100,6 +106,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -118,18 +125,54 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import coil3.compose.AsyncImage
+import dev.naominet.lazer.gateway.DEFAULT_GATEWAY_BASE_URL
+import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
 import kotlinx.coroutines.launch
+import kotlin.math.roundToLong
 
-private const val ROOT_ENTER_DURATION_MILLIS = 270
-private const val ROOT_EXIT_DURATION_MILLIS = 170
-private const val SETTINGS_ENTER_DURATION_MILLIS = 360
-private const val SETTINGS_EXIT_DURATION_MILLIS = 240
-private const val PLAYER_ENTER_DURATION_MILLIS = 360
-private const val PLAYER_EXIT_DURATION_MILLIS = 240
-private const val LYRICS_ENTER_DURATION_MILLIS = 320
-private const val LYRICS_EXIT_DURATION_MILLIS = 210
-private val LazerEnterEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-private val LazerExitEasing = CubicBezierEasing(0.4f, 0f, 1f, 1f)
+private const val PAGE_TRANSITION_MILLIS = LazerTokens.Motion.pageMillis
+private val LazerMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+private enum class AndroidMainPageKind(val depth: Int) {
+    ROOT(0),
+    PLAYLIST(1),
+    SETTINGS(1),
+}
+
+private data class AndroidMainPage(
+    val kind: AndroidMainPageKind,
+    val playlist: AndroidPlaylist? = null,
+    val tracks: List<AndroidTrack> = emptyList(),
+    val isLoading: Boolean = false,
+) {
+    val contentKey: Any
+        get() = if (kind == AndroidMainPageKind.PLAYLIST) kind to playlist?.id else kind
+}
+
+private enum class AndroidBackLayer {
+    PLAYLIST,
+    SETTINGS,
+    PLAYER,
+    LYRICS,
+}
+
+private fun Modifier.predictiveBackTransform(
+    enabled: Boolean,
+    progress: Float,
+    swipeEdge: Int,
+): Modifier = if (!enabled) {
+    this
+} else {
+    graphicsLayer {
+        val fraction = progress.coerceIn(0f, 1f)
+        val direction = if (swipeEdge == BackEventCompat.EDGE_RIGHT) -1f else 1f
+        translationX = size.width * 0.08f * fraction * direction
+        val scale = 1f - 0.035f * fraction
+        scaleX = scale
+        scaleY = scale
+        alpha = 1f - 0.08f * fraction
+    }
+}
 
 @Composable
 private fun isLandscapeLayout(): Boolean =
@@ -142,27 +185,89 @@ fun AndroidLazerApp() {
     val playback by AndroidPlaybackConnection.snapshot.collectAsState()
     var playerVisible by remember { mutableStateOf(false) }
     var lyricsVisible by remember { mutableStateOf(false) }
+    var requestedBackProgress by remember { mutableFloatStateOf(0f) }
+    var isPredictiveBackRunning by remember { mutableStateOf(false) }
+    var backSwipeEdge by remember { mutableStateOf(BackEventCompat.EDGE_LEFT) }
+    var transformedBackLayer by remember { mutableStateOf<AndroidBackLayer?>(null) }
+
+    val activeBackLayer = when {
+        lyricsVisible -> AndroidBackLayer.LYRICS
+        playerVisible -> AndroidBackLayer.PLAYER
+        controller.isSettingsVisible -> AndroidBackLayer.SETTINGS
+        controller.activePlaylist != null -> AndroidBackLayer.PLAYLIST
+        else -> null
+    }
+    val renderedBackProgress by animateFloatAsState(
+        targetValue = requestedBackProgress,
+        animationSpec = if (isPredictiveBackRunning) {
+            snap()
+        } else {
+            tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing)
+        },
+        label = "predictive-back-progress",
+    )
+    LaunchedEffect(isPredictiveBackRunning, renderedBackProgress) {
+        if (!isPredictiveBackRunning && renderedBackProgress == 0f) transformedBackLayer = null
+    }
 
     DisposableEffect(controller) {
         onDispose { controller.close() }
     }
     LaunchedEffect(playback.track?.id) { playback.track?.id?.let(controller::loadLyrics) }
 
-    // Back only reaches Android's launcher from a root page. Sheets, player, lyrics, settings and
-    // playlist detail are all real levels in this small navigation stack.
-    BackHandler(enabled = lyricsVisible || playerVisible || controller.isLoginVisible || controller.activePlaylist != null || controller.isSettingsVisible) {
-        when {
-            lyricsVisible -> lyricsVisible = false
-            controller.isLoginVisible -> controller.closeLogin()
-            playerVisible -> playerVisible = false
-            controller.isSettingsVisible -> controller.closeSettings()
-            else -> controller.closePlaylist()
+    // The currently visible top layer owns back. Gesture progress drives the same page that a
+    // normal back press closes; cancelling the gesture eases that page back into place.
+    PredictiveBackHandler(enabled = !controller.isLoginVisible && activeBackLayer != null) { events ->
+        val layer = activeBackLayer ?: return@PredictiveBackHandler
+        transformedBackLayer = layer
+        isPredictiveBackRunning = true
+        try {
+            events.collect { event ->
+                requestedBackProgress = event.progress
+                backSwipeEdge = event.swipeEdge
+            }
+            when (layer) {
+                AndroidBackLayer.LYRICS -> lyricsVisible = false
+                AndroidBackLayer.PLAYER -> playerVisible = false
+                AndroidBackLayer.SETTINGS -> controller.closeSettings()
+                AndroidBackLayer.PLAYLIST -> controller.closePlaylist()
+            }
+        } finally {
+            isPredictiveBackRunning = false
+            requestedBackProgress = 0f
         }
     }
 
-    LazerTheme(isDark = controller.isDark) {
+    val mainPage = when {
+        controller.isSettingsVisible -> AndroidMainPage(AndroidMainPageKind.SETTINGS)
+        controller.activePlaylist != null -> AndroidMainPage(
+            kind = AndroidMainPageKind.PLAYLIST,
+            playlist = controller.activePlaylist,
+            tracks = controller.activePlaylistTracks,
+            isLoading = controller.isPlaylistLoading,
+        )
+        else -> AndroidMainPage(AndroidMainPageKind.ROOT)
+    }
+    val systemConfiguration = LocalConfiguration.current
+    val systemColorScheme = remember(
+        controller.useSystemMonetColors,
+        controller.isDark,
+        systemConfiguration,
+    ) {
+        if (controller.useSystemMonetColors && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (controller.isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        } else {
+            null
+        }
+    }
+
+    LazerTheme(isDark = controller.isDark, colorScheme = systemColorScheme) {
         val colors = MaterialTheme.colorScheme
         val view = LocalView.current
+        val playFromQueue: (List<AndroidTrack>, AndroidTrack) -> Unit = { queue, track ->
+            AndroidPlaybackConnection.play(context, queue, track)
+            playerVisible = true
+        }
         if (!view.isInEditMode) {
             SideEffect {
                 (view.context as? Activity)?.window?.let { window ->
@@ -177,97 +282,73 @@ fun AndroidLazerApp() {
             // Android 16 forces edge-to-edge. Keep the visual canvas under the status bar, while
             // placing every interactive root-page element below its dynamic inset.
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                AnimatedContent(
-                    targetState = controller.isSettingsVisible,
-                    modifier = Modifier.weight(1f),
-                    transitionSpec = {
-                        val openingSettings = targetState
-                        val enter = slideInHorizontally(
-                            animationSpec = tween(
-                                durationMillis = SETTINGS_ENTER_DURATION_MILLIS,
-                                delayMillis = SETTINGS_EXIT_DURATION_MILLIS,
-                                easing = LazerEnterEasing,
-                            ),
-                            initialOffsetX = { width -> if (openingSettings) width / 4 else -width / 4 },
-                        ) + fadeIn(
-                            tween(
-                                durationMillis = SETTINGS_ENTER_DURATION_MILLIS - 40,
-                                delayMillis = SETTINGS_EXIT_DURATION_MILLIS,
-                                easing = LazerEnterEasing,
-                            ),
+                Box(Modifier.weight(1f)) {
+                    if (
+                        transformedBackLayer == AndroidBackLayer.PLAYLIST ||
+                        transformedBackLayer == AndroidBackLayer.SETTINGS
+                    ) {
+                        AndroidRootContent(
+                            controller = controller,
+                            currentTrackId = playback.track?.id,
+                            onPlay = playFromQueue,
+                            modifier = Modifier.fillMaxSize(),
                         )
-                        val exit = slideOutHorizontally(
-                            animationSpec = tween(SETTINGS_EXIT_DURATION_MILLIS, easing = LazerExitEasing),
-                            targetOffsetX = { width -> if (openingSettings) -width / 6 else width / 6 },
-                        ) + fadeOut(tween(SETTINGS_EXIT_DURATION_MILLIS, easing = LazerExitEasing))
-                        enter togetherWith exit
-                    },
-                    label = "settings-content",
-                ) { settingsVisible ->
-                    if (settingsVisible) {
-                        Surface(Modifier.fillMaxSize(), color = colors.background) {
-                            SettingsPage(controller)
-                        }
-                    } else if (controller.activePlaylist != null) {
-                        PlaylistDetail(
-                            playlist = controller.activePlaylist!!,
-                            tracks = controller.activePlaylistTracks,
-                            isLoading = controller.isPlaylistLoading,
-                            currentId = playback.track?.id,
-                            onBack = controller::closePlaylist,
-                            onPlay = { track ->
-                                AndroidPlaybackConnection.play(context, controller.activePlaylistTracks, track)
-                                playerVisible = true
-                            },
-                        )
-                    } else {
-                        Column(Modifier.fillMaxSize()) {
-                            MobileHeader(
-                                controller = controller,
-                                modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 6.dp),
-                            )
-                            AnimatedContent(
-                                targetState = controller.destination,
-                                modifier = Modifier.weight(1f),
-                                transitionSpec = {
-                                    val movesForward = targetState.motionIndex > initialState.motionIndex
-                                    val enter = slideInHorizontally(
-                                        animationSpec = tween(
-                                            durationMillis = ROOT_ENTER_DURATION_MILLIS,
-                                            delayMillis = ROOT_EXIT_DURATION_MILLIS,
-                                            easing = LazerEnterEasing,
-                                        ),
-                                        initialOffsetX = { width -> if (movesForward) width / 5 else -width / 5 },
-                                    ) + fadeIn(
-                                        tween(
-                                            durationMillis = ROOT_ENTER_DURATION_MILLIS - 30,
-                                            delayMillis = ROOT_EXIT_DURATION_MILLIS,
-                                            easing = LazerEnterEasing,
-                                        ),
+                    }
+                    AnimatedContent(
+                        targetState = mainPage,
+                        modifier = Modifier.fillMaxSize(),
+                        transitionSpec = {
+                            val movesForward = targetState.kind.depth > initialState.kind.depth
+                            val enter = slideInHorizontally(
+                                animationSpec = tween(
+                                    durationMillis = PAGE_TRANSITION_MILLIS,
+                                    easing = LazerMotionEasing,
+                                ),
+                                initialOffsetX = { width -> if (movesForward) width / 5 else -width / 5 },
+                            ) + fadeIn(tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing))
+                            val exit = slideOutHorizontally(
+                                animationSpec = tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing),
+                                targetOffsetX = { width -> if (movesForward) -width / 8 else width / 8 },
+                            ) + fadeOut(tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing))
+                            (enter togetherWith exit).apply {
+                                targetContentZIndex = if (movesForward) 1f else -1f
+                            }
+                        },
+                        contentKey = AndroidMainPage::contentKey,
+                        label = "android-main-page",
+                    ) { page ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .predictiveBackTransform(
+                                    enabled = when (page.kind) {
+                                        AndroidMainPageKind.PLAYLIST -> transformedBackLayer == AndroidBackLayer.PLAYLIST
+                                        AndroidMainPageKind.SETTINGS -> transformedBackLayer == AndroidBackLayer.SETTINGS
+                                        AndroidMainPageKind.ROOT -> false
+                                    },
+                                    progress = renderedBackProgress,
+                                    swipeEdge = backSwipeEdge,
+                                ),
+                            color = colors.background,
+                        ) {
+                            when (page.kind) {
+                                AndroidMainPageKind.SETTINGS -> SettingsPage(controller)
+                                AndroidMainPageKind.PLAYLIST -> page.playlist?.let { playlist ->
+                                    PlaylistDetail(
+                                        playlist = playlist,
+                                        tracks = page.tracks,
+                                        isLoading = page.isLoading,
+                                        currentId = playback.track?.id,
+                                        onBack = controller::closePlaylist,
+                                        onPlay = { track -> playFromQueue(page.tracks, track) },
                                     )
-                                    val exit = slideOutHorizontally(
-                                        animationSpec = tween(ROOT_EXIT_DURATION_MILLIS, easing = LazerExitEasing),
-                                        targetOffsetX = { width -> if (movesForward) -width / 6 else width / 6 },
-                                    ) + fadeOut(tween(ROOT_EXIT_DURATION_MILLIS, easing = LazerExitEasing))
-                                    enter togetherWith exit
-                                },
-                                label = "android-root",
-                            ) { page ->
-                                when (page) {
-                                    AndroidRootDestination.HOME -> HomePage(controller, playback.track?.id) { track ->
-                                        AndroidPlaybackConnection.play(context, controller.homeTracks, track); playerVisible = true
-                                    }
-                                    AndroidRootDestination.DISCOVER -> DiscoverPage(controller, playback.track?.id) { track ->
-                                        AndroidPlaybackConnection.play(context, controller.homeTracks, track); playerVisible = true
-                                    }
-                                    AndroidRootDestination.SEARCH -> SearchPage(controller, playback.track?.id) { track ->
-                                        AndroidPlaybackConnection.play(context, controller.searchResults, track); playerVisible = true
-                                    }
-                                    AndroidRootDestination.LIBRARY -> LibraryPage(controller, playback.track?.id) { track ->
-                                        AndroidPlaybackConnection.play(context, controller.homeTracks, track); playerVisible = true
-                                    }
-                                    AndroidRootDestination.ME -> MePage(controller)
                                 }
+                                AndroidMainPageKind.ROOT -> AndroidRootContent(
+                                    controller = controller,
+                                    currentTrackId = playback.track?.id,
+                                    onPlay = playFromQueue,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             }
                         }
                     }
@@ -281,7 +362,19 @@ fun AndroidLazerApp() {
             }
 
             controller.message?.let { text -> MessageBanner(text, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(16.dp)) }
-            if (playerVisible && playback.track != null) {
+            AnimatedVisibility(
+                visible = playerVisible && playback.track != null,
+                modifier = Modifier.fillMaxSize(),
+                enter = slideInVertically(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing),
+                    initialOffsetY = { height -> height / 8 },
+                ) + fadeIn(tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing)),
+                exit = slideOutVertically(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing),
+                    targetOffsetY = { height -> height / 8 },
+                ) + fadeOut(tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing)),
+                label = "now-playing-page",
+            ) {
                 NowPlayingPage(
                     snapshot = playback,
                     lyricLines = controller.lyrics,
@@ -296,9 +389,28 @@ fun AndroidLazerApp() {
                     onNext = { AndroidPlaybackConnection.next(context) },
                     onSeek = { AndroidPlaybackConnection.seekTo(context, it) },
                     onLyrics = { lyricsVisible = true },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .predictiveBackTransform(
+                            enabled = transformedBackLayer == AndroidBackLayer.PLAYER,
+                            progress = renderedBackProgress,
+                            swipeEdge = backSwipeEdge,
+                        ),
                 )
             }
-            if (lyricsVisible) {
+            AnimatedVisibility(
+                visible = lyricsVisible && playback.track != null,
+                modifier = Modifier.fillMaxSize(),
+                enter = slideInHorizontally(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing),
+                    initialOffsetX = { width -> width / 5 },
+                ) + fadeIn(tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing)),
+                exit = slideOutHorizontally(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing),
+                    targetOffsetX = { width -> width / 5 },
+                ) + fadeOut(tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing)),
+                label = "lyrics-page",
+            ) {
                 AndroidLyricsPage(
                     track = playback.track,
                     lines = controller.lyrics,
@@ -308,9 +420,64 @@ fun AndroidLazerApp() {
                     followDelayMillis = controller.lyricFollowDelayMillis,
                     onBack = { lyricsVisible = false },
                     onSeek = { AndroidPlaybackConnection.seekTo(context, it) },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .predictiveBackTransform(
+                            enabled = transformedBackLayer == AndroidBackLayer.LYRICS,
+                            progress = renderedBackProgress,
+                            swipeEdge = backSwipeEdge,
+                        ),
                 )
             }
             if (controller.isLoginVisible) LoginSheet(controller)
+        }
+    }
+}
+
+@Composable
+private fun AndroidRootContent(
+    controller: AndroidGatewayController,
+    currentTrackId: Long?,
+    onPlay: (List<AndroidTrack>, AndroidTrack) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        MobileHeader(
+            controller = controller,
+            modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 6.dp),
+        )
+        AnimatedContent(
+            targetState = controller.destination,
+            modifier = Modifier.weight(1f),
+            transitionSpec = {
+                val movesForward = targetState.motionIndex > initialState.motionIndex
+                val enter = slideInHorizontally(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing),
+                    initialOffsetX = { width -> if (movesForward) width / 5 else -width / 5 },
+                ) + fadeIn(tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing))
+                val exit = slideOutHorizontally(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing),
+                    targetOffsetX = { width -> if (movesForward) -width / 8 else width / 8 },
+                ) + fadeOut(tween(PAGE_TRANSITION_MILLIS, easing = LazerMotionEasing))
+                enter togetherWith exit
+            },
+            label = "android-root",
+        ) { destination ->
+            when (destination) {
+                AndroidRootDestination.HOME -> HomePage(controller, currentTrackId) { track ->
+                    onPlay(controller.homeTracks, track)
+                }
+                AndroidRootDestination.DISCOVER -> DiscoverPage(controller, currentTrackId) { track ->
+                    onPlay(controller.homeTracks, track)
+                }
+                AndroidRootDestination.SEARCH -> SearchPage(controller, currentTrackId) { track ->
+                    onPlay(controller.searchResults, track)
+                }
+                AndroidRootDestination.LIBRARY -> LibraryPage(controller, currentTrackId) { track ->
+                    onPlay(controller.homeTracks, track)
+                }
+                AndroidRootDestination.ME -> MePage(controller)
+            }
         }
     }
 }
@@ -465,6 +632,15 @@ private fun MePage(controller: AndroidGatewayController) {
 @Composable
 private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
+    val systemMonetAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    var followDelaySliderValue by remember(controller.lyricFollowDelayMillis) {
+        mutableFloatStateOf(controller.lyricFollowDelayMillis.toFloat())
+    }
+    var gatewayBaseUrlDraft by remember(controller.gatewayBaseUrl) {
+        mutableStateOf(controller.gatewayBaseUrl)
+    }
+    val displayedFollowDelay = normalizeLyricFollowDelayMillis(followDelaySliderValue.roundToLong())
+    val normalizedGatewayBaseUrl = normalizeGatewayBaseUrl(gatewayBaseUrlDraft)
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp, 10.dp, 20.dp, 18.dp),
@@ -489,6 +665,125 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     }
                     TextButton(onClick = controller::toggleTheme) {
                         Text(if (controller.isDark) "切换浅色" else "切换深色")
+                    }
+                }
+            }
+        }
+        item {
+            Surface(shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerHigh) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = systemMonetAvailable, role = Role.Switch) {
+                            controller.updateUseSystemMonetColors(!controller.useSystemMonetColors)
+                        }
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("系统 Monet 取色", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (systemMonetAvailable) "使用当前壁纸生成的系统配色" else "需要 Android 12 或更高版本",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = controller.useSystemMonetColors && systemMonetAvailable,
+                        onCheckedChange = null,
+                        enabled = systemMonetAvailable,
+                    )
+                }
+            }
+        }
+        item { SectionTitle("歌词") }
+        item {
+            Surface(shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerHigh) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("恢复自动跟随", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "手动滑动歌词后，等待这段时间再继续跟随播放",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            lyricFollowDelayLabel(displayedFollowDelay),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = colors.primary,
+                        )
+                    }
+                    Slider(
+                        value = followDelaySliderValue,
+                        onValueChange = {
+                            followDelaySliderValue = normalizeLyricFollowDelayMillis(it.roundToLong()).toFloat()
+                        },
+                        onValueChangeFinished = {
+                            controller.updateLyricFollowDelay(displayedFollowDelay)
+                        },
+                        valueRange = MIN_LYRIC_FOLLOW_DELAY_MILLIS.toFloat()..MAX_LYRIC_FOLLOW_DELAY_MILLIS.toFloat(),
+                        steps = LYRIC_FOLLOW_DELAY_OPTIONS_MILLIS.size - 2,
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(
+                            lyricFollowDelayLabel(MIN_LYRIC_FOLLOW_DELAY_MILLIS),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            lyricFollowDelayLabel(MAX_LYRIC_FOLLOW_DELAY_MILLIS),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        item { SectionTitle("音乐服务") }
+        item {
+            Surface(shape = RoundedCornerShape(18.dp), color = colors.surfaceContainerHigh) {
+                Column(Modifier.fillMaxWidth().padding(18.dp)) {
+                    Text("API 服务提供商", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "填写兼容服务的根地址。登录状态会继续沿用，请只使用你信任的提供商。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = gatewayBaseUrlDraft,
+                        onValueChange = { gatewayBaseUrlDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("服务地址") },
+                        placeholder = { Text(DEFAULT_GATEWAY_BASE_URL) },
+                        supportingText = if (gatewayBaseUrlDraft.isNotBlank() && normalizedGatewayBaseUrl == null) {
+                            { Text("请输入有效的 HTTP 或 HTTPS 服务地址") }
+                        } else {
+                            null
+                        },
+                        isError = gatewayBaseUrlDraft.isNotBlank() && normalizedGatewayBaseUrl == null,
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { gatewayBaseUrlDraft = DEFAULT_GATEWAY_BASE_URL }) {
+                            Text("恢复默认")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                normalizedGatewayBaseUrl?.let { controller.updateGatewayBaseUrl(it) }
+                            },
+                            enabled = normalizedGatewayBaseUrl != null && normalizedGatewayBaseUrl != controller.gatewayBaseUrl,
+                        ) {
+                            Text("保存")
+                        }
                     }
                 }
             }
@@ -751,6 +1046,7 @@ private fun NowPlayingPage(
     onNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onLyrics: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val track = snapshot.track ?: return
     val colors = MaterialTheme.colorScheme
@@ -766,7 +1062,7 @@ private fun NowPlayingPage(
     LaunchedEffect(display, seeking) { if (!seeking) seekProgress = display }
 
     // Keep the visual background edge-to-edge; only the controls need to avoid system bars.
-    Surface(Modifier.fillMaxSize(), color = colors.background) {
+    Surface(modifier.fillMaxSize(), color = colors.background) {
         if (isLandscapeLayout()) {
             Box(Modifier.fillMaxSize()) {
                 AndroidAlbumFlowBackground(
