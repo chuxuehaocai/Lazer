@@ -48,6 +48,10 @@ internal object DesktopSettings {
             normalizeLyricFollowDelayMillis(value).toString(),
         )
 
+    var exclusiveAudio: Boolean
+        get() = DesktopStateFile.get("playback.exclusive_audio")?.toBooleanStrictOrNull() ?: false
+        set(value) = DesktopStateFile.set("playback.exclusive_audio", value.toString())
+
     var gatewayBaseUrl: String
         get() = normalizeGatewayBaseUrl(
             DesktopStateFile.get("gateway.base_url") ?: DEFAULT_GATEWAY_BASE_URL,

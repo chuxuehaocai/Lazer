@@ -1,6 +1,7 @@
 package dev.naominet.lazer
 
 import dev.nucleusframework.media.control.MediaControlEvent
+import dev.naominet.lazer.gateway.model.UserProfile
 import fr.delthas.javamp3.Sound
 import java.awt.Insets
 import java.awt.Rectangle
@@ -18,6 +19,46 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DesktopMediaAndCacheTest {
+    @Test
+    fun `exclusive PCM volume is applied to every channel`() {
+        val format = AudioFormat(
+            AudioFormat.Encoding.PCM_SIGNED,
+            48_000f,
+            16,
+            2,
+            4,
+            48_000f,
+            false,
+        )
+        val pcm = byteArrayOf(0x10, 0x27, 0xF0.toByte(), 0xD8.toByte())
+
+        applyPcm16Volume(pcm, pcm.size, format, 0.5f)
+
+        assertArrayEquals(byteArrayOf(0x88.toByte(), 0x13, 0x78, 0xEC.toByte()), pcm)
+    }
+
+    @Test
+    fun `WASAPI wave format matches decoded stereo PCM`() {
+        val format = AudioFormat(
+            AudioFormat.Encoding.PCM_SIGNED,
+            44_100f,
+            16,
+            2,
+            4,
+            44_100f,
+            false,
+        )
+
+        waveFormatEx(format).use { wave ->
+            assertEquals(1, wave.getShort(0).toInt())
+            assertEquals(2, wave.getShort(2).toInt())
+            assertEquals(44_100, wave.getInt(4))
+            assertEquals(176_400, wave.getInt(8))
+            assertEquals(4, wave.getShort(12).toInt())
+            assertEquals(16, wave.getShort(14).toInt())
+        }
+    }
+
     @Test
     fun `system media buttons map to the player commands`() {
         assertEquals(SystemMediaCommand.Play, MediaControlEvent.Play.toSystemMediaCommand())
@@ -73,13 +114,26 @@ class DesktopMediaAndCacheTest {
         val directory = Files.createTempDirectory("lazer-playlist-cache-test")
         try {
             val cache = DesktopPlaylistCache(directory)
-            val playlist = PlaylistItem(42, "夜晚散步", "18 首 · 初雪", "https://img.example/list.jpg", 18)
+            val playlist = PlaylistItem(
+                42,
+                "夜晚散步",
+                "18 首 · 初雪",
+                "https://img.example/list.jpg",
+                18,
+                creatorName = "初雪",
+            )
             val track = TrackItem(7, "晴天", "周杰伦", "叶惠美", 269_000, "https://img.example/song.jpg")
 
             cache.savePlaylists("user-9", listOf(playlist))
             cache.saveTracks(playlist.id, listOf(track), complete = true)
+            cache.saveLikedTracks(9, listOf(track))
 
             assertEquals(playlist, cache.loadPlaylists("user-9").single())
+            assertEquals(UserProfile(userId = 9, nickname = "初雪"), cache.loadCurrentUser())
+            val profile = UserProfile(9, "初雪", "https://img.example/avatar.jpg", "慢慢听")
+            cache.saveCurrentUser(profile)
+            assertEquals(profile, cache.loadCurrentUser())
+            assertEquals(listOf(track), cache.loadLikedTracks(9))
             val cachedTracks = cache.loadTracks(playlist.id)
             assertNotNull(cachedTracks)
             cachedTracks!!

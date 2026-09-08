@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.naominet.lazer.gateway.AudioQuality
 import dev.naominet.lazer.gateway.GatewayConfig
 import dev.naominet.lazer.gateway.NeteaseMusicGateway
 import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
@@ -76,6 +77,10 @@ class AndroidGatewayController(context: Context) {
     var themeEngine by mutableStateOf(settings.themeEngine)
         private set
     var lyricFollowDelayMillis by mutableStateOf(settings.lyricFollowDelayMillis)
+        private set
+    var audioQuality by mutableStateOf(settings.audioQuality)
+        private set
+    var exclusiveAudio by mutableStateOf(settings.exclusiveAudio)
         private set
     var gatewayBaseUrl by mutableStateOf(settings.gatewayBaseUrl)
         private set
@@ -178,6 +183,19 @@ class AndroidGatewayController(context: Context) {
         settings.lyricFollowDelayMillis = lyricFollowDelayMillis
     }
 
+    fun updateAudioQuality(value: AudioQuality) {
+        if (value !in ANDROID_AUDIO_QUALITY_OPTIONS || value == audioQuality) return
+        audioQuality = value
+        settings.audioQuality = value
+    }
+
+    fun updateExclusiveAudio(enabled: Boolean) {
+        if (exclusiveAudio == enabled) return
+        exclusiveAudio = enabled
+        settings.exclusiveAudio = enabled
+        AndroidPlaybackConnection.updateExclusiveAudio(appContext)
+    }
+
     fun updateGatewayBaseUrl(value: String): Boolean {
         val normalized = normalizeGatewayBaseUrl(value) ?: return false
         if (normalized == gatewayBaseUrl) return true
@@ -222,10 +240,12 @@ class AndroidGatewayController(context: Context) {
         val wasLiked = track.id in likedSongIds
         val nextLiked = !wasLiked
         likedSongIds = if (nextLiked) likedSongIds + track.id else likedSongIds - track.id
+        cache.saveLikedSongIds(user.userId, likedSongIds)
         scope.launch {
             runCatching { gateway.updateSongLiked(track.id, user.userId, nextLiked) }
                 .onFailure {
                     likedSongIds = if (wasLiked) likedSongIds + track.id else likedSongIds - track.id
+                    cache.saveLikedSongIds(user.userId, likedSongIds)
                     message = "喜欢状态未能同步，请重试"
                 }
         }
@@ -476,6 +496,7 @@ class AndroidGatewayController(context: Context) {
                 gateway.clearSession()
             }
             currentUser = null
+            cache.clearCurrentUser()
             userPlaylists = emptyList()
             likedSongIds = emptySet()
             destination = AndroidRootDestination.HOME
@@ -492,27 +513,47 @@ class AndroidGatewayController(context: Context) {
 
     private fun bootstrap() {
         bootstrapJob?.cancel()
+        isLoading = true
+        featuredPlaylists = cache.loadFeaturedPlaylists()
+        homeTracks = cache.loadTracks(HOME_TRACKS_CACHE_ID)
+        val hasSavedSession = !gateway.sessionCookie.isNullOrBlank()
+        val cachedProfile = cache.loadCurrentUser().takeIf { hasSavedSession }
+        if (cachedProfile != null) {
+            currentUser = cachedProfile
+            restoreCachedSignedInContent(cachedProfile)
+        } else if (!hasSavedSession) {
+            currentUser = null
+            userPlaylists = emptyList()
+            likedSongIds = emptySet()
+        }
         bootstrapJob = scope.launch {
-            isLoading = true
-            featuredPlaylists = cache.loadFeaturedPlaylists()
-            homeTracks = cache.loadTracks(HOME_TRACKS_CACHE_ID)
             try {
-                currentUser = try {
-                    resolveCurrentUser()
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: Throwable) {
-                    null
-                }
-                if (currentUser == null) {
+                if (!hasSavedSession) {
                     loadPublicContent()
                 } else {
-                    loadSignedInContent(currentUser!!)
+                    val freshProfile = resolveCurrentUser()
+                    if (freshProfile == null) {
+                        gateway.clearSession()
+                        cache.clearCurrentUser()
+                        currentUser = null
+                        userPlaylists = emptyList()
+                        likedSongIds = emptySet()
+                        loadPublicContent()
+                    } else {
+                        currentUser = freshProfile
+                        cache.saveCurrentUser(freshProfile)
+                        restoreCachedSignedInContent(freshProfile)
+                        loadSignedInContent(freshProfile)
+                    }
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Throwable) {
-                message = "暂时无法连接音乐服务，请稍后再试"
+                message = if (currentUser != null) {
+                    "已显示本地内容，暂时无法同步"
+                } else {
+                    "暂时无法连接音乐服务，请稍后再试"
+                }
             } finally {
                 isLoading = false
             }
@@ -533,11 +574,18 @@ class AndroidGatewayController(context: Context) {
         }
     }
 
+    private fun restoreCachedSignedInContent(profile: UserProfile) {
+        userPlaylists = cache.loadUserPlaylists(profile.userId)
+        likedSongIds = cache.loadLikedSongIds(profile.userId)
+    }
+
     private suspend fun loadSignedInContent(profile: UserProfile) {
-        likedSongIds = runCatching { gateway.likedSongIds(profile.userId).ids.toSet() }
-            .getOrDefault(likedSongIds)
-        val cachedPlaylists = cache.loadUserPlaylists(profile.userId)
-        if (cachedPlaylists.isNotEmpty()) userPlaylists = cachedPlaylists
+        runCatching { gateway.likedSongIds(profile.userId).ids.toSet() }
+            .getOrNull()
+            ?.let { freshLikedSongIds ->
+                likedSongIds = freshLikedSongIds
+                cache.saveLikedSongIds(profile.userId, freshLikedSongIds)
+            }
         val loadedPlaylists = loadAllUserPlaylists(profile.userId)
         if (loadedPlaylists.isNotEmpty()) {
             userPlaylists = loadedPlaylists
@@ -608,6 +656,8 @@ class AndroidGatewayController(context: Context) {
         bootstrapJob?.cancelAndJoin()
         bootstrapJob = null
         currentUser = profile
+        cache.saveCurrentUser(profile)
+        restoreCachedSignedInContent(profile)
         loginPassword = ""
         loginCaptcha = ""
         isLoginVisible = false

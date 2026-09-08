@@ -6,6 +6,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import dev.naominet.lazer.gateway.GatewaySessionStore
+import dev.naominet.lazer.gateway.model.UserProfile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
@@ -71,11 +72,37 @@ class AndroidPlaylistCache(context: Context) {
         preferences.edit().putString(KEY_FEATURED, encodePlaylists(playlists)).apply()
     }
 
+    fun loadCurrentUser(): UserProfile? = decodeUserProfile(
+        preferences.getString(KEY_CURRENT_USER, null),
+    ) ?: preferences.getLong(KEY_LAST_USER_ID, 0L)
+        .takeIf { it > 0 }
+        ?.let { UserProfile(userId = it) }
+        ?: cachedUserIdHint(preferences.all.keys)?.let { UserProfile(userId = it) }
+
+    fun saveCurrentUser(profile: UserProfile) {
+        preferences.edit().putString(KEY_CURRENT_USER, encodeUserProfile(profile)).apply()
+    }
+
+    fun clearCurrentUser() {
+        preferences.edit().remove(KEY_CURRENT_USER).apply()
+    }
+
     fun loadUserPlaylists(userId: Long): List<AndroidPlaylist> =
         decodePlaylists(preferences.getString(userPlaylistsKey(userId), null))
 
     fun saveUserPlaylists(userId: Long, playlists: List<AndroidPlaylist>) {
-        preferences.edit().putString(userPlaylistsKey(userId), encodePlaylists(playlists)).apply()
+        preferences.edit()
+            .putString(userPlaylistsKey(userId), encodePlaylists(playlists))
+            .putLong(KEY_LAST_USER_ID, userId)
+            .apply()
+    }
+
+    fun loadLikedSongIds(userId: Long): Set<Long> = decodeSongIds(
+        preferences.getString(likedSongIdsKey(userId), null),
+    )
+
+    fun saveLikedSongIds(userId: Long, songIds: Set<Long>) {
+        preferences.edit().putString(likedSongIdsKey(userId), encodeSongIds(songIds)).apply()
     }
 
     fun loadTracks(playlistId: Long): List<AndroidTrack> =
@@ -84,6 +111,36 @@ class AndroidPlaylistCache(context: Context) {
     fun saveTracks(playlistId: Long, tracks: List<AndroidTrack>) {
         preferences.edit().putString(tracksKey(playlistId), encodeTracks(tracks)).apply()
     }
+
+    private fun encodeUserProfile(profile: UserProfile): String = JSONObject().apply {
+        put("userId", profile.userId)
+        put("nickname", profile.nickname)
+        put("avatarUrl", profile.avatarUrl.orEmpty())
+        put("signature", profile.signature.orEmpty())
+    }.toString()
+
+    private fun decodeUserProfile(serialized: String?): UserProfile? = runCatching {
+        val item = JSONObject(serialized ?: return null)
+        UserProfile(
+            userId = item.optLong("userId"),
+            nickname = item.optString("nickname"),
+            avatarUrl = normalizedArtworkUrl(item.optString("avatarUrl")),
+            signature = item.optString("signature").takeIf(String::isNotBlank),
+        ).takeIf { it.userId > 0 }
+    }.getOrNull()
+
+    private fun encodeSongIds(songIds: Set<Long>): String = JSONArray().apply {
+        songIds.forEach(::put)
+    }.toString()
+
+    private fun decodeSongIds(serialized: String?): Set<Long> = runCatching {
+        val array = JSONArray(serialized ?: return emptySet())
+        buildSet {
+            repeat(array.length()) { index ->
+                array.optLong(index).takeIf { it > 0 }?.let(::add)
+            }
+        }
+    }.getOrDefault(emptySet())
 
     private fun encodePlaylists(playlists: List<AndroidPlaylist>): String = JSONArray().apply {
         playlists.forEach { playlist ->
@@ -148,12 +205,21 @@ class AndroidPlaylistCache(context: Context) {
     }.getOrDefault(emptyList())
 
     private fun userPlaylistsKey(userId: Long) = "user.playlists.$userId"
+    private fun likedSongIdsKey(userId: Long) = "user.liked_song_ids.$userId"
     private fun tracksKey(playlistId: Long) = "playlist.tracks.$playlistId"
 
     private companion object {
         const val KEY_FEATURED = "featured.playlists"
+        const val KEY_CURRENT_USER = "session.current_user"
+        const val KEY_LAST_USER_ID = "session.last_user_id"
     }
 }
+
+internal fun cachedUserIdHint(keys: Set<String>): Long? = keys
+    .asSequence()
+    .mapNotNull { key -> key.removePrefix("user.playlists.").takeIf { it != key }?.toLongOrNull() }
+    .distinct()
+    .singleOrNull()
 
 /**
  * Persists the Gateway cookie with an app-scoped Android Keystore AES key. If the keystore becomes

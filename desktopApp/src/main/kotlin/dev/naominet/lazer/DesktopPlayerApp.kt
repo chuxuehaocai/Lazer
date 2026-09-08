@@ -571,7 +571,10 @@ private fun DesktopSettingsDialog(
         title = { Text("设置") },
         text = {
             Column(
-                modifier = Modifier.widthIn(min = 480.dp),
+                modifier = Modifier
+                    .widthIn(min = 480.dp)
+                    .heightIn(max = 680.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text("外观", style = MaterialTheme.typography.titleSmall)
@@ -606,6 +609,39 @@ private fun DesktopSettingsDialog(
                     )
                 }
                 HorizontalDivider()
+                if (isWindowsDesktop()) {
+                    Text("播放", style = MaterialTheme.typography.titleSmall)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(role = androidx.compose.ui.semantics.Role.Switch) {
+                                controller.updateExclusiveAudio(!controller.exclusiveAudio)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("独占音频", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (controller.exclusiveAudio) {
+                                    "播放时独占当前输出设备，其他应用会暂时无声"
+                                } else {
+                                    "与其他应用共享音频输出"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        LazerSwitch(
+                            engine = controller.themeEngine,
+                            checked = controller.exclusiveAudio,
+                            onCheckedChange = null,
+                        )
+                    }
+                    HorizontalDivider()
+                }
                 Text("歌词", style = MaterialTheme.typography.titleSmall)
                 Text(
                     "手动滚动歌词后，经过所选时间恢复自动跟随。",

@@ -148,6 +148,7 @@ class DesktopPlayerController(
                 )
             }
         },
+        initialExclusiveAudio = DesktopSettings.exclusiveAudio,
     )
 
     var isDark by mutableStateOf(DesktopSettings.isDark)
@@ -193,6 +194,8 @@ class DesktopPlayerController(
     var volume by mutableFloatStateOf(0.72f)
         private set
     var audioQuality by mutableStateOf(AudioQuality.EXHIGH)
+        private set
+    var exclusiveAudio by mutableStateOf(DesktopSettings.exclusiveAudio && isWindowsDesktop())
         private set
     var streamUrl by mutableStateOf<String?>(null)
         private set
@@ -275,32 +278,48 @@ class DesktopPlayerController(
 
     private fun connectMusicService() {
         bootstrapJob?.cancel()
+        val hasSavedSession = !gateway.sessionCookie.isNullOrBlank()
+        val cachedProfile = playlistCache.loadCurrentUser().takeIf { hasSavedSession }
+        if (cachedProfile != null) {
+            currentUser = cachedProfile
+            restoreCachedUserLibrary(cachedProfile)
+        } else if (!hasSavedSession) {
+            currentUser = null
+            userPlaylists = emptyList()
+            likedTracks = emptyList()
+            isLiked = false
+        }
         bootstrapJob = scope.launch {
-            beginRequest("正在连接音乐服务…")
+            beginRequest(if (cachedProfile != null) "正在同步你的音乐…" else "正在连接音乐服务…")
             try {
-                val restoredProfile = if (!gateway.sessionCookie.isNullOrBlank()) {
-                    try {
-                        gateway.loginStatus().data?.profile
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (_: Throwable) {
-                        null
-                    }
-                } else {
-                    null
-                }
-
-                if (restoredProfile != null) {
-                    currentUser = restoredProfile
-                    syncUserLibrary(restoredProfile)
-                } else {
+                if (!hasSavedSession) {
                     loadPublicLibrary()
+                } else {
+                    val freshProfile = resolveStoredProfile()
+                    if (freshProfile == null) {
+                        gateway.clearSession()
+                        playlistCache.clearCurrentUser()
+                        currentUser = null
+                        userPlaylists = emptyList()
+                        likedTracks = emptyList()
+                        isLiked = false
+                        loadPublicLibrary()
+                    } else {
+                        currentUser = freshProfile
+                        playlistCache.saveCurrentUser(freshProfile)
+                        restoreCachedUserLibrary(freshProfile)
+                        syncUserLibrary(freshProfile)
+                    }
                 }
                 statusMessage = null
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                statusMessage = error.toFriendlyMessage("暂时无法连接音乐服务")
+                statusMessage = if (currentUser != null) {
+                    "已显示本地内容，暂时无法同步"
+                } else {
+                    error.toFriendlyMessage("暂时无法连接音乐服务")
+                }
             } finally {
                 endRequest()
             }
@@ -668,6 +687,18 @@ class DesktopPlayerController(
         }
     }
 
+    fun updateExclusiveAudio(enabled: Boolean) {
+        if (!isWindowsDesktop() || exclusiveAudio == enabled) return
+        exclusiveAudio = enabled
+        DesktopSettings.exclusiveAudio = enabled
+        audioPlayer.setExclusiveAudio(enabled)
+        val track = nowPlaying ?: return
+        if (isPlaying || streamUrl != null) {
+            bufferedProgress = 0f
+            resolveAndPlay(track, resumeProgress = progress, playWhenReady = isPlaying)
+        }
+    }
+
     fun toggleLiked() {
         val track = nowPlaying ?: return
         val user = currentUser
@@ -676,16 +707,20 @@ class DesktopPlayerController(
             return
         }
         val next = !isLiked
+        val previousLikedTracks = likedTracks
         isLiked = next
         likedTracks = if (next) {
             listOf(track) + likedTracks.filterNot { it.id == track.id }
         } else {
             likedTracks.filterNot { it.id == track.id }
         }
+        playlistCache.saveLikedTracks(user.userId, likedTracks)
         scope.launch {
             runCatching { gateway.updateSongLiked(track.id, user.userId, next) }
                 .onFailure {
                     isLiked = !next
+                    likedTracks = previousLikedTracks
+                    playlistCache.saveLikedTracks(user.userId, previousLikedTracks)
                     statusMessage = "喜欢状态未能同步，请重试"
                 }
         }
@@ -876,6 +911,7 @@ class DesktopPlayerController(
             } finally {
                 gateway.clearSession()
                 currentUser = null
+                playlistCache.clearCurrentUser()
                 userPlaylists = emptyList()
                 likedTracks = emptyList()
                 isLiked = false
@@ -896,6 +932,8 @@ class DesktopPlayerController(
     private suspend fun finishSignInAndClose(profileHint: UserProfile? = null) {
         val profile = resolveSignedInProfile(profileHint)
         currentUser = profile
+        playlistCache.saveCurrentUser(profile)
+        restoreCachedUserLibrary(profile)
         loginPassword = ""
         loginError = null
         isLoginVisible = false
@@ -919,18 +957,18 @@ class DesktopPlayerController(
     }
 
     private suspend fun resolveSignedInProfile(profileHint: UserProfile? = null): UserProfile {
-        val loginStatus = if (profileHint == null || profileHint.userId <= 0) {
-            gateway.loginStatus().data
-        } else {
-            null
-        }
         val profile = profileHint?.takeIf { it.userId > 0 }
-            ?: loginStatus?.profile?.takeIf { it.userId > 0 }
+            ?: resolveStoredProfile()
+        check(profile != null && profile.userId > 0) { "没有读取到用户资料" }
+        return profile
+    }
+
+    private suspend fun resolveStoredProfile(): UserProfile? {
+        val loginStatus = gateway.loginStatus().data
+        return loginStatus?.profile?.takeIf { it.userId > 0 }
             ?: loginStatus?.account?.id
                 ?.takeIf { it > 0 }
                 ?.let { gateway.userDetail(it).profile }
-        check(profile != null && profile.userId > 0) { "没有读取到用户资料" }
-        return profile
     }
 
     private suspend fun loadPublicLibrary() {
@@ -956,11 +994,15 @@ class DesktopPlayerController(
         }
     }
 
+    private fun restoreCachedUserLibrary(profile: UserProfile) {
+        val cacheKey = userPlaylistCacheKey(profile.userId)
+        userPlaylists = playlistCache.loadPlaylists(cacheKey)
+        likedTracks = playlistCache.loadLikedTracks(profile.userId)
+        isLiked = nowPlaying?.let { current -> likedTracks.any { it.id == current.id } } ?: false
+    }
+
     private suspend fun syncUserLibrary(profile: UserProfile) {
         val cacheKey = userPlaylistCacheKey(profile.userId)
-        if (userPlaylists.isEmpty()) {
-            userPlaylists = playlistCache.loadPlaylists(cacheKey).orEmpty()
-        }
         val personal = loadAllUserPlaylists(profile.userId, cacheKey)
         userPlaylists = personal
 
@@ -1001,6 +1043,7 @@ class DesktopPlayerController(
                 }
             }
         }
+        playlistCache.saveLikedTracks(profile.userId, likedTracks)
 
         val dailyTracks = runCatching { gateway.dailyRecommendedSongs().data?.dailySongs.orEmpty().map { it.toTrackItem() } }
             .getOrDefault(emptyList())

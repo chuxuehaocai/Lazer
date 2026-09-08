@@ -38,6 +38,8 @@ dependencies {
     implementation(libs.coil.network.ktor3)
     implementation(libs.ktor.client.cio)
     implementation(libs.javamp3)
+    implementation(libs.jna.core)
+    implementation(libs.jna.platform)
     implementation(libs.nucleus.media.control)
     testImplementation(libs.junit)
 }

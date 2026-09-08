@@ -1,5 +1,6 @@
 package dev.naominet.lazer
 
+import dev.naominet.lazer.gateway.model.UserProfile
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -35,6 +36,31 @@ internal class DesktopPlaylistCache(
         save(file("collection", key), properties)
     }
 
+    fun loadCurrentUser(): UserProfile? = load(file("profile", "current")) { properties ->
+        UserProfile(
+            userId = properties.getProperty("userId")?.toLongOrNull() ?: return@load null,
+            nickname = decode(properties.getProperty("nickname")).orEmpty(),
+            avatarUrl = decode(properties.getProperty("avatarUrl"))?.takeIf(String::isNotBlank),
+            signature = decode(properties.getProperty("signature"))?.takeIf(String::isNotBlank),
+        ).takeIf { it.userId > 0 }
+    } ?: loadMostRecentUserHint()
+
+    fun saveCurrentUser(profile: UserProfile) {
+        val properties = Properties().apply {
+            setProperty("version", CACHE_VERSION)
+            setProperty("userId", profile.userId.toString())
+            setProperty("nickname", encode(profile.nickname))
+            setProperty("avatarUrl", encode(profile.avatarUrl.orEmpty()))
+            setProperty("signature", encode(profile.signature.orEmpty()))
+            setProperty("savedAt", System.currentTimeMillis().toString())
+        }
+        save(file("profile", "current"), properties)
+    }
+
+    fun clearCurrentUser() {
+        runCatching { Files.deleteIfExists(file("profile", "current")) }
+    }
+
     fun loadTracks(playlistId: Long): CachedPlaylistTracks? = load(file("tracks", playlistId.toString())) { properties ->
         val count = properties.getProperty("count")?.toIntOrNull() ?: return@load null
         val tracks = (0 until count).mapNotNull { index -> properties.readTrack("item.$index") }
@@ -52,6 +78,21 @@ internal class DesktopPlaylistCache(
         save(file("tracks", playlistId.toString()), properties)
     }
 
+    fun loadLikedTracks(userId: Long): List<TrackItem> = load(file("liked", userId.toString())) { properties ->
+        val count = properties.getProperty("count")?.toIntOrNull() ?: return@load emptyList()
+        (0 until count).mapNotNull { index -> properties.readTrack("item.$index") }
+    } ?: emptyList()
+
+    fun saveLikedTracks(userId: Long, tracks: List<TrackItem>) {
+        val properties = Properties().apply {
+            setProperty("version", CACHE_VERSION)
+            setProperty("count", tracks.size.toString())
+            setProperty("savedAt", System.currentTimeMillis().toString())
+            tracks.forEachIndexed { index, track -> writeTrack("item.$index", track) }
+        }
+        save(file("liked", userId.toString()), properties)
+    }
+
     private fun file(kind: String, key: String): Path {
         val safeKey = key.replace(Regex("[^A-Za-z0-9_-]"), "_")
         return cacheDirectory.resolve("$kind-$safeKey.properties")
@@ -62,6 +103,33 @@ internal class DesktopPlaylistCache(
         val properties = Properties().apply { Files.newInputStream(path).use(::load) }
         if (properties.getProperty("version") != CACHE_VERSION) return@runCatching null
         block(properties)
+    }.getOrNull()
+
+    private fun loadMostRecentUserHint(): UserProfile? = runCatching {
+        if (!Files.isDirectory(cacheDirectory)) return@runCatching null
+        Files.newDirectoryStream(cacheDirectory, "collection-user-*.properties").use { entries ->
+            val latest = entries.mapNotNull { path ->
+                val userId = USER_COLLECTION_FILE.matchEntire(path.fileName.toString())
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.toLongOrNull()
+                    ?: return@mapNotNull null
+                val savedAt = runCatching {
+                    Properties().apply { Files.newInputStream(path).use(::load) }
+                        .getProperty("savedAt")
+                        ?.toLongOrNull()
+                        ?: 0L
+                }.getOrDefault(0L)
+                userId to savedAt
+            }.maxByOrNull { (_, savedAt) -> savedAt } ?: return@use null
+            val userId = latest.first
+            val nickname = loadPlaylists("user-$userId")
+                .asSequence()
+                .mapNotNull(PlaylistItem::creatorName)
+                .firstOrNull()
+                .orEmpty()
+            UserProfile(userId = userId, nickname = nickname)
+        }
     }.getOrNull()
 
     private fun save(path: Path, properties: Properties) {
@@ -126,6 +194,7 @@ internal class DesktopPlaylistCache(
 
     private companion object {
         const val CACHE_VERSION = "1"
+        val USER_COLLECTION_FILE = Regex("collection-user-(\\d+)\\.properties")
         val encoder: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
         val decoder: Base64.Decoder = Base64.getUrlDecoder()
 

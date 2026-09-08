@@ -25,6 +25,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.rememberScrollState
@@ -85,6 +86,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -129,6 +131,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.core.view.WindowCompat
 import coil3.compose.AsyncImage
+import dev.naominet.lazer.gateway.AudioQuality
 import dev.naominet.lazer.gateway.DEFAULT_GATEWAY_BASE_URL
 import dev.naominet.lazer.gateway.normalizeGatewayBaseUrl
 import kotlinx.coroutines.launch
@@ -739,6 +742,7 @@ private fun MePage(controller: AndroidGatewayController) {
 private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val systemMonetAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    var isAudioQualitySheetVisible by remember { mutableStateOf(false) }
     var followDelaySliderValue by remember(controller.lyricFollowDelayMillis) {
         mutableFloatStateOf(controller.lyricFollowDelayMillis.toFloat())
     }
@@ -833,6 +837,65 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                         checked = controller.useSystemMonetColors && systemMonetAvailable,
                         onCheckedChange = null,
                         enabled = systemMonetAvailable,
+                    )
+                }
+            }
+        }
+        item { SectionTitle("播放") }
+        item {
+            SettingsCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button) { isAudioQualitySheetVisible = true }
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("音质", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "${controller.audioQuality.description} · 下次播放时生效",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Text(
+                        controller.audioQuality.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.primary,
+                    )
+                }
+            }
+        }
+        item {
+            SettingsCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Switch) {
+                            controller.updateExclusiveAudio(!controller.exclusiveAudio)
+                        }
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("独占音频", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (controller.exclusiveAudio) {
+                                "播放时请求系统暂停其他应用的声音"
+                            } else {
+                                "与其他应用共享音频输出"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerSwitch(
+                        engine = controller.themeEngine,
+                        checked = controller.exclusiveAudio,
+                        onCheckedChange = null,
                     )
                 }
             }
@@ -949,6 +1012,85 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
             }
         } else {
             item { SignInInvitation(controller::openLogin) }
+        }
+    }
+    if (isAudioQualitySheetVisible) {
+        AudioQualitySheet(
+            selected = controller.audioQuality,
+            onSelected = {
+                controller.updateAudioQuality(it)
+                isAudioQualitySheetVisible = false
+            },
+            onDismiss = { isAudioQualitySheetVisible = false },
+        )
+    }
+}
+
+@Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun AudioQualitySheet(
+    selected: AudioQuality,
+    onSelected: (AudioQuality) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.surface,
+        contentColor = colors.onSurface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+        ) {
+            Text(
+                "播放音质",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            )
+            Text(
+                "高音质会使用更多流量；会员音质以帐号权限为准。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+            Spacer(Modifier.height(8.dp))
+            ANDROID_AUDIO_QUALITY_OPTIONS.forEach { quality ->
+                val isSelected = quality == selected
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.RadioButton,
+                            onClick = { onSelected(quality) },
+                        )
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = isSelected,
+                        onClick = null,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        quality.label,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (isSelected) colors.primary else colors.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        quality.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.MediaPlayer
@@ -115,6 +116,11 @@ object AndroidPlaybackConnection {
         AndroidPlaybackService.EXTRA_POSITION to positionMillis.coerceAtLeast(0L),
     )
 
+    fun updateExclusiveAudio(context: Context) = dispatch(
+        context,
+        AndroidPlaybackService.ACTION_EXCLUSIVE_AUDIO_CHANGED,
+    )
+
     fun stopAndClearSession(context: Context) = dispatch(context, AndroidPlaybackService.ACTION_STOP_AND_CLEAR_SESSION)
 
     private fun dispatch(context: Context, action: String, extra: Pair<String, Long>? = null) {
@@ -133,6 +139,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var mediaSession: MediaSession
     private lateinit var audioManager: AudioManager
+    private var audioFocusRequest: AudioFocusRequest? = null
     private lateinit var gatewaySettings: AndroidSettingsStore
     private lateinit var gatewaySessionStore: AndroidGatewaySessionStore
     private lateinit var gateway: NeteaseMusicGateway
@@ -196,6 +203,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
             ACTION_NEXT -> playNext()
             ACTION_PREVIOUS -> playPrevious()
             ACTION_SEEK -> seekTo(intent.getLongExtra(EXTRA_POSITION, 0L))
+            ACTION_EXCLUSIVE_AUDIO_CHANGED -> refreshAudioFocusMode()
             ACTION_STOP -> stopPlayback()
             ACTION_STOP_AND_CLEAR_SESSION -> stopPlayback(clearSession = true)
         }
@@ -208,13 +216,13 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN -> if (wasPlayingBeforeFocusLoss) {
                 wasPlayingBeforeFocusLoss = false
-                resumeCurrent()
+                resumeCurrent(requestFocus = false)
             }
             AudioManager.AUDIOFOCUS_LOSS,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 wasPlayingBeforeFocusLoss = player?.isPlaying == true
-                pauseCurrent()
+                pauseCurrent(abandonExclusiveFocus = false)
             }
         }
     }
@@ -222,6 +230,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
     private fun resolveAndPlay(track: AndroidTrack) {
         val generation = ++loadingGeneration
         releasePlayer()
+        abandonAudioFocus()
         requestArtwork(track)
         ensureForeground(track, preparing = true)
         AndroidPlaybackStateStore.update(
@@ -248,17 +257,15 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
     }
 
     private fun preparePlayer(track: AndroidTrack, url: String, generation: Long) {
-        requestAudioFocus()
         val newPlayer = MediaPlayer().apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-            )
+            setAudioAttributes(playbackAudioAttributes())
             setOnPreparedListener { readyPlayer ->
                 if (generation != loadingGeneration) {
                     readyPlayer.release()
+                    return@setOnPreparedListener
+                }
+                if (!requestAudioFocus()) {
+                    publishError(audioFocusFailureMessage())
                     return@setOnPreparedListener
                 }
                 readyPlayer.start()
@@ -296,12 +303,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
 
     private suspend fun resolveStreamUrl(trackId: Long): String? {
         refreshGatewayProvider()
-        val attempts = listOf(
-            AudioQuality.EXHIGH to false,
-            AudioQuality.HIGHER to false,
-            AudioQuality.STANDARD to false,
-            AudioQuality.EXHIGH to true,
-        )
+        val attempts = androidAudioQualityAttempts(gatewaySettings.audioQuality)
         attempts.forEach { (quality, unblock) ->
             val rawUrl = runCatching {
                 val streams = gateway.songUrls(listOf(trackId), quality = quality, unblock = unblock).data
@@ -326,13 +328,16 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         sessionStore = gatewaySessionStore,
     )
 
-    private fun resumeCurrent() {
+    private fun resumeCurrent(requestFocus: Boolean = true) {
         val currentPlayer = player
         if (currentPlayer == null) {
             AndroidPlaybackQueue.current()?.let(::resolveAndPlay)
             return
         }
-        requestAudioFocus()
+        if (requestFocus && !requestAudioFocus()) {
+            publishError(audioFocusFailureMessage())
+            return
+        }
         runCatching { currentPlayer.start() }.onSuccess {
             publishCurrentState(isPreparing = false, isPlaying = true)
             AndroidPlaybackStateStore.snapshot.value.track?.let { ensureForeground(it, preparing = false) }
@@ -341,12 +346,13 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         }
     }
 
-    private fun pauseCurrent() {
+    private fun pauseCurrent(abandonExclusiveFocus: Boolean = true) {
         player?.let { currentPlayer ->
             runCatching { if (currentPlayer.isPlaying) currentPlayer.pause() }
             publishCurrentState(isPreparing = false, isPlaying = false)
             AndroidPlaybackStateStore.snapshot.value.track?.let { ensureForeground(it, preparing = false) }
         }
+        if (gatewaySettings.exclusiveAudio && abandonExclusiveFocus) abandonAudioFocus()
     }
 
     private fun seekTo(positionMillis: Long) {
@@ -371,7 +377,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         releasePlayer()
         artworkTrackId = null
         artworkBitmap = null
-        audioManager.abandonAudioFocus(this)
+        abandonAudioFocus()
         if (clearSession) gateway.clearSession()
         AndroidPlaybackStateStore.update(AndroidPlaybackSnapshot())
         mediaSession.setPlaybackState(
@@ -405,6 +411,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
     private fun publishError(message: String) {
         ++loadingGeneration
         releasePlayer()
+        abandonAudioFocus()
         val previous = AndroidPlaybackStateStore.snapshot.value
         AndroidPlaybackStateStore.update(previous.copy(isPreparing = false, isPlaying = false, message = message))
         previous.track?.let {
@@ -568,8 +575,49 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    private fun requestAudioFocus() {
-        audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+    private fun requestAudioFocus(): Boolean {
+        abandonAudioFocus()
+        val focusGain = androidAudioFocusGain(gatewaySettings.exclusiveAudio)
+        val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val request = AudioFocusRequest.Builder(focusGain)
+                .setAudioAttributes(playbackAudioAttributes())
+                .setOnAudioFocusChangeListener(this, handler)
+                .setWillPauseWhenDucked(true)
+                .build()
+            audioFocusRequest = request
+            audioManager.requestAudioFocus(request)
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, focusGain)
+        }
+        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    private fun abandonAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let(audioManager::abandonAudioFocusRequest)
+            audioFocusRequest = null
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus(this)
+        }
+    }
+
+    private fun refreshAudioFocusMode() {
+        val isPlaying = player?.isPlaying == true
+        abandonAudioFocus()
+        if (isPlaying && !requestAudioFocus()) publishError(audioFocusFailureMessage())
+    }
+
+    private fun playbackAudioAttributes(): AudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+        .build()
+
+    private fun audioFocusFailureMessage(): String = if (gatewaySettings.exclusiveAudio) {
+        "无法独占音频输出，请关闭独占音频后重试"
+    } else {
+        "暂时无法使用音频输出"
     }
 
     private fun releasePlayer() {
@@ -586,7 +634,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         artworkTrackId = null
         artworkBitmap = null
         releasePlayer()
-        audioManager.abandonAudioFocus(this)
+        abandonAudioFocus()
         mediaSession.isActive = false
         mediaSession.release()
         scope.cancel()
@@ -600,6 +648,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         const val ACTION_NEXT = "dev.naominet.lazer.action.NEXT"
         const val ACTION_PREVIOUS = "dev.naominet.lazer.action.PREVIOUS"
         const val ACTION_SEEK = "dev.naominet.lazer.action.SEEK"
+        const val ACTION_EXCLUSIVE_AUDIO_CHANGED = "dev.naominet.lazer.action.EXCLUSIVE_AUDIO_CHANGED"
         const val ACTION_STOP = "dev.naominet.lazer.action.STOP"
         const val ACTION_STOP_AND_CLEAR_SESSION = "dev.naominet.lazer.action.STOP_AND_CLEAR_SESSION"
         const val EXTRA_POSITION = "position_millis"
@@ -610,6 +659,23 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         private const val NETWORK_TIMEOUT_MILLIS = 10_000
         private const val TAG = "LazerPlayback"
     }
+}
+
+internal fun androidAudioFocusGain(exclusiveAudio: Boolean): Int = if (exclusiveAudio) {
+    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+} else {
+    AudioManager.AUDIOFOCUS_GAIN
+}
+
+internal fun androidAudioQualityAttempts(preferred: AudioQuality): List<Pair<AudioQuality, Boolean>> {
+    val preferredIndex = ANDROID_AUDIO_QUALITY_OPTIONS.indexOf(preferred)
+        .takeIf { it >= 0 }
+        ?: ANDROID_AUDIO_QUALITY_OPTIONS.indexOf(AudioQuality.EXHIGH)
+    val normalAttempts = ANDROID_AUDIO_QUALITY_OPTIONS
+        .subList(0, preferredIndex + 1)
+        .asReversed()
+        .map { it to false }
+    return normalAttempts + (preferred to true)
 }
 
 internal fun normalizedPlaybackUrl(raw: String?): String? {

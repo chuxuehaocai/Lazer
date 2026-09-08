@@ -15,23 +15,20 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.sound.sampled.AudioFormat
-import javax.sound.sampled.AudioSystem
-import javax.sound.sampled.FloatControl
-import javax.sound.sampled.SourceDataLine
-import kotlin.math.log10
 import kotlin.math.roundToInt
 
 private const val OutputWriteTimeoutNanos = 2_000_000_000L
 
 /**
  * Small desktop streaming player. JavaMP3 decodes the growing cached MP3 stream, while PCM is
- * written to the operating system's default output device through [SourceDataLine].
+ * written to the operating system's default output device.
  */
 internal class DesktopAudioPlayer(
     private val onProgress: (playbackToken: Long, progress: Float) -> Unit,
     private val onBuffered: (trackId: Long, progress: Float) -> Unit,
     private val onCompleted: (playbackToken: Long) -> Unit,
     private val onError: (playbackToken: Long, error: Throwable) -> Unit,
+    initialExclusiveAudio: Boolean = false,
 ) : Closeable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val audioCache = DesktopAudioCache(onProgress = onBuffered)
@@ -39,7 +36,7 @@ internal class DesktopAudioPlayer(
     private var playbackJob: Job? = null
 
     @Volatile
-    private var activeLine: SourceDataLine? = null
+    private var activeLine: DesktopPcmAudioOutput? = null
 
     @Volatile
     private var activeInput: Closeable? = null
@@ -49,6 +46,9 @@ internal class DesktopAudioPlayer(
 
     @Volatile
     private var volume = 0.72f
+
+    @Volatile
+    private var exclusiveAudio = initialExclusiveAudio && isWindowsDesktop()
 
     fun play(
         url: String,
@@ -97,7 +97,14 @@ internal class DesktopAudioPlayer(
     fun pause() {
         paused = true
         PlaybackDebugLog.event("audio-pause", "token=${generation.get()}")
-        runCatching { activeLine?.stop() }
+        activeLine?.let { output ->
+            if (output.usesSoftwareVolume) {
+                // A paused exclusive stream must not keep other applications locked out.
+                closeOutputLine(output)
+            } else {
+                runCatching { output.stop() }
+            }
+        }
     }
 
     fun resume() {
@@ -108,7 +115,11 @@ internal class DesktopAudioPlayer(
 
     fun setVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
-        activeLine?.let(::applyVolume)
+        activeLine?.setVolume(volume)
+    }
+
+    fun setExclusiveAudio(enabled: Boolean) {
+        exclusiveAudio = enabled && isWindowsDesktop()
     }
 
     fun stop() {
@@ -145,7 +156,7 @@ internal class DesktopAudioPlayer(
         activeInput = decodedInput
         val decodedFormat = decodedInput.audioFormat
 
-        var line: SourceDataLine? = null
+        var line: DesktopPcmAudioOutput? = null
         var outputWatchdog: Job? = null
         try {
             // A PCM position must land on a complete sample frame. Dropping an arbitrary byte
@@ -162,7 +173,7 @@ internal class DesktopAudioPlayer(
             }
             if (!scope.isActive || token != generation.get()) return
 
-            line = openOutputLine(decodedFormat)
+            line = if (paused && exclusiveAudio) null else openOutputLine(decodedFormat)
 
             val buffer = ByteArray(16 * 1024)
             var lastProgressUpdate = 0L
@@ -174,7 +185,7 @@ internal class DesktopAudioPlayer(
                 frameRate = decodedFormat.frameRate,
             )
             val seekFadeIn = PcmSeekFadeIn(decodedFormat).takeIf { fromProgress > 0f }
-            val writeInProgress = AtomicReference<SourceDataLine?>(null)
+            val writeInProgress = AtomicReference<DesktopPcmAudioOutput?>(null)
             val writeStartedAtNanos = AtomicLong(0L)
 
             fun playedMillis(): Long {
@@ -209,7 +220,13 @@ internal class DesktopAudioPlayer(
                 while (paused && scope.isActive && token == generation.get()) delay(40)
                 if (!scope.isActive || token != generation.get()) return
 
-                val active = line ?: return
+                val currentOutput = line
+                if (currentOutput == null || (!currentOutput.isOpen && currentOutput.usesSoftwareVolume)) {
+                    if (currentOutput != null) outputTimeline.onLineReplaced()
+                    line = openOutputLine(decodedFormat)
+                    continue
+                }
+                val active = currentOutput
                 if (!paused && !active.isRunning) {
                     runCatching { active.start() }
                 }
@@ -249,6 +266,9 @@ internal class DesktopAudioPlayer(
                         // short ramp removes that discontinuity without making the seek sound
                         // delayed or changing normal playback from the beginning.
                         seekFadeIn?.apply(buffer, count)
+                        if (line.usesSoftwareVolume) {
+                            applyPcm16Volume(buffer, count, decodedFormat, volume)
+                        }
                     }
                 }
 
@@ -260,6 +280,12 @@ internal class DesktopAudioPlayer(
                         continue
                     }
                     val output = line ?: return
+                    if (!output.isOpen && output.usesSoftwareVolume) {
+                        outputTimeline.onLineReplaced()
+                        line = openOutputLine(decodedFormat)
+                        zeroWrites = 0
+                        continue
+                    }
                     var writeError: Throwable? = null
                     writeStartedAtNanos.set(System.nanoTime())
                     writeInProgress.set(output)
@@ -272,6 +298,7 @@ internal class DesktopAudioPlayer(
                         writeInProgress.compareAndSet(output, null)
                         writeStartedAtNanos.set(0L)
                     }
+                    if (paused && output.usesSoftwareVolume && !output.isOpen) continue
                     if (chunk > 0) {
                         written += chunk
                         outputTimeline.onBytesSubmitted(chunk)
@@ -286,7 +313,11 @@ internal class DesktopAudioPlayer(
                         if (shouldReopen && outputRecoveries < 3) {
                             PlaybackDebugLog.event(
                                 "audio-output-recover",
-                                "token=$token track=$trackId attempt=${outputRecoveries + 1} open=${output.isOpen} running=${output.isRunning} available=${runCatching { output.available() }.getOrDefault(-1)} written=$written count=$count error=${writeError?.playbackDebugSummary().orEmpty()}",
+                                "token=$token track=$trackId attempt=${outputRecoveries + 1} " +
+                                    "open=${output.isOpen} running=${output.isRunning} " +
+                                    "available=${runCatching { output.availableBytes }.getOrDefault(-1)} " +
+                                    "written=$written count=$count " +
+                                    "error=${writeError?.playbackDebugSummary().orEmpty()}",
                             )
                             outputTimeline.onLineReplaced()
                             closeOutputLine(output)
@@ -339,18 +370,18 @@ internal class DesktopAudioPlayer(
      * [SourceDataLine.drain] can block indefinitely on some Windows drivers when the stream ends.
      * Wait up to [timeoutMs], then force-stop so the next track can start.
      */
-    private suspend fun drainWithTimeout(line: SourceDataLine, token: Long, timeoutMs: Long) {
+    private suspend fun drainWithTimeout(line: DesktopPcmAudioOutput, token: Long, timeoutMs: Long) {
         val deadline = System.nanoTime() + timeoutMs * 1_000_000L
         while (
             scope.isActive &&
             token == generation.get() &&
             line.isOpen &&
-            line.available() < line.bufferSize &&
+            line.availableBytes < line.bufferSizeBytes &&
             System.nanoTime() < deadline
         ) {
             delay(12)
         }
-        if (line.isOpen && line.available() < line.bufferSize) {
+        if (line.isOpen && line.availableBytes < line.bufferSizeBytes) {
             runCatching { line.stop() }
             runCatching { line.flush() }
         }
@@ -362,27 +393,14 @@ internal class DesktopAudioPlayer(
         }
     }
 
-    private fun applyVolume(line: SourceDataLine) {
-        runCatching {
-            val control = line.getControl(FloatControl.Type.MASTER_GAIN) as FloatControl
-            val gain = if (volume <= 0.0001f) {
-                control.minimum
-            } else {
-                (20f * log10(volume)).coerceIn(control.minimum, control.maximum)
-            }
-            control.value = gain
-        }
-    }
-
-    private fun openOutputLine(format: AudioFormat): SourceDataLine =
-        AudioSystem.getSourceDataLine(format).also { opened ->
+    private fun openOutputLine(format: AudioFormat): DesktopPcmAudioOutput =
+        (if (exclusiveAudio) WindowsWasapiAudioOutput(format) else JavaSoundPcmAudioOutput(format)).also { opened ->
             activeLine = opened
-            opened.open(format)
-            applyVolume(opened)
+            opened.setVolume(volume)
             if (!paused) opened.start()
         }
 
-    private fun closeOutputLine(line: SourceDataLine) {
+    private fun closeOutputLine(line: DesktopPcmAudioOutput) {
         if (activeLine === line) activeLine = null
         runCatching { line.stop() }
         runCatching { line.flush() }
@@ -410,7 +428,7 @@ internal class DesktopAudioPlayer(
         runCatching { input?.close() }
     }
 
-    private fun release(line: SourceDataLine, input: Closeable) {
+    private fun release(line: DesktopPcmAudioOutput, input: Closeable) {
         if (activeInput === input) activeInput = null
         closeOutputLine(line)
         runCatching { input.close() }
@@ -508,6 +526,42 @@ internal class PcmSeekFadeIn(
                 }
             }
             processedFrames += 1
+        }
+    }
+}
+
+/** Applies the app volume before WASAPI because exclusive streams bypass the system mixer. */
+internal fun applyPcm16Volume(
+    buffer: ByteArray,
+    byteCount: Int,
+    format: AudioFormat,
+    volume: Float,
+) {
+    if (
+        format.encoding != AudioFormat.Encoding.PCM_SIGNED ||
+        format.sampleSizeInBits != 16 ||
+        format.frameSize < 2 ||
+        format.frameSize % 2 != 0
+    ) {
+        return
+    }
+    val normalized = volume.coerceIn(0f, 1f)
+    if (normalized >= 0.9999f) return
+    val safeByteCount = byteCount.coerceIn(0, buffer.size)
+    val sampleBytes = safeByteCount - safeByteCount % 2
+    for (offset in 0 until sampleBytes step 2) {
+        val first = buffer[offset].toInt() and 0xFF
+        val second = buffer[offset + 1].toInt() and 0xFF
+        val raw = if (format.isBigEndian) (first shl 8) or second else (second shl 8) or first
+        val scaled = (raw.toShort().toInt() * normalized)
+            .roundToInt()
+            .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+        if (format.isBigEndian) {
+            buffer[offset] = (scaled shr 8).toByte()
+            buffer[offset + 1] = scaled.toByte()
+        } else {
+            buffer[offset] = scaled.toByte()
+            buffer[offset + 1] = (scaled shr 8).toByte()
         }
     }
 }
