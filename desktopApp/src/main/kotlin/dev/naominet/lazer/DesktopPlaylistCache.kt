@@ -93,6 +93,24 @@ internal class DesktopPlaylistCache(
         save(file("liked", userId.toString()), properties)
     }
 
+    /** Clears library data while preserving the cached profile used for cache-first startup. */
+    fun clearPlaylistData(): Int = runCatching {
+        if (!Files.isDirectory(cacheDirectory)) return@runCatching 0
+        var removed = 0
+        Files.newDirectoryStream(cacheDirectory).use { entries ->
+            entries.forEach { path ->
+                if (
+                    Files.isRegularFile(path) &&
+                    path.fileName.toString() != "profile-current.properties" &&
+                    Files.deleteIfExists(path)
+                ) {
+                    removed += 1
+                }
+            }
+        }
+        removed
+    }.getOrDefault(0)
+
     private fun file(kind: String, key: String): Path {
         val safeKey = key.replace(Regex("[^A-Za-z0-9_-]"), "_")
         return cacheDirectory.resolve("$kind-$safeKey.properties")

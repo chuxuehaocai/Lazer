@@ -46,6 +46,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -558,6 +561,7 @@ private fun DesktopSettingsDialog(
     controller: DesktopPlayerController,
     onDismiss: () -> Unit,
 ) {
+    var cacheDialogVisible by remember { mutableStateOf(false) }
     var followDelaySliderValue by remember(controller.lyricFollowDelayMillis) {
         mutableFloatStateOf(controller.lyricFollowDelayMillis.toFloat())
     }
@@ -565,6 +569,7 @@ private fun DesktopSettingsDialog(
         mutableStateOf(controller.gatewayBaseUrl)
     }
     val displayedFollowDelay = normalizeLyricFollowDelayMillis(followDelaySliderValue.roundToLong())
+    val animationSpeedOptions = LyricAnimationSpeed.entries
     val normalizedGatewayBaseUrl = normalizeGatewayBaseUrl(gatewayBaseUrlDraft)
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -643,6 +648,42 @@ private fun DesktopSettingsDialog(
                     HorizontalDivider()
                 }
                 Text("歌词", style = MaterialTheme.typography.titleSmall)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("歌词动画速率", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "调整逐字高亮和自动跟随的节奏",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        controller.lyricAnimationSpeed.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                LazerSlider(
+                    engine = controller.themeEngine,
+                    value = controller.lyricAnimationSpeed.ordinal.toFloat(),
+                    onValueChange = { value ->
+                        controller.updateLyricAnimationSpeed(
+                            animationSpeedOptions[value.roundToInt().coerceIn(animationSpeedOptions.indices)],
+                        )
+                    },
+                    valueRange = 0f..animationSpeedOptions.lastIndex.toFloat(),
+                    steps = animationSpeedOptions.size - 2,
+                )
+                Row(Modifier.fillMaxWidth()) {
+                    animationSpeedOptions.forEachIndexed { index, speed ->
+                        Text(
+                            speed.label,
+                            modifier = if (index < animationSpeedOptions.lastIndex) Modifier.weight(1f) else Modifier,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 Text(
                     "手动滚动歌词后，经过所选时间恢复自动跟随。",
                     style = MaterialTheme.typography.bodySmall,
@@ -681,6 +722,32 @@ private fun DesktopSettingsDialog(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                HorizontalDivider()
+                Text("存储与同步", style = MaterialTheme.typography.titleSmall)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("清除本地缓存", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "选择清除歌曲缓存或歌单缓存",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = { cacheDialogVisible = true }) { Text("选择") }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("强制重新同步", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "保留当前内容，并重新获取最新歌单",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Button(onClick = controller::forceResync, enabled = !controller.isLoading) {
+                        Text(if (controller.isLoading) "同步中" else "重新同步")
+                    }
                 }
                 HorizontalDivider()
                 Text("音乐服务", style = MaterialTheme.typography.titleSmall)
@@ -726,6 +793,37 @@ private fun DesktopSettingsDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
     )
+    if (cacheDialogVisible) {
+        AlertDialog(
+            onDismissRequest = { cacheDialogVisible = false },
+            title = { Text("清除本地缓存") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "清除歌曲缓存会停止当前播放；登录状态不会受影响。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        onClick = {
+                            controller.clearSongCache()
+                            cacheDialogVisible = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("清除歌曲缓存", color = MaterialTheme.colorScheme.error) }
+                    TextButton(
+                        onClick = {
+                            controller.clearPlaylistCache()
+                            cacheDialogVisible = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("清除歌单缓存", color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { cacheDialogVisible = false }) { Text("取消") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -2051,7 +2149,11 @@ private fun LyricsOverlay(
                         val target = (liveIndex * rowPitchPx).coerceIn(0f, liveMax)
                         val distance = target - lyricScroll
                         if (kotlin.math.abs(distance) > 0.05f) {
-                            val approach = (1.0 - kotlin.math.exp(-11.0 * dt)).toFloat()
+                            val approach = (
+                                1.0 - kotlin.math.exp(
+                                    -lyricScrollApproachCoefficient(controller.lyricAnimationSpeed) * dt,
+                                )
+                            ).toFloat()
                             lyricScroll += distance * approach
                         } else {
                             lyricScroll = target
@@ -2219,6 +2321,23 @@ private fun LyricsOverlay(
                                 val scaledRowHeight = rowHeight * scale
                                 val textWidthFraction = (1f / scale).coerceAtMost(1f)
                                 val yDp = with(density) { lineCenterPx.toDp() } - scaledRowHeight / 2
+                                val lyricText = if (index == activeIndex && line.words.isNotEmpty()) {
+                                    val highlighted = lyricHighlightCharacterCount(
+                                        line.words,
+                                        controller.positionMillis,
+                                        controller.lyricAnimationSpeed,
+                                    ).coerceIn(0, line.text.length)
+                                    buildAnnotatedString {
+                                        withStyle(SpanStyle(color = colors.primary)) {
+                                            append(line.text.take(highlighted))
+                                        }
+                                        withStyle(SpanStyle(color = color.copy(alpha = 0.55f))) {
+                                            append(line.text.drop(highlighted))
+                                        }
+                                    }
+                                } else {
+                                    buildAnnotatedString { append(line.text) }
+                                }
 
                                 Box(
                                     Modifier
@@ -2239,7 +2358,7 @@ private fun LyricsOverlay(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
                                         Text(
-                                            text = line.text,
+                                            text = lyricText,
                                             modifier = Modifier
                                                 .fillMaxWidth(textWidthFraction)
                                                 .graphicsLayer {

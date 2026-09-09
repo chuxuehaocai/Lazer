@@ -65,6 +65,18 @@ class NeteaseMusicGatewayTest {
     }
 
     @Test
+    fun `forced playlist refresh adds the documented cache busting timestamp`() = runTest {
+        val client = HttpClient(MockEngine { request ->
+            assertEquals("/api/user/playlist", request.url.encodedPath)
+            assertEquals("123456789", request.url.parameters["timestamp"])
+            assertEquals("9", request.url.parameters["uid"])
+            respond(content = "{\"code\":200,\"playlist\":[],\"more\":false}", headers = jsonHeaders())
+        })
+
+        gateway(client).userPlaylists(uid = 9, forceRefresh = true)
+    }
+
+    @Test
     fun `blank coverImgUrl does not hide picUrl when resolving covers`() = runTest {
         val client = HttpClient(MockEngine {
             respond(

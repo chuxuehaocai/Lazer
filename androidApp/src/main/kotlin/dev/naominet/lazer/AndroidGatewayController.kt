@@ -21,6 +21,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class AndroidRootDestination(val label: String, val motionIndex: Int) {
     HOME("今天", 0),
@@ -65,6 +66,7 @@ class AndroidGatewayController(context: Context) {
     private var lyricJob: Job? = null
     private var qrLoginJob: Job? = null
     private var postLoginSyncJob: Job? = null
+    private var maintenanceJob: Job? = null
 
     var destination by mutableStateOf(AndroidRootDestination.HOME)
         private set
@@ -77,6 +79,8 @@ class AndroidGatewayController(context: Context) {
     var themeEngine by mutableStateOf(settings.themeEngine)
         private set
     var lyricFollowDelayMillis by mutableStateOf(settings.lyricFollowDelayMillis)
+        private set
+    var lyricAnimationSpeed by mutableStateOf(settings.lyricAnimationSpeed)
         private set
     var audioQuality by mutableStateOf(settings.audioQuality)
         private set
@@ -181,6 +185,11 @@ class AndroidGatewayController(context: Context) {
     fun updateLyricFollowDelay(value: Long) {
         lyricFollowDelayMillis = normalizeLyricFollowDelayMillis(value)
         settings.lyricFollowDelayMillis = lyricFollowDelayMillis
+    }
+
+    fun updateLyricAnimationSpeed(value: LyricAnimationSpeed) {
+        lyricAnimationSpeed = value
+        settings.lyricAnimationSpeed = value
     }
 
     fun updateAudioQuality(value: AudioQuality) {
@@ -319,9 +328,12 @@ class AndroidGatewayController(context: Context) {
         lyricsLoading = true
         lyricJob = scope.launch {
             try {
-                val response = gateway.lyrics(trackId)
+                val response = runCatching { gateway.wordByWordLyrics(trackId) }
+                    .getOrElse { gateway.lyrics(trackId) }
+                val timedLyrics = parseAndroidWordLyrics(response.yrc?.lyric)
+                    .ifEmpty { parseAndroidLrc(response.lrc?.lyric) }
                 val merged = mergeAndroidLyrics(
-                    parseAndroidLrc(response.lrc?.lyric),
+                    timedLyrics,
                     parseAndroidLrc(response.tlyric?.lyric),
                 )
                 lyrics = merged
@@ -507,8 +519,45 @@ class AndroidGatewayController(context: Context) {
 
     fun close() {
         postLoginSyncJob?.cancel()
+        maintenanceJob?.cancel()
         scope.cancel()
         gateway.close()
+    }
+
+    fun clearSongCache() {
+        maintenanceJob?.cancel()
+        maintenanceJob = scope.launch {
+            val removed = withContext(Dispatchers.IO) {
+                appContext.cacheDir.listFiles().orEmpty().count { it.deleteRecursively() }
+            }
+            message = if (removed > 0) "歌曲缓存已清除" else "歌曲缓存已经是空的"
+        }
+    }
+
+    fun clearPlaylistCache() {
+        val removed = cache.clearPlaylistData()
+        message = if (removed > 0) "歌单缓存已清除" else "歌单缓存已经是空的"
+    }
+
+    fun forceResync() {
+        maintenanceJob?.cancel()
+        bootstrapJob?.cancel()
+        postLoginSyncJob?.cancel()
+        maintenanceJob = scope.launch {
+            isLoading = true
+            message = "正在重新同步…"
+            try {
+                currentUser?.let { loadSignedInContent(it, forceRefresh = true) }
+                    ?: loadPublicContent(forceRefresh = true)
+                message = "已重新同步"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                message = "重新同步没有完成，请稍后再试"
+            } finally {
+                isLoading = false
+            }
+        }
     }
 
     private fun bootstrap() {
@@ -560,14 +609,16 @@ class AndroidGatewayController(context: Context) {
         }
     }
 
-    private suspend fun loadPublicContent() {
-        val freshPlaylists = gateway.topPlaylists(limit = 12).playlists.map(::toAndroidPlaylist)
+    private suspend fun loadPublicContent(forceRefresh: Boolean = false) {
+        val freshPlaylists = gateway.topPlaylists(limit = 12, forceRefresh = forceRefresh)
+            .playlists.map(::toAndroidPlaylist)
         if (freshPlaylists.isNotEmpty()) {
             featuredPlaylists = freshPlaylists
             cache.saveFeaturedPlaylists(freshPlaylists)
         }
         val source = featuredPlaylists.firstOrNull() ?: return
-        val freshTracks = gateway.playlistTracks(source.id, limit = 50).songs.map(::toAndroidTrack)
+        val freshTracks = gateway.playlistTracks(source.id, limit = 50, forceRefresh = forceRefresh)
+            .songs.map(::toAndroidTrack)
         if (freshTracks.isNotEmpty()) {
             homeTracks = freshTracks
             cache.saveTracks(HOME_TRACKS_CACHE_ID, freshTracks)
@@ -579,21 +630,21 @@ class AndroidGatewayController(context: Context) {
         likedSongIds = cache.loadLikedSongIds(profile.userId)
     }
 
-    private suspend fun loadSignedInContent(profile: UserProfile) {
-        runCatching { gateway.likedSongIds(profile.userId).ids.toSet() }
+    private suspend fun loadSignedInContent(profile: UserProfile, forceRefresh: Boolean = false) {
+        runCatching { gateway.likedSongIds(profile.userId, forceRefresh).ids.toSet() }
             .getOrNull()
             ?.let { freshLikedSongIds ->
                 likedSongIds = freshLikedSongIds
                 cache.saveLikedSongIds(profile.userId, freshLikedSongIds)
             }
-        val loadedPlaylists = loadAllUserPlaylists(profile.userId)
+        val loadedPlaylists = loadAllUserPlaylists(profile.userId, forceRefresh)
         if (loadedPlaylists.isNotEmpty()) {
             userPlaylists = loadedPlaylists
             cache.saveUserPlaylists(profile.userId, loadedPlaylists)
         }
 
         val recommendedPlaylists = runCatching {
-            gateway.dailyRecommendedPlaylists().recommend.map(::toAndroidPlaylist)
+            gateway.dailyRecommendedPlaylists(forceRefresh).recommend.map(::toAndroidPlaylist)
         }.getOrDefault(emptyList())
         if (recommendedPlaylists.isNotEmpty()) {
             featuredPlaylists = recommendedPlaylists
@@ -601,21 +652,29 @@ class AndroidGatewayController(context: Context) {
         }
 
         val recommendedTracks = runCatching {
-            gateway.dailyRecommendedSongs().data?.dailySongs.orEmpty().map(::toAndroidTrack)
+            gateway.dailyRecommendedSongs(forceRefresh).data?.dailySongs.orEmpty().map(::toAndroidTrack)
         }.getOrDefault(emptyList())
         if (recommendedTracks.isNotEmpty()) {
             homeTracks = recommendedTracks
             cache.saveTracks(HOME_TRACKS_CACHE_ID, recommendedTracks)
         } else if (homeTracks.isEmpty()) {
-            loadPublicContent()
+            loadPublicContent(forceRefresh)
         }
     }
 
-    private suspend fun loadAllUserPlaylists(userId: Long): List<AndroidPlaylist> {
+    private suspend fun loadAllUserPlaylists(
+        userId: Long,
+        forceRefresh: Boolean = false,
+    ): List<AndroidPlaylist> {
         val all = mutableListOf<AndroidPlaylist>()
         var offset = 0
         do {
-            val page = gateway.userPlaylists(userId, limit = 50, offset = offset)
+            val page = gateway.userPlaylists(
+                userId,
+                limit = 50,
+                offset = offset,
+                forceRefresh = forceRefresh,
+            )
             all += page.playlist.map(::toAndroidPlaylist)
             offset += page.playlist.size
             if (!page.more || page.playlist.isEmpty()) break

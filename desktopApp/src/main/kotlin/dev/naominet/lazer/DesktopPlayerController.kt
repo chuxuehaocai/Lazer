@@ -25,6 +25,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.swing.Swing
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
 
@@ -80,6 +81,7 @@ class DesktopPlayerController(
     private var paletteJob: Job? = null
     private var qrLoginJob: Job? = null
     private var bootstrapJob: Job? = null
+    private var maintenanceJob: Job? = null
     private var started = false
     private val activePlaybackToken = AtomicLong(0L)
     private val progressEvents = Channel<PlaybackProgress>(Channel.CONFLATED)
@@ -156,6 +158,8 @@ class DesktopPlayerController(
     var themeEngine by mutableStateOf(DesktopSettings.themeEngine)
         private set
     var lyricFollowDelayMillis by mutableStateOf(DesktopSettings.lyricFollowDelayMillis)
+        private set
+    var lyricAnimationSpeed by mutableStateOf(DesktopSettings.lyricAnimationSpeed)
         private set
     var gatewayBaseUrl by mutableStateOf(gateway.config.baseUrl)
         private set
@@ -334,6 +338,7 @@ class DesktopPlayerController(
         lyricsJob?.cancel()
         paletteJob?.cancel()
         qrLoginJob?.cancel()
+        maintenanceJob?.cancel()
         activePlaybackToken.set(0L)
         progressEvents.close()
         progressCollectorJob.cancel()
@@ -358,6 +363,11 @@ class DesktopPlayerController(
     fun updateLyricFollowDelay(value: Long) {
         lyricFollowDelayMillis = normalizeLyricFollowDelayMillis(value)
         DesktopSettings.lyricFollowDelayMillis = lyricFollowDelayMillis
+    }
+
+    fun updateLyricAnimationSpeed(value: LyricAnimationSpeed) {
+        lyricAnimationSpeed = value
+        DesktopSettings.lyricAnimationSpeed = value
     }
 
     fun updateGatewayBaseUrl(value: String): Boolean {
@@ -477,9 +487,12 @@ class DesktopPlayerController(
         lyricsLoading = true
         lyricsJob = scope.launch {
             try {
-                val response = gateway.lyrics(songId)
+                val response = runCatching { gateway.wordByWordLyrics(songId) }
+                    .getOrElse { gateway.lyrics(songId) }
+                val timedLyrics = parseDesktopWordLyrics(response.yrc?.lyric)
+                    .ifEmpty { parseLrc(response.lrc?.lyric) }
                 val parsed = mergeLyrics(
-                    lyrics = parseLrc(response.lrc?.lyric),
+                    lyrics = timedLyrics,
                     translatedLyrics = parseLrc(response.tlyric?.lyric),
                 )
                 if (nowPlaying?.id != songId) return@launch
@@ -784,6 +797,49 @@ class DesktopPlayerController(
         }
     }
 
+    fun clearSongCache() {
+        maintenanceJob?.cancel()
+        maintenanceJob = scope.launch {
+            playJob?.cancel()
+            activePlaybackToken.set(0L)
+            isPlaying = false
+            isSeeking = false
+            streamUrl = null
+            streamBitrate = null
+            bufferedProgress = 0f
+            val removed = withContext(Dispatchers.IO) { audioPlayer.clearCache() }
+            publishSystemMedia(
+                statusOverride = SystemMediaPlaybackStatus.STOPPED,
+                forcePosition = true,
+            )
+            statusMessage = if (removed > 0) "歌曲缓存已清除" else "歌曲缓存已经是空的"
+        }
+    }
+
+    fun clearPlaylistCache() {
+        val removed = playlistCache.clearPlaylistData()
+        statusMessage = if (removed > 0) "歌单缓存已清除" else "歌单缓存已经是空的"
+    }
+
+    fun forceResync() {
+        maintenanceJob?.cancel()
+        bootstrapJob?.cancel()
+        maintenanceJob = scope.launch {
+            beginRequest("正在重新同步…")
+            try {
+                currentUser?.let { syncUserLibrary(it, forceRefresh = true) }
+                    ?: loadPublicLibrary(forceRefresh = true)
+                statusMessage = "已重新同步"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                statusMessage = error.toFriendlyMessage("重新同步没有完成，请稍后再试")
+            } finally {
+                endRequest()
+            }
+        }
+    }
+
     fun openLogin() {
         isLoginVisible = true
         loginMethod = LoginMethod.QR_CODE
@@ -971,15 +1027,20 @@ class DesktopPlayerController(
                 ?.let { gateway.userDetail(it).profile }
     }
 
-    private suspend fun loadPublicLibrary() {
+    private suspend fun loadPublicLibrary(forceRefresh: Boolean = false) {
         val playlists = ensurePlaylistCovers(
-            gateway.topPlaylists(limit = 12).playlists.map { it.toPlaylistItem() },
+            gateway.topPlaylists(limit = 12, forceRefresh = forceRefresh).playlists.map { it.toPlaylistItem() },
+            forceRefresh = forceRefresh,
         )
         featuredPlaylists = playlists
         playlistCache.savePlaylists(FEATURED_CACHE_KEY, playlists)
         if (recentTracks.isEmpty() && playlists.isNotEmpty()) {
             val tracks = runCatching {
-                gateway.playlistTracks(playlists.first().id, limit = 18).songs.map { it.toTrackItem() }
+                gateway.playlistTracks(
+                    playlists.first().id,
+                    limit = 18,
+                    forceRefresh = forceRefresh,
+                ).songs.map { it.toTrackItem() }
             }.getOrDefault(emptyList())
             recentTracks = tracks
             playlistCache.saveTracks(RECENT_TRACKS_CACHE_ID, tracks, complete = false)
@@ -1001,26 +1062,29 @@ class DesktopPlayerController(
         isLiked = nowPlaying?.let { current -> likedTracks.any { it.id == current.id } } ?: false
     }
 
-    private suspend fun syncUserLibrary(profile: UserProfile) {
+    private suspend fun syncUserLibrary(profile: UserProfile, forceRefresh: Boolean = false) {
         val cacheKey = userPlaylistCacheKey(profile.userId)
-        val personal = loadAllUserPlaylists(profile.userId, cacheKey)
+        val personal = loadAllUserPlaylists(profile.userId, cacheKey, forceRefresh)
         userPlaylists = personal
 
         // `/recommend/resource` sometimes omits picUrl/coverImgUrl for radar-style lists.
         // Always resolve covers before publishing to the home strip.
         val recommended = runCatching {
-            ensurePlaylistCovers(gateway.dailyRecommendedPlaylists().recommend.map { it.toPlaylistItem() })
+            ensurePlaylistCovers(
+                gateway.dailyRecommendedPlaylists(forceRefresh).recommend.map { it.toPlaylistItem() },
+                forceRefresh,
+            )
         }.getOrDefault(emptyList())
         if (recommended.isNotEmpty()) {
             featuredPlaylists = (recommended + featuredPlaylists)
                 .distinctBy { it.id }
-                .let { ensurePlaylistCovers(it) }
+                .let { ensurePlaylistCovers(it, forceRefresh) }
                 .take(12)
             playlistCache.savePlaylists(FEATURED_CACHE_KEY, featuredPlaylists)
         } else if (featuredPlaylists.isEmpty() || featuredPlaylists.all { it.coverUrl.isNullOrBlank() }) {
-            loadPublicLibrary()
+            loadPublicLibrary(forceRefresh)
         } else {
-            featuredPlaylists = ensurePlaylistCovers(featuredPlaylists)
+            featuredPlaylists = ensurePlaylistCovers(featuredPlaylists, forceRefresh)
             playlistCache.savePlaylists(FEATURED_CACHE_KEY, featuredPlaylists)
         }
 
@@ -1028,16 +1092,17 @@ class DesktopPlayerController(
         val liked = personal.firstOrNull { it.isLikedCollection }
         likedTracks = when {
             liked != null -> runCatching {
-                gateway.playlistTracks(liked.id, limit = 200).songs.map { it.toTrackItem() }
+                gateway.playlistTracks(liked.id, limit = 200, forceRefresh = forceRefresh)
+                    .songs.map { it.toTrackItem() }
             }.getOrDefault(likedTracks)
             else -> {
-                val likedIds = runCatching { gateway.likedSongIds(profile.userId).ids.take(200) }
+                val likedIds = runCatching { gateway.likedSongIds(profile.userId, forceRefresh).ids.take(200) }
                     .getOrDefault(emptyList())
                 if (likedIds.isEmpty()) {
                     emptyList()
                 } else {
                     runCatching {
-                        val byId = gateway.songDetails(likedIds).songs.associateBy { it.id }
+                        val byId = gateway.songDetails(likedIds, forceRefresh).songs.associateBy { it.id }
                         likedIds.mapNotNull { id -> byId[id]?.toTrackItem() }
                     }.getOrDefault(emptyList())
                 }
@@ -1045,7 +1110,9 @@ class DesktopPlayerController(
         }
         playlistCache.saveLikedTracks(profile.userId, likedTracks)
 
-        val dailyTracks = runCatching { gateway.dailyRecommendedSongs().data?.dailySongs.orEmpty().map { it.toTrackItem() } }
+        val dailyTracks = runCatching {
+            gateway.dailyRecommendedSongs(forceRefresh).data?.dailySongs.orEmpty().map { it.toTrackItem() }
+        }
             .getOrDefault(emptyList())
         if (dailyTracks.isNotEmpty()) {
             recentTracks = dailyTracks
@@ -1053,7 +1120,11 @@ class DesktopPlayerController(
             if (nowPlaying == null) nowPlaying = dailyTracks.first()
         } else if (recentTracks.isEmpty() && personal.isNotEmpty()) {
             recentTracks = runCatching {
-                gateway.playlistTracks(personal.first().id, limit = 24).songs.map { it.toTrackItem() }
+                gateway.playlistTracks(
+                    personal.first().id,
+                    limit = 24,
+                    forceRefresh = forceRefresh,
+                ).songs.map { it.toTrackItem() }
             }.getOrDefault(emptyList())
             playlistCache.saveTracks(RECENT_TRACKS_CACHE_ID, recentTracks, complete = false)
             if (nowPlaying == null) nowPlaying = recentTracks.firstOrNull()
@@ -1184,11 +1255,20 @@ class DesktopPlayerController(
         return combined
     }
 
-    private suspend fun loadAllUserPlaylists(userId: Long, cacheKey: String): List<PlaylistItem> {
+    private suspend fun loadAllUserPlaylists(
+        userId: Long,
+        cacheKey: String,
+        forceRefresh: Boolean = false,
+    ): List<PlaylistItem> {
         val combined = mutableListOf<PlaylistItem>()
         var offset = 0
         do {
-            val response = gateway.userPlaylists(userId, limit = USER_PLAYLIST_PAGE_SIZE, offset = offset)
+            val response = gateway.userPlaylists(
+                userId,
+                limit = USER_PLAYLIST_PAGE_SIZE,
+                offset = offset,
+                forceRefresh = forceRefresh,
+            )
             val page = response.playlist.map { it.toPlaylistItem() }
             combined += page.filterNot { incoming -> combined.any { it.id == incoming.id } }
             userPlaylists = combined.toList()
@@ -1202,12 +1282,15 @@ class DesktopPlayerController(
      * Some Gateway playlist payloads only carry a cover on `/playlist/detail`.
      * Fill missing artwork so the home strip never publishes bare gradient tiles when a cover exists.
      */
-    private suspend fun ensurePlaylistCovers(playlists: List<PlaylistItem>): List<PlaylistItem> {
+    private suspend fun ensurePlaylistCovers(
+        playlists: List<PlaylistItem>,
+        forceRefresh: Boolean = false,
+    ): List<PlaylistItem> {
         if (playlists.isEmpty()) return playlists
         return playlists.map { playlist ->
             if (!playlist.coverUrl.isNullOrBlank()) return@map playlist
             val detailCover = runCatching {
-                gateway.playlistDetail(playlist.id).playlist?.resolvedCoverUrl()
+                gateway.playlistDetail(playlist.id, forceRefresh = forceRefresh).playlist?.resolvedCoverUrl()
             }.getOrNull()?.takeIf { it.isNotBlank() }
             if (detailCover == null) playlist else playlist.copy(coverUrl = detailCover)
         }

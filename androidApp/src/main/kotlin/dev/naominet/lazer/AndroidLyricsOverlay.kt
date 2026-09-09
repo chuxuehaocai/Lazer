@@ -43,6 +43,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,6 +60,7 @@ internal fun AndroidLyricsPage(
     message: String?,
     positionMillis: Long,
     followDelayMillis: Long,
+    animationSpeed: LyricAnimationSpeed,
     onBack: () -> Unit,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -95,6 +99,7 @@ internal fun AndroidLyricsPage(
                 message = message,
                 positionMillis = positionMillis,
                 followDelayMillis = followDelayMillis,
+                animationSpeed = animationSpeed,
                 onSeek = onSeek,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
@@ -110,6 +115,7 @@ internal fun AndroidLyricsViewport(
     message: String?,
     positionMillis: Long,
     followDelayMillis: Long,
+    animationSpeed: LyricAnimationSpeed,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -122,6 +128,7 @@ internal fun AndroidLyricsViewport(
             lines = lines,
             positionMillis = positionMillis,
             followDelayMillis = followDelayMillis,
+            animationSpeed = animationSpeed,
             onSeek = onSeek,
             modifier = modifier,
         )
@@ -134,6 +141,7 @@ private fun AnimatedLyricsViewport(
     lines: List<AndroidTimedLyricLine>,
     positionMillis: Long,
     followDelayMillis: Long,
+    animationSpeed: LyricAnimationSpeed,
     onSeek: (Long) -> Unit,
     modifier: Modifier,
 ) {
@@ -181,7 +189,11 @@ private fun AnimatedLyricsViewport(
                         val target = (liveIndex * rowPitchPx).coerceIn(0f, currentMaxScroll)
                         val distance = target - lyricScroll
                         if (kotlin.math.abs(distance) > 0.05f) {
-                            val approach = (1.0 - kotlin.math.exp(-11.0 * deltaSeconds)).toFloat()
+                            val approach = (
+                                1.0 - kotlin.math.exp(
+                                    -lyricScrollApproachCoefficient(animationSpeed) * deltaSeconds,
+                                )
+                            ).toFloat()
                             lyricScroll += distance * approach
                         } else {
                             lyricScroll = target
@@ -250,6 +262,23 @@ private fun AnimatedLyricsViewport(
             val scaledRowHeight = rowHeight * scale
             val textWidthFraction = (1f / scale).coerceAtMost(1f)
             val y = with(density) { lineCenterPx.toDp() } - scaledRowHeight / 2
+            val lyricText = if (index == activeIndex && line.words.isNotEmpty()) {
+                val highlighted = lyricHighlightCharacterCount(
+                    words = line.words,
+                    positionMillis = positionMillis,
+                    speed = animationSpeed,
+                ).coerceIn(0, line.text.length)
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        append(line.text.take(highlighted))
+                    }
+                    withStyle(SpanStyle(color = Color(0xFFF2F6F4).copy(alpha = 0.62f))) {
+                        append(line.text.drop(highlighted))
+                    }
+                }
+            } else {
+                buildAnnotatedString { append(line.text) }
+            }
 
             Box(
                 modifier = Modifier
@@ -267,7 +296,7 @@ private fun AnimatedLyricsViewport(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = line.text,
+                        text = lyricText,
                         modifier = Modifier.fillMaxWidth(textWidthFraction).graphicsLayer {
                             scaleX = scale
                             scaleY = scale

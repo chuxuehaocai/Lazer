@@ -126,6 +126,11 @@ internal class DesktopAudioPlayer(
         stopCurrent()
     }
 
+    suspend fun clearCache(): Int {
+        stopCurrent()
+        return audioCache.clear()
+    }
+
     override fun close() {
         stopCurrent()
         audioCache.close()

@@ -143,6 +143,7 @@ import top.yukonga.miuix.kmp.basic.NavigationBar as MiuixNavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarDisplayMode as MiuixNavigationBarDisplayMode
 import top.yukonga.miuix.kmp.basic.NavigationBarItem as MiuixNavigationBarItem
 import kotlin.math.roundToLong
+import kotlin.math.roundToInt
 
 private const val PAGE_TRANSITION_MILLIS = LazerTokens.Motion.pageMillis
 private val LazerMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
@@ -490,6 +491,7 @@ fun AndroidLazerApp() {
                     lyricsLoading = controller.lyricsLoading,
                     lyricsMessage = controller.lyricsMessage,
                     lyricFollowDelayMillis = controller.lyricFollowDelayMillis,
+                    lyricAnimationSpeed = controller.lyricAnimationSpeed,
                     isLiked = playback.track?.let { controller.isSongLiked(it.id) } == true,
                     onToggleLiked = { playback.track?.let(controller::toggleSongLiked) },
                     onDismiss = { playerVisible = false },
@@ -527,6 +529,7 @@ fun AndroidLazerApp() {
                     message = controller.lyricsMessage,
                     positionMillis = playback.positionMillis,
                     followDelayMillis = controller.lyricFollowDelayMillis,
+                    animationSpeed = controller.lyricAnimationSpeed,
                     onBack = { lyricsVisible = false },
                     onSeek = { AndroidPlaybackConnection.seekTo(context, it) },
                     modifier = Modifier
@@ -743,6 +746,7 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
     val colors = MaterialTheme.colorScheme
     val systemMonetAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     var isAudioQualitySheetVisible by remember { mutableStateOf(false) }
+    var isCacheSheetVisible by remember { mutableStateOf(false) }
     var followDelaySliderValue by remember(controller.lyricFollowDelayMillis) {
         mutableFloatStateOf(controller.lyricFollowDelayMillis.toFloat())
     }
@@ -750,6 +754,7 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
         mutableStateOf(controller.gatewayBaseUrl)
     }
     val displayedFollowDelay = normalizeLyricFollowDelayMillis(followDelaySliderValue.roundToLong())
+    val animationSpeedOptions = LyricAnimationSpeed.entries
     val normalizedGatewayBaseUrl = normalizeGatewayBaseUrl(gatewayBaseUrlDraft)
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -906,6 +911,48 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                 Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
+                            Text("歌词动画速率", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "调整逐字高亮和自动跟随的节奏",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            controller.lyricAnimationSpeed.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = colors.primary,
+                        )
+                    }
+                    LazerSlider(
+                        engine = controller.themeEngine,
+                        value = controller.lyricAnimationSpeed.ordinal.toFloat(),
+                        onValueChange = { value ->
+                            controller.updateLyricAnimationSpeed(
+                                animationSpeedOptions[value.roundToInt().coerceIn(animationSpeedOptions.indices)],
+                            )
+                        },
+                        valueRange = 0f..animationSpeedOptions.lastIndex.toFloat(),
+                        steps = animationSpeedOptions.size - 2,
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        animationSpeedOptions.forEachIndexed { index, speed ->
+                            Text(
+                                speed.label,
+                                modifier = if (index < animationSpeedOptions.lastIndex) Modifier.weight(1f) else Modifier,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            SettingsCard {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
                             Text("恢复自动跟随", style = MaterialTheme.typography.titleSmall)
                             Text(
                                 "手动滑动歌词后，等待这段时间再继续跟随播放",
@@ -943,6 +990,48 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.onSurfaceVariant,
                         )
+                    }
+                }
+            }
+        }
+        item { SectionTitle("存储与同步") }
+        item {
+            SettingsCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button) { isCacheSheetVisible = true }
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("清除本地缓存", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "选择清除歌曲缓存或歌单缓存",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Text("选择", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                }
+            }
+        }
+        item {
+            SettingsCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("强制重新同步", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "保留当前内容，并重新获取最新歌单",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    ThemeButton(onClick = controller::forceResync, enabled = !controller.isLoading) {
+                        Text(if (controller.isLoading) "同步中" else "重新同步")
                     }
                 }
             }
@@ -1023,6 +1112,50 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
             },
             onDismiss = { isAudioQualitySheetVisible = false },
         )
+    }
+    if (isCacheSheetVisible) {
+        CacheChoiceSheet(
+            onClearSongs = {
+                controller.clearSongCache()
+                isCacheSheetVisible = false
+            },
+            onClearPlaylists = {
+                controller.clearPlaylistCache()
+                isCacheSheetVisible = false
+            },
+            onDismiss = { isCacheSheetVisible = false },
+        )
+    }
+}
+
+@Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun CacheChoiceSheet(
+    onClearSongs: () -> Unit,
+    onClearPlaylists: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = colors.surface,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 28.dp)) {
+            Text("清除本地缓存", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "清除后，需要时会重新加载。登录状态不会受影响。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp, bottom = 14.dp),
+            )
+            ThemeTextButton(onClick = onClearSongs, modifier = Modifier.fillMaxWidth()) {
+                Text("清除歌曲缓存", color = colors.error)
+            }
+            ThemeTextButton(onClick = onClearPlaylists, modifier = Modifier.fillMaxWidth()) {
+                Text("清除歌单缓存", color = colors.error)
+            }
+        }
     }
 }
 
@@ -1340,6 +1473,7 @@ private fun NowPlayingPage(
     lyricsLoading: Boolean,
     lyricsMessage: String?,
     lyricFollowDelayMillis: Long,
+    lyricAnimationSpeed: LyricAnimationSpeed,
     isLiked: Boolean,
     onToggleLiked: () -> Unit,
     onDismiss: () -> Unit,
@@ -1420,6 +1554,7 @@ private fun NowPlayingPage(
                         message = lyricsMessage,
                         positionMillis = snapshot.positionMillis,
                         followDelayMillis = lyricFollowDelayMillis,
+                        animationSpeed = lyricAnimationSpeed,
                         onSeek = onSeek,
                         modifier = Modifier.weight(1f).fillMaxSize(),
                     )

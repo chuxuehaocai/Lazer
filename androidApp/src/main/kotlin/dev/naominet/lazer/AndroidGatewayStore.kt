@@ -112,6 +112,18 @@ class AndroidPlaylistCache(context: Context) {
         preferences.edit().putString(tracksKey(playlistId), encodeTracks(tracks)).apply()
     }
 
+    /** Clears playlist and track data while keeping the cached signed-in identity intact. */
+    fun clearPlaylistData(): Int {
+        val keys = preferences.all.keys.filter { key ->
+            key == KEY_FEATURED ||
+                key.startsWith("user.playlists.") ||
+                key.startsWith("user.liked_song_ids.") ||
+                key.startsWith("playlist.tracks.")
+        }
+        preferences.edit().apply { keys.forEach(::remove) }.commit()
+        return keys.size
+    }
+
     private fun encodeUserProfile(profile: UserProfile): String = JSONObject().apply {
         put("userId", profile.userId)
         put("nickname", profile.nickname)

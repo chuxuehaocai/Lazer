@@ -8,6 +8,7 @@ data class TimedLyricLine(
     val timeMs: Long,
     val text: String,
     val translation: String? = null,
+    val words: List<TimedLyricWord> = emptyList(),
 )
 
 private val LrcStampPattern = Regex("""\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?]""")
@@ -46,6 +47,15 @@ internal fun parseLrc(lrc: String?): List<TimedLyricLine> {
     }
     return lines.sortedBy { it.timeMs }
 }
+
+internal fun parseDesktopWordLyrics(yrc: String?): List<TimedLyricLine> =
+    parseWordLyrics(yrc).map { line ->
+        TimedLyricLine(
+            timeMs = line.timeMillis,
+            text = line.text,
+            words = line.words,
+        )
+    }
 
 /**
  * Attaches translated lyric lines to their matching original lines.

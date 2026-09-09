@@ -282,9 +282,9 @@ class NeteaseMusicGateway(
         ).jsonObject
     }
 
-    suspend fun songDetails(ids: Collection<Long>): SongDetailResponse {
+    suspend fun songDetails(ids: Collection<Long>, forceRefresh: Boolean = false): SongDetailResponse {
         require(ids.isNotEmpty()) { "ids cannot be empty." }
-        return get("/song/detail", parametersOf("ids" to ids.joinToString(",")))
+        return get("/song/detail", freshParameters(forceRefresh, "ids" to ids.joinToString(",")))
     }
 
     suspend fun songUrls(
@@ -312,25 +312,41 @@ class NeteaseMusicGateway(
 
     suspend fun wordByWordLyrics(id: Long): LyricResponse = get("/lyric/new", parametersOf("id" to id))
 
-    suspend fun playlistDetail(id: Long, subscriberLimit: Int = 8): PlaylistDetailResponse {
+    suspend fun playlistDetail(
+        id: Long,
+        subscriberLimit: Int = 8,
+        forceRefresh: Boolean = false,
+    ): PlaylistDetailResponse {
         require(subscriberLimit >= 0) { "subscriberLimit cannot be negative." }
-        return get("/playlist/detail", parametersOf("id" to id, "s" to subscriberLimit))
+        return get("/playlist/detail", freshParameters(forceRefresh, "id" to id, "s" to subscriberLimit))
     }
 
     suspend fun playlistTracks(
         id: Long,
         limit: Int? = null,
         offset: Int = 0,
+        forceRefresh: Boolean = false,
     ): PlaylistTracksResponse {
         require(limit == null || limit > 0) { "limit must be greater than zero." }
         require(offset >= 0) { "offset cannot be negative." }
-        return get("/playlist/track/all", parametersOf("id" to id, "limit" to limit, "offset" to offset))
+        return get(
+            "/playlist/track/all",
+            freshParameters(forceRefresh, "id" to id, "limit" to limit, "offset" to offset),
+        )
     }
 
-    suspend fun userPlaylists(uid: Long, limit: Int = 30, offset: Int = 0): UserPlaylistsResponse {
+    suspend fun userPlaylists(
+        uid: Long,
+        limit: Int = 30,
+        offset: Int = 0,
+        forceRefresh: Boolean = false,
+    ): UserPlaylistsResponse {
         require(limit > 0) { "limit must be greater than zero." }
         require(offset >= 0) { "offset cannot be negative." }
-        return get("/user/playlist", parametersOf("uid" to uid, "limit" to limit, "offset" to offset))
+        return get(
+            "/user/playlist",
+            freshParameters(forceRefresh, "uid" to uid, "limit" to limit, "offset" to offset),
+        )
     }
 
     suspend fun topPlaylists(
@@ -338,12 +354,19 @@ class NeteaseMusicGateway(
         order: String = "hot",
         limit: Int = 50,
         offset: Int = 0,
+        forceRefresh: Boolean = false,
     ): TopPlaylistsResponse {
         require(limit > 0) { "limit must be greater than zero." }
         require(offset >= 0) { "offset cannot be negative." }
         return get(
             "/top/playlist",
-            parametersOf("cat" to category, "order" to order, "limit" to limit, "offset" to offset),
+            freshParameters(
+                forceRefresh,
+                "cat" to category,
+                "order" to order,
+                "limit" to limit,
+                "offset" to offset,
+            ),
         )
     }
 
@@ -356,13 +379,16 @@ class NeteaseMusicGateway(
     suspend fun banners(platform: BannerPlatform = BannerPlatform.DESKTOP): BannerResponse =
         get("/banner", parametersOf("type" to platform.apiValue))
 
-    suspend fun dailyRecommendedSongs(): DailySongsResponse = get("/recommend/songs")
+    suspend fun dailyRecommendedSongs(forceRefresh: Boolean = false): DailySongsResponse =
+        get("/recommend/songs", freshParameters(forceRefresh))
 
-    suspend fun dailyRecommendedPlaylists(): DailyPlaylistsResponse = get("/recommend/resource")
+    suspend fun dailyRecommendedPlaylists(forceRefresh: Boolean = false): DailyPlaylistsResponse =
+        get("/recommend/resource", freshParameters(forceRefresh))
 
     suspend fun personalFm(): PersonalFmResponse = get("/personal_fm")
 
-    suspend fun likedSongIds(uid: Long): LikedSongIdsResponse = get("/likelist", parametersOf("uid" to uid))
+    suspend fun likedSongIds(uid: Long, forceRefresh: Boolean = false): LikedSongIdsResponse =
+        get("/likelist", freshParameters(forceRefresh, "uid" to uid))
 
     suspend fun setSongLiked(songId: Long, userId: Long, liked: Boolean): JsonObject =
         postRaw(
@@ -436,6 +462,13 @@ class NeteaseMusicGateway(
             if (config.randomChineseIp) put("randomCNIP", "true")
             config.userAgent?.takeIf(String::isNotBlank)?.let { putIfAbsent("ua", it) }
         }
+
+    private fun freshParameters(
+        forceRefresh: Boolean,
+        vararg values: Pair<String, Any?>,
+    ): Map<String, String> = parametersOf(*values).toMutableMap().apply {
+        if (forceRefresh) put("timestamp", nowMillis().toString())
+    }
 
     private fun rememberCookie(response: LoginResponse): LoginResponse = response.also {
         it.cookie?.takeIf(String::isNotBlank)?.let { cookie -> sessionStore.cookie = cookie }

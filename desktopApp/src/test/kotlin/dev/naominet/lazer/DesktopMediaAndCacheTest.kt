@@ -168,6 +168,47 @@ class DesktopMediaAndCacheTest {
     }
 
     @Test
+    fun `playlist cache clear preserves the signed in profile`() {
+        val directory = Files.createTempDirectory("lazer-playlist-clear-test")
+        try {
+            val cache = DesktopPlaylistCache(directory)
+            val profile = UserProfile(9, "初雪")
+            val playlist = PlaylistItem(42, "夜晚散步", "18 首", null, 18)
+            val track = TrackItem(7, "晴天", "周杰伦", "叶惠美", 269_000, null)
+            cache.saveCurrentUser(profile)
+            cache.savePlaylists("user-9", listOf(playlist))
+            cache.saveTracks(playlist.id, listOf(track), complete = true)
+
+            assertEquals(2, cache.clearPlaylistData())
+            assertEquals(profile, cache.loadCurrentUser())
+            assertTrue(cache.loadPlaylists("user-9").isEmpty())
+            assertEquals(null, cache.loadTracks(playlist.id))
+        } finally {
+            Files.walk(directory).use { paths ->
+                paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
+            }
+        }
+    }
+
+    @Test
+    fun `audio cache clear removes local media files`() = runBlocking {
+        val directory = Files.createTempDirectory("lazer-audio-clear-test")
+        try {
+            Files.writeString(directory.resolve("7-test.audio"), "cached")
+            Files.writeString(directory.resolve("7-test.audio.complete"), "6")
+            val cache = DesktopAudioCache(directory) { _, _ -> }
+
+            assertEquals(2, cache.clear())
+            assertTrue(Files.list(directory).use { paths -> paths.findAny().isEmpty })
+            cache.close()
+        } finally {
+            Files.walk(directory).use { paths ->
+                paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
+            }
+        }
+    }
+
+    @Test
     fun `audio output recovery handles errors closures and repeated zero writes`() {
         assertFalse(shouldRecoverAudioOutput(null, outputOpen = true, consecutiveZeroWrites = 7))
         assertTrue(shouldRecoverAudioOutput(null, outputOpen = true, consecutiveZeroWrites = 8))

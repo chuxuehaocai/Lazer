@@ -4,6 +4,7 @@ data class AndroidTimedLyricLine(
     val timeMillis: Long,
     val text: String,
     val translation: String? = null,
+    val words: List<TimedLyricWord> = emptyList(),
 )
 
 private val AndroidLrcStampPattern = Regex("""\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?]""")
@@ -33,6 +34,15 @@ internal fun parseAndroidLrc(lrc: String?): List<AndroidTimedLyricLine> {
         }
     }.sortedBy(AndroidTimedLyricLine::timeMillis)
 }
+
+internal fun parseAndroidWordLyrics(yrc: String?): List<AndroidTimedLyricLine> =
+    parseWordLyrics(yrc).map { line ->
+        AndroidTimedLyricLine(
+            timeMillis = line.timeMillis,
+            text = line.text,
+            words = line.words,
+        )
+    }
 
 internal fun mergeAndroidLyrics(
     lyrics: List<AndroidTimedLyricLine>,

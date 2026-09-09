@@ -48,6 +48,10 @@ internal object DesktopSettings {
             normalizeLyricFollowDelayMillis(value).toString(),
         )
 
+    var lyricAnimationSpeed: LyricAnimationSpeed
+        get() = parseLyricAnimationSpeed(DesktopStateFile.get("lyrics.animation_speed"))
+        set(value) = DesktopStateFile.set("lyrics.animation_speed", value.name)
+
     var exclusiveAudio: Boolean
         get() = DesktopStateFile.get("playback.exclusive_audio")?.toBooleanStrictOrNull() ?: false
         set(value) = DesktopStateFile.set("playback.exclusive_audio", value.toString())

@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.Closeable
@@ -58,6 +59,19 @@ internal class DesktopAudioCache(
         scope.cancel()
         entries.values.forEach(AudioCacheEntry::wakeReaders)
         entries.clear()
+    }
+
+    suspend fun clear(): Int {
+        entries.values.forEach { it.cancel() }
+        entries.clear()
+        return runCatching {
+            if (!Files.isDirectory(cacheDirectory)) return@runCatching 0
+            var removed = 0
+            Files.newDirectoryStream(cacheDirectory).use { paths ->
+                paths.forEach { path -> if (Files.deleteIfExists(path)) removed += 1 }
+            }
+            removed
+        }.getOrDefault(0)
     }
 }
 
@@ -144,6 +158,12 @@ private class AudioCacheEntry(
         } finally {
             dataLock.unlock()
         }
+    }
+
+    suspend fun cancel() {
+        val job = synchronized(stateLock) { downloadJob }
+        job?.cancelAndJoin()
+        wakeReaders()
     }
 
     private suspend fun download(url: String) {
