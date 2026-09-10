@@ -161,6 +161,8 @@ class DesktopPlayerController(
         private set
     var lyricAnimationSpeed by mutableStateOf(DesktopSettings.lyricAnimationSpeed)
         private set
+    var wordLyricsEnabled by mutableStateOf(DesktopSettings.wordLyricsEnabled)
+        private set
     var gatewayBaseUrl by mutableStateOf(gateway.config.baseUrl)
         private set
     var isLoading by mutableStateOf(false)
@@ -368,6 +370,11 @@ class DesktopPlayerController(
     fun updateLyricAnimationSpeed(value: LyricAnimationSpeed) {
         lyricAnimationSpeed = value
         DesktopSettings.lyricAnimationSpeed = value
+    }
+
+    fun updateWordLyricsEnabled(enabled: Boolean) {
+        wordLyricsEnabled = enabled
+        DesktopSettings.wordLyricsEnabled = enabled
     }
 
     fun updateGatewayBaseUrl(value: String): Boolean {

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,9 +47,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -171,9 +169,14 @@ fun WindowScope.DesktopPlayerApp(
                                         NavigationPanel(
                                             controller = controller,
                                             selectedDestination = destination,
+                                            settingsSelected = settingsVisible,
                                             compact = compactNavigation,
-                                            onDestinationSelected = { destination = it },
+                                            onDestinationSelected = {
+                                                settingsVisible = false
+                                                destination = it
+                                            },
                                             onPlaylistSelected = {
+                                                settingsVisible = false
                                                 destination = DesktopDestination.LIBRARY
                                                 controller.openPlaylist(it)
                                             },
@@ -182,6 +185,7 @@ fun WindowScope.DesktopPlayerApp(
                                         MainContent(
                                             controller = controller,
                                             destination = destination,
+                                            settingsVisible = settingsVisible,
                                             modifier = Modifier.weight(1f),
                                         )
                                     }
@@ -194,12 +198,6 @@ fun WindowScope.DesktopPlayerApp(
 
                 if (controller.isLoginVisible) {
                     LoginOverlay(controller)
-                }
-                if (settingsVisible) {
-                    DesktopSettingsDialog(
-                        controller = controller,
-                        onDismiss = { settingsVisible = false },
-                    )
                 }
             }
         }
@@ -242,11 +240,11 @@ private fun WindowTitleIdentity() {
             Modifier.size(20.dp).clip(RoundedCornerShape(7.dp)).background(colors.primaryContainer),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                "L",
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.onPrimaryContainer,
-                fontWeight = FontWeight.Bold,
+            Icon(
+                Icons.Rounded.LibraryMusic,
+                contentDescription = "Lazer",
+                modifier = Modifier.size(14.dp),
+                tint = colors.onPrimaryContainer,
             )
         }
         Spacer(Modifier.width(8.dp))
@@ -287,6 +285,7 @@ private fun Color.luminanceValue(): Float = (red + green + blue) / 3f
 private fun NavigationPanel(
     controller: DesktopPlayerController,
     selectedDestination: DesktopDestination,
+    settingsSelected: Boolean,
     compact: Boolean,
     onDestinationSelected: (DesktopDestination) -> Unit,
     onPlaylistSelected: (PlaylistItem) -> Unit,
@@ -317,7 +316,7 @@ private fun NavigationPanel(
             DesktopDestination.entries.forEach { destination ->
                 NavigationEntry(
                     destination = destination,
-                    selected = destination == selectedDestination,
+                    selected = !settingsSelected && destination == selectedDestination,
                     compact = compact,
                     themeEngine = controller.themeEngine,
                     onClick = { onDestinationSelected(destination) },
@@ -375,7 +374,7 @@ private fun NavigationPanel(
                             playlists.forEach { playlist ->
                                 SidebarPlaylistRow(
                                     playlist = playlist,
-                                    selected = controller.activePlaylist?.id == playlist.id,
+                                    selected = !settingsSelected && controller.activePlaylist?.id == playlist.id,
                                     compact = compact,
                                     onClick = { onPlaylistSelected(playlist) },
                                 )
@@ -390,6 +389,8 @@ private fun NavigationPanel(
                 icon = Icons.Outlined.Settings,
                 label = "设置",
                 compact = compact,
+                selected = settingsSelected,
+                themeEngine = controller.themeEngine,
                 onClick = onOpenSettings,
             )
         }
@@ -401,22 +402,36 @@ private fun NavigationUtilityEntry(
     icon: ImageVector,
     label: String,
     compact: Boolean,
+    selected: Boolean,
+    themeEngine: LazerThemeEngine,
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val selectedIconColor = if (themeEngine == LazerThemeEngine.MIUIX) Color.White else colors.primary
     Row(
         modifier = Modifier
             .then(if (compact) Modifier.size(48.dp) else Modifier.fillMaxWidth())
             .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) colors.primaryContainer else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = if (compact) 0.dp else 11.dp, vertical = if (compact) 0.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (compact) Arrangement.Center else Arrangement.Start,
     ) {
-        Icon(icon, label, Modifier.size(19.dp), tint = colors.onSurfaceVariant)
+        Icon(
+            icon,
+            label,
+            Modifier.size(19.dp),
+            tint = if (selected) selectedIconColor else colors.onSurfaceVariant,
+        )
         if (!compact) {
             Spacer(Modifier.width(11.dp))
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            )
         }
     }
 }
@@ -489,7 +504,12 @@ private fun BrandMark(compact: Boolean) {
                 .background(colors.primaryContainer),
             contentAlignment = Alignment.Center,
         ) {
-            Text("L", color = colors.onPrimaryContainer, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Icon(
+                Icons.Rounded.LibraryMusic,
+                contentDescription = "Lazer",
+                modifier = Modifier.size(23.dp),
+                tint = colors.onPrimaryContainer,
+            )
         }
         if (!compact) {
             Spacer(Modifier.width(10.dp))
@@ -542,24 +562,29 @@ private fun NavigationEntry(
 private fun MainContent(
     controller: DesktopPlayerController,
     destination: DesktopDestination,
+    settingsVisible: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxHeight().padding(horizontal = 28.dp)) {
-        TopBar(controller)
-        when {
-            controller.searchQuery.isNotBlank() -> SearchPage(controller, Modifier.weight(1f))
-            destination == DesktopDestination.HOME -> HomePage(controller, Modifier.weight(1f))
-            destination == DesktopDestination.DISCOVER -> DiscoverPage(controller, Modifier.weight(1f))
-            destination == DesktopDestination.LIBRARY -> LibraryPage(controller, Modifier.weight(1f))
-            else -> LikedPage(controller, Modifier.weight(1f))
+        if (settingsVisible) {
+            DesktopSettingsPage(controller, Modifier.weight(1f))
+        } else {
+            TopBar(controller)
+            when {
+                controller.searchQuery.isNotBlank() -> SearchPage(controller, Modifier.weight(1f))
+                destination == DesktopDestination.HOME -> HomePage(controller, Modifier.weight(1f))
+                destination == DesktopDestination.DISCOVER -> DiscoverPage(controller, Modifier.weight(1f))
+                destination == DesktopDestination.LIBRARY -> LibraryPage(controller, Modifier.weight(1f))
+                else -> LikedPage(controller, Modifier.weight(1f))
+            }
         }
     }
 }
 
 @Composable
-private fun DesktopSettingsDialog(
+private fun DesktopSettingsPage(
     controller: DesktopPlayerController,
-    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var cacheDialogVisible by remember { mutableStateOf(false) }
     var followDelaySliderValue by remember(controller.lyricFollowDelayMillis) {
@@ -571,17 +596,21 @@ private fun DesktopSettingsDialog(
     val displayedFollowDelay = normalizeLyricFollowDelayMillis(followDelaySliderValue.roundToLong())
     val animationSpeedOptions = LyricAnimationSpeed.entries
     val normalizedGatewayBaseUrl = normalizeGatewayBaseUrl(gatewayBaseUrlDraft)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("设置") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .widthIn(min = 480.dp)
-                    .heightIn(max = 680.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
+    val scrollState = rememberScrollState()
+    val inertia = LocalScrollInertia.current
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .verticalScroll(scrollState)
+            .scrollInertia(scrollState, inertia)
+            .padding(top = 22.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Column(
+            modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+                PageHeading("设置", "外观、播放、歌词和同步。")
                 Text("外观", style = MaterialTheme.typography.titleSmall)
                 Row(
                     modifier = Modifier
@@ -648,11 +677,37 @@ private fun DesktopSettingsDialog(
                     HorizontalDivider()
                 }
                 Text("歌词", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(role = androidx.compose.ui.semantics.Role.Switch) {
+                            controller.updateWordLyricsEnabled(!controller.wordLyricsEnabled)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("逐字歌词", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (controller.wordLyricsEnabled) "显示逐字渐亮和模糊过渡" else "只显示整行歌词",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerSwitch(
+                        engine = controller.themeEngine,
+                        checked = controller.wordLyricsEnabled,
+                        onCheckedChange = null,
+                    )
+                }
+                HorizontalDivider()
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("歌词动画速率", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "调整逐字高亮和自动跟随的节奏",
+                            "调整滚动收束和逐字过渡的节奏",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -675,14 +730,23 @@ private fun DesktopSettingsDialog(
                     steps = animationSpeedOptions.size - 2,
                 )
                 Row(Modifier.fillMaxWidth()) {
-                    animationSpeedOptions.forEachIndexed { index, speed ->
-                        Text(
-                            speed.label,
-                            modifier = if (index < animationSpeedOptions.lastIndex) Modifier.weight(1f) else Modifier,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        animationSpeedOptions.first().label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        LyricAnimationSpeed.STANDARD.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        animationSpeedOptions.last().label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 Text(
                     "手动滚动歌词后，经过所选时间恢复自动跟随。",
@@ -789,10 +853,8 @@ private fun DesktopSettingsDialog(
                         Text("保存")
                     }
                 }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
-    )
+        }
+    }
     if (cacheDialogVisible) {
         AlertDialog(
             onDismissRequest = { cacheDialogVisible = false },
@@ -2111,6 +2173,8 @@ private fun LyricsOverlay(
     var manualAtMs by remember { mutableLongStateOf(0L) }
     var lyricScroll by remember { mutableFloatStateOf(0f) }
     val lyricWheelInertia = remember { WheelInertiaMotion() }
+    val lyricLineMotion = remember { LyricLineMotionField() }
+    var lyricMotionRevision by remember { mutableIntStateOf(0) }
     var lyricMotionAtNs by remember { mutableLongStateOf(0L) }
 
     val maxScroll = ((lines.size - 1).coerceAtLeast(0)) * rowPitchPx
@@ -2120,12 +2184,13 @@ private fun LyricsOverlay(
         lyricWheelInertia.stop()
         val idx = findCurrentLyricIndex(controller.lyrics, controller.positionMillis).coerceAtLeast(0)
         lyricScroll = idx * rowPitchPx
+        lyricLineMotion.reset(lines.size, lyricScroll)
+        lyricMotionRevision++
         lyricMotionAtNs = 0L
     }
 
-    // One persistent frame loop handles both follow motion and wheel inertia. It never cancels
-    // and relaunches competing scroll jobs, and the exponential approach restores the original
-    // non-linear lyric motion.
+    // One persistent frame loop handles both follow motion and wheel inertia. Each lyric row keeps
+    // its own velocity and short cascade delay, matching AMLL's non-linear landing.
     LaunchedEffect(Unit) {
         while (true) {
             withFrameNanos { now ->
@@ -2137,6 +2202,7 @@ private fun LyricsOverlay(
                 lyricMotionAtNs = now
 
                 if (!followPlayback && System.currentTimeMillis() - manualAtMs > controller.lyricFollowDelayMillis) {
+                    lyricLineMotion.snapTo(lyricScroll)
                     followPlayback = true
                     lyricWheelInertia.stop()
                 }
@@ -2147,17 +2213,20 @@ private fun LyricsOverlay(
                     if (liveIndex >= 0 && liveLines.isNotEmpty()) {
                         val liveMax = ((liveLines.size - 1).coerceAtLeast(0)) * rowPitchPx
                         val target = (liveIndex * rowPitchPx).coerceIn(0f, liveMax)
-                        val distance = target - lyricScroll
-                        if (kotlin.math.abs(distance) > 0.05f) {
-                            val approach = (
-                                1.0 - kotlin.math.exp(
-                                    -lyricScrollApproachCoefficient(controller.lyricAnimationSpeed) * dt,
-                                )
-                            ).toFloat()
-                            lyricScroll += distance * approach
+                        val intervalMillis = if (liveIndex > 0) {
+                            liveLines[liveIndex].timeMs - liveLines[liveIndex - 1].timeMs
                         } else {
-                            lyricScroll = target
+                            null
                         }
+                        val moving = lyricLineMotion.advance(
+                            target = target,
+                            activeIndex = liveIndex,
+                            seconds = dt,
+                            intervalMillis = intervalMillis,
+                            speed = controller.lyricAnimationSpeed,
+                        )
+                        lyricScroll = lyricLineMotion.positionFor(liveIndex).coerceIn(0f, liveMax)
+                        if (moving) lyricMotionRevision++
                     }
                 } else {
                     val movement = lyricWheelInertia.advance(dt)
@@ -2168,6 +2237,8 @@ private fun LyricsOverlay(
     }
 
     fun markManualScroll() {
+        lyricLineMotion.snapTo(lyricScroll)
+        lyricMotionRevision++
         followPlayback = false
         manualAtMs = System.currentTimeMillis()
     }
@@ -2305,40 +2376,30 @@ private fun LyricsOverlay(
                             )
                         }
                         else -> {
+                            val motionRevision = lyricMotionRevision
                             val visualIndex = if (rowPitchPx <= 0f) 0f else lyricScroll / rowPitchPx
                             lines.forEachIndexed { index, line ->
-                                val lineCenterPx = centerYPx + index * rowPitchPx - lyricScroll
+                                val lineScroll = if (followPlayback && motionRevision >= 0) {
+                                    lyricLineMotion.positionFor(index)
+                                } else {
+                                    lyricScroll
+                                }
+                                val lineCenterPx = centerYPx + index * rowPitchPx - lineScroll
                                 if (lineCenterPx < -120f || lineCenterPx > heightPx + 120f) return@forEachIndexed
 
                                 val distance = kotlin.math.abs(index - visualIndex)
-                                val focus = if (activeIndex < 0) 0f else (1f - distance).coerceAtLeast(0f)
+                                val focus = androidx.compose.runtime.key(controller.nowPlaying?.id, index) {
+                                    animatedLyricFocus(index == activeIndex, controller.lyricAnimationSpeed)
+                                }
                                 val ambient = (1f - distance / 4f).coerceAtLeast(0f)
-                                val scale = (0.92f + focus * 0.16f + ambient * 0.03f).coerceIn(0.90f, 1.14f)
-                                val alpha = ((130f * ambient + 125f * focus) / 255f).coerceIn(0.125f, 1f)
+                                val scale = 0.96f + focus * 0.08f
+                                val alpha = (0.24f + ambient * 0.20f) * (1f - focus) + focus
                                 val color = lerpColor(colors.onSurfaceVariant, colors.onSurface, focus)
                                 val hasTranslation = !line.translation.isNullOrBlank()
                                 val rowHeight = if (hasTranslation) 124.dp else 74.dp
-                                val scaledRowHeight = rowHeight * scale
-                                val textWidthFraction = (1f / scale).coerceAtMost(1f)
+                                val scaledRowHeight = rowHeight * 1.04f
+                                val textWidthFraction = 1f / 1.04f
                                 val yDp = with(density) { lineCenterPx.toDp() } - scaledRowHeight / 2
-                                val lyricText = if (index == activeIndex && line.words.isNotEmpty()) {
-                                    val highlighted = lyricHighlightCharacterCount(
-                                        line.words,
-                                        controller.positionMillis,
-                                        controller.lyricAnimationSpeed,
-                                    ).coerceIn(0, line.text.length)
-                                    buildAnnotatedString {
-                                        withStyle(SpanStyle(color = colors.primary)) {
-                                            append(line.text.take(highlighted))
-                                        }
-                                        withStyle(SpanStyle(color = color.copy(alpha = 0.55f))) {
-                                            append(line.text.drop(highlighted))
-                                        }
-                                    }
-                                } else {
-                                    buildAnnotatedString { append(line.text) }
-                                }
-
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
@@ -2347,36 +2408,42 @@ private fun LyricsOverlay(
                                         .padding(horizontal = 20.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable {
+                                            lyricLineMotion.snapTo(lyricScroll)
                                             followPlayback = true
                                             lyricWheelInertia.stop()
                                             controller.seekToLyric(index)
-                                            lyricScroll = index * rowPitchPx
                                         },
                                     contentAlignment = if (hasTranslation) Alignment.TopCenter else Alignment.Center,
                                 ) {
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
-                                        Text(
-                                            text = lyricText,
-                                            modifier = Modifier
-                                                .fillMaxWidth(textWidthFraction)
-                                                .graphicsLayer {
-                                                    scaleX = scale
-                                                scaleY = scale
-                                                this.alpha = alpha
-                                                transformOrigin = TransformOrigin.Center
-                                            },
-                                            style = MaterialTheme.typography.bodyLarge.copy(
-                                                fontWeight = if (focus > 0.55f) FontWeight.SemiBold else FontWeight.Normal,
-                                                fontSize = baseFontSp,
-                                                lineHeight = baseLineHeightSp,
-                                            ),
-                                            color = color,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                        androidx.compose.runtime.key(controller.nowPlaying?.id, index) {
+                                            AmllLyricText(
+                                                text = line.text,
+                                                words = line.words,
+                                                positionMillis = controller.positionMillis,
+                                                active = controller.wordLyricsEnabled && index == activeIndex,
+                                                color = color,
+                                                speed = controller.lyricAnimationSpeed,
+                                                modifier = Modifier
+                                                    .fillMaxWidth(textWidthFraction)
+                                                    .graphicsLayer {
+                                                        scaleX = scale
+                                                        scaleY = scale
+                                                        this.alpha = alpha
+                                                        transformOrigin = TransformOrigin.Center
+                                                    },
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = baseFontSp,
+                                                    lineHeight = baseLineHeightSp,
+                                                ),
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
                                         if (hasTranslation) {
                                             Spacer(Modifier.height(6.dp))
                                             Text(
@@ -2470,7 +2537,12 @@ private fun LoginOverlay(controller: DesktopPlayerController) {
                     Modifier.width(250.dp).fillMaxHeight().background(colors.primaryContainer).padding(26.dp),
                 ) {
                     Box(Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(colors.surface), contentAlignment = Alignment.Center) {
-                        Text("L", color = colors.primary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Icon(
+                            Icons.Rounded.LibraryMusic,
+                            contentDescription = "Lazer",
+                            modifier = Modifier.size(25.dp),
+                            tint = colors.primary,
+                        )
                     }
                     Spacer(Modifier.height(34.dp))
                     Text("把熟悉的音乐，带回这一页。", style = MaterialTheme.typography.headlineMedium, color = colors.onPrimaryContainer)

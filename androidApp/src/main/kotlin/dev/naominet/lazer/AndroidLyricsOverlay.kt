@@ -43,9 +43,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,6 +58,7 @@ internal fun AndroidLyricsPage(
     positionMillis: Long,
     followDelayMillis: Long,
     animationSpeed: LyricAnimationSpeed,
+    wordLyricsEnabled: Boolean,
     onBack: () -> Unit,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -100,6 +98,7 @@ internal fun AndroidLyricsPage(
                 positionMillis = positionMillis,
                 followDelayMillis = followDelayMillis,
                 animationSpeed = animationSpeed,
+                wordLyricsEnabled = wordLyricsEnabled,
                 onSeek = onSeek,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
@@ -116,6 +115,7 @@ internal fun AndroidLyricsViewport(
     positionMillis: Long,
     followDelayMillis: Long,
     animationSpeed: LyricAnimationSpeed,
+    wordLyricsEnabled: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -129,6 +129,7 @@ internal fun AndroidLyricsViewport(
             positionMillis = positionMillis,
             followDelayMillis = followDelayMillis,
             animationSpeed = animationSpeed,
+            wordLyricsEnabled = wordLyricsEnabled,
             onSeek = onSeek,
             modifier = modifier,
         )
@@ -142,11 +143,14 @@ private fun AnimatedLyricsViewport(
     positionMillis: Long,
     followDelayMillis: Long,
     animationSpeed: LyricAnimationSpeed,
+    wordLyricsEnabled: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier,
 ) {
     val density = LocalDensity.current
     val activeIndex = remember(lines, positionMillis) { activeAndroidLyricIndex(lines, positionMillis) }
+    val currentActiveIndex by rememberUpdatedState(activeIndex)
+    val currentAnimationSpeed by rememberUpdatedState(animationSpeed)
     val currentPositionMillis by rememberUpdatedState(positionMillis)
     val currentLines by rememberUpdatedState(lines)
     val currentFollowDelayMillis by rememberUpdatedState(followDelayMillis)
@@ -160,12 +164,16 @@ private fun AnimatedLyricsViewport(
     var flingVelocity by remember { mutableFloatStateOf(0f) }
     var lastDragNanos by remember { mutableLongStateOf(0L) }
     var lastFrameNanos by remember { mutableLongStateOf(0L) }
+    val lyricLineMotion = remember { LyricLineMotionField() }
+    var lyricMotionRevision by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(lines.size, trackId) {
         followPlayback = true
         isDragging = false
         flingVelocity = 0f
         lyricScroll = activeAndroidLyricIndex(lines, positionMillis).coerceAtLeast(0) * rowPitchPx
+        lyricLineMotion.reset(lines.size, lyricScroll)
+        lyricMotionRevision++
         lastFrameNanos = 0L
     }
     LaunchedEffect(Unit) {
@@ -180,6 +188,7 @@ private fun AnimatedLyricsViewport(
                 if (!followPlayback && !isDragging && kotlin.math.abs(flingVelocity) < 8f &&
                     System.currentTimeMillis() - manualAtMillis > currentFollowDelayMillis
                 ) {
+                    lyricLineMotion.snapTo(lyricScroll)
                     followPlayback = true
                 }
                 if (followPlayback) {
@@ -187,17 +196,20 @@ private fun AnimatedLyricsViewport(
                     val liveIndex = activeAndroidLyricIndex(currentLines, currentPositionMillis)
                     if (liveIndex >= 0) {
                         val target = (liveIndex * rowPitchPx).coerceIn(0f, currentMaxScroll)
-                        val distance = target - lyricScroll
-                        if (kotlin.math.abs(distance) > 0.05f) {
-                            val approach = (
-                                1.0 - kotlin.math.exp(
-                                    -lyricScrollApproachCoefficient(animationSpeed) * deltaSeconds,
-                                )
-                            ).toFloat()
-                            lyricScroll += distance * approach
-                        } else {
-                            lyricScroll = target
+                        val intervalMillis = currentLines.getOrNull(liveIndex - 1)?.let { previous ->
+                            (currentLines[liveIndex].timeMillis - previous.timeMillis).coerceAtLeast(0L)
                         }
+                        if (lyricLineMotion.advance(
+                                target = target,
+                                activeIndex = liveIndex,
+                                seconds = deltaSeconds,
+                                intervalMillis = intervalMillis,
+                                speed = currentAnimationSpeed,
+                            )
+                        ) {
+                            lyricMotionRevision++
+                        }
+                        lyricScroll = lyricLineMotion.positionFor(liveIndex).coerceIn(0f, currentMaxScroll)
                     }
                 } else if (!isDragging && kotlin.math.abs(flingVelocity) >= 8f) {
                     val nextScroll = (lyricScroll + flingVelocity * deltaSeconds).coerceIn(0f, currentMaxScroll)
@@ -216,6 +228,11 @@ private fun AnimatedLyricsViewport(
             .pointerInput(lines.size, maxScroll) {
                 detectVerticalDragGestures(
                     onDragStart = {
+                        if (currentActiveIndex >= 0) {
+                            lyricScroll = lyricLineMotion.positionFor(currentActiveIndex)
+                                .coerceIn(0f, currentMaxScroll)
+                        }
+                        lyricLineMotion.snapTo(lyricScroll)
                         followPlayback = false
                         isDragging = true
                         flingVelocity = 0f
@@ -248,38 +265,33 @@ private fun AnimatedLyricsViewport(
     ) {
         val centerYPx = with(density) { (maxHeight / 2).toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
-        val visualIndex = if (rowPitchPx == 0f) 0f else lyricScroll / rowPitchPx
+        val motionRevision = lyricMotionRevision
+        val visualScroll = if (followPlayback && activeIndex >= 0 && motionRevision >= 0) {
+            lyricLineMotion.positionFor(activeIndex)
+        } else {
+            lyricScroll
+        }
+        val visualIndex = if (rowPitchPx == 0f) 0f else visualScroll / rowPitchPx
         lines.forEachIndexed { index, line ->
-            val lineCenterPx = centerYPx + index * rowPitchPx - lyricScroll
+            val rowScroll = if (followPlayback && motionRevision >= 0) {
+                lyricLineMotion.positionFor(index)
+            } else {
+                lyricScroll
+            }
+            val lineCenterPx = centerYPx + index * rowPitchPx - rowScroll
             if (lineCenterPx < -120f || lineCenterPx > heightPx + 120f) return@forEachIndexed
             val distance = kotlin.math.abs(index - visualIndex)
-            val focus = if (activeIndex < 0) 0f else (1f - distance).coerceAtLeast(0f)
+            val focus = androidx.compose.runtime.key(trackId, index) {
+                animatedLyricFocus(index == activeIndex, animationSpeed)
+            }
             val ambient = (1f - distance / 4f).coerceAtLeast(0f)
-            val scale = (0.92f + focus * 0.16f + ambient * 0.03f).coerceIn(0.90f, 1.14f)
-            val alpha = ((130f * ambient + 125f * focus) / 255f).coerceIn(0.125f, 1f)
+            val scale = 0.96f + focus * 0.08f
+            val alpha = (0.24f + ambient * 0.20f) * (1f - focus) + focus
             val hasTranslation = !line.translation.isNullOrBlank()
             val rowHeight = if (hasTranslation) 124.dp else 74.dp
-            val scaledRowHeight = rowHeight * scale
-            val textWidthFraction = (1f / scale).coerceAtMost(1f)
+            val scaledRowHeight = rowHeight * 1.04f
+            val textWidthFraction = 1f / 1.04f
             val y = with(density) { lineCenterPx.toDp() } - scaledRowHeight / 2
-            val lyricText = if (index == activeIndex && line.words.isNotEmpty()) {
-                val highlighted = lyricHighlightCharacterCount(
-                    words = line.words,
-                    positionMillis = positionMillis,
-                    speed = animationSpeed,
-                ).coerceIn(0, line.text.length)
-                buildAnnotatedString {
-                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
-                        append(line.text.take(highlighted))
-                    }
-                    withStyle(SpanStyle(color = Color(0xFFF2F6F4).copy(alpha = 0.62f))) {
-                        append(line.text.drop(highlighted))
-                    }
-                }
-            } else {
-                buildAnnotatedString { append(line.text) }
-            }
-
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -288,31 +300,37 @@ private fun AnimatedLyricsViewport(
                     .padding(horizontal = 26.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .clickable {
+                        lyricLineMotion.snapTo(lyricScroll)
                         followPlayback = true
                         onSeek(line.timeMillis)
-                        lyricScroll = index * rowPitchPx
                     },
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = lyricText,
-                        modifier = Modifier.fillMaxWidth(textWidthFraction).graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            this.alpha = alpha
-                            transformOrigin = TransformOrigin.Center
-                        },
-                        color = Color(0xFFF2F6F4),
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = 27.sp,
-                            lineHeight = 37.sp,
-                            fontWeight = if (focus > 0.55f) FontWeight.SemiBold else FontWeight.Normal,
-                        ),
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    androidx.compose.runtime.key(trackId, index) {
+                        AmllLyricText(
+                            text = line.text,
+                            words = line.words,
+                            positionMillis = positionMillis,
+                            active = wordLyricsEnabled && index == activeIndex,
+                            color = Color(0xFFF2F6F4),
+                            speed = animationSpeed,
+                            modifier = Modifier.fillMaxWidth(textWidthFraction).graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                this.alpha = alpha
+                                transformOrigin = TransformOrigin.Center
+                            },
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 27.sp,
+                                lineHeight = 37.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     if (hasTranslation) {
                         Spacer(Modifier.height(6.dp))
                         Text(

@@ -82,6 +82,8 @@ class AndroidGatewayController(context: Context) {
         private set
     var lyricAnimationSpeed by mutableStateOf(settings.lyricAnimationSpeed)
         private set
+    var wordLyricsEnabled by mutableStateOf(settings.wordLyricsEnabled)
+        private set
     var audioQuality by mutableStateOf(settings.audioQuality)
         private set
     var exclusiveAudio by mutableStateOf(settings.exclusiveAudio)
@@ -190,6 +192,11 @@ class AndroidGatewayController(context: Context) {
     fun updateLyricAnimationSpeed(value: LyricAnimationSpeed) {
         lyricAnimationSpeed = value
         settings.lyricAnimationSpeed = value
+    }
+
+    fun updateWordLyricsEnabled(enabled: Boolean) {
+        wordLyricsEnabled = enabled
+        settings.wordLyricsEnabled = enabled
     }
 
     fun updateAudioQuality(value: AudioQuality) {

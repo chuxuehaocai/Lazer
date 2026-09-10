@@ -34,4 +34,12 @@ class WordLyricsTest {
     fun malformedMetadataAndEmptyRowsAreIgnored() {
         assertTrue(parseWordLyrics("{\"t\":0}\n[broken]\n[100,80]").isEmpty())
     }
+
+    @Test
+    fun animationSpeedKeepsPersistedNamesAndAddsFineGrainedChoices() {
+        assertEquals(LyricAnimationSpeed.RELAXED, parseLyricAnimationSpeed("RELAXED"))
+        assertEquals(LyricAnimationSpeed.STANDARD, parseLyricAnimationSpeed("STANDARD"))
+        assertEquals(LyricAnimationSpeed.RESPONSIVE, parseLyricAnimationSpeed("RESPONSIVE"))
+        assertEquals(7, LyricAnimationSpeed.entries.size)
+    }
 }

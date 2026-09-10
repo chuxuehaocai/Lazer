@@ -262,12 +262,15 @@ private fun ThemeTextButton(
 }
 
 @Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
+private fun SettingsCard(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     if (LocalLazerThemeEngine.current == LazerThemeEngine.MIUIX) {
         CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides colors.onSurface) {
             MiuixCard(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = modifier.fillMaxWidth(),
                 cornerRadius = 18.dp,
             ) {
                 content()
@@ -275,7 +278,7 @@ private fun SettingsCard(content: @Composable () -> Unit) {
         }
     } else {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth(),
             shape = RoundedCornerShape(18.dp),
             color = colors.surfaceContainerHigh,
         ) {
@@ -492,6 +495,7 @@ fun AndroidLazerApp() {
                     lyricsMessage = controller.lyricsMessage,
                     lyricFollowDelayMillis = controller.lyricFollowDelayMillis,
                     lyricAnimationSpeed = controller.lyricAnimationSpeed,
+                    wordLyricsEnabled = controller.wordLyricsEnabled,
                     isLiked = playback.track?.let { controller.isSongLiked(it.id) } == true,
                     onToggleLiked = { playback.track?.let(controller::toggleSongLiked) },
                     onDismiss = { playerVisible = false },
@@ -530,6 +534,7 @@ fun AndroidLazerApp() {
                     positionMillis = playback.positionMillis,
                     followDelayMillis = controller.lyricFollowDelayMillis,
                     animationSpeed = controller.lyricAnimationSpeed,
+                    wordLyricsEnabled = controller.wordLyricsEnabled,
                     onBack = { lyricsVisible = false },
                     onSeek = { AndroidPlaybackConnection.seekTo(context, it) },
                     modifier = Modifier
@@ -907,13 +912,40 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
         }
         item { SectionTitle("歌词") }
         item {
+            SettingsCard(
+                modifier = Modifier.clickable(role = Role.Switch) {
+                    controller.updateWordLyricsEnabled(!controller.wordLyricsEnabled)
+                },
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("逐字歌词", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (controller.wordLyricsEnabled) "显示逐字渐亮和模糊过渡" else "只显示整行歌词",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerSwitch(
+                        engine = controller.themeEngine,
+                        checked = controller.wordLyricsEnabled,
+                        onCheckedChange = null,
+                    )
+                }
+            }
+        }
+        item {
             SettingsCard {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("歌词动画速率", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "调整逐字高亮和自动跟随的节奏",
+                                "调整滚动收束和逐字过渡的节奏",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.onSurfaceVariant,
                             )
@@ -936,14 +968,23 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                         steps = animationSpeedOptions.size - 2,
                     )
                     Row(Modifier.fillMaxWidth()) {
-                        animationSpeedOptions.forEachIndexed { index, speed ->
-                            Text(
-                                speed.label,
-                                modifier = if (index < animationSpeedOptions.lastIndex) Modifier.weight(1f) else Modifier,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant,
-                            )
-                        }
+                        Text(
+                            animationSpeedOptions.first().label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            LyricAnimationSpeed.STANDARD.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            animationSpeedOptions.last().label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -1474,6 +1515,7 @@ private fun NowPlayingPage(
     lyricsMessage: String?,
     lyricFollowDelayMillis: Long,
     lyricAnimationSpeed: LyricAnimationSpeed,
+    wordLyricsEnabled: Boolean,
     isLiked: Boolean,
     onToggleLiked: () -> Unit,
     onDismiss: () -> Unit,
@@ -1555,6 +1597,7 @@ private fun NowPlayingPage(
                         positionMillis = snapshot.positionMillis,
                         followDelayMillis = lyricFollowDelayMillis,
                         animationSpeed = lyricAnimationSpeed,
+                        wordLyricsEnabled = wordLyricsEnabled,
                         onSeek = onSeek,
                         modifier = Modifier.weight(1f).fillMaxSize(),
                     )

@@ -48,6 +48,10 @@ internal class AndroidSettingsStore(context: Context) {
         get() = parseLyricAnimationSpeed(preferences.getString(KEY_LYRIC_ANIMATION_SPEED, null))
         set(value) = preferences.edit().putString(KEY_LYRIC_ANIMATION_SPEED, value.name).apply()
 
+    var wordLyricsEnabled: Boolean
+        get() = preferences.getBoolean(KEY_WORD_LYRICS_ENABLED, true)
+        set(value) = preferences.edit().putBoolean(KEY_WORD_LYRICS_ENABLED, value).apply()
+
     var audioQuality: AudioQuality
         get() = parseAndroidAudioQuality(preferences.getString(KEY_AUDIO_QUALITY, null))
         set(value) = preferences.edit().putString(KEY_AUDIO_QUALITY, value.name).apply()
@@ -71,6 +75,7 @@ internal class AndroidSettingsStore(context: Context) {
         const val KEY_THEME_ENGINE = "appearance.theme_engine"
         const val KEY_LYRIC_FOLLOW_DELAY = "lyrics.follow_delay_millis"
         const val KEY_LYRIC_ANIMATION_SPEED = "lyrics.animation_speed"
+        const val KEY_WORD_LYRICS_ENABLED = "lyrics.word_animation_enabled"
         const val KEY_AUDIO_QUALITY = "playback.audio_quality"
         const val KEY_EXCLUSIVE_AUDIO = "playback.exclusive_audio"
         const val KEY_GATEWAY_BASE_URL = "gateway.base_url"

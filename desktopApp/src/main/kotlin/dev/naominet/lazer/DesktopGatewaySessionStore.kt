@@ -52,6 +52,10 @@ internal object DesktopSettings {
         get() = parseLyricAnimationSpeed(DesktopStateFile.get("lyrics.animation_speed"))
         set(value) = DesktopStateFile.set("lyrics.animation_speed", value.name)
 
+    var wordLyricsEnabled: Boolean
+        get() = DesktopStateFile.get("lyrics.word_animation_enabled")?.toBooleanStrictOrNull() ?: true
+        set(value) = DesktopStateFile.set("lyrics.word_animation_enabled", value.toString())
+
     var exclusiveAudio: Boolean
         get() = DesktopStateFile.get("playback.exclusive_audio")?.toBooleanStrictOrNull() ?: false
         set(value) = DesktopStateFile.set("playback.exclusive_audio", value.toString())
