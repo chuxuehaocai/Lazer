@@ -148,6 +148,28 @@ class LyricLineMotionField {
     }
 }
 
+/** How far the whole-line scanner has travelled, 0–1, weighted equally per timed word. */
+internal fun lyricLineScanFraction(
+    words: List<TimedLyricWord>,
+    positionMillis: Long,
+    speed: LyricAnimationSpeed,
+): Float {
+    if (words.isEmpty()) return 0f
+    val index = currentLyricWordIndex(words, positionMillis)
+    if (index < 0) return 0f
+    val progress = lyricWordVisualProgress(words[index], positionMillis, speed).coerceIn(0f, 1f)
+    return ((index + progress) / words.size).coerceIn(0f, 1f)
+}
+
+/** Last word whose start is at or before the playhead, or -1 if none have started. */
+internal fun currentLyricWordIndex(words: List<TimedLyricWord>, positionMillis: Long): Int {
+    var result = -1
+    for (index in words.indices) {
+        if (words[index].startTimeMillis <= positionMillis) result = index else break
+    }
+    return result
+}
+
 /** Fractional progress keeps a long syllable moving throughout its source duration. */
 fun lyricWordProgress(word: TimedLyricWord, positionMillis: Long): Float =
     ((positionMillis - word.startTimeMillis).toDouble() / word.durationMillis.coerceAtLeast(1L))
@@ -163,7 +185,7 @@ fun lyricWordVisualProgress(
     speed: LyricAnimationSpeed,
 ): Float {
     val leadMillis = 70.0 / speed.scrollMultiplier
-    val tailMillis = 150.0 / speed.scrollMultiplier
+    val tailMillis = 15.0 / speed.scrollMultiplier
     val visualStart = word.startTimeMillis.toDouble() - leadMillis
     val visualDuration = word.durationMillis.coerceAtLeast(1L) + leadMillis + tailMillis
     val rawProgress = ((positionMillis - visualStart) / visualDuration).coerceIn(0.0, 1.0)

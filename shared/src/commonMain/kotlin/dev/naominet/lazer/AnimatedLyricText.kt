@@ -5,6 +5,8 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -12,26 +14,28 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import kotlin.math.abs
-import kotlin.math.max
+import androidx.compose.ui.unit.dp
+import kotlin.math.min
 import kotlin.math.roundToLong
+
+private val LyricShaderShadowRadius = 12.dp
 
 @Composable
 fun animatedLyricFocus(active: Boolean, speed: LyricAnimationSpeed): Float {
@@ -55,7 +59,9 @@ fun AmllLyricText(
     words: List<TimedLyricWord>,
     positionMillis: Long,
     active: Boolean,
+    currentLine: Boolean = active,
     color: Color,
+    shadowColor: Color = Color.Black,
     speed: LyricAnimationSpeed,
     modifier: Modifier = Modifier,
     style: TextStyle = TextStyle.Default,
@@ -80,51 +86,83 @@ fun AmllLyricText(
         animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
         label = "AMLL lyric effect",
     )
-    val layoutStyle = style.merge(
-        TextStyle(
-            color = Color.Transparent,
-            textAlign = textAlign ?: TextAlign.Unspecified,
-        ),
+    val lineFocus by animateFloatAsState(
+        targetValue = if (currentLine) 1f else 0f,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "AMLL lyric shadow",
     )
+    val alignedStyle = style.merge(
+        TextStyle(textAlign = textAlign ?: TextAlign.Unspecified),
+    )
+    val layoutStyle = alignedStyle.merge(TextStyle(color = Color.Transparent))
     val laidOutGlyphs = remember(layoutResult, glyphs, words) {
         layoutResult?.let { buildLaidOutGlyphs(it, glyphs, words.size) }.orEmpty()
     }
 
-    BasicText(
-        text = text,
-        modifier = modifier.drawWithContent {
-            val measured = layoutResult
-            if (measured == null) {
-                drawContent()
-            } else if (words.isEmpty() || laidOutGlyphs.none { it.timing.wordIndex >= 0 }) {
-                drawText(measured, color = color)
-            } else if (!active && effectStrength <= 0.001f) {
-                drawText(measured, color = color)
-            } else {
-                drawAmllGlyphs(
-                    layout = measured,
-                    glyphs = laidOutGlyphs,
-                    words = words,
-                    positionMillis = animatedPosition.roundToLong(),
-                    color = color,
-                    speed = speed,
-                    effectStrength = effectStrength,
-                )
-            }
-        },
-        style = layoutStyle,
-        overflow = overflow,
-        maxLines = maxLines,
-        onTextLayout = { result ->
-            if (layoutResult != result) layoutResult = result
-        },
-    )
+    Box(modifier) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    val radius = LyricShaderShadowRadius.toPx()
+                    compositingStrategy = CompositingStrategy.Offscreen
+                    clip = false
+                    alpha = 0.5f * lineFocus
+                    renderEffect = if (lineFocus > 0.001f) {
+                        BlurEffect(radius, radius, TileMode.Decal)
+                    } else {
+                        null
+                    }
+                }
+                .drawBehind {
+                    if (lineFocus <= 0.001f) return@drawBehind
+                    val measured = layoutResult ?: return@drawBehind
+                    drawLyricShaderShadow(
+                        layout = measured,
+                        glyphs = laidOutGlyphs,
+                        words = words,
+                        positionMillis = animatedPosition.roundToLong(),
+                        speed = speed,
+                        shadowColor = shadowColor,
+                    )
+                }
+                .clearAndSetSemantics { },
+        )
+        BasicText(
+            text = text,
+            modifier = Modifier.fillMaxWidth().drawWithContent {
+                val measured = layoutResult
+                if (measured == null) {
+                    drawContent()
+                } else if (words.isEmpty() || laidOutGlyphs.none { it.timing.wordIndex >= 0 }) {
+                    drawText(measured, color = color)
+                } else if (!active && effectStrength <= 0.001f) {
+                    drawText(measured, color = color)
+                } else {
+                    drawAmllGlyphs(
+                        layout = measured,
+                        glyphs = laidOutGlyphs,
+                        words = words,
+                        positionMillis = animatedPosition.roundToLong(),
+                        color = color,
+                        speed = speed,
+                        effectStrength = effectStrength,
+                    )
+                }
+            },
+            style = layoutStyle,
+            overflow = overflow,
+            maxLines = maxLines,
+            onTextLayout = { result ->
+                if (layoutResult != result) layoutResult = result
+            },
+        )
+    }
 }
 
 private data class LaidOutLyricGlyph(
     val timing: TimedLyricGlyph,
     val bounds: Rect,
-    val path: Path,
     val startInWord: Float,
     val wordWidth: Float,
 )
@@ -134,7 +172,7 @@ private fun buildLaidOutGlyphs(
     glyphs: List<TimedLyricGlyph>,
     wordCount: Int,
 ): List<LaidOutLyricGlyph> {
-    data class Partial(val timing: TimedLyricGlyph, val bounds: Rect, val path: Path, val start: Float)
+    data class Partial(val timing: TimedLyricGlyph, val bounds: Rect, val start: Float)
 
     val wordWidths = FloatArray(wordCount)
     val partials = buildList {
@@ -144,25 +182,89 @@ private fun buildLaidOutGlyphs(
             if (bounds.width <= 0.01f || bounds.height <= 0.01f) continue
             val startInWord = if (glyph.wordIndex >= 0) wordWidths[glyph.wordIndex] else 0f
             if (glyph.wordIndex >= 0) wordWidths[glyph.wordIndex] += bounds.width
-            add(
-                Partial(
-                    timing = glyph,
-                    bounds = bounds,
-                    path = layout.getPathForRange(glyph.startOffset, glyph.endOffset),
-                    start = startInWord,
-                ),
-            )
+            add(Partial(timing = glyph, bounds = bounds, start = startInWord))
         }
     }
     return partials.map { partial ->
         LaidOutLyricGlyph(
             timing = partial.timing,
             bounds = partial.bounds,
-            path = partial.path,
             startInWord = partial.start,
             wordWidth = wordWidths.getOrElse(partial.timing.wordIndex) { 0f },
         )
     }
+}
+
+private fun DrawScope.drawLyricShaderShadow(
+    layout: TextLayoutResult,
+    glyphs: List<LaidOutLyricGlyph>,
+    words: List<TimedLyricWord>,
+    positionMillis: Long,
+    speed: LyricAnimationSpeed,
+    shadowColor: Color,
+) {
+    drawRect(color = Color.Transparent, blendMode = BlendMode.Clear)
+    if (words.isEmpty() || glyphs.none { it.timing.wordIndex >= 0 }) {
+        drawText(textLayoutResult = layout, color = shadowColor)
+        return
+    }
+    for (clip in lineScanClips(layout, glyphs, words, positionMillis, speed)) {
+        clipRect(clip.left, clip.top, clip.right, clip.bottom) {
+            drawText(textLayoutResult = layout, color = shadowColor)
+        }
+    }
+}
+
+private fun lineScanClips(
+    layout: TextLayoutResult,
+    glyphs: List<LaidOutLyricGlyph>,
+    words: List<TimedLyricWord>,
+    positionMillis: Long,
+    speed: LyricAnimationSpeed,
+): List<Rect> {
+    val timed = glyphs.filter { it.timing.wordIndex >= 0 }.sortedBy { it.timing.startOffset }
+    if (timed.isEmpty()) return emptyList()
+    val current = currentLyricWordIndex(words, positionMillis)
+    if (current < 0) return emptyList()
+    val progress = lyricWordVisualProgress(words[current], positionMillis, speed).coerceIn(0f, 1f)
+    val wordWidths = FloatArray(words.size)
+    for (glyph in timed) {
+        val index = glyph.timing.wordIndex
+        if (index in wordWidths.indices) wordWidths[index] = glyph.wordWidth
+    }
+    var target = 0f
+    for (index in 0 until current) target += wordWidths[index]
+    target += wordWidths.getOrElse(current) { 0f } * progress
+
+    val clips = ArrayList<Rect>(timed.size)
+    var traveled = 0f
+    for (glyph in timed) {
+        val clip = glyphLineClip(layout, glyph)
+        val width = clip.width
+        if (width <= 0.01f) continue
+        when {
+            traveled + width <= target + 0.01f -> {
+                clips += clip
+                traveled += width
+            }
+            traveled < target -> {
+                clips += Rect(clip.left, clip.top, min(clip.left + (target - traveled), clip.right), clip.bottom)
+                break
+            }
+            else -> break
+        }
+    }
+    return clips
+}
+
+private fun glyphLineClip(layout: TextLayoutResult, glyph: LaidOutLyricGlyph): Rect {
+    val line = layout.getLineForOffset(glyph.timing.startOffset)
+    return Rect(
+        left = glyph.bounds.left,
+        top = layout.getLineTop(line),
+        right = glyph.bounds.right,
+        bottom = layout.getLineBottom(line),
+    )
 }
 
 private fun DrawScope.drawAmllGlyphs(
@@ -175,101 +277,11 @@ private fun DrawScope.drawAmllGlyphs(
     effectStrength: Float,
 ) {
     val effect = effectStrength.coerceIn(0f, 1f)
-    for (laidOutGlyph in glyphs) {
-        val glyph = laidOutGlyph.timing
-        val bounds = laidOutGlyph.bounds
-        val path = laidOutGlyph.path
-        val word = words.getOrNull(glyph.wordIndex)
-        val shouldEmphasize = word?.let(::shouldEmphasizeLyricWord) == true
-        val motion = when {
-            word == null -> AmllCharacterMotion(1f, 0f, 0f, 0f, 0f)
-            shouldEmphasize -> amllCharacterMotion(
-                word = word,
-                positionMillis = positionMillis,
-                characterIndex = glyph.indexInWord,
-                characterCount = glyph.characterCount,
-                isLastWord = glyph.wordIndex == words.lastIndex,
-                speed = speed,
-            )
-            else -> AmllCharacterMotion(
-                scale = 1f,
-                offsetXEm = 0f,
-                offsetYEm = amllWordFloatOffsetEm(word, positionMillis, speed),
-                glowAlpha = 0f,
-                glowRadiusEm = 0f,
-            )
-        }
-        val emPixels = max(bounds.height, 1f)
-        val scale = 1f + (motion.scale - 1f) * effect
-        val offsetX = motion.offsetXEm * emPixels * effect
-        val offsetY = motion.offsetYEm * emPixels * effect
-        val pivot = bounds.center
-
-        if (motion.glowAlpha * effect > 0.001f && motion.glowRadiusEm > 0f) {
-            val blurPixels = motion.glowRadiusEm * emPixels
-            withTransform({
-                translate(offsetX, offsetY)
-                scale(scale, scale, pivot)
-            }) {
-                clipRect(
-                    left = bounds.left - blurPixels * 2f,
-                    top = bounds.top - blurPixels * 2f,
-                    right = bounds.right + blurPixels * 2f,
-                    bottom = bounds.bottom + blurPixels * 2f,
-                ) {
-                    drawText(
-                        textLayoutResult = layout,
-                        color = Color.Transparent,
-                        shadow = Shadow(
-                            color = color.copy(alpha = color.alpha * motion.glowAlpha * effect),
-                            offset = Offset.Zero,
-                            blurRadius = blurPixels,
-                        ),
-                    )
-                }
-            }
-        }
-
-        withTransform({
-            translate(offsetX, offsetY)
-            scale(scale, scale, pivot)
-        }) {
-            clipPath(path) {
-                if (word != null && glyph.characterCount > 0) {
-                    val progress = lyricWordVisualProgress(word, positionMillis, speed)
-                    val fadeWidth = bounds.height * 0.5f
-                    val leftMask = lyricMaskForegroundAlpha(
-                        wordProgress = progress,
-                        pointInWordPixels = laidOutGlyph.startInWord,
-                        wordWidthPixels = laidOutGlyph.wordWidth,
-                        fadeWidthPixels = fadeWidth,
-                    )
-                    val rightMask = lyricMaskForegroundAlpha(
-                        wordProgress = progress,
-                        pointInWordPixels = laidOutGlyph.startInWord + bounds.width,
-                        wordWidthPixels = laidOutGlyph.wordWidth,
-                        fadeWidthPixels = fadeWidth,
-                    )
-                    val base = lyricBaseMaskAlpha()
-                    val leftAlpha = 1f - effect * (1f - (base + (1f - base) * leftMask))
-                    val rightAlpha = 1f - effect * (1f - (base + (1f - base) * rightMask))
-                    val foreground: Brush = if (abs(leftAlpha - rightAlpha) < 0.001f) {
-                        SolidColor(color.copy(alpha = color.alpha * leftAlpha))
-                    } else {
-                        Brush.horizontalGradient(
-                            colors = listOf(
-                                color.copy(alpha = color.alpha * leftAlpha),
-                                color.copy(alpha = color.alpha * rightAlpha),
-                            ),
-                            startX = bounds.left,
-                            endX = bounds.right,
-                        )
-                    }
-                    drawText(textLayoutResult = layout, brush = foreground)
-                } else {
-                    drawText(textLayoutResult = layout, color = color)
-                }
-            }
+    val dimColor = color.copy(alpha = color.alpha * (1f - effect * (1f - lyricBaseMaskAlpha())))
+    drawText(textLayoutResult = layout, color = dimColor)
+    for (clip in lineScanClips(layout, glyphs, words, positionMillis, speed)) {
+        clipRect(clip.left, clip.top, clip.right, clip.bottom) {
+            drawText(textLayoutResult = layout, color = color)
         }
     }
 }

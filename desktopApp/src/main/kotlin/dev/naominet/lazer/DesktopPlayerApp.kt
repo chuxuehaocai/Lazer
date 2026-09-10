@@ -2396,35 +2396,37 @@ private fun LyricsOverlay(
                                 val alpha = (0.24f + ambient * 0.20f) * (1f - focus) + focus
                                 val color = lerpColor(colors.onSurfaceVariant, colors.onSurface, focus)
                                 val hasTranslation = !line.translation.isNullOrBlank()
-                                val rowHeight = if (hasTranslation) 124.dp else 74.dp
-                                val scaledRowHeight = rowHeight * 1.04f
+                                val baseRowHeight = 74.dp * 1.04f
+                                val scaledRowHeight = if (hasTranslation) 124.dp * 1.04f else baseRowHeight
                                 val textWidthFraction = 1f / 1.04f
-                                val yDp = with(density) { lineCenterPx.toDp() } - scaledRowHeight / 2
+                                val yDp = with(density) { lineCenterPx.toDp() } - baseRowHeight / 2
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .offset(y = yDp)
                                         .height(scaledRowHeight)
                                         .padding(horizontal = 20.dp)
-                                        .clip(RoundedCornerShape(10.dp))
                                         .clickable {
                                             lyricLineMotion.snapTo(lyricScroll)
                                             followPlayback = true
                                             lyricWheelInertia.stop()
                                             controller.seekToLyric(index)
                                         },
-                                    contentAlignment = if (hasTranslation) Alignment.TopCenter else Alignment.Center,
+                                    contentAlignment = Alignment.TopCenter,
                                 ) {
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
                                         androidx.compose.runtime.key(controller.nowPlaying?.id, index) {
+                                            Box(Modifier.height(baseRowHeight), contentAlignment = Alignment.Center) {
                                             AmllLyricText(
                                                 text = line.text,
                                                 words = line.words,
                                                 positionMillis = controller.positionMillis,
                                                 active = controller.wordLyricsEnabled && index == activeIndex,
+                                                currentLine = index == activeIndex,
                                                 color = color,
+                                                shadowColor = if (controller.isDark) Color.White else Color.Black,
                                                 speed = controller.lyricAnimationSpeed,
                                                 modifier = Modifier
                                                     .fillMaxWidth(textWidthFraction)
@@ -2443,6 +2445,7 @@ private fun LyricsOverlay(
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
+                                            }
                                         }
                                         if (hasTranslation) {
                                             Spacer(Modifier.height(6.dp))

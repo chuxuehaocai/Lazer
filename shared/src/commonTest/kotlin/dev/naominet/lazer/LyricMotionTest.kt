@@ -6,6 +6,37 @@ import kotlin.test.assertTrue
 
 class LyricMotionTest {
     @Test
+    fun currentWordFollowsThePlayhead() {
+        val words = listOf(
+            TimedLyricWord(1_000L, 400L, "还"),
+            TimedLyricWord(1_400L, 400L, "没"),
+            TimedLyricWord(1_800L, 400L, "见"),
+        )
+        assertEquals(-1, currentLyricWordIndex(words, 999L))
+        assertEquals(0, currentLyricWordIndex(words, 1_000L))
+        assertEquals(0, currentLyricWordIndex(words, 1_399L))
+        assertEquals(1, currentLyricWordIndex(words, 1_400L))
+        assertEquals(2, currentLyricWordIndex(words, 2_500L))
+        assertTrue(currentLyricWordIndex(words, 1_400L) >= 1)
+    }
+
+    @Test
+    fun lineScanTravelsWithTheCurrentWord() {
+        val words = listOf(
+            TimedLyricWord(1_000L, 400L, "还"),
+            TimedLyricWord(1_400L, 400L, "没"),
+            TimedLyricWord(1_800L, 400L, "见"),
+        )
+        assertEquals(0f, lyricLineScanFraction(words, 999L, LyricAnimationSpeed.STANDARD))
+        assertTrue(lyricLineScanFraction(words, 1_000L, LyricAnimationSpeed.STANDARD) > 0f)
+        assertTrue(
+            lyricLineScanFraction(words, 1_400L, LyricAnimationSpeed.STANDARD) >
+                lyricLineScanFraction(words, 1_200L, LyricAnimationSpeed.STANDARD),
+        )
+        assertEquals(1f, lyricLineScanFraction(words, 2_500L, LyricAnimationSpeed.STANDARD), 0.001f)
+    }
+
+    @Test
     fun longSyllablesHaveFractionalProgressAndSeekBackwards() {
         val word = TimedLyricWord(1_000L, 2_000L, "你")
         assertEquals(0f, lyricWordProgress(word, 900L))
@@ -67,6 +98,20 @@ class LyricMotionTest {
         assertEquals(0f, amllEmphasisEasing(1f), 0.001f)
         assertTrue(shouldEmphasizeLyricWord(TimedLyricWord(0L, 1_100L, "长")))
         assertTrue(!shouldEmphasizeLyricWord(TimedLyricWord(0L, 500L, "短")))
+    }
+
+    @Test
+    fun glyphMappingKeepsYrcSyllablesOnTheirTimedWords() {
+        val words = listOf(
+            TimedLyricWord(16_210L, 670L, "还"),
+            TimedLyricWord(16_880L, 410L, "没 "),
+            TimedLyricWord(17_290L, 980L, "见"),
+        )
+        val text = words.joinToString(separator = "", transform = TimedLyricWord::text)
+        val glyphs = buildTimedLyricGlyphs(text, words)
+        assertEquals("还没 见", text)
+        assertEquals(listOf(0, 1, 1, 2), glyphs.map { it.wordIndex })
+        assertEquals(listOf(true, true, false, true), glyphs.map { it.isVisible })
     }
 
     @Test

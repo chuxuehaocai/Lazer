@@ -288,32 +288,34 @@ private fun AnimatedLyricsViewport(
             val scale = 0.96f + focus * 0.08f
             val alpha = (0.24f + ambient * 0.20f) * (1f - focus) + focus
             val hasTranslation = !line.translation.isNullOrBlank()
-            val rowHeight = if (hasTranslation) 124.dp else 74.dp
-            val scaledRowHeight = rowHeight * 1.04f
+            val baseRowHeight = 74.dp * 1.04f
+            val scaledRowHeight = if (hasTranslation) 124.dp * 1.04f else baseRowHeight
             val textWidthFraction = 1f / 1.04f
-            val y = with(density) { lineCenterPx.toDp() } - scaledRowHeight / 2
+            val y = with(density) { lineCenterPx.toDp() } - baseRowHeight / 2
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .offset(y = y)
                     .height(scaledRowHeight)
                     .padding(horizontal = 26.dp)
-                    .clip(RoundedCornerShape(10.dp))
                     .clickable {
                         lyricLineMotion.snapTo(lyricScroll)
                         followPlayback = true
                         onSeek(line.timeMillis)
                     },
-                contentAlignment = Alignment.Center,
+                contentAlignment = Alignment.TopCenter,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     androidx.compose.runtime.key(trackId, index) {
+                        Box(Modifier.height(baseRowHeight), contentAlignment = Alignment.Center) {
                         AmllLyricText(
                             text = line.text,
                             words = line.words,
                             positionMillis = positionMillis,
                             active = wordLyricsEnabled && index == activeIndex,
+                            currentLine = index == activeIndex,
                             color = Color(0xFFF2F6F4),
+                            shadowColor = Color.White,
                             speed = animationSpeed,
                             modifier = Modifier.fillMaxWidth(textWidthFraction).graphicsLayer {
                                 scaleX = scale
@@ -330,6 +332,7 @@ private fun AnimatedLyricsViewport(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        }
                     }
                     if (hasTranslation) {
                         Spacer(Modifier.height(6.dp))
