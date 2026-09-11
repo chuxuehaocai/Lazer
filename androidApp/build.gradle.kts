@@ -17,6 +17,48 @@ kotlin {
         jvmTarget = JvmTarget.JVM_11
     }
 }
+
+// Release signing is resolved up front but never required at configuration time, so unrelated
+// tasks (debug APK, desktop packaging, CI) configure and run without a keystore.
+val releaseKeystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use(::load)
+}
+val releaseStoreFile = providers.environmentVariable("LAZER_KEYSTORE_FILE")
+    .orElse(releaseKeystoreProperties.getProperty("storeFile") ?: "")
+    .get()
+val releaseStorePassword = providers.environmentVariable("LAZER_KEYSTORE_PASSWORD")
+    .orElse(releaseKeystoreProperties.getProperty("storePassword") ?: "")
+    .get()
+val releaseKeyAlias = providers.environmentVariable("LAZER_KEY_ALIAS")
+    .orElse(releaseKeystoreProperties.getProperty("keyAlias") ?: "")
+    .get()
+val releaseKeyPassword = providers.environmentVariable("LAZER_KEY_PASSWORD")
+    .orElse(releaseKeystoreProperties.getProperty("keyPassword") ?: "")
+    .get()
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all(String::isNotBlank)
+
+// Fail loudly only when a release artifact is actually requested, and point at the fix. A dedicated
+// task keeps this out of configuration-time evaluation (CI builds without a keystore) and stays
+// configuration-cache safe by capturing a plain Boolean.
+val verifyReleaseSigning = tasks.register("verifyReleaseSigning") {
+    val signingConfigured = hasReleaseSigning
+    doLast {
+        check(signingConfigured) {
+            "Release signing is not configured. Set LAZER_KEYSTORE_FILE, " +
+                "LAZER_KEYSTORE_PASSWORD, LAZER_KEY_ALIAS and LAZER_KEY_PASSWORD, " +
+                "or create keystore.properties in the project root."
+        }
+    }
+}
+tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
+    dependsOn(verifyReleaseSigning)
+}
 dependencies {
     implementation(project(":shared"))
 
@@ -45,27 +87,6 @@ android {
     namespace = "dev.naominet.lazer"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
-    val releaseKeystorePropertiesFile = rootProject.file("keystore.properties")
-    val releaseKeystoreProperties = Properties().apply {
-        if (releaseKeystorePropertiesFile.exists()) {
-            releaseKeystorePropertiesFile.inputStream().use(::load)
-        }
-    }
-    val releaseStoreFile = providers.environmentVariable("LAZER_KEYSTORE_FILE")
-        .orElse(releaseKeystoreProperties.getProperty("storeFile") ?: "")
-    val releaseStorePassword = providers.environmentVariable("LAZER_KEYSTORE_PASSWORD")
-        .orElse(releaseKeystoreProperties.getProperty("storePassword") ?: "")
-    val releaseKeyAlias = providers.environmentVariable("LAZER_KEY_ALIAS")
-        .orElse(releaseKeystoreProperties.getProperty("keyAlias") ?: "")
-    val releaseKeyPassword = providers.environmentVariable("LAZER_KEY_PASSWORD")
-        .orElse(releaseKeystoreProperties.getProperty("keyPassword") ?: "")
-    val hasReleaseSigning = listOf(
-        releaseStoreFile.get(),
-        releaseStorePassword.get(),
-        releaseKeyAlias.get(),
-        releaseKeyPassword.get(),
-    ).all(String::isNotBlank)
-
     defaultConfig {
         applicationId = "dev.naominet.lazer"
         minSdk = libs.versions.android.minSdk.get().toInt()
@@ -90,21 +111,16 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
-                storeFile = rootProject.file(releaseStoreFile.get())
-                storePassword = releaseStorePassword.get()
-                keyAlias = releaseKeyAlias.get()
-                keyPassword = releaseKeyPassword.get()
+                storeFile = rootProject.file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
     buildTypes {
         release {
-            check(hasReleaseSigning) {
-                "Release signing is not configured. Set LAZER_KEYSTORE_FILE, " +
-                    "LAZER_KEYSTORE_PASSWORD, LAZER_KEY_ALIAS and LAZER_KEY_PASSWORD, " +
-                    "or create keystore.properties in the project root."
-            }
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
