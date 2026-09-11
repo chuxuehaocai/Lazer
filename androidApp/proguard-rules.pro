@@ -19,3 +19,5 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# SuperLyricApi Binder models are serialized across process boundaries; keep them intact.
+-keep class com.hchen.superlyricapi.** { *; }

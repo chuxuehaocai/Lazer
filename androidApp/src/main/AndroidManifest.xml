@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- SuperLyricApi declares minSdk 26. It is an optional system integration that is only ever
+         called after SuperLyricHelper.isAvailable(), so the lower app floor is safe. -->
+    <uses-sdk tools:overrideLibrary="com.hchen.superlyricapi" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

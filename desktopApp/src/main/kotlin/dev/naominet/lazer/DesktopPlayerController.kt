@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import dev.naominet.lazer.gateway.AudioQuality
 import dev.naominet.lazer.gateway.GatewayConfig
 import dev.naominet.lazer.gateway.NeteaseMusicGateway
@@ -186,8 +188,16 @@ class DesktopPlayerController(
 
     var isDark by mutableStateOf(DesktopSettings.isDark)
         private set
-    var themeEngine by mutableStateOf(DesktopSettings.themeEngine)
+    var style by mutableStateOf(DesktopSettings.style)
         private set
+    var palette by mutableStateOf(DesktopSettings.palette)
+        private set
+    var backgroundImage by mutableStateOf<ImageBitmap?>(null)
+        private set
+    var backgroundAlpha by mutableStateOf(DesktopSettings.backgroundAlpha)
+        private set
+    val themeEngine: LazerThemeEngine get() = style.themeEngine
+    val liquidGlassEnabled: Boolean get() = style.usesLiquidGlass
     var language by mutableStateOf(DesktopSettings.language)
         private set
     var lyricFollowDelayMillis by mutableStateOf(DesktopSettings.lyricFollowDelayMillis)
@@ -312,7 +322,57 @@ class DesktopPlayerController(
         systemMediaSession.setVolume(volume)
         scope.launch {
             loadLazerTranslations()
+            loadBackgroundImage()
             connectMusicService()
+        }
+    }
+
+    fun updatePalette(value: LazerPalette) {
+        palette = value
+        DesktopSettings.palette = value
+    }
+
+    fun updateBackgroundAlpha(value: Float) {
+        backgroundAlpha = value.coerceIn(0f, 1f)
+        DesktopSettings.backgroundAlpha = backgroundAlpha
+    }
+
+    /** Copies the chosen file into app storage and decodes it as the new background. */
+    fun setBackgroundImage(source: java.io.File) {
+        scope.launch {
+            val decoded = withContext(Dispatchers.IO) {
+                runCatching {
+                    val target = java.io.File(
+                        System.getProperty("user.home"),
+                        ".lazer/background.png",
+                    )
+                    target.parentFile?.mkdirs()
+                    source.inputStream().use { input -> target.outputStream().use(input::copyTo) }
+                    javax.imageio.ImageIO.read(target)?.toComposeImageBitmap()
+                }.onFailure { error -> println("Lazer: background load failed: $error") }.getOrNull()
+            }
+            if (decoded != null) {
+                backgroundImage = decoded
+                DesktopSettings.backgroundImagePath = java.io.File(
+                    System.getProperty("user.home"),
+                    ".lazer/background.png",
+                ).absolutePath
+            }
+        }
+    }
+
+    fun clearBackgroundImage() {
+        backgroundImage = null
+        DesktopSettings.backgroundImagePath = null
+        runCatching {
+            java.io.File(System.getProperty("user.home"), ".lazer/background.png").delete()
+        }
+    }
+
+    private suspend fun loadBackgroundImage() {
+        val path = DesktopSettings.backgroundImagePath ?: return
+        backgroundImage = withContext(Dispatchers.IO) {
+            runCatching { javax.imageio.ImageIO.read(java.io.File(path))?.toComposeImageBitmap() }.getOrNull()
         }
     }
 
@@ -420,9 +480,9 @@ class DesktopPlayerController(
         DesktopSettings.isDark = isDark
     }
 
-    fun updateThemeEngine(value: LazerThemeEngine) {
-        themeEngine = value
-        DesktopSettings.themeEngine = value
+    fun updateStyle(value: LazerStyle) {
+        style = value
+        DesktopSettings.style = value
     }
 
     fun updateLanguage(value: LazerLanguage) {

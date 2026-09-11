@@ -208,6 +208,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
             setSessionActivity(contentIntent())
             isActive = true
         }
+        SuperLyricPublisher.ensureRegistered()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -405,6 +406,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
             publishCurrentState(isPreparing = false, isPlaying = false)
             AndroidPlaybackStateStore.snapshot.value.track?.let { ensureForeground(it, preparing = false) }
         }
+        SuperLyricPublisher.stop()
         if (gatewaySettings.exclusiveAudio && abandonExclusiveFocus) abandonAudioFocus()
     }
 
@@ -433,6 +435,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         streamUrls.clear()
         streamUrlPrefetches.clear()
         abandonAudioFocus()
+        SuperLyricPublisher.stop()
         if (clearSession) gateway.clearSession()
         AndroidPlaybackStateStore.update(AndroidPlaybackSnapshot())
         mediaSession.setPlaybackState(
@@ -461,6 +464,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
             ),
         )
         updateSession(track, isPlaying, position)
+        if (isPlaying) SuperLyricPublisher.onPosition(track, position.coerceAtLeast(0L))
     }
 
     private fun publishError(message: String) {
@@ -692,6 +696,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         abandonAudioFocus()
         mediaSession.isActive = false
         mediaSession.release()
+        SuperLyricPublisher.release()
         scope.cancel()
         gateway.close()
         super.onDestroy()

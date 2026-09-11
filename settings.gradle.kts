@@ -24,6 +24,12 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
+        // SuperLyricApi is published on JitPack.
+        maven("https://jitpack.io") {
+            content {
+                includeGroupAndSubgroups("com.github.HChenX")
+            }
+        }
     }
 }
 

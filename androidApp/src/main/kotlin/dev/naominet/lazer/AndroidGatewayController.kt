@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
 import dev.naominet.lazer.gateway.AudioQuality
 import dev.naominet.lazer.gateway.GatewayConfig
 import dev.naominet.lazer.gateway.NeteaseMusicGateway
@@ -98,8 +99,16 @@ class AndroidGatewayController(context: Context) {
         private set
     var useSystemMonetColors by mutableStateOf(settings.useSystemMonetColors)
         private set
-    var themeEngine by mutableStateOf(settings.themeEngine)
+    var palette by mutableStateOf(settings.palette)
         private set
+    var backgroundImage by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
+        private set
+    var backgroundAlpha by mutableStateOf(settings.backgroundAlpha)
+        private set
+    var style by mutableStateOf(settings.style)
+        private set
+    val themeEngine: LazerThemeEngine get() = style.themeEngine
+    val liquidGlassEnabled: Boolean get() = style.usesLiquidGlass
     var language by mutableStateOf(settings.language)
         private set
     var lyricFollowDelayMillis by mutableStateOf(settings.lyricFollowDelayMillis)
@@ -182,8 +191,55 @@ class AndroidGatewayController(context: Context) {
         LazerI18n.switchLanguage(language)
         scope.launch {
             loadLazerTranslations()
+            loadBackgroundImage()
             bootstrap()
         }
+    }
+
+    fun updatePalette(value: LazerPalette) {
+        palette = value
+        settings.palette = value
+    }
+
+    fun updateBackgroundAlpha(value: Float) {
+        backgroundAlpha = value.coerceIn(0f, 1f)
+        settings.backgroundAlpha = backgroundAlpha
+    }
+
+    private suspend fun loadBackgroundImage() {
+        val path = settings.backgroundImagePath ?: return
+        val bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                android.graphics.BitmapFactory.decodeFile(path)?.asImageBitmap()
+            }.getOrNull()
+        }
+        backgroundImage = bitmap
+    }
+
+    /** Copies the picked image into app storage and decodes it as the new background. */
+    fun setBackgroundImage(uri: android.net.Uri) {
+        scope.launch {
+            val decoded = withContext(Dispatchers.IO) {
+                runCatching {
+                    val target = java.io.File(appContext.filesDir, BACKGROUND_IMAGE_FILE)
+                    appContext.contentResolver.openInputStream(uri)?.use { input ->
+                        target.outputStream().use(input::copyTo)
+                    }
+                    android.graphics.BitmapFactory.decodeFile(target.absolutePath)?.asImageBitmap()
+                }.onFailure { android.util.Log.w("AndroidGatewayController", "background load failed", it) }
+                    .getOrNull()
+            }
+            if (decoded != null) {
+                backgroundImage = decoded
+                settings.backgroundImagePath = java.io.File(appContext.filesDir, BACKGROUND_IMAGE_FILE).absolutePath
+            }
+        }
+    }
+
+    fun clearBackgroundImage() {
+        backgroundImage = null
+        settings.backgroundImagePath = null
+        runCatching { java.io.File(appContext.filesDir, BACKGROUND_IMAGE_FILE).delete() }
     }
 
     val isSignedIn: Boolean get() = currentUser != null
@@ -213,9 +269,9 @@ class AndroidGatewayController(context: Context) {
         settings.useSystemMonetColors = enabled
     }
 
-    fun updateThemeEngine(value: LazerThemeEngine) {
-        themeEngine = value
-        settings.themeEngine = value
+    fun updateStyle(value: LazerStyle) {
+        style = value
+        settings.style = value
     }
 
     fun updateLanguage(value: LazerLanguage) {
@@ -399,6 +455,7 @@ class AndroidGatewayController(context: Context) {
     fun loadLyrics(trackId: Long) {
         lyricJob?.cancel()
         lyrics = emptyList()
+        SuperLyricPublisher.updateLyrics(trackId, emptyList())
         lyricsMessage = null
         lyricsLoading = true
         lyricJob = scope.launch {
@@ -411,9 +468,11 @@ class AndroidGatewayController(context: Context) {
                     parseAndroidLrc(response.tlyric?.lyric),
                 )
                 lyrics = merged
+                SuperLyricPublisher.updateLyrics(trackId, merged)
                 lyricsMessage = if (merged.isEmpty()) tr("status.no_lyrics") else null
             } catch (_: Throwable) {
                 lyrics = emptyList()
+                SuperLyricPublisher.updateLyrics(trackId, emptyList())
                 lyricsMessage = tr("status.lyrics_fail")
             } finally {
                 lyricsLoading = false
@@ -895,6 +954,7 @@ class AndroidGatewayController(context: Context) {
     }
 
     private companion object {
+        const val BACKGROUND_IMAGE_FILE = "lazer.background.png"
         const val HOME_TRACKS_CACHE_ID = -101L
         const val PLAYLIST_PAGE_SIZE = 500
         const val QR_POLL_INTERVAL_MILLIS = 1_800L

@@ -75,6 +75,9 @@ private val LocalScrollInertia = compositionLocalOf<ScrollInertiaController> {
     error("ScrollInertiaController missing")
 }
 
+/** True while the native Windows acrylic backdrop is showing, so chrome can go translucent. */
+private val LocalOsGlassActive = androidx.compose.runtime.staticCompositionLocalOf { false }
+
 private enum class DesktopDestination(
     private val labelKey: String,
     val icon: ImageVector,
@@ -111,19 +114,62 @@ fun WindowScope.DesktopPlayerApp(
     var destination by remember { mutableStateOf(DesktopDestination.HOME) }
     var settingsVisible by remember { mutableStateOf(false) }
     val scrollInertia = rememberScrollInertiaController()
+    val windowTitle = controller.nowPlaying
+        ?.takeIf { controller.isPlaying }
+        ?.let { "Lazer - ${it.title}" }
+        ?: "Lazer"
+    // Liquid Glass on Windows uses the native DWM acrylic backdrop, which blurs the real desktop
+    // behind the window. Other platforms fall back to the opaque paper surface.
+    val osGlassAvailable = isWindowsDesktop()
+    val osGlassActive = osGlassAvailable && controller.style.usesLiquidGlass
+    LaunchedEffect(osGlassActive, window) {
+        applyWindowsAcrylic(window, osGlassActive)
+        // The native window handle can appear a beat after the first frame; re-apply once.
+        kotlinx.coroutines.delay(300)
+        applyWindowsAcrylic(window, osGlassActive)
+    }
 
-    LazerTheme(isDark = controller.isDark, engine = controller.themeEngine) {
-        val frameShape = RoundedCornerShape(if (isWindowMaximized) 0.dp else 12.dp)
-        CompositionLocalProvider(LocalScrollInertia provides scrollInertia) {
+    val paletteColorScheme = remember(controller.palette, controller.isDark) {
+        when (val palette = controller.palette) {
+            LazerPalette.Default -> null
+            LazerPalette.System -> null
+            is LazerPalette.Custom -> seedColorScheme(palette.seed, controller.isDark)
+        }
+    }
+    val hasWallpaper = controller.backgroundImage != null
+    val uiAlpha = if (hasWallpaper) controller.backgroundAlpha else 1f
+    LazerTheme(
+        isDark = controller.isDark,
+        colorScheme = paletteColorScheme,
+        engine = controller.themeEngine,
+    ) {
+        val frameShape = RoundedCornerShape(0.dp)
+        CompositionLocalProvider(
+            LocalScrollInertia provides scrollInertia,
+            LocalOsGlassActive provides osGlassActive,
+            LocalLazerUiAlpha provides uiAlpha,
+        ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             shape = frameShape,
-            color = MaterialTheme.colorScheme.background,
+            color = if (osGlassActive) Color.Transparent else MaterialTheme.colorScheme.background,
             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         ) {
-            PaperBackground {
+            Box(Modifier.fillMaxSize()) {
+            val bg = controller.backgroundImage
+            if (bg != null) {
+                // The wallpaper is fully opaque; the slider fades the UI surfaces above it.
+                Image(
+                    bitmap = bg,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            PaperBackground(transparent = osGlassActive) {
                 Column(Modifier.fillMaxSize()) {
                     WindowTitleBar(
+                        title = windowTitle,
                         maximized = isWindowMaximized,
                         onMinimize = onMinimizeWindow,
                         onToggleMaximize = onToggleMaximizeWindow,
@@ -203,6 +249,7 @@ fun WindowScope.DesktopPlayerApp(
                     LoginOverlay(controller)
                 }
             }
+            }
         }
         }
     }
@@ -210,21 +257,27 @@ fun WindowScope.DesktopPlayerApp(
 
 @Composable
 private fun WindowScope.WindowTitleBar(
+    title: String,
     maximized: Boolean,
     onMinimize: () -> Unit,
     onToggleMaximize: () -> Unit,
     onClose: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val glass = LocalOsGlassActive.current
+    val uiAlpha = LocalLazerUiAlpha.current
     Row(
-        modifier = Modifier.fillMaxWidth().height(42.dp).background(colors.surface.copy(alpha = 0.9f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(42.dp)
+            .background(colors.surface.copy(alpha = if (glass) 0f else 0.9f * uiAlpha)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val titleModifier = Modifier.weight(1f).fillMaxHeight()
         if (maximized) {
-            Box(titleModifier) { WindowTitleIdentity() }
+            Box(titleModifier) { WindowTitleIdentity(title) }
         } else {
-            WindowDraggableArea(titleModifier) { WindowTitleIdentity() }
+            WindowDraggableArea(titleModifier) { WindowTitleIdentity(title) }
         }
         WindowControlButton(Icons.Outlined.Remove, tr("window.minimize"), onMinimize)
         WindowControlButton(if (maximized) Icons.Outlined.FilterNone else Icons.Outlined.CropSquare, if (maximized) tr("window.restore") else tr("window.maximize"), onToggleMaximize)
@@ -233,7 +286,7 @@ private fun WindowScope.WindowTitleBar(
 }
 
 @Composable
-private fun WindowTitleIdentity() {
+private fun WindowTitleIdentity(title: String) {
     val colors = MaterialTheme.colorScheme
     Row(
         Modifier.fillMaxSize().padding(start = 14.dp),
@@ -251,7 +304,14 @@ private fun WindowTitleIdentity() {
             )
         }
         Spacer(Modifier.width(8.dp))
-        Text("Lazer", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+        Text(
+            title,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(end = 12.dp),
+        )
     }
 }
 
@@ -270,13 +330,15 @@ private fun WindowControlButton(icon: ImageVector, description: String, onClick:
 }
 
 @Composable
-private fun PaperBackground(content: @Composable () -> Unit) {
+private fun PaperBackground(transparent: Boolean = false, content: @Composable () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    // Calm paper sheet — no fiber dots / dashed noise.
+    // Calm paper sheet — no fiber dots / dashed noise. Transparent under the OS glass layer; when a
+    // custom wallpaper is active the paper fades by LocalLazerUiAlpha so the wallpaper shows through.
+    val uiAlpha = LocalLazerUiAlpha.current
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.background),
+            .then(if (transparent) Modifier else Modifier.background(colors.background.copy(alpha = uiAlpha))),
     ) {
         content()
     }
@@ -295,6 +357,8 @@ private fun NavigationPanel(
     onOpenSettings: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val glass = LocalOsGlassActive.current
+    val uiAlpha = LocalLazerUiAlpha.current
     val playlistScrollState = rememberScrollState()
     val inertia = LocalScrollInertia.current
     // width() (not requiredWidth) so a narrow window can still shrink the rail.
@@ -304,7 +368,7 @@ private fun NavigationPanel(
             .fillMaxHeight()
             .width(railWidth)
             .widthIn(max = railWidth),
-        color = colors.surface.copy(alpha = 0.86f),
+        color = colors.surface.copy(alpha = if (glass) 0f else 0.86f * uiAlpha),
         border = androidx.compose.foundation.BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.45f)),
     ) {
         Column(
@@ -620,47 +684,104 @@ private fun DesktopSettingsPage(
                 PageHeading(tr("settings.title"), tr("settings.subtitle"))
                 Text(tr("settings.appearance"), style = MaterialTheme.typography.titleSmall)
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            controller.updateThemeEngine(
-                                if (controller.themeEngine == LazerThemeEngine.MIUIX) {
-                                    LazerThemeEngine.MATERIAL3
-                                } else {
-                                    LazerThemeEngine.MIUIX
-                                },
-                            )
-                        }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(tr("settings.theme.engine.title"), style = MaterialTheme.typography.bodyMedium)
+                        Text(tr("settings.style"), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            tr("settings.theme.engine.current", controller.themeEngine.label),
+                            desktopStyleLabel(controller.style),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Spacer(Modifier.width(12.dp))
-                    LazerThemeEngineSwitch(
-                        engine = controller.themeEngine,
-                        onEngineChange = controller::updateThemeEngine,
+                    DesktopSettingsDropdown(
+                        // Acrylic is Windows-only; it is not offered on other platforms.
+                        options = if (isWindowsDesktop()) LazerStyle.entries else DesktopStyleOptions,
+                        selected = controller.style,
+                        label = ::desktopStyleLabel,
+                        onSelected = controller::updateStyle,
                     )
                 }
                 HorizontalDivider()
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(tr("settings.language"), style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LazerLanguage.entries.forEach { language ->
-                            FilterChip(
-                                selected = controller.language == language,
-                                onClick = { controller.updateLanguage(language) },
-                                label = { Text(language.displayName) },
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tr("settings.palette"), style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                paletteLabel(controller.palette),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        DesktopSettingsDropdown(
+                            options = listOf(
+                                LazerPalette.Default,
+                                LazerPalette.System,
+                                LazerPalette.Custom(LazerSeedSwatches.first()),
+                            ),
+                            selected = controller.palette,
+                            label = ::paletteLabel,
+                            onSelected = controller::updatePalette,
+                        )
                     }
+                    val custom = controller.palette
+                    if (custom is LazerPalette.Custom) {
+                        SeedColorPicker(
+                            seed = custom.seed,
+                            onSeedChange = { controller.updatePalette(LazerPalette.Custom(it)) },
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                        )
+                    }
+                }
+                HorizontalDivider()
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tr("settings.background"), style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (controller.backgroundImage != null) tr("settings.background.change") else tr("settings.background.none"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { pickBackgroundImage(controller) }) {
+                            Text(tr("settings.background.pick"))
+                        }
+                        if (controller.backgroundImage != null) {
+                            TextButton(onClick = controller::clearBackgroundImage) {
+                                Text(tr("settings.background.clear"), color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                    if (controller.backgroundImage != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(tr("settings.background.alpha"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(12.dp))
+                            Slider(
+                                value = controller.backgroundAlpha,
+                                onValueChange = controller::updateBackgroundAlpha,
+                                valueRange = 0f..1f,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("${(controller.backgroundAlpha * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(tr("settings.language"), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    DesktopSettingsDropdown(
+                        options = LazerLanguage.entries,
+                        selected = controller.language,
+                        label = LazerLanguage::displayName,
+                        onSelected = controller::updateLanguage,
+                    )
                 }
                 HorizontalDivider()
                 if (isWindowsDesktop()) {
@@ -1555,6 +1676,64 @@ private fun PageHeading(title: String, subtitle: String) {
 }
 
 @Composable
+private fun <T> DesktopSettingsDropdown(
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    onSelected: (T) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }) {
+            Text(label(selected), color = colors.primary)
+            Icon(Icons.Filled.ArrowDropDown, null, Modifier.size(18.dp), tint = colors.primary)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            label(option),
+                            color = if (option == selected) colors.primary else colors.onSurface,
+                        )
+                    },
+                    onClick = {
+                        onSelected(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+private val DesktopStyleOptions = LazerStyle.entries.filter { it != LazerStyle.LIQUID_GLASS }
+
+/** On desktop the Liquid Glass style is the native Windows Acrylic backdrop. */
+private fun desktopStyleLabel(style: LazerStyle): String =
+    if (style == LazerStyle.LIQUID_GLASS) tr("style.acrylic") else style.label
+
+private fun paletteLabel(palette: LazerPalette): String = when (palette) {
+    LazerPalette.Default -> tr("settings.palette.default")
+    LazerPalette.System -> tr("settings.palette.system")
+    is LazerPalette.Custom -> tr("settings.palette.custom")
+}
+
+private fun pickBackgroundImage(controller: DesktopPlayerController) {
+    val chooser = javax.swing.JFileChooser().apply {
+        dialogTitle = tr("settings.background.pick")
+        fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
+            "Images",
+            "png", "jpg", "jpeg", "webp", "bmp", "gif",
+        )
+    }
+    if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+        chooser.selectedFile?.let(controller::setBackgroundImage)
+    }
+}
+
+@Composable
 private fun SectionHeading(title: String, subtitle: String) {
     Row(verticalAlignment = Alignment.Bottom) {
         Text(title, style = MaterialTheme.typography.headlineSmall)
@@ -1920,9 +2099,11 @@ private fun PlayerBar(controller: DesktopPlayerController) {
         },
         label = "playback-progress",
     )
+    val glass = LocalOsGlassActive.current
+    val uiAlpha = LocalLazerUiAlpha.current
     Surface(
         modifier = Modifier.fillMaxWidth().height(84.dp),
-        color = colors.surface.copy(alpha = 0.96f),
+        color = colors.surface.copy(alpha = if (glass) 0f else 0.96f * uiAlpha),
         border = androidx.compose.foundation.BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.7f)),
     ) {
         Row(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {

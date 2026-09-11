@@ -71,6 +71,9 @@ kotlin {
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
             implementation(libs.miuix.ui)
+            // Exposed so platform modules can compose the backdrop library's own modifiers
+            // (switchers, magnifiers) instead of re-wrapping every recipe here.
+            api(libs.backdrop)
             implementation(libs.compose.ui)
             implementation(libs.compose.components.resources)
             implementation(libs.compose.uiToolingPreview)

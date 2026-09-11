@@ -34,13 +34,45 @@ internal object DesktopSettings {
         get() = DesktopStateFile.get("appearance.dark")?.toBooleanStrictOrNull() ?: false
         set(value) = DesktopStateFile.set("appearance.dark", value.toString())
 
-    var themeEngine: LazerThemeEngine
-        get() = parseLazerThemeEngine(DesktopStateFile.get("appearance.theme_engine"))
-        set(value) = DesktopStateFile.set("appearance.theme_engine", value.name)
+    /**
+     * Single appearance style. The Acrylic style is Windows-only (it needs the DWM backdrop), so a
+     * value persisted on Windows falls back to Material when the app runs elsewhere.
+     */
+    var style: LazerStyle
+        get() {
+            val stored = DesktopStateFile.get("appearance.style")?.let(::parseLazerStyle)
+                ?: run {
+                    val legacyEngine = parseLazerThemeEngine(DesktopStateFile.get("appearance.theme_engine"))
+                    val legacyGlass = DesktopStateFile.get("appearance.liquid_glass")?.toBooleanStrictOrNull() ?: false
+                    when {
+                        legacyGlass -> LazerStyle.LIQUID_GLASS
+                        legacyEngine == LazerThemeEngine.MIUIX -> LazerStyle.MIUIX
+                        else -> LazerStyle.MATERIAL
+                    }
+                }
+            return if (!isWindowsDesktop() && stored == LazerStyle.LIQUID_GLASS) LazerStyle.MATERIAL else stored
+        }
+        set(value) = DesktopStateFile.set("appearance.style", value.name)
 
     var language: LazerLanguage
         get() = parseLazerLanguage(DesktopStateFile.get("appearance.language"))
         set(value) = DesktopStateFile.set("appearance.language", value.name)
+
+    /** Colour source. Migrates the legacy system-monet toggle on first read. */
+    var palette: LazerPalette
+        get() {
+            DesktopStateFile.get("appearance.palette")?.let { return LazerPalette.parse(it) }
+            return LazerPalette.Default
+        }
+        set(value) = DesktopStateFile.set("appearance.palette", value.serialize())
+
+    var backgroundImagePath: String?
+        get() = DesktopStateFile.get("appearance.background_image")
+        set(value) = DesktopStateFile.set("appearance.background_image", value)
+
+    var backgroundAlpha: Float
+        get() = DesktopStateFile.get("appearance.background_alpha")?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.82f
+        set(value) = DesktopStateFile.set("appearance.background_alpha", value.coerceIn(0f, 1f).toString())
 
     var lyricFollowDelayMillis: Long
         get() = normalizeLyricFollowDelayMillis(

@@ -34,6 +34,8 @@ dependencies {
     implementation(libs.compose.uiToolingPreview)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.ktor3)
+    // Publishes real-time lyrics to the system SuperLyric service.
+    implementation("com.github.HChenX:SuperLyricApi:3.4")
     debugImplementation(libs.compose.uiTooling)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit)
@@ -70,6 +72,15 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "1.0"
+
+        // CI builds a slimmer APK for a single ABI (e.g. -PlazerAbis=arm64-v8a). Local builds keep
+        // every ABI unless the property is supplied.
+        providers.gradleProperty("lazerAbis").orNull
+            ?.split(',')
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?.takeIf(List<String>::isNotEmpty)
+            ?.let { abis -> ndk { abiFilters.addAll(abis) } }
     }
     packaging {
         resources {

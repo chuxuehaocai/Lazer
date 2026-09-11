@@ -64,6 +64,13 @@ fun main() = application {
         position = WindowPosition.Aligned(Alignment.Center),
         size = DpSize(1280.dp, 820.dp),
     )
+    val controller = remember { DesktopPlayerController().also { it.start() } }
+    val nowPlaying = controller.nowPlaying
+    val windowTitle = if (controller.isPlaying && nowPlaying != null) {
+        "Lazer - ${nowPlaying.title}"
+    } else {
+        "Lazer"
+    }
     // Compose's maximized placement can cover the Windows taskbar for undecorated windows.
     // Store native pixel bounds so maximize/restore also stays correct on mixed-DPI monitors.
     var restoreBounds by remember { mutableStateOf<Rectangle?>(null) }
@@ -77,6 +84,7 @@ fun main() = application {
         transparent = true,
     ) {
         DesktopPlayerApp(
+            controller = controller,
             isWindowMaximized = restoreBounds != null,
             onMinimizeWindow = { windowState.isMinimized = true },
             onToggleMaximizeWindow = {

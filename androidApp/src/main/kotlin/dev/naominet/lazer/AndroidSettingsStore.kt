@@ -32,9 +32,36 @@ internal class AndroidSettingsStore(context: Context) {
         get() = preferences.getBoolean(KEY_SYSTEM_MONET, false)
         set(value) = preferences.edit().putBoolean(KEY_SYSTEM_MONET, value).apply()
 
-    var themeEngine: LazerThemeEngine
-        get() = parseLazerThemeEngine(preferences.getString(KEY_THEME_ENGINE, null))
-        set(value) = preferences.edit().putString(KEY_THEME_ENGINE, value.name).apply()
+    /** Colour source. Migrates the legacy system-monet toggle on first read. */
+    var palette: LazerPalette
+        get() {
+            preferences.getString(KEY_PALETTE, null)?.let { return LazerPalette.parse(it) }
+            return if (preferences.getBoolean(KEY_SYSTEM_MONET, false)) LazerPalette.System else LazerPalette.Default
+        }
+        set(value) = preferences.edit().putString(KEY_PALETTE, value.serialize()).apply()
+
+    /** Absolute path of the user's custom background image, or null. */
+    var backgroundImagePath: String?
+        get() = preferences.getString(KEY_BACKGROUND_IMAGE, null)
+        set(value) = preferences.edit().putString(KEY_BACKGROUND_IMAGE, value).apply()
+
+    var backgroundAlpha: Float
+        get() = preferences.getFloat(KEY_BACKGROUND_ALPHA, 0.82f).coerceIn(0f, 1f)
+        set(value) = preferences.edit().putFloat(KEY_BACKGROUND_ALPHA, value.coerceIn(0f, 1f)).apply()
+
+    /** Single appearance style. Migrates the legacy separate engine/glass keys on first read. */
+    var style: LazerStyle
+        get() {
+            preferences.getString(KEY_STYLE, null)?.let { return parseLazerStyle(it) }
+            val legacyEngine = parseLazerThemeEngine(preferences.getString(KEY_THEME_ENGINE, null))
+            val legacyGlass = preferences.getBoolean(KEY_LIQUID_GLASS_ENABLED, false)
+            return when {
+                legacyGlass -> LazerStyle.LIQUID_GLASS
+                legacyEngine == LazerThemeEngine.MIUIX -> LazerStyle.MIUIX
+                else -> LazerStyle.MATERIAL
+            }
+        }
+        set(value) = preferences.edit().putString(KEY_STYLE, value.name).apply()
 
     var language: LazerLanguage
         get() = parseLazerLanguage(preferences.getString(KEY_LANGUAGE, null))
@@ -92,7 +119,12 @@ internal class AndroidSettingsStore(context: Context) {
         const val PREFERENCES_NAME = "lazer.android.settings"
         const val KEY_DARK_THEME = "appearance.dark"
         const val KEY_SYSTEM_MONET = "appearance.system_monet"
+        const val KEY_STYLE = "appearance.style"
+        const val KEY_PALETTE = "appearance.palette"
+        const val KEY_BACKGROUND_IMAGE = "appearance.background_image"
+        const val KEY_BACKGROUND_ALPHA = "appearance.background_alpha"
         const val KEY_THEME_ENGINE = "appearance.theme_engine"
+        const val KEY_LIQUID_GLASS_ENABLED = "appearance.liquid_glass"
         const val KEY_LANGUAGE = "appearance.language"
         const val KEY_LYRIC_FOLLOW_DELAY = "lyrics.follow_delay_millis"
         const val KEY_LYRIC_ANIMATION_SPEED = "lyrics.animation_speed"
