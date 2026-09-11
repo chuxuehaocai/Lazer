@@ -660,6 +660,16 @@ fun AndroidLazerApp() {
                 )
             }
             if (controller.isLoginVisible) LoginSheet(controller)
+            if ((context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                // Top-end, just below the header row, so it never overlaps the bottom controls.
+                DebugWatermark(
+                    enabled = true,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 54.dp, end = 14.dp),
+                )
+            }
         }
     }
 }

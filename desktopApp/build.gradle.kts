@@ -84,5 +84,13 @@ tasks.register<JavaExec>("runDesktop") {
     // Skiko on JDK 21+ needs native access; match compose run defaults loosely.
     jvmArgs(
         "--enable-native-access=ALL-UNNAMED",
+        // Gradle-run builds are development builds: show the debug watermark.
+        "-Dlazer.debug=true",
     )
+}
+
+// The Compose `run` task is also a development run. Match lazily because the Compose plugin may
+// register `run` after this script body is evaluated.
+tasks.withType<JavaExec>().configureEach {
+    if (name == "run") jvmArgs("-Dlazer.debug=true")
 }

@@ -104,6 +104,7 @@ fun WindowScope.DesktopPlayerApp(
         DesktopPlayerController().also { it.start() }
     },
     isWindowMaximized: Boolean = false,
+    debugBuild: Boolean = System.getProperty("lazer.debug") == "true",
     onMinimizeWindow: () -> Unit = {},
     onToggleMaximizeWindow: () -> Unit = {},
     onCloseWindow: () -> Unit = {},
@@ -247,6 +248,13 @@ fun WindowScope.DesktopPlayerApp(
 
                 if (controller.isLoginVisible) {
                     LoginOverlay(controller)
+                }
+                if (debugBuild) {
+                    // Top-end, below the window title bar, clear of the window controls.
+                    DebugWatermark(
+                        enabled = true,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 50.dp, end = 14.dp),
+                    )
                 }
             }
             }
