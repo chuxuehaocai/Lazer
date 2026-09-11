@@ -38,6 +38,10 @@ internal object DesktopSettings {
         get() = parseLazerThemeEngine(DesktopStateFile.get("appearance.theme_engine"))
         set(value) = DesktopStateFile.set("appearance.theme_engine", value.name)
 
+    var language: LazerLanguage
+        get() = parseLazerLanguage(DesktopStateFile.get("appearance.language"))
+        set(value) = DesktopStateFile.set("appearance.language", value.name)
+
     var lyricFollowDelayMillis: Long
         get() = normalizeLyricFollowDelayMillis(
             DesktopStateFile.get("lyrics.follow_delay_millis")?.toLongOrNull()
@@ -55,6 +59,24 @@ internal object DesktopSettings {
     var wordLyricsEnabled: Boolean
         get() = DesktopStateFile.get("lyrics.word_animation_enabled")?.toBooleanStrictOrNull() ?: true
         set(value) = DesktopStateFile.set("lyrics.word_animation_enabled", value.toString())
+
+    var lyricGlowEnabled: Boolean
+        get() = DesktopStateFile.get("lyrics.glow_enabled")?.toBooleanStrictOrNull() ?: true
+        set(value) = DesktopStateFile.set("lyrics.glow_enabled", value.toString())
+
+    var lyricFontSizeSp: Int
+        get() = normalizeLyricFontSizeSp(
+            DesktopStateFile.get("lyrics.font_size_sp")?.toIntOrNull()
+                ?: DEFAULT_DESKTOP_LYRIC_FONT_SIZE_SP,
+        )
+        set(value) = DesktopStateFile.set(
+            "lyrics.font_size_sp",
+            normalizeLyricFontSizeSp(value).toString(),
+        )
+
+    var showFullLyrics: Boolean
+        get() = DesktopStateFile.get("lyrics.show_full_lines")?.toBooleanStrictOrNull() ?: false
+        set(value) = DesktopStateFile.set("lyrics.show_full_lines", value.toString())
 
     var exclusiveAudio: Boolean
         get() = DesktopStateFile.get("playback.exclusive_audio")?.toBooleanStrictOrNull() ?: false

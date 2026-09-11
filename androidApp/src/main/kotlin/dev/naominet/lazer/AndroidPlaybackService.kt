@@ -90,6 +90,14 @@ private object AndroidPlaybackQueue {
         index = (index - 1 + tracks.size) % tracks.size
         return current()
     }
+
+    fun adjacent(): List<AndroidTrack> {
+        if (tracks.size < 2 || index !in tracks.indices) return emptyList()
+        return listOf(
+            tracks[(index + 1) % tracks.size],
+            tracks[(index - 1 + tracks.size) % tracks.size],
+        ).distinctBy(AndroidTrack::id)
+    }
 }
 
 /** Entry point used by Compose controls. Android's media session calls back into the same service. */
@@ -150,6 +158,15 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
     private var artworkBitmap: Bitmap? = null
     private var wasPlayingBeforeFocusLoss = false
     private var foregroundStarted = false
+    private val streamUrls = object : LinkedHashMap<AndroidStreamCacheKey, AndroidCachedStreamUrl>(
+        STREAM_URL_CACHE_SIZE,
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<AndroidStreamCacheKey, AndroidCachedStreamUrl>?): Boolean =
+            size > STREAM_URL_CACHE_SIZE
+    }
+    private val streamUrlPrefetches = mutableSetOf<AndroidStreamCacheKey>()
     private val mediaRequestHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android ${Build.VERSION.RELEASE}) Lazer/1.0",
         "Referer" to "https://music.163.com/",
@@ -197,7 +214,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         when (intent?.action) {
             ACTION_PLAY_TRACK -> {
                 AndroidPlaybackQueue.current()?.let(::resolveAndPlay)
-                    ?: publishError("播放队列已结束，请从应用内重新选择一首歌")
+                    ?: publishError(tr("status.audio_queue_end"))
             }
             ACTION_TOGGLE -> if (player?.isPlaying == true) pauseCurrent() else resumeCurrent()
             ACTION_NEXT -> playNext()
@@ -249,10 +266,11 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
             }.getOrNull()
             if (generation != loadingGeneration) return@launch
             if (url.isNullOrBlank()) {
-                publishError("这首歌暂时无法播放")
+                publishError(tr("status.track_unplayable"))
                 return@launch
             }
             preparePlayer(track, url, generation)
+            prefetchAdjacentStreamUrls()
         }
     }
 
@@ -283,7 +301,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
             }
             setOnErrorListener { _, what, extra ->
                 Log.e(TAG, "MediaPlayer failed for ${track.id}: what=$what extra=$extra")
-                if (generation == loadingGeneration) publishError("这首歌暂时无法播放")
+                if (generation == loadingGeneration) publishError(tr("status.track_unplayable"))
                 true
             }
         }
@@ -297,23 +315,58 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
             newPlayer.prepareAsync()
         }.onFailure { error ->
             Log.e(TAG, "MediaPlayer could not open stream for ${track.id}", error)
-            if (generation == loadingGeneration) publishError("这首歌暂时无法播放")
+            if (generation == loadingGeneration) publishError(tr("status.track_unplayable"))
         }
     }
 
-    private suspend fun resolveStreamUrl(trackId: Long): String? {
+    private suspend fun resolveStreamUrl(
+        trackId: Long,
+        preferredQuality: AudioQuality = gatewaySettings.audioQuality,
+    ): String? {
         refreshGatewayProvider()
-        val attempts = androidAudioQualityAttempts(gatewaySettings.audioQuality)
+        val cacheKey = AndroidStreamCacheKey(trackId, preferredQuality)
+        val now = System.currentTimeMillis()
+        streamUrls[cacheKey]
+            ?.takeIf { it.expiresAtMillis > now }
+            ?.let { return it.url }
+        streamUrls.remove(cacheKey)
+
+        val attempts = androidAudioQualityAttempts(cacheKey.quality)
         attempts.forEach { (quality, unblock) ->
-            val rawUrl = runCatching {
-                val streams = gateway.songUrls(listOf(trackId), quality = quality, unblock = unblock).data
-                (streams.firstOrNull { it.id == trackId } ?: streams.firstOrNull())?.url
-            }.onFailure { error ->
-                Log.w(TAG, "Audio URL attempt failed for $trackId at ${quality.label}", error)
-            }.getOrNull()
-            normalizedPlaybackUrl(rawUrl)?.let { return it }
+            val rawUrl = withContext(Dispatchers.IO) {
+                runCatching {
+                    val streams = gateway.songUrls(listOf(trackId), quality = quality, unblock = unblock).data
+                    (streams.firstOrNull { it.id == trackId } ?: streams.firstOrNull())?.url
+                }.onFailure { error ->
+                    Log.w(TAG, "Audio URL attempt failed for $trackId at ${quality.label}", error)
+                }.getOrNull()
+            }
+            normalizedPlaybackUrl(rawUrl)?.let { url ->
+                streamUrls[cacheKey] = AndroidCachedStreamUrl(
+                    url = url,
+                    expiresAtMillis = now + STREAM_URL_CACHE_TTL_MILLIS,
+                )
+                return url
+            }
         }
         return null
+    }
+
+    /** Resolve nearby URLs while the current player is buffering, so next/previous skips avoid a round trip. */
+    private fun prefetchAdjacentStreamUrls() {
+        val preferredQuality = gatewaySettings.audioQuality
+        AndroidPlaybackQueue.adjacent().forEach { track ->
+            val cacheKey = AndroidStreamCacheKey(track.id, preferredQuality)
+            val usableCachedUrl = streamUrls[cacheKey]?.expiresAtMillis ?: 0L
+            if (usableCachedUrl > System.currentTimeMillis() || !streamUrlPrefetches.add(cacheKey)) return@forEach
+            scope.launch {
+                try {
+                    resolveStreamUrl(track.id, preferredQuality)
+                } finally {
+                    streamUrlPrefetches.remove(cacheKey)
+                }
+            }
+        }
     }
 
     private fun refreshGatewayProvider() {
@@ -377,6 +430,8 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         releasePlayer()
         artworkTrackId = null
         artworkBitmap = null
+        streamUrls.clear()
+        streamUrlPrefetches.clear()
         abandonAudioFocus()
         if (clearSession) gateway.clearSession()
         AndroidPlaybackStateStore.update(AndroidPlaybackSnapshot())
@@ -518,10 +573,10 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "正在播放",
+            tr("notification.playing"),
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "显示播放控制"
+            description = tr("notification.controls")
             setShowBadge(false)
         }
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
@@ -531,7 +586,7 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         val isPlaying = AndroidPlaybackStateStore.snapshot.value.isPlaying
         val playAction = if (isPlaying) ACTION_TOGGLE else ACTION_TOGGLE
         val playIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val playLabel = if (isPlaying) "暂停" else "播放"
+        val playLabel = if (isPlaying) tr("player.pause") else tr("player.play")
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
         } else {
@@ -540,15 +595,15 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         }
             .setSmallIcon(if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
             .setContentTitle(track.title)
-            .setContentText(if (preparing) "正在准备播放" else track.artist)
+            .setContentText(if (preparing) tr("notification.preparing") else track.artist)
             .setOnlyAlertOnce(true)
             .setOngoing(isPlaying || preparing)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setContentIntent(contentIntent())
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .addAction(notificationAction(android.R.drawable.ic_media_previous, "上一首", ACTION_PREVIOUS))
+            .addAction(notificationAction(android.R.drawable.ic_media_previous, tr("player.previous"), ACTION_PREVIOUS))
             .addAction(notificationAction(playIcon, playLabel, playAction))
-            .addAction(notificationAction(android.R.drawable.ic_media_next, "下一首", ACTION_NEXT))
+            .addAction(notificationAction(android.R.drawable.ic_media_next, tr("player.next"), ACTION_NEXT))
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(mediaSession.sessionToken)
@@ -615,9 +670,9 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         .build()
 
     private fun audioFocusFailureMessage(): String = if (gatewaySettings.exclusiveAudio) {
-        "无法独占音频输出，请关闭独占音频后重试"
+        tr("status.exclusive_fail")
     } else {
-        "暂时无法使用音频输出"
+        tr("status.audio_fail")
     }
 
     private fun releasePlayer() {
@@ -657,9 +712,21 @@ class AndroidPlaybackService : Service(), AudioManager.OnAudioFocusChangeListene
         private const val NOTIFICATION_ID = 2036
         private const val PROGRESS_UPDATE_MILLIS = 100L
         private const val NETWORK_TIMEOUT_MILLIS = 10_000
+        private const val STREAM_URL_CACHE_SIZE = 6
+        private const val STREAM_URL_CACHE_TTL_MILLIS = 4 * 60_000L
         private const val TAG = "LazerPlayback"
     }
 }
+
+private data class AndroidStreamCacheKey(
+    val trackId: Long,
+    val quality: AudioQuality,
+)
+
+private data class AndroidCachedStreamUrl(
+    val url: String,
+    val expiresAtMillis: Long,
+)
 
 internal fun androidAudioFocusGain(exclusiveAudio: Boolean): Int = if (exclusiveAudio) {
     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE

@@ -385,6 +385,48 @@ class NeteaseMusicGatewayTest {
     }
 
     @Test
+    fun `preferred lyrics retries regular route when new route has no timed content`() = runTest {
+        val requestedPaths = mutableListOf<String>()
+        val client = HttpClient(MockEngine { request ->
+            requestedPaths += request.url.encodedPath
+            when (request.url.encodedPath) {
+                "/api/lyric/new" -> respond(
+                    content = """{"code":200,"yrc":{"lyric":"{\"t\":0}"}}""",
+                    headers = jsonHeaders(),
+                )
+                "/api/lyric" -> respond(
+                    content = """{"code":200,"lrc":{"lyric":"[00:01.00]普通歌词"}}""",
+                    headers = jsonHeaders(),
+                )
+                else -> error("Unexpected route: ${request.url.encodedPath}")
+            }
+        })
+
+        val response = gateway(client).preferredLyrics(42)
+
+        assertEquals("[00:01.00]普通歌词", response.lrc?.lyric)
+        assertEquals(listOf("/api/lyric/new", "/api/lyric"), requestedPaths)
+    }
+
+    @Test
+    fun `preferred lyrics keeps documented word lyric without a second request`() = runTest {
+        var requestCount = 0
+        val client = HttpClient(MockEngine { request ->
+            requestCount++
+            assertEquals("/api/lyric/new", request.url.encodedPath)
+            respond(
+                content = """{"code":200,"yrc":{"lyric":"[1000,500](1000,500,0)一句"}}""",
+                headers = jsonHeaders(),
+            )
+        })
+
+        val response = gateway(client).preferredLyrics(42)
+
+        assertEquals(1, requestCount)
+        assertEquals("[1000,500](1000,500,0)一句", response.yrc?.lyric)
+    }
+
+    @Test
     fun `raw routes reject absolute URLs`() = runTest {
         val gateway = gateway(HttpClient(MockEngine { error("request should not be reached") }))
 

@@ -20,6 +20,22 @@ import org.junit.Test
 
 class DesktopMediaAndCacheTest {
     @Test
+    fun `background home refresh cannot replace the playlist currently on screen`() {
+        val playlist = PlaylistItem(10, "A", "", null, 1)
+        val playlistTrack = TrackItem(101, "A song", "", "", 1_000, null)
+        val newlyRefreshedHomeTrack = TrackItem(202, "B song", "", "", 1_000, null)
+
+        assertEquals(
+            listOf(playlistTrack),
+            visiblePlaylistTracks(playlist, listOf(playlistTrack), listOf(newlyRefreshedHomeTrack)),
+        )
+        assertEquals(
+            listOf(newlyRefreshedHomeTrack),
+            visiblePlaylistTracks(null, listOf(playlistTrack), listOf(newlyRefreshedHomeTrack)),
+        )
+    }
+
+    @Test
     fun `exclusive PCM volume is applied to every channel`() {
         val format = AudioFormat(
             AudioFormat.Encoding.PCM_SIGNED,

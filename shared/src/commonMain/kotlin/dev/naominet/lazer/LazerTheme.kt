@@ -31,9 +31,11 @@ import top.yukonga.miuix.kmp.theme.TextStyles as MiuixTextStyles
 import top.yukonga.miuix.kmp.theme.darkColorScheme as miuixDarkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme as miuixLightColorScheme
 
-enum class LazerThemeEngine(val label: String) {
-    MATERIAL3("原生 Material 3"),
-    MIUIX("Miuix"),
+enum class LazerThemeEngine(private val labelKey: String) {
+    MATERIAL3("theme.engine.material"),
+    MIUIX("theme.engine.miuix");
+
+    val label: String get() = tr(labelKey)
 }
 
 fun parseLazerThemeEngine(value: String?): LazerThemeEngine =

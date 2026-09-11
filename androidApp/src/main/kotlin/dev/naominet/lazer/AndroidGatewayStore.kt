@@ -7,6 +7,11 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import dev.naominet.lazer.gateway.GatewaySessionStore
 import dev.naominet.lazer.gateway.model.UserProfile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
@@ -65,63 +70,168 @@ class AndroidPlaylistCache(context: Context) {
         "lazer.android.playlist.cache",
         Context.MODE_PRIVATE,
     )
+    private val lock = Any()
+    private val writerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var nextWriteRevision = 0L
+    private val writeRevisions = mutableMapOf<String, Long>()
 
-    fun loadFeaturedPlaylists(): List<AndroidPlaylist> = decodePlaylists(preferences.getString(KEY_FEATURED, null))
+    // Parsed cache values stay in process after their first read. This keeps opening a playlist,
+    // restoring the library, and replacing a playback queue from doing JSON work on the UI thread.
+    private var featuredPlaylistsMemory: List<AndroidPlaylist>? = null
+    private var currentUserMemory: UserProfile? = null
+    private var hasReadCurrentUser = false
+    private val userPlaylistsMemory = mutableMapOf<Long, List<AndroidPlaylist>>()
+    private val likedSongIdsMemory = mutableMapOf<Long, Set<Long>>()
+    private val tracksMemory = mutableMapOf<Long, List<AndroidTrack>>()
 
-    fun saveFeaturedPlaylists(playlists: List<AndroidPlaylist>) {
-        preferences.edit().putString(KEY_FEATURED, encodePlaylists(playlists)).apply()
+    fun loadFeaturedPlaylists(): List<AndroidPlaylist> = synchronized(lock) {
+        featuredPlaylistsMemory
+    } ?: decodePlaylists(preferences.getString(KEY_FEATURED, null)).also { playlists ->
+        synchronized(lock) { featuredPlaylistsMemory = playlists }
     }
 
-    fun loadCurrentUser(): UserProfile? = decodeUserProfile(
-        preferences.getString(KEY_CURRENT_USER, null),
-    ) ?: preferences.getLong(KEY_LAST_USER_ID, 0L)
-        .takeIf { it > 0 }
-        ?.let { UserProfile(userId = it) }
-        ?: cachedUserIdHint(preferences.all.keys)?.let { UserProfile(userId = it) }
+    fun saveFeaturedPlaylists(playlists: List<AndroidPlaylist>) {
+        val snapshot = playlists.toList()
+        synchronized(lock) { featuredPlaylistsMemory = snapshot }
+        writeAsync(KEY_FEATURED) { encodePlaylists(snapshot) }
+    }
+
+    fun loadCurrentUser(): UserProfile? {
+        synchronized(lock) {
+            if (hasReadCurrentUser) return currentUserMemory
+        }
+        val profile = decodeUserProfile(preferences.getString(KEY_CURRENT_USER, null))
+            ?: preferences.getLong(KEY_LAST_USER_ID, 0L)
+                .takeIf { it > 0 }
+                ?.let { UserProfile(userId = it) }
+            ?: cachedUserIdHint(preferences.all.keys)?.let { UserProfile(userId = it) }
+        synchronized(lock) {
+            currentUserMemory = profile
+            hasReadCurrentUser = true
+        }
+        return profile
+    }
 
     fun saveCurrentUser(profile: UserProfile) {
-        preferences.edit().putString(KEY_CURRENT_USER, encodeUserProfile(profile)).apply()
+        synchronized(lock) {
+            currentUserMemory = profile
+            hasReadCurrentUser = true
+        }
+        writeAsync(KEY_CURRENT_USER) { encodeUserProfile(profile) }
     }
 
     fun clearCurrentUser() {
-        preferences.edit().remove(KEY_CURRENT_USER).apply()
+        synchronized(lock) {
+            currentUserMemory = null
+            hasReadCurrentUser = true
+        }
+        removeAsync(KEY_CURRENT_USER)
     }
 
-    fun loadUserPlaylists(userId: Long): List<AndroidPlaylist> =
-        decodePlaylists(preferences.getString(userPlaylistsKey(userId), null))
+    fun loadUserPlaylists(userId: Long): List<AndroidPlaylist> = synchronized(lock) {
+        userPlaylistsMemory[userId]
+    } ?: decodePlaylists(preferences.getString(userPlaylistsKey(userId), null)).also { playlists ->
+        synchronized(lock) { userPlaylistsMemory[userId] = playlists }
+    }
 
     fun saveUserPlaylists(userId: Long, playlists: List<AndroidPlaylist>) {
-        preferences.edit()
-            .putString(userPlaylistsKey(userId), encodePlaylists(playlists))
-            .putLong(KEY_LAST_USER_ID, userId)
-            .apply()
+        val snapshot = playlists.toList()
+        synchronized(lock) { userPlaylistsMemory[userId] = snapshot }
+        writeAsync(userPlaylistsKey(userId)) { encodePlaylists(snapshot) }
+        writeAsync(KEY_LAST_USER_ID) { userId.toString() }
     }
 
-    fun loadLikedSongIds(userId: Long): Set<Long> = decodeSongIds(
-        preferences.getString(likedSongIdsKey(userId), null),
-    )
+    fun loadLikedSongIds(userId: Long): Set<Long> = synchronized(lock) {
+        likedSongIdsMemory[userId]
+    } ?: decodeSongIds(preferences.getString(likedSongIdsKey(userId), null)).also { songIds ->
+        synchronized(lock) { likedSongIdsMemory[userId] = songIds }
+    }
 
     fun saveLikedSongIds(userId: Long, songIds: Set<Long>) {
-        preferences.edit().putString(likedSongIdsKey(userId), encodeSongIds(songIds)).apply()
+        val snapshot = songIds.toSet()
+        synchronized(lock) { likedSongIdsMemory[userId] = snapshot }
+        writeAsync(likedSongIdsKey(userId)) { encodeSongIds(snapshot) }
     }
 
-    fun loadTracks(playlistId: Long): List<AndroidTrack> =
-        decodeTracks(preferences.getString(tracksKey(playlistId), null))
+    fun loadTracks(playlistId: Long): List<AndroidTrack> = synchronized(lock) {
+        tracksMemory[playlistId]
+    } ?: decodeTracks(preferences.getString(tracksKey(playlistId), null)).also { tracks ->
+        synchronized(lock) { tracksMemory[playlistId] = tracks }
+    }
+
+    /** Returns only already-decoded data; safe to call from a click handler without disk or JSON work. */
+    fun peekTracks(playlistId: Long): List<AndroidTrack>? = synchronized(lock) {
+        tracksMemory[playlistId]
+    }
 
     fun saveTracks(playlistId: Long, tracks: List<AndroidTrack>) {
-        preferences.edit().putString(tracksKey(playlistId), encodeTracks(tracks)).apply()
+        val snapshot = tracks.toList()
+        synchronized(lock) { tracksMemory[playlistId] = snapshot }
+        writeAsync(tracksKey(playlistId)) { encodeTracks(snapshot) }
     }
 
     /** Clears playlist and track data while keeping the cached signed-in identity intact. */
     fun clearPlaylistData(): Int {
-        val keys = preferences.all.keys.filter { key ->
+        fun isPlaylistDataKey(key: String): Boolean =
             key == KEY_FEATURED ||
                 key.startsWith("user.playlists.") ||
                 key.startsWith("user.liked_song_ids.") ||
                 key.startsWith("playlist.tracks.")
+
+        val storedKeys = preferences.all.keys.filter(::isPlaylistDataKey)
+        val keysToRemove = synchronized(lock) {
+            // A save may still be encoding on the writer dispatcher and therefore not appear in
+            // SharedPreferences yet. Invalidate those pending writes too, otherwise a cleared
+            // playlist could reappear a moment later.
+            val keys = (storedKeys + writeRevisions.keys.filter(::isPlaylistDataKey)).distinct()
+            keys.forEach(::invalidateWrite)
+            featuredPlaylistsMemory = null
+            userPlaylistsMemory.clear()
+            likedSongIdsMemory.clear()
+            tracksMemory.clear()
+            keys
         }
-        preferences.edit().apply { keys.forEach(::remove) }.commit()
-        return keys.size
+        preferences.edit().apply { keysToRemove.forEach(::remove) }.commit()
+        return storedKeys.size
+    }
+
+    fun close() {
+        writerScope.cancel()
+    }
+
+    private fun writeAsync(key: String, encode: () -> String) {
+        val revision = synchronized(lock) {
+            nextWriteRevision += 1
+            nextWriteRevision.also { writeRevisions[key] = it }
+        }
+        writerScope.launch {
+            val value = encode()
+            synchronized(lock) {
+                if (writeRevisions[key] != revision) return@launch
+                if (key == KEY_LAST_USER_ID) {
+                    preferences.edit().putLong(key, value.toLong()).apply()
+                } else {
+                    preferences.edit().putString(key, value).apply()
+                }
+            }
+        }
+    }
+
+    private fun removeAsync(key: String) {
+        val revision = synchronized(lock) {
+            invalidateWrite(key)
+            writeRevisions.getValue(key)
+        }
+        writerScope.launch {
+            synchronized(lock) {
+                if (writeRevisions[key] == revision) preferences.edit().remove(key).apply()
+            }
+        }
+    }
+
+    private fun invalidateWrite(key: String) {
+        nextWriteRevision += 1
+        writeRevisions[key] = nextWriteRevision
     }
 
     private fun encodeUserProfile(profile: UserProfile): String = JSONObject().apply {

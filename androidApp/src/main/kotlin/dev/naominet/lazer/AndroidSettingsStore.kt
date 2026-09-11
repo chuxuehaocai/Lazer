@@ -36,6 +36,10 @@ internal class AndroidSettingsStore(context: Context) {
         get() = parseLazerThemeEngine(preferences.getString(KEY_THEME_ENGINE, null))
         set(value) = preferences.edit().putString(KEY_THEME_ENGINE, value.name).apply()
 
+    var language: LazerLanguage
+        get() = parseLazerLanguage(preferences.getString(KEY_LANGUAGE, null))
+        set(value) = preferences.edit().putString(KEY_LANGUAGE, value.name).apply()
+
     var lyricFollowDelayMillis: Long
         get() = normalizeLyricFollowDelayMillis(
             preferences.getLong(KEY_LYRIC_FOLLOW_DELAY, DEFAULT_LYRIC_FOLLOW_DELAY_MILLIS),
@@ -51,6 +55,22 @@ internal class AndroidSettingsStore(context: Context) {
     var wordLyricsEnabled: Boolean
         get() = preferences.getBoolean(KEY_WORD_LYRICS_ENABLED, true)
         set(value) = preferences.edit().putBoolean(KEY_WORD_LYRICS_ENABLED, value).apply()
+
+    var lyricGlowEnabled: Boolean
+        get() = preferences.getBoolean(KEY_LYRIC_GLOW_ENABLED, true)
+        set(value) = preferences.edit().putBoolean(KEY_LYRIC_GLOW_ENABLED, value).apply()
+
+    var lyricFontSizeSp: Int
+        get() = normalizeLyricFontSizeSp(
+            preferences.getInt(KEY_LYRIC_FONT_SIZE_SP, DEFAULT_ANDROID_LYRIC_FONT_SIZE_SP),
+        )
+        set(value) = preferences.edit()
+            .putInt(KEY_LYRIC_FONT_SIZE_SP, normalizeLyricFontSizeSp(value))
+            .apply()
+
+    var showFullLyrics: Boolean
+        get() = preferences.getBoolean(KEY_SHOW_FULL_LYRICS, false)
+        set(value) = preferences.edit().putBoolean(KEY_SHOW_FULL_LYRICS, value).apply()
 
     var audioQuality: AudioQuality
         get() = parseAndroidAudioQuality(preferences.getString(KEY_AUDIO_QUALITY, null))
@@ -73,9 +93,13 @@ internal class AndroidSettingsStore(context: Context) {
         const val KEY_DARK_THEME = "appearance.dark"
         const val KEY_SYSTEM_MONET = "appearance.system_monet"
         const val KEY_THEME_ENGINE = "appearance.theme_engine"
+        const val KEY_LANGUAGE = "appearance.language"
         const val KEY_LYRIC_FOLLOW_DELAY = "lyrics.follow_delay_millis"
         const val KEY_LYRIC_ANIMATION_SPEED = "lyrics.animation_speed"
         const val KEY_WORD_LYRICS_ENABLED = "lyrics.word_animation_enabled"
+        const val KEY_LYRIC_GLOW_ENABLED = "lyrics.glow_enabled"
+        const val KEY_LYRIC_FONT_SIZE_SP = "lyrics.font_size_sp"
+        const val KEY_SHOW_FULL_LYRICS = "lyrics.show_full_lines"
         const val KEY_AUDIO_QUALITY = "playback.audio_quality"
         const val KEY_EXCLUSIVE_AUDIO = "playback.exclusive_audio"
         const val KEY_GATEWAY_BASE_URL = "gateway.base_url"

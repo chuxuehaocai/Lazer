@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -39,15 +40,19 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.isActive
+import kotlin.math.roundToInt
 
 @Composable
 internal fun AndroidLyricsPage(
@@ -59,23 +64,27 @@ internal fun AndroidLyricsPage(
     followDelayMillis: Long,
     animationSpeed: LyricAnimationSpeed,
     wordLyricsEnabled: Boolean,
+    lyricGlowEnabled: Boolean,
+    lyricFontSizeSp: Int,
+    showFullLyrics: Boolean,
     onBack: () -> Unit,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val colors = MaterialTheme.colorScheme
     Box(modifier.fillMaxSize()) {
         AndroidAlbumFlowBackground(
             track = track,
             modifier = Modifier.fillMaxSize(),
             cornerRadius = 0.dp,
-            veil = Color(0xFF1D282D).copy(alpha = 0.38f),
+            veil = colors.background.copy(alpha = 0.38f),
         )
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             if (landscape) {
                 Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
                     IconButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart)) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回播放器", tint = Color(0xFFE7ECEB))
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("lyrics.back_to_player"), tint = colors.onBackground)
                     }
                     LyricTrackHeader(track, Modifier.align(Alignment.Center).padding(horizontal = 56.dp))
                 }
@@ -85,7 +94,7 @@ internal fun AndroidLyricsPage(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回播放器", tint = Color(0xFFE7ECEB))
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("lyrics.back_to_player"), tint = colors.onBackground)
                     }
                     LyricTrackHeader(track, Modifier.weight(1f).padding(end = 48.dp))
                 }
@@ -99,6 +108,9 @@ internal fun AndroidLyricsPage(
                 followDelayMillis = followDelayMillis,
                 animationSpeed = animationSpeed,
                 wordLyricsEnabled = wordLyricsEnabled,
+                lyricGlowEnabled = lyricGlowEnabled,
+                lyricFontSizeSp = lyricFontSizeSp,
+                showFullLyrics = showFullLyrics,
                 onSeek = onSeek,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
@@ -116,13 +128,16 @@ internal fun AndroidLyricsViewport(
     followDelayMillis: Long,
     animationSpeed: LyricAnimationSpeed,
     wordLyricsEnabled: Boolean,
+    lyricGlowEnabled: Boolean,
+    lyricFontSizeSp: Int,
+    showFullLyrics: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     when {
-        track == null -> LyricEmpty("选一首音乐后，歌词会出现在这里。", modifier)
-        isLoading -> LyricEmpty("正在加载歌词…", modifier)
-        lines.isEmpty() -> LyricEmpty(message ?: "这首歌暂时没有歌词", modifier)
+        track == null -> LyricEmpty(tr("lyrics.empty"), modifier)
+        isLoading -> LyricEmpty(tr("lyrics.loading"), modifier)
+        lines.isEmpty() -> LyricEmpty(message ?: tr("lyrics.none"), modifier)
         else -> AnimatedLyricsViewport(
             trackId = track.id,
             lines = lines,
@@ -130,6 +145,9 @@ internal fun AndroidLyricsViewport(
             followDelayMillis = followDelayMillis,
             animationSpeed = animationSpeed,
             wordLyricsEnabled = wordLyricsEnabled,
+            lyricGlowEnabled = lyricGlowEnabled,
+            lyricFontSizeSp = lyricFontSizeSp,
+            showFullLyrics = showFullLyrics,
             onSeek = onSeek,
             modifier = modifier,
         )
@@ -144,18 +162,58 @@ private fun AnimatedLyricsViewport(
     followDelayMillis: Long,
     animationSpeed: LyricAnimationSpeed,
     wordLyricsEnabled: Boolean,
+    lyricGlowEnabled: Boolean,
+    lyricFontSizeSp: Int,
+    showFullLyrics: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier,
 ) {
     val density = LocalDensity.current
+    val colors = MaterialTheme.colorScheme
+    val isDark = colors.background.luminance() < 0.5f
     val activeIndex = remember(lines, positionMillis) { activeAndroidLyricIndex(lines, positionMillis) }
     val currentActiveIndex by rememberUpdatedState(activeIndex)
     val currentAnimationSpeed by rememberUpdatedState(animationSpeed)
     val currentPositionMillis by rememberUpdatedState(positionMillis)
     val currentLines by rememberUpdatedState(lines)
     val currentFollowDelayMillis by rememberUpdatedState(followDelayMillis)
-    val rowPitchPx = with(density) { 112.dp.toPx() }
-    val maxScroll = ((lines.size - 1).coerceAtLeast(0)) * rowPitchPx
+    val mainFontSp = lyricFontSizeSp.sp
+    val mainLineHeightSp = (lyricFontSizeSp * 1.38f).sp
+    val translationFontSp = (lyricFontSizeSp * 0.50f).coerceIn(12f, 20f).sp
+    val translationLineHeightSp = (translationFontSp.value * 1.38f).sp
+    val lyricMaxLines = if (showFullLyrics) Int.MAX_VALUE else 2
+    val measuredRowHeightsPx = remember(lines, lyricFontSizeSp, showFullLyrics) {
+        mutableStateMapOf<Int, Int>()
+    }
+    val measuredMainHeightsPx = remember(lines, lyricFontSizeSp, showFullLyrics) {
+        mutableStateMapOf<Int, Int>()
+    }
+    val minimumRowGapPx = with(density) { 12.dp.toPx() }
+    val maximumRowGapPx = with(density) { 36.dp.toPx() }
+    val minimumTranslationGapPx = with(density) { 7.dp.toPx() }
+    val maximumTranslationGapPx = with(density) { 22.dp.toPx() }
+    val estimatedMainHeightPx = with(density) { mainLineHeightSp.toPx() }
+    val estimatedTranslationHeightPx = with(density) { translationLineHeightSp.toPx() }
+    val rowHeightsPx = lines.mapIndexed { index, line ->
+        measuredRowHeightsPx[index]?.toFloat() ?: (
+            estimatedMainHeightPx + if (line.translation.isNullOrBlank()) {
+                0f
+            } else {
+                lyricTranslationGapPx(
+                    estimatedMainHeightPx,
+                    minimumTranslationGapPx,
+                    maximumTranslationGapPx,
+                ) + estimatedTranslationHeightPx
+            }
+        )
+    }
+    val lineCentersPx = lyricLineCenters(
+        rowHeightsPx = rowHeightsPx,
+        minimumGapPx = minimumRowGapPx,
+        maximumGapPx = maximumRowGapPx,
+    )
+    val maxScroll = lineCentersPx.lastOrNull() ?: 0f
+    val currentLineCentersPx by rememberUpdatedState(lineCentersPx)
     val currentMaxScroll by rememberUpdatedState(maxScroll)
     var followPlayback by remember { mutableStateOf(true) }
     var isDragging by remember { mutableStateOf(false) }
@@ -167,11 +225,12 @@ private fun AnimatedLyricsViewport(
     val lyricLineMotion = remember { LyricLineMotionField() }
     var lyricMotionRevision by remember { mutableLongStateOf(0L) }
 
-    LaunchedEffect(lines.size, trackId) {
+    LaunchedEffect(lines.size, trackId, lyricFontSizeSp, showFullLyrics) {
         followPlayback = true
         isDragging = false
         flingVelocity = 0f
-        lyricScroll = activeAndroidLyricIndex(lines, positionMillis).coerceAtLeast(0) * rowPitchPx
+        val initialIndex = activeAndroidLyricIndex(lines, positionMillis).coerceAtLeast(0)
+        lyricScroll = lineCentersPx.getOrElse(initialIndex) { 0f }
         lyricLineMotion.reset(lines.size, lyricScroll)
         lyricMotionRevision++
         lastFrameNanos = 0L
@@ -195,7 +254,8 @@ private fun AnimatedLyricsViewport(
                     flingVelocity = 0f
                     val liveIndex = activeAndroidLyricIndex(currentLines, currentPositionMillis)
                     if (liveIndex >= 0) {
-                        val target = (liveIndex * rowPitchPx).coerceIn(0f, currentMaxScroll)
+                        val target = currentLineCentersPx.getOrElse(liveIndex) { currentMaxScroll }
+                            .coerceIn(0f, currentMaxScroll)
                         val intervalMillis = currentLines.getOrNull(liveIndex - 1)?.let { previous ->
                             (currentLines[liveIndex].timeMillis - previous.timeMillis).coerceAtLeast(0L)
                         }
@@ -271,15 +331,18 @@ private fun AnimatedLyricsViewport(
         } else {
             lyricScroll
         }
-        val visualIndex = if (rowPitchPx == 0f) 0f else visualScroll / rowPitchPx
+        val visualIndex = lyricVisualIndex(lineCentersPx, visualScroll)
         lines.forEachIndexed { index, line ->
             val rowScroll = if (followPlayback && motionRevision >= 0) {
                 lyricLineMotion.positionFor(index)
             } else {
                 lyricScroll
             }
-            val lineCenterPx = centerYPx + index * rowPitchPx - rowScroll
-            if (lineCenterPx < -120f || lineCenterPx > heightPx + 120f) return@forEachIndexed
+            val rowHeightPx = rowHeightsPx[index]
+            val lineCenterPx = centerYPx + lineCentersPx[index] - rowScroll
+            if (lineCenterPx < -rowHeightPx || lineCenterPx > heightPx + rowHeightPx) {
+                return@forEachIndexed
+            }
             val distance = kotlin.math.abs(index - visualIndex)
             val focus = androidx.compose.runtime.key(trackId, index) {
                 animatedLyricFocus(index == activeIndex, animationSpeed)
@@ -288,16 +351,30 @@ private fun AnimatedLyricsViewport(
             val scale = 0.96f + focus * 0.08f
             val alpha = (0.24f + ambient * 0.20f) * (1f - focus) + focus
             val hasTranslation = !line.translation.isNullOrBlank()
-            val baseRowHeight = 74.dp * 1.04f
-            val scaledRowHeight = if (hasTranslation) 124.dp * 1.04f else baseRowHeight
             val textWidthFraction = 1f / 1.04f
-            val y = with(density) { lineCenterPx.toDp() } - baseRowHeight / 2
+            val mainHeightPx = measuredMainHeightsPx[index]?.toFloat() ?: estimatedMainHeightPx
+            val translationGap = with(density) {
+                lyricTranslationGapPx(
+                    mainHeightPx,
+                    minimumTranslationGapPx,
+                    maximumTranslationGapPx,
+                ).toDp()
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .offset(y = y)
-                    .height(scaledRowHeight)
+                    .offset {
+                        IntOffset(
+                            x = 0,
+                            y = (lineCenterPx - rowHeightPx / 2f).roundToInt(),
+                        )
+                    }
                     .padding(horizontal = 26.dp)
+                    .onSizeChanged { size ->
+                        if (measuredRowHeightsPx[index] != size.height) {
+                            measuredRowHeightsPx[index] = size.height
+                        }
+                    }
                     .clickable {
                         lyricLineMotion.snapTo(lyricScroll)
                         followPlayback = true
@@ -307,35 +384,41 @@ private fun AnimatedLyricsViewport(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     androidx.compose.runtime.key(trackId, index) {
-                        Box(Modifier.height(baseRowHeight), contentAlignment = Alignment.Center) {
                         AmllLyricText(
                             text = line.text,
                             words = line.words,
                             positionMillis = positionMillis,
                             active = wordLyricsEnabled && index == activeIndex,
                             currentLine = index == activeIndex,
-                            color = Color(0xFFF2F6F4),
-                            shadowColor = Color.White,
+                            color = colors.onBackground,
+                            shadowColor = if (isDark) Color.White else Color.Black,
+                            glowEnabled = lyricGlowEnabled,
                             speed = animationSpeed,
-                            modifier = Modifier.fillMaxWidth(textWidthFraction).graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                this.alpha = alpha
-                                transformOrigin = TransformOrigin.Center
-                            },
+                            modifier = Modifier
+                                .fillMaxWidth(textWidthFraction)
+                                .onSizeChanged { size ->
+                                    if (measuredMainHeightsPx[index] != size.height) {
+                                        measuredMainHeightsPx[index] = size.height
+                                    }
+                                }
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    this.alpha = alpha
+                                    transformOrigin = TransformOrigin.Center
+                                },
                             style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = 27.sp,
-                                lineHeight = 37.sp,
+                                fontSize = mainFontSp,
+                                lineHeight = mainLineHeightSp,
                                 fontWeight = FontWeight.SemiBold,
                             ),
                             textAlign = TextAlign.Center,
-                            maxLines = 2,
+                            maxLines = lyricMaxLines,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        }
                     }
                     if (hasTranslation) {
-                        Spacer(Modifier.height(6.dp))
+                        Spacer(Modifier.height(translationGap))
                         Text(
                             text = line.translation.orEmpty(),
                             modifier = Modifier.fillMaxWidth(textWidthFraction).graphicsLayer {
@@ -344,10 +427,13 @@ private fun AnimatedLyricsViewport(
                                 this.alpha = alpha
                                 transformOrigin = TransformOrigin.Center
                             },
-                            color = Color(0xFFC7D3D5),
-                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                            color = colors.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = translationFontSp,
+                                lineHeight = translationLineHeightSp,
+                            ),
                             textAlign = TextAlign.Center,
-                            maxLines = 2,
+                            maxLines = lyricMaxLines,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -359,11 +445,12 @@ private fun AnimatedLyricsViewport(
 
 @Composable
 private fun LyricTrackHeader(track: AndroidTrack?, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            track?.title ?: "歌词",
+            track?.title ?: tr("lyrics.nothing"),
             modifier = Modifier.fillMaxWidth(),
-            color = Color(0xFFE7ECEB),
+            color = colors.onBackground,
             style = MaterialTheme.typography.titleSmall,
             textAlign = TextAlign.Center,
             maxLines = 1,
@@ -372,7 +459,7 @@ private fun LyricTrackHeader(track: AndroidTrack?, modifier: Modifier = Modifier
         Text(
             track?.artist.orEmpty(),
             modifier = Modifier.fillMaxWidth(),
-            color = Color(0xFFC7D3D5),
+            color = colors.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall,
             textAlign = TextAlign.Center,
             maxLines = 1,
@@ -383,14 +470,15 @@ private fun LyricTrackHeader(track: AndroidTrack?, modifier: Modifier = Modifier
 
 @Composable
 private fun LyricEmpty(text: String, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(
             text,
             modifier = Modifier
                 .clip(RoundedCornerShape(18.dp))
-                .background(Color(0xFF1D282D).copy(alpha = 0.42f))
+                .background(colors.background.copy(alpha = 0.42f))
                 .padding(horizontal = 20.dp, vertical = 14.dp),
-            color = Color(0xFFE7ECEB),
+            color = colors.onBackground,
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
         )

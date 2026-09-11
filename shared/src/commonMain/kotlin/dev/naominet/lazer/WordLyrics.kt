@@ -18,17 +18,19 @@ data class ParsedWordLyricLine(
 )
 
 enum class LyricAnimationSpeed(
-    val label: String,
+    private val labelKey: String,
     internal val scrollMultiplier: Double,
     internal val highlightExponent: Double,
 ) {
-    VERY_RELAXED("最慢", 0.55, 1.45),
-    RELAXED("较慢", 0.72, 1.25),
-    GENTLE("稍慢", 0.86, 1.12),
-    STANDARD("标准", 1.0, 1.0),
-    BRISK("稍快", 1.18, 0.9),
-    RESPONSIVE("较快", 1.38, 0.78),
-    VERY_RESPONSIVE("最快", 1.65, 0.68),
+    VERY_RELAXED("lyric.speed.very_relaxed", 0.55, 1.45),
+    RELAXED("lyric.speed.relaxed", 0.72, 1.25),
+    GENTLE("lyric.speed.gentle", 0.86, 1.12),
+    STANDARD("lyric.speed.standard", 1.0, 1.0),
+    BRISK("lyric.speed.brisk", 1.18, 0.9),
+    RESPONSIVE("lyric.speed.responsive", 1.38, 0.78),
+    VERY_RESPONSIVE("lyric.speed.very_responsive", 1.65, 0.68);
+
+    val label: String get() = tr(labelKey)
 }
 
 fun parseLyricAnimationSpeed(value: String?): LyricAnimationSpeed =

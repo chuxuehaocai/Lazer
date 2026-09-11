@@ -1,5 +1,6 @@
 package dev.naominet.lazer.gateway
 
+import dev.naominet.lazer.tr
 import dev.naominet.lazer.gateway.model.AlbumDetailResponse
 import dev.naominet.lazer.gateway.model.ArtistDetailResponse
 import dev.naominet.lazer.gateway.model.BannerResponse
@@ -63,18 +64,21 @@ enum class SearchType(internal val apiValue: Int) {
 /** Playback qualities accepted by `/song/url/v1`. */
 enum class AudioQuality(
     internal val apiValue: String,
-    val label: String,
-    val description: String,
+    private val labelKey: String,
+    private val descriptionKey: String,
 ) {
-    STANDARD("standard", "标准", "128 kbps"),
-    HIGHER("higher", "较高", "192 kbps"),
-    EXHIGH("exhigh", "极高", "320 kbps"),
-    LOSSLESS("lossless", "无损", "FLAC"),
-    HI_RES("hires", "Hi-Res", "Hi-Res FLAC"),
-    JYEFFECT("jyeffect", "高清环绕", "音效增强"),
-    SKY("sky", "沉浸环绕", "空间音频"),
-    DOLBY("dolby", "杜比全景声", "Dolby Atmos"),
-    JYMASTER("jymaster", "超清母带", "Master"),
+    STANDARD("standard", "quality.standard", "quality.standard.desc"),
+    HIGHER("higher", "quality.higher", "quality.higher.desc"),
+    EXHIGH("exhigh", "quality.exhigh", "quality.exhigh.desc"),
+    LOSSLESS("lossless", "quality.lossless", "quality.lossless.desc"),
+    HI_RES("hires", "quality.hires", "quality.hires.desc"),
+    JYEFFECT("jyeffect", "quality.jyeffect", "quality.jyeffect.desc"),
+    SKY("sky", "quality.sky", "quality.sky.desc"),
+    DOLBY("dolby", "quality.dolby", "quality.dolby.desc"),
+    JYMASTER("jymaster", "quality.jymaster", "quality.jymaster.desc");
+
+    val label: String get() = tr(labelKey)
+    val description: String get() = tr(descriptionKey)
 }
 
 /** Platform values accepted by `/banner`. */
@@ -312,6 +316,20 @@ class NeteaseMusicGateway(
 
     suspend fun wordByWordLyrics(id: Long): LyricResponse = get("/lyric/new", parametersOf("id" to id))
 
+    /**
+     * Prefers `/lyric/new`, but falls back when that successful response contains no timed lyric.
+     * The Gateway documentation explicitly notes that some songs do not provide the `yrc` field;
+     * a transport-only fallback misses that normal response shape.
+     */
+    suspend fun preferredLyrics(id: Long): LyricResponse {
+        val enhanced = runCatching { wordByWordLyrics(id) }.getOrNull()
+        if (enhanced?.pureMusic == true || enhanced?.hasTimedLyricPayload() == true) return enhanced
+
+        return runCatching { lyrics(id) }.getOrElse { regularError ->
+            enhanced ?: throw regularError
+        }
+    }
+
     suspend fun playlistDetail(
         id: Long,
         subscriberLimit: Int = 8,
@@ -478,6 +496,13 @@ class NeteaseMusicGateway(
         it.cookie?.takeIf(String::isNotBlank)?.let { cookie -> sessionStore.cookie = cookie }
     }
 }
+
+private val YrcTimedLinePattern = Regex("""(?m)^\s*\[\d+,\d+]""")
+private val LrcTimedLinePattern = Regex("""(?m)^\s*\[\d{1,2}:\d{2}""")
+
+private fun LyricResponse.hasTimedLyricPayload(): Boolean =
+    yrc?.lyric?.let(YrcTimedLinePattern::containsMatchIn) == true ||
+        lrc?.lyric?.let(LrcTimedLinePattern::containsMatchIn) == true
 
 private fun parametersOf(vararg values: Pair<String, Any?>): Map<String, String> =
     buildMap {

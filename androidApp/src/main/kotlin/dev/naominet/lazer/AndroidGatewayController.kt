@@ -2,6 +2,7 @@ package dev.naominet.lazer
 
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.naominet.lazer.gateway.AudioQuality
@@ -16,25 +17,31 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 
-enum class AndroidRootDestination(val label: String, val motionIndex: Int) {
-    HOME("今天", 0),
-    DISCOVER("发现", 1),
-    SEARCH("搜索", 2),
-    LIBRARY("音乐库", 3),
-    ME("我的", 4),
+enum class AndroidRootDestination(private val labelKey: String, val motionIndex: Int) {
+    HOME("nav.today", 0),
+    DISCOVER("nav.discover", 1),
+    SEARCH("nav.search", 2),
+    LIBRARY("nav.library", 3),
+    ME("nav.me", 4);
+
+    val label: String get() = tr(labelKey)
 }
 
-enum class AndroidLoginMethod(val label: String) {
-    CAPTCHA("验证码"),
-    PASSWORD("密码"),
-    QR_CODE("二维码"),
+enum class AndroidLoginMethod(private val labelKey: String) {
+    CAPTCHA("login.method.captcha"),
+    PASSWORD("login.method.password"),
+    QR_CODE("login.method.qr");
+
+    val label: String get() = tr(labelKey)
 }
 
 enum class AndroidQrLoginState {
@@ -45,6 +52,20 @@ enum class AndroidQrLoginState {
     EXPIRED,
     ERROR,
 }
+
+private data class AndroidCachedSignedInContent(
+    val userPlaylists: List<AndroidPlaylist>,
+    val likedSongIds: Set<Long>,
+)
+
+private data class AndroidCachedBootstrap(
+    val hasSavedSession: Boolean,
+    val featuredPlaylists: List<AndroidPlaylist>,
+    val homeTracks: List<AndroidTrack>,
+    val profile: UserProfile?,
+    val userPlaylists: List<AndroidPlaylist>,
+    val likedSongIds: Set<Long>,
+)
 
 /**
  * Android presentation state backed by the shared Gateway client. All Gateway access stays here,
@@ -67,6 +88,7 @@ class AndroidGatewayController(context: Context) {
     private var qrLoginJob: Job? = null
     private var postLoginSyncJob: Job? = null
     private var maintenanceJob: Job? = null
+    private var playlistRequestGeneration = 0L
 
     var destination by mutableStateOf(AndroidRootDestination.HOME)
         private set
@@ -78,11 +100,19 @@ class AndroidGatewayController(context: Context) {
         private set
     var themeEngine by mutableStateOf(settings.themeEngine)
         private set
+    var language by mutableStateOf(settings.language)
+        private set
     var lyricFollowDelayMillis by mutableStateOf(settings.lyricFollowDelayMillis)
         private set
     var lyricAnimationSpeed by mutableStateOf(settings.lyricAnimationSpeed)
         private set
     var wordLyricsEnabled by mutableStateOf(settings.wordLyricsEnabled)
+        private set
+    var lyricGlowEnabled by mutableStateOf(settings.lyricGlowEnabled)
+        private set
+    var lyricFontSizeSp by mutableIntStateOf(settings.lyricFontSizeSp)
+        private set
+    var showFullLyrics by mutableStateOf(settings.showFullLyrics)
         private set
     var audioQuality by mutableStateOf(settings.audioQuality)
         private set
@@ -149,7 +179,11 @@ class AndroidGatewayController(context: Context) {
         private set
 
     init {
-        bootstrap()
+        LazerI18n.switchLanguage(language)
+        scope.launch {
+            loadLazerTranslations()
+            bootstrap()
+        }
     }
 
     val isSignedIn: Boolean get() = currentUser != null
@@ -184,6 +218,15 @@ class AndroidGatewayController(context: Context) {
         settings.themeEngine = value
     }
 
+    fun updateLanguage(value: LazerLanguage) {
+        if (language == value) return
+        language = value
+        LazerI18n.switchLanguage(value)
+        settings.language = value
+        message = null
+        loginMessage = null
+    }
+
     fun updateLyricFollowDelay(value: Long) {
         lyricFollowDelayMillis = normalizeLyricFollowDelayMillis(value)
         settings.lyricFollowDelayMillis = lyricFollowDelayMillis
@@ -197,6 +240,21 @@ class AndroidGatewayController(context: Context) {
     fun updateWordLyricsEnabled(enabled: Boolean) {
         wordLyricsEnabled = enabled
         settings.wordLyricsEnabled = enabled
+    }
+
+    fun updateLyricGlowEnabled(enabled: Boolean) {
+        lyricGlowEnabled = enabled
+        settings.lyricGlowEnabled = enabled
+    }
+
+    fun updateLyricFontSizeSp(value: Int) {
+        lyricFontSizeSp = normalizeLyricFontSizeSp(value)
+        settings.lyricFontSizeSp = lyricFontSizeSp
+    }
+
+    fun updateShowFullLyrics(enabled: Boolean) {
+        showFullLyrics = enabled
+        settings.showFullLyrics = enabled
     }
 
     fun updateAudioQuality(value: AudioQuality) {
@@ -223,6 +281,7 @@ class AndroidGatewayController(context: Context) {
         qrLoginJob?.cancel()
         postLoginSyncJob?.cancel()
         gateway.close()
+        playlistRequestGeneration += 1
 
         settings.gatewayBaseUrl = normalized
         gatewayBaseUrl = normalized
@@ -241,7 +300,7 @@ class AndroidGatewayController(context: Context) {
         qrState = AndroidQrLoginState.IDLE
         qrImageData = null
         bootstrap()
-        message = "音乐服务已切换"
+        message = tr("status.music_switched")
         return true
     }
 
@@ -262,33 +321,42 @@ class AndroidGatewayController(context: Context) {
                 .onFailure {
                     likedSongIds = if (wasLiked) likedSongIds + track.id else likedSongIds - track.id
                     cache.saveLikedSongIds(user.userId, likedSongIds)
-                    message = "喜欢状态未能同步，请重试"
+                    message = tr("status.like_fail")
                 }
         }
     }
 
     fun openPlaylist(playlist: AndroidPlaylist) {
+        val requestGeneration = ++playlistRequestGeneration
+        playlistJob?.cancel()
         activePlaylist = playlist
-        val cachedTracks = cache.loadTracks(playlist.id)
+        val cachedTracks = cache.peekTracks(playlist.id).orEmpty()
         activePlaylistTracks = cachedTracks
         isPlaylistLoading = true
-        playlistJob?.cancel()
         playlistJob = scope.launch {
+            val persistedTracks = if (cachedTracks.isEmpty()) {
+                withContext(Dispatchers.IO) { cache.loadTracks(playlist.id) }
+            } else {
+                cachedTracks
+            }
+            if (!isCurrentPlaylistRequest(playlist.id, requestGeneration)) return@launch
+            if (persistedTracks.isNotEmpty()) activePlaylistTracks = persistedTracks
             try {
-                val fresh = loadAllPlaylistTracks(playlist)
-                if (activePlaylist?.id == playlist.id && fresh.isNotEmpty()) {
+                val fresh = loadAllPlaylistTracks(playlist, requestGeneration)
+                if (isCurrentPlaylistRequest(playlist.id, requestGeneration) && fresh.isNotEmpty()) {
                     activePlaylistTracks = fresh
                 }
             } catch (_: Throwable) {
-                if (cachedTracks.isEmpty()) message = "歌单暂时没有同步成功，请稍后再试"
+                if (persistedTracks.isEmpty()) message = tr("status.playlist_sync_fail")
             } finally {
-                if (activePlaylist?.id == playlist.id) isPlaylistLoading = false
+                if (isCurrentPlaylistRequest(playlist.id, requestGeneration)) isPlaylistLoading = false
             }
         }
     }
 
     fun closePlaylist() {
         playlistJob?.cancel()
+        playlistRequestGeneration += 1
         activePlaylist = null
         activePlaylistTracks = emptyList()
         isPlaylistLoading = false
@@ -321,7 +389,7 @@ class AndroidGatewayController(context: Context) {
                 }
             } catch (_: Throwable) {
                 searchResults = emptyList()
-                message = "搜索没有完成，请稍后再试"
+                message = tr("status.search_fail")
             } finally {
                 if (value == searchQuery) isSearching = false
             }
@@ -335,8 +403,7 @@ class AndroidGatewayController(context: Context) {
         lyricsLoading = true
         lyricJob = scope.launch {
             try {
-                val response = runCatching { gateway.wordByWordLyrics(trackId) }
-                    .getOrElse { gateway.lyrics(trackId) }
+                val response = gateway.preferredLyrics(trackId)
                 val timedLyrics = parseAndroidWordLyrics(response.yrc?.lyric)
                     .ifEmpty { parseAndroidLrc(response.lrc?.lyric) }
                 val merged = mergeAndroidLyrics(
@@ -344,10 +411,10 @@ class AndroidGatewayController(context: Context) {
                     parseAndroidLrc(response.tlyric?.lyric),
                 )
                 lyrics = merged
-                lyricsMessage = if (merged.isEmpty()) "这首歌暂时没有歌词" else null
+                lyricsMessage = if (merged.isEmpty()) tr("status.no_lyrics") else null
             } catch (_: Throwable) {
                 lyrics = emptyList()
-                lyricsMessage = "歌词没有加载成功，请稍后再试"
+                lyricsMessage = tr("status.lyrics_fail")
             } finally {
                 lyricsLoading = false
             }
@@ -397,7 +464,7 @@ class AndroidGatewayController(context: Context) {
 
     fun sendCaptcha() {
         val phone = normalizedPhone() ?: run {
-            loginMessage = "请输入手机号后再获取验证码"
+            loginMessage = tr("login.captcha.phone_required")
             return
         }
         scope.launch {
@@ -406,11 +473,11 @@ class AndroidGatewayController(context: Context) {
             try {
                 val result = gateway.sendCaptcha(phone)
                 val code = result["code"]?.toString()?.trim('"')?.toIntOrNull()
-                check(code in 200..299) { "验证码发送失败" }
+                check(code in 200..299) { tr("login.captcha.send_fail") }
                 captchaSent = true
-                loginMessage = "验证码已发送，请留意手机"
+                loginMessage = tr("login.captcha.sent")
             } catch (_: Throwable) {
-                loginMessage = "验证码没有发送成功，请稍后再试"
+                loginMessage = tr("login.captcha.send_fail")
             } finally {
                 isSendingCaptcha = false
             }
@@ -419,11 +486,11 @@ class AndroidGatewayController(context: Context) {
 
     fun submitCaptchaLogin() {
         val phone = normalizedPhone() ?: run {
-            loginMessage = "请输入手机号"
+            loginMessage = tr("login.phone_required")
             return
         }
         if (loginCaptcha.isBlank()) {
-            loginMessage = "请输入收到的验证码"
+            loginMessage = tr("login.code_required")
             return
         }
         scope.launch {
@@ -434,7 +501,7 @@ class AndroidGatewayController(context: Context) {
                 validateLogin(result.code, result.failureMessage)
                 finishLogin(result.profile)
             } catch (_: Throwable) {
-                loginMessage = "验证码登录没有完成，请检查后重试"
+                loginMessage = tr("login.captcha_fail")
             } finally {
                 isSubmittingLogin = false
             }
@@ -443,11 +510,11 @@ class AndroidGatewayController(context: Context) {
 
     fun submitPasswordLogin() {
         val phone = normalizedPhone() ?: run {
-            loginMessage = "请输入手机号"
+            loginMessage = tr("login.phone_required")
             return
         }
         if (loginPassword.isBlank()) {
-            loginMessage = "请输入密码"
+            loginMessage = tr("login.password_required")
             return
         }
         scope.launch {
@@ -458,7 +525,7 @@ class AndroidGatewayController(context: Context) {
                 validateLogin(result.code, result.failureMessage)
                 finishLogin(result.profile)
             } catch (_: Throwable) {
-                loginMessage = "密码登录没有完成，请检查账号和密码"
+                loginMessage = tr("login.password_fail")
             } finally {
                 isSubmittingLogin = false
             }
@@ -473,10 +540,10 @@ class AndroidGatewayController(context: Context) {
             loginMessage = null
             try {
                 val key = gateway.createQrKey().data?.unikey.orEmpty()
-                check(key.isNotBlank()) { "二维码初始化失败" }
+                check(key.isNotBlank()) { tr("login.qr_key_empty") }
                 val code = gateway.createQrCode(key, includeImage = true).data
                 qrImageData = code?.qrimg
-                check(!qrImageData.isNullOrBlank()) { "二维码生成失败" }
+                check(!qrImageData.isNullOrBlank()) { tr("login.qr_empty") }
                 qrState = AndroidQrLoginState.WAITING_FOR_SCAN
                 while (isActive) {
                     delay(QR_POLL_INTERVAL_MILLIS)
@@ -493,14 +560,14 @@ class AndroidGatewayController(context: Context) {
                         }
                         else -> {
                             qrState = AndroidQrLoginState.ERROR
-                            loginMessage = "二维码登录没有完成，请重新生成"
+                            loginMessage = tr("login.qr_fail")
                             return@launch
                         }
                     }
                 }
             } catch (_: Throwable) {
                 qrState = AndroidQrLoginState.ERROR
-                loginMessage = "二维码生成失败，请重新生成"
+                loginMessage = tr("login.qr_gen_fail_retry")
             }
         }
     }
@@ -519,7 +586,7 @@ class AndroidGatewayController(context: Context) {
             userPlaylists = emptyList()
             likedSongIds = emptySet()
             destination = AndroidRootDestination.HOME
-            message = "已退出登录"
+            message = tr("status.logged_out")
             runCatching { loadPublicContent() }
         }
     }
@@ -528,6 +595,7 @@ class AndroidGatewayController(context: Context) {
         postLoginSyncJob?.cancel()
         maintenanceJob?.cancel()
         scope.cancel()
+        cache.close()
         gateway.close()
     }
 
@@ -537,13 +605,16 @@ class AndroidGatewayController(context: Context) {
             val removed = withContext(Dispatchers.IO) {
                 appContext.cacheDir.listFiles().orEmpty().count { it.deleteRecursively() }
             }
-            message = if (removed > 0) "歌曲缓存已清除" else "歌曲缓存已经是空的"
+            message = if (removed > 0) tr("status.songs_cleared") else tr("status.songs_empty")
         }
     }
 
     fun clearPlaylistCache() {
-        val removed = cache.clearPlaylistData()
-        message = if (removed > 0) "歌单缓存已清除" else "歌单缓存已经是空的"
+        maintenanceJob?.cancel()
+        maintenanceJob = scope.launch {
+            val removed = withContext(Dispatchers.IO) { cache.clearPlaylistData() }
+            message = if (removed > 0) tr("status.playlists_cleared") else tr("status.playlists_empty")
+        }
     }
 
     fun forceResync() {
@@ -552,15 +623,15 @@ class AndroidGatewayController(context: Context) {
         postLoginSyncJob?.cancel()
         maintenanceJob = scope.launch {
             isLoading = true
-            message = "正在重新同步…"
+            message = tr("status.resyncing")
             try {
                 currentUser?.let { loadSignedInContent(it, forceRefresh = true) }
                     ?: loadPublicContent(forceRefresh = true)
-                message = "已重新同步"
+                message = tr("status.resynced")
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Throwable) {
-                message = "重新同步没有完成，请稍后再试"
+                message = tr("status.resync_fail")
             } finally {
                 isLoading = false
             }
@@ -570,21 +641,34 @@ class AndroidGatewayController(context: Context) {
     private fun bootstrap() {
         bootstrapJob?.cancel()
         isLoading = true
-        featuredPlaylists = cache.loadFeaturedPlaylists()
-        homeTracks = cache.loadTracks(HOME_TRACKS_CACHE_ID)
-        val hasSavedSession = !gateway.sessionCookie.isNullOrBlank()
-        val cachedProfile = cache.loadCurrentUser().takeIf { hasSavedSession }
-        if (cachedProfile != null) {
-            currentUser = cachedProfile
-            restoreCachedSignedInContent(cachedProfile)
-        } else if (!hasSavedSession) {
-            currentUser = null
-            userPlaylists = emptyList()
-            likedSongIds = emptySet()
-        }
+        val gatewayAtStart = gateway
         bootstrapJob = scope.launch {
+            val cached = withContext(Dispatchers.IO) {
+                val hasSavedSession = !gatewayAtStart.sessionCookie.isNullOrBlank()
+                val profile = cache.loadCurrentUser().takeIf { hasSavedSession }
+                AndroidCachedBootstrap(
+                    hasSavedSession = hasSavedSession,
+                    featuredPlaylists = cache.loadFeaturedPlaylists(),
+                    homeTracks = cache.loadTracks(HOME_TRACKS_CACHE_ID),
+                    profile = profile,
+                    userPlaylists = profile?.let { cache.loadUserPlaylists(it.userId) }.orEmpty(),
+                    likedSongIds = profile?.let { cache.loadLikedSongIds(it.userId) }.orEmpty(),
+                )
+            }
+            if (gatewayAtStart !== gateway) return@launch
+            featuredPlaylists = cached.featuredPlaylists
+            homeTracks = cached.homeTracks
+            if (cached.profile != null) {
+                currentUser = cached.profile
+                userPlaylists = cached.userPlaylists
+                likedSongIds = cached.likedSongIds
+            } else {
+                currentUser = null
+                userPlaylists = emptyList()
+                likedSongIds = emptySet()
+            }
             try {
-                if (!hasSavedSession) {
+                if (!cached.hasSavedSession) {
                     loadPublicContent()
                 } else {
                     val freshProfile = resolveCurrentUser()
@@ -606,9 +690,9 @@ class AndroidGatewayController(context: Context) {
                 throw error
             } catch (_: Throwable) {
                 message = if (currentUser != null) {
-                    "已显示本地内容，暂时无法同步"
+                    tr("status.local_only")
                 } else {
-                    "暂时无法连接音乐服务，请稍后再试"
+                    tr("status.connect_fail")
                 }
             } finally {
                 isLoading = false
@@ -617,55 +701,80 @@ class AndroidGatewayController(context: Context) {
     }
 
     private suspend fun loadPublicContent(forceRefresh: Boolean = false) {
-        val freshPlaylists = gateway.topPlaylists(limit = 12, forceRefresh = forceRefresh)
-            .playlists.map(::toAndroidPlaylist)
+        val freshPlaylists = withContext(Dispatchers.IO) {
+            gateway.topPlaylists(limit = 12, forceRefresh = forceRefresh)
+                .playlists.map(::toAndroidPlaylist)
+        }
         if (freshPlaylists.isNotEmpty()) {
             featuredPlaylists = freshPlaylists
             cache.saveFeaturedPlaylists(freshPlaylists)
         }
         val source = featuredPlaylists.firstOrNull() ?: return
-        val freshTracks = gateway.playlistTracks(source.id, limit = 50, forceRefresh = forceRefresh)
-            .songs.map(::toAndroidTrack)
+        val freshTracks = withContext(Dispatchers.IO) {
+            gateway.playlistTracks(source.id, limit = 50, forceRefresh = forceRefresh)
+                .songs.map(::toAndroidTrack)
+        }
         if (freshTracks.isNotEmpty()) {
             homeTracks = freshTracks
             cache.saveTracks(HOME_TRACKS_CACHE_ID, freshTracks)
         }
     }
 
-    private fun restoreCachedSignedInContent(profile: UserProfile) {
-        userPlaylists = cache.loadUserPlaylists(profile.userId)
-        likedSongIds = cache.loadLikedSongIds(profile.userId)
+    private suspend fun restoreCachedSignedInContent(profile: UserProfile) {
+        val cached = withContext(Dispatchers.IO) {
+            AndroidCachedSignedInContent(
+                userPlaylists = cache.loadUserPlaylists(profile.userId),
+                likedSongIds = cache.loadLikedSongIds(profile.userId),
+            )
+        }
+        userPlaylists = cached.userPlaylists
+        likedSongIds = cached.likedSongIds
     }
 
     private suspend fun loadSignedInContent(profile: UserProfile, forceRefresh: Boolean = false) {
-        runCatching { gateway.likedSongIds(profile.userId, forceRefresh).ids.toSet() }
-            .getOrNull()
-            ?.let { freshLikedSongIds ->
+        supervisorScope {
+            // These endpoints are independent. Starting them together shortens a refresh by the
+            // slowest request instead of the sum of all four round trips.
+            val likedSongIdsRequest = async(Dispatchers.IO) {
+                gatewayOrNull { gateway.likedSongIds(profile.userId, forceRefresh).ids.toSet() }
+            }
+            val userPlaylistsRequest = async(Dispatchers.IO) {
+                gatewayOrNull { loadAllUserPlaylists(profile.userId, forceRefresh) }.orEmpty()
+            }
+            val recommendedPlaylistsRequest = async(Dispatchers.IO) {
+                gatewayOrNull {
+                    gateway.dailyRecommendedPlaylists(forceRefresh).recommend.map(::toAndroidPlaylist)
+                }.orEmpty()
+            }
+            val recommendedTracksRequest = async(Dispatchers.IO) {
+                gatewayOrNull {
+                    gateway.dailyRecommendedSongs(forceRefresh).data?.dailySongs.orEmpty().map(::toAndroidTrack)
+                }.orEmpty()
+            }
+
+            likedSongIdsRequest.await()?.let { freshLikedSongIds ->
                 likedSongIds = freshLikedSongIds
                 cache.saveLikedSongIds(profile.userId, freshLikedSongIds)
             }
-        val loadedPlaylists = loadAllUserPlaylists(profile.userId, forceRefresh)
-        if (loadedPlaylists.isNotEmpty()) {
-            userPlaylists = loadedPlaylists
-            cache.saveUserPlaylists(profile.userId, loadedPlaylists)
-        }
+            val loadedPlaylists = userPlaylistsRequest.await()
+            if (loadedPlaylists.isNotEmpty()) {
+                userPlaylists = loadedPlaylists
+                cache.saveUserPlaylists(profile.userId, loadedPlaylists)
+            }
 
-        val recommendedPlaylists = runCatching {
-            gateway.dailyRecommendedPlaylists(forceRefresh).recommend.map(::toAndroidPlaylist)
-        }.getOrDefault(emptyList())
-        if (recommendedPlaylists.isNotEmpty()) {
-            featuredPlaylists = recommendedPlaylists
-            cache.saveFeaturedPlaylists(recommendedPlaylists)
-        }
+            val recommendedPlaylists = recommendedPlaylistsRequest.await()
+            if (recommendedPlaylists.isNotEmpty()) {
+                featuredPlaylists = recommendedPlaylists
+                cache.saveFeaturedPlaylists(recommendedPlaylists)
+            }
 
-        val recommendedTracks = runCatching {
-            gateway.dailyRecommendedSongs(forceRefresh).data?.dailySongs.orEmpty().map(::toAndroidTrack)
-        }.getOrDefault(emptyList())
-        if (recommendedTracks.isNotEmpty()) {
-            homeTracks = recommendedTracks
-            cache.saveTracks(HOME_TRACKS_CACHE_ID, recommendedTracks)
-        } else if (homeTracks.isEmpty()) {
-            loadPublicContent(forceRefresh)
+            val recommendedTracks = recommendedTracksRequest.await()
+            if (recommendedTracks.isNotEmpty()) {
+                homeTracks = recommendedTracks
+                cache.saveTracks(HOME_TRACKS_CACHE_ID, recommendedTracks)
+            } else if (homeTracks.isEmpty()) {
+                loadPublicContent(forceRefresh)
+            }
         }
     }
 
@@ -689,25 +798,44 @@ class AndroidGatewayController(context: Context) {
         return all.distinctBy(AndroidPlaylist::id)
     }
 
-    private suspend fun loadAllPlaylistTracks(playlist: AndroidPlaylist): List<AndroidTrack> {
+    private suspend fun loadAllPlaylistTracks(
+        playlist: AndroidPlaylist,
+        requestGeneration: Long,
+    ): List<AndroidTrack> {
         val refreshed = mutableListOf<AndroidTrack>()
         var offset = 0
         do {
-            val page = gateway.playlistTracks(playlist.id, limit = PLAYLIST_PAGE_SIZE, offset = offset).songs
-            if (page.isEmpty()) break
-            refreshed += page.map(::toAndroidTrack)
-            // Publish additive pages while preserving cache content already shown on screen.
-            if (activePlaylist?.id == playlist.id) {
-                activePlaylistTracks = (activePlaylistTracks + refreshed)
-                    .distinctBy(AndroidTrack::id)
+            val page = withContext(Dispatchers.IO) {
+                gateway.playlistTracks(
+                    playlist.id,
+                    limit = PLAYLIST_PAGE_SIZE,
+                    offset = offset,
+                    // The Gateway may retain a GET response briefly. The on-screen cache is already
+                    // shown first, so a refresh must use a request-specific URL rather than risk
+                    // accepting an old response after the user opened another playlist.
+                    forceRefresh = true,
+                ).songs.map(::toAndroidTrack)
             }
+            if (!isCurrentPlaylistRequest(playlist.id, requestGeneration)) return emptyList()
+            if (page.isEmpty()) break
+            refreshed += page
+            val currentPage = refreshed.distinctBy(AndroidTrack::id)
+            // A request owns the visible list for its full lifetime. Do not combine it with a
+            // previous cache snapshot: that is how a cancelled playlist request could leave B's
+            // rows visible under A's header while the next page was arriving.
+            activePlaylistTracks = currentPage
             offset += page.size
             if (page.size < PLAYLIST_PAGE_SIZE) break
         } while (true)
         val complete = refreshed.distinctBy(AndroidTrack::id)
-        if (complete.isNotEmpty()) cache.saveTracks(playlist.id, complete)
+        if (isCurrentPlaylistRequest(playlist.id, requestGeneration) && complete.isNotEmpty()) {
+            cache.saveTracks(playlist.id, complete)
+        }
         return complete
     }
+
+    private fun isCurrentPlaylistRequest(playlistId: Long, requestGeneration: Long): Boolean =
+        playlistRequestGeneration == requestGeneration && activePlaylist?.id == playlistId
 
     private suspend fun resolveCurrentUser(): UserProfile? {
         if (gateway.sessionCookie.isNullOrBlank()) return null
@@ -718,7 +846,7 @@ class AndroidGatewayController(context: Context) {
 
     private suspend fun finishLogin(profileHint: UserProfile? = null) {
         val profile = profileHint?.takeIf { it.userId > 0 } ?: resolveCurrentUser()
-        check(profile != null && profile.userId > 0) { "未能确认登录状态" }
+        check(profile != null && profile.userId > 0) { tr("login.no_profile") }
         bootstrapJob?.cancelAndJoin()
         bootstrapJob = null
         currentUser = profile
@@ -730,17 +858,17 @@ class AndroidGatewayController(context: Context) {
         qrLoginJob = null
         qrState = AndroidQrLoginState.IDLE
         qrImageData = null
-        message = "登录成功，正在同步你的音乐"
+        message = tr("status.login_success_syncing")
         postLoginSyncJob?.cancel()
         postLoginSyncJob = scope.launch {
             isLoading = true
             try {
                 loadSignedInContent(profile)
-                message = "歌单已同步"
+                message = tr("status.synced")
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Throwable) {
-                message = "登录成功，个人音乐暂时未能同步，请稍后重试"
+                message = tr("status.login_sync_later")
             } finally {
                 isLoading = false
             }
@@ -749,7 +877,7 @@ class AndroidGatewayController(context: Context) {
 
     private fun validateLogin(code: Int, failureMessage: String?) {
         check(code in 200..299 && !gateway.sessionCookie.isNullOrBlank()) {
-            failureMessage ?: "登录没有完成"
+            failureMessage ?: tr("login.fail_check")
         }
     }
 
@@ -757,6 +885,14 @@ class AndroidGatewayController(context: Context) {
         .replace(" ", "")
         .removePrefix("+86")
         .takeIf { it.length >= 6 && it.all(Char::isDigit) }
+
+    private suspend fun <T> gatewayOrNull(request: suspend () -> T): T? = try {
+        request()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Throwable) {
+        null
+    }
 
     private companion object {
         const val HOME_TRACKS_CACHE_ID = -101L
@@ -767,8 +903,8 @@ class AndroidGatewayController(context: Context) {
 
 private fun toAndroidTrack(song: Song): AndroidTrack = AndroidTrack(
     id = song.id,
-    title = song.name.ifBlank { "未命名歌曲" },
-    artist = song.artists.joinToString(" / ") { it.name }.ifBlank { "未知音乐人" },
+    title = song.name.ifBlank { tr("track.unknown_song") },
+    artist = song.artists.joinToString(" / ") { it.name }.ifBlank { tr("track.unknown_artist.android") },
     album = song.album?.name.orEmpty(),
     durationMillis = song.durationMillis ?: 0L,
     coverUrl = normalizedArtworkUrl(song.album?.picUrl),
@@ -776,10 +912,10 @@ private fun toAndroidTrack(song: Song): AndroidTrack = AndroidTrack(
 
 private fun toAndroidPlaylist(playlist: Playlist): AndroidPlaylist = AndroidPlaylist(
     id = playlist.id,
-    title = playlist.name.ifBlank { "未命名歌单" },
+    title = playlist.name.ifBlank { tr("playlist.unnamed") },
     subtitle = playlist.creator?.nickname?.takeIf(String::isNotBlank)
         ?: playlist.description?.takeIf(String::isNotBlank)
-        ?: "${playlist.trackCount ?: 0} 首音乐",
+        ?: tr("playlist.tracks", playlist.trackCount ?: 0),
     coverUrl = sequenceOf(playlist.coverImgUrl, playlist.picUrl)
         .mapNotNull(::normalizedArtworkUrl)
         .firstOrNull(),

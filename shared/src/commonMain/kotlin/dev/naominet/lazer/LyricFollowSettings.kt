@@ -24,6 +24,6 @@ fun normalizeLyricFollowDelayMillis(value: Long): Long {
 
 /** Human-readable duration used by both settings surfaces. */
 fun lyricFollowDelayLabel(value: Long): String = when {
-    value % 1_000L == 0L -> "${value / 1_000L} 秒"
-    else -> "${value / 1_000.0} 秒"
+    value % 1_000L == 0L -> tr("lyric.follow.seconds", value / 1_000L)
+    else -> tr("lyric.follow.seconds", value / 1_000.0)
 }

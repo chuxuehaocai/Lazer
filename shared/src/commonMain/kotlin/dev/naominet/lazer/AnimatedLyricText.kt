@@ -21,9 +21,10 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.TextLayoutResult
@@ -62,6 +63,7 @@ fun AmllLyricText(
     currentLine: Boolean = active,
     color: Color,
     shadowColor: Color = Color.Black,
+    glowEnabled: Boolean = true,
     speed: LyricAnimationSpeed,
     modifier: Modifier = Modifier,
     style: TextStyle = TextStyle.Default,
@@ -98,36 +100,53 @@ fun AmllLyricText(
     val laidOutGlyphs = remember(layoutResult, glyphs, words) {
         layoutResult?.let { buildLaidOutGlyphs(it, glyphs, words.size) }.orEmpty()
     }
+    val timedGlyphs = remember(laidOutGlyphs) {
+        laidOutGlyphs.filter { it.timing.wordIndex >= 0 }
+    }
+    // A selected line used to calculate its per-glyph clip geometry twice every frame: once for
+    // the blurred selection layer and once for the foreground. Compute it once and reuse it for
+    // both passes. Inactive rows do not need a mask at all.
+    val playbackPosition = animatedPosition.roundToLong()
+    val needsMask = timedGlyphs.isNotEmpty() && (active || currentLine || effectStrength > 0.001f)
+    val maskClips = if (needsMask) {
+        remember(layoutResult, timedGlyphs, words, playbackPosition, speed) {
+            layoutResult?.let {
+                lineScanClips(it, timedGlyphs, words, playbackPosition, speed)
+            }.orEmpty()
+        }
+    } else {
+        emptyList()
+    }
 
     Box(modifier) {
-        Box(
-            Modifier
-                .matchParentSize()
-                .graphicsLayer {
-                    val radius = LyricShaderShadowRadius.toPx()
-                    compositingStrategy = CompositingStrategy.Offscreen
-                    clip = false
-                    alpha = 0.5f * lineFocus
-                    renderEffect = if (lineFocus > 0.001f) {
-                        BlurEffect(radius, radius, TileMode.Decal)
-                    } else {
-                        null
+        if (glowEnabled) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        val radius = LyricShaderShadowRadius.toPx()
+                        compositingStrategy = CompositingStrategy.Offscreen
+                        clip = false
+                        alpha = 0.5f * lineFocus
+                        renderEffect = if (lineFocus > 0.001f) {
+                            BlurEffect(radius, radius, TileMode.Decal)
+                        } else {
+                            null
+                        }
                     }
-                }
-                .drawBehind {
-                    if (lineFocus <= 0.001f) return@drawBehind
-                    val measured = layoutResult ?: return@drawBehind
-                    drawLyricShaderShadow(
-                        layout = measured,
-                        glyphs = laidOutGlyphs,
-                        words = words,
-                        positionMillis = animatedPosition.roundToLong(),
-                        speed = speed,
-                        shadowColor = shadowColor,
-                    )
-                }
-                .clearAndSetSemantics { },
-        )
+                    .drawBehind {
+                        if (lineFocus <= 0.001f) return@drawBehind
+                        val measured = layoutResult ?: return@drawBehind
+                        drawLyricShaderShadow(
+                            layout = measured,
+                            hasTimedGlyphs = timedGlyphs.isNotEmpty(),
+                            maskClips = maskClips,
+                            shadowColor = shadowColor,
+                        )
+                    }
+                    .clearAndSetSemantics { },
+            )
+        }
         BasicText(
             text = text,
             modifier = Modifier.fillMaxWidth().drawWithContent {
@@ -141,11 +160,9 @@ fun AmllLyricText(
                 } else {
                     drawAmllGlyphs(
                         layout = measured,
-                        glyphs = laidOutGlyphs,
-                        words = words,
-                        positionMillis = animatedPosition.roundToLong(),
+                        hasTimedGlyphs = timedGlyphs.isNotEmpty(),
+                        maskClips = maskClips,
                         color = color,
-                        speed = speed,
                         effectStrength = effectStrength,
                     )
                 }
@@ -197,38 +214,31 @@ private fun buildLaidOutGlyphs(
 
 private fun DrawScope.drawLyricShaderShadow(
     layout: TextLayoutResult,
-    glyphs: List<LaidOutLyricGlyph>,
-    words: List<TimedLyricWord>,
-    positionMillis: Long,
-    speed: LyricAnimationSpeed,
+    hasTimedGlyphs: Boolean,
+    maskClips: List<Rect>,
     shadowColor: Color,
 ) {
     drawRect(color = Color.Transparent, blendMode = BlendMode.Clear)
-    if (words.isEmpty() || glyphs.none { it.timing.wordIndex >= 0 }) {
+    if (!hasTimedGlyphs) {
         drawText(textLayoutResult = layout, color = shadowColor)
         return
     }
-    for (clip in lineScanClips(layout, glyphs, words, positionMillis, speed)) {
-        clipRect(clip.left, clip.top, clip.right, clip.bottom) {
-            drawText(textLayoutResult = layout, color = shadowColor)
-        }
-    }
+    drawTextInMask(layout, maskClips, shadowColor)
 }
 
 private fun lineScanClips(
     layout: TextLayoutResult,
-    glyphs: List<LaidOutLyricGlyph>,
+    timedGlyphs: List<LaidOutLyricGlyph>,
     words: List<TimedLyricWord>,
     positionMillis: Long,
     speed: LyricAnimationSpeed,
 ): List<Rect> {
-    val timed = glyphs.filter { it.timing.wordIndex >= 0 }.sortedBy { it.timing.startOffset }
-    if (timed.isEmpty()) return emptyList()
+    if (timedGlyphs.isEmpty()) return emptyList()
     val current = currentLyricWordIndex(words, positionMillis)
     if (current < 0) return emptyList()
     val progress = lyricWordVisualProgress(words[current], positionMillis, speed).coerceIn(0f, 1f)
     val wordWidths = FloatArray(words.size)
-    for (glyph in timed) {
+    for (glyph in timedGlyphs) {
         val index = glyph.timing.wordIndex
         if (index in wordWidths.indices) wordWidths[index] = glyph.wordWidth
     }
@@ -236,9 +246,9 @@ private fun lineScanClips(
     for (index in 0 until current) target += wordWidths[index]
     target += wordWidths.getOrElse(current) { 0f } * progress
 
-    val clips = ArrayList<Rect>(timed.size)
+    val clips = ArrayList<Rect>(timedGlyphs.size)
     var traveled = 0f
-    for (glyph in timed) {
+    for (glyph in timedGlyphs) {
         val clip = glyphLineClip(layout, glyph)
         val width = clip.width
         if (width <= 0.01f) continue
@@ -269,19 +279,26 @@ private fun glyphLineClip(layout: TextLayoutResult, glyph: LaidOutLyricGlyph): R
 
 private fun DrawScope.drawAmllGlyphs(
     layout: TextLayoutResult,
-    glyphs: List<LaidOutLyricGlyph>,
-    words: List<TimedLyricWord>,
-    positionMillis: Long,
+    hasTimedGlyphs: Boolean,
+    maskClips: List<Rect>,
     color: Color,
-    speed: LyricAnimationSpeed,
     effectStrength: Float,
 ) {
     val effect = effectStrength.coerceIn(0f, 1f)
     val dimColor = color.copy(alpha = color.alpha * (1f - effect * (1f - lyricBaseMaskAlpha())))
     drawText(textLayoutResult = layout, color = dimColor)
-    for (clip in lineScanClips(layout, glyphs, words, positionMillis, speed)) {
-        clipRect(clip.left, clip.top, clip.right, clip.bottom) {
-            drawText(textLayoutResult = layout, color = color)
-        }
+    if (hasTimedGlyphs) drawTextInMask(layout, maskClips, color)
+}
+
+/** Draw all selected glyph regions in one text pass instead of redrawing once for every glyph. */
+private fun DrawScope.drawTextInMask(
+    layout: TextLayoutResult,
+    maskClips: List<Rect>,
+    color: Color,
+) {
+    if (maskClips.isEmpty()) return
+    val mask = Path().apply { maskClips.forEach(::addRect) }
+    clipPath(mask) {
+        drawText(textLayoutResult = layout, color = color)
     }
 }

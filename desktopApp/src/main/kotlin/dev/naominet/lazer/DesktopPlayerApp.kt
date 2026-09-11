@@ -45,6 +45,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -75,13 +76,15 @@ private val LocalScrollInertia = compositionLocalOf<ScrollInertiaController> {
 }
 
 private enum class DesktopDestination(
-    val label: String,
+    private val labelKey: String,
     val icon: ImageVector,
 ) {
-    HOME("主页", Icons.Outlined.Home),
-    DISCOVER("发现", Icons.Outlined.Explore),
-    LIBRARY("音乐库", Icons.Outlined.LibraryMusic),
-    LIKED("我喜欢", Icons.Outlined.FavoriteBorder),
+    HOME("nav.home", Icons.Outlined.Home),
+    DISCOVER("nav.discover", Icons.Outlined.Explore),
+    LIBRARY("nav.library", Icons.Outlined.LibraryMusic),
+    LIKED("nav.liked", Icons.Outlined.FavoriteBorder);
+
+    val label: String get() = tr(labelKey)
 }
 
 private val calmArtwork = listOf(
@@ -223,9 +226,9 @@ private fun WindowScope.WindowTitleBar(
         } else {
             WindowDraggableArea(titleModifier) { WindowTitleIdentity() }
         }
-        WindowControlButton(Icons.Outlined.Remove, "最小化", onMinimize)
-        WindowControlButton(if (maximized) Icons.Outlined.FilterNone else Icons.Outlined.CropSquare, if (maximized) "还原" else "最大化", onToggleMaximize)
-        WindowControlButton(Icons.Outlined.Close, "关闭", onClose, close = true)
+        WindowControlButton(Icons.Outlined.Remove, tr("window.minimize"), onMinimize)
+        WindowControlButton(if (maximized) Icons.Outlined.FilterNone else Icons.Outlined.CropSquare, if (maximized) tr("window.restore") else tr("window.maximize"), onToggleMaximize)
+        WindowControlButton(Icons.Outlined.Close, tr("window.close"), onClose, close = true)
     }
 }
 
@@ -262,7 +265,7 @@ private fun WindowControlButton(icon: ImageVector, description: String, onClick:
             contentColor = if (close) colors.error else colors.onSurfaceVariant,
         ),
     ) {
-        Icon(icon, description, Modifier.size(if (description == "关闭") 17.dp else 15.dp))
+        Icon(icon, description, Modifier.size(if (description == tr("window.close")) 17.dp else 15.dp))
     }
 }
 
@@ -333,11 +336,11 @@ private fun NavigationPanel(
             if (!compact) {
                 Spacer(Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("你的歌单", style = MaterialTheme.typography.titleSmall, color = colors.onSurface)
+                    Text(tr("nav.your_playlists"), style = MaterialTheme.typography.titleSmall, color = colors.onSurface)
                     Spacer(Modifier.weight(1f))
                     if (controller.isSignedIn) {
                         IconButton(onClick = controller::syncLibrary, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Outlined.Sync, "同步歌单", Modifier.size(16.dp), tint = colors.primary)
+                            Icon(Icons.Outlined.Sync, tr("nav.sync"), Modifier.size(16.dp), tint = colors.primary)
                         }
                     }
                 }
@@ -356,7 +359,7 @@ private fun NavigationPanel(
                 when {
                     playlists.isEmpty() && !compact -> {
                         Text(
-                            if (controller.isSignedIn) "暂时没有歌单" else "登录后在这里同步收藏",
+                            if (controller.isSignedIn) tr("nav.no_playlists") else tr("nav.login_hint"),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
@@ -387,7 +390,7 @@ private fun NavigationPanel(
             Spacer(Modifier.height(8.dp))
             NavigationUtilityEntry(
                 icon = Icons.Outlined.Settings,
-                label = "设置",
+                label = tr("settings.title"),
                 compact = compact,
                 selected = settingsSelected,
                 themeEngine = controller.themeEngine,
@@ -590,10 +593,14 @@ private fun DesktopSettingsPage(
     var followDelaySliderValue by remember(controller.lyricFollowDelayMillis) {
         mutableFloatStateOf(controller.lyricFollowDelayMillis.toFloat())
     }
+    var lyricFontSizeSliderValue by remember(controller.lyricFontSizeSp) {
+        mutableFloatStateOf(controller.lyricFontSizeSp.toFloat())
+    }
     var gatewayBaseUrlDraft by remember(controller.gatewayBaseUrl) {
         mutableStateOf(controller.gatewayBaseUrl)
     }
     val displayedFollowDelay = normalizeLyricFollowDelayMillis(followDelaySliderValue.roundToLong())
+    val displayedLyricFontSize = normalizeLyricFontSizeSp(lyricFontSizeSliderValue.roundToInt())
     val animationSpeedOptions = LyricAnimationSpeed.entries
     val normalizedGatewayBaseUrl = normalizeGatewayBaseUrl(gatewayBaseUrlDraft)
     val scrollState = rememberScrollState()
@@ -610,8 +617,8 @@ private fun DesktopSettingsPage(
             modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-                PageHeading("设置", "外观、播放、歌词和同步。")
-                Text("外观", style = MaterialTheme.typography.titleSmall)
+                PageHeading(tr("settings.title"), tr("settings.subtitle"))
+                Text(tr("settings.appearance"), style = MaterialTheme.typography.titleSmall)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -629,9 +636,9 @@ private fun DesktopSettingsPage(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("Miuix 组件风格", style = MaterialTheme.typography.bodyMedium)
+                        Text(tr("settings.theme.engine.title"), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "当前：${controller.themeEngine.label} · 切换后立即生效",
+                            tr("settings.theme.engine.current", controller.themeEngine.label),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -643,8 +650,21 @@ private fun DesktopSettingsPage(
                     )
                 }
                 HorizontalDivider()
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(tr("settings.language"), style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LazerLanguage.entries.forEach { language ->
+                            FilterChip(
+                                selected = controller.language == language,
+                                onClick = { controller.updateLanguage(language) },
+                                label = { Text(language.displayName) },
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider()
                 if (isWindowsDesktop()) {
-                    Text("播放", style = MaterialTheme.typography.titleSmall)
+                    Text(tr("settings.playback"), style = MaterialTheme.typography.titleSmall)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -656,12 +676,12 @@ private fun DesktopSettingsPage(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("独占音频", style = MaterialTheme.typography.bodyMedium)
+                            Text(tr("settings.exclusive.title"), style = MaterialTheme.typography.bodyMedium)
                             Text(
                                 if (controller.exclusiveAudio) {
-                                    "播放时独占当前输出设备，其他应用会暂时无声"
+                                    tr("settings.exclusive.on.desktop")
                                 } else {
-                                    "与其他应用共享音频输出"
+                                    tr("settings.exclusive.off")
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -676,7 +696,7 @@ private fun DesktopSettingsPage(
                     }
                     HorizontalDivider()
                 }
-                Text("歌词", style = MaterialTheme.typography.titleSmall)
+                Text(tr("settings.lyrics"), style = MaterialTheme.typography.titleSmall)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -688,9 +708,9 @@ private fun DesktopSettingsPage(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("逐字歌词", style = MaterialTheme.typography.bodyMedium)
+                        Text(tr("settings.word.title"), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            if (controller.wordLyricsEnabled) "显示逐字渐亮和模糊过渡" else "只显示整行歌词",
+                            if (controller.wordLyricsEnabled) tr("settings.word.on") else tr("settings.word.off"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -703,11 +723,108 @@ private fun DesktopSettingsPage(
                     )
                 }
                 HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(role = androidx.compose.ui.semantics.Role.Switch) {
+                            controller.updateLyricGlowEnabled(!controller.lyricGlowEnabled)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("settings.lyric.glow.title"), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (controller.lyricGlowEnabled) tr("settings.lyric.glow.on") else tr("settings.lyric.glow.off"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerSwitch(
+                        engine = controller.themeEngine,
+                        checked = controller.lyricGlowEnabled,
+                        onCheckedChange = null,
+                    )
+                }
+                HorizontalDivider()
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("歌词动画速率", style = MaterialTheme.typography.bodyMedium)
+                        Text(tr("settings.lyric.font.title"), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "调整滚动收束和逐字过渡的节奏",
+                            tr("settings.lyric.font.hint"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        lyricFontSizeLabel(displayedLyricFontSize),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                LazerSlider(
+                    engine = controller.themeEngine,
+                    value = lyricFontSizeSliderValue,
+                    onValueChange = {
+                        lyricFontSizeSliderValue = normalizeLyricFontSizeSp(it.roundToInt()).toFloat()
+                    },
+                    onValueChangeFinished = {
+                        controller.updateLyricFontSizeSp(displayedLyricFontSize)
+                    },
+                    valueRange = MIN_LYRIC_FONT_SIZE_SP.toFloat()..MAX_LYRIC_FONT_SIZE_SP.toFloat(),
+                    steps = LYRIC_FONT_SIZE_OPTIONS_SP.size - 2,
+                )
+                Row(Modifier.fillMaxWidth()) {
+                    Text(
+                        tr("settings.lyric.font.small"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        tr("settings.lyric.font.large"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(role = androidx.compose.ui.semantics.Role.Switch) {
+                            controller.updateShowFullLyrics(!controller.showFullLyrics)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("settings.lyric.full.title"), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (controller.showFullLyrics) {
+                                tr("settings.lyric.full.on")
+                            } else {
+                                tr("settings.lyric.full.off")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerSwitch(
+                        engine = controller.themeEngine,
+                        checked = controller.showFullLyrics,
+                        onCheckedChange = null,
+                    )
+                }
+                HorizontalDivider()
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("settings.lyric.speed.title"), style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            tr("settings.lyric.speed.hint"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -749,12 +866,12 @@ private fun DesktopSettingsPage(
                     )
                 }
                 Text(
-                    "手动滚动歌词后，经过所选时间恢复自动跟随。",
+                    tr("settings.lyric.follow.desktop.hint"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("恢复跟随", style = MaterialTheme.typography.bodyMedium)
+                    Text(tr("settings.lyric.follow.desktop.title"), style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.weight(1f))
                     Text(
                         lyricFollowDelayLabel(displayedFollowDelay),
@@ -788,35 +905,35 @@ private fun DesktopSettingsPage(
                     )
                 }
                 HorizontalDivider()
-                Text("存储与同步", style = MaterialTheme.typography.titleSmall)
+                Text(tr("settings.storage"), style = MaterialTheme.typography.titleSmall)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("清除本地缓存", style = MaterialTheme.typography.bodyMedium)
+                        Text(tr("settings.cache.title"), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "选择清除歌曲缓存或歌单缓存",
+                            tr("settings.cache.hint"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(onClick = { cacheDialogVisible = true }) { Text("选择") }
+                    TextButton(onClick = { cacheDialogVisible = true }) { Text(tr("settings.cache.select")) }
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("强制重新同步", style = MaterialTheme.typography.bodyMedium)
+                        Text(tr("settings.resync.title"), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "保留当前内容，并重新获取最新歌单",
+                            tr("settings.resync.hint"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Button(onClick = controller::forceResync, enabled = !controller.isLoading) {
-                        Text(if (controller.isLoading) "同步中" else "重新同步")
+                        Text(if (controller.isLoading) tr("settings.resync.doing") else tr("settings.resync.action"))
                     }
                 }
                 HorizontalDivider()
-                Text("音乐服务", style = MaterialTheme.typography.titleSmall)
+                Text(tr("settings.service"), style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "填写兼容服务的根地址。登录状态会继续沿用，请只使用你信任的提供商。",
+                    tr("settings.service.hint"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -825,10 +942,10 @@ private fun DesktopSettingsPage(
                     onValueChange = { gatewayBaseUrlDraft = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("服务地址") },
+                    label = { Text(tr("settings.service.address")) },
                     placeholder = { Text(DEFAULT_GATEWAY_BASE_URL) },
                     supportingText = if (gatewayBaseUrlDraft.isNotBlank() && normalizedGatewayBaseUrl == null) {
-                        { Text("请输入有效的 HTTP 或 HTTPS 地址") }
+                        { Text(tr("settings.service.invalid.desktop")) }
                     } else {
                         null
                     },
@@ -840,7 +957,7 @@ private fun DesktopSettingsPage(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(onClick = { gatewayBaseUrlDraft = DEFAULT_GATEWAY_BASE_URL }) {
-                        Text("恢复默认")
+                        Text(tr("settings.service.reset"))
                     }
                     Spacer(Modifier.width(8.dp))
                     Button(
@@ -850,7 +967,7 @@ private fun DesktopSettingsPage(
                         enabled = normalizedGatewayBaseUrl != null &&
                             normalizedGatewayBaseUrl != controller.gatewayBaseUrl,
                     ) {
-                        Text("保存")
+                        Text(tr("settings.save"))
                     }
                 }
         }
@@ -858,11 +975,11 @@ private fun DesktopSettingsPage(
     if (cacheDialogVisible) {
         AlertDialog(
             onDismissRequest = { cacheDialogVisible = false },
-            title = { Text("清除本地缓存") },
+            title = { Text(tr("settings.cache.dialog.title")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "清除歌曲缓存会停止当前播放；登录状态不会受影响。",
+                        tr("settings.cache.dialog.body"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     TextButton(
@@ -871,18 +988,18 @@ private fun DesktopSettingsPage(
                             cacheDialogVisible = false
                         },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("清除歌曲缓存", color = MaterialTheme.colorScheme.error) }
+                    ) { Text(tr("settings.cache.clear.songs"), color = MaterialTheme.colorScheme.error) }
                     TextButton(
                         onClick = {
                             controller.clearPlaylistCache()
                             cacheDialogVisible = false
                         },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("清除歌单缓存", color = MaterialTheme.colorScheme.error) }
+                    ) { Text(tr("settings.cache.clear.playlists"), color = MaterialTheme.colorScheme.error) }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { cacheDialogVisible = false }) { Text("取消") }
+                TextButton(onClick = { cacheDialogVisible = false }) { Text(tr("settings.cancel")) }
             },
         )
     }
@@ -910,7 +1027,7 @@ private fun TopBar(controller: DesktopPlayerController) {
         ) {
             Icon(
                 if (controller.isDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
-                "切换明暗主题",
+                tr("topbar.toggle_theme"),
                 Modifier.size(18.dp),
             )
         }
@@ -925,12 +1042,12 @@ private fun TopBar(controller: DesktopPlayerController) {
             ) {
                 if (controller.isSignedIn) {
                     UserAvatar(
-                        controller.currentUser?.nickname ?: "你",
+                        controller.currentUser?.nickname ?: tr("topbar.you"),
                         controller.currentUser?.avatarUrl,
                         Modifier.size(32.dp),
                     )
                 } else {
-                    Icon(Icons.Outlined.Person, "登录", Modifier.size(18.dp))
+                    Icon(Icons.Outlined.Person, tr("topbar.login"), Modifier.size(18.dp))
                 }
             }
             if (accountMenuOpen && controller.isSignedIn) {
@@ -966,7 +1083,7 @@ private fun TopBar(controller: DesktopPlayerController) {
                             ) {
                                 Icon(Icons.Outlined.Sync, null, Modifier.size(16.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("同步歌单", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                                Text(tr("nav.sync"), modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
                             }
                             TextButton(
                                 onClick = {
@@ -979,7 +1096,7 @@ private fun TopBar(controller: DesktopPlayerController) {
                             ) {
                                 Icon(Icons.AutoMirrored.Outlined.Logout, null, Modifier.size(16.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("退出登录", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                                Text(tr("settings.account.logout"), modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
                             }
                         }
                     }
@@ -1021,7 +1138,7 @@ private fun NaturalLanguageField(
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) {
                         Text(
-                            "搜索...",
+                            tr("search.placeholder"),
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.onSurfaceVariant,
                             maxLines = 1,
@@ -1032,7 +1149,7 @@ private fun NaturalLanguageField(
                 }
                 if (value.isNotEmpty()) {
                     IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(30.dp)) {
-                        Icon(Icons.Outlined.Close, "清空搜索", Modifier.size(16.dp), tint = colors.onSurfaceVariant)
+                        Icon(Icons.Outlined.Close, tr("search.clear"), Modifier.size(16.dp), tint = colors.onSurfaceVariant)
                     }
                 }
             }
@@ -1067,7 +1184,7 @@ private fun GatewayStatus(controller: DesktopPlayerController) {
             }
             Spacer(Modifier.width(7.dp))
             Text(
-                controller.statusMessage ?: if (controller.isSignedIn) "个人音乐已同步" else "音乐服务已连接",
+                controller.statusMessage ?: if (controller.isSignedIn) tr("topbar.synced") else tr("topbar.connected"),
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.onSurfaceVariant,
                 maxLines = 1,
@@ -1092,17 +1209,22 @@ private fun HomePage(controller: DesktopPlayerController, modifier: Modifier = M
         item {
             Column {
                 SectionHeading(
-                    if (controller.isSignedIn) "今天为你整理" else "最近有人在听",
-                    if (controller.isSignedIn) "来自你的听歌偏好" else "登录后会换成你的每日推荐",
+                    if (controller.isSignedIn) tr("home.desktop.signed") else tr("home.desktop.anon"),
+                    if (controller.isSignedIn) tr("home.desktop.signed.sub") else tr("home.desktop.anon.sub"),
                 )
                 Spacer(Modifier.height(12.dp))
                 PlaylistStrip(controller.featuredPlaylists.take(8), controller::openPlaylist)
             }
         }
         item {
+            val visibleTracks = visiblePlaylistTracks(
+                controller.activePlaylist,
+                controller.activePlaylistTracks,
+                controller.recentTracks,
+            )
             TrackSection(
-                title = controller.activePlaylistTitle ?: "接着听",
-                tracks = controller.recentTracks.take(8),
+                title = controller.activePlaylistTitle ?: tr("home.continue"),
+                tracks = visibleTracks.take(8),
                 onPlay = controller::playTrack,
             )
         }
@@ -1111,7 +1233,12 @@ private fun HomePage(controller: DesktopPlayerController, modifier: Modifier = M
 
 @Composable
 private fun IntentSuggestions(controller: DesktopPlayerController) {
-    val suggestions = listOf("适合专注写作的纯音乐", "傍晚散步，轻一点", "熟悉但不吵的华语歌", "雨天慢节奏")
+    val suggestions = listOf(
+        tr("search.suggestion.focus"),
+        tr("search.suggestion.walk"),
+        tr("search.suggestion.familiar"),
+        tr("search.suggestion.rain"),
+    )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         suggestions.forEach { suggestion ->
             Surface(
@@ -1142,10 +1269,10 @@ private fun DiscoverPage(controller: DesktopPlayerController, modifier: Modifier
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         item {
-            PageHeading("慢慢发现", "从编辑精选到每日推荐，内容会跟着你的听歌习惯变化。")
+            PageHeading(tr("discover.title"), tr("discover.sub.desktop"))
         }
         item { PlaylistStrip(controller.featuredPlaylists, controller::openPlaylist) }
-        item { TrackSection("正在流动", controller.recentTracks.take(12), controller::playTrack) }
+        item { TrackSection(tr("discover.flowing"), controller.recentTracks.take(12), controller::playTrack) }
     }
 }
 
@@ -1156,7 +1283,7 @@ private fun LibraryPage(controller: DesktopPlayerController, modifier: Modifier 
     val listState = rememberLazyListState()
     val inertia = LocalScrollInertia.current
     val currentTrackIndex = if (active?.isLikedCollection == false) {
-        controller.recentTracks.indexOfFirst { it.id == controller.nowPlaying?.id }
+        controller.activePlaylistTracks.indexOfFirst { it.id == controller.nowPlaying?.id }
     } else {
         -1
     }
@@ -1173,34 +1300,34 @@ private fun LibraryPage(controller: DesktopPlayerController, modifier: Modifier 
         ) {
             when {
                 !controller.isSignedIn -> {
-                    item { PageHeading("你的音乐库", "登录后，歌单会出现在这里。") }
+                    item { PageHeading(tr("library.title"), tr("library.sub.desktop.anon")) }
                     item { SignInInvitation(controller::openLogin) }
                 }
                 browsing.isEmpty() && active == null -> {
                     item {
                         Row(verticalAlignment = Alignment.Bottom) {
-                            PageHeading("你的音乐库", "歌单与收藏已通过 Gateway 保持同步。")
+                            PageHeading(tr("library.title"), tr("library.sub.desktop.signed"))
                             Spacer(Modifier.weight(1f))
                             TextButton(onClick = controller::syncLibrary) {
                                 Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("同步歌单")
+                                Text(tr("nav.sync"))
                             }
                         }
                     }
-                    item { QuietEmptyState("还没有歌单", "在网易云音乐中新建歌单后，再点一次同步歌单。") }
+                    item { QuietEmptyState(tr("library.no_playlists"), tr("library.no_playlists.hint")) }
                 }
                 active != null && (active.isLikedCollection.not()) -> {
-                    item { PlaylistDetailHeader(active, onPlayAll = { active.let { controller.recentTracks.firstOrNull()?.let(controller::playTrack) } }) }
-                    if (controller.recentTracks.isEmpty()) {
+                    item { PlaylistDetailHeader(active, onPlayAll = { active.let { controller.activePlaylistTracks.firstOrNull()?.let(controller::playTrack) } }) }
+                    if (controller.activePlaylistTracks.isEmpty()) {
                         item {
                             QuietEmptyState(
-                                if (controller.isLoading) "正在整理歌曲" else "这个歌单还是空的",
-                                if (controller.isLoading) "封面与曲目正在同步。" else "换一个歌单看看。",
+                                if (controller.isLoading) tr("library.opening") else tr("library.playlist_empty"),
+                                if (controller.isLoading) tr("library.sync.cover") else tr("library.try_other"),
                             )
                         }
                     } else {
-                        itemsIndexed(controller.recentTracks, key = { _, track -> track.id }) { index, track ->
+                        itemsIndexed(controller.activePlaylistTracks, key = { _, track -> track.id }) { index, track ->
                             TrackRow(track, track.id == controller.nowPlaying?.id, { controller.playTrack(track) }, index + 1)
                         }
                     }
@@ -1208,12 +1335,12 @@ private fun LibraryPage(controller: DesktopPlayerController, modifier: Modifier 
                 else -> {
                     item {
                         Row(verticalAlignment = Alignment.Bottom) {
-                            PageHeading("你的音乐库", "点开一个歌单，封面与曲目会出现在这里。")
+                            PageHeading(tr("library.title"), tr("library.pick"))
                             Spacer(Modifier.weight(1f))
                             TextButton(onClick = controller::syncLibrary) {
                                 Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("同步歌单")
+                                Text(tr("nav.sync"))
                             }
                         }
                     }
@@ -1242,15 +1369,15 @@ private fun LikedPage(controller: DesktopPlayerController, modifier: Modifier = 
         ?: controller.likedPlaylist()
         ?: PlaylistItem(
             id = -5L,
-            title = "我喜欢",
-            subtitle = "私人收藏",
+            title = tr("liked.title"),
+            subtitle = tr("liked.private"),
             coverUrl = controller.likedTracks.firstOrNull()?.coverUrl,
             trackCount = controller.likedTracks.size,
             creatorName = controller.currentUser?.nickname,
             isLikedCollection = true,
         )
     val tracks = if (controller.activePlaylist?.isLikedCollection == true) {
-        controller.recentTracks
+        controller.activePlaylistTracks
     } else {
         controller.likedTracks
     }
@@ -1270,14 +1397,14 @@ private fun LikedPage(controller: DesktopPlayerController, modifier: Modifier = 
         ) {
             when {
                 !controller.isSignedIn -> {
-                    item { PageHeading("我喜欢", "登录后，喜欢状态会和你的账号保持一致。") }
+                    item { PageHeading(tr("liked.title"), tr("liked.sub.anon")) }
                     item { SignInInvitation(controller::openLogin) }
                 }
                 else -> {
                     item {
                         PlaylistDetailHeader(
                             playlist = playlist.copy(
-                                title = "我喜欢",
+                                title = tr("liked.title"),
                                 trackCount = tracks.size.takeIf { it > 0 } ?: playlist.trackCount,
                                 coverUrl = playlist.coverUrl ?: tracks.firstOrNull()?.coverUrl,
                             ),
@@ -1287,8 +1414,8 @@ private fun LikedPage(controller: DesktopPlayerController, modifier: Modifier = 
                     if (tracks.isEmpty()) {
                         item {
                             QuietEmptyState(
-                                if (controller.isLoading) "正在整理喜欢的歌" else "这里还很安静",
-                                if (controller.isLoading) "按你收藏时的顺序同步中。" else "播放一首歌，点亮播放栏里的心形即可收藏。",
+                                if (controller.isLoading) tr("liked.preparing") else tr("liked.empty"),
+                                if (controller.isLoading) tr("liked.sync") else tr("liked.hint"),
                             )
                         }
                     } else {
@@ -1321,7 +1448,7 @@ private fun NowPlayingLocatorButton(onClick: () -> Unit, modifier: Modifier = Mo
         contentColor = MaterialTheme.colorScheme.primary,
         elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp, pressedElevation = 2.dp),
         icon = { Icon(Icons.Outlined.MyLocation, null, Modifier.size(18.dp)) },
-        text = { Text("定位当前歌曲", style = MaterialTheme.typography.labelLarge) },
+        text = { Text(tr("playlist.locate"), style = MaterialTheme.typography.labelLarge) },
     )
 }
 
@@ -1345,7 +1472,7 @@ private fun PlaylistDetailHeader(playlist: PlaylistItem, onPlayAll: () -> Unit) 
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                if (playlist.isLikedCollection) "我喜欢" else playlist.title,
+                if (playlist.isLikedCollection) tr("liked.title") else playlist.title,
                 style = MaterialTheme.typography.headlineMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -1373,7 +1500,7 @@ private fun PlaylistDetailHeader(playlist: PlaylistItem, onPlayAll: () -> Unit) 
             Text(
                 buildString {
                     val count = playlist.trackCount
-                    if (count > 0) append("$count 首") else append("整理中")
+                    if (count > 0) append(tr("playlist.tracks", count)) else append(tr("playlist.organizing"))
                     playlist.creatorName?.takeIf { it.isNotBlank() }?.let {
                         // creator already shown above; keep the meta line minimal
                     }
@@ -1389,7 +1516,7 @@ private fun PlaylistDetailHeader(playlist: PlaylistItem, onPlayAll: () -> Unit) 
             ) {
                 Icon(Icons.Filled.PlayArrow, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("播放全部")
+                Text(tr("playlist.play_all"))
             }
         }
     }
@@ -1405,11 +1532,11 @@ private fun SearchPage(controller: DesktopPlayerController, modifier: Modifier =
         contentPadding = PaddingValues(top = 22.dp, bottom = 28.dp),
     ) {
         item {
-            PageHeading("关于「${controller.searchQuery}」", "Lazer 正在按你的描述整理歌曲。")
+            PageHeading(tr("search.heading", controller.searchQuery), tr("search.heading.sub"))
             Spacer(Modifier.height(22.dp))
         }
         if (controller.searchResults.isEmpty() && !controller.isLoading) {
-            item { QuietEmptyState("还没有合适的结果", "试着加入一种心情、场景或语言。") }
+            item { QuietEmptyState(tr("search.no_match"), tr("search.no_match.hint")) }
         } else {
             items(controller.searchResults, key = { it.id }) { track ->
                 TrackRow(track, track.id == controller.nowPlaying?.id, { controller.playTrack(track) })
@@ -1475,7 +1602,7 @@ private fun PlaylistStrip(playlists: List<PlaylistItem>, onPlaylistClick: (Playl
                 if (listState.canScrollBackward) {
                     PlaylistStripScrollButton(
                         icon = Icons.AutoMirrored.Outlined.ArrowBack,
-                        description = "查看前面的歌单",
+                        description = tr("strip.prev"),
                         modifier = Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
                         onClick = {
                             scope.launch {
@@ -1489,7 +1616,7 @@ private fun PlaylistStrip(playlists: List<PlaylistItem>, onPlaylistClick: (Playl
                 if (listState.canScrollForward) {
                     PlaylistStripScrollButton(
                         icon = Icons.AutoMirrored.Outlined.ArrowForward,
-                        description = "查看后面的歌单",
+                        description = tr("strip.next"),
                         modifier = Modifier.align(Alignment.CenterEnd).padding(end = 4.dp),
                         onClick = {
                             scope.launch {
@@ -1609,7 +1736,7 @@ private fun Artwork(
         if (sizedUrl != null) {
             AsyncImage(
                 model = sizedUrl,
-                contentDescription = "$title 封面",
+                contentDescription = tr("artwork.cover", title),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
@@ -1644,7 +1771,7 @@ private fun UserAvatar(name: String, avatarUrl: String?, modifier: Modifier = Mo
         if (sizedUrl != null) {
             AsyncImage(
                 model = sizedUrl,
-                contentDescription = "$name 的头像",
+                contentDescription = tr("artwork.avatar", name),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
@@ -1656,7 +1783,7 @@ private fun UserAvatar(name: String, avatarUrl: String?, modifier: Modifier = Mo
 private fun AvatarFallback(name: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(
-            name.firstOrNull()?.toString() ?: "你",
+            name.firstOrNull()?.toString() ?: tr("topbar.you"),
             color = MaterialTheme.colorScheme.onPrimaryContainer,
             fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.labelMedium,
@@ -1679,10 +1806,10 @@ private fun String.toArtworkUrl(): String {
 @Composable
 private fun TrackSection(title: String, tracks: List<TrackItem>, onPlay: (TrackItem) -> Unit) {
     Column {
-        SectionHeading(title, if (tracks.isEmpty()) "正在整理" else "${tracks.size} 首")
+        SectionHeading(title, if (tracks.isEmpty()) tr("tracks.organizing") else tr("tracks.count", tracks.size))
         Spacer(Modifier.height(10.dp))
         if (tracks.isEmpty()) {
-            QuietEmptyState("音乐还在路上", "连接成功后会自动出现在这里。")
+            QuietEmptyState(tr("tracks.loading"), tr("tracks.loading.hint"))
         } else {
             tracks.forEachIndexed { index, track ->
                 TrackRow(track, false, { onPlay(track) }, index + 1)
@@ -1738,7 +1865,7 @@ private fun TrackRow(
         )
         Text(track.durationLabel, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, modifier = Modifier.width(48.dp))
         IconButton(onClick = onClick, modifier = Modifier.size(30.dp)) {
-            Icon(Icons.Filled.PlayArrow, "播放 ${track.title}", Modifier.size(17.dp), tint = colors.primary)
+            Icon(Icons.Filled.PlayArrow, tr("tracks.play", track.title), Modifier.size(17.dp), tint = colors.primary)
         }
     }
 }
@@ -1753,10 +1880,10 @@ private fun SignInInvitation(onLogin: () -> Unit) {
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text("登录后继续", style = MaterialTheme.typography.titleLarge)
-                Text("优先使用二维码，不需要在电脑上输入密码。", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                Text(tr("signin.continue"), style = MaterialTheme.typography.titleLarge)
+                Text(tr("signin.desktop.hint"), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             }
-            Button(onClick = onLogin, shape = RoundedCornerShape(11.dp)) { Text("扫码登录") }
+            Button(onClick = onLogin, shape = RoundedCornerShape(11.dp)) { Text(tr("signin.qr")) }
         }
     }
 }
@@ -1828,7 +1955,7 @@ private fun PlayerBar(controller: DesktopPlayerController) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
-                            controller.nowPlaying?.title ?: "选一首音乐开始",
+                            controller.nowPlaying?.title ?: tr("player.choose"),
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -1845,7 +1972,7 @@ private fun PlayerBar(controller: DesktopPlayerController) {
                 IconButton(onClick = controller::toggleLiked, modifier = Modifier.size(30.dp)) {
                     Icon(
                         if (controller.isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                        "喜欢",
+                        tr("player.like"),
                         Modifier.size(17.dp),
                         tint = if (controller.isLiked) colors.tertiary else colors.onSurfaceVariant,
                     )
@@ -1854,17 +1981,17 @@ private fun PlayerBar(controller: DesktopPlayerController) {
 
             Column(Modifier.weight(1f).padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    CompactIconButton(Icons.Outlined.Shuffle, controller::toggleShuffle, "随机播放", controller.shuffle)
-                    CompactIconButton(Icons.Filled.SkipPrevious, controller::playPrevious, "上一首")
+                    CompactIconButton(Icons.Outlined.Shuffle, controller::toggleShuffle, tr("player.shuffle"), controller.shuffle)
+                    CompactIconButton(Icons.Filled.SkipPrevious, controller::playPrevious, tr("player.previous"))
                     IconButton(
                         onClick = controller::togglePlayPause,
                         modifier = Modifier.size(38.dp),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                     ) {
-                        Icon(if (controller.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (controller.isPlaying) "暂停" else "播放", Modifier.size(21.dp))
+                        Icon(if (controller.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (controller.isPlaying) tr("player.pause") else tr("player.play"), Modifier.size(21.dp))
                     }
-                    CompactIconButton(Icons.Filled.SkipNext, controller::playNext, "下一首")
-                    CompactIconButton(Icons.Outlined.Repeat, controller::toggleRepeat, "循环播放", controller.repeat)
+                    CompactIconButton(Icons.Filled.SkipNext, controller::playNext, tr("player.next"))
+                    CompactIconButton(Icons.Outlined.Repeat, controller::toggleRepeat, tr("player.repeat"), controller.repeat)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val total = controller.nowPlaying?.durationLabel ?: "00:00"
@@ -1899,11 +2026,11 @@ private fun PlayerBar(controller: DesktopPlayerController) {
                 CompactIconButton(
                     Icons.Outlined.Lyrics,
                     controller::openLyrics,
-                    "歌词",
+                    tr("player.lyrics"),
                     selected = controller.isLyricsVisible,
                 )
                 Spacer(Modifier.width(2.dp))
-                CompactIconButton(Icons.AutoMirrored.Outlined.QueueMusic, {}, "播放队列")
+                CompactIconButton(Icons.AutoMirrored.Outlined.QueueMusic, {}, tr("player.queue"))
             }
         }
     }
@@ -2019,7 +2146,7 @@ private fun VolumePanelControl(
     ) {
         Icon(
             if (volume <= 0.001f) Icons.AutoMirrored.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
-            "音量",
+            tr("player.volume"),
             Modifier.size(18.dp),
             tint = if (showPanel) colors.primary else colors.onSurfaceVariant,
         )
@@ -2041,7 +2168,7 @@ private fun VolumePanelControl(
                 ) {
                     Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                         Text(
-                            "音量 ${(volume * 100).roundToInt()}%",
+                            tr("player.volume.pct", (volume * 100).roundToInt()),
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.onSurfaceVariant,
                         )
@@ -2074,7 +2201,7 @@ private fun QualityControl(
         ) {
             Icon(
                 Icons.Outlined.HighQuality,
-                "播放音质",
+                tr("player.quality"),
                 Modifier.size(18.dp),
                 tint = if (menuOpen) colors.primary else colors.onSurfaceVariant,
             )
@@ -2095,7 +2222,7 @@ private fun QualityControl(
                 ) {
                     Column(Modifier.padding(vertical = 8.dp, horizontal = 6.dp)) {
                         Text(
-                            "播放音质",
+                            tr("player.quality"),
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -2135,7 +2262,7 @@ private fun QualityControl(
                         }
                         bitrate?.let {
                             Text(
-                                "当前 ${it / 1000} kbps",
+                                tr("player.quality.current", it / 1000),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colors.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -2163,11 +2290,44 @@ private fun LyricsOverlay(
         derivedStateOf { findCurrentLyricIndex(lines, controller.positionMillis) }
     }
 
-    // Original lyric plus its translation share one row, so keep a taller pitch and center
-    // the original lyric line within each row.
-    val rowPitchPx = with(density) { 112.dp.toPx() }
-    val baseFontSp = 34.sp
-    val baseLineHeightSp = 48.sp
+    val baseFontSp = controller.lyricFontSizeSp.sp
+    val baseLineHeightSp = (controller.lyricFontSizeSp * 1.38f).sp
+    val translationFontSp = (controller.lyricFontSizeSp * 0.48f).coerceIn(12f, 20f).sp
+    val translationLineHeightSp = (translationFontSp.value * 1.36f).sp
+    val lyricMaxLines = if (controller.showFullLyrics) Int.MAX_VALUE else 2
+    val measuredRowHeightsPx = remember(lines, controller.lyricFontSizeSp, controller.showFullLyrics) {
+        mutableStateMapOf<Int, Int>()
+    }
+    val measuredMainHeightsPx = remember(lines, controller.lyricFontSizeSp, controller.showFullLyrics) {
+        mutableStateMapOf<Int, Int>()
+    }
+    val minimumRowGapPx = with(density) { 12.dp.toPx() }
+    val maximumRowGapPx = with(density) { 40.dp.toPx() }
+    val minimumTranslationGapPx = with(density) { 8.dp.toPx() }
+    val maximumTranslationGapPx = with(density) { 24.dp.toPx() }
+    val estimatedMainHeightPx = with(density) { baseLineHeightSp.toPx() }
+    val estimatedTranslationHeightPx = with(density) { translationLineHeightSp.toPx() }
+    val rowHeightsPx = lines.mapIndexed { index, line ->
+        measuredRowHeightsPx[index]?.toFloat() ?: (
+            estimatedMainHeightPx + if (line.translation.isNullOrBlank()) {
+                0f
+            } else {
+                lyricTranslationGapPx(
+                    estimatedMainHeightPx,
+                    minimumTranslationGapPx,
+                    maximumTranslationGapPx,
+                ) + estimatedTranslationHeightPx
+            }
+        )
+    }
+    val lineCentersPx = lyricLineCenters(
+        rowHeightsPx = rowHeightsPx,
+        minimumGapPx = minimumRowGapPx,
+        maximumGapPx = maximumRowGapPx,
+    )
+    val maxScroll = lineCentersPx.lastOrNull() ?: 0f
+    val currentLineCentersPx by rememberUpdatedState(lineCentersPx)
+    val currentMaxScroll by rememberUpdatedState(maxScroll)
 
     var followPlayback by remember { mutableStateOf(true) }
     var manualAtMs by remember { mutableLongStateOf(0L) }
@@ -2177,13 +2337,16 @@ private fun LyricsOverlay(
     var lyricMotionRevision by remember { mutableIntStateOf(0) }
     var lyricMotionAtNs by remember { mutableLongStateOf(0L) }
 
-    val maxScroll = ((lines.size - 1).coerceAtLeast(0)) * rowPitchPx
-
-    LaunchedEffect(lines.size, controller.nowPlaying?.id) {
+    LaunchedEffect(
+        lines.size,
+        controller.nowPlaying?.id,
+        controller.lyricFontSizeSp,
+        controller.showFullLyrics,
+    ) {
         followPlayback = true
         lyricWheelInertia.stop()
         val idx = findCurrentLyricIndex(controller.lyrics, controller.positionMillis).coerceAtLeast(0)
-        lyricScroll = idx * rowPitchPx
+        lyricScroll = lineCentersPx.getOrElse(idx) { 0f }
         lyricLineMotion.reset(lines.size, lyricScroll)
         lyricMotionRevision++
         lyricMotionAtNs = 0L
@@ -2211,8 +2374,9 @@ private fun LyricsOverlay(
                     val liveLines = controller.lyrics
                     val liveIndex = findCurrentLyricIndex(liveLines, controller.positionMillis)
                     if (liveIndex >= 0 && liveLines.isNotEmpty()) {
-                        val liveMax = ((liveLines.size - 1).coerceAtLeast(0)) * rowPitchPx
-                        val target = (liveIndex * rowPitchPx).coerceIn(0f, liveMax)
+                        val liveMax = currentMaxScroll
+                        val target = currentLineCentersPx.getOrElse(liveIndex) { liveMax }
+                            .coerceIn(0f, liveMax)
                         val intervalMillis = if (liveIndex > 0) {
                             liveLines[liveIndex].timeMs - liveLines[liveIndex - 1].timeMs
                         } else {
@@ -2279,15 +2443,15 @@ private fun LyricsOverlay(
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                         shape = RoundedCornerShape(10.dp),
                     ) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", Modifier.size(16.dp))
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, tr("lyrics.back"), Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("返回", style = MaterialTheme.typography.labelMedium)
+                        Text(tr("lyrics.back"), style = MaterialTheme.typography.labelMedium)
                     }
                     Spacer(Modifier.weight(1f))
                     Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(max = 360.dp)) {
                         ///stp
                         Text(
-                            controller.nowPlaying?.title ?: "未在播放",
+                            controller.nowPlaying?.title ?: tr("lyrics.nothing"),
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -2351,7 +2515,7 @@ private fun LyricsOverlay(
                     when {
                         controller.nowPlaying == null -> {
                             Text(
-                                "选一首音乐后，歌词会出现在这里。",
+                                tr("lyrics.empty"),
                                 modifier = Modifier.align(Alignment.Center),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = colors.onSurfaceVariant,
@@ -2364,12 +2528,12 @@ private fun LyricsOverlay(
                             ) {
                                 CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = colors.primary)
                                 Spacer(Modifier.height(12.dp))
-                                Text("正在加载歌词…", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                                Text(tr("lyrics.loading"), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                             }
                         }
                         lines.isEmpty() -> {
                             Text(
-                                controller.lyricsError ?: "这首歌暂时没有歌词",
+                                controller.lyricsError ?: tr("lyrics.none"),
                                 modifier = Modifier.align(Alignment.Center),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = colors.onSurfaceVariant,
@@ -2377,15 +2541,18 @@ private fun LyricsOverlay(
                         }
                         else -> {
                             val motionRevision = lyricMotionRevision
-                            val visualIndex = if (rowPitchPx <= 0f) 0f else lyricScroll / rowPitchPx
+                            val visualIndex = lyricVisualIndex(lineCentersPx, lyricScroll)
                             lines.forEachIndexed { index, line ->
                                 val lineScroll = if (followPlayback && motionRevision >= 0) {
                                     lyricLineMotion.positionFor(index)
                                 } else {
                                     lyricScroll
                                 }
-                                val lineCenterPx = centerYPx + index * rowPitchPx - lineScroll
-                                if (lineCenterPx < -120f || lineCenterPx > heightPx + 120f) return@forEachIndexed
+                                val rowHeightPx = rowHeightsPx[index]
+                                val lineCenterPx = centerYPx + lineCentersPx[index] - lineScroll
+                                if (lineCenterPx < -rowHeightPx || lineCenterPx > heightPx + rowHeightPx) {
+                                    return@forEachIndexed
+                                }
 
                                 val distance = kotlin.math.abs(index - visualIndex)
                                 val focus = androidx.compose.runtime.key(controller.nowPlaying?.id, index) {
@@ -2396,16 +2563,30 @@ private fun LyricsOverlay(
                                 val alpha = (0.24f + ambient * 0.20f) * (1f - focus) + focus
                                 val color = lerpColor(colors.onSurfaceVariant, colors.onSurface, focus)
                                 val hasTranslation = !line.translation.isNullOrBlank()
-                                val baseRowHeight = 74.dp * 1.04f
-                                val scaledRowHeight = if (hasTranslation) 124.dp * 1.04f else baseRowHeight
                                 val textWidthFraction = 1f / 1.04f
-                                val yDp = with(density) { lineCenterPx.toDp() } - baseRowHeight / 2
+                                val mainHeightPx = measuredMainHeightsPx[index]?.toFloat() ?: estimatedMainHeightPx
+                                val translationGap = with(density) {
+                                    lyricTranslationGapPx(
+                                        mainHeightPx,
+                                        minimumTranslationGapPx,
+                                        maximumTranslationGapPx,
+                                    ).toDp()
+                                }
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
-                                        .offset(y = yDp)
-                                        .height(scaledRowHeight)
+                                        .offset {
+                                            IntOffset(
+                                                x = 0,
+                                                y = (lineCenterPx - rowHeightPx / 2f).roundToInt(),
+                                            )
+                                        }
                                         .padding(horizontal = 20.dp)
+                                        .onSizeChanged { size ->
+                                            if (measuredRowHeightsPx[index] != size.height) {
+                                                measuredRowHeightsPx[index] = size.height
+                                            }
+                                        }
                                         .clickable {
                                             lyricLineMotion.snapTo(lyricScroll)
                                             followPlayback = true
@@ -2418,7 +2599,6 @@ private fun LyricsOverlay(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
                                         androidx.compose.runtime.key(controller.nowPlaying?.id, index) {
-                                            Box(Modifier.height(baseRowHeight), contentAlignment = Alignment.Center) {
                                             AmllLyricText(
                                                 text = line.text,
                                                 words = line.words,
@@ -2427,9 +2607,15 @@ private fun LyricsOverlay(
                                                 currentLine = index == activeIndex,
                                                 color = color,
                                                 shadowColor = if (controller.isDark) Color.White else Color.Black,
+                                                glowEnabled = controller.lyricGlowEnabled,
                                                 speed = controller.lyricAnimationSpeed,
                                                 modifier = Modifier
                                                     .fillMaxWidth(textWidthFraction)
+                                                    .onSizeChanged { size ->
+                                                        if (measuredMainHeightsPx[index] != size.height) {
+                                                            measuredMainHeightsPx[index] = size.height
+                                                        }
+                                                    }
                                                     .graphicsLayer {
                                                         scaleX = scale
                                                         scaleY = scale
@@ -2442,29 +2628,30 @@ private fun LyricsOverlay(
                                                     lineHeight = baseLineHeightSp,
                                                 ),
                                                 textAlign = TextAlign.Center,
-                                                maxLines = 2,
+                                                maxLines = lyricMaxLines,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
-                                            }
                                         }
                                         if (hasTranslation) {
-                                            Spacer(Modifier.height(6.dp))
+                                            Spacer(Modifier.height(translationGap))
                                             Text(
                                                 text = line.translation.orEmpty(),
-                                                modifier = Modifier.graphicsLayer {
-                                                    scaleX = scale
-                                                    scaleY = scale
-                                                    this.alpha = alpha
-                                                    transformOrigin = TransformOrigin.Center
-                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth(textWidthFraction)
+                                                    .graphicsLayer {
+                                                        scaleX = scale
+                                                        scaleY = scale
+                                                        this.alpha = alpha
+                                                        transformOrigin = TransformOrigin.Center
+                                                    },
                                                 style = MaterialTheme.typography.bodyMedium.copy(
-                                                    fontSize = 16.sp,
-                                                    lineHeight = 21.sp,
+                                                    fontSize = translationFontSp,
+                                                    lineHeight = translationLineHeightSp,
                                                     fontWeight = FontWeight.Normal,
                                                 ),
                                                 color = colors.onSurfaceVariant.copy(alpha = 0.96f),
                                                 textAlign = TextAlign.Center,
-                                                maxLines = 2,
+                                                maxLines = lyricMaxLines,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
                                         }
@@ -2482,7 +2669,7 @@ private fun LyricsOverlay(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    CompactIconButton(Icons.Filled.SkipPrevious, controller::playPrevious, "上一首")
+                    CompactIconButton(Icons.Filled.SkipPrevious, controller::playPrevious, tr("player.previous"))
                     Spacer(Modifier.width(8.dp))
                     IconButton(
                         onClick = controller::togglePlayPause,
@@ -2494,12 +2681,12 @@ private fun LyricsOverlay(
                     ) {
                         Icon(
                             if (controller.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            if (controller.isPlaying) "暂停" else "播放",
+                            if (controller.isPlaying) tr("player.pause") else tr("player.play"),
                             Modifier.size(24.dp),
                         )
                     }
                     Spacer(Modifier.width(8.dp))
-                    CompactIconButton(Icons.Filled.SkipNext, controller::playNext, "下一首")
+                    CompactIconButton(Icons.Filled.SkipNext, controller::playNext, tr("player.next"))
                 }
             }
         }
@@ -2548,10 +2735,10 @@ private fun LoginOverlay(controller: DesktopPlayerController) {
                         )
                     }
                     Spacer(Modifier.height(34.dp))
-                    Text("把熟悉的音乐，带回这一页。", style = MaterialTheme.typography.headlineMedium, color = colors.onPrimaryContainer)
+                    Text(tr("login.side.heading"), style = MaterialTheme.typography.headlineMedium, color = colors.onPrimaryContainer)
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        "登录后自动同步歌单、喜欢歌曲与每日推荐。会话会保存在这台设备上。",
+                        tr("login.sub.desktop"),
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onPrimaryContainer.copy(alpha = 0.72f),
                     )
@@ -2560,9 +2747,9 @@ private fun LoginOverlay(controller: DesktopPlayerController) {
 
                 Column(Modifier.weight(1f).padding(horizontal = 32.dp, vertical = 24.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("登录 Lazer", style = MaterialTheme.typography.headlineSmall)
+                        Text(tr("login.title"), style = MaterialTheme.typography.headlineSmall)
                         Spacer(Modifier.weight(1f))
-                        IconButton(onClick = controller::closeLogin) { Icon(Icons.Outlined.Close, "关闭") }
+                        IconButton(onClick = controller::closeLogin) { Icon(Icons.Outlined.Close, tr("login.close")) }
                     }
                     Spacer(Modifier.height(14.dp))
                     LoginMethodSwitch(controller)
@@ -2592,7 +2779,7 @@ private fun LoginMethodSwitch(controller: DesktopPlayerController) {
                     .clickable { controller.selectLoginMethod(method) },
                 contentAlignment = Alignment.Center,
             ) {
-                Text(if (method == LoginMethod.QR_CODE) "二维码登录" else "密码登录", style = MaterialTheme.typography.labelMedium, color = if (selected) colors.onSurface else colors.onSurfaceVariant)
+                Text(if (method == LoginMethod.QR_CODE) tr("login.qr") else tr("login.password"), style = MaterialTheme.typography.labelMedium, color = if (selected) colors.onSurface else colors.onSurfaceVariant)
             }
         }
     }
@@ -2611,7 +2798,7 @@ private fun QrLoginContent(controller: DesktopPlayerController) {
             contentAlignment = Alignment.Center,
         ) {
             when {
-                qrBitmap != null -> Image(qrBitmap, "登录二维码", Modifier.size(188.dp))
+                qrBitmap != null -> Image(qrBitmap, tr("login.artwork.qr"), Modifier.size(188.dp))
                 controller.qrLoginState == QrLoginState.CREATING -> CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
                 else -> Icon(Icons.Outlined.MusicNote, null, Modifier.size(42.dp), tint = colors.primary)
             }
@@ -2619,13 +2806,13 @@ private fun QrLoginContent(controller: DesktopPlayerController) {
         Spacer(Modifier.height(14.dp))
         Text(
             when (controller.qrLoginState) {
-                QrLoginState.CREATING -> "正在生成二维码…"
-                QrLoginState.WAITING_FOR_SCAN -> "打开网易云音乐，扫码登录"
-                QrLoginState.WAITING_FOR_CONFIRMATION -> "已扫码，请在手机上确认"
-                QrLoginState.EXPIRED -> "二维码已过期"
-                QrLoginState.AUTHORIZED -> "登录成功，正在同步音乐"
-                QrLoginState.ERROR -> "二维码暂时不可用"
-                else -> "准备二维码"
+                QrLoginState.CREATING -> tr("login.qr.creating")
+                QrLoginState.WAITING_FOR_SCAN -> tr("login.qr.scan")
+                QrLoginState.WAITING_FOR_CONFIRMATION -> tr("login.qr.confirm")
+                QrLoginState.EXPIRED -> tr("login.qr.expired")
+                QrLoginState.AUTHORIZED -> tr("login.qr.success")
+                QrLoginState.ERROR -> tr("login.qr.error")
+                else -> tr("login.qr.ready")
             },
             style = MaterialTheme.typography.bodyMedium,
             color = colors.onSurface,
@@ -2639,7 +2826,7 @@ private fun QrLoginContent(controller: DesktopPlayerController) {
             TextButton(onClick = controller::startQrLogin) {
                 Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("重新生成二维码")
+                Text(tr("login.qr.regenerate"))
             }
         }
     }
@@ -2649,15 +2836,15 @@ private fun QrLoginContent(controller: DesktopPlayerController) {
 private fun PasswordLoginContent(controller: DesktopPlayerController) {
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth()) {
-        Text("使用网易云音乐账号", style = MaterialTheme.typography.titleMedium)
+        Text(tr("login.pw.title"), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(5.dp))
-        Text("支持手机号或邮箱。手机号默认使用 +86 区号。", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+        Text(tr("login.pw.hint"), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         Spacer(Modifier.height(20.dp))
         OutlinedTextField(
             value = controller.loginIdentifier,
             onValueChange = controller::updateLoginIdentifier,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("手机号或邮箱") },
+            label = { Text(tr("login.pw.identifier")) },
             singleLine = true,
             shape = RoundedCornerShape(13.dp),
             colors = quietTextFieldColors(),
@@ -2667,7 +2854,7 @@ private fun PasswordLoginContent(controller: DesktopPlayerController) {
             value = controller.loginPassword,
             onValueChange = controller::updateLoginPassword,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("密码") },
+            label = { Text(tr("login.pw.password")) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             shape = RoundedCornerShape(13.dp),
@@ -2688,7 +2875,7 @@ private fun PasswordLoginContent(controller: DesktopPlayerController) {
                 CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp, color = colors.onPrimary)
                 Spacer(Modifier.width(8.dp))
             }
-            Text(if (controller.isSubmittingLogin) "正在登录" else "登录并同步歌单")
+            Text(if (controller.isSubmittingLogin) tr("login.submitting") else tr("login.submit"))
         }
     }
 }

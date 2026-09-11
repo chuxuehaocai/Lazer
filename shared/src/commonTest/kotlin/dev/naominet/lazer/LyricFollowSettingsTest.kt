@@ -15,7 +15,20 @@ class LyricFollowSettingsTest {
 
     @Test
     fun formatsWholeAndFractionalSeconds() {
+        LazerI18n.install(
+            LazerLanguage.entries.associateWith { language ->
+                mapOf(
+                    "lyric.follow.seconds" to
+                        if (language == LazerLanguage.ENGLISH) "{0} sec" else "{0} 秒",
+                )
+            },
+        )
+        LazerI18n.switchLanguage(LazerLanguage.SIMPLIFIED_CHINESE)
         assertEquals("0.5 秒", lyricFollowDelayLabel(500L))
         assertEquals("5 秒", lyricFollowDelayLabel(5_000L))
+        LazerI18n.switchLanguage(LazerLanguage.ENGLISH)
+        assertEquals("0.5 sec", lyricFollowDelayLabel(500L))
+        assertEquals("5 sec", lyricFollowDelayLabel(5_000L))
+        LazerI18n.switchLanguage(LazerLanguage.SIMPLIFIED_CHINESE)
     }
 }

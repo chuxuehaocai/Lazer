@@ -496,6 +496,9 @@ fun AndroidLazerApp() {
                     lyricFollowDelayMillis = controller.lyricFollowDelayMillis,
                     lyricAnimationSpeed = controller.lyricAnimationSpeed,
                     wordLyricsEnabled = controller.wordLyricsEnabled,
+                    lyricGlowEnabled = controller.lyricGlowEnabled,
+                    lyricFontSizeSp = controller.lyricFontSizeSp,
+                    showFullLyrics = controller.showFullLyrics,
                     isLiked = playback.track?.let { controller.isSongLiked(it.id) } == true,
                     onToggleLiked = { playback.track?.let(controller::toggleSongLiked) },
                     onDismiss = { playerVisible = false },
@@ -535,6 +538,9 @@ fun AndroidLazerApp() {
                     followDelayMillis = controller.lyricFollowDelayMillis,
                     animationSpeed = controller.lyricAnimationSpeed,
                     wordLyricsEnabled = controller.wordLyricsEnabled,
+                    lyricGlowEnabled = controller.lyricGlowEnabled,
+                    lyricFontSizeSp = controller.lyricFontSizeSp,
+                    showFullLyrics = controller.showFullLyrics,
                     onBack = { lyricsVisible = false },
                     onSeek = { AndroidPlaybackConnection.seekTo(context, it) },
                     modifier = Modifier
@@ -607,14 +613,14 @@ private fun HomePage(controller: AndroidGatewayController, currentId: Long?, onP
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
         item {
-            SectionTitle("从这里开始", if (controller.isSignedIn) "为你整理了今天可以慢慢听的音乐" else "登录后，推荐会跟着你的听歌习惯变化")
+            SectionTitle(tr("home.section.title"), if (controller.isSignedIn) tr("home.section.signed") else tr("home.section.anon"))
             Spacer(Modifier.height(12.dp))
             PlaylistStrip(controller.featuredPlaylists, controller::openPlaylist)
         }
-        item { SectionTitle(if (controller.isSignedIn) "每日推荐" else "正在流动") }
+        item { SectionTitle(if (controller.isSignedIn) tr("home.daily") else tr("home.flowing")) }
         when {
-            controller.isLoading && controller.homeTracks.isEmpty() -> item { QuietState("正在整理音乐…") }
-            controller.homeTracks.isEmpty() -> item { QuietState("现在还没有可播放的音乐，稍后再试。") }
+            controller.isLoading && controller.homeTracks.isEmpty() -> item { QuietState(tr("home.preparing")) }
+            controller.homeTracks.isEmpty() -> item { QuietState(tr("home.empty")) }
             else -> items(controller.homeTracks, key = AndroidTrack::id) { TrackRow(it, it.id == currentId) { onPlay(it) } }
         }
     }
@@ -629,13 +635,13 @@ private fun DiscoverPage(controller: AndroidGatewayController, currentId: Long?,
     ) {
         item {
             Column(Modifier.widthIn(max = 470.dp)) {
-                Text("慢慢发现", style = MaterialTheme.typography.displaySmall)
+                Text(tr("discover.title"), style = MaterialTheme.typography.displaySmall)
                 Spacer(Modifier.height(6.dp))
-                Text("从一张歌单开始，留一点空间给意外听到的声音。", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(tr("discover.sub"), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item { PlaylistStrip(controller.featuredPlaylists, controller::openPlaylist) }
-        item { SectionTitle("此刻可以听") }
+        item { SectionTitle(tr("discover.playing")) }
         items(controller.homeTracks.take(12), key = AndroidTrack::id) { TrackRow(it, it.id == currentId) { onPlay(it) } }
     }
 }
@@ -647,23 +653,23 @@ private fun SearchPage(controller: AndroidGatewayController, currentId: Long?, o
         contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 18.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        item { Text("搜索", style = MaterialTheme.typography.displaySmall) }
+        item { Text(tr("search.title"), style = MaterialTheme.typography.displaySmall) }
         item {
             OutlinedTextField(
                 value = controller.searchQuery,
                 onValueChange = controller::updateSearchQuery,
                 modifier = Modifier.fillMaxWidth(),
                 leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                placeholder = { Text("歌名、音乐人或专辑") },
+                placeholder = { Text(tr("search.hint")) },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             )
         }
         when {
-            controller.searchQuery.isBlank() -> item { QuietState("输入歌名、音乐人或专辑，结果会在这里出现。") }
-            controller.isSearching -> item { QuietState("正在搜索…") }
-            controller.searchResults.isEmpty() -> item { QuietState("没有找到匹配的音乐。") }
+            controller.searchQuery.isBlank() -> item { QuietState(tr("search.empty")) }
+            controller.isSearching -> item { QuietState(tr("search.searching")) }
+            controller.searchResults.isEmpty() -> item { QuietState(tr("search.no_results")) }
             else -> items(controller.searchResults, key = AndroidTrack::id) { TrackRow(it, it.id == currentId) { onPlay(it) } }
         }
     }
@@ -677,22 +683,22 @@ private fun LibraryPage(controller: AndroidGatewayController, currentId: Long?, 
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         item {
-            Text("你的音乐库", style = MaterialTheme.typography.displaySmall)
+            Text(tr("library.title"), style = MaterialTheme.typography.displaySmall)
             Spacer(Modifier.height(6.dp))
             Text(
-                if (controller.isSignedIn) "歌单先从本地恢复，再悄悄同步新内容。" else "登录后可以继续听你的歌单和每日推荐。",
+                if (controller.isSignedIn) tr("library.sub.signed") else tr("library.sub.anon"),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         when {
             !controller.isSignedIn -> item { SignInInvitation(controller::openLogin) }
-            controller.userPlaylists.isEmpty() && controller.isLoading -> item { QuietState("正在同步你的歌单…") }
-            controller.userPlaylists.isEmpty() -> item { QuietState("还没有找到歌单。") }
+            controller.userPlaylists.isEmpty() && controller.isLoading -> item { QuietState(tr("library.syncing")) }
+            controller.userPlaylists.isEmpty() -> item { QuietState(tr("library.empty")) }
             else -> items(controller.userPlaylists, key = AndroidPlaylist::id) { PlaylistListRow(it, controller::openPlaylist) }
         }
         if (controller.homeTracks.isNotEmpty()) {
-            item { SectionTitle("接着听") }
+            item { SectionTitle(tr("library.continue")) }
             items(controller.homeTracks.take(5), key = AndroidTrack::id) { TrackRow(it, it.id == currentId) { onPlay(it) } }
         }
     }
@@ -707,9 +713,9 @@ private fun MePage(controller: AndroidGatewayController) {
     ) {
         if (!controller.isSignedIn) {
             item {
-                Text("我的", style = MaterialTheme.typography.displaySmall)
+                Text(tr("me.title"), style = MaterialTheme.typography.displaySmall)
                 Spacer(Modifier.height(6.dp))
-                Text("登录后，在这里集中查看你的资料和歌单。", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(tr("me.sub"), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             item { SignInInvitation(controller::openLogin) }
         } else {
@@ -720,26 +726,26 @@ private fun MePage(controller: AndroidGatewayController) {
                         MobileArtwork(normalizedArtworkUrl(user.avatarUrl), user.nickname, Modifier.size(64.dp), 32.dp)
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(user.nickname.ifBlank { "我的音乐" }, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(user.nickname.ifBlank { tr("me.my_music") }, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             user.signature?.takeIf(String::isNotBlank)?.let { signature ->
                                 Spacer(Modifier.height(4.dp))
                                 Text(signature, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f), maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             Spacer(Modifier.height(7.dp))
-                            Text("网易云 ID ${user.userId}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f))
+                            Text(tr("me.netease_id", user.userId), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f))
                         }
                     }
                 }
             }
-            item { SectionTitle("我的歌单", "完整歌单和离线恢复内容都在音乐库") }
+            item { SectionTitle(tr("me.my_playlists"), tr("me.playlist.sub")) }
             when {
-                controller.userPlaylists.isEmpty() && controller.isLoading -> item { QuietState("正在同步你的歌单…") }
-                controller.userPlaylists.isEmpty() -> item { QuietState("还没有找到歌单。") }
+                controller.userPlaylists.isEmpty() && controller.isLoading -> item { QuietState(tr("library.syncing")) }
+                controller.userPlaylists.isEmpty() -> item { QuietState(tr("library.empty")) }
                 else -> items(controller.userPlaylists.take(3), key = AndroidPlaylist::id) { PlaylistListRow(it, controller::openPlaylist) }
             }
             item {
                 ThemeTextButton(onClick = { controller.selectDestination(AndroidRootDestination.LIBRARY) }) {
-                    Text("查看完整音乐库")
+                    Text(tr("me.view_library"))
                 }
             }
         }
@@ -755,10 +761,14 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
     var followDelaySliderValue by remember(controller.lyricFollowDelayMillis) {
         mutableFloatStateOf(controller.lyricFollowDelayMillis.toFloat())
     }
+    var lyricFontSizeSliderValue by remember(controller.lyricFontSizeSp) {
+        mutableFloatStateOf(controller.lyricFontSizeSp.toFloat())
+    }
     var gatewayBaseUrlDraft by remember(controller.gatewayBaseUrl) {
         mutableStateOf(controller.gatewayBaseUrl)
     }
     val displayedFollowDelay = normalizeLyricFollowDelayMillis(followDelaySliderValue.roundToLong())
+    val displayedLyricFontSize = normalizeLyricFontSizeSp(lyricFontSizeSliderValue.roundToInt())
     val animationSpeedOptions = LyricAnimationSpeed.entries
     val normalizedGatewayBaseUrl = normalizeGatewayBaseUrl(gatewayBaseUrlDraft)
     LazyColumn(
@@ -769,13 +779,13 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = controller::closeSettings) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("common.back"))
                 }
                 Spacer(Modifier.width(4.dp))
-                Text("设置", style = MaterialTheme.typography.headlineSmall)
+                Text(tr("settings.title"), style = MaterialTheme.typography.headlineSmall)
             }
         }
-        item { SectionTitle("外观") }
+        item { SectionTitle(tr("settings.appearance")) }
         item {
             SettingsCard {
                 Row(
@@ -794,9 +804,9 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("Miuix 组件风格", style = MaterialTheme.typography.titleSmall)
+                        Text(tr("settings.theme.engine.title"), style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "当前：${controller.themeEngine.label} · 切换后立即生效",
+                            tr("settings.theme.engine.current", controller.themeEngine.label),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                         )
@@ -813,11 +823,11 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
             SettingsCard {
                 Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("界面", style = MaterialTheme.typography.titleSmall)
-                        Text(if (controller.isDark) "深色外观" else "浅色外观", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                        Text(tr("settings.interface.title"), style = MaterialTheme.typography.titleSmall)
+                        Text(if (controller.isDark) tr("settings.interface.dark") else tr("settings.interface.light"), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                     }
                     ThemeTextButton(onClick = controller::toggleTheme) {
-                        Text(if (controller.isDark) "切换浅色" else "切换深色")
+                        Text(if (controller.isDark) tr("settings.interface.switch_light") else tr("settings.interface.switch_dark"))
                     }
                 }
             }
@@ -834,9 +844,9 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("系统 Monet 取色", style = MaterialTheme.typography.titleSmall)
+                        Text(tr("settings.monet.title"), style = MaterialTheme.typography.titleSmall)
                         Text(
-                            if (systemMonetAvailable) "使用当前壁纸生成的系统配色" else "需要 Android 12 或更高版本",
+                            if (systemMonetAvailable) tr("settings.monet.on") else tr("settings.monet.off"),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                         )
@@ -851,7 +861,21 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                 }
             }
         }
-        item { SectionTitle("播放") }
+        item {
+            SettingsCard {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("settings.language"), style = MaterialTheme.typography.titleSmall)
+                        Text(controller.language.displayName, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                    }
+                    LanguageSheetButton(
+                        selected = controller.language,
+                        onSelected = controller::updateLanguage,
+                    )
+                }
+            }
+        }
+        item { SectionTitle(tr("settings.playback")) }
         item {
             SettingsCard {
                 Row(
@@ -862,9 +886,9 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("音质", style = MaterialTheme.typography.titleSmall)
+                        Text(tr("settings.quality.title"), style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "${controller.audioQuality.description} · 下次播放时生效",
+                            tr("settings.quality.hint", controller.audioQuality.description),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                         )
@@ -890,12 +914,12 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("独占音频", style = MaterialTheme.typography.titleSmall)
+                        Text(tr("settings.exclusive.title"), style = MaterialTheme.typography.titleSmall)
                         Text(
                             if (controller.exclusiveAudio) {
-                                "播放时请求系统暂停其他应用的声音"
+                                tr("settings.exclusive.on")
                             } else {
-                                "与其他应用共享音频输出"
+                                tr("settings.exclusive.off")
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
@@ -910,7 +934,7 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                 }
             }
         }
-        item { SectionTitle("歌词") }
+        item { SectionTitle(tr("settings.lyrics")) }
         item {
             SettingsCard(
                 modifier = Modifier.clickable(role = Role.Switch) {
@@ -922,9 +946,9 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("逐字歌词", style = MaterialTheme.typography.titleSmall)
+                        Text(tr("settings.word.title"), style = MaterialTheme.typography.titleSmall)
                         Text(
-                            if (controller.wordLyricsEnabled) "显示逐字渐亮和模糊过渡" else "只显示整行歌词",
+                            if (controller.wordLyricsEnabled) tr("settings.word.on") else tr("settings.word.off"),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                         )
@@ -939,13 +963,40 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
             }
         }
         item {
+            SettingsCard(
+                modifier = Modifier.clickable(role = Role.Switch) {
+                    controller.updateLyricGlowEnabled(!controller.lyricGlowEnabled)
+                },
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("settings.lyric.glow.title"), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (controller.lyricGlowEnabled) tr("settings.lyric.glow.on") else tr("settings.lyric.glow.off"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerSwitch(
+                        engine = controller.themeEngine,
+                        checked = controller.lyricGlowEnabled,
+                        onCheckedChange = null,
+                    )
+                }
+            }
+        }
+        item {
             SettingsCard {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("歌词动画速率", style = MaterialTheme.typography.titleSmall)
+                            Text(tr("settings.lyric.speed.title"), style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "调整滚动收束和逐字过渡的节奏",
+                                tr("settings.lyric.speed.hint"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.onSurfaceVariant,
                             )
@@ -994,9 +1045,86 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                 Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("恢复自动跟随", style = MaterialTheme.typography.titleSmall)
+                            Text(tr("settings.lyric.font.title"), style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "手动滑动歌词后，等待这段时间再继续跟随播放",
+                                tr("settings.lyric.font.hint"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            lyricFontSizeLabel(displayedLyricFontSize),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = colors.primary,
+                        )
+                    }
+                    LazerSlider(
+                        engine = controller.themeEngine,
+                        value = lyricFontSizeSliderValue,
+                        onValueChange = {
+                            lyricFontSizeSliderValue = normalizeLyricFontSizeSp(it.roundToInt()).toFloat()
+                        },
+                        onValueChangeFinished = {
+                            controller.updateLyricFontSizeSp(displayedLyricFontSize)
+                        },
+                        valueRange = MIN_LYRIC_FONT_SIZE_SP.toFloat()..MAX_LYRIC_FONT_SIZE_SP.toFloat(),
+                        steps = LYRIC_FONT_SIZE_OPTIONS_SP.size - 2,
+                    )
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(
+                            tr("settings.lyric.font.small"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            tr("settings.lyric.font.large"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            SettingsCard(
+                modifier = Modifier.clickable(role = Role.Switch) {
+                    controller.updateShowFullLyrics(!controller.showFullLyrics)
+                },
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tr("settings.lyric.full.title"), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (controller.showFullLyrics) {
+                                tr("settings.lyric.full.on")
+                            } else {
+                                tr("settings.lyric.full.off")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    LazerSwitch(
+                        engine = controller.themeEngine,
+                        checked = controller.showFullLyrics,
+                        onCheckedChange = null,
+                    )
+                }
+            }
+        }
+        item {
+            SettingsCard {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tr("settings.lyric.follow.title"), style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                tr("settings.lyric.follow.hint"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.onSurfaceVariant,
                             )
@@ -1035,7 +1163,7 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                 }
             }
         }
-        item { SectionTitle("存储与同步") }
+        item { SectionTitle(tr("settings.storage")) }
         item {
             SettingsCard {
                 Row(
@@ -1046,14 +1174,14 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("清除本地缓存", style = MaterialTheme.typography.titleSmall)
+                        Text(tr("settings.cache.title"), style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "选择清除歌曲缓存或歌单缓存",
+                            tr("settings.cache.hint"),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                         )
                     }
-                    Text("选择", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                    Text(tr("settings.cache.select"), style = MaterialTheme.typography.labelLarge, color = colors.primary)
                 }
             }
         }
@@ -1064,27 +1192,27 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("强制重新同步", style = MaterialTheme.typography.titleSmall)
+                        Text(tr("settings.resync.title"), style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "保留当前内容，并重新获取最新歌单",
+                            tr("settings.resync.hint"),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
                         )
                     }
                     ThemeButton(onClick = controller::forceResync, enabled = !controller.isLoading) {
-                        Text(if (controller.isLoading) "同步中" else "重新同步")
+                        Text(if (controller.isLoading) tr("settings.resync.doing") else tr("settings.resync.action"))
                     }
                 }
             }
         }
-        item { SectionTitle("音乐服务") }
+        item { SectionTitle(tr("settings.service")) }
         item {
             SettingsCard {
                 Column(Modifier.fillMaxWidth().padding(18.dp)) {
-                    Text("API 服务提供商", style = MaterialTheme.typography.titleSmall)
+                    Text(tr("settings.service.title"), style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        "填写兼容服务的根地址。登录状态会继续沿用，请只使用你信任的提供商。",
+                        tr("settings.service.hint"),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant,
                     )
@@ -1093,10 +1221,10 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                         value = gatewayBaseUrlDraft,
                         onValueChange = { gatewayBaseUrlDraft = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("服务地址") },
+                        label = { Text(tr("settings.service.address")) },
                         placeholder = { Text(DEFAULT_GATEWAY_BASE_URL) },
                         supportingText = if (gatewayBaseUrlDraft.isNotBlank() && normalizedGatewayBaseUrl == null) {
-                            { Text("请输入有效的 HTTP 或 HTTPS 服务地址") }
+                            { Text(tr("settings.service.invalid")) }
                         } else {
                             null
                         },
@@ -1107,7 +1235,7 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         ThemeTextButton(onClick = { gatewayBaseUrlDraft = DEFAULT_GATEWAY_BASE_URL }) {
-                            Text("恢复默认")
+                            Text(tr("settings.service.reset"))
                         }
                         Spacer(Modifier.width(8.dp))
                         ThemeButton(
@@ -1116,13 +1244,13 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                             },
                             enabled = normalizedGatewayBaseUrl != null && normalizedGatewayBaseUrl != controller.gatewayBaseUrl,
                         ) {
-                            Text("保存")
+                            Text(tr("settings.save"))
                         }
                     }
                 }
             }
         }
-        item { SectionTitle("帐号") }
+        item { SectionTitle(tr("settings.account")) }
         if (controller.isSignedIn) {
             val user = controller.currentUser!!
             item {
@@ -1130,14 +1258,14 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                     MobileArtwork(normalizedArtworkUrl(user.avatarUrl), user.nickname, Modifier.size(42.dp), 21.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(user.nickname.ifBlank { "已登录" }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("当前已连接网易云音乐", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                        Text(user.nickname.ifBlank { tr("settings.account.signed.fallback") }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(tr("settings.account.signed"), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                     }
                 }
             }
             item {
                 ThemeTextButton(onClick = controller::logout) {
-                    Text("退出登录", color = colors.error)
+                    Text(tr("settings.account.logout"), color = colors.error)
                 }
             }
         } else {
@@ -1171,6 +1299,65 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
 
 @Composable
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun LanguageSheetButton(
+    selected: LazerLanguage,
+    onSelected: (LazerLanguage) -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    var visible by remember { mutableStateOf(false) }
+    ThemeTextButton(onClick = { visible = true }) {
+        Text(selected.displayName, color = colors.primary)
+    }
+    if (visible) {
+        ModalBottomSheet(
+            onDismissRequest = { visible = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = colors.surface,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            ) {
+                Text(
+                    tr("settings.language"),
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                )
+                Spacer(Modifier.height(4.dp))
+                LazerLanguage.entries.forEach { language ->
+                    val isSelected = language == selected
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .selectable(
+                                selected = isSelected,
+                                role = Role.RadioButton,
+                                onClick = {
+                                    onSelected(language)
+                                    visible = false
+                                },
+                            )
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = isSelected, onClick = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            language.displayName,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (isSelected) colors.primary else colors.onSurface,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private fun CacheChoiceSheet(
     onClearSongs: () -> Unit,
     onClearPlaylists: () -> Unit,
@@ -1183,18 +1370,18 @@ private fun CacheChoiceSheet(
         containerColor = colors.surface,
     ) {
         Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 28.dp)) {
-            Text("清除本地缓存", style = MaterialTheme.typography.headlineSmall)
+            Text(tr("settings.cache.dialog.title"), style = MaterialTheme.typography.headlineSmall)
             Text(
-                "清除后，需要时会重新加载。登录状态不会受影响。",
+                tr("settings.cache.dialog.body.mobile"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp, bottom = 14.dp),
             )
             ThemeTextButton(onClick = onClearSongs, modifier = Modifier.fillMaxWidth()) {
-                Text("清除歌曲缓存", color = colors.error)
+                Text(tr("settings.cache.clear.songs"), color = colors.error)
             }
             ThemeTextButton(onClick = onClearPlaylists, modifier = Modifier.fillMaxWidth()) {
-                Text("清除歌单缓存", color = colors.error)
+                Text(tr("settings.cache.clear.playlists"), color = colors.error)
             }
         }
     }
@@ -1222,12 +1409,12 @@ private fun AudioQualitySheet(
                 .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
         ) {
             Text(
-                "播放音质",
+                tr("player.quality"),
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
             )
             Text(
-                "高音质会使用更多流量；会员音质以帐号权限为准。",
+                tr("settings.quality.sheet.hint"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1291,8 +1478,8 @@ private fun PlaylistDetail(
         ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回音乐库") }
-                Text("歌单", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("playlist.back")) }
+                Text(tr("playlist.title"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item {
@@ -1303,12 +1490,12 @@ private fun PlaylistDetail(
                     Text(playlist.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(5.dp))
                     Text(playlist.subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("${tracks.size.takeIf { it > 0 } ?: playlist.trackCount} 首", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr("playlist.tracks", tracks.size.takeIf { it > 0 } ?: playlist.trackCount), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-        if (isLoading && tracks.isEmpty()) item { QuietState("正在打开歌单…") }
-        if (!isLoading && tracks.isEmpty()) item { QuietState("这个歌单暂时没有歌曲。") }
+        if (isLoading && tracks.isEmpty()) item { QuietState(tr("playlist.opening")) }
+        if (!isLoading && tracks.isEmpty()) item { QuietState(tr("playlist.empty")) }
             items(tracks, key = AndroidTrack::id) { TrackRow(it, it.id == currentId) { onPlay(it) } }
         }
         if (currentTrackIndex >= 0) {
@@ -1320,7 +1507,7 @@ private fun PlaylistDetail(
                 contentColor = MaterialTheme.colorScheme.primary,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp, pressedElevation = 2.dp),
                 icon = { Icon(Icons.Outlined.MyLocation, null, Modifier.size(18.dp)) },
-                text = { Text("定位当前歌曲", style = MaterialTheme.typography.labelLarge) },
+                text = { Text(tr("playlist.locate"), style = MaterialTheme.typography.labelLarge) },
             )
         }
     }
@@ -1332,9 +1519,9 @@ private fun MobileHeader(controller: AndroidGatewayController, modifier: Modifie
         Column(Modifier.weight(1f)) {
             Text("Lazer", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         }
-        IconButton(onClick = controller::toggleTheme) { Icon(if (controller.isDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, "切换主题") }
+        IconButton(onClick = controller::toggleTheme) { Icon(if (controller.isDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode, tr("player.toggle_theme")) }
         IconButton(onClick = controller::openSettings) {
-            Icon(Icons.Outlined.Settings, "打开设置")
+            Icon(Icons.Outlined.Settings, tr("player.open_settings"))
         }
     }
 }
@@ -1350,7 +1537,7 @@ private fun SectionTitle(title: String, subtitle: String? = null) {
 @Composable
 private fun PlaylistStrip(playlists: List<AndroidPlaylist>, onOpen: (AndroidPlaylist) -> Unit) {
     if (playlists.isEmpty()) {
-        QuietState("歌单会在连接成功后显示。")
+        QuietState(tr("strip.empty"))
     } else {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             items(playlists, key = AndroidPlaylist::id) { playlist ->
@@ -1376,7 +1563,7 @@ private fun PlaylistListRow(playlist: AndroidPlaylist, onOpen: (AndroidPlaylist)
         MobileArtwork(playlist.coverUrl, playlist.title, Modifier.size(56.dp), 14.dp)
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text(if (playlist.isLikedCollection) "我喜欢" else playlist.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (playlist.isLikedCollection) tr("liked.title") else playlist.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(playlist.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text("${playlist.trackCount}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1413,7 +1600,7 @@ private fun MobileArtwork(url: String?, label: String, modifier: Modifier, corne
         if (!url.isNullOrBlank()) {
             AsyncImage(
                 model = url,
-                contentDescription = "$label 封面",
+                contentDescription = tr("artwork.cover", label),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
@@ -1430,12 +1617,12 @@ private fun SignInInvitation(onSignIn: () -> Unit) {
                 Box(Modifier.size(42.dp).clip(CircleShape).background(colors.surface), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Person, null, tint = colors.primary) }
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("登录后继续", style = MaterialTheme.typography.titleLarge, color = colors.onPrimaryContainer)
-                    Text("先用验证码，密码和二维码在需要时再用。", style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer.copy(alpha = 0.74f))
+                    Text(tr("signin.continue"), style = MaterialTheme.typography.titleLarge, color = colors.onPrimaryContainer)
+                    Text(tr("login.sign_in.sub"), style = MaterialTheme.typography.bodySmall, color = colors.onPrimaryContainer.copy(alpha = 0.74f))
                 }
             }
             Spacer(Modifier.height(16.dp))
-            ThemeButton(onClick = onSignIn, cornerRadius = 11.dp) { Text("登录网易云音乐") }
+            ThemeButton(onClick = onSignIn, cornerRadius = 11.dp) { Text(tr("login.sign_in")) }
         }
     }
 }
@@ -1459,10 +1646,10 @@ private fun MiniPlayer(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(if (isPreparing) "正在准备播放" else track.artist, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (isPreparing) tr("player.preparing") else track.artist, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = onToggle, modifier = Modifier.size(42.dp), colors = IconButtonDefaults.iconButtonColors(containerColor = colors.primaryContainer)) {
-                Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (isPlaying) "暂停" else "播放", tint = colors.onPrimaryContainer)
+                Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (isPlaying) tr("player.pause") else tr("player.play"), tint = colors.onPrimaryContainer)
             }
         }
     }
@@ -1496,7 +1683,7 @@ private fun BottomDock(selected: AndroidRootDestination, onSelect: (AndroidRootD
                 val active = selected == destination
                 Column(
                     Modifier.clip(RoundedCornerShape(13.dp)).clickable(role = Role.Tab) { onSelect(destination) }
-                        .padding(horizontal = 14.dp, vertical = 6.dp).semantics { contentDescription = "打开${destination.label}" },
+                        .padding(horizontal = 14.dp, vertical = 6.dp).semantics { contentDescription = destination.label },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Icon(destination.icon(), null, Modifier.size(20.dp), tint = if (active) colors.primary else colors.onSurfaceVariant)
@@ -1516,6 +1703,9 @@ private fun NowPlayingPage(
     lyricFollowDelayMillis: Long,
     lyricAnimationSpeed: LyricAnimationSpeed,
     wordLyricsEnabled: Boolean,
+    lyricGlowEnabled: Boolean,
+    lyricFontSizeSp: Int,
+    showFullLyrics: Boolean,
     isLiked: Boolean,
     onToggleLiked: () -> Unit,
     onDismiss: () -> Unit,
@@ -1547,7 +1737,7 @@ private fun NowPlayingPage(
                     track = track,
                     modifier = Modifier.fillMaxSize(),
                     cornerRadius = 0.dp,
-                    veil = Color(0xFF1D282D).copy(alpha = 0.38f),
+                    veil = colors.background.copy(alpha = 0.38f),
                 )
                 Row(
                     Modifier
@@ -1558,13 +1748,13 @@ private fun NowPlayingPage(
                 ) {
                     Column(Modifier.widthIn(min = 230.dp, max = 320.dp).fillMaxSize()) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "收起播放器", tint = Color(0xFFC7D3D5)) }
-                            Text("正在播放", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = Color(0xFFC7D3D5))
+                            IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, tr("player.collapse"), tint = colors.onSurfaceVariant) }
+                            Text(tr("player.now_playing"), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
                         }
                         MobileArtwork(track.coverUrl, track.title, Modifier.size(132.dp).align(Alignment.CenterHorizontally), 20.dp)
                         Spacer(Modifier.height(10.dp))
-                        Text(track.title, color = Color(0xFFF2F6F4), style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(track.artist, color = Color(0xFFC7D3D5), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(track.title, color = colors.onBackground, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(track.artist, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.weight(1f))
                         ThinSeekBar(
                             progress = seekProgress,
@@ -1573,18 +1763,18 @@ private fun NowPlayingPage(
                             onFinished = { seeking = false; onSeek((duration * seekProgress).toLong()) },
                         )
                         Row(Modifier.fillMaxWidth()) {
-                            Text(formatPlaybackTime((duration * seekProgress).toLong()), style = MaterialTheme.typography.labelSmall, color = Color(0xFFC7D3D5))
+                            Text(formatPlaybackTime((duration * seekProgress).toLong()), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                             Spacer(Modifier.weight(1f))
-                            Text(formatPlaybackTime(duration), style = MaterialTheme.typography.labelSmall, color = Color(0xFFC7D3D5))
+                            Text(formatPlaybackTime(duration), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.SkipPrevious, "上一首", Modifier.size(30.dp), tint = Color(0xFFE7ECEB)) }
-                            IconButton(onClick = onToggle, modifier = Modifier.size(60.dp), colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFFE7ECEB), contentColor = Color(0xFF1D282D))) {
-                                Icon(if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (snapshot.isPlaying) "暂停" else "播放", Modifier.size(32.dp))
+                            IconButton(onClick = onPrevious, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.SkipPrevious, tr("player.previous"), Modifier.size(30.dp), tint = colors.onBackground) }
+                            IconButton(onClick = onToggle, modifier = Modifier.size(60.dp), colors = IconButtonDefaults.iconButtonColors(containerColor = colors.primary, contentColor = colors.onPrimary)) {
+                                Icon(if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (snapshot.isPlaying) tr("player.pause") else tr("player.play"), Modifier.size(32.dp))
                             }
-                            IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.SkipNext, "下一首", Modifier.size(30.dp), tint = Color(0xFFE7ECEB)) }
+                            IconButton(onClick = onNext, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.SkipNext, tr("player.next"), Modifier.size(30.dp), tint = colors.onBackground) }
                             IconButton(onClick = onToggleLiked, modifier = Modifier.size(48.dp)) {
-                                Icon(if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, if (isLiked) "移出我喜欢" else "加入我喜欢", tint = if (isLiked) colors.primary else Color(0xFFE7ECEB))
+                                Icon(if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, if (isLiked) tr("player.like.remove") else tr("player.like.add"), tint = if (isLiked) colors.primary else colors.onBackground)
                             }
                         }
                     }
@@ -1598,6 +1788,9 @@ private fun NowPlayingPage(
                         followDelayMillis = lyricFollowDelayMillis,
                         animationSpeed = lyricAnimationSpeed,
                         wordLyricsEnabled = wordLyricsEnabled,
+                        lyricGlowEnabled = lyricGlowEnabled,
+                        lyricFontSizeSp = lyricFontSizeSp,
+                        showFullLyrics = showFullLyrics,
                         onSeek = onSeek,
                         modifier = Modifier.weight(1f).fillMaxSize(),
                     )
@@ -1612,8 +1805,8 @@ private fun NowPlayingPage(
                     .padding(horizontal = 24.dp, vertical = 16.dp),
             ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "收起播放器", tint = colors.onSurfaceVariant) }
-                Text("正在播放", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, tr("player.collapse"), tint = colors.onSurfaceVariant) }
+                Text(tr("player.now_playing"), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
             }
             Spacer(Modifier.weight(0.4f))
             MobileArtwork(track.coverUrl, track.title, Modifier.fillMaxWidth().heightIn(max = 390.dp).height(320.dp), 30.dp)
@@ -1624,7 +1817,7 @@ private fun NowPlayingPage(
                     Text(track.artist, style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 IconButton(onClick = onToggleLiked, modifier = Modifier.size(48.dp)) {
-                    Icon(if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, if (isLiked) "移出我喜欢" else "加入我喜欢", tint = if (isLiked) colors.primary else colors.onSurfaceVariant)
+                    Icon(if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, if (isLiked) tr("player.like.remove") else tr("player.like.add"), tint = if (isLiked) colors.primary else colors.onSurfaceVariant)
                 }
             }
             Spacer(Modifier.height(28.dp))
@@ -1641,15 +1834,15 @@ private fun NowPlayingPage(
             }
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onPrevious, modifier = Modifier.size(50.dp)) { Icon(Icons.Filled.SkipPrevious, "上一首", Modifier.size(31.dp)) }
+                IconButton(onClick = onPrevious, modifier = Modifier.size(50.dp)) { Icon(Icons.Filled.SkipPrevious, tr("player.previous"), Modifier.size(31.dp)) }
                 IconButton(onClick = onToggle, modifier = Modifier.size(68.dp), colors = IconButtonDefaults.iconButtonColors(containerColor = colors.primary, contentColor = colors.onPrimary)) {
-                    Icon(if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (snapshot.isPlaying) "暂停" else "播放", Modifier.size(35.dp))
+                    Icon(if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (snapshot.isPlaying) tr("player.pause") else tr("player.play"), Modifier.size(35.dp))
                 }
-                IconButton(onClick = onNext, modifier = Modifier.size(50.dp)) { Icon(Icons.Filled.SkipNext, "下一首", Modifier.size(31.dp)) }
+                IconButton(onClick = onNext, modifier = Modifier.size(50.dp)) { Icon(Icons.Filled.SkipNext, tr("player.next"), Modifier.size(31.dp)) }
             }
             Spacer(Modifier.weight(1f))
             ThemeTextButton(onClick = onLyrics, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Icon(Icons.Outlined.Lyrics, null, Modifier.size(18.dp)); Spacer(Modifier.width(7.dp)); Text("歌词")
+                Icon(Icons.Outlined.Lyrics, null, Modifier.size(18.dp)); Spacer(Modifier.width(7.dp)); Text(tr("player.lyrics"))
             }
             snapshot.message?.let { Text(it, Modifier.fillMaxWidth().padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = colors.error, textAlign = TextAlign.Center) }
             }
@@ -1711,8 +1904,8 @@ private fun LoginSheet(controller: AndroidGatewayController) {
                 .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("登录后继续", style = MaterialTheme.typography.headlineSmall)
-            Text("先用验证码；遇到问题时再试密码或二维码。", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+            Text(tr("login.continue"), style = MaterialTheme.typography.headlineSmall)
+            Text(tr("login.sub.mobile"), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 AndroidLoginMethod.entries.forEach { method ->
                     ThemeTextButton(onClick = { controller.selectLoginMethod(method) }) {
@@ -1726,7 +1919,11 @@ private fun LoginSheet(controller: AndroidGatewayController) {
                 AndroidLoginMethod.QR_CODE -> QrLogin(controller)
             }
             controller.loginMessage?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.contains("成功") || it.contains("已发送")) colors.primary else colors.error)
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (it == tr("login.captcha.sent")) colors.primary else colors.error,
+                )
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -1739,19 +1936,19 @@ private fun CaptchaLogin(controller: AndroidGatewayController) {
         PhoneField(controller.loginPhone, controller::updateLoginPhone)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                controller.loginCaptcha, controller::updateLoginCaptcha, Modifier.weight(1f), label = { Text("验证码") }, singleLine = true,
+                controller.loginCaptcha, controller::updateLoginCaptcha, Modifier.weight(1f), label = { Text(tr("login.captcha.code")) }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
             Spacer(Modifier.width(10.dp))
             ThemeTextButton(onClick = controller::sendCaptcha, enabled = !controller.isSendingCaptcha) {
-                Text(if (controller.isSendingCaptcha) "发送中" else if (controller.captchaSent) "重新发送" else "获取验证码")
+                Text(if (controller.isSendingCaptcha) tr("login.captcha.sending") else if (controller.captchaSent) tr("login.captcha.resend") else tr("login.captcha.send"))
             }
         }
         ThemeButton(
             onClick = controller::submitCaptchaLogin,
             modifier = Modifier.fillMaxWidth(),
             enabled = !controller.isSubmittingLogin,
-        ) { Text(if (controller.isSubmittingLogin) "正在登录" else "用验证码登录") }
+        ) { Text(if (controller.isSubmittingLogin) tr("login.submitting") else tr("login.captcha.submit")) }
     }
 }
 
@@ -1760,7 +1957,7 @@ private fun PasswordLogin(controller: AndroidGatewayController) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PhoneField(controller.loginPhone, controller::updateLoginPhone)
         OutlinedTextField(
-            controller.loginPassword, controller::updateLoginPassword, Modifier.fillMaxWidth(), label = { Text("密码") }, singleLine = true,
+            controller.loginPassword, controller::updateLoginPassword, Modifier.fillMaxWidth(), label = { Text(tr("login.pw.password")) }, singleLine = true,
             visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
         )
@@ -1768,14 +1965,14 @@ private fun PasswordLogin(controller: AndroidGatewayController) {
             onClick = controller::submitPasswordLogin,
             modifier = Modifier.fillMaxWidth(),
             enabled = !controller.isSubmittingLogin,
-        ) { Text(if (controller.isSubmittingLogin) "正在登录" else "用密码登录") }
+        ) { Text(if (controller.isSubmittingLogin) tr("login.submitting") else tr("login.pw.submit")) }
     }
 }
 
 @Composable
 private fun PhoneField(value: String, onChange: (String) -> Unit) {
     OutlinedTextField(
-        value, onChange, Modifier.fillMaxWidth(), label = { Text("手机号") }, leadingIcon = { Text("+86", style = MaterialTheme.typography.labelLarge) },
+        value, onChange, Modifier.fillMaxWidth(), label = { Text(tr("login.phone")) }, leadingIcon = { Text("+86", style = MaterialTheme.typography.labelLarge) },
         singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
     )
 }
@@ -1785,25 +1982,25 @@ private fun QrLogin(controller: AndroidGatewayController) {
     val image = remember(controller.qrImageData) { decodeQrImage(controller.qrImageData) }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (image != null) {
-            androidx.compose.foundation.Image(image, "网易云音乐登录二维码", Modifier.size(208.dp).clip(RoundedCornerShape(18.dp)))
+            androidx.compose.foundation.Image(image, tr("login.artwork.qr"), Modifier.size(208.dp).clip(RoundedCornerShape(18.dp)))
         } else {
             Box(Modifier.size(208.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-                Text(if (controller.qrState == AndroidQrLoginState.CREATING) "正在生成二维码…" else "二维码暂时不可用", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                Text(if (controller.qrState == AndroidQrLoginState.CREATING) tr("login.qr.creating") else tr("login.qr.unavailable"), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             }
         }
         Text(
             when (controller.qrState) {
-                AndroidQrLoginState.WAITING_FOR_SCAN -> "请用网易云音乐扫描二维码"
-                AndroidQrLoginState.WAITING_FOR_CONFIRMATION -> "请在网易云音乐中确认登录"
-                AndroidQrLoginState.EXPIRED -> "二维码已过期"
-                AndroidQrLoginState.ERROR -> "二维码生成失败"
+                AndroidQrLoginState.WAITING_FOR_SCAN -> tr("login.qr.scan.mobile")
+                AndroidQrLoginState.WAITING_FOR_CONFIRMATION -> tr("login.qr.confirm.mobile")
+                AndroidQrLoginState.EXPIRED -> tr("login.qr.expired")
+                AndroidQrLoginState.ERROR -> tr("login.qr.error.mobile")
                 else -> ""
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (controller.qrState == AndroidQrLoginState.EXPIRED || controller.qrState == AndroidQrLoginState.ERROR) {
-            ThemeTextButton(controller::startQrLogin) { Text("重新生成二维码") }
+            ThemeTextButton(controller::startQrLogin) { Text(tr("login.qr.regenerate")) }
         }
     }
 }
