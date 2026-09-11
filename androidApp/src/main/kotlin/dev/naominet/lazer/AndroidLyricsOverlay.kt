@@ -188,12 +188,14 @@ private fun AnimatedLyricsViewport(
     val measuredMainHeightsPx = remember(lines, lyricFontSizeSp, showFullLyrics) {
         mutableStateMapOf<Int, Int>()
     }
-    val minimumRowGapPx = with(density) { 12.dp.toPx() }
-    val maximumRowGapPx = with(density) { 36.dp.toPx() }
-    val minimumTranslationGapPx = with(density) { 7.dp.toPx() }
-    val maximumTranslationGapPx = with(density) { 22.dp.toPx() }
     val estimatedMainHeightPx = with(density) { mainLineHeightSp.toPx() }
     val estimatedTranslationHeightPx = with(density) { translationLineHeightSp.toPx() }
+    // Spacing scales with the rendered lyric line height, so it follows the font-size setting.
+    val spacing = lyricSpacing(estimatedMainHeightPx)
+    val minimumRowGapPx = spacing.minimumRowGapPx
+    val maximumRowGapPx = spacing.maximumRowGapPx
+    val minimumTranslationGapPx = spacing.minimumTranslationGapPx
+    val maximumTranslationGapPx = spacing.maximumTranslationGapPx
     val rowHeightsPx = lines.mapIndexed { index, line ->
         measuredRowHeightsPx[index]?.toFloat() ?: (
             estimatedMainHeightPx + if (line.translation.isNullOrBlank()) {

@@ -33,6 +33,18 @@ class LyricLayoutTest {
     }
 
     @Test
+    fun `spacing scales with the lyric line height`() {
+        val small = lyricSpacing(40f)
+        val large = lyricSpacing(80f)
+
+        assertTrue(large.minimumRowGapPx > small.minimumRowGapPx)
+        assertTrue(large.maximumRowGapPx > small.maximumRowGapPx)
+        assertTrue(large.minimumTranslationGapPx > small.minimumTranslationGapPx)
+        assertTrue(large.maximumTranslationGapPx > small.maximumTranslationGapPx)
+        assertEquals(small.minimumRowGapPx * 2f, large.minimumRowGapPx, 0.001f)
+    }
+
+    @Test
     fun `font size preference snaps to supported values`() {
         assertEquals(MIN_LYRIC_FONT_SIZE_SP, normalizeLyricFontSizeSp(Int.MIN_VALUE))
         assertEquals(34, normalizeLyricFontSizeSp(35))

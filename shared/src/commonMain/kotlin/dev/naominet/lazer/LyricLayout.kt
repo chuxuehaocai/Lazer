@@ -55,6 +55,28 @@ fun lyricTranslationGapPx(
 ): Float = (mainLyricHeightPx.coerceAtLeast(1f) * 0.18f)
     .coerceIn(minimumGapPx, maximumGapPx)
 
+/**
+ * Vertical rhythm for the lyric page, derived from the rendered main line height instead of fixed
+ * dp. Enlarging the lyric font therefore widens the breathing room between rows and translations
+ * proportionally, and shrinking it tightens the page the same way.
+ */
+data class LyricSpacing(
+    val minimumRowGapPx: Float,
+    val maximumRowGapPx: Float,
+    val minimumTranslationGapPx: Float,
+    val maximumTranslationGapPx: Float,
+)
+
+fun lyricSpacing(mainLineHeightPx: Float): LyricSpacing {
+    val height = mainLineHeightPx.takeIf(Float::isFinite)?.coerceAtLeast(1f) ?: 1f
+    return LyricSpacing(
+        minimumRowGapPx = height * 0.32f,
+        maximumRowGapPx = height * 0.95f,
+        minimumTranslationGapPx = height * 0.18f,
+        maximumTranslationGapPx = height * 0.55f,
+    )
+}
+
 /** Fractional row index nearest to [scrollPx], used for quiet distance-based fading. */
 fun lyricVisualIndex(centersPx: FloatArray, scrollPx: Float): Float {
     if (centersPx.isEmpty()) return 0f
