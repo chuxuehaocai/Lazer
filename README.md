@@ -88,7 +88,6 @@ Lazer/
 - Android Studio（Android 开发与构建）
 - Xcode（仅 macOS，iOS 开发与构建）
 - 可访问的 Gateway 服务
-- Windows ARM64 构建需要使用 `runDesktop` Gradle 任务，不要使用 IntelliJ 的 JVM 绿色运行按钮
 
 项目使用 Gradle Wrapper，通常不需要单独安装 Gradle。
 
