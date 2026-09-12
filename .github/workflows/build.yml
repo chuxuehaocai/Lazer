@@ -56,17 +56,20 @@ jobs:
       - name: Build runnable jar
         shell: pwsh
         run: .\gradlew.bat :desktopApp:packageUberJarForCurrentOS --stacktrace
+      # Separate artifacts so each downloads as its own zip (msi.zip, jar.zip).
       - uses: actions/upload-artifact@v4
         with:
-          name: lazer-desktop
-          path: |
-            desktopApp/build/compose/binaries/**/*.msi
-            desktopApp/build/compose/jars/*.jar
-          if-no-files-found: warn
+          name: msi
+          path: desktopApp/build/compose/binaries/**/*.msi
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jar
+          path: desktopApp/build/compose/jars/*.jar
+          if-no-files-found: error
 
-  # Only version tags publish anything; a build without a tag just leaves the Actions artifacts.
-  # Bundles the three deliverables (APK, MSI, runnable jar) into a single zip attached to the
-  # GitHub Release.
+  # Version tags publish the three deliverables uncompressed as release assets. A build without a
+  # tag only leaves the Actions artifacts (lazer-apk-arm64.zip, msi.zip, jar.zip).
   release:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [android, desktop]
@@ -82,13 +85,10 @@ jobs:
           mkdir -p release
           find artifacts -type f \( -name '*.apk' -o -name '*.msi' -o -name '*.jar' \) -exec cp {} release/ \;
           ls -l release
-      - name: Zip
-        run: |
-          cd release
-          zip -r "../Lazer-${GITHUB_REF_NAME}.zip" .
-          cd ..
-          ls -l Lazer-*.zip
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: Lazer-*.zip
+          files: |
+            release/*.apk
+            release/*.msi
+            release/*.jar
