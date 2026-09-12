@@ -63,3 +63,24 @@ jobs:
             desktopApp/build/compose/binaries/**/*.msi
             desktopApp/build/compose/jars/*.jar
           if-no-files-found: warn
+
+  # On a version tag, publish a GitHub Release with the APK, MSI and runnable jar attached.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Show collected files
+        run: find artifacts -type f
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.apk
+            artifacts/**/*.msi
+            artifacts/**/*.jar
