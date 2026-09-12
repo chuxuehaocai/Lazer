@@ -60,8 +60,8 @@ internal object SuperLyricPublisher {
         if (track == null || !ensureRegistered()) return
         val index = activeAndroidLyricIndex(lines, positionMillis)
         val line = lines.getOrNull(index)
-        // Without a timed lyric line there is nothing to publish. Never fall back to the song
-        // title, otherwise a track with no lyrics shows its name as if it were a lyric.
+        // No timed lyric for this position: publish nothing. Never fall back to a placeholder or
+        // the song title, and clear a previously shown line from the system.
         if (line == null) {
             if (lastSentIndex != -1) stop()
             return

@@ -103,6 +103,8 @@ class AndroidGatewayController(context: Context) {
         private set
     var backgroundImage by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
         private set
+    var backgroundImageEnabled by mutableStateOf(settings.backgroundImageEnabled)
+        private set
     var backgroundAlpha by mutableStateOf(settings.backgroundAlpha)
         private set
     var style by mutableStateOf(settings.style)
@@ -204,6 +206,11 @@ class AndroidGatewayController(context: Context) {
     fun updateBackgroundAlpha(value: Float) {
         backgroundAlpha = value.coerceIn(0f, 1f)
         settings.backgroundAlpha = backgroundAlpha
+    }
+
+    fun updateBackgroundImageEnabled(enabled: Boolean) {
+        backgroundImageEnabled = enabled
+        settings.backgroundImageEnabled = enabled
     }
 
     private suspend fun loadBackgroundImage() {

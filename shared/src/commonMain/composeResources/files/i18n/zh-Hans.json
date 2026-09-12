@@ -356,5 +356,7 @@
   "settings.background.clear": "清除",
   "settings.background.alpha": "不透明度",
   "settings.background.none": "未选择背景图",
-  "style.acrylic": "亚克力"
+  "style.acrylic": "亚克力",
+  "settings.background.on": "显示自定义背景",
+  "settings.background.off": "隐藏自定义背景"
 }

@@ -137,7 +137,7 @@ fun WindowScope.DesktopPlayerApp(
             is LazerPalette.Custom -> seedColorScheme(palette.seed, controller.isDark)
         }
     }
-    val hasWallpaper = controller.backgroundImage != null
+    val hasWallpaper = controller.backgroundImage != null && controller.backgroundImageEnabled
     val uiAlpha = if (hasWallpaper) controller.backgroundAlpha else 1f
     LazerTheme(
         isDark = controller.isDark,
@@ -157,17 +157,27 @@ fun WindowScope.DesktopPlayerApp(
             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         ) {
             Box(Modifier.fillMaxSize()) {
-            val bg = controller.backgroundImage
+            val bg = controller.backgroundImage.takeIf { controller.backgroundImageEnabled }
             if (bg != null) {
-                // The wallpaper is fully opaque; the slider fades the UI surfaces above it.
+                // The wallpaper is faded by the same opacity in both styles. Under acrylic this is
+                // also what lets the DWM backdrop show through; without acrylic it keeps Material
+                // and Acrylic equally bright at the same slider value.
                 Image(
                     bitmap = bg,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
+                    alpha = uiAlpha,
                     modifier = Modifier.fillMaxSize(),
                 )
+                // Global scrim over the wallpaper: the main content's paper tone. Without it the
+                // wallpaper would show through the UI at full strength.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = uiAlpha)),
+                )
             }
-            PaperBackground(transparent = osGlassActive) {
+            PaperBackground(transparent = osGlassActive || bg != null) {
                 Column(Modifier.fillMaxSize()) {
                     WindowTitleBar(
                         title = windowTitle,
@@ -753,6 +763,14 @@ private fun DesktopSettingsPage(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                        }
+                        if (controller.backgroundImage != null) {
+                            LazerSwitch(
+                                engine = controller.themeEngine,
+                                checked = controller.backgroundImageEnabled,
+                                onCheckedChange = controller::updateBackgroundImageEnabled,
+                            )
+                            Spacer(Modifier.width(6.dp))
                         }
                         TextButton(onClick = { pickBackgroundImage(controller) }) {
                             Text(tr("settings.background.pick"))

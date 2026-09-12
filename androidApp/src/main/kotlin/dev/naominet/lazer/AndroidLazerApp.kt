@@ -443,10 +443,11 @@ fun AndroidLazerApp() {
         }
         // A custom background wallpaper is drawn fully opaque; the slider fades the app's own
         // surfaces above it (see LocalLazerUiAlpha), never the wallpaper.
-        val hasWallpaper = controller.backgroundImage != null
+        val wallpaper = controller.backgroundImage.takeIf { controller.backgroundImageEnabled }
+        val hasWallpaper = wallpaper != null
         val uiAlpha = if (hasWallpaper) controller.backgroundAlpha else 1f
         Box(Modifier.fillMaxSize().background(colors.background)) {
-            controller.backgroundImage?.let { image ->
+            wallpaper?.let { image ->
                 Image(
                     bitmap = image,
                     contentDescription = null,
@@ -454,6 +455,15 @@ fun AndroidLazerApp() {
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+            // Global scrim, always present and constant: it dims the wallpaper and covers every
+            // pixel a page might vacate during a return, so the raw image is never exposed at full
+            // opacity. Pages additionally carry their own scrim (below) so their background moves
+            // with them; the global layer sits behind the pages and is what shows in the gaps.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(colors.background.copy(alpha = uiAlpha)),
+            )
             val liquidGlass = rememberLazerLiquidGlass(controller.liquidGlassEnabled, colors.background)
             val floatingControlsInset = if (liquidGlass.isEnabled) {
                 (if (playback.track != null) 76.dp else 0.dp) + 96.dp
@@ -471,9 +481,8 @@ fun AndroidLazerApp() {
                     .fillMaxSize()
                     .captureLiquidGlass(liquidGlass),
             ) {
-                // Manual status-bar inset, painted by the app surface (uiAlpha) instead of
-                // statusBarsPadding, so a custom background wallpaper never clashes with the
-                // system status-bar region.
+                // Manual status-bar inset. It paints the same scrim as every page, so the top
+                // safe area matches the content below it exactly.
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -527,7 +536,10 @@ fun AndroidLazerApp() {
                                     progress = renderedBackProgress,
                                     swipeEdge = backSwipeEdge,
                                 ),
-                            color = colors.background.copy(alpha = LocalLazerUiAlpha.current),
+                            // Each page carries its own scrim so its background accompanies the page
+                            // through a transition (occluding the page behind it). The global scrim
+                            // behind fills the area a moving page uncovers.
+                            color = colors.background.copy(alpha = uiAlpha),
                         ) {
                             when (page.kind) {
                                 AndroidMainPageKind.SETTINGS -> SettingsPage(controller)
@@ -1000,6 +1012,14 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.onSurfaceVariant,
                             )
+                        }
+                        if (controller.backgroundImage != null) {
+                            LazerSwitch(
+                                engine = controller.themeEngine,
+                                checked = controller.backgroundImageEnabled,
+                                onCheckedChange = controller::updateBackgroundImageEnabled,
+                            )
+                            Spacer(Modifier.width(6.dp))
                         }
                         ThemeTextButton(onClick = { backgroundPicker.launch("image/*") }) {
                             Text(tr("settings.background.pick"))
@@ -1743,10 +1763,22 @@ private fun TrackRow(track: AndroidTrack, current: Boolean, onClick: () -> Unit)
 }
 
 @Composable
-private fun MobileArtwork(url: String?, label: String, modifier: Modifier, cornerRadius: androidx.compose.ui.unit.Dp) {
+private fun MobileArtwork(
+    url: String?,
+    label: String,
+    modifier: Modifier,
+    cornerRadius: androidx.compose.ui.unit.Dp,
+    onClick: (() -> Unit)? = null,
+) {
     val colors = MaterialTheme.colorScheme
     Box(
-        modifier.clip(RoundedCornerShape(cornerRadius)).background(Brush.linearGradient(listOf(colors.primaryContainer, colors.secondaryContainer))),
+        modifier
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(Brush.linearGradient(listOf(colors.primaryContainer, colors.secondaryContainer)))
+            // Clickable inside the clip so the ripple is confined to the rounded artwork.
+            .then(
+                if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(label.firstOrNull()?.toString().orEmpty(), style = MaterialTheme.typography.titleMedium, color = colors.onPrimaryContainer)
@@ -2128,7 +2160,13 @@ private fun NowPlayingPage(
                             IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, tr("player.collapse"), tint = colors.onSurfaceVariant) }
                             Text(tr("player.now_playing"), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
                         }
-                        MobileArtwork(track.coverUrl, track.title, Modifier.size(132.dp).align(Alignment.CenterHorizontally), 20.dp)
+                        MobileArtwork(
+                            track.coverUrl,
+                            track.title,
+                            Modifier.size(132.dp).align(Alignment.CenterHorizontally),
+                            20.dp,
+                            onClick = onLyrics,
+                        )
                         Spacer(Modifier.height(10.dp))
                         Text(track.title, color = colors.onBackground, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(track.artist, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2186,7 +2224,13 @@ private fun NowPlayingPage(
                 Text(tr("player.now_playing"), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
             }
             Spacer(Modifier.weight(0.4f))
-            MobileArtwork(track.coverUrl, track.title, Modifier.fillMaxWidth().heightIn(max = 390.dp).height(320.dp), 30.dp)
+            MobileArtwork(
+                track.coverUrl,
+                track.title,
+                Modifier.fillMaxWidth().heightIn(max = 390.dp).height(320.dp),
+                30.dp,
+                onClick = onLyrics,
+            )
             Spacer(Modifier.height(32.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

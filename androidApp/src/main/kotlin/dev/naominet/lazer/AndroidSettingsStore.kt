@@ -45,8 +45,13 @@ internal class AndroidSettingsStore(context: Context) {
         get() = preferences.getString(KEY_BACKGROUND_IMAGE, null)
         set(value) = preferences.edit().putString(KEY_BACKGROUND_IMAGE, value).apply()
 
+    /** Whether the custom background image is currently shown. */
+    var backgroundImageEnabled: Boolean
+        get() = preferences.getBoolean(KEY_BACKGROUND_IMAGE_ENABLED, true)
+        set(value) = preferences.edit().putBoolean(KEY_BACKGROUND_IMAGE_ENABLED, value).apply()
+
     var backgroundAlpha: Float
-        get() = preferences.getFloat(KEY_BACKGROUND_ALPHA, 0.82f).coerceIn(0f, 1f)
+        get() = preferences.getFloat(KEY_BACKGROUND_ALPHA, 0.5f).coerceIn(0f, 1f)
         set(value) = preferences.edit().putFloat(KEY_BACKGROUND_ALPHA, value.coerceIn(0f, 1f)).apply()
 
     /** Single appearance style. Migrates the legacy separate engine/glass keys on first read. */
@@ -122,6 +127,7 @@ internal class AndroidSettingsStore(context: Context) {
         const val KEY_STYLE = "appearance.style"
         const val KEY_PALETTE = "appearance.palette"
         const val KEY_BACKGROUND_IMAGE = "appearance.background_image"
+        const val KEY_BACKGROUND_IMAGE_ENABLED = "appearance.background_image_enabled"
         const val KEY_BACKGROUND_ALPHA = "appearance.background_alpha"
         const val KEY_THEME_ENGINE = "appearance.theme_engine"
         const val KEY_LIQUID_GLASS_ENABLED = "appearance.liquid_glass"

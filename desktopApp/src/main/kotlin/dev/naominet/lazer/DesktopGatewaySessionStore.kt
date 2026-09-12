@@ -70,8 +70,12 @@ internal object DesktopSettings {
         get() = DesktopStateFile.get("appearance.background_image")
         set(value) = DesktopStateFile.set("appearance.background_image", value)
 
+    var backgroundImageEnabled: Boolean
+        get() = DesktopStateFile.get("appearance.background_image_enabled")?.toBooleanStrictOrNull() ?: true
+        set(value) = DesktopStateFile.set("appearance.background_image_enabled", value.toString())
+
     var backgroundAlpha: Float
-        get() = DesktopStateFile.get("appearance.background_alpha")?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.82f
+        get() = DesktopStateFile.get("appearance.background_alpha")?.toFloatOrNull()?.coerceIn(0f, 1f) ?: 0.5f
         set(value) = DesktopStateFile.set("appearance.background_alpha", value.coerceIn(0f, 1f).toString())
 
     var lyricFollowDelayMillis: Long

@@ -356,5 +356,7 @@
   "settings.background.clear": "Clear",
   "settings.background.alpha": "Opacity",
   "settings.background.none": "No background image",
-  "style.acrylic": "Acrylic"
+  "style.acrylic": "Acrylic",
+  "settings.background.on": "Show custom background",
+  "settings.background.off": "Hide custom background"
 }

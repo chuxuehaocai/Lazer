@@ -356,5 +356,7 @@
   "settings.background.clear": "クリア",
   "settings.background.alpha": "不透明度",
   "settings.background.none": "背景画像なし",
-  "style.acrylic": "アクリル"
+  "style.acrylic": "アクリル",
+  "settings.background.on": "カスタム背景を表示",
+  "settings.background.off": "カスタム背景を非表示"
 }

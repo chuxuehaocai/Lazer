@@ -194,6 +194,8 @@ class DesktopPlayerController(
         private set
     var backgroundImage by mutableStateOf<ImageBitmap?>(null)
         private set
+    var backgroundImageEnabled by mutableStateOf(DesktopSettings.backgroundImageEnabled)
+        private set
     var backgroundAlpha by mutableStateOf(DesktopSettings.backgroundAlpha)
         private set
     val themeEngine: LazerThemeEngine get() = style.themeEngine
@@ -337,26 +339,22 @@ class DesktopPlayerController(
         DesktopSettings.backgroundAlpha = backgroundAlpha
     }
 
-    /** Copies the chosen file into app storage and decodes it as the new background. */
+    fun updateBackgroundImageEnabled(enabled: Boolean) {
+        backgroundImageEnabled = enabled
+        DesktopSettings.backgroundImageEnabled = enabled
+    }
+
+    /** Stores the chosen image's path and decodes it as the new background. */
     fun setBackgroundImage(source: java.io.File) {
         scope.launch {
             val decoded = withContext(Dispatchers.IO) {
-                runCatching {
-                    val target = java.io.File(
-                        System.getProperty("user.home"),
-                        ".lazer/background.png",
-                    )
-                    target.parentFile?.mkdirs()
-                    source.inputStream().use { input -> target.outputStream().use(input::copyTo) }
-                    javax.imageio.ImageIO.read(target)?.toComposeImageBitmap()
-                }.onFailure { error -> println("Lazer: background load failed: $error") }.getOrNull()
+                runCatching { javax.imageio.ImageIO.read(source)?.toComposeImageBitmap() }
+                    .onFailure { error -> println("Lazer: background load failed: $error") }
+                    .getOrNull()
             }
             if (decoded != null) {
                 backgroundImage = decoded
-                DesktopSettings.backgroundImagePath = java.io.File(
-                    System.getProperty("user.home"),
-                    ".lazer/background.png",
-                ).absolutePath
+                DesktopSettings.backgroundImagePath = source.absolutePath
             }
         }
     }
@@ -364,9 +362,6 @@ class DesktopPlayerController(
     fun clearBackgroundImage() {
         backgroundImage = null
         DesktopSettings.backgroundImagePath = null
-        runCatching {
-            java.io.File(System.getProperty("user.home"), ".lazer/background.png").delete()
-        }
     }
 
     private suspend fun loadBackgroundImage() {
