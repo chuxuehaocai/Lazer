@@ -109,6 +109,8 @@ class AndroidGatewayController(context: Context) {
         private set
     var style by mutableStateOf(settings.style)
         private set
+    var liquidGlassBlurIntensity by mutableStateOf(settings.liquidGlassBlurIntensity)
+        private set
     val themeEngine: LazerThemeEngine get() = style.themeEngine
     val liquidGlassEnabled: Boolean get() = style.usesLiquidGlass
     var language by mutableStateOf(settings.language)
@@ -206,6 +208,11 @@ class AndroidGatewayController(context: Context) {
     fun updateBackgroundAlpha(value: Float) {
         backgroundAlpha = value.coerceIn(0f, 1f)
         settings.backgroundAlpha = backgroundAlpha
+    }
+
+    fun updateLiquidGlassBlurIntensity(value: Float) {
+        liquidGlassBlurIntensity = normalizeLiquidGlassBlurIntensity(value)
+        settings.liquidGlassBlurIntensity = liquidGlassBlurIntensity
     }
 
     fun updateBackgroundImageEnabled(enabled: Boolean) {

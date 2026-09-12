@@ -24,9 +24,12 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -124,33 +127,51 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import coil3.compose.AsyncImage
+import com.kashif_e.backdrop.backdrops.LayerBackdrop
 import com.kashif_e.backdrop.backdrops.layerBackdrop
 import com.kashif_e.backdrop.backdrops.rememberCombinedBackdrop
 import com.kashif_e.backdrop.backdrops.rememberLayerBackdrop
 import com.kashif_e.backdrop.drawBackdrop
+import com.kashif_e.backdrop.drawPlainBackdrop
 import com.kashif_e.backdrop.effects.blur
 import com.kashif_e.backdrop.effects.lens
 import com.kashif_e.backdrop.effects.vibrancy
@@ -217,6 +238,14 @@ private fun Modifier.predictiveBackTransform(
         alpha = 1f - 0.08f * fraction
     }
 }
+
+/** Paints the fixed wallpaper canvas inside a moving page, keeping transition seams hidden. */
+private fun Modifier.capturedPageBackground(backdrop: LayerBackdrop): Modifier =
+    drawPlainBackdrop(
+        backdrop = backdrop,
+        shape = { RectangleShape },
+        effects = {},
+    )
 
 @Composable
 private fun isLandscapeLayout(): Boolean =
@@ -446,27 +475,52 @@ fun AndroidLazerApp() {
         val wallpaper = controller.backgroundImage.takeIf { controller.backgroundImageEnabled }
         val hasWallpaper = wallpaper != null
         val uiAlpha = if (hasWallpaper) controller.backgroundAlpha else 1f
+        // Preserve the previous steady-state appearance, where equal global and page scrims were
+        // composited, while baking that result into one transition-safe background canvas.
+        val backgroundCanvasAlpha = if (hasWallpaper) {
+            1f - (1f - uiAlpha) * (1f - uiAlpha)
+        } else {
+            1f
+        }
+        val pageBackgroundBackdrop = rememberLayerBackdrop()
         Box(Modifier.fillMaxSize().background(colors.background)) {
-            wallpaper?.let { image ->
-                Image(
-                    bitmap = image,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-            // Global scrim, always present and constant: it dims the wallpaper and covers every
-            // pixel a page might vacate during a return, so the raw image is never exposed at full
-            // opacity. Pages additionally carry their own scrim (below) so their background moves
-            // with them; the global layer sits behind the pages and is what shows in the gaps.
+            // Keep the wallpaper and its scrim in one fixed, capturable canvas. Animated pages
+            // reuse this exact canvas, so their interiors and any exposed transition gaps match.
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(colors.background.copy(alpha = uiAlpha)),
+                    .then(
+                        if (hasWallpaper) {
+                            Modifier.layerBackdrop(pageBackgroundBackdrop)
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                // Include the opaque app base in the recorded canvas so transparent PNG
+                // wallpapers cannot reveal another page underneath during overlap.
+                Box(Modifier.fillMaxSize().background(colors.background))
+                wallpaper?.let { image ->
+                    Image(
+                        bitmap = image,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(colors.background.copy(alpha = backgroundCanvasAlpha)),
+                )
+            }
+            val liquidGlass = rememberLazerLiquidGlass(
+                enabled = controller.liquidGlassEnabled,
+                backgroundColor = colors.background,
+                blurIntensity = controller.liquidGlassBlurIntensity,
             )
-            val liquidGlass = rememberLazerLiquidGlass(controller.liquidGlassEnabled, colors.background)
             val floatingControlsInset = if (liquidGlass.isEnabled) {
-                (if (playback.track != null) 76.dp else 0.dp) + 96.dp
+                navigationBarBottomInset() + if (playback.track != null) 176.dp else 104.dp
             } else {
                 0.dp
             }
@@ -481,13 +535,11 @@ fun AndroidLazerApp() {
                     .fillMaxSize()
                     .captureLiquidGlass(liquidGlass),
             ) {
-                // Manual status-bar inset. It paints the same scrim as every page, so the top
-                // safe area matches the content below it exactly.
+                // Manual status-bar inset. The fixed background canvas already paints this area.
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(statusBarTopInset())
-                        .background(colors.background.copy(alpha = uiAlpha)),
+                        .height(statusBarTopInset()),
                 )
                 Box(Modifier.weight(1f)) {
                     if (
@@ -535,11 +587,18 @@ fun AndroidLazerApp() {
                                     },
                                     progress = renderedBackProgress,
                                     swipeEdge = backSwipeEdge,
+                                )
+                                .then(
+                                    if (hasWallpaper) {
+                                        Modifier.capturedPageBackground(pageBackgroundBackdrop)
+                                    } else {
+                                        Modifier
+                                    },
                                 ),
-                            // Each page carries its own scrim so its background accompanies the page
-                            // through a transition (occluding the page behind it). The global scrim
-                            // behind fills the area a moving page uncovers.
-                            color = colors.background.copy(alpha = uiAlpha),
+                            // With wallpaper, the captured canvas is an opaque visual page plane:
+                            // it hides sibling content without adding a second translucent scrim.
+                            color = if (hasWallpaper) Color.Transparent else colors.background,
+                            contentColor = colors.onBackground,
                         ) {
                             when (page.kind) {
                                 AndroidMainPageKind.SETTINGS -> SettingsPage(controller)
@@ -580,9 +639,14 @@ fun AndroidLazerApp() {
             if (liquidGlass.isEnabled) {
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                     playback.track?.let { track ->
-                        MiniPlayer(track, playback.isPlaying, playback.isPreparing, { playerVisible = true }) {
-                            AndroidPlaybackConnection.toggle(context)
-                        }
+                        MiniPlayer(
+                            track = track,
+                            isPlaying = playback.isPlaying,
+                            isPreparing = playback.isPreparing,
+                            onOpen = { playerVisible = true },
+                            glass = liquidGlass,
+                            onToggle = { AndroidPlaybackConnection.toggle(context) },
+                        )
                     }
                     LiquidGlassBottomDock(
                         selected = controller.destination,
@@ -592,7 +656,13 @@ fun AndroidLazerApp() {
                 }
             }
 
-            controller.message?.let { text -> MessageBanner(text, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(16.dp)) }
+            controller.message?.let { text ->
+                MessageBanner(
+                    text = text,
+                    modifier = Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(16.dp),
+                    glass = liquidGlass,
+                )
+            }
             AnimatedVisibility(
                 visible = playerVisible && playback.track != null,
                 modifier = Modifier.fillMaxSize(),
@@ -616,6 +686,7 @@ fun AndroidLazerApp() {
                     wordLyricsEnabled = controller.wordLyricsEnabled,
                     lyricGlowEnabled = controller.lyricGlowEnabled,
                     liquidGlassEnabled = controller.liquidGlassEnabled,
+                    liquidGlassBlurIntensity = controller.liquidGlassBlurIntensity,
                     lyricFontSizeSp = controller.lyricFontSizeSp,
                     showFullLyrics = controller.showFullLyrics,
                     isLiked = playback.track?.let { controller.isSongLiked(it.id) } == true,
@@ -671,16 +742,54 @@ fun AndroidLazerApp() {
                         ),
                 )
             }
-            if (controller.isLoginVisible) LoginSheet(controller)
+            if (controller.isLoginVisible) LoginSheet(controller, liquidGlass)
             if ((context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
-                // Top-end, just below the header row, so it never overlaps the bottom controls.
-                DebugWatermark(
-                    enabled = true,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .statusBarsPadding()
-                        .padding(top = 54.dp, end = 14.dp),
-                )
+                AndroidDebugWatermark(Modifier.fillMaxSize())
+            }
+        }
+    }
+}
+
+@Composable
+private fun AndroidDebugWatermark(modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val watermarkText = remember {
+        val model = Build.MODEL.orEmpty().ifBlank { "Unknown device" }
+        val fingerprint = Build.FINGERPRINT.orEmpty().ifBlank { "Unknown fingerprint" }
+        "DEBUG  ·  $model  ·  $fingerprint"
+    }
+    val textMeasurer = rememberTextMeasurer()
+    val watermarkColor = colors.onBackground.copy(alpha = 0.06f)
+    val watermarkLayout = remember(textMeasurer, watermarkText, watermarkColor) {
+        textMeasurer.measure(
+            text = AnnotatedString(watermarkText),
+            style = TextStyle(
+                color = watermarkColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.35.sp,
+            ),
+            overflow = TextOverflow.Visible,
+            softWrap = false,
+            maxLines = 1,
+        )
+    }
+    Canvas(modifier.clearAndSetSemantics { }) {
+        val stampWidth = watermarkLayout.size.width.toFloat()
+        val horizontalStep = stampWidth + 72.dp.toPx()
+        val verticalStep = 88.dp.toPx()
+        val overscan = maxOf(size.width, size.height) * 0.45f
+        rotate(degrees = -20f, pivot = center) {
+            var rowIndex = 0
+            var y = -overscan
+            while (y <= size.height + overscan) {
+                var x = -overscan - if (rowIndex % 2 == 0) 0f else horizontalStep / 2f
+                while (x <= size.width + overscan) {
+                    drawText(watermarkLayout, topLeft = Offset(x, y))
+                    x += horizontalStep
+                }
+                rowIndex += 1
+                y += verticalStep
             }
         }
     }
@@ -936,6 +1045,45 @@ private fun SettingsPage(controller: AndroidGatewayController, modifier: Modifie
                         selected = controller.style,
                         onSelected = controller::updateStyle,
                     )
+                }
+            }
+        }
+        if (controller.liquidGlassEnabled) {
+            item {
+                SettingsCard {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    tr("settings.glass.blur.title"),
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                Text(
+                                    tr("settings.glass.blur.hint"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "${(controller.liquidGlassBlurIntensity * 100).roundToInt()}%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.primary,
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        LazerSlider(
+                            engine = controller.themeEngine,
+                            value = controller.liquidGlassBlurIntensity,
+                            onValueChange = controller::updateLiquidGlassBlurIntensity,
+                            modifier = Modifier.fillMaxWidth(),
+                            valueRange = 0f..1f,
+                        )
+                    }
                 }
             }
         }
@@ -1818,25 +1966,70 @@ private fun MiniPlayer(
     isPlaying: Boolean,
     isPreparing: Boolean,
     onOpen: () -> Unit,
+    glass: LazerLiquidGlass = LazerLiquidGlass.Disabled,
     onToggle: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    Surface(
-        modifier = Modifier.fillMaxWidth().height(76.dp).clickable(role = Role.Button, onClick = onOpen),
-        color = colors.surface.copy(alpha = 0.98f * LocalLazerUiAlpha.current),
-        border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.78f)),
-    ) {
-        Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            MobileArtwork(track.coverUrl, track.title, Modifier.size(48.dp), 12.dp)
+    val content: @Composable () -> Unit = {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = if (glass.isEnabled) 14.dp else 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MobileArtwork(
+                track.coverUrl,
+                track.title,
+                Modifier.size(if (glass.isEnabled) 44.dp else 48.dp),
+                12.dp,
+            )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(if (isPreparing) tr("player.preparing") else track.artist, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (isPreparing) tr("player.preparing") else track.artist,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            IconButton(onClick = onToggle, modifier = Modifier.size(42.dp), colors = IconButtonDefaults.iconButtonColors(containerColor = colors.primaryContainer)) {
-                Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (isPlaying) tr("player.pause") else tr("player.play"), tint = colors.onPrimaryContainer)
+            IconButton(
+                onClick = onToggle,
+                modifier = Modifier.size(42.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = colors.primaryContainer.copy(alpha = if (glass.isEnabled) 0.78f else 1f),
+                ),
+            ) {
+                Icon(
+                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    if (isPlaying) tr("player.pause") else tr("player.play"),
+                    tint = colors.onPrimaryContainer,
+                )
             }
         }
+    }
+
+    if (glass.isEnabled) {
+        val shape = RoundedCornerShape(24.dp)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 2.dp)
+                .height(70.dp)
+                .liquidGlassSurface(glass, shape, colors.surface, blurRadius = 10.dp)
+                .clip(shape)
+                .clickable(role = Role.Button, onClick = onOpen)
+                .semantics { contentDescription = tr("player.now_playing") },
+            contentAlignment = Alignment.Center,
+        ) {
+            content()
+        }
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth().height(76.dp).clickable(role = Role.Button, onClick = onOpen),
+            color = colors.surface.copy(alpha = 0.98f * LocalLazerUiAlpha.current),
+            border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.78f)),
+            content = content,
+        )
     }
 }
 
@@ -1919,6 +2112,7 @@ private fun LiquidGlassBottomDock(
     // Set briefly on a tap while the droplet slides to the tapped tab. During the slide every icon
     // except the target drops behind the droplet, so only the target stays on top.
     var switchingTo by remember { mutableStateOf<AndroidRootDestination?>(null) }
+    var keyboardFocusedDestination by remember { mutableStateOf<AndroidRootDestination?>(null) }
     val activeDestination = pressedDestination ?: selected
     val activeIndex = destinations.indexOf(activeDestination).coerceAtLeast(0)
     // Captures the bar glass only, so the droplet can refract it as a second nested lens. The
@@ -1936,9 +2130,32 @@ private fun LiquidGlassBottomDock(
         val slotWidth = maxWidth / destinations.size
         val slotWidthPx = with(density) { slotWidth.toPx() }
         val selectorWidth = slotWidth - 14.dp
+        val isDragging = pressCenter != null
+        val selectorExpansion by animateDpAsState(
+            targetValue = if (isDragging) 6.dp else 0.dp,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+            label = "selector-expansion",
+        )
+        val selectorLift by animateDpAsState(
+            targetValue = if (isDragging) 2.dp else 0.dp,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+            label = "selector-lift",
+        )
+        val pressedIconScale by animateFloatAsState(
+            targetValue = if (isDragging) 1.08f else 1f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+            label = "pressed-icon-scale",
+        )
+        val renderedSelectorWidth = selectorWidth + selectorExpansion
+        val renderedSelectorHeight = 56.dp + selectorExpansion
         val selectorCenterX by animateDpAsState(
             targetValue = with(density) {
-                (pressCenter?.x ?: (slotWidthPx * activeIndex + slotWidthPx / 2f)).toDp()
+                val halfSelectorWidth = renderedSelectorWidth.toPx() / 2f
+                val rawCenter = pressCenter?.x ?: (slotWidthPx * activeIndex + slotWidthPx / 2f)
+                rawCenter.coerceIn(
+                    minimumValue = halfSelectorWidth,
+                    maximumValue = maxWidth.toPx() - halfSelectorWidth,
+                ).toDp()
             },
             animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
             label = "selector-x",
@@ -1954,26 +2171,39 @@ private fun LiquidGlassBottomDock(
             }
         }
         val renderIcons: @Composable (visible: (AndroidRootDestination) -> Boolean) -> Unit = { visible ->
-            Row(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxSize().clearAndSetSemantics { }) {
                 destinations.forEach { destination ->
                     // Always keep the slot so both layers stay aligned; only the content toggles.
                     Box(
                         Modifier
                             .weight(1f)
-                            .fillMaxHeight()
-                            .semantics {
-                                contentDescription = destination.label
-                                role = Role.Tab
-                            },
+                            .fillMaxHeight(),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (visible(destination)) {
                             val active = destination == activeDestination
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                // Strong foreground contrast on the glass; the droplet itself
-                                // already communicates selection, so the active tab uses onSurface.
-                                Icon(destination.icon(), null, Modifier.size(20.dp), tint = if (active) colors.onSurface else colors.onSurfaceVariant)
-                                Text(destination.label, style = MaterialTheme.typography.labelSmall, color = if (active) colors.onSurface else colors.onSurfaceVariant, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal)
+                            val isPressedTarget = isDragging && active
+                            val activeColor = if (isPressedTarget) colors.primary else colors.onSurface
+                            Column(
+                                modifier = Modifier.graphicsLayer {
+                                    val scale = if (isPressedTarget) pressedIconScale else 1f
+                                    scaleX = scale
+                                    scaleY = scale
+                                },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(
+                                    destination.icon(),
+                                    null,
+                                    Modifier.size(20.dp),
+                                    tint = if (active) activeColor else colors.onSurfaceVariant,
+                                )
+                                Text(
+                                    destination.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (active) activeColor else colors.onSurfaceVariant,
+                                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                                )
                             }
                         }
                     }
@@ -1981,7 +2211,7 @@ private fun LiquidGlassBottomDock(
             }
         }
         val priorityOne: (AndroidRootDestination) -> Boolean = when {
-            pressCenter != null -> { _ -> true }
+            pressCenter != null -> { destination -> destination != activeDestination }
             switchingTo != null -> { destination -> destination != switchingTo }
             else -> { _ -> false }
         }
@@ -2039,7 +2269,7 @@ private fun LiquidGlassBottomDock(
                             shape = { barShape },
                             effects = {
                                 vibrancy()
-                                blur(10.dp.toPx())
+                                blur(glass.scaledBlurRadius(10.dp).toPx())
                                 lens(
                                     refractionHeight = 26.dp.toPx(),
                                     refractionAmount = 52.dp.toPx(),
@@ -2061,17 +2291,21 @@ private fun LiquidGlassBottomDock(
                 Modifier
                     .offset {
                         IntOffset(
-                            x = (selectorCenterX.toPx() - selectorWidth.toPx() / 2f).roundToInt(),
-                            y = ((72.dp - 56.dp).toPx() / 2f).roundToInt(),
+                            x = (selectorCenterX.toPx() - renderedSelectorWidth.toPx() / 2f).roundToInt(),
+                            y = (((72.dp - renderedSelectorHeight) / 2f) - selectorLift).toPx().roundToInt(),
                         )
                     }
-                    .size(selectorWidth, 56.dp)
+                    .size(renderedSelectorWidth, renderedSelectorHeight)
                     .drawBackdrop(
                         backdrop = nestedGlass,
                         shape = { selectorShape },
                         effects = {
                             vibrancy()
-                            blur(2.5f.dp.toPx())
+                            blur(
+                                glass.scaledBlurRadius(
+                                    if (isDragging) 4.dp else 2.5.dp,
+                                ).toPx(),
+                            )
                             lens(
                                 refractionHeight = 22.dp.toPx(),
                                 refractionAmount = 64.dp.toPx(),
@@ -2081,13 +2315,73 @@ private fun LiquidGlassBottomDock(
                         },
                         highlight = { Highlight.Default },
                         innerShadow = { InnerShadow(radius = 10.dp, color = Color.Black.copy(alpha = 0.08f)) },
-                        onDrawSurface = { drawRect(Color.White.copy(alpha = if (isDark) 0.05f else 0.09f)) },
+                        onDrawSurface = {
+                            drawRect(
+                                Color.White.copy(
+                                    alpha = when {
+                                        isDragging && isDark -> 0.09f
+                                        isDragging -> 0.13f
+                                        isDark -> 0.05f
+                                        else -> 0.09f
+                                    },
+                                ),
+                            )
+                        },
                     ),
             )
 
             // Layer 3 (priority 0): icons above the glass. During a press/switch only the target
-            // (or, while pressing, none) remains here.
+            // remains crisp and readable while neighboring icons are refracted underneath.
             renderIcons(priorityZero)
+
+            // A separate, visually transparent interaction layer keeps the custom drag gesture
+            // intact while exposing five real tab actions to accessibility services and keyboards.
+            Row(Modifier.fillMaxSize()) {
+                destinations.forEach { destination ->
+                    val focused = keyboardFocusedDestination == destination
+                    val destinationSelected = destination == selected
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(4.dp)
+                            .then(
+                                if (focused) {
+                                    Modifier.border(2.dp, colors.primary, RoundedCornerShape(16.dp))
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .semantics {
+                                contentDescription = destination.label
+                                role = Role.Tab
+                                this.selected = destinationSelected
+                                onClick {
+                                    switchingTo = destination
+                                    onSelect(destination)
+                                    true
+                                }
+                            }
+                            .onFocusChanged { state ->
+                                if (state.isFocused) {
+                                    keyboardFocusedDestination = destination
+                                } else if (keyboardFocusedDestination == destination) {
+                                    keyboardFocusedDestination = null
+                                }
+                            }
+                            .onKeyEvent { event ->
+                                val activates = event.type == KeyEventType.KeyUp &&
+                                    (event.key == Key.Enter || event.key == Key.DirectionCenter)
+                                if (activates) {
+                                    switchingTo = destination
+                                    onSelect(destination)
+                                }
+                                activates
+                            }
+                            .focusable(),
+                    )
+                }
+            }
         }
     }
 }
@@ -2103,6 +2397,7 @@ private fun NowPlayingPage(
     wordLyricsEnabled: Boolean,
     lyricGlowEnabled: Boolean,
     liquidGlassEnabled: Boolean,
+    liquidGlassBlurIntensity: Float,
     lyricFontSizeSp: Int,
     showFullLyrics: Boolean,
     isLiked: Boolean,
@@ -2117,7 +2412,11 @@ private fun NowPlayingPage(
 ) {
     val track = snapshot.track ?: return
     val colors = MaterialTheme.colorScheme
-    val glass = rememberLazerLiquidGlass(liquidGlassEnabled, colors.background)
+    val glass = rememberLazerLiquidGlass(
+        enabled = liquidGlassEnabled,
+        backgroundColor = colors.background,
+        blurIntensity = liquidGlassBlurIntensity,
+    )
     val duration = snapshot.durationMillis.takeIf { it > 0L } ?: track.durationMillis
     val target = if (duration > 0) snapshot.positionMillis.toFloat() / duration else 0f
     val display by animateFloatAsState(
@@ -2209,6 +2508,160 @@ private fun NowPlayingPage(
                         onSeek = onSeek,
                         modifier = Modifier.weight(1f).fillMaxSize(),
                     )
+                }
+            }
+        } else if (glass.isEnabled) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                AndroidAlbumFlowBackground(
+                    track = track,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .captureLiquidGlass(glass),
+                    cornerRadius = 0.dp,
+                    veil = colors.background.copy(alpha = 0.34f),
+                )
+                val artworkSize = minOf(maxWidth - 48.dp, maxHeight * 0.32f)
+                    .coerceIn(168.dp, 328.dp)
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .liquidGlassSurface(glass, CircleShape, colors.surface, blurRadius = 7.dp),
+                        ) {
+                            Icon(Icons.Filled.Close, tr("player.collapse"), tint = colors.onSurface)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                tr("player.now_playing"),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = colors.onSurface,
+                            )
+                            Text(
+                                track.artist,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    MobileArtwork(
+                        track.coverUrl,
+                        track.title,
+                        Modifier.size(artworkSize),
+                        28.dp,
+                        onClick = onLyrics,
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    val panelShape = RoundedCornerShape(28.dp)
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .liquidGlassSurface(glass, panelShape, colors.surface, blurRadius = 12.dp)
+                            .clip(panelShape)
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                    ) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    track.title,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = colors.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    track.artist,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            IconButton(onClick = onToggleLiked, modifier = Modifier.size(48.dp)) {
+                                Icon(
+                                    if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                    if (isLiked) tr("player.like.remove") else tr("player.like.add"),
+                                    tint = if (isLiked) colors.primary else colors.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        ThinSeekBar(
+                            progress = seekProgress,
+                            bufferedProgress = snapshot.bufferedFraction,
+                            onSeek = { seeking = true; seekProgress = it },
+                            onFinished = { seeking = false; onSeek((duration * seekProgress).toLong()) },
+                        )
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(
+                                formatPlaybackTime((duration * seekProgress).toLong()),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                formatPlaybackTime(duration),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(onClick = onPrevious, modifier = Modifier.size(50.dp)) {
+                                Icon(Icons.Filled.SkipPrevious, tr("player.previous"), Modifier.size(31.dp))
+                            }
+                            IconButton(
+                                onClick = onToggle,
+                                modifier = Modifier.size(64.dp),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    containerColor = colors.primary,
+                                    contentColor = colors.onPrimary,
+                                ),
+                            ) {
+                                Icon(
+                                    if (snapshot.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                    if (snapshot.isPlaying) tr("player.pause") else tr("player.play"),
+                                    Modifier.size(34.dp),
+                                )
+                            }
+                            IconButton(onClick = onNext, modifier = Modifier.size(50.dp)) {
+                                Icon(Icons.Filled.SkipNext, tr("player.next"), Modifier.size(31.dp))
+                            }
+                        }
+                        ThemeTextButton(
+                            onClick = onLyrics,
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        ) {
+                            Icon(Icons.Outlined.Lyrics, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(7.dp))
+                            Text(tr("player.lyrics"))
+                        }
+                        snapshot.message?.let { message ->
+                            Text(
+                                message,
+                                Modifier.fillMaxWidth().padding(top = 4.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.error,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
                 }
             }
         } else {
@@ -2308,14 +2761,24 @@ private fun ThinSeekBar(
 
 @Composable
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-private fun LoginSheet(controller: AndroidGatewayController) {
+private fun LoginSheet(
+    controller: AndroidGatewayController,
+    glass: LazerLiquidGlass = LazerLiquidGlass.Disabled,
+) {
     val colors = MaterialTheme.colorScheme
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val contentScrollState = rememberScrollState()
+    val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ModalBottomSheet(
         onDismissRequest = controller::closeLogin,
         sheetState = sheetState,
-        containerColor = colors.surface,
+        modifier = if (glass.isEnabled) {
+            Modifier.liquidGlassSurface(glass, shape, colors.surface, blurRadius = 14.dp)
+        } else {
+            Modifier
+        },
+        shape = shape,
+        containerColor = if (glass.isEnabled) Color.Transparent else colors.surface,
         contentColor = colors.onSurface,
     ) {
         Column(
@@ -2438,9 +2901,35 @@ private fun QuietState(text: String) {
 }
 
 @Composable
-private fun MessageBanner(text: String, modifier: Modifier) {
-    Surface(modifier, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 5.dp) {
-        Text(text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodySmall)
+private fun MessageBanner(
+    text: String,
+    modifier: Modifier,
+    glass: LazerLiquidGlass = LazerLiquidGlass.Disabled,
+) {
+    val colors = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(16.dp)
+    if (glass.isEnabled) {
+        Box(
+            modifier
+                .liquidGlassSurface(glass, shape, colors.surface, blurRadius = 10.dp)
+                .clip(shape),
+        ) {
+            Text(
+                text,
+                Modifier.padding(horizontal = 16.dp, vertical = 11.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurface,
+            )
+        }
+    } else {
+        Surface(
+            modifier,
+            shape = RoundedCornerShape(14.dp),
+            color = colors.surfaceContainerHigh,
+            shadowElevation = 5.dp,
+        ) {
+            Text(text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 

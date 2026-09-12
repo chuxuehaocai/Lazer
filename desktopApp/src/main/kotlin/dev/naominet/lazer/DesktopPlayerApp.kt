@@ -123,11 +123,11 @@ fun WindowScope.DesktopPlayerApp(
     // behind the window. Other platforms fall back to the opaque paper surface.
     val osGlassAvailable = isWindowsDesktop()
     val osGlassActive = osGlassAvailable && controller.style.usesLiquidGlass
-    LaunchedEffect(osGlassActive, window) {
-        applyWindowsAcrylic(window, osGlassActive)
+    LaunchedEffect(osGlassActive, controller.isDark, window) {
+        applyWindowsAcrylic(window, osGlassActive, controller.isDark)
         // The native window handle can appear a beat after the first frame; re-apply once.
         kotlinx.coroutines.delay(300)
-        applyWindowsAcrylic(window, osGlassActive)
+        applyWindowsAcrylic(window, osGlassActive, controller.isDark)
     }
 
     val paletteColorScheme = remember(controller.palette, controller.isDark) {

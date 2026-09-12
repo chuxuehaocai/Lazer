@@ -54,6 +54,17 @@ internal class AndroidSettingsStore(context: Context) {
         get() = preferences.getFloat(KEY_BACKGROUND_ALPHA, 0.5f).coerceIn(0f, 1f)
         set(value) = preferences.edit().putFloat(KEY_BACKGROUND_ALPHA, value.coerceIn(0f, 1f)).apply()
 
+    var liquidGlassBlurIntensity: Float
+        get() = normalizeLiquidGlassBlurIntensity(
+            preferences.getFloat(
+                KEY_LIQUID_GLASS_BLUR_INTENSITY,
+                DEFAULT_LIQUID_GLASS_BLUR_INTENSITY,
+            ),
+        )
+        set(value) = preferences.edit()
+            .putFloat(KEY_LIQUID_GLASS_BLUR_INTENSITY, normalizeLiquidGlassBlurIntensity(value))
+            .apply()
+
     /** Single appearance style. Migrates the legacy separate engine/glass keys on first read. */
     var style: LazerStyle
         get() {
@@ -131,6 +142,7 @@ internal class AndroidSettingsStore(context: Context) {
         const val KEY_BACKGROUND_ALPHA = "appearance.background_alpha"
         const val KEY_THEME_ENGINE = "appearance.theme_engine"
         const val KEY_LIQUID_GLASS_ENABLED = "appearance.liquid_glass"
+        const val KEY_LIQUID_GLASS_BLUR_INTENSITY = "appearance.liquid_glass_blur_intensity"
         const val KEY_LANGUAGE = "appearance.language"
         const val KEY_LYRIC_FOLLOW_DELAY = "lyrics.follow_delay_millis"
         const val KEY_LYRIC_ANIMATION_SPEED = "lyrics.animation_speed"

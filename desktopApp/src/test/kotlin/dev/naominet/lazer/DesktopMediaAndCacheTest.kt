@@ -20,6 +20,14 @@ import org.junit.Test
 
 class DesktopMediaAndCacheTest {
     @Test
+    fun `acrylic tint follows the app theme instead of Windows appearance`() {
+        // Native acrylic uses AABBGGRR. Day mode is the light paper (#F7F5EF) with an 80% tint,
+        // leaving just enough blurred desktop to retain the acrylic character.
+        assertEquals(0xCCEFF5F7.toInt(), windowsAcrylicTint(isDark = false))
+        assertEquals(0x662D281D.toInt(), windowsAcrylicTint(isDark = true))
+    }
+
+    @Test
     fun `background home refresh cannot replace the playlist currently on screen`() {
         val playlist = PlaylistItem(10, "A", "", null, 1)
         val playlistTrack = TrackItem(101, "A song", "", "", 1_000, null)
