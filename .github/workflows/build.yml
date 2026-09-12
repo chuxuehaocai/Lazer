@@ -59,12 +59,12 @@ jobs:
       # Separate artifacts so each downloads as its own zip (msi.zip, jar.zip).
       - uses: actions/upload-artifact@v4
         with:
-          name: msi
+          name: lazer-msi
           path: desktopApp/build/compose/binaries/**/*.msi
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: jar
+          name: lazer-jar
           path: desktopApp/build/compose/jars/*.jar
           if-no-files-found: error
 
