@@ -64,10 +64,11 @@ jobs:
             desktopApp/build/compose/jars/*.jar
           if-no-files-found: warn
 
-  # Always publish a GitHub Release with the three real files (APK, MSI, runnable jar) attached.
-  # A `v*` tag produces a versioned release; any other build updates the rolling "latest" release.
+  # Only version tags publish anything; a build without a tag just leaves the Actions artifacts.
+  # Bundles the three deliverables (APK, MSI, runnable jar) into a single zip attached to the
+  # GitHub Release.
   release:
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [android, desktop]
     runs-on: ubuntu-latest
     permissions:
@@ -76,15 +77,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Show collected files
-        run: find artifacts -type f
+      - name: Collect the three deliverables
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.apk' -o -name '*.msi' -o -name '*.jar' \) -exec cp {} release/ \;
+          ls -l release
+      - name: Zip
+        run: |
+          cd release
+          zip -r "../Lazer-${GITHUB_REF_NAME}.zip" .
+          cd ..
+          ls -l Lazer-*.zip
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Latest build' }}
-          generate_release_notes: ${{ startsWith(github.ref, 'refs/tags/') }}
-          fail_on_unmatched_files: false
-          files: |
-            artifacts/**/*.apk
-            artifacts/**/*.msi
-            artifacts/**/*.jar
+          generate_release_notes: true
+          files: Lazer-*.zip
