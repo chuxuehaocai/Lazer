@@ -64,9 +64,10 @@ jobs:
             desktopApp/build/compose/jars/*.jar
           if-no-files-found: warn
 
-  # On a version tag, publish a GitHub Release with the APK, MSI and runnable jar attached.
+  # Always publish a GitHub Release with the three real files (APK, MSI, runnable jar) attached.
+  # A `v*` tag produces a versioned release; any other build updates the rolling "latest" release.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name != 'pull_request'
     needs: [android, desktop]
     runs-on: ubuntu-latest
     permissions:
@@ -79,7 +80,10 @@ jobs:
         run: find artifacts -type f
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Latest build' }}
+          generate_release_notes: ${{ startsWith(github.ref, 'refs/tags/') }}
+          fail_on_unmatched_files: false
           files: |
             artifacts/**/*.apk
             artifacts/**/*.msi
