@@ -226,7 +226,7 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           declare -A deliverables=(
-            [lazer-apk-arm64]="Lazer-$version-arm64.apk"
+            [lazer-apk-arm64]="Lazer-$version-android-arm64.apk"
             [lazer-msi]="Lazer-$version-windows-x64.msi"
             [lazer-jar-windows-x64]="Lazer-$version-windows-x64.jar"
             [lazer-windows-x64-portable]="Lazer-$version-windows-x64-portable.zip"
