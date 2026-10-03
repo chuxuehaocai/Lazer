@@ -462,6 +462,7 @@ jobs:
             [lazer-rpm-x64]="Lazer-$version-linux-x64.rpm"
             [lazer-appimage-x64]="Lazer-$version-linux-x64.AppImage"
             [lazer-jar-linux-x64]="Lazer-$version-linux-x64.jar"
+            [lazer-ios-unsigned]="Lazer-$version-ios-unsigned.ipa"
           )
           mkdir -p release
           missing=()
@@ -510,3 +511,4 @@ jobs:
             release/Lazer-*.rpm
             release/Lazer-*.AppImage
             release/Lazer-*-portable.zip
+            release/Lazer-*.ipa
