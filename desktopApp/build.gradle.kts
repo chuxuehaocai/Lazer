@@ -119,6 +119,7 @@ compose.desktop {
                 iconFile = project.file("src/main/resources/icon.ico")
             }
             linux {
+                iconFile = project.file("src/main/resources/icon.png")
                 shortcut = true
                 appCategory = "AudioVideo"
                 menuGroup = "AudioVideo"

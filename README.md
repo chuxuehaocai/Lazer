@@ -195,7 +195,7 @@ Desktop 配置了以下原生分发格式：
 ./gradlew :desktopApp:createDistributable
 ```
 
-Windows 图标资源位于 [`desktopApp/src/main/resources/icon.ico`](./desktopApp/src/main/resources/icon.ico)，运行时窗口图标使用 [`icon.png`](./desktopApp/src/main/resources/icon.png)。
+Windows 图标资源位于 [`desktopApp/src/main/resources/icon.ico`](./desktopApp/src/main/resources/icon.ico)，Linux 原生分发包与运行时窗口图标使用 [`icon.png`](./desktopApp/src/main/resources/icon.png)。
 
 ### Android Release
 
