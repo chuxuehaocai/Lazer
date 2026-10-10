@@ -234,7 +234,9 @@ compose.desktop {
             // Shell links need stable on-disk ICO paths; jpackage places this directory at app/resources.
             appResourcesRootDir.set(layout.buildDirectory.dir("generated/jpackage-resources"))
             targetFormats(TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Rpm)
-            packageName = "dev.naominet.lazer"
+            // jpackage's --name is both the installer display name and the Linux package name, and
+            // Debian requires the lowercase reverse-DNS id, so only Windows drops it.
+            packageName = if (isWindowsHost) "Lazer" else "dev.naominet.lazer"
             packageVersion = rootProject.extra["lazerPackageVersion"] as String
             // Runtime-only JDK APIs are not all visible to jdeps through Kotlin bytecode analysis.
             // Retain both the HTTP client used by DesktopAudioCache and the LAN source server.
