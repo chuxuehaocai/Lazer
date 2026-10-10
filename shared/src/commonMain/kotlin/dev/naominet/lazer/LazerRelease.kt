@@ -7,8 +7,8 @@ package dev.naominet.lazer
  */
 object LazerRelease {
     const val name = "Lazer"
-    const val versionName = "1.3.1"
-    const val versionCode = 5
+    const val versionName = "1.4"
+    const val versionCode = 6
 
     /** Where the source lives. The About page links straight to it. */
     const val repositoryUrl = "https://github.com/chuxuehaocai/Lazer"
