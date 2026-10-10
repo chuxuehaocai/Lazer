@@ -55,17 +55,19 @@ API Gateway 已内置于共享模块中，直接与音乐服务通信，无需�
 
 ## 技术栈
 
-- Kotlin `2.4.10`
-- Kotlin Multiplatform
-- Compose Multiplatform `1.10.3`
-- Compose Material 3
-- Ktor `3.5.2`
-- Kotlinx Serialization
-- Coil 3
-- ZXing（Desktop 二维码生成）
-- JavaMP3（Desktop 音频解码）
-- Nucleus Media Control（Desktop 系统媒体控制）
-- Gradle Wrapper
+| 技术 | 版本 | 说明 |
+|:---|:---|:---|
+| [![Kotlin](https://img.shields.io/badge/Kotlin-2.4.10-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org/) | 2.4.10 | 编程语言 |
+| [![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin_Multiplatform-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://www.jetbrains.com/kotlin-multiplatform/) | — | 跨平台框架 |
+| [![Compose Multiplatform](https://img.shields.io/badge/Compose_Multiplatform-1.10.3-0827D5?style=flat-square&logo=jetpackcompose&logoColor=white)](https://www.jetbrains.com/lifecycle/compose-multiplatform/) | 1.10.3 | 声明式 UI 框架 |
+| [![Compose Material 3](https://img.shields.io/badge/Compose_Material_3-6750A4?style=flat-square&logo=materialdesign&logoColor=white)](https://m3.material.io/) | — | Material 3 组件库 |
+| [![Ktor](https://img.shields.io/badge/Ktor-3.5.2-087CFA?style=flat-square&logo=ktor&logoColor=white)](https://ktor.io/) | 3.5.2 | 网络请求框架 |
+| [![Kotlinx Serialization](https://img.shields.io/badge/Kotlinx_Serialization-1.11.0-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://github.com/Kotlin/kotlinx.serialization) | 1.11.0 | JSON 数据序列化 |
+| [![Coil](https://img.shields.io/badge/Coil-3.4.0-4CAF50?style=flat-square&logo=coil&logoColor=white)](https://coil-kt.github.io/coil/) | 3.4.0 | 图片加载 |
+| [![ZXing](https://img.shields.io/badge/ZXing-3.5.4-1665C0?style=flat-square&logoColor=white)](https://github.com/zxing/zxing) | 3.5.4 | Desktop 二维码生成 |
+| [![JavaMP3](https://img.shields.io/badge/JavaMP3-1.0.1-00629B?style=flat-square&logoColor=white)](https://github.com/delthas/javamp3) | 1.0.1 | Desktop 音频解码 |
+| ![Nucleus Media Control](https://img.shields.io/badge/Nucleus_Media_Control-2.5.0-6E7681?style=flat-square&logoColor=white) | 2.5.0 | Desktop 系统媒体控制 |
+| [![Gradle Wrapper](https://img.shields.io/badge/Gradle_Wrapper-02303A?style=flat-square&logo=gradle&logoColor=white)](https://gradle.org/) | — | 构建工具，通常无需单独安装 |
 
 ## 项目结构
 
