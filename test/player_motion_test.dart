@@ -81,7 +81,7 @@ void main() {
     await tester.pump();
     expect(remaining(), closeTo(1, .001), reason: 'it starts below the window');
 
-    // First third of the 500 ms entrance.
+    // First leg of the 400 ms entrance.
     await tester.pump(const Duration(milliseconds: 160));
     final double firstLeg = 1 - remaining();
     expect(
@@ -90,7 +90,7 @@ void main() {
       reason: 'a decelerating entrance covers most of the travel up front',
     );
 
-    // Second third: less travel than the first, i.e. it is slowing down.
+    // Second leg: less travel than the first, i.e. it is slowing down.
     await tester.pump(const Duration(milliseconds: 160));
     final double secondLeg = 1 - remaining() - firstLeg;
     expect(secondLeg, lessThan(firstLeg / 2));

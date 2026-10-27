@@ -151,7 +151,14 @@ void main() {
     );
     await gesture.up();
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 540));
+    // The released sheet keeps easing out instead of snapping away: at 250 ms
+    // it is still travelling, even though the old 80-260 ms finish would have
+    // retired it already.
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byType(NowPlayingPage), findsOneWidget);
+    expect(_slide(tester), greaterThan(0));
+    await tester.pump(const Duration(milliseconds: 320));
+    await tester.pump();
     expect(find.byType(NowPlayingPage), findsNothing);
     expect(tester.takeException(), isNull);
   });

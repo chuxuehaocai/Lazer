@@ -146,13 +146,13 @@ class _LegacyShellState extends State<LegacyShell>
     super.initState();
     _nowPlayingMotion = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
-      reverseDuration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 400),
+      reverseDuration: const Duration(milliseconds: 400),
       // Never let the platform's reduced-motion flag scale this to 5%: the
       // player is dragged by the finger, so a released pull has to finish the
-      // distance it was left at (80-260 ms) instead of snapping away in a
-      // single frame. The motion is a compositor-only slide, not a vestibular
-      // trigger.
+      // distance it was left at (220-520 ms when dismissing) instead of
+      // snapping away in a single frame. The motion is a compositor-only
+      // slide, not a vestibular trigger.
       animationBehavior: AnimationBehavior.preserve,
     )..addStatusListener(_onNowPlayingStatus);
     // Mirrors the page switcher's duration in [_content].
@@ -496,7 +496,7 @@ class _LegacyShellState extends State<LegacyShell>
     _nowPlayingMotion.value = 0;
     _nowPlayingMotion.animateTo(
       1,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 400),
       curve: _playerMotionCurve,
     );
   }
@@ -514,15 +514,16 @@ class _LegacyShellState extends State<LegacyShell>
     // would never be retired.
     _nowPlayingMotion.animateBack(
       0,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 400),
       curve: _playerMotionCurve,
     );
   }
 
   /// Settles a finger-driven pull. The player closes when it has been dragged
   /// far enough, or flung downward; otherwise it returns to the open position.
-  /// The duration follows the distance that is actually left, so a long pull
-  /// does not spend a whole transition on its last few pixels.
+  /// The duration follows the distance that is actually left. A dismissal is
+  /// deliberately slower than the spring-back so the released sheet reads as
+  /// one continuous exit instead of snapping away.
   void _settlePlayerPull(double velocity) {
     if (!_nowPlayingOpen) return;
     final double open = _nowPlayingMotion.value.clamp(0.0, 1.0);
@@ -530,9 +531,9 @@ class _LegacyShellState extends State<LegacyShell>
     final bool dismiss = velocity < -900
         ? false
         : (velocity > 900 && pulled > .02) || pulled >= .22;
-    final Duration duration = Duration(
-      milliseconds: ((dismiss ? open : pulled) * 260).round().clamp(80, 260),
-    );
+    final Duration duration = dismiss
+        ? Duration(milliseconds: (open * 520).round().clamp(220, 520))
+        : Duration(milliseconds: (pulled * 260).round().clamp(80, 260));
     if (!dismiss) {
       _nowPlayingMotion.animateTo(
         1,
