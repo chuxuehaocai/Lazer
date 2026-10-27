@@ -68,6 +68,47 @@ void main() {
     expect(lines.first.translation, '翻译');
     expect(lines.last.translation, isNull);
   });
+  test('a blank translation row does not hide the real line', () {
+    final lines = parseLyrics(
+      const GatewayLyrics(
+        lrc: '[00:05.00]original',
+        tlyric: '[00:05.06]\n[00:05.18]翻译',
+      ),
+    );
+    expect(lines.single.translation, '翻译');
+  });
+  test('line-aligned translations survive one slipped timestamp', () {
+    final lines = parseLyrics(
+      const GatewayLyrics(
+        lrc: '[00:01.00]one\n[00:02.00]two\n[00:03.00]three\n[00:04.00]four',
+        tlyric: '[00:01.10]一\n[00:02.10]二\n[00:03.10]三\n[00:06.00]四',
+      ),
+    );
+    expect(lines.map((line) => line.translation), <String?>[
+      '一',
+      '二',
+      '三',
+      '四',
+    ]);
+  });
+  test('blank source rows do not consume a line-aligned translation', () {
+    final lines = parseLyrics(
+      const GatewayLyrics(
+        lrc: '[00:01.00]first\n[00:02.00]\n[00:03.00]third',
+        tlyric: '[00:01.00]一\n[00:03.00]三',
+      ),
+    );
+    expect(lines.map((line) => line.translation), <String?>['一', null, '三']);
+  });
+  test('a blank translation row keeps its own line untranslated', () {
+    final lines = parseLyrics(
+      const GatewayLyrics(
+        lrc: '[00:01.00]one\n[00:02.00]instrumental\n[00:03.00]three',
+        tlyric: '[00:01.00]一\n[00:02.00]\n[00:03.20]三',
+      ),
+    );
+    expect(lines.map((line) => line.translation), <String?>['一', null, '三']);
+  });
   test('equal-time credits do not block later translated lyrics', () {
     final lines = parseLyrics(
       const GatewayLyrics(

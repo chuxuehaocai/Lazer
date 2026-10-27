@@ -85,38 +85,100 @@ List<LyricLine> parseYrc(String? source) {
   return lines;
 }
 
+const Duration _translationWindow = Duration(milliseconds: 1200);
+const Duration _translationAlignmentWindow = Duration(milliseconds: 1000);
+const double _translationAlignmentRatio = .7;
+
 List<LyricLine> parseLyrics(GatewayLyrics payload) {
   final words = parseYrc(payload.yrc);
   final original = words.isNotEmpty ? words : parseLrc(payload.lrc);
   final regularTranslations = parseLrc(payload.tlyric);
-  final translations = regularTranslations.isNotEmpty
+  final allTranslations = regularTranslations.isNotEmpty
       ? regularTranslations
       : parseLrc(payload.ytlrc);
+  final translations = allTranslations
+      .where((line) => line.text.trim().isNotEmpty)
+      .toList(growable: false);
   if (translations.isEmpty) return original;
-  return original.map((line) {
-    int delta(int index) =>
-        (translations[index].time - line.time).inMilliseconds.abs();
-    // Find the insertion point; equal-time credits must not block all later
-    // translations by making a forward-only nearest search stop at a tie.
-    int low = 0;
-    int high = translations.length;
-    while (low < high) {
-      final middle = (low + high) ~/ 2;
-      if (translations[middle].time < line.time) {
-        low = middle + 1;
-      } else {
-        high = middle;
-      }
+  final sourceIndexes = <int>[
+    for (var i = 0; i < original.length; i++)
+      if (original[i].text.trim().isNotEmpty) i,
+  ];
+  if (sourceIndexes.isEmpty) return original;
+
+  // A translation track that mirrors the original line for line is the most
+  // reliable mapping. Match the full track first: blank rows are meaningful
+  // placeholders for untranslated lines. If the counts only line up after
+  // dropping blank rows, use that list instead. The timestamp check keeps a
+  // shifted or unrelated track from being force-paired.
+  final List<String?>? paired =
+      _pairByLine(original, sourceIndexes, allTranslations) ??
+      _pairByLine(original, sourceIndexes, translations);
+  final matched = <int, String>{};
+  if (paired != null) {
+    for (var i = 0; i < sourceIndexes.length; i++) {
+      final String? text = paired[i];
+      if (text != null) matched[sourceIndexes[i]] = text;
     }
-    int cursor = (low - 1).clamp(0, translations.length - 1);
-    if (low < translations.length && delta(low) < delta(cursor)) cursor = low;
-    final text = delta(cursor) <= 1000 ? translations[cursor].text.trim() : '';
-    return LyricLine(
-      line.time,
-      line.text,
-      words: line.words,
-      end: line.end,
-      translation: text.isEmpty || text == line.text ? null : text,
-    );
-  }).toList();
+  } else {
+    for (final int index in sourceIndexes) {
+      final String? text = _nearestTranslation(original[index], translations);
+      if (text != null) matched[index] = text;
+    }
+  }
+  return <LyricLine>[
+    for (var i = 0; i < original.length; i++)
+      _withTranslation(original[i], matched[i]),
+  ];
+}
+
+List<String?>? _pairByLine(
+  List<LyricLine> original,
+  List<int> sourceIndexes,
+  List<LyricLine> translations,
+) {
+  if (sourceIndexes.length != translations.length) return null;
+  var aligned = 0;
+  for (var i = 0; i < sourceIndexes.length; i++) {
+    final int delta = (original[sourceIndexes[i]].time - translations[i].time)
+        .inMilliseconds
+        .abs();
+    if (delta <= _translationAlignmentWindow.inMilliseconds) aligned++;
+  }
+  if (aligned / sourceIndexes.length < _translationAlignmentRatio) return null;
+  return <String?>[for (final LyricLine line in translations) line.text.trim()];
+}
+
+String? _nearestTranslation(LyricLine line, List<LyricLine> translations) {
+  final int target = line.time.inMilliseconds;
+  int low = 0;
+  int high = translations.length;
+  while (low < high) {
+    final int middle = (low + high) ~/ 2;
+    if (translations[middle].time.inMilliseconds < target) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  // Equal-time credits must not block all later translations by making a
+  // forward-only nearest search stop at a tie.
+  int cursor = (low - 1).clamp(0, translations.length - 1);
+  int delta(int index) =>
+      (translations[index].time.inMilliseconds - target).abs();
+  if (low < translations.length && delta(low) < delta(cursor)) cursor = low;
+  return delta(cursor) <= _translationWindow.inMilliseconds
+      ? translations[cursor].text.trim()
+      : null;
+}
+
+LyricLine _withTranslation(LyricLine line, String? translation) {
+  final String text = translation?.trim() ?? '';
+  return LyricLine(
+    line.time,
+    line.text,
+    words: line.words,
+    end: line.end,
+    translation: text.isEmpty || text == line.text.trim() ? null : text,
+  );
 }
