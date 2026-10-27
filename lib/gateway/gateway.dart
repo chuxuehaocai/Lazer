@@ -1179,38 +1179,63 @@ class NeteaseGateway {
         : int.tryParse(value is String ? value : '');
   }
 
+  /// Records the start of a play in 最近播放.
+  ///
+  /// The official player sends two client-log entries per play: `startplay`
+  /// when the track starts, and `play` (see [reportPlayback]) once it has been
+  /// heard. Both are posted to the client-log deposit as eapi requests, which
+  /// is the path that feeds the account's cloud record; a single weapi `play`
+  /// entry is accepted by the server but never reaches it.
+  Future<void> reportPlayStart({
+    required int songId,
+    required int sourceId,
+  }) async {
+    if (songId <= 0) return;
+    await _postPlayLog(<String, Object?>{
+      'action': 'startplay',
+      'json': <String, Object?>{
+        'id': songId,
+        'type': 'song',
+        'mainsite': '1',
+        'mainsiteWeb': '1',
+        'content': 'id=$sourceId',
+      },
+    });
+  }
+
   /// Reports one qualified play to the account's play record.
   ///
-  /// This is the upload half of the play-count / listening-time sync: the
-  /// official client posts an `play` action to the weblog endpoint, and the
-  /// account's record (read back by [playRecord]) gains both the play and the
-  /// listened seconds. [playedSeconds] is the time actually heard in this
-  /// session, not the track duration.
+  /// This is the upload half of the play-count / listening-time sync. The
+  /// entry carries the seconds actually heard, the queue it was played from
+  /// and the `playend` marker that makes 听歌排行 count it.
   Future<void> reportPlayback({
     required int songId,
     required int playedSeconds,
+    int sourceId = 0,
   }) async {
     if (songId <= 0 || playedSeconds <= 0) return;
-    final String logs = jsonEncode(<Map<String, Object?>>[
-      <String, Object?>{
-        'action': 'play',
-        'json': <String, Object?>{
-          'id': songId,
-          'type': 'song',
-          'time': playedSeconds,
-          'end': 'playend',
-          'wifi': 0,
-          'source': 'list',
-          'mainsite': 1,
-          'download': 0,
-          'content': '',
-        },
+    await _postPlayLog(<String, Object?>{
+      'action': 'play',
+      'json': <String, Object?>{
+        'download': 0,
+        'end': 'playend',
+        'id': songId,
+        'sourceId': '$sourceId',
+        'time': playedSeconds,
+        'type': 'song',
+        'wifi': 0,
+        'source': 'list',
+        'mainsite': '1',
+        'mainsiteWeb': '1',
+        'content': 'id=$sourceId',
       },
-    ]);
-    await _transport.request('/feedback/weblog', <String, String>{
-      'logs': logs,
     });
   }
+
+  Future<void> _postPlayLog(Map<String, Object?> log) =>
+      _transport.request('/feedback/weblog', <String, String>{
+        'logs': jsonEncode(<Map<String, Object?>>[log]),
+      });
 
   Future<List<GatewaySong>> personalFm() async {
     final Map<String, dynamic> body = await _transport.request(

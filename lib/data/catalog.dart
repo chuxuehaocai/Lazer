@@ -728,11 +728,20 @@ class Catalog {
     ];
   }
 
+  /// Records the start of a play in 最近播放.
+  Future<void> reportPlayStart({required int songId, required int sourceId}) =>
+      gateway.reportPlayStart(songId: songId, sourceId: sourceId);
+
   /// Uploads one qualified play to the account's cloud play record.
   Future<void> reportPlayback({
     required int songId,
     required int playedSeconds,
-  }) => gateway.reportPlayback(songId: songId, playedSeconds: playedSeconds);
+    int sourceId = 0,
+  }) => gateway.reportPlayback(
+    songId: songId,
+    playedSeconds: playedSeconds,
+    sourceId: sourceId,
+  );
 
   // -- listen together -----------------------------------------------------
 

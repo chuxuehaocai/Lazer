@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, listEquals;
 import 'package:flutter/material.dart';
 
+import '../audio/audio_device_report.dart';
 import '../data/audio_quality.dart';
 import '../data/catalog.dart';
 import '../data/catalog_details.dart';
@@ -4691,13 +4692,6 @@ class LegacySettingsPage extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
-                  _LegacySwitchRow(
-                    label: '显示帧率',
-                    subtitle: '实时显示 UI、GPU、低帧和 100 fps 帧预算',
-                    value: state.showFrameStats,
-                    onChanged: (bool value) =>
-                        unawaited(state.setShowFrameStats(value)),
-                  ),
                   _LegacySettingRow(
                     label: '动画帧预算',
                     subtitle: '全部界面动画按 10 ms 设计；低帧目标不低于 90 fps',
@@ -4714,6 +4708,33 @@ class LegacySettingsPage extends StatelessWidget {
                 ],
               ),
             ),
+            if (state.debugOptionsEnabled) ...<Widget>[
+              const _LegacySectionLabel('调试'),
+              AppleGroupedCard(
+                margin: EdgeInsets.zero,
+                child: Column(
+                  children: <Widget>[
+                    _LegacySwitchRow(
+                      label: '显示帧数',
+                      subtitle: '实时显示 UI、GPU、低帧和 100 fps 帧预算',
+                      value: state.showFrameStats,
+                      onChanged: (bool value) =>
+                          unawaited(state.setShowFrameStats(value)),
+                    ),
+                    _LegacySettingRow(
+                      label: '音频设备',
+                      subtitle: '查看当前音频输出端点和音频会话详情',
+                      trailing: OutlinedButton(
+                        key: const ValueKey('open-audio-device-info'),
+                        onPressed: () =>
+                            unawaited(showAudioDeviceInfoDialog(context)),
+                        child: const TrText('查看'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const _LegacySectionLabel('账户'),
             AppleGroupedCard(
               margin: EdgeInsets.zero,
@@ -4762,28 +4783,7 @@ class LegacySettingsPage extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
-                  AppleListTile(
-                    title: 'Lazer',
-                    subtitle: context.tr('提交 ${BuildInfo.shortCommit}'),
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(7),
-                      child: Image.asset(
-                        'assets/app_icon.png',
-                        width: 30,
-                        height: 30,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    trailing: Text(
-                      BuildInfo.displayVersion,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: apple.secondaryLabel,
-                        fontFeatures: const <FontFeature>[
-                          FontFeature.tabularFigures(),
-                        ],
-                      ),
-                    ),
-                  ),
+                  _VersionSecretTile(state: state),
                   _LegacySettingRow(
                     label: '检查更新',
                     subtitle: '从 GitHub 获取最新版本',
@@ -4930,6 +4930,231 @@ class _LegacySwitchRow extends StatelessWidget {
       label: label,
       subtitle: subtitle,
       trailing: Switch(value: value, onChanged: onChanged),
+    );
+  }
+}
+
+/// The 关于 version card doubles as the hidden switch for the debug section:
+/// seven taps inside four seconds toggle it. The tap target is invisible, so
+/// ordinary users only ever see an ordinary version row.
+class _VersionSecretTile extends StatefulWidget {
+  const _VersionSecretTile({required this.state});
+
+  final AppState state;
+
+  @override
+  State<_VersionSecretTile> createState() => _VersionSecretTileState();
+}
+
+class _VersionSecretTileState extends State<_VersionSecretTile> {
+  static const int _tapsToToggle = 7;
+  static const Duration _window = Duration(seconds: 4);
+
+  int _taps = 0;
+  DateTime? _firstTap;
+
+  void _tap() {
+    final DateTime now = DateTime.now();
+    final DateTime? first = _firstTap;
+    if (first == null || now.difference(first) > _window) {
+      _firstTap = now;
+      _taps = 0;
+    }
+    if (++_taps < _tapsToToggle) return;
+    _taps = 0;
+    _firstTap = null;
+    final bool enabled = !widget.state.debugOptionsEnabled;
+    unawaited(widget.state.setDebugOptionsEnabled(enabled));
+    final String message = enabled
+        ? context.tr('调试选项已开启')
+        : context.tr('调试选项已关闭');
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    return AppleListTile(
+      title: 'Lazer',
+      subtitle: context.tr('提交 ${BuildInfo.shortCommit}'),
+      onTap: _tap,
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: Image.asset(
+          'assets/app_icon.png',
+          width: 30,
+          height: 30,
+          fit: BoxFit.cover,
+        ),
+      ),
+      trailing: Text(
+        BuildInfo.displayVersion,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: apple.secondaryLabel,
+          fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+        ),
+      ),
+    );
+  }
+}
+
+/// Debug-only panel listing the current audio endpoints and the session
+/// attributes the player asked the platform for.
+Future<void> showAudioDeviceInfoDialog(BuildContext context) =>
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => const _AudioDeviceDialog(),
+    );
+
+class _AudioDeviceDialog extends StatefulWidget {
+  const _AudioDeviceDialog();
+
+  @override
+  State<_AudioDeviceDialog> createState() => _AudioDeviceDialogState();
+}
+
+class _AudioDeviceDialogState extends State<_AudioDeviceDialog> {
+  late Future<AudioDeviceReport> _report = AudioDeviceReport.collect();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const TrText('音频设备'),
+      contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+      content: SizedBox(
+        width: 420,
+        child: FutureBuilder<AudioDeviceReport>(
+          future: _report,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<AudioDeviceReport> snapshot,
+              ) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const SizedBox(
+                    height: 120,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                return _body(context, snapshot.data);
+              },
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => setState(() {
+            _report = AudioDeviceReport.collect();
+          }),
+          child: const TrText('刷新'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const TrText('完成'),
+        ),
+      ],
+    );
+  }
+
+  Widget _body(BuildContext context, AudioDeviceReport? report) {
+    final ThemeData theme = Theme.of(context);
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final TextStyle labelStyle =
+        theme.textTheme.bodyMedium?.copyWith(color: apple.label) ??
+        const TextStyle();
+    final TextStyle valueStyle =
+        theme.textTheme.bodySmall?.copyWith(color: apple.secondaryLabel) ??
+        const TextStyle();
+    final List<Widget> children = <Widget>[];
+    if (report == null) {
+      children.add(Text(context.tr('读取音频设备失败。'), style: valueStyle));
+    } else {
+      for (final AudioSessionAttribute attribute in report.attributes) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(
+                  width: 84,
+                  child: Text(context.tr(attribute.label), style: valueStyle),
+                ),
+                Expanded(child: Text(attribute.value, style: valueStyle)),
+              ],
+            ),
+          ),
+        );
+      }
+      if (report.error != null) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              context.tr('读取失败：${report.error}'),
+              style: valueStyle.copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ),
+        );
+      }
+      if (report.outputs.isEmpty) {
+        if (report.error == null) {
+          children.add(
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                context.tr('当前平台不支持读取音频设备（仅 Android 与 iOS 支持）。'),
+                style: valueStyle,
+              ),
+            ),
+          );
+        }
+      } else {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 10, bottom: 6),
+            child: Text(
+              context.tr('可用输出设备（${report.outputs.length}）'),
+              style: labelStyle,
+            ),
+          ),
+        );
+        for (final AudioDeviceInfo device in report.outputs) {
+          children.add(
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(device.name, style: labelStyle),
+                  const SizedBox(height: 1),
+                  Text(context.tr(device.typeLabel), style: valueStyle),
+                  Text(
+                    context.tr('ID：${device.id}'),
+                    style: valueStyle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      }
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 360),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: children,
+        ),
+      ),
     );
   }
 }

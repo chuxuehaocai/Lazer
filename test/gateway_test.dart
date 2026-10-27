@@ -195,7 +195,11 @@ void main() {
         <String, String>{'logs': '[]'},
       );
       expect(upload.path, '/api/feedback/weblog');
-      expect(upload.encoding, NeteaseEncoding.weapi);
+      // The official client deposits play logs through eapi on the client-log
+      // host; the old weapi post was accepted but never credited a play.
+      expect(upload.encoding, NeteaseEncoding.eapi);
+      expect(upload.desktopClient, isTrue);
+      expect(upload.domain, 'https://clientlog.music.163.com');
       expect(upload.payload['logs'], '[]');
     });
 

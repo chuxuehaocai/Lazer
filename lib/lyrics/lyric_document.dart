@@ -24,21 +24,28 @@ class LyricLine {
 
 /// Port of LrcRow.kt and LyricTimeline.kt: both fractional separators and
 /// multiple timestamps are supported; untimed JSON credits are ignored.
+///
+/// The official parser (`com.netease.cloudmusic.module.lyric.y`) accepts one
+/// or two digits for the minute and second fields, scales a one-to-three digit
+/// fraction by its length (`.5` is 500 ms, `.05` is 50 ms) and drops rows
+/// whose seconds field is 60 or more.
 List<LyricLine> parseLrc(String? source) {
   if (source == null || source.trim().isEmpty) return const [];
-  final stamp = RegExp(r'\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]');
+  final stamp = RegExp(r'\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]');
   final lines = <LyricLine>[];
   for (final row in source.split(RegExp(r'[\r\n]+'))) {
     final matches = stamp.allMatches(row).toList();
     if (matches.isEmpty) continue;
     final text = row.substring(matches.last.end).trim();
     for (final match in matches) {
+      final seconds = int.parse(match.group(2)!);
+      if (seconds >= 60) continue;
       final fraction = (match.group(3) ?? '').padRight(3, '0');
       lines.add(
         LyricLine(
           Duration(
             minutes: int.parse(match.group(1)!),
-            seconds: int.parse(match.group(2)!),
+            seconds: seconds,
             milliseconds: int.parse(fraction),
           ),
           text,
@@ -50,12 +57,14 @@ List<LyricLine> parseLrc(String? source) {
   return lines;
 }
 
-/// Port of WordLyrics.kt; word offsets are absolute song positions.
+/// Port of WordLyrics.kt; word offsets are absolute song positions. The
+/// official parser also accepts full-width commas between the timing fields,
+/// which some YRC tracks ship with.
 List<LyricLine> parseYrc(String? source) {
   if (source == null || source.trim().isEmpty) return const [];
-  final linePattern = RegExp(r'^\[(\d+),(\d+)\](.*)$');
+  final linePattern = RegExp(r'^\[(-?\d+)[,，](-?\d+)\](.*)$');
   final wordPattern = RegExp(
-    r'\((\d+),(\d+),(\d+)\)(.*?)(?=\(\d+,\d+,\d+\)|$)',
+    r'\((\d+)[,，](\d+)[,，](\d+)\)(.*?)(?=\(\d+[,，]\d+[,，]\d+\)|$)',
   );
   final lines = <LyricLine>[];
   for (final raw in source.split(RegExp(r'[\r\n]+'))) {

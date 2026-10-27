@@ -23,7 +23,8 @@ const Track _track = Track(
 );
 
 class _Gateway extends NeteaseGateway {
-  final List<(int, int)> uploads = <(int, int)>[];
+  final List<(int, int, int)> uploads = <(int, int, int)>[];
+  final List<(int, int)> starts = <(int, int)>[];
   bool failUploads = false;
 
   @override
@@ -40,12 +41,22 @@ class _Gateway extends NeteaseGateway {
       const <GatewayPlayRecord>[];
 
   @override
+  Future<void> reportPlayStart({
+    required int songId,
+    required int sourceId,
+  }) async {
+    if (failUploads) throw StateError('offline');
+    starts.add((songId, sourceId));
+  }
+
+  @override
   Future<void> reportPlayback({
     required int songId,
     required int playedSeconds,
+    int sourceId = 0,
   }) async {
     if (failUploads) throw StateError('offline');
-    uploads.add((songId, playedSeconds));
+    uploads.add((songId, playedSeconds, sourceId));
   }
 }
 
@@ -173,7 +184,10 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(harness.gateway.uploads, <(int, int)>[(42, 4)]);
+    // The client-log pair: a start log credits 最近播放, the play log credits
+    // 听歌排行 with the album/song id the official client sends as sourceId.
+    expect(harness.gateway.starts, <(int, int)>[(42, 42)]);
+    expect(harness.gateway.uploads, <(int, int, int)>[(42, 4, 42)]);
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('lazer_play_uploads'), '[]');
   });
@@ -193,7 +207,8 @@ void main() {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     expect(
       prefs.getString('lazer_play_uploads'),
-      '[{"songId":42,"seconds":4}]',
+      '[{"songId":42,"kind":"start","seconds":0,"sourceId":42},'
+      '{"songId":42,"kind":"play","seconds":4,"sourceId":42}]',
     );
 
     // The next library visit pushes the backlog before reading the record.
@@ -201,7 +216,8 @@ void main() {
     await harness.state.loadPlayStats(force: true);
     await tester.pump();
 
-    expect(harness.gateway.uploads, <(int, int)>[(42, 4)]);
+    expect(harness.gateway.starts, <(int, int)>[(42, 42)]);
+    expect(harness.gateway.uploads, <(int, int, int)>[(42, 4, 42)]);
     expect(prefs.getString('lazer_play_uploads'), '[]');
   });
 

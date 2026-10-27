@@ -339,9 +339,28 @@ class NeteaseTransport {
     if (web) {
       payload['csrf_token'] = csrf;
     } else if (!plain) {
+      // eapi authenticates the client through its envelope header. The
+      // play-record deposit only credits entries from the desktop player, so
+      // that route presents the osx identity the official player uses.
+      final String os = route.desktopClient
+          ? 'osx'
+          : route.mobileClient
+          ? 'android'
+          : 'pc';
+      final String appver = route.desktopClient
+          ? '3.1.10.5100'
+          : route.mobileClient
+          ? '9.5.95'
+          : '3.1.17.204416';
       payload['header'] = <String, Object?>{
-        'os': route.mobileClient ? 'android' : 'pc',
-        'appver': route.mobileClient ? '9.5.95' : '3.1.17.204416',
+        'os': os,
+        'appver': appver,
+        'osver': route.desktopClient
+            ? '15.5'
+            : route.mobileClient
+            ? '14'
+            : 'Microsoft-Windows-10-Professional-build-19045-64bit',
+        'channel': route.mobileClient ? 'xiaomi' : 'netease',
         if (route.mobileClient) 'versioncode': '9005095',
         '__csrf': csrf,
         'requestId':
@@ -365,11 +384,16 @@ class NeteaseTransport {
         : <String, String>{
             'params': gatewayEapi(route.path, jsonEncode(payload)),
           };
+    final String host =
+        route.domain ??
+        (web || plain
+            ? 'https://music.163.com'
+            : 'https://interfacepc.music.163.com');
     final String endpoint = web
-        ? 'https://music.163.com/weapi/'
+        ? '$host/weapi/'
         : plain
-        ? 'https://music.163.com'
-        : 'https://interfacepc.music.163.com/eapi/';
+        ? host
+        : '$host/eapi/';
     final String upstreamPath = route.path.startsWith('/api/')
         ? route.path.substring(5)
         : route.path;
@@ -380,7 +404,11 @@ class NeteaseTransport {
     request.headers.set(io.HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(
       io.HttpHeaders.userAgentHeader,
-      plain ? _desktopUserAgent : userAgent,
+      route.desktopClient
+          ? _osxUserAgent
+          : plain
+          ? _desktopUserAgent
+          : userAgent,
     );
     request.headers.set('Referer', 'https://music.163.com/');
     request.headers.set(io.HttpHeaders.cacheControlHeader, 'no-cache');
@@ -390,6 +418,14 @@ class NeteaseTransport {
             'os=android',
             'appver=9.5.95',
             'versioncode=9005095',
+          ].join('; ')
+        : route.desktopClient
+        ? <String>[
+            ?currentCookie,
+            'os=osx',
+            'appver=3.1.10.5100',
+            'osver=15.5',
+            'channel=netease',
           ].join('; ')
         : currentCookie;
     if (requestCookie != null) {
@@ -574,6 +610,12 @@ class NeteaseTransport {
   static const String _desktopUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like '
       'Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.1.29.205117';
+
+  /// The macOS player identity that the client-log deposit expects; its
+  /// headers mirror a Chrome build of the desktop player.
+  static const String _osxUserAgent =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 }
 
 class _Response {

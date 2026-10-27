@@ -406,7 +406,13 @@ void main() {
         ScrollMotion.addWheelImpulse(second, -25),
         inExclusiveRange(0, second),
       );
-      expect(ScrollMotion.carriedVelocity(2000), 1300);
+      // The default pair means stock Flutter: the release velocity passes
+      // through untouched. A tuned pair still scales it.
+      expect(ScrollMotion.carriedVelocity(2000), 2000);
+      expect(
+        ScrollMotion.carriedVelocity(2000, retention: .95, acceleration: 2),
+        2600,
+      );
     },
   );
 

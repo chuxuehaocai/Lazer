@@ -119,13 +119,19 @@ announced with 已切换至心动模式.
 
 ## Play reporting and 一起听
 
-- A play is uploaded to the account's cloud record once, when the session ends
-  (track change, stop or completion) and only after the qualifying listen
-  (half the song, capped at 30 seconds). The `feedback/weblog` payload carries
-  the song id and the seconds actually heard, measured from position deltas so
-  buffering and seeks never inflate the time. Failed uploads stay in a small
-  in-memory queue and are retried on the next track boundary or library
-  refresh; `flutter_test` covers the route mapping.
+- Play reporting follows the official client-log pair. When a new session
+  starts, a `startplay` log credits 最近播放; once the qualifying listen is
+  reached (half the song, capped at 30 seconds) a `play` log credits
+  听歌排行 with the seconds actually heard, measured from position deltas so
+  buffering and seeks never inflate the time. Both logs go to
+  `clientlog.music.163.com/eapi/feedback/weblog` with the desktop `os=osx`
+  identity the official client presents; the old single `weapi` post was
+  accepted with code 200 but never reached the account record. The payload
+  carries the song id and the album-or-song `sourceId` used for attribution.
+  Failed logs stay in a persisted queue (kind, seconds, sourceId) and are
+  retried on sign-in, the next qualification, or a library refresh, so an
+  offline spell or a crash does not lose plays; `flutter_test` covers the
+  route mapping and the queued retry.
 - **一起听** has an entry in the player header on every platform and in
   设置 → 账户. The room sheet creates a room, shows the invite code
   (`roomId|inviterId`), copies it, joins a friend's room by code or invite

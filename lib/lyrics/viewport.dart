@@ -73,6 +73,8 @@ class _LyricViewportState extends State<LyricViewport>
   int? _middlePointer;
   double _offset = 0;
   double _velocity = 0;
+  ClampingScrollSimulation? _coast;
+  double _coastTime = 0;
   Duration _lastFrame = Duration.zero;
   Duration? _lastLanePosition;
   Duration? _lastMedia;
@@ -254,6 +256,10 @@ class _LyricViewportState extends State<LyricViewport>
 
   void _start() {
     final Ticker? ticker = _ticker;
+    // Any new velocity (drag release, wheel impulse) starts a fresh glide
+    // rather than continuing the previous spline's clock.
+    _coast = null;
+    _coastTime = 0;
     if (ticker != null && !ticker.isActive) {
       _lastFrame = Duration.zero;
       ticker.start();
@@ -270,8 +276,25 @@ class _LyricViewportState extends State<LyricViewport>
     if (widget.state.playing) _followLine();
     if (_manual && !_dragging && _velocity.abs() > 5 && dt > 0) {
       final previous = _offset;
-      _setOffset(_offset + _velocity * dt);
-      _velocity *= math.pow(widget.state.scrollRetention, dt * 60);
+      if (ScrollMotion.isNative(
+        retention: widget.state.scrollRetention,
+        acceleration: widget.state.scrollAcceleration,
+      )) {
+        // At the default pair the manual glide must match a stock Flutter
+        // fling, so advance the framework's own spline instead of the
+        // exponential coast the inertia sliders describe.
+        final ClampingScrollSimulation coast = _coast ??=
+            ClampingScrollSimulation(position: _offset, velocity: _velocity);
+        _coastTime += dt;
+        _setOffset(coast.x(_coastTime));
+        _velocity = coast.dx(_coastTime);
+        if (coast.isDone(_coastTime)) _velocity = 0;
+      } else {
+        _coast = null;
+        _coastTime = 0;
+        _setOffset(_offset + _velocity * dt);
+        _velocity *= math.pow(widget.state.scrollRetention, dt * 60);
+      }
       if (_offset == previous) _velocity = 0;
     }
     var moving =

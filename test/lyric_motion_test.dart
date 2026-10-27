@@ -285,7 +285,10 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MaterialApp(scrollBehavior: const AppScrollBehavior(), home: content),
+      MaterialApp(
+        scrollBehavior: const AppScrollBehavior(retention: .95),
+        home: content,
+      ),
     );
     final center = tester.getCenter(find.byType(ListView));
     await tester.sendEventToBinding(
@@ -326,5 +329,35 @@ void main() {
       .98,
       reason: 'changing the preference updates an already-mounted scroll view',
     );
+  });
+
+  testWidgets('the default settings hand the wheel back to Flutter', (
+    tester,
+  ) async {
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    final content = Scaffold(
+      body: ListView.builder(
+        controller: controller,
+        itemCount: 100,
+        itemExtent: 60,
+        itemBuilder: (_, i) => Text('$i'),
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(scrollBehavior: const AppScrollBehavior(), home: content),
+    );
+    final center = tester.getCenter(find.byType(ListView));
+    await tester.sendEventToBinding(
+      PointerScrollEvent(position: center, scrollDelta: const Offset(0, 120)),
+    );
+    await tester.pump();
+    // Stock Flutter applies a wheel step synchronously and adds no momentum.
+    final first = controller.offset;
+    expect(first, greaterThan(0));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.offset, first);
+    await tester.pumpAndSettle();
+    expect(find.byType(Scrollbar), findsNothing);
   });
 }

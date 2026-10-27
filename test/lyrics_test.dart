@@ -58,6 +58,17 @@ void main() {
       expect(lines.map((line) => line.time.inMilliseconds), [12950, 62500]);
     },
   );
+  test('accepts one-digit second fields like the official parser', () {
+    final lines = parseLrc('[0:5]first\n[01:2.5]second\n[00:60.00]invalid');
+    expect(lines.map((line) => line.text), <String>['first', 'second']);
+    expect(lines.map((line) => line.time.inMilliseconds), <int>[5000, 62500]);
+  });
+  test('accepts full-width commas in YRC timing', () {
+    final lines = parseYrc('[1200，800](1200，400，0)逐(1600，400，0)字');
+    expect(lines.single.text, '逐字');
+    expect(lines.single.time, const Duration(milliseconds: 1200));
+    expect(lines.single.end, const Duration(milliseconds: 2000));
+  });
   test('translation follows the nearest source line within one second', () {
     final lines = parseLyrics(
       const GatewayLyrics(

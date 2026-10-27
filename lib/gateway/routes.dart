@@ -8,12 +8,22 @@ class NeteaseRequest {
     required this.payload,
     this.encoding = NeteaseEncoding.eapi,
     this.mobileClient = false,
+    this.desktopClient = false,
+    this.domain,
   });
 
   final String path;
   final Map<String, Object?> payload;
   final NeteaseEncoding encoding;
   final bool mobileClient;
+
+  /// Identifies the desktop client (`os=osx`) for endpoints that only accept
+  /// plays from that player, such as the client-log deposit.
+  final bool desktopClient;
+
+  /// Overrides the request host, for example the client-log deposit host.
+  /// Scheme and host only, without a trailing slash.
+  final String? domain;
 }
 
 /// Port of the finite route table in NeteaseRoutes.kt.
@@ -45,6 +55,8 @@ NeteaseRequest buildNeteaseRequest(
     String path, {
     bool web = false,
     bool plain = false,
+    bool desktop = false,
+    String? domain,
     Map<String, Object?> body = const <String, Object?>{},
   }) => NeteaseRequest(
     path: path,
@@ -53,6 +65,8 @@ NeteaseRequest buildNeteaseRequest(
         ? NeteaseEncoding.api
         : (web ? NeteaseEncoding.weapi : NeteaseEncoding.eapi),
     mobileClient: alias.startsWith('/listentogether/'),
+    desktopClient: desktop,
+    domain: domain,
   );
 
   Map<String, Object?> page({int defaultLimit = 30}) => <String, Object?>{
@@ -419,9 +433,15 @@ NeteaseRequest buildNeteaseRequest(
         body: <String, Object?>{'uid': id('uid'), 'type': value('type', '0')},
       );
     case '/feedback/weblog':
+      // The play-record deposit is not the ordinary interface host: the
+      // official player posts its client-log entries to the client-log host
+      // through the eapi envelope, which is the surface the account's
+      // 最近播放 and 听歌排行 are built from. The webapi copy is accepted but
+      // does not reach that store.
       return request(
         '/api/feedback/weblog',
-        web: true,
+        desktop: true,
+        domain: 'https://clientlog.music.163.com',
         body: <String, Object?>{'logs': value('logs')},
       );
     case '/likelist':

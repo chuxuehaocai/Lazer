@@ -58,6 +58,7 @@ class InertiaScrollPhysics extends ClampingScrollPhysics {
   double carriedMomentum(double existingVelocity) =>
       ScrollMotion.carriedVelocity(
         existingVelocity,
+        retention: retention,
         acceleration: acceleration,
       );
   @override
@@ -73,6 +74,19 @@ class InertiaScrollPhysics extends ClampingScrollPhysics {
         (velocity < 0 && position.pixels <= position.minScrollExtent) ||
         (velocity > 0 && position.pixels >= position.maxScrollExtent)) {
       return null;
+    }
+    // At the defaults the settings must reproduce Flutter's stock scrolling,
+    // so hand the fling to the framework's own clamping simulation instead of
+    // approximating it with a tuned friction curve.
+    if (ScrollMotion.isNative(
+      retention: retention,
+      acceleration: acceleration,
+    )) {
+      return ClampingScrollSimulation(
+        position: position.pixels,
+        velocity: velocity,
+        tolerance: tolerance,
+      );
     }
     return FrictionSimulation(
       math.pow(retention, 60).toDouble(),
@@ -162,6 +176,15 @@ class _WheelMomentumState extends State<_WheelMomentum>
 
   void _wheel(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
+    // Stock Flutter applies a wheel step synchronously with no momentum. The
+    // default settings must feel exactly like that, so leave the signal alone
+    // until the inertia sliders are actually moved.
+    if (ScrollMotion.isNative(
+      retention: widget.retention,
+      acceleration: widget.acceleration,
+    )) {
+      return;
+    }
     final position = _position;
     if (position == null ||
         !position.physics.shouldAcceptUserOffset(position)) {

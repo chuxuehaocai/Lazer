@@ -572,6 +572,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double lyricControlsSeconds = 1.5;
   bool lyricBlurEnabled = true;
   bool showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
+
+  /// Hidden developer switches. They stay out of the settings list until the
+  /// version card in 关于 is tapped repeatedly, so ordinary users never see
+  /// the frame overlay or the audio-device dump.
+  bool debugOptionsEnabled = false;
+
+  Future<void> setDebugOptionsEnabled(bool value) async {
+    if (debugOptionsEnabled == value) return;
+    debugOptionsEnabled = value;
+    // The switch that turns the overlay back off disappears with the debug
+    // section, so never leave it running behind closed doors.
+    if (!value) showFrameStats = false;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lazer_debug_options', value);
+    if (!value) await prefs.setBool('lazer_show_frame_stats', false);
+  }
+
   double lyricFontSize = 22;
   int lyricFontWeight = 600;
   static int normalizeLyricWeight(int value) =>
@@ -957,6 +975,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricBlurEnabled = prefs.getBool('lazer_lyric_blur') ?? true;
       showFrameStats =
           prefs.getBool('lazer_show_frame_stats') ?? showFrameStats;
+      debugOptionsEnabled = prefs.getBool('lazer_debug_options') ?? false;
+      // A build without the hidden switch must not boot with the overlay on.
+      if (!debugOptionsEnabled) {
+        showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
+      }
       lyricFontSize = (prefs.getDouble('lazer_lyric_font_size') ?? 22).clamp(
         14,
         40,
@@ -2428,6 +2451,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _playSessionPosition = _position;
       _playSessionQualified = false;
       _playSessionSent = false;
+      _reportPlayStart(track);
       return;
     }
     final Duration delta = _position - _playSessionPosition;
@@ -2436,7 +2460,31 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _playSessionTime += delta;
     if (!_playSessionQualified && _playSessionTime >= _qualifyTime(track)) {
       _playSessionQualified = true;
+      // The official player reports the play as soon as it has been heard,
+      // not when the listener pauses or changes track. Waiting for a boundary
+      // meant the song on screen never reached 听歌排行 and a force-close lost
+      // the report entirely.
+      _flushQualifiedSession();
     }
+  }
+
+  /// The queue a play is credited to: the album when the track names one,
+  /// otherwise the song itself, matching the official play-log `sourceId`.
+  int _playSourceId(Track track) {
+    if (track.albumId > 0) return track.albumId;
+    return int.tryParse(track.id) ?? 0;
+  }
+
+  void _reportPlayStart(Track track) {
+    final int? songId = int.tryParse(track.id);
+    if (songId == null || songId <= 0 || !signedIn) return;
+    _enqueuePlay(
+      _PlayReport(
+        songId: songId,
+        kind: _PlayLogKind.start,
+        sourceId: _playSourceId(track),
+      ),
+    );
   }
 
   /// The official play record qualifies a play after half the song, capped at
@@ -2466,23 +2514,30 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? track = _playSessionTrack;
     if (track == null || !_playSessionQualified || _playSessionSent) return;
     _playSessionSent = true;
-    unawaited(_uploadPlay(track, _playSessionTime));
-  }
-
-  Future<void> _uploadPlay(Track track, Duration played) async {
     final int? songId = int.tryParse(track.id);
     if (songId == null || songId <= 0 || !signedIn) return;
     final int durationSeconds = track.duration.inSeconds;
-    final int seconds = played.inSeconds.clamp(
+    final int seconds = _playSessionTime.inSeconds.clamp(
       1,
       durationSeconds > 0
           ? durationSeconds
-          : played.inSeconds.clamp(1, 1 << 20),
+          : _playSessionTime.inSeconds.clamp(1, 1 << 20),
     );
+    _enqueuePlay(
+      _PlayReport(
+        songId: songId,
+        kind: _PlayLogKind.play,
+        seconds: seconds,
+        sourceId: _playSourceId(track),
+      ),
+    );
+  }
+
+  void _enqueuePlay(_PlayReport report) {
     if (_playUploads.length >= 50) _playUploads.removeAt(0);
-    _playUploads.add(_PlayReport(songId: songId, seconds: seconds));
+    _playUploads.add(report);
     unawaited(_persistPlayUploads());
-    await _flushPlayUploads();
+    unawaited(_flushPlayUploads());
   }
 
   /// Restores plays that qualified while the app was offline or closing, so a
@@ -2497,8 +2552,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         if (row is! Map<String, dynamic>) continue;
         final int songId = (row['songId'] as num?)?.toInt() ?? 0;
         final int seconds = (row['seconds'] as num?)?.toInt() ?? 0;
-        if (songId > 0 && seconds > 0) {
-          _playUploads.add(_PlayReport(songId: songId, seconds: seconds));
+        final int sourceId = (row['sourceId'] as num?)?.toInt() ?? songId;
+        // Entries written before the split carry only seconds and are plays.
+        final _PlayLogKind kind = row['kind'] == 'start'
+            ? _PlayLogKind.start
+            : _PlayLogKind.play;
+        if (songId > 0 && (kind == _PlayLogKind.start || seconds > 0)) {
+          _playUploads.add(
+            _PlayReport(
+              songId: songId,
+              kind: kind,
+              seconds: seconds,
+              sourceId: sourceId,
+            ),
+          );
         }
       }
       while (_playUploads.length > 50) {
@@ -2514,9 +2581,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         'lazer_play_uploads',
-        jsonEncode(<Map<String, int>>[
+        jsonEncode(<Map<String, Object?>>[
           for (final report in _playUploads)
-            <String, int>{'songId': report.songId, 'seconds': report.seconds},
+            <String, Object?>{
+              'songId': report.songId,
+              'kind': report.kind == _PlayLogKind.start ? 'start' : 'play',
+              'seconds': report.seconds,
+              'sourceId': report.sourceId,
+            },
         ]),
       );
     } catch (_) {}
@@ -2529,14 +2601,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (_playUploadInFlight || !signedIn) return;
     _playUploadInFlight = true;
     var uploaded = false;
+    var uploadedPlay = false;
     try {
       while (_playUploads.isNotEmpty) {
         final _PlayReport report = _playUploads.first;
         try {
-          await catalog.reportPlayback(
-            songId: report.songId,
-            playedSeconds: report.seconds,
-          );
+          if (report.kind == _PlayLogKind.start) {
+            await catalog.reportPlayStart(
+              songId: report.songId,
+              sourceId: report.sourceId,
+            );
+          } else {
+            await catalog.reportPlayback(
+              songId: report.songId,
+              playedSeconds: report.seconds,
+              sourceId: report.sourceId,
+            );
+            uploadedPlay = true;
+          }
           _playUploads.removeAt(0);
           uploaded = true;
         } catch (_) {
@@ -2548,7 +2630,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       final int uid = _user.userId;
       if (uploaded) {
         unawaited(_persistPlayUploads());
-        if (uid > 0) {
+        if (uid > 0 && uploadedPlay) {
           await catalog.invalidatePlayStats(uid);
           // The loaded list predates this play; make the next library visit
           // fetch the updated record instead of short-circuiting on the old
@@ -2616,11 +2698,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 enum LoopMode { off, all, one }
 
 /// One queued upload for the account's play record.
+enum _PlayLogKind { start, play }
+
 class _PlayReport {
-  const _PlayReport({required this.songId, required this.seconds});
+  const _PlayReport({
+    required this.songId,
+    required this.kind,
+    this.seconds = 0,
+    this.sourceId = 0,
+  });
 
   final int songId;
+  final _PlayLogKind kind;
   final int seconds;
+  final int sourceId;
 }
 
 /// Tick-only heartbeat lane. `notifyListeners()` is @protected, so this thin
