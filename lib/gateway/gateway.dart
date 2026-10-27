@@ -254,6 +254,8 @@ class GatewayPlaylist {
     this.playCount = 0,
     this.trackIds = const <int>[],
     this.created = false,
+    this.subscribed,
+    this.creatorId,
     this.specialType,
   });
 
@@ -265,14 +267,25 @@ class GatewayPlaylist {
   final int playCount;
   final List<int> trackIds;
 
-  /// Whether the (subscribed) playlist was created by the querying user.
+  /// Set by [NeteaseGateway.createPlaylist] for a playlist that was just
+  /// created; `/user/playlist` does not send this legacy flag.
   final bool created;
+
+  /// `/user/playlist` marks collected playlists with `subscribed: true` and
+  /// leaves it false for the account's own playlists.
+  final bool? subscribed;
+
+  /// Owner id (`creator.userId`). Together with [subscribed] this identifies
+  /// playlists owned by the signed-in account.
+  final int? creatorId;
 
   /// NetEase marks the personal "liked songs" collection as `specialType = 5`.
   final int? specialType;
 
   factory GatewayPlaylist.fromJson(Map<String, dynamic> json) {
     final dynamic trackIds = json['trackIds'];
+    final dynamic creator = json['creator'];
+    final dynamic subscribed = json['subscribed'];
     return GatewayPlaylist(
       id: (json['id'] as num?)?.toInt() ?? 0,
       name: json['name'] as String? ?? '',
@@ -281,6 +294,10 @@ class GatewayPlaylist {
       trackCount: (json['trackCount'] as num?)?.toInt() ?? 0,
       playCount: (json['playCount'] as num?)?.toInt() ?? 0,
       created: json['created'] as bool? ?? false,
+      subscribed: subscribed is bool ? subscribed : null,
+      creatorId: creator is Map<String, dynamic>
+          ? (creator['userId'] as num?)?.toInt()
+          : null,
       specialType: (json['specialType'] as num?)?.toInt(),
       trackIds: trackIds is List
           ? trackIds

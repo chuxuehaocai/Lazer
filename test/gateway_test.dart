@@ -475,6 +475,28 @@ void main() {
     });
   });
   group('cloud playlists', () {
+    test('reads ownership from the user playlist payload', () {
+      final GatewayPlaylist owned = GatewayPlaylist.fromJson(<String, dynamic>{
+        'id': 1,
+        'name': '自己创建',
+        'subscribed': false,
+        'creator': <String, dynamic>{'userId': 7},
+      });
+      expect(owned.subscribed, isFalse);
+      expect(owned.creatorId, 7);
+
+      final GatewayPlaylist collected = GatewayPlaylist.fromJson(
+        <String, dynamic>{
+          'id': 2,
+          'name': '收藏的歌单',
+          'subscribed': true,
+          'creator': <String, dynamic>{'userId': 9},
+        },
+      );
+      expect(collected.subscribed, isTrue);
+      expect(collected.creatorId, 9);
+    });
+
     test('creates a private playlist and adds tracks', () async {
       final _PlaylistTransport transport = _PlaylistTransport();
       final NeteaseGateway gateway = NeteaseGateway(transport: transport);

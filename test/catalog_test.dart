@@ -16,6 +16,7 @@ class _Gateway extends NeteaseGateway {
   bool failSearch = false;
   bool failPlaylist = false;
   bool failAll = false;
+  List<GatewayPlaylist>? collectionFixtures;
   int playlistCalls = 0;
   int collectionCalls = 0;
   int audioCalls = 0;
@@ -68,6 +69,8 @@ class _Gateway extends NeteaseGateway {
   }) async {
     collectionCalls++;
     if (failAll) throw const SocketException('offline');
+    final List<GatewayPlaylist>? fixtures = collectionFixtures;
+    if (fixtures != null) return fixtures;
     return [
       GatewayPlaylist(
         id: uid * 10,
@@ -471,6 +474,47 @@ void main() {
 
         await restarted.invalidateCollections(7);
         expect(await restarted.cachedUserCollections(7), isNull);
+      },
+    );
+
+    test(
+      'playlist ownership comes from subscribed and creator fields',
+      () async {
+        final gateway = _Gateway()
+          ..collectionFixtures = const <GatewayPlaylist>[
+            GatewayPlaylist(
+              id: 1,
+              name: '喜欢的音乐',
+              specialType: 5,
+              subscribed: false,
+              creatorId: 7,
+            ),
+            GatewayPlaylist(
+              id: 2,
+              name: '自己创建',
+              subscribed: false,
+              creatorId: 7,
+            ),
+            GatewayPlaylist(
+              id: 3,
+              name: '收藏的歌单',
+              subscribed: true,
+              creatorId: 9,
+            ),
+            GatewayPlaylist(id: 4, name: '旧版数据'),
+          ];
+        final collections = await Catalog(
+          gateway: gateway,
+          cache: disk,
+        ).userCollections(7);
+        expect(collections.liked?.id, '1');
+        expect(collections.created.map((playlist) => playlist.id), <String>[
+          '2',
+        ]);
+        expect(collections.subscribed.map((playlist) => playlist.id), <String>[
+          '3',
+          '4',
+        ]);
       },
     );
 

@@ -144,6 +144,11 @@ class Catalog {
         : sha256.convert(utf8.encode(cookie)).toString();
   }
 
+  // Versioned so collections cached before ownership was read from
+  // `subscribed`/`creator` cannot keep every own playlist in the subscribed
+  // shelf.
+  String _collectionsKey(int uid) => 'collections:v2:$_scope:$uid';
+
   Future<T> _cached<T extends Object>(
     String key,
     Duration ttl,
@@ -270,15 +275,14 @@ class Catalog {
   Future<UserCollections?> cachedUserCollections(int uid) => uid <= 0
       ? Future<UserCollections?>.value(null)
       : _storedSnapshot<UserCollections>(
-          'collections:$_scope:$uid',
+          _collectionsKey(uid),
           _decodeCollections,
         );
 
   Future<void> invalidatePlaylist(String id) =>
       _expire('playlist-v2:$_scope:$id');
 
-  Future<void> invalidateCollections(int uid) =>
-      _expire('collections:$_scope:$uid');
+  Future<void> invalidateCollections(int uid) => _expire(_collectionsKey(uid));
 
   Future<List<Track>> refreshPlaylist(String id) async {
     await invalidatePlaylist(id);
@@ -1131,7 +1135,7 @@ class Catalog {
   Future<UserCollections> userCollections(int uid) => uid <= 0
       ? Future.value(UserCollections.empty)
       : _cached(
-          'collections:$_scope:$uid',
+          _collectionsKey(uid),
           const Duration(minutes: 5),
           _decodeCollections,
           _encodeCollections,
@@ -1151,12 +1155,17 @@ class Catalog {
       final List<Playlist> subscribed = <Playlist>[];
       for (final GatewayPlaylist p in raw) {
         final Playlist playlist = playlistFromGateway(p);
-        // The personal liked collection also shows up as "created"; pull it
-        // out so the profile can label and count it on its own (mirrors the
-        // reference: specialType 5, name fallback for legacy payloads).
-        if (p.specialType == 5 || (p.created && p.name.endsWith('喜欢的音乐'))) {
+        // `/user/playlist` does not send `created`; own playlists have
+        // `subscribed: false` and the account's id in `creator.userId`.
+        final bool mine =
+            p.created || p.creatorId == uid || p.subscribed == false;
+        // The personal liked collection also shows up as an own playlist;
+        // pull it out so the profile can label and count it on its own
+        // (mirrors the reference: specialType 5, name fallback for legacy
+        // payloads).
+        if (p.specialType == 5 || (mine && p.name.endsWith('喜欢的音乐'))) {
           liked ??= playlist;
-        } else if (p.created) {
+        } else if (mine) {
           created.add(playlist);
         } else {
           subscribed.add(playlist);
