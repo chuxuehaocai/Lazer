@@ -25,6 +25,16 @@ All artifact names follow `Lazer-<OS>-<Arch>`. `universal` denotes a multi-archi
 package. The macOS archives preserve executable permissions and framework symlinks.
 Architecture checks run before packaging. IPA builds explicitly disable code signing.
 
+## Native audio engine
+
+The desktop playback engine ported from `master` (FFmpeg + WASAPI/ALSA/CoreAudio,
+DSD/DoP, gapless, EQ/limiter) is opt-in: it is built into the bundle only when a
+DSD-capable FFmpeg is available, and the app otherwise plays through `just_audio`.
+The CI workflow does not set `LAZER_FFMPEG_ROOT`, so released binaries currently use
+`just_audio`. On Windows the engine must be built with MSVC (its WASAPI backend
+cannot be linked by MinGW). See [audio-engine.md](audio-engine.md) for the build
+variables, the settings page and the checks that cover the port.
+
 ## Build stamp
 
 Every platform build receives the commit it was cut from through

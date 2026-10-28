@@ -8,6 +8,7 @@ import 'package:flutter/material.dart' show Color, ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../audio/audio_engine.dart';
+import '../audio/hifi_controller.dart';
 import '../diagnostics/build_info.dart';
 import '../downloads/download_manager.dart';
 import '../interaction/app_haptics.dart';
@@ -27,6 +28,7 @@ import '../utils/background_image.dart';
 import 'build_safe_notifier.dart';
 import 'listen_together.dart';
 import 'media_shortcuts.dart';
+import 'hifi_settings.dart';
 import 'ui_preferences.dart';
 
 /// How the session was authenticated.
@@ -130,6 +132,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this._independentPlayback = false,
     this.enableExternalCharts = false,
     this.deviceIsTelevision = false,
+    this.hifiSettings = const HifiSettings(),
+    this.hifi,
   }) : catalog = catalog ?? Catalog(),
        localLibrary = localLibrary ?? LocalLibrary(),
        updateChecker = updateChecker ?? UpdateChecker() {
@@ -144,6 +148,50 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // An engine that can hold a queue hands the next track over without a
     // reload; that hand-off arrives as an index change, never as a completion.
     _indexSubscription = _queueEngine?.indexStream.listen(_onEngineAdvanced);
+    // Terminal failures of the native engine (device lost, decode error) have no
+    // throw site to reach the load path, so they arrive here instead.
+    final AudioEngine? engine = audioEngine;
+    _failureSubscription = engine is FailureReportingAudioEngine
+        ? (engine as FailureReportingAudioEngine).failures.listen(
+            _onEngineFailure,
+          )
+        : null;
+  }
+
+  /// HiFi output settings: device, exclusive/bit-perfect policy, DSD mode, buffer,
+  /// and the equaliser. Applied to the native engine by [hifi].
+  HifiSettings hifiSettings;
+
+  /// Owns applying those settings; null when the app runs on `just_audio`.
+  final HifiController? hifi;
+
+  /// Persists the HiFi settings; a single writer so a value the engine refused is
+  /// not stored as if it had taken effect.
+  Future<void> setHifiSettings(HifiSettings next) async {
+    if (next == hifiSettings) return;
+    hifiSettings = next;
+    notifyListeners();
+    // Keep the controller's copy in sync and push live DSP settings to the
+    // native engine. Without this, the settings page only changed AppState and
+    // SharedPreferences; EQ and crossfeed never reached the audio thread.
+    final HifiController? controller = hifi;
+    if (controller != null) {
+      await controller.update(next);
+      return;
+    }
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    for (final MapEntry<String, Object?> entry in next.toMap().entries) {
+      final Object? value = entry.value;
+      if (value == null) {
+        await prefs.remove(entry.key);
+      } else if (value is bool) {
+        await prefs.setBool(entry.key, value);
+      } else if (value is int) {
+        await prefs.setInt(entry.key, value);
+      } else {
+        await prefs.setString(entry.key, '$value');
+      }
+    }
   }
 
   bool _independentPlayback;
@@ -325,6 +373,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   );
   StreamSubscription<void>? _completionSubscription;
   StreamSubscription<int>? _indexSubscription;
+  StreamSubscription<String>? _failureSubscription;
   static const playbackInterval = Duration(milliseconds: 100);
   bool hapticsEnabled = true;
   final AppHaptics haptics = AppHaptics();
@@ -1013,6 +1062,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       playbackQuality = AudioQualityInfo.parse(
         prefs.getString('lazer_playback_quality'),
       );
+      hifiSettings = HifiSettings.fromMap(<String, Object?>{
+        'hifi_native_engine': prefs.getBool('hifi_native_engine'),
+        'hifi_output_token': prefs.getString('hifi_output_token'),
+        'hifi_output_name': prefs.getString('hifi_output_name'),
+        'hifi_exclusive': prefs.getBool('hifi_exclusive'),
+        'hifi_bit_perfect': prefs.getBool('hifi_bit_perfect'),
+        'hifi_dsd_mode': prefs.getString('hifi_dsd_mode'),
+        'hifi_dsd_rate_policy': prefs.getString('hifi_dsd_rate_policy'),
+        'hifi_volume_normalization': prefs.getString(
+          'hifi_volume_normalization',
+        ),
+        'hifi_crossfeed': prefs.getString('hifi_crossfeed'),
+        'hifi_buffer_millis': prefs.getInt('hifi_buffer_millis'),
+        'hifi_equalizer': prefs.getString('hifi_equalizer'),
+      });
+      unawaited(hifi?.apply() ?? Future<void>.value());
       downloadQuality = AudioQualityInfo.parse(
         prefs.getString('lazer_download_quality'),
       );
@@ -2402,6 +2467,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
   }
 
+  /// The engine failed after the source was loaded.
+  ///
+  /// The message is shown instead of silently stopping: a lost output device and a
+  /// decode error both leave the user with no audio, and both are worth naming.
+  void _onEngineFailure(String message) {
+    if (!_realActive) return;
+    _failPlayback(message);
+  }
+
   void _onEngineCompleted() {
     _finishPlaySession();
     if (!_realActive || !_playing) return;
@@ -2741,6 +2815,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     listenTogether.dispose();
     _completionSubscription?.cancel();
     _indexSubscription?.cancel();
+    _failureSubscription?.cancel();
     _ticker?.cancel();
     _tickNotifier.dispose();
     if (_ownsDownloadManager) downloadManager.dispose();

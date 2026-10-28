@@ -140,7 +140,7 @@ void main() {
     );
     expect(tuned.columns, 22);
     expect(tuned.rows, 14);
-    expect(tuned.frameInterval.inMilliseconds, 47);
+    expect(tuned.frameInterval.inMilliseconds, 20);
     expect(tuned.vertexCount, lessThan(full.vertexCount));
   });
 

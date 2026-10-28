@@ -94,66 +94,112 @@ class DesktopNowPlaying extends StatelessWidget {
                 ),
                 Expanded(
                   child: LayoutBuilder(
-                    builder: (context, box) => Padding(
-                      padding: const EdgeInsets.fromLTRB(32, 24, 24, 24),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          SizedBox(
-                            width: (box.maxWidth * .34).clamp(240, 440),
-                            child: _Presentation(
-                              track: track,
-                              state: state,
-                              artwork: artwork,
-                              onSaveArtwork: onSaveArtwork,
-                            ),
-                          ),
-                          const SizedBox(width: 32),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: RepaintBoundary(
-                              child: AnimatedSwitcher(
-                                duration:
-                                    MediaQuery.disableAnimationsOf(context)
-                                    ? Duration.zero
-                                    : const Duration(milliseconds: 240),
-                                switchInCurve: Curves.easeOutCubic,
-                                switchOutCurve: Curves.easeInCubic,
-                                transitionBuilder: (child, animation) =>
-                                    FadeTransition(
-                                      opacity: animation,
-                                      child: SlideTransition(
-                                        position: Tween(
-                                          begin: const Offset(.025, 0),
-                                          end: Offset.zero,
-                                        ).animate(animation),
-                                        child: RepaintBoundary(child: child),
+                    builder: (context, box) {
+                      final double sidePadding = (box.maxWidth * .04).clamp(
+                        24.0,
+                        64.0,
+                      );
+                      return Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: sidePadding,
+                          vertical: 24,
+                        ),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 1280),
+                            child: LayoutBuilder(
+                              builder: (context, content) {
+                                // Both panes share the available width equally
+                                // at every window size. Bound the artwork group
+                                // inside its pane without changing the split.
+                                final double paneGap = (content.maxWidth * .06)
+                                    .clamp(16.0, 80.0);
+                                return Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      child: Align(
+                                        alignment: Alignment.center,
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxWidth: 440,
+                                          ),
+                                          child: _Presentation(
+                                            track: track,
+                                            state: state,
+                                            artwork: artwork,
+                                            onSaveArtwork: onSaveArtwork,
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                layoutBuilder: (current, previous) => Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    for (final old in previous)
-                                      ExcludeSemantics(
-                                        child: IgnorePointer(child: old),
+                                    SizedBox(width: paneGap),
+                                    Expanded(
+                                      child: RepaintBoundary(
+                                        child: AnimatedSwitcher(
+                                          duration:
+                                              MediaQuery.disableAnimationsOf(
+                                                context,
+                                              )
+                                              ? Duration.zero
+                                              : const Duration(
+                                                  milliseconds: 240,
+                                                ),
+                                          switchInCurve: Curves.easeOutCubic,
+                                          switchOutCurve: Curves.easeInCubic,
+                                          transitionBuilder:
+                                              (child, animation) =>
+                                                  FadeTransition(
+                                                    opacity: animation,
+                                                    child: SlideTransition(
+                                                      position: Tween(
+                                                        begin: const Offset(
+                                                          .025,
+                                                          0,
+                                                        ),
+                                                        end: Offset.zero,
+                                                      ).animate(animation),
+                                                      child: RepaintBoundary(
+                                                        child: child,
+                                                      ),
+                                                    ),
+                                                  ),
+                                          layoutBuilder: (current, previous) =>
+                                              Stack(
+                                                fit: StackFit.expand,
+                                                children: [
+                                                  for (final old in previous)
+                                                    ExcludeSemantics(
+                                                      child: IgnorePointer(
+                                                        child: old,
+                                                      ),
+                                                    ),
+                                                  ?current,
+                                                ],
+                                              ),
+                                          child: KeyedSubtree(
+                                            key: ValueKey(pane),
+                                            child: switch (pane) {
+                                              DesktopNowPlayingPane.lyrics =>
+                                                lyrics,
+                                              DesktopNowPlayingPane.comments =>
+                                                comments,
+                                              DesktopNowPlayingPane.queue =>
+                                                queue,
+                                            },
+                                          ),
+                                        ),
                                       ),
-                                    ?current,
+                                    ),
                                   ],
-                                ),
-                                child: KeyedSubtree(
-                                  key: ValueKey(pane),
-                                  child: switch (pane) {
-                                    DesktopNowPlayingPane.lyrics => lyrics,
-                                    DesktopNowPlayingPane.comments => comments,
-                                    DesktopNowPlayingPane.queue => queue,
-                                  },
-                                ),
-                              ),
+                                );
+                              },
                             ),
                           ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 _DesktopDock(
@@ -451,13 +497,12 @@ class _Presentation extends StatelessWidget {
       }
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Expanded(
-            child: Center(
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: RepaintBoundary(child: _cover(context)),
-              ),
+          Flexible(
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: RepaintBoundary(child: _cover(context)),
             ),
           ),
           const SizedBox(height: 24),

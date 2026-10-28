@@ -28,6 +28,7 @@ import '../widgets/accessible_controls.dart';
 import '../widgets/app_scroll_behavior.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/catalog_links.dart';
+import '../widgets/hifi_settings_section.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/listen_together_dialog.dart';
 import '../widgets/playlist_picker_dialog.dart';
@@ -5152,6 +5153,7 @@ class LegacySettingsPage extends StatelessWidget {
                 ],
               ),
             ),
+            HifiSettingsSection(state: state),
             const _LegacySectionLabel('下载'),
             AppleGroupedCard(
               margin: EdgeInsets.zero,
@@ -5295,8 +5297,9 @@ class LegacySettingsPage extends StatelessWidget {
                       subtitle: action.detail,
                       trailing: OutlinedButton(
                         key: ValueKey('media-shortcut-${action.name}'),
-                        onPressed: () =>
-                            unawaited(_editMediaShortcut(context, state, action)),
+                        onPressed: () => unawaited(
+                          _editMediaShortcut(context, state, action),
+                        ),
                         child: Text(
                           state.mediaShortcutFor(action)?.label ??
                               context.tr('未设置'),
@@ -6395,11 +6398,13 @@ class _LegacyGradientSlider extends StatelessWidget {
                     ),
                     tickMarkShape: SliderTickMarkShape.noTickMark,
                   ),
-                  child: Slider(
-                    value: value.clamp(0, max),
-                    min: 0,
-                    max: max,
-                    onChanged: onChanged,
+                  child: SemanticsPortal(
+                    child: Slider(
+                      value: value.clamp(0, max),
+                      min: 0,
+                      max: max,
+                      onChanged: onChanged,
+                    ),
                   ),
                 ),
               ],

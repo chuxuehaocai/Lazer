@@ -14,12 +14,14 @@ class PlaybackSession {
     Future<AudioSession> Function()? sessionFactory,
   }) : _sessionFactory = sessionFactory ?? (() => AudioSession.instance),
        _independent = state.independentPlayback {
-    engine.activateSession = _activate;
+    if (engine is FocusAwareAudioEngine) {
+      (engine as FocusAwareAudioEngine).activateSession = _activate;
+    }
     state.addListener(_changed);
   }
 
   final AppState state;
-  final JustAudioEngine engine;
+  final AudioEngine engine;
   final Future<AudioSession> Function() _sessionFactory;
   Future<void> get settled => _operations;
   AudioSession? _session;
@@ -85,7 +87,11 @@ class PlaybackSession {
         !state.independentPlayback &&
         defaultTargetPlatform == TargetPlatform.android) {
       final attributes = session.androidAudioAttributes;
-      if (attributes != null) await engine.applyAudioAttributes(attributes);
+      // Only the just_audio path owns Android audio attributes; the native engine
+      // has its own output backend and ignores them.
+      if (attributes != null && engine is JustAudioEngine) {
+        await (engine as JustAudioEngine).applyAudioAttributes(attributes);
+      }
     }
     _session = session;
     return session;
@@ -151,7 +157,9 @@ class PlaybackSession {
     _closed = true;
     ++_generation;
     state.removeListener(_changed);
-    engine.activateSession = () async => false;
+    if (engine is FocusAwareAudioEngine) {
+      (engine as FocusAwareAudioEngine).activateSession = () async => false;
+    }
     unawaited(_interruptions?.cancel());
     unawaited(_noisy?.cancel());
     final session = _session;

@@ -11,12 +11,16 @@ import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio/audio_engine.dart';
+import 'audio/engine_factory.dart';
+import 'audio/hifi_controller.dart';
 import 'audio/system_media_handler.dart';
+import 'audio/native/lazer_audio_library.dart';
 import 'audio/playback_session.dart';
 import 'diagnostics/frame_stats.dart';
 import 'legacy/legacy_shell.dart';
 import 'theme/apple_design.dart';
 import 'state/app_state.dart';
+import 'state/hifi_settings.dart';
 import 'tv/tv_mode.dart';
 import 'widgets/window_frame.dart';
 import 'widgets/media_shortcut_listener.dart';
@@ -82,13 +86,57 @@ Future<void> main() async {
       // frame: a television with no pointer would otherwise boot into a screen
       // where nothing can be operated.
       final bool television = await detectTelevision();
-      final audio = JustAudioEngine();
+      // The native HiFi engine (FFmpeg + WASAPI/ALSA/CoreAudio) when this build
+      // ships one, otherwise just_audio/media_kit. Chosen once per launch.
+      final AudioEngineSelection selection = await createAudioEngine();
+      final AudioEngine audio = selection.engine;
+      debugPrint('Audio engine: ${selection.description}');
+      // The HiFi page needs one owner for "apply these settings to whatever engine
+      // is running"; it exists even on just_audio so the page can still show the
+      // device catalog and why the native engine is not in use.
+      final HifiController hifi = HifiController(
+        HifiSettings.fromMap(<String, Object?>{
+          'hifi_native_engine': prefs.getBool('hifi_native_engine'),
+          'hifi_output_token': prefs.getString('hifi_output_token'),
+          'hifi_output_name': prefs.getString('hifi_output_name'),
+          'hifi_exclusive': prefs.getBool('hifi_exclusive'),
+          'hifi_bit_perfect': prefs.getBool('hifi_bit_perfect'),
+          'hifi_dsd_mode': prefs.getString('hifi_dsd_mode'),
+          'hifi_dsd_rate_policy': prefs.getString('hifi_dsd_rate_policy'),
+          'hifi_volume_normalization': prefs.getString(
+            'hifi_volume_normalization',
+          ),
+          'hifi_crossfeed': prefs.getString('hifi_crossfeed'),
+          'hifi_buffer_millis': prefs.getInt('hifi_buffer_millis'),
+          'hifi_equalizer': prefs.getString('hifi_equalizer'),
+        }),
+        engine: selection.native,
+        catalogApi: LazerAudioLoader.load().api,
+        persist: (HifiSettings value) async {
+          final SharedPreferences prefs = await SharedPreferences.getInstance();
+          for (final MapEntry<String, Object?> entry
+              in value.toMap().entries) {
+            final Object? stored = entry.value;
+            if (stored == null) {
+              await prefs.remove(entry.key);
+            } else if (stored is bool) {
+              await prefs.setBool(entry.key, stored);
+            } else if (stored is int) {
+              await prefs.setInt(entry.key, stored);
+            } else {
+              await prefs.setString(entry.key, '$stored');
+            }
+          }
+        },
+      )..attach();
       final state = AppState(
         audioEngine: audio,
         enableExternalCharts: true,
         deviceIsTelevision: television,
         independentPlayback:
             prefs.getBool('lazer_independent_playback') ?? false,
+        hifiSettings: hifi.settings,
+        hifi: hifi,
       );
       final session = PlaybackSession(state, audio);
       final media = SystemMediaController(state);
@@ -115,7 +163,7 @@ class LazerApp extends StatefulWidget {
     this.session,
   });
   final AppState state;
-  final JustAudioEngine audio;
+  final AudioEngine audio;
   final SystemMediaController media;
   final PlaybackSession? session;
 

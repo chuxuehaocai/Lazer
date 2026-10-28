@@ -44,6 +44,26 @@ abstract interface class QueueAudioEngine {
   Stream<int> get indexStream;
 }
 
+/// Optional engine capability: failures that happen *after* a source was loaded.
+///
+/// `just_audio` surfaces those through its own player streams, but an engine
+/// backed by a native callback has no throw site to hand them to. [AppState]
+/// listens when the engine offers it and otherwise keeps the load-time handling.
+abstract interface class FailureReportingAudioEngine {
+  /// User-facing text for a terminal failure (device lost, decode error).
+  Stream<String> get failures;
+}
+
+/// Optional engine capability: the app installs its audio-focus policy here.
+///
+/// `PlaybackSession` owns OS focus once per app; engines that can ask before
+/// starting playback implement this so the first track does not begin into an
+/// interrupted or ducked stream. Test doubles and engines without focus handling
+/// simply do not implement it.
+abstract interface class FocusAwareAudioEngine {
+  Future<bool> Function()? activateSession;
+}
+
 /// Playback surface used for stream URLs returned by the gateway.
 abstract class AudioEngine {
   /// Whether a source is currently loaded.
@@ -67,7 +87,11 @@ abstract class AudioEngine {
 
 /// just_audio-backed engine used by the real app.
 class JustAudioEngine
-    implements AudioEngine, BufferedAudioEngine, QueueAudioEngine {
+    implements
+        AudioEngine,
+        BufferedAudioEngine,
+        QueueAudioEngine,
+        FocusAwareAudioEngine {
   JustAudioEngine({AudioPlayer? player, this.activateSession})
     : _player =
           player ??
@@ -83,6 +107,7 @@ class JustAudioEngine
   }
 
   /// Optional application-owned focus policy; absent in independent playback.
+  @override
   Future<bool> Function()? activateSession;
 
   Future<void> applyAudioAttributes(AndroidAudioAttributes attributes) =>
