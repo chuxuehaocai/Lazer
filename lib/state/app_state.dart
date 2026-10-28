@@ -1576,7 +1576,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double get progress {
     final Track? t = current;
     if (t == null || t.duration.inMilliseconds == 0) return 0;
-    return (_position.inMilliseconds / t.duration.inMilliseconds).clamp(0, 1);
+    // The seek rail and its time label read this on every tick, so it has to
+    // be the engine's live position. [_position] is only copied across on the
+    // tick itself and lags the audio by up to one interval.
+    return (precisePosition.inMilliseconds / t.duration.inMilliseconds).clamp(
+      0,
+      1,
+    );
   }
 
   /// How much of the current track the engine has buffered, 0…1.

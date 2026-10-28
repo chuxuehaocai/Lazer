@@ -738,7 +738,11 @@ class _Clock extends StatelessWidget {
     child: AnimatedBuilder(
       animation: state.all,
       builder: (context, _) => Text(
-        fmt(end ? state.current?.duration ?? Duration.zero : state.position),
+        fmt(
+          end
+              ? state.current?.duration ?? Duration.zero
+              : state.precisePosition,
+        ),
         textAlign: end ? TextAlign.right : TextAlign.left,
         style: context.type.monoSm,
       ),
