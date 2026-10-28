@@ -585,5 +585,14 @@
   "当前平台不支持读取音频设备（仅 Android 与 iOS 支持）。": "This platform cannot list audio devices (Android and iOS only).",
   "读取音频设备失败。": "Failed to read audio devices.",
   "读取失败：{error}": "Read failed: {error}",
-  "ID：{id}": "ID: {id}"
+  "ID：{id}": "ID: {id}",
+  "歌单排列": "Playlist layout",
+  "跟随窗口宽度": "Fit the window",
+  "长按拖动排序": "Touch and hold to reorder",
+  "歌曲详情": "Song details",
+  "时长": "Length",
+  "音质": "Quality",
+  "来源": "Source",
+  "在线播放": "Streaming",
+  "本地文件": "Local file"
 }

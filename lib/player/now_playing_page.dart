@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../data/audio_quality.dart';
 import '../data/models.dart';
 import '../downloads/download_dialog.dart';
 import 'player_backdrop.dart';
@@ -194,6 +195,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   bool _selectionOpen = false;
   bool _commentsOpen = false;
   bool _queueOpen = false;
+  bool _moreOpen = false;
   bool? _desktopLayout;
   DesktopNowPlayingPane _desktopPane = DesktopNowPlayingPane.lyrics;
   final GlobalKey _backdropKey = GlobalKey();
@@ -214,6 +216,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       !_selectionOpen &&
       !_commentsOpen &&
       !_queueOpen &&
+      !_moreOpen &&
       (_desktopLayout == true
           ? _desktopPane == DesktopNowPlayingPane.lyrics
           : _lyricsMode) &&
@@ -508,6 +511,11 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     ),
   );
 
+  /// The phone header: one row, one action.
+  ///
+  /// Everything the player can do with the song sits behind [更多] now. Five
+  /// icons used to crowd this row and cover the cover with chrome; the back
+  /// arrow stays, because leaving the page is not something done to the song.
   Widget _header(bool compact) => IgnorePointer(
     ignoring: compact && !_controlsVisible,
     child: AnimatedOpacity(
@@ -516,7 +524,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
         child: Row(
-          children: [
+          children: <Widget>[
             AccessibleIconButton(
               tooltip: '返回',
               onPressed: _closePage,
@@ -524,56 +532,74 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
             ),
             const Spacer(),
             if (_saving)
-              const SizedBox.square(
-                dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            if (compact)
-              AccessibleIconButton(
-                tooltip: '歌词',
-                onPressed: _toggleLyrics,
-                isSelected: _lyricsMode,
-                icon: const Icon(Icons.lyrics_outlined),
+              const Padding(
+                padding: EdgeInsets.only(right: 12),
+                child: SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
             AccessibleIconButton(
-              tooltip: '添加到歌单',
-              onPressed: int.tryParse(widget.state.current?.id ?? '') == null
-                  ? null
-                  : () => unawaited(
-                      showAddToPlaylistDialog(
-                        context,
-                        widget.state,
-                        track: widget.state.current!,
-                      ),
-                    ),
-              icon: const Icon(Icons.playlist_add_rounded),
-            ),
-            AccessibleIconButton(
-              tooltip: '下载歌曲',
-              onPressed: widget.state.current == null
-                  ? null
-                  : () => unawaited(
-                      downloadTracks(context, widget.state, <Track>[
-                        widget.state.current!,
-                      ]),
-                    ),
-              icon: const Icon(Icons.download_rounded),
-            ),
-            AccessibleIconButton(
-              tooltip: '查看评论',
-              onPressed: () => unawaited(_openComments()),
-              icon: const Icon(Icons.chat_bubble_outline_rounded),
-            ),
-            AccessibleIconButton(
-              tooltip: '播放队列',
-              onPressed: _queue,
-              icon: const Icon(Icons.queue_music_rounded),
+              key: const ValueKey('now-playing-more'),
+              tooltip: '更多',
+              onPressed: () => unawaited(_showMore()),
+              icon: const Icon(Icons.more_horiz_rounded),
             ),
           ],
         ),
       ),
     ),
   );
+
+  /// Opens the song sheet: what the player knows about the track, and every
+  /// action the header used to spell out with its own icon.
+  Future<void> _showMore() async {
+    final Track? track = widget.state.current;
+    if (track == null || _moreOpen) return;
+    _moreOpen = true;
+    _hideTimer?.cancel();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.colors.ivoryLight,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => _NowPlayingMoreSheet(
+        state: widget.state,
+        track: track,
+        lyricsOpen: _lyricsMode,
+        onLyrics: () {
+          Navigator.of(sheetContext).pop();
+          _toggleLyrics();
+        },
+        onSaveArtwork: () {
+          Navigator.of(sheetContext).pop();
+          unawaited(_saveArtwork(track));
+        },
+        onAddToPlaylist: () {
+          Navigator.of(sheetContext).pop();
+          unawaited(
+            showAddToPlaylistDialog(context, widget.state, track: track),
+          );
+        },
+        onDownload: () {
+          Navigator.of(sheetContext).pop();
+          unawaited(downloadTracks(context, widget.state, <Track>[track]));
+        },
+        onComments: () {
+          Navigator.of(sheetContext).pop();
+          unawaited(_openComments());
+        },
+        onQueue: () {
+          Navigator.of(sheetContext).pop();
+          unawaited(_queue());
+        },
+      ),
+    );
+    if (!mounted) return;
+    _moreOpen = false;
+    _wakeControls();
+    _armHide();
+  }
 
   @override
   Widget build(BuildContext context) => Theme(
@@ -723,7 +749,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       child: PlayerPullDownRegion(
         pullDown: pullDown,
         travel: box.maxHeight,
-        enabled: !_selectionOpen && !_commentsOpen && !_queueOpen,
+        enabled:
+            !_selectionOpen && !_commentsOpen && !_queueOpen && !_moreOpen,
       ),
     );
   }
@@ -991,7 +1018,7 @@ class _PlaybackTransport extends StatelessWidget {
               builder: (BuildContext context, _) => Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(fmt(state.position), style: context.type.monoSm),
+                  Text(fmt(state.precisePosition), style: context.type.monoSm),
                   Text(fmt(track.duration), style: context.type.monoSm),
                 ],
               ),
@@ -1132,6 +1159,254 @@ class _BigPlayPause extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// What sits behind [更多]: the song's details on top, every action the phone
+/// header used to spell out with its own icon underneath.
+///
+/// The sheet is the one place that can grow without stealing room from the
+/// artwork, so it is also where the player finally says what it knows about
+/// the track — album, length, the tier it is streaming at, and whether it is
+/// reading a file or the service.
+class _NowPlayingMoreSheet extends StatelessWidget {
+  const _NowPlayingMoreSheet({
+    required this.state,
+    required this.track,
+    required this.lyricsOpen,
+    required this.onLyrics,
+    required this.onSaveArtwork,
+    required this.onAddToPlaylist,
+    required this.onDownload,
+    required this.onComments,
+    required this.onQueue,
+  });
+
+  final AppState state;
+  final Track track;
+  final bool lyricsOpen;
+  final VoidCallback onLyrics;
+  final VoidCallback onSaveArtwork;
+  final VoidCallback onAddToPlaylist;
+  final VoidCallback onDownload;
+  final VoidCallback onComments;
+  final VoidCallback onQueue;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    top: false,
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  const Expanded(child: InlineLabel('歌曲详情')),
+                  AccessibleIconButton(
+                    key: const ValueKey('now-playing-more-close'),
+                    tooltip: '关闭',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox.square(
+                      dimension: 64,
+                      child: AnimatedTrackCover(
+                        track: track,
+                        direction: state.trackChangeDirection,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          track.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.type.subheading,
+                        ),
+                        if (track.translatedTitle?.isNotEmpty ?? false) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            track.translatedTitle!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.type.bodySm.copyWith(
+                              color: context.colors.cloudDark,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 4),
+                        Text(
+                          track.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.type.bodySm.copyWith(
+                            color: context.colors.cloudDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              _DetailLine(
+                label: context.tr('专辑'),
+                value: track.album.isEmpty ? '—' : track.album,
+              ),
+              _DetailLine(
+                label: context.tr('时长'),
+                value: fmt(track.duration),
+              ),
+              _DetailLine(
+                label: context.tr('音质'),
+                value: context.tr(state.playbackQuality.label),
+              ),
+              _DetailLine(
+                label: context.tr('来源'),
+                value: track.localPath == null
+                    ? context.tr('在线播放')
+                    : context.tr('本地文件'),
+              ),
+              const SizedBox(height: 10),
+              Divider(height: 1, color: context.colors.stone),
+              const SizedBox(height: 2),
+              _MoreAction(
+                icon: Icons.lyrics_outlined,
+                label: context.tr('歌词'),
+                selected: lyricsOpen,
+                onTap: onLyrics,
+              ),
+              _MoreAction(
+                icon: Icons.save_alt_rounded,
+                label: context.tr('保存封面'),
+                onTap: onSaveArtwork,
+              ),
+              _MoreAction(
+                icon: Icons.playlist_add_rounded,
+                label: context.tr('添加到歌单'),
+                onTap: onAddToPlaylist,
+              ),
+              _MoreAction(
+                icon: Icons.download_rounded,
+                label: context.tr('下载歌曲'),
+                onTap: onDownload,
+              ),
+              _MoreAction(
+                icon: Icons.chat_bubble_outline_rounded,
+                label: context.tr('查看评论'),
+                onTap: onComments,
+              ),
+              _MoreAction(
+                icon: Icons.queue_music_rounded,
+                label: context.tr('播放队列'),
+                onTap: onQueue,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// One labelled fact about the track: a quiet caption and its value.
+class _DetailLine extends StatelessWidget {
+  const _DetailLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 68,
+          child: Text(
+            label,
+            style: context.type.bodySm.copyWith(
+              color: context.colors.cloudMedium,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: context.type.bodySm,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// A row of the sheet's action list; the selected one carries a check so the
+/// lyrics toggle reads as a state, not as a one-shot command.
+class _MoreAction extends StatelessWidget {
+  const _MoreAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color color = selected
+        ? context.colors.clayDeep
+        : context.colors.slateDark;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, size: 22, color: color),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: context.type.body.copyWith(color: color),
+              ),
+            ),
+            if (selected)
+              Icon(
+                Icons.check_rounded,
+                size: 18,
+                color: context.colors.clayDeep,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _EmptyNowPlaying extends StatelessWidget {

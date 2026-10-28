@@ -13,6 +13,15 @@ import 'package:flutter/foundation.dart' show TargetPlatform;
 /// (phone) presentation: bottom tab bar, floating transport, pushed details.
 const double kCompactBreakpoint = 720;
 
+/// How many cards the library lays its playlists out in per row.
+///
+/// `0` asks the grid to follow the window width — the density the library
+/// opens with — while the other entries are the fixed counts 歌单排列 offers.
+const List<int> kPlaylistColumnChoices = <int>[0, 2, 3, 4, 5, 6];
+
+/// Widest fixed count 歌单排列 offers.
+const int kPlaylistColumnsMax = 6;
+
 /// How the shell picks its accent palette.
 ///
 /// [fixed] is the Apple Music red accent. [nowPlaying] derives the accent and

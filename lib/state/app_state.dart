@@ -422,6 +422,44 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
   }
 
+  /// How many playlist cards the library draws per row. `0` follows the
+  /// window width; a fixed count is the listener's own arrangement.
+  int playlistColumns = 0;
+
+  /// Applies a 歌单排列 choice.
+  Future<void> setPlaylistColumns(int value) async {
+    final int next = value.clamp(0, kPlaylistColumnsMax);
+    if (playlistColumns == next) return;
+    playlistColumns = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setInt(
+      'lazer_playlist_columns',
+      next,
+    );
+  }
+
+  /// The listener's own order for the library playlists, as playlist ids.
+  ///
+  /// Ids the list does not mention keep their catalogue order behind the
+  /// arranged ones, so a fresh subscription still shows up and a playlist
+  /// removed on another device never leaves a hole.
+  List<String> playlistOrder = const <String>[];
+
+  /// Stores the order the library was dragged into.
+  Future<void> setPlaylistOrder(List<String> order) async {
+    final List<String> next = List<String>.unmodifiable(<String>[
+      for (final String id in order)
+        if (id.isNotEmpty) id,
+    ]);
+    if (listEquals(playlistOrder, next)) return;
+    playlistOrder = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_playlist_order',
+      next.join('\n'),
+    );
+  }
+
   /// Legacy shell backdrop: the album-coloured flowing canvas, the listener's
   /// own picture, or off.
   LegacyBackgroundMode legacyBackground =
@@ -946,6 +984,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             kDynamicBackgroundQualityDefault,
       );
       uiMode = AppUiModeLabels.parse(prefs.getString('lazer_ui_mode'));
+      playlistColumns = (prefs.getInt('lazer_playlist_columns') ?? 0).clamp(
+        0,
+        kPlaylistColumnsMax,
+      );
+      playlistOrder = List<String>.unmodifiable(<String>[
+        for (final String id
+            in (prefs.getString('lazer_playlist_order') ?? '').split('\n'))
+          if (id.isNotEmpty) id,
+      ]);
       final String? storedSurface = prefs.getString('lazer_surface');
       surface = AppSurfaceLabels.parse(storedSurface);
       if (deviceIsTelevision && storedSurface == null) {
