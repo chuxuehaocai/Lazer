@@ -405,26 +405,14 @@ jobs:
             echo "::error::apksigner not found under $ANDROID_HOME/build-tools"
             exit 1
           fi
-          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apksigner-output.txt"
+          "$apksigner" verify --verbose --print-certs "$apk"
           if [[ "${SIGNED_RELEASE:-false}" == true ]]; then
             keytool -exportcert -keystore android/app/upload-keystore.jks \
               -alias "$ANDROID_KEY_ALIAS" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
               -file "$RUNNER_TEMP/release.cer" >/dev/null
-            expected=$(sha256sum "$RUNNER_TEMP/release.cer" | cut -d' ' -f1)
-            actual=$(awk -F: '/^[[:space:]]*Signer[[:space:]]+#1[[:space:]]+certificate[[:space:]]+SHA-256[[:space:]]+digest[[:space:]]*:/ {
-              gsub(/[[:space:]]/, "", $2)
-              print tolower($2)
-              exit
-            }' "$RUNNER_TEMP/apksigner-output.txt")
-            if [[ ! "$actual" =~ ^[0-9a-f]{64}$ ]]; then
-              echo "::error::Could not read the APK signer SHA-256 digest from the apksigner output above."
-              exit 1
-            fi
-            if [[ "$expected" != "$actual" ]]; then
-              echo "::error::APK is signed by $actual, expected $expected"
-              exit 1
-            fi
-            echo "Signed by the release key: $actual"
+            apksig_jar="$(dirname "$apksigner")/lib/apksigner.jar"
+            test -f "$apksig_jar" || { echo "::error::Missing $apksig_jar"; exit 1; }
+            java -cp "$apksig_jar" ci/VerifyApkSigner.java "$apk" "$RUNNER_TEMP/release.cer"
           else
             echo "::warning::APK is debug-signed (no release keystore configured)."
           fi
