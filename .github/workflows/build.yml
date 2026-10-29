@@ -268,14 +268,21 @@ jobs:
             echo "::error::apksigner not found under $ANDROID_HOME/build-tools"
             exit 1
           fi
-          "$apksigner" verify --verbose "$apk"
+          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apksigner-output.txt"
           if [[ "${SIGNED_RELEASE:-false}" == true ]]; then
             keytool -exportcert -keystore android/app/upload-keystore.jks \
               -alias "$ANDROID_KEY_ALIAS" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
               -file "$RUNNER_TEMP/release.cer" >/dev/null
             expected=$(sha256sum "$RUNNER_TEMP/release.cer" | cut -d' ' -f1)
-            actual=$("$apksigner" verify --print-certs "$apk" |
-              sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1)
+            actual=$(awk -F: '/^[[:space:]]*Signer[[:space:]]+#1[[:space:]]+certificate[[:space:]]+SHA-256[[:space:]]+digest[[:space:]]*:/ {
+              gsub(/[[:space:]]/, "", $2)
+              print tolower($2)
+              exit
+            }' "$RUNNER_TEMP/apksigner-output.txt")
+            if [[ ! "$actual" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "::error::Could not read the APK signer SHA-256 digest from the apksigner output above."
+              exit 1
+            fi
             if [[ "$expected" != "$actual" ]]; then
               echo "::error::APK is signed by $actual, expected $expected"
               exit 1

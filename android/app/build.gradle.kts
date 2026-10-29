@@ -1,7 +1,33 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Release signing lives in `android/key.properties`, which is git-ignored, plus the
+// keystore it points at. CI writes both from repository secrets; a working copy
+// keeps them untracked next to this module. See docs/builds.md.
+val keystorePropertiesFile = rootProject.file("key.properties")
+val hasReleaseSigning = keystorePropertiesFile.isFile
+val keystoreProperties = Properties().apply {
+    if (hasReleaseSigning) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+// Tag builds set this so a missing keystore fails the build instead of quietly
+// falling back to the debug key. Local builds never see it.
+val requireReleaseSigning =
+    (findProperty("lazerRequireReleaseSigning") as String?)?.toBoolean() ?: false
+
+if (requireReleaseSigning && !hasReleaseSigning) {
+    throw GradleException(
+        "Release signing requested but ${keystorePropertiesFile.path} is missing. " +
+            "Write key.properties and the keystore it points at, or unset " +
+            "-PlazerRequireReleaseSigning.",
+    )
 }
 
 android {
@@ -28,11 +54,27 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                // A relative storeFile is resolved against this module directory,
+                // i.e. android/app/upload-keystore.jks.
+                storeFile = file(keystoreProperties.getProperty("storeFile") ?: "upload-keystore.jks")
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword") ?: keystoreProperties.getProperty("storePassword")
+
+                require(storePassword != null) { "key.properties is missing storePassword" }
+                require(keyAlias != null) { "key.properties is missing keyAlias" }
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Real release key when key.properties exists; the debug key otherwise so
+            // `flutter run --release` keeps working on a fresh checkout.
+            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "release" else "debug")
         }
     }
 }
