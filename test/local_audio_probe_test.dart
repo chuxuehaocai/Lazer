@@ -59,6 +59,49 @@ Uint8List _id3Tag(List<List<int>> frames) {
   ]);
 }
 
+class _CountingFile implements File {
+  _CountingFile(this.delegate, this.maxRead);
+
+  final File delegate;
+  final void Function(int bytes) maxRead;
+
+  @override
+  String get path => delegate.path;
+
+  @override
+  Future<RandomAccessFile> open({FileMode mode = FileMode.read}) async =>
+      _CountingRandomAccessFile(await delegate.open(mode: mode), maxRead);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _CountingRandomAccessFile implements RandomAccessFile {
+  _CountingRandomAccessFile(this.delegate, this.maxRead);
+
+  final RandomAccessFile delegate;
+  final void Function(int bytes) maxRead;
+
+  @override
+  Future<int> length() => delegate.length();
+
+  @override
+  Future<Uint8List> read(int bytes) {
+    maxRead(bytes);
+    return delegate.read(bytes);
+  }
+
+  @override
+  Future<RandomAccessFile> setPosition(int position) =>
+      delegate.setPosition(position);
+
+  @override
+  Future<void> close() => delegate.close();
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 List<int> _mpegFrameWithXing(int frameCount) {
   final List<int> frame = <int>[0xFF, 0xFB, 0x90, 0x00];
   frame.addAll(List<int>.filled(32, 0));
@@ -106,6 +149,34 @@ void main() {
     expect(metadata.artist, 'YOASOBI');
     expect(metadata.album, 'THE BOOK');
     expect(metadata.duration.inMilliseconds, 261000);
+  });
+
+  test('skips large embedded artwork and reads following text frames', () async {
+    final int imageBytes = 4 * 1024 * 1024;
+    final File file = await write('artwork.mp3', <int>[
+      ..._id3Tag(<List<int>>[
+        _id3v23Frame(
+          'APIC',
+          Uint8List.fromList(List<int>.filled(imageBytes, 0xA5)),
+        ),
+        _id3v23Frame('TIT2', _utf8Text('Metadata after artwork')),
+        _id3v23Frame('TPE1', _utf8Text('Scanner test')),
+        _id3v23Frame('TLEN', _utf8Text('90000')),
+      ]),
+      ..._mpegFrameWithXing(1000),
+    ]);
+    int largestRead = 0;
+
+    final LocalAudioMetadata metadata = await probe.probe(
+      _CountingFile(file, (int bytes) {
+        if (bytes > largestRead) largestRead = bytes;
+      }),
+    );
+
+    expect(metadata.title, 'Metadata after artwork');
+    expect(metadata.artist, 'Scanner test');
+    expect(metadata.duration.inMilliseconds, 90000);
+    expect(largestRead, lessThan(1024));
   });
 
   test('decodes UTF-16 ID3 text', () async {

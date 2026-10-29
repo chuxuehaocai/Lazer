@@ -532,6 +532,16 @@ class LargeScreenLibraryPage extends StatefulWidget {
 
 class _LargeScreenLibraryPageState extends State<LargeScreenLibraryPage> {
   late LargeScreenLibraryFilter _filter = widget.initialFilter;
+  AppState? _cachedState;
+  UserCollections? _cachedCollections;
+  HomeFeed? _cachedHome;
+  List<Playlist> _cachedMine = const <Playlist>[];
+  List<Playlist> _cachedPlaylists = const <Playlist>[];
+  List<Album> _cachedAlbums = const <Album>[];
+  List<TrackPlayStat>? _cachedStatsSource;
+  Map<String, int> _cachedPlayCounts = const <String, int>{};
+  int _cachedTotalPlays = 0;
+  Duration _cachedTotalListenTime = Duration.zero;
 
   @override
   void initState() {
@@ -550,38 +560,57 @@ class _LargeScreenLibraryPageState extends State<LargeScreenLibraryPage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final UserCollections collections = widget.state.collections;
-    final List<Playlist> mine = _uniquePlaylists(<Playlist>[
+  void _refreshDerivedData() {
+    final AppState state = widget.state;
+    final UserCollections collections = state.collections;
+    final HomeFeed? home = state.home;
+    if (identical(_cachedState, state) &&
+        identical(_cachedCollections, collections) &&
+        identical(_cachedHome, home)) {
+      return;
+    }
+    _cachedState = state;
+    _cachedCollections = collections;
+    _cachedHome = home;
+    _cachedMine = _uniquePlaylists(<Playlist>[
       if (collections.liked != null) collections.liked!,
       ...collections.created,
       ...collections.subscribed,
     ]);
-    final List<Playlist> playlists = _uniquePlaylists(<Playlist>[
-      ...mine,
-      ...?widget.state.home?.playlists,
-      ...?widget.state.home?.recommended,
+    _cachedPlaylists = _uniquePlaylists(<Playlist>[
+      ..._cachedMine,
+      ...?home?.playlists,
+      ...?home?.recommended,
     ]);
-    final List<Album> albums = _uniqueAlbums(<Album>[
-      ...?widget.state.home?.albums,
-      if (widget.state.home?.featured != null) widget.state.home!.featured!,
+    _cachedAlbums = _uniqueAlbums(<Album>[
+      ...?home?.albums,
+      if (home?.featured != null) home!.featured!,
     ]);
+  }
+
+  void _refreshPlayStats() {
+    final List<TrackPlayStat> stats = widget.state.playStats;
+    if (identical(_cachedStatsSource, stats)) return;
+    _cachedStatsSource = stats;
+    final Map<String, int> playCounts = <String, int>{};
+    var totalPlays = 0;
+    var totalListenTime = Duration.zero;
+    for (final TrackPlayStat stat in stats) {
+      playCounts[stat.songId] = stat.playCount;
+      totalPlays += stat.playCount;
+      totalListenTime += stat.duration * stat.playCount;
+    }
+    _cachedPlayCounts = playCounts;
+    _cachedTotalPlays = totalPlays;
+    _cachedTotalListenTime = totalListenTime;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _refreshDerivedData();
+    _refreshPlayStats();
     final List<Track> songs = widget.state.recentTracks;
-    final List<ArtistRef> artists = _artistsFrom(songs, albums);
-    final Map<String, int> playCounts = <String, int>{
-      for (final TrackPlayStat stat in widget.state.playStats)
-        stat.songId: stat.playCount,
-    };
-    final int totalPlays = widget.state.playStats.fold<int>(
-      0,
-      (int sum, TrackPlayStat stat) => sum + stat.playCount,
-    );
-    final Duration totalListenTime = widget.state.playStats.fold<Duration>(
-      Duration.zero,
-      (Duration sum, TrackPlayStat stat) =>
-          sum + stat.duration * stat.playCount,
-    );
+    final List<ArtistRef> artists = _artistsFrom(songs, _cachedAlbums);
     final double width = MediaQuery.sizeOf(context).width;
     final double rail = LargeScreenMetrics.railWidth(width);
     return Row(
@@ -602,13 +631,13 @@ class _LargeScreenLibraryPageState extends State<LargeScreenLibraryPage> {
             padding: EdgeInsets.fromLTRB(10, 16, 0, 0),
             child: _LibraryPane(
               filter: _filter,
-              playlists: playlists,
+              playlists: _cachedPlaylists,
               artists: artists,
               songs: songs,
               actions: widget.actions,
-              playCounts: playCounts,
-              totalPlays: totalPlays,
-              totalListenTime: totalListenTime,
+              playCounts: _cachedPlayCounts,
+              totalPlays: _cachedTotalPlays,
+              totalListenTime: _cachedTotalListenTime,
             ),
           ),
         ),

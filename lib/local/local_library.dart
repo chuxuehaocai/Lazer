@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../data/audio_quality.dart';
 import '../data/models.dart';
 import '../state/build_safe_notifier.dart';
+import 'coalescing_writer.dart';
 
 /// Where a file in the local library came from.
 enum LocalTrackSource { download, scan }
@@ -80,6 +81,28 @@ class LocalTrack {
   );
 }
 
+class _ManifestData {
+  const _ManifestData(this.tracks, this.scanRoots);
+  final List<LocalTrack> tracks;
+  final List<Object?> scanRoots;
+}
+
+class _ManifestWrite {
+  const _ManifestWrite(this.tracks, this.scanRoots, this.documentsPath);
+  final List<LocalTrack> tracks;
+  final List<String> scanRoots;
+  final String? documentsPath;
+}
+
+_ManifestData? _decodeManifest(String raw) {
+  final Object? decoded = jsonDecode(raw);
+  if (decoded is! Map<String, dynamic>) return null;
+  return _ManifestData(<LocalTrack>[
+    for (final Object? value in decoded['tracks'] as List<Object?>? ?? const [])
+      if (value is Map<String, dynamic>) LocalTrack.fromJson(value),
+  ], decoded['scanRoots'] as List<Object?>? ?? const []);
+}
+
 /// Persistent index of local audio files.
 ///
 /// The manifest lives in the application support directory. Downloads are
@@ -89,23 +112,37 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
   LocalLibrary({
     Future<Directory> Function()? supportDirectory,
     Future<Directory> Function()? documentsDirectory,
-  }) : _supportDirectory = supportDirectory ?? getApplicationSupportDirectory,
+    Future<bool> Function(String path)? fileExists,
+  }) : _fileExists = fileExists ?? _defaultFileExists,
+       _supportDirectory = supportDirectory ?? getApplicationSupportDirectory,
        _documentsDirectory =
            documentsDirectory ?? getApplicationDocumentsDirectory;
 
   static const String _documentsPrefix = 'documents:';
   static const String _manifestName = 'local_library.json';
 
+  static Future<bool> _defaultFileExists(String path) => File(path).exists();
+
+  final Future<bool> Function(String path) _fileExists;
   final Future<Directory> Function() _supportDirectory;
   final Future<Directory> Function() _documentsDirectory;
   final List<LocalTrack> _tracks = <LocalTrack>[];
+  Map<String, int>? _pathIndexes;
   final List<String> _scanRoots = <String>[];
   String? _documentsPath;
   Future<Directory?>? _supportFuture;
+  int _tracksRevision = 0;
   bool _loaded = false;
+  Future<void>? _loading;
   bool _verifying = false;
   bool _disposed = false;
-  Future<void> _writeChain = Future<void>.value();
+  late final CoalescingWriter _writer = CoalescingWriter(() async {
+    try {
+      await _writeManifest();
+    } catch (_) {
+      // A failed manifest write must not interrupt playback or later updates.
+    }
+  });
 
   @override
   void dispose() {
@@ -114,6 +151,9 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
   }
 
   List<LocalTrack> get tracks => List<LocalTrack>.unmodifiable(_tracks);
+
+  /// Changes whenever the track list or its missing-file status changes.
+  int get tracksRevision => _tracksRevision;
   List<String> get scanRoots => List<String>.unmodifiable(_scanRoots);
   bool get loaded => _loaded;
   bool get verifying => _verifying;
@@ -128,19 +168,33 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
 
   /// Restores the manifest. Missing files are checked in the background so a
   /// slow external drive cannot delay startup.
-  Future<void> load() async {
-    if (_loaded) return;
+  Future<void> load() {
+    final Future<void>? pending = _loading;
+    if (pending != null) return pending;
+    if (_loaded) return Future<void>.value();
     _loaded = true;
+    final Future<void> loading = _loadManifest();
+    _loading = loading;
+    unawaited(
+      loading.whenComplete(() {
+        if (identical(_loading, loading)) _loading = null;
+      }),
+    );
+    return loading;
+  }
+
+  Future<void> _loadManifest() async {
     try {
       final File? file = await _manifestFile();
       if (file == null || !await file.exists()) return;
-      final Object? decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map<String, dynamic>) return;
+      final String raw = await file.readAsString();
+      final _ManifestData? decoded = raw.length < 65536
+          ? _decodeManifest(raw)
+          : await compute(_decodeManifest, raw, debugLabel: 'local-manifest');
+      if (decoded == null || _disposed) return;
       await _resolveDocumentsPath();
-      for (final Object? value
-          in decoded['tracks'] as List<Object?>? ?? const []) {
-        if (value is! Map<String, dynamic>) continue;
-        final LocalTrack stored = LocalTrack.fromJson(value);
+      if (_disposed) return;
+      for (final LocalTrack stored in decoded.tracks) {
         final LocalTrack entry = LocalTrack(
           track: stored.track,
           path: _decodePath(stored.path),
@@ -153,8 +207,9 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
         if (entry.path.isEmpty) continue;
         _tracks.add(entry);
       }
-      for (final Object? value
-          in decoded['scanRoots'] as List<Object?>? ?? const []) {
+      _pathIndexes = null;
+      _tracksRevision++;
+      for (final Object? value in decoded.scanRoots) {
         if (value is String &&
             value.isNotEmpty &&
             !_scanRoots.contains(value)) {
@@ -184,9 +239,24 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
     bool changed = false;
     try {
       final List<LocalTrack> snapshot = List<LocalTrack>.of(_tracks);
+      int indexedRevision = _tracksRevision;
+      Set<LocalTrack>? live;
+      bool isLive(LocalTrack entry) {
+        if (indexedRevision != _tracksRevision) {
+          live = Set<LocalTrack>.identity()..addAll(_tracks);
+          indexedRevision = _tracksRevision;
+        }
+        return live?.contains(entry) ?? true;
+      }
+
       for (final LocalTrack entry in snapshot) {
-        if (!_tracks.contains(entry)) continue;
-        final bool exists = await File(entry.path).exists();
+        if (_disposed) break;
+        if (!isLive(entry)) continue;
+        final bool exists = await _fileExists(entry.path);
+        // A scan/import can replace this object while the filesystem request
+        // is in flight. Never apply a stale result to a removed record.
+        if (_disposed) break;
+        if (!isLive(entry)) continue;
         if (entry.missing != !exists) {
           entry.missing = !exists;
           changed = true;
@@ -194,21 +264,25 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
       }
     } finally {
       _verifying = false;
-      if (changed && !_disposed) notifyListeners();
+      if (changed && !_disposed) {
+        _tracksRevision++;
+        notifyListeners();
+      }
     }
   }
 
   /// Adds or refreshes entries. The same path is never indexed twice; a
   /// download record wins over a scanned record for the same file.
   Future<void> addTracks(Iterable<LocalTrack> entries) async {
+    await load();
     await _resolveDocumentsPath();
     bool changed = false;
+    final Map<String, int> indexes = _indexesByPath();
     for (final LocalTrack entry in entries) {
       if (entry.path.isEmpty) continue;
       final String path = _absolute(entry.path);
-      final int index = _tracks.indexWhere(
-        (LocalTrack existing) => _samePath(existing.path, path),
-      );
+      final String key = _normalize(path);
+      final int index = indexes[key] ?? -1;
       final LocalTrack normalized = LocalTrack(
         track: entry.track.copyWith(localPath: path),
         path: path,
@@ -219,6 +293,7 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
         addedAt: entry.addedAt,
       );
       if (index < 0) {
+        indexes[key] = _tracks.length;
         _tracks.add(normalized);
         changed = true;
         continue;
@@ -240,46 +315,86 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
       changed = true;
     }
     if (!changed) return;
+    _tracksRevision++;
     notifyListeners();
     await _persist();
   }
 
-  /// The best local file for [track], preferring [quality] and then the
-  /// highest tier available. Returns null when the file is gone.
-  File? localFileFor(Track track, {AudioQuality? quality}) {
-    final String? path = track.localPath;
-    final Iterable<LocalTrack> candidates = _tracks.where((LocalTrack entry) {
-      if (entry.missing) return false;
-      if (path != null && _samePath(entry.path, _absolute(path))) return true;
-      return entry.track.id == track.id;
-    });
-    LocalTrack? chosen;
-    for (final LocalTrack entry in candidates) {
-      if (!File(entry.path).existsSync()) {
-        entry.missing = true;
-        continue;
+  /// The best existing local file for [track], preferring [quality] and then
+  /// the highest tier. Filesystem checks are asynchronous so a slow drive
+  /// cannot block the UI while a song or its lyrics are loading.
+  Future<File?> localFileFor(Track track, {AudioQuality? quality}) async {
+    final Future<void>? pending = _loading;
+    if (pending != null) await pending;
+    final String? localPath = track.localPath;
+    final String? pathKey = localPath == null
+        ? null
+        : _normalize(_absolute(localPath));
+    final List<LocalTrack> candidates = <LocalTrack>[
+      for (final LocalTrack entry in _tracks)
+        if (!entry.missing &&
+            (entry.track.id == track.id ||
+                pathKey != null && _normalize(entry.path) == pathKey))
+          entry,
+    ];
+    int indexedRevision = _tracksRevision;
+    Set<LocalTrack>? live;
+    bool isLive(LocalTrack entry) {
+      if (indexedRevision != _tracksRevision) {
+        live = Set<LocalTrack>.identity()..addAll(_tracks);
+        indexedRevision = _tracksRevision;
       }
+      return live?.contains(entry) ?? true;
+    }
+
+    final List<LocalTrack> available = <LocalTrack>[];
+    bool missingChanged = false;
+    for (final LocalTrack entry in candidates) {
+      if (_disposed) return null;
+      if (!isLive(entry) || entry.missing) continue;
+      final bool exists = await _fileExists(entry.path);
+      if (_disposed) return null;
+      if (!isLive(entry) || entry.missing) continue;
+      if (exists) {
+        available.add(entry);
+      } else {
+        entry.missing = true;
+        missingChanged = true;
+      }
+    }
+    if (missingChanged && !_disposed) {
+      _tracksRevision++;
+      notifyListeners();
+    }
+    LocalTrack? chosen;
+    for (final LocalTrack entry in available) {
+      if (!isLive(entry) || entry.missing) continue;
       if (chosen == null || _prefer(entry, chosen, quality)) chosen = entry;
     }
     return chosen == null ? null : File(chosen.path);
   }
 
   LocalTrack? entryForPath(String path) {
-    final String absolute = _absolute(path);
-    for (final LocalTrack entry in _tracks) {
-      if (_samePath(entry.path, absolute)) return entry;
-    }
-    return null;
+    final int? index = _indexesByPath()[_normalize(_absolute(path))];
+    return index == null ? null : _tracks[index];
   }
+
+  // Keep the first occurrence for old manifests containing duplicate paths.
+  // Appends update this map; removals invalidate it because indexes shift.
+  Map<String, int> _indexesByPath() => _pathIndexes ??= <String, int>{
+    for (int i = _tracks.length - 1; i >= 0; i--)
+      _normalize(_tracks[i].path): i,
+  };
 
   /// Removes an entry. Downloaded files are deleted when [deleteFile] is true;
   /// scanned/imported files are never deleted by this API.
   Future<void> remove(LocalTrack entry, {bool deleteFile = false}) async {
-    final int index = _tracks.indexWhere(
-      (LocalTrack existing) => _samePath(existing.path, entry.path),
-    );
-    if (index < 0) return;
+    await load();
+    final int? index = _indexesByPath()[_normalize(entry.path)];
+    if (index == null) return;
     _tracks.removeAt(index);
+    _pathIndexes = null;
+    _tracksRevision++;
     if (deleteFile && entry.source == LocalTrackSource.download) {
       try {
         final File file = File(entry.path);
@@ -292,14 +407,18 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
 
   /// Drops records whose file disappeared, without touching any file.
   Future<void> clearMissing() async {
+    await load();
     final int before = _tracks.length;
     _tracks.removeWhere((LocalTrack entry) => entry.missing);
     if (_tracks.length == before) return;
+    _pathIndexes = null;
+    _tracksRevision++;
     notifyListeners();
     await _persist();
   }
 
   Future<void> addScanRoot(String path) async {
+    await load();
     final String absolute = _absolute(path);
     if (_scanRoots.any((String root) => _samePath(root, absolute))) return;
     _scanRoots.add(absolute);
@@ -308,6 +427,7 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> removeScanRoot(String path) async {
+    await load();
     final int before = _scanRoots.length;
     _scanRoots.removeWhere((String root) => _samePath(root, path));
     if (_scanRoots.length == before) return;
@@ -317,6 +437,7 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
 
   /// Removes every entry that came from a scan of [root] (or its children).
   Future<void> removeScannedUnder(String root) async {
+    await load();
     final String normalizedRoot = _normalize(root);
     final String prefix = normalizedRoot.endsWith('/')
         ? normalizedRoot
@@ -328,6 +449,8 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
       return path == normalizedRoot || path.startsWith(prefix);
     });
     if (_tracks.length == before) return;
+    _pathIndexes = null;
+    _tracksRevision++;
     notifyListeners();
     await _persist();
   }
@@ -365,31 +488,43 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  Future<void> _persist() {
-    final Future<void> next = _writeChain.then((_) => _writeManifest());
-    _writeChain = next.catchError((Object _) {});
-    return next.catchError((Object _) {});
-  }
+  Future<void> _persist() => _writer.request();
 
   Future<void> _writeManifest() async {
     final File? file = await _manifestFile();
     if (file == null) return;
     await _resolveDocumentsPath();
-    final String json = jsonEncode(<String, dynamic>{
-      'version': 1,
-      'tracks': <Map<String, dynamic>>[
-        for (final LocalTrack entry in _tracks)
-          <String, dynamic>{...entry.toJson(), 'path': _encodePath(entry.path)},
-      ],
-      'scanRoots': _scanRoots,
-    });
+    final snapshot = _ManifestWrite(
+      List<LocalTrack>.of(_tracks),
+      List<String>.of(_scanRoots),
+      _documentsPath,
+    );
+    final String json = snapshot.tracks.length < 128
+        ? _encodeManifest(snapshot)
+        : await compute(
+            _encodeManifest,
+            snapshot,
+            debugLabel: 'local-manifest-write',
+          );
     final File temporary = File('${file.path}.tmp');
     await temporary.writeAsString(json, flush: true);
     await temporary.rename(file.path);
   }
 
-  String _encodePath(String path) {
-    final String? documents = _documentsPath;
+  static String _encodeManifest(_ManifestWrite snapshot) =>
+      jsonEncode(<String, dynamic>{
+        'version': 1,
+        'tracks': <Map<String, dynamic>>[
+          for (final LocalTrack entry in snapshot.tracks)
+            <String, dynamic>{
+              ...entry.toJson(),
+              'path': _encodePath(entry.path, snapshot.documentsPath),
+            },
+        ],
+        'scanRoots': snapshot.scanRoots,
+      });
+
+  static String _encodePath(String path, String? documents) {
     if (documents == null) return path;
     final String? relative = _relativeWithin(documents, path);
     if (relative == null || relative.isEmpty) return path;
@@ -421,7 +556,7 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
     return left == right;
   }
 
-  String _normalize(String path) {
+  static String _normalize(String path) {
     String value = path.replaceAll('\\', '/');
     while (value.endsWith('/') && value.length > 1) {
       value = value.substring(0, value.length - 1);
@@ -429,7 +564,7 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
     return Platform.isWindows ? value.toLowerCase() : value;
   }
 
-  String? _relativeWithin(String root, String path) {
+  static String? _relativeWithin(String root, String path) {
     final String normalizedRoot = _normalize(root);
     final String normalizedPath = _normalize(path);
     if (normalizedPath == normalizedRoot) return '';

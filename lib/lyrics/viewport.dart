@@ -300,9 +300,14 @@ class _LyricViewportState extends State<LyricViewport>
     var moving =
         _manual && _velocity.abs() > 5 ||
         widget.state.playing && _hasWordTimings;
+    var positionsChanged = false;
     for (var i = 0; i < _ys.length; i++) {
+      final double y = _ys[i].value;
+      final double scale = _scales[i].value;
       _ys[i].update(dt);
       _scales[i].update(dt);
+      positionsChanged =
+          positionsChanged || y != _ys[i].value || scale != _scales[i].value;
       moving = moving || !_ys[i].arrived || !_scales[i].arrived;
     }
     // Only the active word row needs a paint every frame; a row whose scale
@@ -314,7 +319,10 @@ class _LyricViewportState extends State<LyricViewport>
         _rowFrames[i].value++;
       }
     }
-    _frames.value++;
+    // Word highlights repaint their own boundary. Once positions settle,
+    // rebuilding the whole stack every vsync adds layout and semantics work
+    // without changing the geometry.
+    if (positionsChanged) _frames.value++;
     if (!moving) _ticker?.stop();
   }
 
@@ -929,6 +937,7 @@ class _LyricViewportState extends State<LyricViewport>
                   // 60 fps reconfigured a full-pane offscreen layer each frame.
                   child: _edgeFade(
                     AnimatedBuilder(
+                      key: const ValueKey<String>('lyric-position-stack'),
                       animation: Listenable.merge([_frames, _blur]),
                       builder: (context, _) => Stack(
                         fit: StackFit.expand,

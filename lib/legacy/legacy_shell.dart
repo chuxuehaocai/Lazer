@@ -63,6 +63,8 @@ enum _LegacySection { home, search, library, likes, settings }
 class _LegacyShellState extends State<LegacyShell>
     with TickerProviderStateMixin {
   _LegacySection _section = _LegacySection.home;
+  Object? _railCollectionsSource;
+  List<Playlist> _railPlaylistCache = const <Playlist>[];
   Playlist? _playlist;
 
   /// Set when the open detail is an album; the playlist pipeline renders it.
@@ -214,19 +216,8 @@ class _LegacyShellState extends State<LegacyShell>
   void _onAppStateChanged() {
     if (!mounted) return;
     if (_contentSwitching && !_nowPlayingOpen) return;
-    // On a television the shelf pages are the most expensive trees in the
-    // app. Playback position ticks arrive ten times a second and change
-    // nothing on them; the transport has its own listener. Filter those
-    // reports out, but keep every structural change (track, queue, loaded
-    // collections, charts, surface) flowing through.
-    if (largeScreenModeOf(context) &&
-        !_nowPlayingOpen &&
-        !_hasOpenDetail &&
-        _section != _LegacySection.settings) {
-      final String signature = _largeScreenSignature;
-      if (signature == _largeScreenSignatureCache) return;
-      _largeScreenSignatureCache = signature;
-    }
+    // Progress ticks use AppState.ticks; structural reports must all reach the
+    // page, including changes whose list lengths or track IDs stay the same.
     // A page can report from its own initState, i.e. while the tree is being
     // built; marking the shell dirty there throws. Take that report on the
     // frame that is already running instead.
@@ -241,29 +232,6 @@ class _LegacyShellState extends State<LegacyShell>
       return;
     }
     _repaint.ping();
-  }
-
-  String? _largeScreenSignatureCache;
-
-  String get _largeScreenSignature {
-    final Track? current = state.current;
-    return <Object?>[
-      current?.id,
-      state.playing,
-      state.queueIndex,
-      state.queue.length,
-      state.recentTracks.length,
-      identityHashCode(state.collections),
-      identityHashCode(state.home),
-      identityHashCode(state.playStats),
-      state.discoveryCharts.length,
-      state.discoveryChartsLoading,
-      state.discoveryChartsError,
-      state.homeError,
-      state.surface,
-      state.signedIn,
-      state.isGuest,
-    ].join('|');
   }
 
   /// The switcher is already animating in this frame, so the mirror starts on
@@ -1266,11 +1234,16 @@ class _LegacyShellState extends State<LegacyShell>
   }
 
   Widget _railPlaylists(AppleSemanticColors apple) {
-    final List<Playlist> playlists = <Playlist>[
-      if (state.collections.liked != null) state.collections.liked!,
-      ...state.collections.created,
-      ...state.collections.subscribed,
-    ];
+    final collections = state.collections;
+    if (!identical(_railCollectionsSource, collections)) {
+      _railCollectionsSource = collections;
+      _railPlaylistCache = <Playlist>[
+        if (collections.liked != null) collections.liked!,
+        ...collections.created,
+        ...collections.subscribed,
+      ];
+    }
+    final List<Playlist> playlists = _railPlaylistCache;
     if (playlists.isEmpty) {
       return SliverToBoxAdapter(
         child: Padding(

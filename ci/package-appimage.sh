@@ -20,6 +20,22 @@ bundle="build/linux/$bundle_arch/release/bundle"
 test -x "$bundle/lazer_nextgen"
 test -d "$bundle/data"
 test -d "$bundle/lib"
+require_file() {
+  if [[ ! -f "$1" ]]; then
+    echo "Missing required file in the Flutter bundle: $1" >&2
+    exit 1
+  fi
+}
+require_file "$bundle/lib/liblazer-audio.so"
+require_file "$bundle/lib/liblazer-audio-bridge.so"
+for component in avcodec avformat avutil swresample; do
+  if ! compgen -G "$bundle/lib/lib${component}.so*" > /dev/null; then
+    echo "Missing FFmpeg runtime library in the Flutter bundle: $component" >&2
+    exit 1
+  fi
+done
+require_file "$bundle/lib/licenses/lazer-ffmpeg/COPYING.LGPLv2.1"
+require_file "$bundle/lib/licenses/lazer-ffmpeg/BUILDINFO.txt"
 
 tools=$(mktemp -d)
 trap 'rm -rf -- "$tools"' EXIT
@@ -55,4 +71,6 @@ export PATH="$tools:$PATH"
   --plugin gtk --output appimage
 chmod +x "$OUTPUT"
 find "$appdir/usr/lib" -name 'libmpv.so*' -print -quit | grep -q .
+require_file "$appdir/usr/bin/lib/liblazer-audio.so"
+require_file "$appdir/usr/bin/lib/liblazer-audio-bridge.so"
 (cd dist && sha256sum "$filename" > "$filename.sha256")

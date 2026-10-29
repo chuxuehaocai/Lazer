@@ -8,6 +8,7 @@ import 'package:flutter/material.dart' show Color, ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../audio/audio_engine.dart';
+import '../audio/hifi_controller.dart';
 import '../diagnostics/build_info.dart';
 import '../downloads/download_manager.dart';
 import '../interaction/app_haptics.dart';
@@ -27,6 +28,8 @@ import '../utils/background_image.dart';
 import 'build_safe_notifier.dart';
 import 'listen_together.dart';
 import 'media_shortcuts.dart';
+import 'playback_queue_store.dart';
+import 'hifi_settings.dart';
 import 'ui_preferences.dart';
 
 /// How the session was authenticated.
@@ -125,13 +128,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     LocalLibrary? localLibrary,
     DownloadManager? downloadManager,
     ImportedLyricsStore? importedLyrics,
+    PlaybackQueueStore? queueStore,
     UpdateChecker? updateChecker,
     this.audioEngine,
     this._independentPlayback = false,
     this.enableExternalCharts = false,
     this.deviceIsTelevision = false,
+    this.hifiSettings = const HifiSettings(),
+    this.hifi,
   }) : catalog = catalog ?? Catalog(),
        localLibrary = localLibrary ?? LocalLibrary(),
+       _queueStore = queueStore ?? PlaybackQueueStore(),
        updateChecker = updateChecker ?? UpdateChecker() {
     this.importedLyrics = importedLyrics ?? ImportedLyricsStore();
     this.downloadManager =
@@ -144,6 +151,55 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // An engine that can hold a queue hands the next track over without a
     // reload; that hand-off arrives as an index change, never as a completion.
     _indexSubscription = _queueEngine?.indexStream.listen(_onEngineAdvanced);
+    // Terminal failures of the native engine (device lost, decode error) have no
+    // throw site to reach the load path, so they arrive here instead.
+    final AudioEngine? engine = audioEngine;
+    _failureSubscription = engine is FailureReportingAudioEngine
+        ? (engine as FailureReportingAudioEngine).failures.listen(
+            _onEngineFailure,
+          )
+        : null;
+    _bufferSubscription = engine is BufferChangeReportingAudioEngine
+        ? (engine as BufferChangeReportingAudioEngine).bufferChanges.listen(
+            (_) => _onBufferChanged(),
+          )
+        : null;
+  }
+
+  /// HiFi output settings: device, exclusive/bit-perfect policy, DSD mode, buffer,
+  /// and the equaliser. Applied to the native engine by [hifi].
+  HifiSettings hifiSettings;
+
+  /// Owns applying those settings; null when the app runs on `just_audio`.
+  final HifiController? hifi;
+
+  /// Persists the HiFi settings; a single writer so a value the engine refused is
+  /// not stored as if it had taken effect.
+  Future<void> setHifiSettings(HifiSettings next) async {
+    if (next == hifiSettings) return;
+    hifiSettings = next;
+    notifyListeners();
+    // Keep the controller's copy in sync and push live DSP settings to the
+    // native engine. Without this, the settings page only changed AppState and
+    // SharedPreferences; EQ and crossfeed never reached the audio thread.
+    final HifiController? controller = hifi;
+    if (controller != null) {
+      await controller.update(next);
+      return;
+    }
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    for (final MapEntry<String, Object?> entry in next.toMap().entries) {
+      final Object? value = entry.value;
+      if (value == null) {
+        await prefs.remove(entry.key);
+      } else if (value is bool) {
+        await prefs.setBool(entry.key, value);
+      } else if (value is int) {
+        await prefs.setInt(entry.key, value);
+      } else {
+        await prefs.setString(entry.key, '$value');
+      }
+    }
   }
 
   bool _independentPlayback;
@@ -315,7 +371,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   static const String _sessionKey = 'lazer_gateway_cookie';
-  static const String _queueKey = 'lazer_playback_queue_v1';
+
   static const String _recentTracksKey = 'lazer_recent_tracks_v1';
   static const int _recentTracksLimit = 60;
 
@@ -324,7 +380,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     state: this,
   );
   StreamSubscription<void>? _completionSubscription;
+  StreamSubscription<void>? _bufferSubscription;
   StreamSubscription<int>? _indexSubscription;
+  StreamSubscription<String>? _failureSubscription;
+  Timer? _bufferPulseTimer;
   static const playbackInterval = Duration(milliseconds: 100);
   bool hapticsEnabled = true;
   final AppHaptics haptics = AppHaptics();
@@ -942,6 +1001,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Restores any persisted gateway session, then loads the home feed.
   Future<void> bootstrap() async {
+    final int initialQueueActivity = _queueActivity;
     try {
       final prefs = await SharedPreferences.getInstance();
       _independentPlayback =
@@ -1013,6 +1073,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       playbackQuality = AudioQualityInfo.parse(
         prefs.getString('lazer_playback_quality'),
       );
+      hifiSettings = HifiSettings.fromMap(<String, Object?>{
+        'hifi_native_engine': prefs.getBool('hifi_native_engine'),
+        'hifi_output_token': prefs.getString('hifi_output_token'),
+        'hifi_output_name': prefs.getString('hifi_output_name'),
+        'hifi_exclusive': prefs.getBool('hifi_exclusive'),
+        'hifi_bit_perfect': prefs.getBool('hifi_bit_perfect'),
+        'hifi_dsd_mode': prefs.getString('hifi_dsd_mode'),
+        'hifi_dsd_rate_policy': prefs.getString('hifi_dsd_rate_policy'),
+        'hifi_volume_normalization': prefs.getString(
+          'hifi_volume_normalization',
+        ),
+        'hifi_crossfeed': prefs.getString('hifi_crossfeed'),
+        'hifi_buffer_millis': prefs.getInt('hifi_buffer_millis'),
+        'hifi_equalizer': prefs.getString('hifi_equalizer'),
+      });
+      unawaited(hifi?.apply() ?? Future<void>.value());
       downloadQuality = AudioQualityInfo.parse(
         prefs.getString('lazer_download_quality'),
       );
@@ -1061,7 +1137,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await localLibrary.load();
     await audioEngine?.setVolume(_volume);
     await _restoreRecentTracks();
-    await _restoreQueue();
+    await _restoreQueue(initialQueueActivity);
     unawaited(_loadCurrentArtwork());
     unawaited(ensureCurrentLyrics());
     await _restoreSession();
@@ -1350,6 +1426,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _stationLoading = false;
     _stationSeen.clear();
     _queue = <Track>[];
+    _markQueueChanged();
     _queueIndex = 0;
     _position = Duration.zero;
     lyrics = const <LyricLine>[];
@@ -1495,7 +1572,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   // -- transport ------------------------------------------------------------
   //
   // Two notification lanes. `notifyListeners()` fires only on structural
-  // changes (session, queue, play state); the 100 ms position ticks go
+  // changes (session, queue, play state); position ticks and buffer progress go
   // through the private [ticks] lane so leaf transport widgets update
   // without rebuilding whole screens. This keeps the semantics tree stable
   // while playing — the churn behind the Windows UIA log storm and the
@@ -1503,7 +1580,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   final _TickNotifier _tickNotifier = _TickNotifier();
 
-  /// Position/progress updates only (fires every 100 ms while playing).
+  /// Position/progress updates (100 ms while playing, buffer changes while paused).
   Listenable get ticks => _tickNotifier;
 
   /// Structural changes AND ticks — for the transport widgets that mirror
@@ -1515,6 +1592,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Timer? _ticker;
   List<Track> _queue = <Track>[];
+  int _queueRevision = 0;
+  List<Track>? _queueSnapshot;
+  final PlaybackQueueStore _queueStore;
+  int _queueActivity = 0;
   List<Track> _recentTracks = <Track>[];
   int _queueIndex = 0;
   Duration _position = Duration.zero;
@@ -1552,8 +1633,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool _stationLoading = false;
   final Set<String> _stationSeen = <String>{};
 
-  List<Track> get queue => List<Track>.unmodifiable(_queue);
+  List<Track> get queue => _queueSnapshot ??= List<Track>.unmodifiable(_queue);
+
+  /// Changes whenever the queue's contents or order change.
+  int get queueRevision => _queueRevision;
+
+  void _markQueueChanged() {
+    _queueRevision++;
+    _queueSnapshot = null;
+  }
+
   List<Track> get recentTracks => List<Track>.unmodifiable(_recentTracks);
+
+  /// Counts without allocating an immutable snapshot of the queue.
+  int get queueLength => _queue.length;
   Track? get current =>
       _queue.isEmpty ? null : _queue[_queueIndex.clamp(0, _queue.length - 1)];
   Duration get position => _position;
@@ -1594,11 +1687,33 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? t = current;
     final int duration = t?.duration.inMilliseconds ?? 0;
     if (duration <= 0) return 0;
+    if (audioEngine == null) return 0;
+    if (!_seekLimitedByBuffer) return 1;
     final AudioEngine? engine = audioEngine;
+    final Duration playhead = precisePosition;
     final Duration buffered = engine is BufferedAudioEngine
         ? (engine as BufferedAudioEngine).bufferedPosition
-        : _position;
-    return (buffered.inMilliseconds / duration).clamp(0.0, 1.0);
+        : playhead;
+    final Duration available = buffered > playhead ? buffered : playhead;
+    return (available.inMilliseconds / duration).clamp(0.0, 1.0);
+  }
+
+  /// Seeking can move through buffered audio, but never past it.
+  /// Keep the current playhead reachable if a backend reports a shorter buffer.
+  double get seekLimitFraction {
+    if (!_seekLimitedByBuffer) return 1;
+    final double buffered = bufferedFraction;
+    final double played = progress;
+    return buffered > played ? buffered : played;
+  }
+
+  double clampSeekFraction(double fraction) =>
+      fraction.clamp(0.0, seekLimitFraction).toDouble();
+
+  bool get _seekLimitedByBuffer {
+    final AudioEngine? engine = audioEngine;
+    return engine is SeekBoundaryReportingAudioEngine &&
+        (engine as SeekBoundaryReportingAudioEngine).seekIsLimitedByBuffer;
   }
 
   void playQueue(List<Track> tracks, {int startIndex = 0}) {
@@ -1659,6 +1774,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _finishPlaySession();
     trackChangeDirection = 1;
     _queue = List<Track>.of(tracks);
+    _markQueueChanged();
     _queueIndex = startIndex.clamp(0, tracks.length - 1);
     unawaited(_saveQueue());
     _position = Duration.zero;
@@ -1812,6 +1928,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         final additions = fresh.take(30).toList();
         if (additions.isEmpty) continue;
         _queue.addAll(additions);
+        _markQueueChanged();
         unawaited(_saveQueue());
         notifyListeners();
         return true;
@@ -1824,6 +1941,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             ..shuffle();
       if (fallback.isNotEmpty && _stationLoader == loader) {
         _queue.addAll(fallback.take(20));
+        _markQueueChanged();
         unawaited(_saveQueue());
         notifyListeners();
         return true;
@@ -1864,7 +1982,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void seek(double fraction) {
     final Track? t = current;
     if (t == null) return;
-    final Duration target = t.duration * fraction.clamp(0, 1);
+    final Duration target = t.duration * clampSeekFraction(fraction);
     _position = target;
     if (_realActive) unawaited(audioEngine!.seek(target));
     // Position-only change: tick lane, not a structural rebuild.
@@ -1929,13 +2047,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Local files win over the network so downloads and scanned songs keep
   /// playing offline. Missing files fall through to the service.
-  Future<String?> _trackUrl(Track track) async {
-    final File? local = localLibrary.localFileFor(
+  Future<String?> _trackUrl(
+    Track track, {
+    bool Function()? stillCurrent,
+  }) async {
+    final AudioQuality quality = playbackQuality;
+    final File? local = await localLibrary.localFileFor(
       track,
-      quality: playbackQuality,
+      quality: quality,
     );
+    if (stillCurrent != null && !stillCurrent()) return null;
     if (local != null) return local.uri.toString();
-    return catalog.audioUrlFor(track, quality: playbackQuality);
+    return catalog.audioUrlFor(track, quality: quality);
   }
 
   /// Loads the stream URL. A locked or unavailable song stops playback and
@@ -1953,7 +2076,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queuedNextIndex = null;
     String? url;
     try {
-      url = await _trackUrl(track);
+      url = await _trackUrl(
+        track,
+        stillCurrent: () => generation == _generation,
+      );
     } catch (error) {
       if (generation == _generation) _failPlayback(_friendly(error));
       return;
@@ -2025,7 +2151,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     String? url;
     try {
-      url = await _trackUrl(_queue[next]);
+      url = await _trackUrl(
+        _queue[next],
+        stillCurrent: () => queueId == _queueId && _realActive,
+      );
     } catch (_) {
       url = null;
     }
@@ -2047,13 +2176,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<void> _crossIntoQueuedTrack() async {
     final QueueAudioEngine? engine = _queueEngine;
     if (engine == null) return;
+    final int generation = _generation;
+    final int targetIndex = _queueIndex;
+    var crossed = false;
     try {
-      await engine.playQueuedNext();
+      crossed = await engine.playQueuedNext();
     } catch (_) {
-      if (_playing) unawaited(_startAudio());
+      // A queue implementation may reject the hand-off. The normal source
+      // path below still gives the requested track a chance to play.
+    }
+    // A newer switch, stop or pause owns the engine now. Do not let a delayed
+    // queue operation restart playback or overwrite that newer choice.
+    if (!_playing || generation != _generation || targetIndex != _queueIndex) {
       return;
     }
-    if (!_playing) return;
+    if (!crossed) {
+      unawaited(_startAudio());
+      return;
+    }
+    // Some queue engines switch tracks by opening the prepared source again;
+    // that leaves their output paused even though the app is still in the
+    // playing state. Calling play is harmless for engines that preserved
+    // playback and is required for engines that reopened the source.
+    unawaited(_resumeAudio());
     unawaited(_prefetchNext());
   }
 
@@ -2125,6 +2270,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         );
       }).toList();
       if (changed) {
+        _markQueueChanged();
         unawaited(_saveQueue());
         final Track? hydrated = current;
         if (hydrated != null) unawaited(_replaceRecentMetadata(hydrated));
@@ -2137,45 +2283,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  Future<void> _restoreQueue() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_queueKey);
-      if (raw == null) return;
-      final json = jsonDecode(raw);
-      if (json is! Map<String, dynamic> || json['tracks'] is! List) return;
-      final tracks = <Track>[];
-      for (final item in json['tracks'] as List) {
-        if (item is! Map<String, dynamic>) continue;
-        final id = item['id'] as String? ?? '';
-        if (int.tryParse(id) == null) continue;
-        tracks.add(
-          Track(
-            id: id,
-            title: item['title'] as String? ?? '',
-            artist: item['artist'] as String? ?? '',
-            artists: ArtistRef.list(item['artists']),
-            album: item['album'] as String? ?? '',
-            duration: Duration(
-              milliseconds: (item['durationMs'] as num?)?.toInt() ?? 0,
-            ),
-            coverSeed: (item['coverSeed'] as num?)?.toInt() ?? 0,
-            accent: (item['accent'] as num?)?.toInt() ?? 0,
-            albumId: (item['albumId'] as num?)?.toInt() ?? 0,
-            coverUrl: item['coverUrl'] as String?,
-            translatedTitle: item['translatedTitle'] as String?,
-          ),
-        );
-      }
-      _queue = tracks;
-      _queueIndex = ((json['index'] as num?)?.toInt() ?? 0).clamp(
-        0,
-        tracks.isEmpty ? 0 : tracks.length - 1,
-      );
-      notifyListeners();
-    } catch (_) {
-      // Corrupt or inaccessible local state leaves an empty queue.
-    }
+  Future<void> _restoreQueue(int initialActivity) async {
+    if (_queueActivity != initialActivity) return;
+    final PlaybackQueueSnapshot? snapshot = await _queueStore.load();
+    // Playback or sign-out can happen while preferences or decoding are in
+    // flight. Those actions own the queue and must not be overwritten.
+    if (snapshot == null || _queueActivity != initialActivity) return;
+    _queue = snapshot.tracks;
+    _markQueueChanged();
+    _queueIndex = snapshot.index;
+    notifyListeners();
   }
 
   Future<void> _restoreRecentTracks() async {
@@ -2228,34 +2345,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {}
   }
 
-  Future<void> _saveQueue() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _queueKey,
-        jsonEncode(<String, Object?>{
-          'index': _queueIndex,
-          'tracks': <Map<String, Object?>>[
-            for (final track in _queue)
-              <String, Object?>{
-                'id': track.id,
-                'title': track.title,
-                'translatedTitle': track.translatedTitle,
-                'artist': track.artist,
-                'artists': track.artists
-                    .map((artist) => artist.toJson())
-                    .toList(),
-                'album': track.album,
-                'albumId': track.albumId,
-                'durationMs': track.duration.inMilliseconds,
-                'coverSeed': track.coverSeed,
-                'accent': track.accent,
-                'coverUrl': track.coverUrl,
-              },
-          ],
-        }),
-      );
-    } catch (_) {}
+  Future<void> _saveQueue() {
+    _queueActivity++;
+    return _queueStore.save(_queue, _queueIndex, _queueRevision);
   }
 
   Future<void> _resumeAudio() async {
@@ -2366,11 +2458,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // Cloud lyrics are authoritative, but a `.lrc` beside a downloaded or
     // scanned file is a useful offline fallback.
     if (lyrics.isEmpty && !lyricsPureMusic) {
-      final String? localPath =
-          localLibrary.localFileFor(track)?.path ?? track.localPath;
+      final File? localFile = await localLibrary.localFileFor(track);
+      if (generation != _lyricGeneration) return;
+      final String? localPath = localFile?.path ?? track.localPath;
       final String? sidecar = await ImportedLyricsStore.sidecarFor(localPath);
       if (generation != _lyricGeneration) return;
-      if (sidecar != null) lyrics = parseLrc(sidecar);
+      if (sidecar != null &&
+          lyrics.isEmpty &&
+          !lyricsImported &&
+          !lyricsPureMusic) {
+        lyrics = parseLrc(sidecar);
+      }
     }
     if (lyrics.isEmpty && failure != null) {
       lyricsError = '歌词暂时无法加载。';
@@ -2400,6 +2498,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     playbackError = message;
     unawaited(audioEngine?.stop() ?? Future<void>.value());
     notifyListeners();
+  }
+
+  /// The engine failed after the source was loaded.
+  ///
+  /// The message is shown instead of silently stopping: a lost output device and a
+  /// decode error both leave the user with no audio, and both are worth naming.
+  void _onEngineFailure(String message) {
+    if (!_realActive) return;
+    _failPlayback(message);
   }
 
   void _onEngineCompleted() {
@@ -2488,6 +2595,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return;
     }
     // The URL is still loading. Do not invent elapsed time.
+  }
+
+  void _onBufferChanged() {
+    // Playback ticks already repaint the rail. While paused, coalesce buffer
+    // updates into a modest refresh rate so cache progress stays visible.
+    if (_playing || _bufferPulseTimer != null) return;
+    _bufferPulseTimer = Timer(const Duration(milliseconds: 250), () {
+      _bufferPulseTimer = null;
+      _tickNotifier.pulse();
+    });
   }
 
   /// Accumulates how much of [track] was actually heard.
@@ -2734,13 +2851,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _queueActivity++;
     ++_generation;
     ++_lyricGeneration;
     // Detach the room controller before the tick lane it listens to is
     // disposed: the controller is lazy, so this may be its first access.
     listenTogether.dispose();
     _completionSubscription?.cancel();
+    _bufferSubscription?.cancel();
     _indexSubscription?.cancel();
+    _failureSubscription?.cancel();
+    _bufferPulseTimer?.cancel();
     _ticker?.cancel();
     _tickNotifier.dispose();
     if (_ownsDownloadManager) downloadManager.dispose();
@@ -2767,8 +2888,8 @@ class _PlayReport {
   final int sourceId;
 }
 
-/// Tick-only heartbeat lane. `notifyListeners()` is @protected, so this thin
-/// subclass exposes [pulse] for the 100 ms position updates that must not
+/// Transport heartbeat lane. `notifyListeners()` is @protected, so this thin
+/// subclass exposes [pulse] for position and buffer updates that must not
 /// rebuild whole screens (see AppState's transport note).
 class _TickNotifier extends ChangeNotifier with BuildSafeNotifier {
   void pulse() => notifyListeners();

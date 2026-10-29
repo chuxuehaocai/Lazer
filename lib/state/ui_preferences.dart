@@ -99,9 +99,10 @@ extension LegacyBackgroundModeLabels on LegacyBackgroundMode {
 const int kFlowMeshColumns = 28;
 const int kFlowMeshRows = 18;
 
-/// Update cadence at full precision. The mesh drifts on a ten second time
-/// base, so 30 updates per second already read as continuous motion.
-const Duration kFlowFrameIntervalFull = Duration(milliseconds: 33);
+/// Update cadence at full precision. A 60 Hz cap keeps the mesh motion smooth
+/// on high-refresh displays without running the painter faster than the UI can
+/// present useful frames.
+const Duration kFlowFrameIntervalFull = Duration(milliseconds: 16);
 
 /// Update cadence at the lowest precision — three times cheaper, still a
 /// drifting canvas.
@@ -117,8 +118,8 @@ const double kDynamicBackgroundQualityMax = 1;
 const double kDynamicBackgroundQualityStep = 0.05;
 
 /// Default precision. 80% draws the same colour field with 22x14 vertices and
-/// an update just under every 50 ms — indistinguishable from the authored
-/// mesh, and it leaves the GPU headroom the now-playing entrance needs.
+/// refreshes at roughly 50 Hz, leaving the mesh visibly smooth while keeping
+/// its vertex count below the authored maximum.
 const double kDynamicBackgroundQualityDefault = 0.8;
 
 /// Clamps to the supported range and snaps to [kDynamicBackgroundQualityStep],
@@ -140,7 +141,8 @@ double normalizeDynamicBackgroundQuality(double value) {
 ///
 /// This is the whole meaning of the setting — there is no hidden second knob.
 /// At 10% the canvas is a 4x3 field refreshed about ten times per second; at
-/// 100% it is the 28x18 field refreshed thirty times per second.
+/// 100% it is the 28x18 field refreshed at 60 Hz. The cadence accelerates
+/// earlier than the mesh density so the default 80% setting stays fluid.
 class DynamicBackgroundPrecision {
   const DynamicBackgroundPrecision({
     required this.quality,
@@ -161,9 +163,13 @@ class DynamicBackgroundPrecision {
 
   factory DynamicBackgroundPrecision.of(double quality) {
     final double q = normalizeDynamicBackgroundQuality(quality);
-    final double t =
+    final double qualityProgress =
         (q - kDynamicBackgroundQualityMin) /
         (kDynamicBackgroundQualityMax - kDynamicBackgroundQualityMin);
+    // Most of the perceptual gain comes from moving the mesh above 30 fps.
+    // Spend more of the cadence budget in the middle of the slider range,
+    // where its grid is still substantially cheaper than the full mesh.
+    final double cadenceProgress = math.pow(qualityProgress, 0.2).toDouble();
     final int span =
         kFlowFrameIntervalLow.inMicroseconds -
         kFlowFrameIntervalFull.inMicroseconds;
@@ -174,7 +180,9 @@ class DynamicBackgroundPrecision {
       columns: math.max(4, (kFlowMeshColumns * q).round()),
       rows: math.max(3, (kFlowMeshRows * q).round()),
       frameInterval: Duration(
-        microseconds: (kFlowFrameIntervalLow.inMicroseconds - span * t).round(),
+        microseconds:
+            (kFlowFrameIntervalLow.inMicroseconds - span * cadenceProgress)
+                .round(),
       ),
     );
   }

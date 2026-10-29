@@ -230,79 +230,88 @@ class _SongCommentsViewState extends State<SongCommentsView> {
                           ),
                         ),
                       )
-                    : CustomScrollView(
-                        controller: _scroll,
-                        key: const PageStorageKey<String>('song-comments'),
-                        slivers: <Widget>[
-                          if (hot.isNotEmpty) ...<Widget>[
-                            const SliverPadding(
-                              padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
-                              sliver: SliverToBoxAdapter(
-                                child: _CommentsSectionLabel('热门评论'),
-                              ),
-                            ),
-                            _rows(hot),
-                          ],
-                          if (latest.isNotEmpty) ...<Widget>[
-                            const SliverPadding(
-                              padding: EdgeInsets.fromLTRB(20, 22, 20, 4),
-                              sliver: SliverToBoxAdapter(
-                                child: _CommentsSectionLabel('最新评论'),
-                              ),
-                            ),
-                            _rows(latest),
-                          ],
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                20,
-                                16,
-                                20,
-                                32,
-                              ),
-                              child: Center(
-                                child: _comments.loadingMore
-                                    ? const SizedBox.square(
-                                        dimension: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : _comments.error != null
-                                    ? Column(
-                                        children: <Widget>[
-                                          TrText(
-                                            _comments.error!,
-                                            style: theme.textTheme.bodySmall
+                    : LayoutBuilder(
+                        builder: (BuildContext context, BoxConstraints box) {
+                          final int columns = ((box.maxWidth - 40) / 320)
+                              .floor()
+                              .clamp(1, 4);
+                          return CustomScrollView(
+                            controller: _scroll,
+                            key: const PageStorageKey<String>('song-comments'),
+                            slivers: <Widget>[
+                              if (hot.isNotEmpty) ...<Widget>[
+                                const SliverPadding(
+                                  padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+                                  sliver: SliverToBoxAdapter(
+                                    child: _CommentsSectionLabel('热门评论'),
+                                  ),
+                                ),
+                                _rows(hot, columns),
+                              ],
+                              if (latest.isNotEmpty) ...<Widget>[
+                                const SliverPadding(
+                                  padding: EdgeInsets.fromLTRB(20, 22, 20, 4),
+                                  sliver: SliverToBoxAdapter(
+                                    child: _CommentsSectionLabel('最新评论'),
+                                  ),
+                                ),
+                                _rows(latest, columns),
+                              ],
+                              SliverToBoxAdapter(
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    20,
+                                    16,
+                                    20,
+                                    32,
+                                  ),
+                                  child: Center(
+                                    child: _comments.loadingMore
+                                        ? const SizedBox.square(
+                                            dimension: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : _comments.error != null
+                                        ? Column(
+                                            children: <Widget>[
+                                              TrText(
+                                                _comments.error!,
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                      color: scheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                              ),
+                                              TextButton(
+                                                onPressed: () => unawaited(
+                                                  _comments.retry(),
+                                                ),
+                                                child: const TrText('重试'),
+                                              ),
+                                            ],
+                                          )
+                                        : _comments.hasMore
+                                        ? TextButton(
+                                            onPressed: () =>
+                                                unawaited(_comments.loadMore()),
+                                            child: const TrText('加载更多评论'),
+                                          )
+                                        : Text(
+                                            context.tr('已显示全部评论'),
+                                            style: theme.textTheme.labelMedium
                                                 ?.copyWith(
                                                   color:
                                                       scheme.onSurfaceVariant,
                                                 ),
                                           ),
-                                          TextButton(
-                                            onPressed: () =>
-                                                unawaited(_comments.retry()),
-                                            child: const TrText('重试'),
-                                          ),
-                                        ],
-                                      )
-                                    : _comments.hasMore
-                                    ? TextButton(
-                                        onPressed: () =>
-                                            unawaited(_comments.loadMore()),
-                                        child: const TrText('加载更多评论'),
-                                      )
-                                    : Text(
-                                        context.tr('已显示全部评论'),
-                                        style: theme.textTheme.labelMedium
-                                            ?.copyWith(
-                                              color: scheme.onSurfaceVariant,
-                                            ),
-                                      ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ],
+                            ],
+                          );
+                        },
                       ),
               ),
             ),
@@ -312,50 +321,36 @@ class _SongCommentsViewState extends State<SongCommentsView> {
     );
   }
 
-  /// Comments flow as a masonry wall: variable-height cards spread across as
-  /// many columns as the pane can hold, instead of one row per comment.
-  Widget _rows(List<SongComment> comments) => SliverPadding(
+  /// Build only the rows near the viewport as more comment pages arrive.
+  /// Cards in a row can have different heights; the next row starts after the
+  /// tallest one so no comment is clipped at large text scales.
+  Widget _rows(List<SongComment> comments, int columns) => SliverPadding(
     padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-    sliver: SliverToBoxAdapter(
-      child: LayoutBuilder(
-        builder: (BuildContext context, BoxConstraints box) {
-          final int columns = (box.maxWidth / 320).floor().clamp(1, 4);
-          final List<List<int>> buckets = List<List<int>>.generate(
-            columns,
-            (_) => <int>[],
-          );
-          for (int i = 0; i < comments.length; i++) {
-            buckets[i % columns].add(i);
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              for (int column = 0; column < columns; column++) ...<Widget>[
-                if (column > 0) const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    children: <Widget>[
-                      for (final int index in buckets[column])
-                        RepaintBoundary(
-                          key: ValueKey<String>(
-                            'comment-${comments[index].id}',
-                          ),
-                          child: _CommentRow(
-                            comment: comments[index],
-                            pending: _comments.isLiking(comments[index].id),
-                            signedIn: widget.state.signedIn,
-                            onLike: () =>
-                                unawaited(_like(comments[index].id)),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          );
-        },
+    sliver: SliverList.builder(
+      itemCount: (comments.length + columns - 1) ~/ columns,
+      itemBuilder: (BuildContext context, int row) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          for (int column = 0; column < columns; column++) ...<Widget>[
+            if (column > 0) const SizedBox(width: 12),
+            Expanded(
+              child: row * columns + column < comments.length
+                  ? _commentCard(comments[row * columns + column])
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ],
       ),
+    ),
+  );
+
+  Widget _commentCard(SongComment comment) => RepaintBoundary(
+    key: ValueKey<String>('comment-${comment.id}'),
+    child: _CommentRow(
+      comment: comment,
+      pending: _comments.isLiking(comment.id),
+      signedIn: widget.state.signedIn,
+      onLike: () => unawaited(_like(comment.id)),
     ),
   );
 

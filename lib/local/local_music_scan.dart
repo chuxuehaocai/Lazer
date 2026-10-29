@@ -95,19 +95,29 @@ Future<LocalScanResult?> scanMusicFolder(
     ),
   );
   LocalScanResult result;
+  int latestFound = 0;
+  final Timer progressTimer = Timer.periodic(
+    const Duration(milliseconds: 100),
+    (_) {
+      if (found.value != latestFound) found.value = latestFound;
+    },
+  );
   try {
     result = await LocalMusicScanner().scan(
       root,
       existing: state.localLibrary.tracks,
       isCanceled: () => stop,
-      onProgress: (int count, String current) => found.value = count,
+      onProgress: (int count, String _) => latestFound = count,
     );
   } catch (_) {
+    progressTimer.cancel();
     if (navigator.mounted) navigator.pop();
     if (context.mounted) _message(context, '扫描失败，请检查文件夹后重试');
     found.dispose();
     return null;
   }
+  progressTimer.cancel();
+  found.value = result.tracks.length;
   if (navigator.mounted) navigator.pop();
   found.dispose();
   if (rememberRoot) await state.localLibrary.addScanRoot(root.path);

@@ -76,6 +76,10 @@ class LyricSpring {
   }
 
   void update(double seconds) {
+    // LyricViewport keeps one position and scale spring per lyric line. Most
+    // rows are settled on almost every frame, so avoid re-running the closed-
+    // form solver and its finite-difference derivatives until a target moves.
+    if (_arrived || seconds <= 0) return;
     _time += seconds;
     value = _solver(_time);
     final queued = _queued;

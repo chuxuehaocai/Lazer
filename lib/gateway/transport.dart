@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'crypto.dart';
 import 'routes.dart';
+import 'response_decoder.dart';
 
 /// HTTP failure before a valid API response could be decoded. The upstream
 /// body is never retained.
@@ -451,14 +452,12 @@ class NeteaseTransport {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw GatewayHttpException(response.statusCode, alias);
     }
-    final dynamic decoded;
+    final Map<String, dynamic> normalizedBody;
     try {
-      decoded = jsonDecode(bodyText);
+      normalizedBody = await decodeGatewayResponse(bodyText);
     } on FormatException {
       throw GatewayProtocolException(alias);
     }
-    if (decoded is! Map<String, dynamic>) throw GatewayProtocolException(alias);
-    final Map<String, dynamic> normalizedBody = _normalizeFields(decoded);
     final dynamic rawCode = normalizedBody['code'];
     final Map<String, dynamic> normalized = rawCode is num
         ? <String, dynamic>{...normalizedBody, 'code': rawCode.toInt()}
@@ -539,34 +538,10 @@ class NeteaseTransport {
     }
     final bodyText = await response.transform(utf8.decoder).join();
     try {
-      final decoded = jsonDecode(bodyText);
-      if (decoded is! Map<String, dynamic>) throw const FormatException();
-      return _Response(_normalizeFields(decoded), null);
+      return _Response(await decodeGatewayResponse(bodyText), null);
     } on FormatException {
       throw GatewayProtocolException(alias);
     }
-  }
-
-  static Map<String, dynamic> _normalizeFields(Map<String, dynamic> element) {
-    return element.map((String key, dynamic value) {
-      final String name = key == 'avatarImgId_str' ? 'avatarImgIdStr' : key;
-      if (value is Map<String, dynamic>) {
-        return MapEntry<String, dynamic>(name, _normalizeFields(value));
-      }
-      if (value is List) {
-        return MapEntry<String, dynamic>(
-          name,
-          value
-              .map<dynamic>(
-                (dynamic item) => item is Map<String, dynamic>
-                    ? _normalizeFields(item)
-                    : item,
-              )
-              .toList(),
-        );
-      }
-      return MapEntry<String, dynamic>(name, value);
-    });
   }
 
   static List<int> _secureRandom(int size) {

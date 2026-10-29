@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -11,8 +11,10 @@ import 'package:lazer_nextgen/legacy/legacy_shell.dart';
 import 'package:lazer_nextgen/legacy/legacy_theme.dart';
 import 'package:lazer_nextgen/navigation/pull_down_to_close.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
+import 'package:lazer_nextgen/player/now_playing_route.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
+import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
 
 const Track _track = Track(
   id: 'pull-down-fixture',
@@ -177,6 +179,89 @@ void main() {
     await tester.tap(find.byTooltip('\u8fd4\u56de'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 540));
+    expect(find.byType(NowPlayingPage), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('closing from lyrics pauses its ticker and allows reopening', (
+    tester,
+  ) async {
+    await _openPlayer(tester);
+
+    await tester.tap(find.byKey(const ValueKey('now-playing-more')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('歌词'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byKey(const ValueKey('mobile-lyrics')), findsOneWidget);
+    expect(
+      TickerMode.valuesOf(tester.element(find.byType(LyricViewport))).enabled,
+      isTrue,
+    );
+
+    await tester.tap(find.byTooltip('返回'));
+    await tester.pump();
+    expect(
+      TickerMode.valuesOf(tester.element(find.byType(LyricViewport))).enabled,
+      isFalse,
+    );
+    await tester.pump(const Duration(milliseconds: 540));
+    expect(find.byType(NowPlayingPage), findsNothing);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(LegacyPlayerBar),
+        matching: find.text(_track.title),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 540));
+    expect(find.byType(NowPlayingPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a pushed player route pauses child tickers while closing', (
+    tester,
+  ) async {
+    final AppState state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+    state.playQueue(const <Track>[_track]);
+    final GlobalKey<NavigatorState> navigator = GlobalKey<NavigatorState>();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        theme: buildLegacyTheme(brightness: Brightness.dark),
+        home: Scaffold(
+          body: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () => Navigator.of(
+                context,
+              ).push<void>(NowPlayingRoute(state: state)),
+              child: const Text('Open player'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open player'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(NowPlayingPage), findsOneWidget);
+    expect(
+      TickerMode.valuesOf(tester.element(find.byType(NowPlayingPage))).enabled,
+      isTrue,
+    );
+
+    navigator.currentState!.pop();
+    await tester.pump();
+    expect(
+      TickerMode.valuesOf(tester.element(find.byType(NowPlayingPage))).enabled,
+      isFalse,
+    );
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(NowPlayingPage), findsNothing);
     expect(tester.takeException(), isNull);
   });

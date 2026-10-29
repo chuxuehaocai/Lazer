@@ -21,9 +21,14 @@ class _QueueEngine implements AudioEngine, QueueAudioEngine {
   final List<String> appends = <String>[];
 
   int jumps = 0;
+  int playCalls = 0;
   int stops = 0;
   int _queueId = 0;
   bool _active = false;
+  bool _hasQueuedNext = false;
+  bool queueJumpSucceeds = true;
+  bool failResumeAfterJump = false;
+  String? failUrl;
 
   @override
   Duration position = Duration.zero;
@@ -36,6 +41,9 @@ class _QueueEngine implements AudioEngine, QueueAudioEngine {
 
   @override
   Future<int> setQueue(List<String> urls, {int startIndex = 0}) async {
+    if (urls[startIndex] == failUrl) {
+      throw StateError('source failed');
+    }
     loads.add(urls[startIndex]);
     _active = true;
     return ++_queueId;
@@ -45,12 +53,16 @@ class _QueueEngine implements AudioEngine, QueueAudioEngine {
   Future<bool> appendToQueue(int queueId, String url) async {
     if (queueId != _queueId) return false;
     appends.add(url);
+    _hasQueuedNext = true;
     return true;
   }
 
   @override
-  Future<void> playQueuedNext() async {
+  Future<bool> playQueuedNext() async {
     jumps++;
+    if (!_hasQueuedNext || !queueJumpSucceeds) return false;
+    _hasQueuedNext = false;
+    return true;
   }
 
   @override
@@ -60,19 +72,28 @@ class _QueueEngine implements AudioEngine, QueueAudioEngine {
   Stream<void> get completed => _completed.stream;
 
   /// Simulates the platform crossing into the queued item on its own.
-  void crossIntoNext() => _indexes.add(1);
+  void crossIntoNext() {
+    _hasQueuedNext = false;
+    _indexes.add(1);
+  }
 
   /// Simulates the platform running out of material.
   void finish() => _completed.add(null);
 
   @override
   Future<void> setUrl(String url) async {
+    if (url == failUrl) throw StateError('source failed');
     loads.add(url);
     _active = true;
   }
 
   @override
-  Future<void> play() async {}
+  Future<void> play() async {
+    playCalls++;
+    if (failResumeAfterJump && jumps > 0) {
+      throw StateError('output stayed paused after the jump');
+    }
+  }
 
   @override
   Future<void> pause() async {}
@@ -154,20 +175,23 @@ class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
 
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => 'url-${track.id}';
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => 'url-${track.id}';
 
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();
 }
 
 Track _track(String id) => Track(
-      id: id,
-      title: 'Track $id',
-      artist: 'Artist',
-      album: 'Album',
-      duration: const Duration(minutes: 3),
-      coverSeed: 1,
-    );
+  id: id,
+  title: 'Track $id',
+  artist: 'Artist',
+  album: 'Album',
+  duration: const Duration(minutes: 3),
+  coverSeed: 1,
+);
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -207,8 +231,88 @@ void main() {
 
     expect(state.queueIndex, 1);
     expect(engine.jumps, 1);
+    expect(engine.playCalls, 2);
     expect(engine.loads, <String>['url-1']);
 
+    state.dispose();
+  });
+
+  testWidgets('a failed resume after a queue jump is reported to the user', (
+    tester,
+  ) async {
+    final engine = _QueueEngine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    state.playQueue(<Track>[_track('1'), _track('2')]);
+    await tester.pump();
+
+    engine.failResumeAfterJump = true;
+    state.next();
+    await tester.pump();
+
+    expect(state.current?.id, '2');
+    expect(state.playing, isFalse);
+    expect(state.playbackError, '播放中断，请重试。');
+    state.dispose();
+  });
+
+  testWidgets('manual next reloads when the platform queue cannot advance', (
+    tester,
+  ) async {
+    final engine = _QueueEngine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    state.playQueue(<Track>[_track('1'), _track('2')]);
+    await tester.pump();
+
+    engine.queueJumpSucceeds = false;
+    state.next();
+    await tester.pump();
+
+    expect(state.current?.id, '2');
+    expect(state.playing, isTrue);
+    expect(engine.loads, <String>['url-1', 'url-2']);
+    expect(state.playbackError, isNull);
+    state.dispose();
+  });
+
+  testWidgets('failed fallback stops playback and reports an error', (
+    tester,
+  ) async {
+    final engine = _QueueEngine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    state.playQueue(<Track>[_track('1'), _track('2')]);
+    await tester.pump();
+
+    engine
+      ..queueJumpSucceeds = false
+      ..failUrl = 'url-2';
+    state.next();
+    await tester.pump();
+
+    expect(state.current?.id, '2');
+    expect(state.playing, isFalse);
+    expect(state.playbackError, '音频加载失败，请重试。');
+    state.dispose();
+  });
+
+  testWidgets('next during a pending queue hand-off plays the requested song', (
+    tester,
+  ) async {
+    final engine = _QueueEngine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    state.playQueue(<Track>[_track('1'), _track('2'), _track('3')]);
+    await tester.pump();
+
+    // The engine has already crossed the boundary, but AppState has not yet
+    // received its asynchronous index notification.
+    engine.crossIntoNext();
+    state.next();
+    await tester.pump();
+
+    expect(state.current?.id, '2');
+    expect(state.queueIndex, 1);
+    expect(state.playing, isTrue);
+    expect(engine.loads, <String>['url-1', 'url-2']);
+    expect(state.playbackError, isNull);
     state.dispose();
   });
 
@@ -244,8 +348,14 @@ void main() {
     await tester.pump();
 
     expect(loads, 1);
-    expect(state.queue.map((track) => track.id),
-        <String>['1', '2', '3', '4', '5', '6']);
+    expect(state.queue.map((track) => track.id), <String>[
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+    ]);
     state.dispose();
   });
 

@@ -11,12 +11,17 @@ import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio/audio_engine.dart';
+import 'audio/engine_factory.dart';
+import 'audio/hifi_controller.dart';
 import 'audio/system_media_handler.dart';
+import 'audio/native/lazer_audio_library.dart';
 import 'audio/playback_session.dart';
 import 'diagnostics/frame_stats.dart';
 import 'legacy/legacy_shell.dart';
 import 'theme/apple_design.dart';
 import 'state/app_state.dart';
+import 'state/ui_preferences.dart';
+import 'state/hifi_settings.dart';
 import 'tv/tv_mode.dart';
 import 'widgets/window_frame.dart';
 import 'widgets/media_shortcut_listener.dart';
@@ -77,18 +82,65 @@ Future<void> main() async {
       // frame; must run before the first frame, which is also when the
       // runner decides to show the window.
       await initWindowFrame();
-      final prefs = await SharedPreferences.getInstance();
       // The television input model (D-pad focus) needs this before the first
       // frame: a television with no pointer would otherwise boot into a screen
       // where nothing can be operated.
-      final bool television = await detectTelevision();
-      final audio = JustAudioEngine();
+      // The native HiFi engine (FFmpeg + WASAPI/ALSA/CoreAudio) when this build
+      // ships one, otherwise just_audio/media_kit. Chosen once per launch.
+      final Future<SharedPreferences> prefsFuture =
+          SharedPreferences.getInstance();
+      final Future<bool> televisionFuture = detectTelevision();
+      final Future<AudioEngineSelection> selectionFuture = createAudioEngine();
+      final prefs = await prefsFuture;
+      final bool television = await televisionFuture;
+      final AudioEngineSelection selection = await selectionFuture;
+      final AudioEngine audio = selection.engine;
+      debugPrint('Audio engine: ${selection.description}');
+      // The HiFi page needs one owner for "apply these settings to whatever engine
+      // is running"; it exists even on just_audio so the page can still show the
+      // device catalog and why the native engine is not in use.
+      final HifiController hifi = HifiController(
+        HifiSettings.fromMap(<String, Object?>{
+          'hifi_native_engine': prefs.getBool('hifi_native_engine'),
+          'hifi_output_token': prefs.getString('hifi_output_token'),
+          'hifi_output_name': prefs.getString('hifi_output_name'),
+          'hifi_exclusive': prefs.getBool('hifi_exclusive'),
+          'hifi_bit_perfect': prefs.getBool('hifi_bit_perfect'),
+          'hifi_dsd_mode': prefs.getString('hifi_dsd_mode'),
+          'hifi_dsd_rate_policy': prefs.getString('hifi_dsd_rate_policy'),
+          'hifi_volume_normalization': prefs.getString(
+            'hifi_volume_normalization',
+          ),
+          'hifi_crossfeed': prefs.getString('hifi_crossfeed'),
+          'hifi_buffer_millis': prefs.getInt('hifi_buffer_millis'),
+          'hifi_equalizer': prefs.getString('hifi_equalizer'),
+        }),
+        engine: selection.native,
+        catalogApi: LazerAudioLoader.load().api,
+        persist: (HifiSettings value) async {
+          final SharedPreferences prefs = await SharedPreferences.getInstance();
+          for (final MapEntry<String, Object?> entry in value.toMap().entries) {
+            final Object? stored = entry.value;
+            if (stored == null) {
+              await prefs.remove(entry.key);
+            } else if (stored is bool) {
+              await prefs.setBool(entry.key, stored);
+            } else if (stored is int) {
+              await prefs.setInt(entry.key, stored);
+            } else {
+              await prefs.setString(entry.key, '$stored');
+            }
+          }
+        },
+      )..attach();
       final state = AppState(
         audioEngine: audio,
         enableExternalCharts: true,
         deviceIsTelevision: television,
         independentPlayback:
             prefs.getBool('lazer_independent_playback') ?? false,
+        hifiSettings: hifi.settings,
+        hifi: hifi,
       );
       final session = PlaybackSession(state, audio);
       final media = SystemMediaController(state);
@@ -115,7 +167,7 @@ class LazerApp extends StatefulWidget {
     this.session,
   });
   final AppState state;
-  final JustAudioEngine audio;
+  final AudioEngine audio;
   final SystemMediaController media;
   final PlaybackSession? session;
 
@@ -123,24 +175,53 @@ class LazerApp extends StatefulWidget {
   State<LazerApp> createState() => _LazerAppState();
 }
 
+// Only values read while constructing MaterialApp and its builder belong in
+// this signature. Playback, catalogue and account changes are consumed by
+// their own listeners further down the tree.
+typedef _RootUiSignature = (
+  Color?,
+  ThemeMode,
+  Locale?,
+  double,
+  double,
+  AppSurface,
+  bool,
+  double,
+  bool,
+  bool,
+);
+
 class _LazerAppState extends State<LazerApp> {
   AppState get _state => widget.state;
   bool _rootRebuildScheduled = false;
+  late _RootUiSignature _rootUi;
+
+  _RootUiSignature get _rootUiSignature => (
+    _state.legacyAccentSeed,
+    _state.themeMode,
+    _state.language.locale,
+    _state.scrollRetention,
+    _state.scrollAcceleration,
+    _state.surface,
+    _state.autoDpiScale,
+    _state.dpiScale,
+    _state.deviceIsTelevision,
+    _state.showFrameStats,
+  );
 
   @override
   void initState() {
     super.initState();
-    // Only structural changes (sign-in/out) may rebuild from the root.
-    // The 100 ms playback ticks are consumed by leaf transport widgets;
-    // previously every tick rebuilt the whole app here, which — on
-    // Windows with an accessibility client attached — fed a per-frame
-    // AXTree sync storm and froze the UI.
-    _state.addListener(_onSessionChanged);
+    _rootUi = _rootUiSignature;
+    _state.addListener(_onRootUiChanged);
     _state.bootstrap();
   }
 
-  void _onSessionChanged() {
+  void _onRootUiChanged() {
     if (!mounted) return;
+    final _RootUiSignature next = _rootUiSignature;
+    if (next == _rootUi) return;
+    _rootUi = next;
     // Pages report state from initState/build (the library starting its play
     // record fetch is one example). Calling setState on the root while the
     // framework is already building throws; take that report on the frame
@@ -161,7 +242,7 @@ class _LazerAppState extends State<LazerApp> {
 
   @override
   void dispose() {
-    _state.removeListener(_onSessionChanged);
+    _state.removeListener(_onRootUiChanged);
     widget.media.close();
     widget.session?.close();
     _state.dispose();
@@ -217,8 +298,6 @@ class _LazerAppState extends State<LazerApp> {
             if (_state.showFrameStats) const FrameStatsOverlay(),
           ],
         ),
-        // Structural rebuilds only: `setState` fires on sign-in/out, never on
-        // the 100 ms position ticks (leaf transport widgets consume those).
         // Keep exactly one root subtree during auth changes. AnimatedSwitcher
         // temporarily keeps both pages alive; with Windows UIA enabled that
         // overlap can leave AX nodes pending after the old page is detached.

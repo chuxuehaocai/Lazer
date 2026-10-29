@@ -140,7 +140,7 @@ void main() {
     expect(task.resolvedQuality, AudioQuality.lossless);
     expect(local.tracks.single.quality, AudioQuality.lossless);
     expect(local.tracks.single.source, LocalTrackSource.download);
-    expect(local.localFileFor(_track('1', '夜の歌'))?.path, native(file.path));
+    expect((await local.localFileFor(_track('1', '夜の歌')))?.path, native(file.path));
     expect(manager.completedCount, 1);
   });
 

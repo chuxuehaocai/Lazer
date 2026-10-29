@@ -51,6 +51,9 @@ dependencies:
   dbus: ^0.7.15
   audio_session: ^0.1.25
   path_provider: ^2.1.5
+  # Native audio engine bindings: memory allocation helpers for the `dart:ffi`
+  # structs the engine's C ABI takes (see lib/audio/native/).
+  ffi: ^2.1.4
   just_audio_media_kit: ^2.1.0
   media_kit_libs_windows_audio: ^1.0.9
   media_kit_libs_linux: ^1.2.1

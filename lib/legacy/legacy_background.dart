@@ -111,7 +111,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   /// change is a fraction of a percent of the warp. Re-rendering it at the
   /// display rate therefore buys nothing visible while spending the whole
   /// frame budget. The cadence actually used comes from the `动态背景渲染精度`
-  /// setting — 100 ms per update at 0.1, 33 ms at 1.0 — and never faster than
+  /// setting — 100 ms per update at 0.1, 16 ms at 1.0 — and never faster than
   /// that, which leaves the UI thread free for page and lyric motion.
   late DynamicBackgroundPrecision _precision = DynamicBackgroundPrecision.of(
     widget.quality,
@@ -234,6 +234,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
       widget.animated &&
       !_reduceMotion &&
       !widget.solid &&
+      !widget.preview &&
       _tickerAllowed &&
       _appActive;
 
@@ -345,6 +346,36 @@ class _FlowPainter extends CustomPainter {
   Float32List? _positions;
   Int32List? _colors;
   Uint16List? _indices;
+  Float64List? _uEnvelope;
+  Float64List? _uSinOuter;
+  Float64List? _uCosOuter;
+  Float64List? _uSinNested;
+  Float64List? _uCosNested;
+  Float64List? _uSinWaveX;
+  Float64List? _uCosWaveX;
+  Float64List? _uSinWaveY;
+  Float64List? _uCosWaveY;
+  Float64List? _uSinMix;
+  Float64List? _uCosMix;
+  Float64List? _vEnvelope;
+  Float64List? _vSinNested;
+  Float64List? _vCosNested;
+  Float64List? _vSinOuter;
+  Float64List? _vCosOuter;
+  Float64List? _vSinWaveX;
+  Float64List? _vCosWaveX;
+  Float64List? _vSinWaveY;
+  Float64List? _vCosWaveY;
+  Float64List? _vSinMix;
+  Float64List? _vCosMix;
+  Float64List? _rowWaveX;
+  Float64List? _rowWaveY;
+  Float64List? _rowOffsetASin;
+  Float64List? _rowOffsetACos;
+  Float64List? _columnWaveX;
+  Float64List? _columnWaveY;
+  Float64List? _columnOffsetBSin;
+  Float64List? _columnOffsetBCos;
   int _builtColumns = 0;
   int _builtRows = 0;
 
@@ -361,6 +392,70 @@ class _FlowPainter extends CustomPainter {
     _positions = Float32List(_vertexCount * 2);
     _colors = Int32List(_vertexCount);
     _indices = Uint16List(columns * rows * 6);
+    final int columnCount = columns + 1;
+    final int rowCount = rows + 1;
+    _uEnvelope = Float64List(columnCount);
+    _uSinOuter = Float64List(columnCount);
+    _uCosOuter = Float64List(columnCount);
+    _uSinNested = Float64List(columnCount);
+    _uCosNested = Float64List(columnCount);
+    _uSinWaveX = Float64List(columnCount);
+    _uCosWaveX = Float64List(columnCount);
+    _uSinWaveY = Float64List(columnCount);
+    _uCosWaveY = Float64List(columnCount);
+    _uSinMix = Float64List(columnCount);
+    _uCosMix = Float64List(columnCount);
+    _vEnvelope = Float64List(rowCount);
+    _vSinNested = Float64List(rowCount);
+    _vCosNested = Float64List(rowCount);
+    _vSinOuter = Float64List(rowCount);
+    _vCosOuter = Float64List(rowCount);
+    _vSinWaveX = Float64List(rowCount);
+    _vCosWaveX = Float64List(rowCount);
+    _vSinWaveY = Float64List(rowCount);
+    _vCosWaveY = Float64List(rowCount);
+    _vSinMix = Float64List(rowCount);
+    _vCosMix = Float64List(rowCount);
+    _rowWaveX = Float64List(rowCount);
+    _rowWaveY = Float64List(rowCount);
+    _rowOffsetASin = Float64List(rowCount);
+    _rowOffsetACos = Float64List(rowCount);
+    _columnWaveX = Float64List(columnCount);
+    _columnWaveY = Float64List(columnCount);
+    _columnOffsetBSin = Float64List(columnCount);
+    _columnOffsetBCos = Float64List(columnCount);
+
+    // The mesh topology and the phase-free trigonometric terms stay the same
+    // for every animation tick. Keep them beside the vertex buffers so a frame
+    // only combines cached values with the current phase.
+    for (int column = 0; column < columnCount; column++) {
+      final double u = column / columns;
+      _uEnvelope![column] = math.sin(math.pi * u);
+      _uSinOuter![column] = math.sin(u * 3.35);
+      _uCosOuter![column] = math.cos(u * 3.35);
+      _uSinNested![column] = math.sin(u * 3.7);
+      _uCosNested![column] = math.cos(u * 3.7);
+      _uSinWaveX![column] = math.sin(u * math.pi * 4.2);
+      _uCosWaveX![column] = math.cos(u * math.pi * 4.2);
+      _uSinWaveY![column] = math.sin(u * math.pi * 2.3);
+      _uCosWaveY![column] = math.cos(u * math.pi * 2.3);
+      _uSinMix![column] = math.sin(u * 2.35);
+      _uCosMix![column] = math.cos(u * 2.35);
+    }
+    for (int row = 0; row < rowCount; row++) {
+      final double v = row / rows;
+      _vEnvelope![row] = math.sin(math.pi * v);
+      _vSinNested![row] = math.sin(v * 2.75);
+      _vCosNested![row] = math.cos(v * 2.75);
+      _vSinOuter![row] = math.sin(v * 3.05);
+      _vCosOuter![row] = math.cos(v * 3.05);
+      _vSinWaveX![row] = math.sin(v * math.pi * 2.4);
+      _vCosWaveX![row] = math.cos(v * math.pi * 2.4);
+      _vSinWaveY![row] = math.sin(v * math.pi * 3.7);
+      _vCosWaveY![row] = math.cos(v * math.pi * 3.7);
+      _vSinMix![row] = math.sin(v * 2.35);
+      _vCosMix![row] = math.cos(v * 2.35);
+    }
     var cursor = 0;
     for (var row = 0; row < rows; row++) {
       for (var column = 0; column < columns; column++) {
@@ -386,25 +481,17 @@ class _FlowPainter extends CustomPainter {
     return Color.lerp(colors[low], colors[high], scaled - low) ?? colors[low];
   }
 
-  Color _meshColor(List<Color> colors, double u, double v, double time) {
-    final double waveA =
-        .5 +
-        .5 *
-            math.sin(
-              u * 3.35 + math.sin(v * 2.75 - time * .19) * 1.15 + time * .21,
-            );
-    final double waveB =
-        .5 +
-        .5 *
-            math.cos(
-              v * 3.05 + math.sin(u * 3.7 + time * .17) * 1.05 - time * .16,
-            );
+  Color _meshColor(
+    List<Color> colors,
+    double waveA,
+    double waveB,
+    double waveMix,
+  ) {
     final double sampleA = (.08 + waveA * .58).clamp(0.0, 1.0);
     final double sampleB = (.38 + waveB * .60).clamp(0.0, 1.0);
     final Color upper = _samplePalette(colors, sampleA);
     final Color lower = _samplePalette(colors, sampleB);
-    final double mix = (.42 + .25 * math.sin((u - v) * 2.35 + time * .14))
-        .clamp(0.0, 1.0);
+    final double mix = (.42 + .25 * waveMix).clamp(0.0, 1.0);
     // The palette arrives already saturation/lightness-treated, so this is a
     // plain colour blend — no HSL conversion per vertex.
     return Color.lerp(upper, lower, mix) ?? lower;
@@ -462,21 +549,115 @@ class _FlowPainter extends CustomPainter {
       final double time = phase();
       final double width = size.width;
       final double height = size.height;
+      final Float64List uEnvelope = _uEnvelope!;
+      final Float64List uSinOuter = _uSinOuter!;
+      final Float64List uCosOuter = _uCosOuter!;
+      final Float64List uSinNested = _uSinNested!;
+      final Float64List uCosNested = _uCosNested!;
+      final Float64List uSinWaveX = _uSinWaveX!;
+      final Float64List uCosWaveX = _uCosWaveX!;
+      final Float64List uSinWaveY = _uSinWaveY!;
+      final Float64List uCosWaveY = _uCosWaveY!;
+      final Float64List uSinMix = _uSinMix!;
+      final Float64List uCosMix = _uCosMix!;
+      final Float64List vEnvelope = _vEnvelope!;
+      final Float64List vSinNested = _vSinNested!;
+      final Float64List vCosNested = _vCosNested!;
+      final Float64List vSinOuter = _vSinOuter!;
+      final Float64List vCosOuter = _vCosOuter!;
+      final Float64List vSinWaveX = _vSinWaveX!;
+      final Float64List vCosWaveX = _vCosWaveX!;
+      final Float64List vSinWaveY = _vSinWaveY!;
+      final Float64List vCosWaveY = _vCosWaveY!;
+      final Float64List vSinMix = _vSinMix!;
+      final Float64List vCosMix = _vCosMix!;
+      final Float64List rowWaveX = _rowWaveX!;
+      final Float64List rowWaveY = _rowWaveY!;
+      final Float64List rowOffsetASin = _rowOffsetASin!;
+      final Float64List rowOffsetACos = _rowOffsetACos!;
+      final Float64List columnWaveX = _columnWaveX!;
+      final Float64List columnWaveY = _columnWaveY!;
+      final Float64List columnOffsetBSin = _columnOffsetBSin!;
+      final Float64List columnOffsetBCos = _columnOffsetBCos!;
+
+      final double sinWaveXRowShift = math.sin(time * .20 + 1.1);
+      final double cosWaveXRowShift = math.cos(time * .20 + 1.1);
+      final double sinWaveXColumnShift = math.sin(-time * .13 + .7);
+      final double cosWaveXColumnShift = math.cos(-time * .13 + .7);
+      final double sinWaveYColumnShift = math.sin(-time * .18 + 2.2);
+      final double cosWaveYColumnShift = math.cos(-time * .18 + 2.2);
+      final double sinWaveYRowShift = math.sin(time * .11);
+      final double cosWaveYRowShift = math.cos(time * .11);
+      final double sinNestedARowShift = math.sin(-time * .19);
+      final double cosNestedARowShift = math.cos(-time * .19);
+      final double sinNestedBColumnShift = math.sin(time * .17);
+      final double cosNestedBColumnShift = math.cos(time * .17);
+      final double sinMixShift = math.sin(time * .14);
+      final double cosMixShift = math.cos(time * .14);
+
+      for (int row = 0; row <= rows; row++) {
+        rowWaveX[row] =
+            vSinWaveX[row] * cosWaveXRowShift +
+            vCosWaveX[row] * sinWaveXRowShift;
+        rowWaveY[row] =
+            vCosWaveY[row] * cosWaveYRowShift -
+            vSinWaveY[row] * sinWaveYRowShift;
+        final double nestedA =
+            vSinNested[row] * cosNestedARowShift +
+            vCosNested[row] * sinNestedARowShift;
+        final double rowOffsetA = nestedA * 1.15 + time * .21;
+        rowOffsetASin[row] = math.sin(rowOffsetA);
+        rowOffsetACos[row] = math.cos(rowOffsetA);
+      }
+      for (int column = 0; column <= columns; column++) {
+        columnWaveX[column] =
+            uSinWaveX[column] * cosWaveXColumnShift +
+            uCosWaveX[column] * sinWaveXColumnShift;
+        columnWaveY[column] =
+            uCosWaveY[column] * cosWaveYColumnShift -
+            uSinWaveY[column] * sinWaveYColumnShift;
+        final double nestedB =
+            uSinNested[column] * cosNestedBColumnShift +
+            uCosNested[column] * sinNestedBColumnShift;
+        final double columnOffsetB = nestedB * 1.05 - time * .16;
+        columnOffsetBSin[column] = math.sin(columnOffsetB);
+        columnOffsetBCos[column] = math.cos(columnOffsetB);
+      }
+
       var vertex = 0;
       for (var row = 0; row <= rows; row++) {
         final double v = row / rows;
+        final double envelopeY = vEnvelope[row];
         for (var column = 0; column <= columns; column++) {
           final double u = column / columns;
-          final double envelope = math.sin(math.pi * u) * math.sin(math.pi * v);
+          final double envelope = uEnvelope[column] * envelopeY;
           final double waveX =
-              math.sin(v * math.pi * 2.4 + time * .20 + 1.1) * .115 +
-              math.sin(u * math.pi * 4.2 - time * .13 + .7) * .055;
-          final double waveY =
-              math.cos(u * math.pi * 2.3 - time * .18 + 2.2) * .12 +
-              math.cos(v * math.pi * 3.7 + time * .11) * .065;
+              rowWaveX[row] * .115 + columnWaveX[column] * .055;
+          final double waveY = columnWaveY[column] * .12 + rowWaveY[row] * .065;
           positions[vertex * 2] = (u + waveX * envelope) * width;
           positions[vertex * 2 + 1] = (v + waveY * envelope) * height;
-          vertexColors[vertex] = _meshColor(colors, u, v, time).toARGB32();
+          final double waveA =
+              .5 +
+              .5 *
+                  (uSinOuter[column] * rowOffsetACos[row] +
+                      uCosOuter[column] * rowOffsetASin[row]);
+          final double waveB =
+              .5 +
+              .5 *
+                  (vCosOuter[row] * columnOffsetBCos[column] -
+                      vSinOuter[row] * columnOffsetBSin[column]);
+          final double baseMixSin =
+              uSinMix[column] * vCosMix[row] - uCosMix[column] * vSinMix[row];
+          final double baseMixCos =
+              uCosMix[column] * vCosMix[row] + uSinMix[column] * vSinMix[row];
+          final double waveMix =
+              baseMixSin * cosMixShift + baseMixCos * sinMixShift;
+          vertexColors[vertex] = _meshColor(
+            colors,
+            waveA,
+            waveB,
+            waveMix,
+          ).toARGB32();
           vertex++;
         }
       }

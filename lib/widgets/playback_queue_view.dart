@@ -45,11 +45,7 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
     super.didChangeDependencies();
     _scroll ??= ScrollController(
       initialScrollOffset:
-          (widget.state.queue.indexWhere(
-                    (Track track) => track.id == widget.state.current?.id,
-                  ) -
-                  2)
-              .clamp(0, widget.state.queue.length) *
+          (widget.state.queueIndex - 2).clamp(0, widget.state.queueLength) *
           _rowExtent,
     );
   }
@@ -68,6 +64,10 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
       animation: widget.state,
       builder: (BuildContext context, _) {
         final AppState state = widget.state;
+        // The getter returns an immutable snapshot; take it once per rebuild,
+        // rather than copying the entire queue for every visible row.
+        final List<Track> queue = state.queue;
+        final String? currentId = state.current?.id;
         return SafeArea(
           top: false,
           child: Column(
@@ -90,7 +90,7 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
                         ),
                       ),
                       TrText(
-                        '${state.queue.length} 首',
+                        '${queue.length} 首',
                         style: theme.textTheme.labelMedium?.copyWith(
                           color: apple.secondaryLabel,
                         ),
@@ -112,14 +112,13 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
                   controller: _scroll,
                   itemExtent: _rowExtent,
                   padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
-                  itemCount: state.queue.length,
+                  itemCount: queue.length,
                   itemBuilder: (BuildContext context, int i) => _QueueRow(
-                    track: state.queue[i],
+                    track: queue[i],
                     index: i,
                     state: state,
-                    isCurrent: state.current?.id == state.queue[i].id,
-                    playing:
-                        state.playing && state.current?.id == state.queue[i].id,
+                    isCurrent: currentId == queue[i].id,
+                    playing: state.playing && currentId == queue[i].id,
                     onTap: () => state.playTrackAt(i),
                   ),
                 ),

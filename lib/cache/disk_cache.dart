@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:path_provider/path_provider.dart';
 
 enum CacheBucket { audio, artwork, data }
@@ -24,6 +25,7 @@ class DiskCache {
   Future<Directory?>? _root;
   final _writes = <String, Future<File?>>{};
   final _maintenance = <CacheBucket, Future<void>>{};
+  final Map<String, Future<void>> _jsonOperations = <String, Future<void>>{};
   int _serial = 0;
 
   static Future<Directory> _defaultDirectory() async => Directory(
@@ -70,7 +72,14 @@ class DiskCache {
     CacheBucket bucket,
     String key, {
     String extension = 'bin',
-  }) async {
+  }) {
+    if (bucket == CacheBucket.data && extension == 'json') {
+      return _jsonOperation(key, () => _remove(bucket, key, extension));
+    }
+    return _remove(bucket, key, extension);
+  }
+
+  Future<void> _remove(CacheBucket bucket, String key, String extension) async {
     try {
       final file = await _path(bucket, key, extension);
       if (file != null && await file.exists()) await file.delete();
@@ -215,45 +224,98 @@ class DiskCache {
     }
   }
 
-  Future<CachedJson?> readJson(String key) async {
+  // Reads, replacement writes and invalidations for a key must be ordered.
+  // Generic [put] coalesces downloads; JSON updates instead need every new
+  // value (including a tombstone) to follow the previous operation.
+  Future<T> _jsonOperation<T>(String key, Future<T> Function() action) {
+    final Future<void> previous = _jsonOperations[key] ?? Future<void>.value();
+    final Future<T> result = previous.then((_) => action());
+    final Future<void> completion = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace stack) {},
+    );
+    _jsonOperations[key] = completion;
+    unawaited(
+      completion.whenComplete(() {
+        if (identical(_jsonOperations[key], completion)) {
+          _jsonOperations.remove(key);
+        }
+      }),
+    );
+    return result;
+  }
+
+  Future<CachedJson?> readJson(String key) =>
+      _jsonOperation(key, () => _readJson(key));
+
+  Future<CachedJson?> _readJson(String key) async {
     try {
       final file = await find(CacheBucket.data, key, extension: 'json');
       if (file == null) return null;
-      final value =
-          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-      return CachedJson(
-        value['data'] as Map<String, dynamic>,
-        DateTime.fromMillisecondsSinceEpoch(value['savedAt'] as int),
-      );
+      final raw = await file.readAsString();
+      return raw.length < 65536
+          ? _decodeCachedJson(raw)
+          : await compute(
+              _decodeCachedJson,
+              raw,
+              debugLabel: 'cache-json-decode',
+            );
     } catch (_) {
-      await remove(CacheBucket.data, key, extension: 'json');
+      await _remove(CacheBucket.data, key, 'json');
       return null;
     }
   }
 
   /// Expire a snapshot without losing its offline fallback.
-  Future<void> expireJson(String key) async {
-    final saved = await readJson(key);
+  Future<void> expireJson(String key) => _jsonOperation(key, () async {
+    final saved = await _readJson(key);
     if (saved != null) {
-      await writeJson(
-        key,
-        saved.data,
-        savedAt: DateTime.fromMillisecondsSinceEpoch(0),
-      );
+      final data = <String, dynamic>{'savedAt': 0, 'data': saved.data};
+      final bytes = _isLargeJson(data)
+          ? await compute(
+              _encodeCachedJson,
+              data,
+              debugLabel: 'cache-json-encode',
+            )
+          : _encodeCachedJson(data);
+      await _writeJsonBytes(key, bytes);
     }
-  }
+  });
 
+  /// Captures the supplied data at invocation, then writes it after any
+  /// earlier operation for the same key. Large payloads are encoded off the
+  /// UI isolate after taking a detached snapshot.
   Future<void> writeJson(
     String key,
     Map<String, dynamic> data, {
     DateTime? savedAt,
-  }) async {
-    final bytes = utf8.encode(
-      jsonEncode({
+  }) {
+    try {
+      final envelope = <String, dynamic>{
         'savedAt': (savedAt ?? DateTime.now()).millisecondsSinceEpoch,
         'data': data,
-      }),
-    );
+      };
+      if (!_isLargeJson(envelope)) {
+        final bytes = _encodeCachedJson(envelope);
+        return _jsonOperation(key, () => _writeJsonBytes(key, bytes));
+      }
+      final snapshot =
+          _copyJson(envelope, Map<Object, Object>.identity())
+              as Map<String, dynamic>;
+      return _jsonOperation(key, () async {
+        final bytes = await compute(
+          _encodeCachedJson,
+          snapshot,
+          debugLabel: 'cache-json-encode',
+        );
+        await _writeJsonBytes(key, bytes);
+      });
+    } catch (error, stack) {
+      return Future<void>.error(error, stack);
+    }
+  }
+
+  Future<void> _writeJsonBytes(String key, List<int> bytes) async {
     await put(
       CacheBucket.data,
       key,
@@ -273,4 +335,66 @@ class CachedJson {
   /// stamps it with the Unix epoch. Cache-first readers must treat that copy
   /// as gone: it can predate the mutation that forced the refresh.
   bool get invalidated => savedAt.millisecondsSinceEpoch == 0;
+}
+
+CachedJson _decodeCachedJson(String raw) {
+  final value = jsonDecode(raw) as Map<String, dynamic>;
+  return CachedJson(
+    value['data'] as Map<String, dynamic>,
+    DateTime.fromMillisecondsSinceEpoch(value['savedAt'] as int),
+  );
+}
+
+List<int> _encodeCachedJson(Map<String, dynamic> data) =>
+    utf8.encode(jsonEncode(data));
+
+// A short bounded walk keeps small snapshots on the cheap synchronous path.
+// Large collections and long strings move JSON serialization off-thread.
+bool _isLargeJson(Object? value) {
+  var remaining = 256;
+  bool visit(Object? item) {
+    if (--remaining < 0) return true;
+    if (item is String) return item.length >= 65536;
+    if (item is List) {
+      if (item.length >= 128) return true;
+      return item.any(visit);
+    }
+    if (item is Map) {
+      if (item.length >= 128) return true;
+      return item.values.any(visit);
+    }
+    return false;
+  }
+
+  return visit(value);
+}
+
+// Detach ordinary JSON containers before a queued encode; preserve identity
+// so jsonEncode still rejects cyclic input instead of recursing indefinitely.
+Object? _copyJson(Object? value, Map<Object, Object> seen) {
+  if (value is List) {
+    final existing = seen[value];
+    if (existing != null) return existing;
+    final copy = <dynamic>[];
+    seen[value] = copy;
+    for (final item in value) {
+      copy.add(_copyJson(item, seen));
+    }
+    return copy;
+  }
+  if (value is Map) {
+    final existing = seen[value];
+    if (existing != null) return existing;
+    if (value is Map<String, dynamic>) {
+      final copy = <String, dynamic>{};
+      seen[value] = copy;
+      value.forEach((key, item) => copy[key] = _copyJson(item, seen));
+      return copy;
+    }
+    final copy = <dynamic, dynamic>{};
+    seen[value] = copy;
+    value.forEach((key, item) => copy[key] = _copyJson(item, seen));
+    return copy;
+  }
+  return value;
 }

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart' as audio;
@@ -7,6 +9,7 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
+import 'package:lazer_nextgen/local/local_library.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -164,7 +167,7 @@ class _InterruptingEngine implements AudioEngine, QueueAudioEngine {
       queueId == _queueId;
 
   @override
-  Future<void> playQueuedNext() async {}
+  Future<bool> playQueuedNext() async => false;
 
   @override
   Future<void> setUrl(String url) async {
@@ -219,7 +222,7 @@ class _QueueRefusingEngine implements AudioEngine, QueueAudioEngine {
   @override
   Future<bool> appendToQueue(int queueId, String url) async => false;
   @override
-  Future<void> playQueuedNext() async {}
+  Future<bool> playQueuedNext() async => false;
 
   @override
   Future<void> setUrl(String url) async {
@@ -247,12 +250,16 @@ class _Gateway extends NeteaseGateway {
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
+  final List<String> requests = <String>[];
 
   @override
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
-  }) async => 'url-${track.id}';
+  }) async {
+    requests.add(track.id);
+    return 'url-${track.id}';
+  }
 
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();
@@ -267,8 +274,71 @@ Track _track(String id) => Track(
   coverSeed: 1,
 );
 
+class _SlowLocalLibrary extends LocalLibrary {
+  final Completer<File?> first = Completer<File?>();
+  @override
+  Future<File?> localFileFor(Track track, {AudioQuality? quality}) =>
+      track.id == '1' ? first.future : Future<File?>.value();
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets(
+    'a slow local file lookup cannot block or overwrite a newer song',
+    (tester) async {
+      final library = _SlowLocalLibrary();
+      final engine = _QueueRefusingEngine();
+      final catalog = _Catalog();
+      final state = AppState(
+        catalog: catalog,
+        audioEngine: engine,
+        localLibrary: library,
+      );
+      state.playQueue([_track('1'), _track('2')]);
+      await tester.pump();
+      expect(engine.singleLoads, isEmpty);
+      state.next();
+      await tester.pump();
+      expect(engine.singleLoads, ['url-2']);
+      library.first.complete(null);
+      await tester.pump();
+      expect(engine.singleLoads, ['url-2']);
+      expect(catalog.requests, ['2']);
+      expect(state.current?.id, '2');
+      state.dispose();
+      library.dispose();
+      await tester.pump();
+    },
+  );
+
+  testWidgets('rapid switches persist the final index in a large queue', (
+    tester,
+  ) async {
+    final engine = _QueueRefusingEngine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    await tester.runAsync(() async {
+      state.playQueue(List<Track>.generate(1000, (i) => _track('${i + 1}')));
+      state.playTrackAt(100);
+      state.playTrackAt(700);
+      final prefs = await SharedPreferences.getInstance();
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (true) {
+        final raw = prefs.getString('lazer_playback_queue_v1');
+        if (raw != null &&
+            (jsonDecode(raw) as Map<String, dynamic>)['index'] == 700) {
+          final saved = jsonDecode(raw) as Map<String, dynamic>;
+          expect((saved['tracks'] as List), hasLength(1000));
+          expect(saved['tracks'][700]['id'], '701');
+          break;
+        }
+        if (DateTime.now().isAfter(deadline)) fail('Queue was not saved');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    state.dispose();
+    await tester.pump();
+  });
 
   testWidgets('a burst of queue loads only opens the newest stream', (
     tester,

@@ -10,6 +10,7 @@ import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
+import 'package:lazer_nextgen/legacy/legacy_pages.dart';
 import 'package:lazer_nextgen/legacy/legacy_shell.dart';
 import 'package:lazer_nextgen/legacy/legacy_theme.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
@@ -49,6 +50,15 @@ const Album _album = Album(
 class _Gateway extends NeteaseGateway {
   @override
   Future<Set<int>> likedSongIds(int uid) async => <int>{};
+}
+
+class _ReportingState extends AppState {
+  _ReportingState() : super(catalog: _Catalog());
+
+  void publishCharts(List<MusicChart> charts) {
+    discoveryCharts = charts;
+    notifyListeners();
+  }
 }
 
 class _Catalog extends Catalog {
@@ -209,6 +219,38 @@ void main() {
       );
       expect((playCentre.dx - dockCentre.dx).abs(), lessThan(1));
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('same-sized chart updates reach the large screen shelf', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final state = _ReportingState();
+      addTearDown(state.dispose);
+      await tester.pumpWidget(_largeScreenApp(state));
+      await tester.pumpAndSettle();
+
+      MusicChart chart(String title) => MusicChart(
+        id: 'chart',
+        title: title,
+        source: 'test',
+        issueLabel: '',
+        entries: const <ChartEntry>[],
+      );
+      state.publishCharts([chart('old')]);
+      await tester.pump();
+      expect(
+        tester.widget<ChartShelf>(find.byType(ChartShelf)).charts.single.title,
+        'old',
+      );
+      state.publishCharts([chart('new')]);
+      await tester.pump();
+      expect(
+        tester.widget<ChartShelf>(find.byType(ChartShelf)).charts.single.title,
+        'new',
+      );
     });
 
     testWidgets('the library tab shows the rail and the artwork grid', (

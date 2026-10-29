@@ -43,10 +43,7 @@ void showLocalImportResult(BuildContext context, LocalImportResult result) {
     if (result.skipped > 0) context.tr('${result.skipped} 首已在资料库'),
     if (result.failed > 0) context.tr('${result.failed} 个文件读取失败'),
   ];
-  _showLocalMessage(
-    context,
-    parts.isEmpty ? '没有选择音频文件' : parts.join(' · '),
-  );
+  _showLocalMessage(context, parts.isEmpty ? '没有选择音频文件' : parts.join(' · '));
 }
 
 void _showLocalMessage(BuildContext context, String message) {
@@ -116,7 +113,9 @@ class _LocalMusicCardState extends State<LocalMusicCard> {
                 title: context.tr('本地音乐'),
                 subtitle: count == 0
                     ? context.tr('导入本机的 MP3、FLAC、M4A 或 WAV')
-                    : context.tr('$count 首 · ${formatBytes(library.totalBytes)}'),
+                    : context.tr(
+                        '$count 首 · ${formatBytes(library.totalBytes)}',
+                      ),
                 leading: AppleIconTile(
                   icon: Icons.library_music_rounded,
                   color: apple.accent,
@@ -194,10 +193,42 @@ class LocalMusicPage extends StatefulWidget {
   State<LocalMusicPage> createState() => _LocalMusicPageState();
 }
 
+class _LocalPageTracks {
+  const _LocalPageTracks(this.playable, this.missing, this.bytes);
+  final List<LocalTrack> playable;
+  final List<LocalTrack> missing;
+  final int bytes;
+}
+
 class _LocalMusicPageState extends State<LocalMusicPage> {
   bool _busy = false;
+  LocalLibrary? _cachedLibrary;
+  int? _cachedRevision;
+  _LocalPageTracks? _cachedTracks;
 
   AppState get state => widget.state;
+
+  _LocalPageTracks _tracksFor(LocalLibrary library) {
+    final int revision = library.tracksRevision;
+    if (identical(_cachedLibrary, library) && _cachedRevision == revision) {
+      return _cachedTracks!;
+    }
+    final playable = <LocalTrack>[];
+    final missing = <LocalTrack>[];
+    var bytes = 0;
+    for (final entry in library.tracks) {
+      if (entry.missing) {
+        missing.add(entry);
+      } else {
+        playable.add(entry);
+        bytes += entry.bytes ?? 0;
+      }
+    }
+    playable.sort((a, b) => b.addedAt.compareTo(a.addedAt));
+    _cachedLibrary = library;
+    _cachedRevision = revision;
+    return _cachedTracks = _LocalPageTracks(playable, missing, bytes);
+  }
 
   @override
   void initState() {
@@ -243,7 +274,9 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
 
   void _playAll(List<LocalTrack> playable) {
     if (playable.isEmpty) return;
-    state.playQueue(<Track>[for (final LocalTrack entry in playable) entry.track]);
+    state.playQueue(<Track>[
+      for (final LocalTrack entry in playable) entry.track,
+    ]);
   }
 
   Future<void> _showRowMenu(
@@ -269,19 +302,15 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
       items: <PopupMenuEntry<String>>[
         PopupMenuItem<String>(value: 'play', child: TrText('播放')),
         if (playable[index].isDownload)
-          PopupMenuItem<String>(
-            value: 'delete-file',
-            child: TrText('删除下载文件'),
-          ),
+          PopupMenuItem<String>(value: 'delete-file', child: TrText('删除下载文件')),
         PopupMenuItem<String>(value: 'remove', child: TrText('从资料库移除')),
       ],
     );
     if (!mounted || action == null) return;
     if (action == 'play') {
-      state.playQueue(
-        <Track>[for (final LocalTrack entry in playable) entry.track],
-        startIndex: index,
-      );
+      state.playQueue(<Track>[
+        for (final LocalTrack entry in playable) entry.track,
+      ], startIndex: index);
       return;
     }
     final LocalTrack entry = playable[index];
@@ -290,9 +319,7 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
         context: context,
         builder: (BuildContext context) => AlertDialog(
           title: TrText('删除下载文件？'),
-          content: Text(
-            context.tr('「${entry.track.title}」的文件会从磁盘删除，无法恢复。'),
-          ),
+          content: Text(context.tr('「${entry.track.title}」的文件会从磁盘删除，无法恢复。')),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -325,20 +352,10 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
     return AnimatedBuilder(
       animation: state.localLibrary,
       builder: (BuildContext context, Widget? child) {
-        final List<LocalTrack> playable = <LocalTrack>[
-          for (final LocalTrack entry in state.localLibrary.tracks)
-            if (!entry.missing) entry,
-        ]..sort(
-          (LocalTrack a, LocalTrack b) => b.addedAt.compareTo(a.addedAt),
-        );
-        final List<LocalTrack> missing = <LocalTrack>[
-          for (final LocalTrack entry in state.localLibrary.tracks)
-            if (entry.missing) entry,
-        ];
-        final int bytes = playable.fold<int>(
-          0,
-          (int sum, LocalTrack entry) => sum + (entry.bytes ?? 0),
-        );
+        final data = _tracksFor(state.localLibrary);
+        final List<LocalTrack> playable = data.playable;
+        final List<LocalTrack> missing = data.missing;
+        final int bytes = data.bytes;
         return Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1100),
@@ -387,10 +404,7 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                                           strokeWidth: 2,
                                         ),
                                       )
-                                    : const Icon(
-                                        Icons.add_rounded,
-                                        size: 19,
-                                      ),
+                                    : const Icon(Icons.add_rounded, size: 19),
                                 label: TrText('导入'),
                               ),
                               const SizedBox(width: 4),
@@ -468,75 +482,110 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                     padding: EdgeInsets.symmetric(horizontal: inset),
                     sliver: SliverList.builder(
                       itemCount: playable.length,
-                      itemBuilder: (BuildContext context, int i) => LegacyTrackRow(
-                        key: ValueKey<String>('local-track-row-$i'),
-                        track: playable[i].track,
-                        index: i,
-                        current: state.current?.id == playable[i].id,
-                        playing: state.playing,
-                        onTap: () => state.playQueue(
-                          <Track>[
-                            for (final LocalTrack entry in playable)
-                              entry.track,
-                          ],
-                          startIndex: i,
-                        ),
-                        onMenuRequested: (Offset position) => unawaited(
-                          _showRowMenu(context, playable, i, position),
-                        ),
-                      ),
+                      itemBuilder: (BuildContext context, int i) =>
+                          LegacyTrackRow(
+                            key: ValueKey<String>('local-track-row-$i'),
+                            track: playable[i].track,
+                            index: i,
+                            current: state.current?.id == playable[i].id,
+                            playing: state.playing,
+                            onTap: () => state.playQueue(<Track>[
+                              for (final LocalTrack entry in playable)
+                                entry.track,
+                            ], startIndex: i),
+                            onMenuRequested: (Offset position) => unawaited(
+                              _showRowMenu(context, playable, i, position),
+                            ),
+                          ),
                     ),
                   ),
                 if (missing.isNotEmpty)
                   SliverPadding(
                     padding: EdgeInsets.fromLTRB(inset, 26, inset, 0),
-                    sliver: SliverToBoxAdapter(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          LegacySectionHeader(
-                            title: '文件已丢失',
-                            subtitle: '${missing.length} 首',
-                            trailing: TextButton(
-                              key: const ValueKey<String>(
-                                'local-music-clear-missing',
-                              ),
-                              onPressed: () =>
-                                  unawaited(state.localLibrary.clearMissing()),
-                              child: const TrText('清理记录'),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          AppleGroupedCard(
-                            margin: EdgeInsets.zero,
-                            child: Column(
-                              children: <Widget>[
-                                for (final LocalTrack entry in missing)
-                                  AppleListTile(
-                                    title: entry.track.title,
-                                    subtitle: entry.path,
-                                    leading: AppleIconTile(
-                                      icon: Icons.error_outline_rounded,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.error,
-                                    ),
-                                    trailing: IconButton(
-                                      tooltip: context.tr('从资料库移除'),
-                                      onPressed: () => unawaited(
-                                        state.localLibrary.remove(entry),
-                                      ),
-                                      icon: const Icon(
-                                        Icons.delete_outline_rounded,
-                                        size: 19,
-                                      ),
-                                    ),
+                    sliver: SliverMainAxisGroup(
+                      slivers: <Widget>[
+                        SliverToBoxAdapter(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              LegacySectionHeader(
+                                title: '文件已丢失',
+                                subtitle: '${missing.length} 首',
+                                trailing: TextButton(
+                                  key: const ValueKey<String>(
+                                    'local-music-clear-missing',
                                   ),
-                              ],
-                            ),
+                                  onPressed: () => unawaited(
+                                    state.localLibrary.clearMissing(),
+                                  ),
+                                  child: const TrText('清理记录'),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                        SliverList.builder(
+                          itemCount: missing.length,
+                          itemBuilder: (BuildContext context, int i) {
+                            final LocalTrack entry = missing[i];
+                            final apple = AppleSemanticColors.of(context);
+                            return Container(
+                              decoration: BoxDecoration(
+                                color: apple.secondaryGroupedBackground,
+                                border: Border(
+                                  left: BorderSide(
+                                    color: apple.separator,
+                                    width: .5,
+                                  ),
+                                  right: BorderSide(
+                                    color: apple.separator,
+                                    width: .5,
+                                  ),
+                                  top: i == 0
+                                      ? BorderSide(
+                                          color: apple.separator,
+                                          width: .5,
+                                        )
+                                      : BorderSide.none,
+                                  bottom: i == missing.length - 1
+                                      ? BorderSide(
+                                          color: apple.separator,
+                                          width: .5,
+                                        )
+                                      : BorderSide.none,
+                                ),
+                                borderRadius: BorderRadius.vertical(
+                                  top: i == 0
+                                      ? const Radius.circular(14)
+                                      : Radius.zero,
+                                  bottom: i == missing.length - 1
+                                      ? const Radius.circular(14)
+                                      : Radius.zero,
+                                ),
+                              ),
+                              child: AppleListTile(
+                                title: entry.track.title,
+                                subtitle: entry.path,
+                                leading: AppleIconTile(
+                                  icon: Icons.error_outline_rounded,
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                                trailing: IconButton(
+                                  tooltip: context.tr('从资料库移除'),
+                                  onPressed: () => unawaited(
+                                    state.localLibrary.remove(entry),
+                                  ),
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                    size: 19,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 const SliverToBoxAdapter(child: SizedBox(height: 40)),
@@ -548,12 +597,7 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
     );
   }
 
-  String _subtitle(
-    BuildContext context,
-    int count,
-    int bytes,
-    int missing,
-  ) {
+  String _subtitle(BuildContext context, int count, int bytes, int missing) {
     if (count == 0 && missing == 0) {
       return context.tr('从这台设备导入 MP3、FLAC、M4A 或 WAV');
     }

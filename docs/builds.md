@@ -13,17 +13,27 @@ upload the following **Artifacts**. Each binary/archive has its own SHA-256 file
 
 | Artifact / filename stem | Format and contents |
 | --- | --- |
-| `Lazer-Windows-x86_64` | ZIP with EXE, DLLs, resources and the MSVC runtime |
-| `Lazer-macOS-universal` | ZIP with an Intel / Apple Silicon App |
-| `Lazer-macOS-x86_64` | ZIP with a native Intel App |
-| `Lazer-Linux-x86_64` | x86_64 AppImage with GTK and libmpv |
-| `Lazer-Linux-aarch64` | ARM64 AppImage with GTK and libmpv |
+| `Lazer-Windows-x86_64` | ZIP with EXE, native audio engine, FFmpeg, resources and the MSVC runtime |
+| `Lazer-macOS-universal` | ZIP with an Intel / Apple Silicon App and native audio engine |
+| `Lazer-macOS-x86_64` | ZIP with a native Intel App and native audio engine |
+| `Lazer-Linux-x86_64` | x86_64 AppImage with GTK, libmpv and the native audio engine |
+| `Lazer-Linux-aarch64` | ARM64 AppImage with GTK, libmpv and the native audio engine |
 | `Lazer-Android-universal` | Universal release APK using the development signing configuration |
 | `Lazer-iOS-aarch64` | Unsigned device IPA containing `Payload/Runner.app` |
 
 All artifact names follow `Lazer-<OS>-<Arch>`. `universal` denotes a multi-architecture
 package. The macOS archives preserve executable permissions and framework symlinks.
 Architecture checks run before packaging. IPA builds explicitly disable code signing.
+
+## Native audio engine
+
+The desktop playback engine ported from `master` (FFmpeg + WASAPI/ALSA/CoreAudio,
+DSD/DoP, gapless, EQ/limiter) is built into all Windows, macOS and Linux cloud
+artifacts together with the matching DSD-capable FFmpeg runtime and its LGPL
+notice. Packaging checks fail if any required engine, bridge or FFmpeg library is
+missing. Android and iOS continue to use `just_audio`. On Windows the engine and
+FFmpeg are built with MSVC so their import libraries match the app toolchain. See
+[audio-engine.md](audio-engine.md) for local build variables and the settings page.
 
 ## Build stamp
 

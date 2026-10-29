@@ -489,12 +489,17 @@ class AppleSearchField extends StatelessWidget {
           ),
         ),
         trailing: <Widget>[
-          if (controller.text.isNotEmpty)
-            IconButton(
-              tooltip: context.tr('清除'),
-              onPressed: onClear,
-              icon: const Icon(Icons.close),
-            ),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (BuildContext context, TextEditingValue value, _) =>
+                value.text.isEmpty
+                ? const SizedBox.shrink()
+                : IconButton(
+                    tooltip: context.tr('清除'),
+                    onPressed: onClear,
+                    icon: const Icon(Icons.close),
+                  ),
+          ),
         ],
         // Stock Material reserves 360 px of width; here the toolbar and the
         // mobile row own the width, and the bar fills whatever they give it.

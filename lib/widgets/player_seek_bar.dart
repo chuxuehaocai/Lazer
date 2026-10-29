@@ -46,6 +46,7 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
           data: SliderThemeData(
             trackHeight: railHeight,
             activeTrackColor: Colors.white,
+            secondaryActiveTrackColor: Colors.white.withValues(alpha: 0.68),
             inactiveTrackColor: Colors.white.withValues(alpha: 0.32),
             thumbColor: Colors.white,
             overlayColor: Colors.white.withValues(alpha: 0.18),

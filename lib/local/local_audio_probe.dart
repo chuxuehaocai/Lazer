@@ -29,6 +29,8 @@ class LocalAudioMetadata {
 class LocalAudioProbe {
   const LocalAudioProbe();
 
+  static const int _maxTextFrameBytes = 64 * 1024;
+
   Future<LocalAudioMetadata> probe(File file) async {
     final String path = file.path;
     RandomAccessFile? raf;
@@ -103,8 +105,7 @@ class LocalAudioProbe {
       final int size = _syncSafe(header, 6);
       final int tagLength = math.min(size, length - 10);
       if (tagLength > 0) {
-        final Uint8List body = await _read(raf, 10, tagLength);
-        _parseId3(body, major, tags);
+        await _readId3Frames(raf, tagLength, major, tags);
       }
       audioStart = 10 + size;
       if (major >= 4 && flags & 0x10 != 0) audioStart += 10;
@@ -129,45 +130,52 @@ class LocalAudioProbe {
     );
   }
 
-  void _parseId3(Uint8List body, int major, Map<String, String> tags) {
+  Future<void> _readId3Frames(
+    RandomAccessFile raf,
+    int bodyLength,
+    int major,
+    Map<String, String> tags,
+  ) async {
     int offset = 0;
-    if (major == 2) {
-      while (offset + 6 <= body.length) {
-        final String id = _ascii(body, offset, 3);
-        final int size = (body[offset + 3] << 16) |
-            (body[offset + 4] << 8) |
-            body[offset + 5];
-        if (id.trim().isEmpty || size <= 0 || offset + 6 + size > body.length) {
-          break;
-        }
-        _storeFrame(
-          id,
-          Uint8List.sublistView(body, offset + 6, offset + 6 + size),
-          tags,
-        );
-        offset += 6 + size;
-      }
-      return;
-    }
-    while (offset + 10 <= body.length) {
-      final String id = _ascii(body, offset, 4);
-      final int size = major == 4
-          ? _syncSafe(body, offset + 4)
-          : _u32be(body, offset + 4);
-      if (id.trim().isEmpty || size <= 0 || offset + 10 + size > body.length) {
+    final bool isV22 = major == 2;
+    final int headerLength = isV22 ? 6 : 10;
+    while (offset + headerLength <= bodyLength) {
+      final Uint8List header = await _read(raf, 10 + offset, headerLength);
+      if (header.length != headerLength) break;
+      final String id = _ascii(header, 0, isV22 ? 3 : 4);
+      final int size = isV22
+          ? (header[3] << 16) | (header[4] << 8) | header[5]
+          : major == 4
+          ? _syncSafe(header, 4)
+          : _u32be(header, 4);
+      if (id.trim().isEmpty || size <= 0 || offset + headerLength + size > bodyLength) {
         break;
       }
-      _storeFrame(
-        id,
-        Uint8List.sublistView(body, offset + 10, offset + 10 + size),
-        tags,
-      );
-      offset += 10 + size;
+      if (_isTextFrame(id) && size <= _maxTextFrameBytes) {
+        final Uint8List frame = await _read(
+          raf,
+          10 + offset + headerLength,
+          size,
+        );
+        if (frame.length != size) break;
+        _storeFrame(id, frame, tags);
+      }
+      offset += headerLength + size;
     }
   }
 
+  bool _isTextFrame(String id) =>
+      id == 'TIT2' ||
+      id == 'TT2' ||
+      id == 'TPE1' ||
+      id == 'TP1' ||
+      id == 'TALB' ||
+      id == 'TAL' ||
+      id == 'TLEN' ||
+      id == 'TLE';
+
   void _storeFrame(String id, Uint8List frame, Map<String, String> tags) {
-    if (frame.isEmpty) return;
+    if (frame.isEmpty || !_isTextFrame(id)) return;
     final String text = _decodeText(frame, frame[0]);
     if (text.isEmpty) return;
     switch (id) {

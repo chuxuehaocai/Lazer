@@ -5,6 +5,37 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/cache/disk_cache.dart';
 import 'package:lazer_nextgen/cache/media_cache.dart';
 
+class _GatedJsonCache extends DiskCache {
+  _GatedJsonCache(Directory directory)
+    : super(directory: () async => directory);
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+  bool gateFirst = true;
+  @override
+  Future<File?> put(
+    CacheBucket bucket,
+    String key,
+    Stream<List<int>> Function() source, {
+    String extension = 'bin',
+    int? expectedLength,
+    int? maxBytes,
+  }) async {
+    if (bucket == CacheBucket.data && key == 'race' && gateFirst) {
+      gateFirst = false;
+      started.complete();
+      await release.future;
+    }
+    return super.put(
+      bucket,
+      key,
+      source,
+      extension: extension,
+      expectedLength: expectedLength,
+      maxBytes: maxBytes,
+    );
+  }
+}
+
 void main() {
   late Directory directory;
   late DiskCache cache;
@@ -121,6 +152,79 @@ void main() {
     await file.writeAsString('{broken');
     expect(await cache.readJson('playlist'), isNull);
     expect(await file.exists(), isFalse);
+  });
+
+  test(
+    'invalidation waits for an in-flight JSON write and survives restart',
+    () async {
+      final gated = _GatedJsonCache(directory);
+      final first = gated.writeJson('race', {
+        'tracks': List<String>.generate(10000, (i) => 'song-$i'),
+      });
+      await gated.started.future;
+      final expire = gated.expireJson('race');
+      gated.release.complete();
+      await Future.wait([first, expire]);
+      final restarted = DiskCache(directory: () async => directory);
+      final saved = await restarted.readJson('race');
+      expect(saved?.invalidated, isTrue);
+      expect((saved!.data['tracks'] as List), hasLength(10000));
+      await restarted.writeJson('race', {
+        'tracks': ['new'],
+      });
+      expect((await restarted.readJson('race'))?.data['tracks'], ['new']);
+      await gated.settle();
+      await restarted.settle();
+    },
+  );
+
+  test('JSON removal follows an in-flight write for the same key', () async {
+    final gated = _GatedJsonCache(directory);
+    final write = gated.writeJson('race', {'old': true});
+    await gated.started.future;
+    final removal = gated.remove(CacheBucket.data, 'race', extension: 'json');
+    gated.release.complete();
+    await Future.wait([write, removal]);
+    expect(await gated.readJson('race'), isNull);
+    await gated.settle();
+  });
+
+  test(
+    'queued JSON writes capture small and large data at call time',
+    () async {
+      for (final count in [1, 300]) {
+        final gated = _GatedJsonCache(directory);
+        final first = gated.writeJson('race', {'old': true});
+        await gated.started.future;
+        final entries = List<Map<String, dynamic>>.generate(
+          count,
+          (i) => {
+            'name': 'original-$i',
+            'nested': {'value': i},
+          },
+        );
+        final write = gated.writeJson('race', {'tracks': entries});
+        entries.first['name'] = 'mutated';
+        (entries.first['nested'] as Map<String, dynamic>)['value'] = -1;
+        entries.add({'name': 'added'});
+        gated.release.complete();
+        await Future.wait([first, write]);
+        final saved = (await gated.readJson('race'))!.data['tracks'] as List;
+        expect(saved, hasLength(count));
+        expect(saved.first['name'], 'original-0');
+        expect(saved.first['nested']['value'], 0);
+        await gated.settle();
+      }
+    },
+  );
+
+  test('an invalid JSON write fails without blocking later writes', () async {
+    final cyclic = <String, dynamic>{};
+    cyclic['self'] = cyclic;
+    await expectLater(cache.writeJson('cycle', cyclic), throwsA(isA<Error>()));
+    await cache.writeJson('cycle', {'ok': true});
+    expect((await cache.readJson('cycle'))?.data['ok'], true);
+    await cache.settle();
   });
 
   test('unwritable cache fails quietly', () async {

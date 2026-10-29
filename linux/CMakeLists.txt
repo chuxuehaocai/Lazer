@@ -74,6 +74,11 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# Native HiFi audio engine (see native/CMakeLists.txt). Built only when a
+# DSD-capable FFmpeg is available; otherwise the app plays through just_audio.
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../native"
+  "${CMAKE_BINARY_DIR}/lazer-native-audio")
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
@@ -105,6 +110,10 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endforeach(bundled_library)
+
+# The native audio engine lands in the bundle's lib/ directory, which the runner
+# also puts on the loader path.
+lazer_install_native_audio("${INSTALL_BUNDLE_LIB_DIR}")
 
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")

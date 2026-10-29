@@ -13,8 +13,10 @@ import '../theme/tokens.dart';
 ///
 /// This is the honest number: it measures the frames Flutter actually built
 /// and rasterised, including dropped frames, rather than an animation's
-/// nominal duration. The overlay is opt-in because it costs one small card
-/// rebuild four times a second.
+/// nominal duration. The overlay is opt-in because it rebuilds when new
+/// timing batches arrive. Measurements remain driven by every completed frame;
+/// the overlay itself updates four times a second so it does not force a new
+/// frame or churn the Windows accessibility tree for every sample.
 class FrameStats extends ChangeNotifier with BuildSafeNotifier {
   FrameStats._();
 
