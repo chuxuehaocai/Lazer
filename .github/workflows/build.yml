@@ -200,6 +200,14 @@ jobs:
     needs: check
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      # Release signing material. See docs/builds.md; generate the values with
+      # ci/generate-android-keystore.ps1. Pull requests from forks cannot read
+      # secrets, so those builds fall back to the debug key.
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -215,7 +223,67 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get --enforce-lockfile
-      - run: flutter build apk --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Materialise the release keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${ANDROID_KEYSTORE_BASE64}" || -z "${ANDROID_KEYSTORE_PASSWORD}" || -z "${ANDROID_KEY_ALIAS}" ]]; then
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              echo "::error::Release signing secrets are missing; refusing to publish a debug-signed release."
+              exit 1
+            fi
+            echo "::warning::Release signing secrets are not configured; building a debug-signed APK."
+            exit 0
+          fi
+          install -d android/app
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \r\n' | base64 --decode > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storeFile=upload-keystore.jks
+          storePassword=${ANDROID_KEYSTORE_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS}
+          keyPassword=${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}
+          EOF
+          printf 'SIGNED_RELEASE=true\n' >> "$GITHUB_ENV"
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A tag build must never fall back to the debug key if the keystore step
+          # silently produced nothing.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export ORG_GRADLE_PROJECT_lazerRequireReleaseSigning=true
+          fi
+          flutter build apk --release --no-pub \
+            --dart-define=LAZER_COMMIT=${{ github.sha }} \
+            --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Verify the APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          test -f "$apk" || { echo "::error::Missing $apk"; exit 1; }
+          apksigner=$(find "${ANDROID_HOME:?ANDROID_HOME is not set}/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          if [[ -z "$apksigner" ]]; then
+            echo "::error::apksigner not found under $ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          "$apksigner" verify --verbose "$apk"
+          if [[ "${SIGNED_RELEASE:-false}" == true ]]; then
+            keytool -exportcert -keystore android/app/upload-keystore.jks \
+              -alias "$ANDROID_KEY_ALIAS" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -file "$RUNNER_TEMP/release.cer" >/dev/null
+            expected=$(sha256sum "$RUNNER_TEMP/release.cer" | cut -d' ' -f1)
+            actual=$("$apksigner" verify --print-certs "$apk" |
+              sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1)
+            if [[ "$expected" != "$actual" ]]; then
+              echo "::error::APK is signed by $actual, expected $expected"
+              exit 1
+            fi
+            echo "Signed by the release key: $actual"
+          else
+            echo "::warning::APK is debug-signed (no release keystore configured)."
+          fi
       - name: Package universal APK
         run: |
           mkdir -p dist
