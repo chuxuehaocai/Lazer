@@ -7,7 +7,7 @@
 // What it does:
 //   1. configures CMake over `native/` into `build/native-audio/cmake`,
 //   2. builds `lazer-audio` and `lazer-audio-bridge`,
-//   3. copies the libraries (and FFmpeg's runtime DLLs on Windows) into
+//   3. copies the libraries (and FFmpeg's runtime libraries) into
 //      `build/native-audio/`, which is one of the directories `LazerAudioLoader`
 //      searches when the app runs from the repository root.
 //
@@ -96,7 +96,7 @@ Future<int> _build(List<String> arguments) async {
   return staged;
 }
 
-/// Copies the built libraries (and FFmpeg's runtime DLLs) next to the app.
+/// Copies the built engine, bridge, and FFmpeg runtime libraries next to the app.
 Future<int> _stage(
   String cmakeDirectory,
   Directory target,
@@ -147,6 +147,20 @@ Future<int> _stage(
         }
         final String name = entity.uri.pathSegments.last;
         await entity.copy('${target.path}${Platform.pathSeparator}$name');
+      }
+    }
+  } else if (Platform.isMacOS) {
+    final Directory lib = Directory('$ffmpegRoot/lib');
+    if (await lib.exists()) {
+      await for (final FileSystemEntity entity in lib.list()) {
+        if ((entity is! File && entity is! Link) ||
+            !entity.path.endsWith('.dylib')) {
+          continue;
+        }
+        final String name = entity.uri.pathSegments.last;
+        await File(
+          entity.path,
+        ).copy('${target.path}${Platform.pathSeparator}$name');
       }
     }
   }

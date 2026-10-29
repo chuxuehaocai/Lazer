@@ -20,6 +20,13 @@ bundle="build/linux/$bundle_arch/release/bundle"
 test -x "$bundle/lazer_nextgen"
 test -d "$bundle/data"
 test -d "$bundle/lib"
+test -f "$bundle/lib/liblazer-audio.so"
+test -f "$bundle/lib/liblazer-audio-bridge.so"
+for component in avcodec avformat avutil swresample; do
+  compgen -G "$bundle/lib/lib${component}.so*" > /dev/null
+done
+test -f "$bundle/lib/licenses/lazer-ffmpeg/COPYING.LGPLv2.1"
+test -f "$bundle/lib/licenses/lazer-ffmpeg/BUILDINFO.txt"
 
 tools=$(mktemp -d)
 trap 'rm -rf -- "$tools"' EXIT
@@ -55,4 +62,6 @@ export PATH="$tools:$PATH"
   --plugin gtk --output appimage
 chmod +x "$OUTPUT"
 find "$appdir/usr/lib" -name 'libmpv.so*' -print -quit | grep -q .
+test -f "$appdir/usr/bin/lib/liblazer-audio.so"
+test -f "$appdir/usr/bin/lib/liblazer-audio-bridge.so"
 (cd dist && sha256sum "$filename" > "$filename.sha256")

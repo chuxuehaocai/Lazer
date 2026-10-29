@@ -98,4 +98,10 @@ function(lazer_install_native_audio destination)
             DESTINATION "${destination}"
             COMPONENT Runtime)
     endif()
+    if(LAZER_FFMPEG_ROOT AND
+       EXISTS "${LAZER_FFMPEG_ROOT}/share/lazer-ffmpeg")
+        install(DIRECTORY "${LAZER_FFMPEG_ROOT}/share/lazer-ffmpeg/"
+            DESTINATION "${destination}/licenses/lazer-ffmpeg"
+            COMPONENT Runtime)
+    endif()
 endfunction()

@@ -498,7 +498,7 @@ abstract final class LazerAudioLoader {
   }
 
   /// Resolution order: explicit environment override, the executable's own
-  /// directory (a packaged bundle), the working directory (a `flutter run` from
+  /// directory (and its `lib/` child on Linux), the working directory (`flutter run` from
   /// the repo root), then the trees `tool/build_native_audio.dart` and CMake
   /// produce under `build/native-audio`.
   static Uri? _resolve({
@@ -512,8 +512,11 @@ abstract final class LazerAudioLoader {
     }
     final String separator = Platform.pathSeparator;
     final String cwd = Directory.current.path;
+    final String executableDirectory =
+        File(Platform.resolvedExecutable).parent.path;
     final List<String> directories = <String>[
-      File(Platform.resolvedExecutable).parent.path,
+      executableDirectory,
+      if (Platform.isLinux) '$executableDirectory${separator}lib',
       cwd,
     ];
     // Multi-config generators nest artefacts under a configuration directory and

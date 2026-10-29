@@ -12,7 +12,12 @@ if [[ $# -ne 1 || -z "$1" ]]; then
 fi
 
 prefix="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-work_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/lazer-ffmpeg-${FFmpeg_REVISION:0:12}"
+platform="$(uname -s)"
+runner_temp="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+case "$platform" in
+    MINGW*|MSYS*|CYGWIN*) runner_temp="$(cygpath -u "$runner_temp")" ;;
+esac
+work_root="$runner_temp/lazer-ffmpeg-${FFmpeg_REVISION:0:12}"
 source_dir="$work_root/source"
 
 mkdir -p "$work_root" "$prefix"
@@ -31,14 +36,13 @@ fi
 git -C "$source_dir" checkout --force --detach "$resolved_revision"
 
 cd "$source_dir"
+ffmpeg_shlibdir="$prefix/lib"
 configure_args=(
     "--prefix=$prefix"
     "--libdir=$prefix/lib"
-    "--shlibdir=$prefix/lib"
     "--incdir=$prefix/include"
     --enable-shared
     --disable-static
-    --enable-pic
     --disable-programs
     --disable-doc
     --disable-debug
@@ -47,10 +51,31 @@ configure_args=(
     --disable-avfilter
     --disable-swscale
 )
+case "$platform" in
+    MINGW*|MSYS*|CYGWIN*)
+        # Build FFmpeg with the same MSVC toolchain as the Windows runner. Its
+        # import libraries are then linkable by the app's Visual Studio CMake
+        # build, and the DLLs land in the directory the Windows bundler collects.
+        ffmpeg_shlibdir="$prefix/bin"
+        configure_args+=(
+            --toolchain=msvc
+            --target-os=win32
+            --arch=x86_64
+            --cc=cl.exe
+            --cxx=cl.exe
+            --ld=link.exe
+            --enable-w32threads
+        )
+        ;;
+    *)
+        configure_args+=(--enable-pic)
+        ;;
+esac
+configure_args+=("--shlibdir=$ffmpeg_shlibdir")
 # Give FFmpeg dylibs a location-independent install name. The desktop bundle copies these shared
 # libraries beside liblazer-audio.dylib, whose @loader_path runpath then resolves @rpath entries.
 # Keep Linux's normal SONAME/RPATH behavior unchanged.
-if [[ "$(uname -s)" == Darwin ]]; then
+if [[ "$platform" == Darwin ]]; then
     configure_args+=("--install-name-dir=@rpath")
 fi
 printf 'FFmpeg revision: %s\nConfigure options: %s\n' \

@@ -45,11 +45,20 @@ jobs:
     name: Windows EXE (x86_64)
     needs: check
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 60
+    env:
+      LAZER_FFMPEG_ROOT: ${{ runner.temp }}\lazer-ffmpeg
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: MSYS
+          update: true
+          path-type: inherit
+          install: make nasm diffutils git perl
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -57,6 +66,15 @@ jobs:
           cache: true
       - run: flutter config --enable-windows-desktop
       - run: flutter pub get --enforce-lockfile
+      - name: Build DSD-capable LGPL FFmpeg with MSVC
+        shell: msys2 {0}
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: |
+          set -euo pipefail
+          command -v cl.exe
+          prefix="$(cygpath -u "$LAZER_FFMPEG_ROOT")"
+          ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
       - run: flutter build windows --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Package EXE, DLLs, resources and Visual C++ runtime
         shell: pwsh
@@ -69,9 +87,56 @@ jobs:
           compression-level: 0
           retention-days: 30
 
+  macos-native:
+    name: macOS native audio (${{ matrix.arch }})
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            flutter_arch: arm64
+          - arch: x86_64
+            runner: macos-15-intel
+            flutter_arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          architecture: ${{ matrix.flutter_arch }}
+      - name: Install native build tools
+        run: brew install cmake ninja nasm pkgconf
+      - run: flutter pub get --enforce-lockfile
+      - name: Build DSD-capable LGPL FFmpeg and native audio
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: |
+          set -euo pipefail
+          ffmpeg_root="$RUNNER_TEMP/lazer-ffmpeg"
+          ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$ffmpeg_root"
+          dart run tool/build_native_audio.dart --ffmpeg-root "$ffmpeg_root"
+          mkdir -p dist/licenses/lazer-ffmpeg
+          cp build/native-audio/*.dylib dist/
+          cp "$ffmpeg_root/share/lazer-ffmpeg/"* dist/licenses/lazer-ffmpeg/
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: native-deps-macos-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   macos:
     name: macOS App (${{ matrix.arch }})
-    needs: check
+    needs: [check, macos-native]
     strategy:
       fail-fast: false
       matrix:
@@ -105,6 +170,32 @@ jobs:
       - run: xcodebuild -version
       - run: flutter config --enable-macos-desktop
       - run: flutter pub get --enforce-lockfile
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: native-deps-macos-*
+          path: build/native-dependencies
+          merge-multiple: false
+      - name: Prepare architecture-matched native audio libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage=build/native-audio-package
+          arm=build/native-dependencies/native-deps-macos-arm64
+          x86=build/native-dependencies/native-deps-macos-x86_64
+          mkdir -p "$stage/licenses/lazer-ffmpeg"
+          if [[ "${{ matrix.arch }}" == universal ]]; then
+            for arm_lib in "$arm"/*.dylib; do
+              name="${arm_lib##*/}"
+              test -f "$x86/$name"
+              lipo -create "$arm_lib" "$x86/$name" -output "$stage/$name"
+            done
+            cp "$arm/licenses/lazer-ffmpeg/"* "$stage/licenses/lazer-ffmpeg/"
+          else
+            cp "$x86/"*.dylib "$stage/"
+            cp "$x86/licenses/lazer-ffmpeg/"* "$stage/licenses/lazer-ffmpeg/"
+          fi
+          test -f "$stage/liblazer-audio.dylib"
+          test -f "$stage/liblazer-audio-bridge.dylib"
       - run: flutter build macos --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Package App with executable permissions and framework symlinks
         shell: bash
@@ -112,15 +203,30 @@ jobs:
           set -euo pipefail
           app=build/macos/Build/Products/Release/lazer_nextgen.app
           test -d "$app"
+          runtime="$app/Contents/MacOS"
+          cp build/native-audio-package/*.dylib "$runtime/"
+          mkdir -p "$app/Contents/Resources/licenses/lazer-ffmpeg"
+          cp build/native-audio-package/licenses/lazer-ffmpeg/* \
+            "$app/Contents/Resources/licenses/lazer-ffmpeg/"
           read -r -a required_archs <<< "$FLUTTER_XCODE_ARCHS"
           lipo "$app/Contents/MacOS/lazer_nextgen" -verify_arch "${required_archs[@]}"
+          for library in "$runtime"/*.dylib; do
+            lipo "$library" -verify_arch "${required_archs[@]}"
+          done
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          test -f "$runtime/liblazer-audio.dylib"
+          test -f "$runtime/liblazer-audio-bridge.dylib"
+          for component in avcodec avformat avutil swresample; do
+            compgen -G "$runtime/lib${component}*.dylib" > /dev/null
+          done
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" dist/Lazer-macOS-${{ matrix.arch }}.zip
           (cd dist && shasum -a 256 Lazer-macOS-${{ matrix.arch }}.zip > Lazer-macOS-${{ matrix.arch }}.zip.sha256)
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: Lazer-macOS-${{ matrix.arch }}
-          path: dist/*
+          path: dist/
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
@@ -150,7 +256,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             libmpv-dev libayatana-appindicator3-dev libgdk-pixbuf2.0-dev \
-            librsvg2-dev patchelf file desktop-file-utils fuse libfuse2 \
+            librsvg2-dev patchelf file desktop-file-utils fuse libfuse2 nasm \
+            libasound2-dev \
             xvfb dbus-x11
       - if: matrix.arch == 'x86_64'
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -171,6 +278,14 @@ jobs:
           "$sdk/bin/flutter" precache --linux
       - run: flutter config --enable-linux-desktop
       - run: flutter pub get --enforce-lockfile
+      - name: Build DSD-capable LGPL FFmpeg
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/lazer-ffmpeg"
+          ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
+          echo "LAZER_FFMPEG_ROOT=$prefix" >> "$GITHUB_ENV"
       - run: flutter build linux --release --no-pub --target-platform ${{ matrix.flutter_target }} --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Bundle GTK, libmpv and Flutter into AppImage
         run: bash ci/package-appimage.sh ${{ matrix.arch }}
@@ -279,7 +394,9 @@ jobs:
       - name: Download all platform artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" --dir release-assets
+        run: |
+          gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" \
+            --pattern 'Lazer-*' --dir release-assets
       - name: Publish tag as a GitHub Release
         shell: bash
         env:
