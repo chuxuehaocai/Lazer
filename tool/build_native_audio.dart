@@ -149,15 +149,17 @@ Future<int> _stage(
         await entity.copy('${target.path}${Platform.pathSeparator}$name');
       }
     }
-  } else if (Platform.isMacOS) {
+  } else if (Platform.isMacOS || Platform.isLinux) {
     final Directory lib = Directory('$ffmpegRoot/lib');
     if (await lib.exists()) {
       await for (final FileSystemEntity entity in lib.list()) {
-        if ((entity is! File && entity is! Link) ||
-            !entity.path.endsWith('.dylib')) {
+        final String name = entity.uri.pathSegments.last;
+        final bool isRuntimeLibrary = Platform.isMacOS
+            ? name.endsWith('.dylib')
+            : name.startsWith('lib') && name.contains('.so');
+        if ((entity is! File && entity is! Link) || !isRuntimeLibrary) {
           continue;
         }
-        final String name = entity.uri.pathSegments.last;
         await File(
           entity.path,
         ).copy('${target.path}${Platform.pathSeparator}$name');

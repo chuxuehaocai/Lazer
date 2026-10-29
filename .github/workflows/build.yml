@@ -77,6 +77,16 @@ jobs:
           prefix="$(cygpath -u "$LAZER_FFMPEG_ROOT")"
           bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
       - run: flutter build windows --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Stage native audio and FFmpeg into the Windows bundle
+        shell: pwsh
+        run: |
+          dart run tool/build_native_audio.dart --ffmpeg-root "$env:LAZER_FFMPEG_ROOT"
+          $release = 'build/windows/x64/runner/Release'
+          Get-ChildItem -LiteralPath 'build/native-audio' -Filter '*.dll' -File |
+            Copy-Item -Destination $release -Force
+          $license = Join-Path $release 'licenses/lazer-ffmpeg'
+          New-Item -ItemType Directory -Path $license -Force | Out-Null
+          Copy-Item -Path "$env:LAZER_FFMPEG_ROOT/share/lazer-ffmpeg/*" -Destination $license -Force
       - name: Package EXE, DLLs, resources and Visual C++ runtime
         shell: pwsh
         run: ./ci/package-windows.ps1
@@ -242,9 +252,11 @@ jobs:
           - arch: x86_64
             runner: ubuntu-22.04
             flutter_target: linux-x64
+            bundle_arch: x64
           - arch: aarch64
             runner: ubuntu-22.04-arm
             flutter_target: linux-arm64
+            bundle_arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
@@ -288,6 +300,15 @@ jobs:
           bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
           echo "LAZER_FFMPEG_ROOT=$prefix" >> "$GITHUB_ENV"
       - run: flutter build linux --release --no-pub --target-platform ${{ matrix.flutter_target }} --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Stage native audio and FFmpeg into the Linux bundle
+        run: |
+          set -euo pipefail
+          dart run tool/build_native_audio.dart --ffmpeg-root "$LAZER_FFMPEG_ROOT"
+          bundle="build/linux/${{ matrix.bundle_arch }}/release/bundle"
+          cp build/native-audio/*.so* "$bundle/lib/"
+          mkdir -p "$bundle/lib/licenses/lazer-ffmpeg"
+          cp "$LAZER_FFMPEG_ROOT/share/lazer-ffmpeg/"* \
+            "$bundle/lib/licenses/lazer-ffmpeg/"
       - name: Bundle GTK, libmpv and Flutter into AppImage
         run: bash ci/package-appimage.sh ${{ matrix.arch }}
       - name: Check AppImage starts with a display and session bus
