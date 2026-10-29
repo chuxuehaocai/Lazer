@@ -81,8 +81,7 @@ class LocalMusicScanner {
     void Function(int found, String current)? onProgress,
   }) async {
     final Map<String, LocalTrack> known = <String, LocalTrack>{
-      for (final LocalTrack entry in existing)
-        _normalize(entry.path): entry,
+      for (final LocalTrack entry in existing) _normalize(entry.path): entry,
     };
     final List<LocalTrack> found = <LocalTrack>[];
     final List<Directory> pending = <Directory>[root];
@@ -96,83 +95,80 @@ class LocalMusicScanner {
         break;
       }
       final Directory directory = pending.removeLast();
-      List<FileSystemEntity> entities;
       try {
-        entities = await directory.list(followLinks: false).toList();
+        await for (final FileSystemEntity entity in directory.list(
+          followLinks: false,
+        )) {
+          if (isCanceled?.call() ?? false) {
+            canceled = true;
+            break;
+          }
+          final String name = _baseName(entity.path);
+          if (name.startsWith('.') || _ignoredDirectories.contains(name)) {
+            continue;
+          }
+          if (entity is Directory) {
+            if (_depthOf(entity.path, root.path) < _maxDepth) {
+              pending.add(entity);
+            }
+            continue;
+          }
+          if (entity is! File) continue;
+          if (!extensions.contains(_extension(entity.path))) continue;
+          visited++;
+          if (found.length >= _maxFiles) break;
+          try {
+            final FileStat stat = await entity.stat();
+            final String path = _absolute(entity.path);
+            final LocalTrack? previous = known[_normalize(path)];
+            LocalTrack entry;
+            if (previous != null &&
+                previous.bytes == stat.size &&
+                previous.modifiedAt.millisecondsSinceEpoch ==
+                    stat.modified.millisecondsSinceEpoch) {
+              entry = previous;
+            } else {
+              final LocalAudioMetadata metadata = await probe.probe(entity);
+              final String title = metadata.title.trim().isEmpty
+                  ? LocalAudioProbe.fromFileName(path).title
+                  : metadata.title.trim();
+              final String artist = metadata.artist.trim();
+              final String album = metadata.album.trim();
+              entry = LocalTrack(
+                track: Track(
+                  id: localTrackIdForPath(path),
+                  title: title,
+                  artist: artist.isEmpty ? '未知歌手' : artist,
+                  album: album.isEmpty ? '未知专辑' : album,
+                  duration: metadata.duration,
+                  coverSeed: _seedFor(path),
+                  localPath: path,
+                ),
+                path: path,
+                source: LocalTrackSource.scan,
+                bytes: stat.size,
+                modifiedAt: stat.modified,
+                addedAt: previous?.addedAt ?? now,
+              );
+            }
+            found.add(entry);
+            onProgress?.call(found.length, path);
+          } catch (_) {
+            skipped++;
+          }
+          if (visited % 20 == 0) {
+            // Yield so the scan never blocks a frame for long.
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
       } catch (_) {
+        // A directory can become inaccessible while it is being enumerated;
+        // keep entries already read and continue with the remaining folders.
         skipped++;
-        continue;
-      }
-      for (final FileSystemEntity entity in entities) {
-        if (isCanceled?.call() ?? false) {
-          canceled = true;
-          break;
-        }
-        final String name = _baseName(entity.path);
-        if (name.startsWith('.') || _ignoredDirectories.contains(name)) {
-          continue;
-        }
-        if (entity is Directory) {
-          if (_depthOf(entity.path, root.path) < _maxDepth) {
-            pending.add(entity);
-          }
-          continue;
-        }
-        if (entity is! File) continue;
-        if (!extensions.contains(_extension(entity.path))) continue;
-        visited++;
-        if (found.length >= _maxFiles) break;
-        try {
-          final FileStat stat = await entity.stat();
-          final String path = _absolute(entity.path);
-          final LocalTrack? previous = known[_normalize(path)];
-          LocalTrack entry;
-          if (previous != null &&
-              previous.bytes == stat.size &&
-              previous.modifiedAt.millisecondsSinceEpoch ==
-                  stat.modified.millisecondsSinceEpoch) {
-            entry = previous;
-          } else {
-            final LocalAudioMetadata metadata = await probe.probe(entity);
-            final String title = metadata.title.trim().isEmpty
-                ? LocalAudioProbe.fromFileName(path).title
-                : metadata.title.trim();
-            final String artist = metadata.artist.trim();
-            final String album = metadata.album.trim();
-            entry = LocalTrack(
-              track: Track(
-                id: localTrackIdForPath(path),
-                title: title,
-                artist: artist.isEmpty ? '未知歌手' : artist,
-                album: album.isEmpty ? '未知专辑' : album,
-                duration: metadata.duration,
-                coverSeed: _seedFor(path),
-                localPath: path,
-              ),
-              path: path,
-              source: LocalTrackSource.scan,
-              bytes: stat.size,
-              modifiedAt: stat.modified,
-              addedAt: previous?.addedAt ?? now,
-            );
-          }
-          found.add(entry);
-          onProgress?.call(found.length, path);
-        } catch (_) {
-          skipped++;
-        }
-        if (visited % 20 == 0) {
-          // Yield so the scan never blocks a frame for long.
-          await Future<void>.delayed(Duration.zero);
-        }
       }
       if (canceled || found.length >= _maxFiles) break;
     }
-    return LocalScanResult(
-      tracks: found,
-      skipped: skipped,
-      canceled: canceled,
-    );
+    return LocalScanResult(tracks: found, skipped: skipped, canceled: canceled);
   }
 
   static const Set<String> _ignoredDirectories = <String>{

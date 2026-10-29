@@ -28,6 +28,7 @@ import '../utils/background_image.dart';
 import 'build_safe_notifier.dart';
 import 'listen_together.dart';
 import 'media_shortcuts.dart';
+import 'playback_queue_store.dart';
 import 'hifi_settings.dart';
 import 'ui_preferences.dart';
 
@@ -127,6 +128,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     LocalLibrary? localLibrary,
     DownloadManager? downloadManager,
     ImportedLyricsStore? importedLyrics,
+    PlaybackQueueStore? queueStore,
     UpdateChecker? updateChecker,
     this.audioEngine,
     this._independentPlayback = false,
@@ -136,6 +138,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.hifi,
   }) : catalog = catalog ?? Catalog(),
        localLibrary = localLibrary ?? LocalLibrary(),
+       _queueStore = queueStore ?? PlaybackQueueStore(),
        updateChecker = updateChecker ?? UpdateChecker() {
     this.importedLyrics = importedLyrics ?? ImportedLyricsStore();
     this.downloadManager =
@@ -363,7 +366,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   static const String _sessionKey = 'lazer_gateway_cookie';
-  static const String _queueKey = 'lazer_playback_queue_v1';
+
   static const String _recentTracksKey = 'lazer_recent_tracks_v1';
   static const int _recentTracksLimit = 60;
 
@@ -991,6 +994,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Restores any persisted gateway session, then loads the home feed.
   Future<void> bootstrap() async {
+    final int initialQueueActivity = _queueActivity;
     try {
       final prefs = await SharedPreferences.getInstance();
       _independentPlayback =
@@ -1126,7 +1130,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await localLibrary.load();
     await audioEngine?.setVolume(_volume);
     await _restoreRecentTracks();
-    await _restoreQueue();
+    await _restoreQueue(initialQueueActivity);
     unawaited(_loadCurrentArtwork());
     unawaited(ensureCurrentLyrics());
     await _restoreSession();
@@ -1415,6 +1419,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _stationLoading = false;
     _stationSeen.clear();
     _queue = <Track>[];
+    _markQueueChanged();
     _queueIndex = 0;
     _position = Duration.zero;
     lyrics = const <LyricLine>[];
@@ -1580,6 +1585,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Timer? _ticker;
   List<Track> _queue = <Track>[];
+  int _queueRevision = 0;
+  List<Track>? _queueSnapshot;
+  final PlaybackQueueStore _queueStore;
+  int _queueActivity = 0;
   List<Track> _recentTracks = <Track>[];
   int _queueIndex = 0;
   Duration _position = Duration.zero;
@@ -1617,8 +1626,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool _stationLoading = false;
   final Set<String> _stationSeen = <String>{};
 
-  List<Track> get queue => List<Track>.unmodifiable(_queue);
+  List<Track> get queue => _queueSnapshot ??= List<Track>.unmodifiable(_queue);
+
+  /// Changes whenever the queue's contents or order change.
+  int get queueRevision => _queueRevision;
+
+  void _markQueueChanged() {
+    _queueRevision++;
+    _queueSnapshot = null;
+  }
+
   List<Track> get recentTracks => List<Track>.unmodifiable(_recentTracks);
+
+  /// Counts without allocating an immutable snapshot of the queue.
+  int get queueLength => _queue.length;
   Track? get current =>
       _queue.isEmpty ? null : _queue[_queueIndex.clamp(0, _queue.length - 1)];
   Duration get position => _position;
@@ -1724,6 +1745,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _finishPlaySession();
     trackChangeDirection = 1;
     _queue = List<Track>.of(tracks);
+    _markQueueChanged();
     _queueIndex = startIndex.clamp(0, tracks.length - 1);
     unawaited(_saveQueue());
     _position = Duration.zero;
@@ -1877,6 +1899,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         final additions = fresh.take(30).toList();
         if (additions.isEmpty) continue;
         _queue.addAll(additions);
+        _markQueueChanged();
         unawaited(_saveQueue());
         notifyListeners();
         return true;
@@ -1889,6 +1912,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             ..shuffle();
       if (fallback.isNotEmpty && _stationLoader == loader) {
         _queue.addAll(fallback.take(20));
+        _markQueueChanged();
         unawaited(_saveQueue());
         notifyListeners();
         return true;
@@ -1994,13 +2018,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Local files win over the network so downloads and scanned songs keep
   /// playing offline. Missing files fall through to the service.
-  Future<String?> _trackUrl(Track track) async {
-    final File? local = localLibrary.localFileFor(
+  Future<String?> _trackUrl(
+    Track track, {
+    bool Function()? stillCurrent,
+  }) async {
+    final AudioQuality quality = playbackQuality;
+    final File? local = await localLibrary.localFileFor(
       track,
-      quality: playbackQuality,
+      quality: quality,
     );
+    if (stillCurrent != null && !stillCurrent()) return null;
     if (local != null) return local.uri.toString();
-    return catalog.audioUrlFor(track, quality: playbackQuality);
+    return catalog.audioUrlFor(track, quality: quality);
   }
 
   /// Loads the stream URL. A locked or unavailable song stops playback and
@@ -2018,7 +2047,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queuedNextIndex = null;
     String? url;
     try {
-      url = await _trackUrl(track);
+      url = await _trackUrl(
+        track,
+        stillCurrent: () => generation == _generation,
+      );
     } catch (error) {
       if (generation == _generation) _failPlayback(_friendly(error));
       return;
@@ -2090,7 +2122,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     String? url;
     try {
-      url = await _trackUrl(_queue[next]);
+      url = await _trackUrl(
+        _queue[next],
+        stillCurrent: () => queueId == _queueId && _realActive,
+      );
     } catch (_) {
       url = null;
     }
@@ -2190,6 +2225,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         );
       }).toList();
       if (changed) {
+        _markQueueChanged();
         unawaited(_saveQueue());
         final Track? hydrated = current;
         if (hydrated != null) unawaited(_replaceRecentMetadata(hydrated));
@@ -2202,45 +2238,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  Future<void> _restoreQueue() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_queueKey);
-      if (raw == null) return;
-      final json = jsonDecode(raw);
-      if (json is! Map<String, dynamic> || json['tracks'] is! List) return;
-      final tracks = <Track>[];
-      for (final item in json['tracks'] as List) {
-        if (item is! Map<String, dynamic>) continue;
-        final id = item['id'] as String? ?? '';
-        if (int.tryParse(id) == null) continue;
-        tracks.add(
-          Track(
-            id: id,
-            title: item['title'] as String? ?? '',
-            artist: item['artist'] as String? ?? '',
-            artists: ArtistRef.list(item['artists']),
-            album: item['album'] as String? ?? '',
-            duration: Duration(
-              milliseconds: (item['durationMs'] as num?)?.toInt() ?? 0,
-            ),
-            coverSeed: (item['coverSeed'] as num?)?.toInt() ?? 0,
-            accent: (item['accent'] as num?)?.toInt() ?? 0,
-            albumId: (item['albumId'] as num?)?.toInt() ?? 0,
-            coverUrl: item['coverUrl'] as String?,
-            translatedTitle: item['translatedTitle'] as String?,
-          ),
-        );
-      }
-      _queue = tracks;
-      _queueIndex = ((json['index'] as num?)?.toInt() ?? 0).clamp(
-        0,
-        tracks.isEmpty ? 0 : tracks.length - 1,
-      );
-      notifyListeners();
-    } catch (_) {
-      // Corrupt or inaccessible local state leaves an empty queue.
-    }
+  Future<void> _restoreQueue(int initialActivity) async {
+    if (_queueActivity != initialActivity) return;
+    final PlaybackQueueSnapshot? snapshot = await _queueStore.load();
+    // Playback or sign-out can happen while preferences or decoding are in
+    // flight. Those actions own the queue and must not be overwritten.
+    if (snapshot == null || _queueActivity != initialActivity) return;
+    _queue = snapshot.tracks;
+    _markQueueChanged();
+    _queueIndex = snapshot.index;
+    notifyListeners();
   }
 
   Future<void> _restoreRecentTracks() async {
@@ -2293,34 +2300,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {}
   }
 
-  Future<void> _saveQueue() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _queueKey,
-        jsonEncode(<String, Object?>{
-          'index': _queueIndex,
-          'tracks': <Map<String, Object?>>[
-            for (final track in _queue)
-              <String, Object?>{
-                'id': track.id,
-                'title': track.title,
-                'translatedTitle': track.translatedTitle,
-                'artist': track.artist,
-                'artists': track.artists
-                    .map((artist) => artist.toJson())
-                    .toList(),
-                'album': track.album,
-                'albumId': track.albumId,
-                'durationMs': track.duration.inMilliseconds,
-                'coverSeed': track.coverSeed,
-                'accent': track.accent,
-                'coverUrl': track.coverUrl,
-              },
-          ],
-        }),
-      );
-    } catch (_) {}
+  Future<void> _saveQueue() {
+    _queueActivity++;
+    return _queueStore.save(_queue, _queueIndex, _queueRevision);
   }
 
   Future<void> _resumeAudio() async {
@@ -2431,11 +2413,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // Cloud lyrics are authoritative, but a `.lrc` beside a downloaded or
     // scanned file is a useful offline fallback.
     if (lyrics.isEmpty && !lyricsPureMusic) {
-      final String? localPath =
-          localLibrary.localFileFor(track)?.path ?? track.localPath;
+      final File? localFile = await localLibrary.localFileFor(track);
+      if (generation != _lyricGeneration) return;
+      final String? localPath = localFile?.path ?? track.localPath;
       final String? sidecar = await ImportedLyricsStore.sidecarFor(localPath);
       if (generation != _lyricGeneration) return;
-      if (sidecar != null) lyrics = parseLrc(sidecar);
+      if (sidecar != null &&
+          lyrics.isEmpty &&
+          !lyricsImported &&
+          !lyricsPureMusic) {
+        lyrics = parseLrc(sidecar);
+      }
     }
     if (lyrics.isEmpty && failure != null) {
       lyricsError = '歌词暂时无法加载。';
@@ -2808,6 +2796,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _queueActivity++;
     ++_generation;
     ++_lyricGeneration;
     // Detach the room controller before the tick lane it listens to is

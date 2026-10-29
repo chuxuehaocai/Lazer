@@ -20,6 +20,7 @@ import 'diagnostics/frame_stats.dart';
 import 'legacy/legacy_shell.dart';
 import 'theme/apple_design.dart';
 import 'state/app_state.dart';
+import 'state/ui_preferences.dart';
 import 'state/hifi_settings.dart';
 import 'tv/tv_mode.dart';
 import 'widgets/window_frame.dart';
@@ -81,14 +82,18 @@ Future<void> main() async {
       // frame; must run before the first frame, which is also when the
       // runner decides to show the window.
       await initWindowFrame();
-      final prefs = await SharedPreferences.getInstance();
       // The television input model (D-pad focus) needs this before the first
       // frame: a television with no pointer would otherwise boot into a screen
       // where nothing can be operated.
-      final bool television = await detectTelevision();
       // The native HiFi engine (FFmpeg + WASAPI/ALSA/CoreAudio) when this build
       // ships one, otherwise just_audio/media_kit. Chosen once per launch.
-      final AudioEngineSelection selection = await createAudioEngine();
+      final Future<SharedPreferences> prefsFuture =
+          SharedPreferences.getInstance();
+      final Future<bool> televisionFuture = detectTelevision();
+      final Future<AudioEngineSelection> selectionFuture = createAudioEngine();
+      final prefs = await prefsFuture;
+      final bool television = await televisionFuture;
+      final AudioEngineSelection selection = await selectionFuture;
       final AudioEngine audio = selection.engine;
       debugPrint('Audio engine: ${selection.description}');
       // The HiFi page needs one owner for "apply these settings to whatever engine
@@ -114,8 +119,7 @@ Future<void> main() async {
         catalogApi: LazerAudioLoader.load().api,
         persist: (HifiSettings value) async {
           final SharedPreferences prefs = await SharedPreferences.getInstance();
-          for (final MapEntry<String, Object?> entry
-              in value.toMap().entries) {
+          for (final MapEntry<String, Object?> entry in value.toMap().entries) {
             final Object? stored = entry.value;
             if (stored == null) {
               await prefs.remove(entry.key);
@@ -171,24 +175,53 @@ class LazerApp extends StatefulWidget {
   State<LazerApp> createState() => _LazerAppState();
 }
 
+// Only values read while constructing MaterialApp and its builder belong in
+// this signature. Playback, catalogue and account changes are consumed by
+// their own listeners further down the tree.
+typedef _RootUiSignature = (
+  Color?,
+  ThemeMode,
+  Locale?,
+  double,
+  double,
+  AppSurface,
+  bool,
+  double,
+  bool,
+  bool,
+);
+
 class _LazerAppState extends State<LazerApp> {
   AppState get _state => widget.state;
   bool _rootRebuildScheduled = false;
+  late _RootUiSignature _rootUi;
+
+  _RootUiSignature get _rootUiSignature => (
+    _state.legacyAccentSeed,
+    _state.themeMode,
+    _state.language.locale,
+    _state.scrollRetention,
+    _state.scrollAcceleration,
+    _state.surface,
+    _state.autoDpiScale,
+    _state.dpiScale,
+    _state.deviceIsTelevision,
+    _state.showFrameStats,
+  );
 
   @override
   void initState() {
     super.initState();
-    // Only structural changes (sign-in/out) may rebuild from the root.
-    // The 100 ms playback ticks are consumed by leaf transport widgets;
-    // previously every tick rebuilt the whole app here, which — on
-    // Windows with an accessibility client attached — fed a per-frame
-    // AXTree sync storm and froze the UI.
-    _state.addListener(_onSessionChanged);
+    _rootUi = _rootUiSignature;
+    _state.addListener(_onRootUiChanged);
     _state.bootstrap();
   }
 
-  void _onSessionChanged() {
+  void _onRootUiChanged() {
     if (!mounted) return;
+    final _RootUiSignature next = _rootUiSignature;
+    if (next == _rootUi) return;
+    _rootUi = next;
     // Pages report state from initState/build (the library starting its play
     // record fetch is one example). Calling setState on the root while the
     // framework is already building throws; take that report on the frame
@@ -209,7 +242,7 @@ class _LazerAppState extends State<LazerApp> {
 
   @override
   void dispose() {
-    _state.removeListener(_onSessionChanged);
+    _state.removeListener(_onRootUiChanged);
     widget.media.close();
     widget.session?.close();
     _state.dispose();
@@ -265,8 +298,6 @@ class _LazerAppState extends State<LazerApp> {
             if (_state.showFrameStats) const FrameStatsOverlay(),
           ],
         ),
-        // Structural rebuilds only: `setState` fires on sign-in/out, never on
-        // the 100 ms position ticks (leaf transport widgets consume those).
         // Keep exactly one root subtree during auth changes. AnimatedSwitcher
         // temporarily keeps both pages alive; with Windows UIA enabled that
         // overlap can leave AX nodes pending after the old page is detached.

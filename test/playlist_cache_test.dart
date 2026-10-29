@@ -82,6 +82,29 @@ class _CachedCatalog extends Catalog {
   Future<void> invalidatePlaylist(String id) async {}
 }
 
+class _SwitchingCatalog extends Catalog {
+  _SwitchingCatalog() : super(gateway: _Gateway());
+  final oldCache = Completer<List<Track>?>();
+  final oldLive = Completer<List<Track>>();
+  bool delayCache = false;
+  int oldLiveCalls = 0;
+
+  @override
+  Future<List<Track>?> cachedPlaylistTracks(String id) =>
+      id == '1' && delayCache
+      ? oldCache.future
+      : Future.value(id == '1' ? [_track('old', 'Old cached')] : null);
+
+  @override
+  Future<List<Track>> playlistTracks(String id) {
+    if (id == '1') {
+      oldLiveCalls++;
+      return oldLive.future;
+    }
+    return Future.value([_track('new', 'New song')]);
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -177,5 +200,54 @@ void main() {
 
     expect(find.text('Fresh song'), findsOneWidget);
     expect(find.text('Stored song'), findsNothing);
+  });
+
+  testWidgets('switching playlists ignores an older live response', (
+    tester,
+  ) async {
+    final catalog = _SwitchingCatalog();
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    Widget page(String id) => MaterialApp(
+      home: Scaffold(
+        body: LegacyPlaylistPage(
+          state: state,
+          playlist: _playlist(id, 'List $id'),
+        ),
+      ),
+    );
+    await tester.pumpWidget(page('1'));
+    await tester.pump();
+    expect(find.text('Old cached'), findsOneWidget);
+    await tester.pumpWidget(page('2'));
+    await tester.pump();
+    expect(find.text('New song'), findsOneWidget);
+    catalog.oldLive.complete([_track('late', 'Old live')]);
+    await tester.pump();
+    expect(find.text('New song'), findsOneWidget);
+    expect(find.text('Old live'), findsNothing);
+  });
+
+  testWidgets('a stale cache read does not start a live request', (
+    tester,
+  ) async {
+    final catalog = _SwitchingCatalog()..delayCache = true;
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    Widget page(String id) => MaterialApp(
+      home: Scaffold(
+        body: LegacyPlaylistPage(
+          state: state,
+          playlist: _playlist(id, 'List $id'),
+        ),
+      ),
+    );
+    await tester.pumpWidget(page('1'));
+    await tester.pumpWidget(page('2'));
+    await tester.pump();
+    catalog.oldCache.complete([_track('old', 'Old cached')]);
+    await tester.pump();
+    expect(catalog.oldLiveCalls, 0);
+    expect(find.text('New song'), findsOneWidget);
   });
 }

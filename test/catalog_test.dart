@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -154,6 +155,43 @@ class _StubbornCache extends DiskCache {
 
   @override
   Future<void> expireJson(String key) async {}
+}
+
+class _GatedWriteCache extends DiskCache {
+  _GatedWriteCache({required super.directory});
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+  bool _first = true;
+  @override
+  Future<void> writeJson(
+    String key,
+    Map<String, dynamic> data, {
+    DateTime? savedAt,
+  }) async {
+    await super.writeJson(key, data, savedAt: savedAt);
+    if (_first && key == 'playlist-v2:guest:12') {
+      _first = false;
+      started.complete();
+      await release.future;
+    }
+  }
+}
+
+class _GatedReadCache extends DiskCache {
+  _GatedReadCache({required super.directory});
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+  bool _first = true;
+  @override
+  Future<CachedJson?> readJson(String key) async {
+    final value = await super.readJson(key);
+    if (_first && key == 'playlist-v2:guest:12') {
+      _first = false;
+      started.complete();
+      await release.future;
+    }
+    return value;
+  }
 }
 
 class _ChartGateway extends NeteaseGateway {
@@ -451,6 +489,45 @@ void main() {
         expect(gateway.playlistCalls, 2);
       },
     );
+
+    test(
+      'invalidation during a cache write does not revive stale memory or disk',
+      () async {
+        final gated = _GatedWriteCache(directory: () async => directory);
+        final gateway = _Gateway();
+        final catalog = Catalog(gateway: gateway, cache: gated);
+        final oldFetch = catalog.playlistTracks('12');
+        await gated.started.future;
+        await catalog.invalidatePlaylist('12');
+        gated.release.complete();
+        expect((await oldFetch), hasLength(501));
+        expect(await catalog.cachedPlaylistTracks('12'), isNull);
+        final restarted = Catalog(
+          gateway: gateway,
+          cache: DiskCache(directory: () async => directory),
+        );
+        expect(await restarted.cachedPlaylistTracks('12'), isNull);
+        expect((await catalog.playlistTracks('12')), hasLength(501));
+        expect(gateway.playlistCalls, 2);
+        await gated.settle();
+      },
+    );
+
+    test('an old snapshot read cannot replace a refreshed playlist', () async {
+      await Catalog(gateway: _Gateway(), cache: disk).playlistTracks('12');
+      final gated = _GatedReadCache(directory: () async => directory);
+      final gateway = _Gateway();
+      final catalog = Catalog(gateway: gateway, cache: gated);
+      final oldRead = catalog.cachedPlaylistTracks('12');
+      await gated.started.future;
+      await catalog.invalidatePlaylist('12');
+      expect(await catalog.playlistTracks('12'), hasLength(501));
+      expect(gateway.playlistCalls, 1);
+      gated.release.complete();
+      expect(await oldRead, isNull);
+      expect(await catalog.cachedPlaylistTracks('12'), hasLength(501));
+      await gated.settle();
+    });
 
     test(
       'stored collections paint without the service until invalidated',

@@ -123,6 +123,87 @@ class _DeferredChartCatalog extends _Catalog {
       prepared.future;
 }
 
+class _PagedAlbumsCatalog extends _Catalog {
+  final Completer<ArtistAlbumPage> second = Completer<ArtistAlbumPage>();
+
+  @override
+  Future<ArtistAlbumPage> artistAlbumPage(
+    int id, {
+    int offset = 0,
+    bool force = false,
+  }) async {
+    if (id == 2) {
+      return const ArtistAlbumPage(
+        albums: [
+          Album(
+            id: 'c',
+            title: 'Other artist',
+            artist: 'Other',
+            year: '2022',
+            coverSeed: 3,
+            note: '',
+            releaseType: 'Album',
+          ),
+        ],
+        more: false,
+        receivedCount: 1,
+      );
+    }
+    if (offset > 0) return second.future;
+    return const ArtistAlbumPage(
+      albums: [
+        Album(
+          id: 'a',
+          title: 'First album',
+          artist: 'Artist',
+          year: '2020',
+          coverSeed: 1,
+          note: '',
+          releaseType: 'Album',
+        ),
+      ],
+      more: true,
+      receivedCount: 1,
+    );
+  }
+}
+
+class _DeferredSongsCatalog extends _Catalog {
+  final Completer<List<Track>> first = Completer<List<Track>>();
+  int fallbackCalls = 0;
+
+  @override
+  Future<List<Track>> artistSongs(int id, {bool force = false}) => id == 1
+      ? first.future
+      : Future.value(const [
+          Track(
+            id: 'new',
+            title: 'New artist song',
+            artist: 'Other',
+            album: '',
+            duration: Duration(minutes: 1),
+            coverSeed: 1,
+          ),
+        ]);
+
+  @override
+  Future<ArtistDetails> artistDetails(
+    ArtistRef seed, {
+    bool force = false,
+  }) async {
+    fallbackCalls++;
+    return ArtistDetails(artist: seed, tracks: const [_track]);
+  }
+}
+
+class _DeferredArtistDetailsCatalog extends _Catalog {
+  final Completer<ArtistDetails> second = Completer<ArtistDetails>();
+
+  @override
+  Future<ArtistDetails> artistDetails(ArtistRef seed, {bool force = false}) =>
+      seed.id == 2 ? second.future : super.artistDetails(seed, force: force);
+}
+
 class _UnmatchedChartCatalog extends _Catalog {
   int prepareCalls = 0;
   bool forced = false;
@@ -172,6 +253,192 @@ Widget _legacyApp(AppState state) => MaterialApp(
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('artist releases appear before later pages finish', (
+    tester,
+  ) async {
+    final catalog = _PagedAlbumsCatalog();
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LegacyArtistReleasesPage(
+          state: state,
+          artist: const ArtistRef(id: 1, name: 'Artist'),
+          group: AlbumReleaseGroup.album,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('First album'), findsOneWidget);
+    expect(find.textContaining('加载中'), findsOneWidget);
+    catalog.second.complete(
+      const ArtistAlbumPage(
+        albums: [
+          Album(
+            id: 'b',
+            title: 'Second album',
+            artist: 'Artist',
+            year: '2021',
+            coverSeed: 2,
+            note: '',
+            releaseType: 'Album',
+          ),
+        ],
+        more: false,
+        receivedCount: 1,
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Second album'), findsOneWidget);
+    expect(find.textContaining('加载中'), findsNothing);
+  });
+
+  testWidgets('artist overview shows releases while later pages load', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final catalog = _PagedAlbumsCatalog();
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LegacyArtistPage(
+            state: state,
+            artist: const ArtistRef(id: 1, name: 'Artist'),
+            onOpenAllSongs: () {},
+            onOpenAlbums: () {},
+            onOpenSingles: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('First album'), findsOneWidget);
+    expect(find.textContaining('加载中'), findsOneWidget);
+    catalog.second.complete(
+      const ArtistAlbumPage(albums: [], more: false, receivedCount: 0),
+    );
+    await tester.pump();
+    expect(find.textContaining('加载中'), findsNothing);
+  });
+
+  testWidgets(
+    'artist overview retains releases and offers retry on page failure',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final catalog = _PagedAlbumsCatalog();
+      final state = AppState(catalog: catalog);
+      addTearDown(state.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LegacyArtistPage(
+              state: state,
+              artist: const ArtistRef(id: 1, name: 'Artist'),
+              onOpenAllSongs: () {},
+              onOpenAlbums: () {},
+              onOpenSingles: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      catalog.second.completeError(StateError('later page failed'));
+      await tester.pump();
+      expect(find.text('First album'), findsOneWidget);
+      expect(find.text('歌手资料加载失败，请重试。'), findsOneWidget);
+      expect(find.text('重试'), findsOneWidget);
+    },
+  );
+
+  testWidgets('artist overview clears old details while switching', (
+    tester,
+  ) async {
+    final catalog = _DeferredArtistDetailsCatalog();
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    Widget page(int id, String name) => MaterialApp(
+      home: Scaffold(
+        body: LegacyArtistPage(
+          state: state,
+          artist: ArtistRef(id: id, name: name),
+          onOpenAllSongs: () {},
+          onOpenAlbums: () {},
+          onOpenSingles: () {},
+        ),
+      ),
+    );
+    await tester.pumpWidget(page(1, 'Old artist'));
+    await tester.pump();
+    expect(find.text('Old artist'), findsOneWidget);
+    await tester.pumpWidget(page(2, 'New artist'));
+    await tester.pump();
+    expect(find.text('Old artist'), findsNothing);
+    expect(find.text('New artist'), findsOneWidget);
+    catalog.second.complete(
+      const ArtistDetails(
+        artist: ArtistRef(id: 2, name: 'New artist'),
+        tracks: [],
+      ),
+    );
+    await tester.pump();
+  });
+
+  testWidgets('old artist pages cannot replace a new artist', (tester) async {
+    final catalog = _PagedAlbumsCatalog();
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    Widget page(int id) => MaterialApp(
+      home: LegacyArtistReleasesPage(
+        state: state,
+        artist: ArtistRef(id: id, name: 'Artist $id'),
+        group: AlbumReleaseGroup.album,
+      ),
+    );
+    await tester.pumpWidget(page(1));
+    await tester.pump();
+    expect(find.text('First album'), findsOneWidget);
+    await tester.pumpWidget(page(2));
+    await tester.pump();
+    expect(find.text('Other artist'), findsOneWidget);
+    catalog.second.complete(
+      const ArtistAlbumPage(albums: [], more: false, receivedCount: 0),
+    );
+    await tester.pump();
+    expect(find.text('Other artist'), findsOneWidget);
+    expect(find.text('First album'), findsNothing);
+  });
+
+  testWidgets('an outdated song request cannot change the new artist', (
+    tester,
+  ) async {
+    final catalog = _DeferredSongsCatalog();
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    Widget page(int id) => MaterialApp(
+      home: LegacyArtistSongsPage(
+        state: state,
+        artist: ArtistRef(id: id, name: 'Artist $id'),
+      ),
+    );
+    await tester.pumpWidget(page(1));
+    await tester.pumpWidget(page(2));
+    await tester.pump();
+    expect(find.text('New artist song'), findsOneWidget);
+    catalog.first.completeError(StateError('old request failed'));
+    await tester.pump();
+    expect(find.text('New artist song'), findsOneWidget);
+    expect(find.text('全部歌曲加载失败，请重试。'), findsNothing);
+    expect(catalog.fallbackCalls, 0);
+  });
 
   test('the legacy theme keeps the Lazer palette and type ramp', () {
     final ThemeData dark = buildLegacyTheme(brightness: Brightness.dark);

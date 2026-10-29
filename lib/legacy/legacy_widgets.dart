@@ -28,6 +28,10 @@ String legacyArtistNames(Track track) {
   return names.isEmpty ? track.artist : names.join(' / ');
 }
 
+/// Horizontal page margin for compact and windowed layouts.
+double legacyPageInset(BuildContext context) =>
+    MediaQuery.sizeOf(context).width < 720 ? 16 : 24;
+
 /// Rounded album artwork with an Apple-like neutral placeholder.
 class LegacyCover extends StatelessWidget {
   const LegacyCover({
@@ -565,5 +569,90 @@ class LegacyNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppleEmptyState(message: message, icon: icon, action: action);
+  }
+}
+
+class LegacyArtistTrackCard extends StatefulWidget {
+  const LegacyArtistTrackCard({
+    super.key,
+    required this.track,
+    required this.current,
+    required this.onTap,
+  });
+  final Track track;
+  final bool current;
+  final VoidCallback onTap;
+
+  @override
+  State<LegacyArtistTrackCard> createState() => _LegacyArtistTrackCardState();
+}
+
+class _LegacyArtistTrackCardState extends State<LegacyArtistTrackCard> {
+  bool _hover = false;
+  @override
+  Widget build(BuildContext context) {
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: feedbackAction(context, widget.onTap),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            height: 66,
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: widget.current
+                  ? apple.accentSoft
+                  : _hover
+                  ? apple.fill
+                  : apple.secondaryGroupedBackground,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: apple.separator, width: .5),
+            ),
+            child: Row(
+              children: <Widget>[
+                LegacyCover(url: widget.track.coverUrl, size: 52, radius: 6),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        widget.track.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: widget.current ? apple.accent : apple.label,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        <String>[
+                          widget.track.album,
+                          if (widget.track.duration > Duration.zero)
+                            legacyDuration(widget.track.duration),
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: apple.secondaryLabel,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.more_horiz_rounded, color: apple.tertiaryLabel),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

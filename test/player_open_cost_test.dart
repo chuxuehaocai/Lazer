@@ -12,6 +12,7 @@ import 'package:lazer_nextgen/legacy/legacy_shell.dart';
 import 'package:lazer_nextgen/legacy/legacy_theme.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/widgets/apple_ui.dart';
 
 const Track _track = Track(
   id: 'open-cost',
@@ -57,8 +58,143 @@ class _Catalog extends Catalog {
   );
 }
 
+class _TickState extends AppState {
+  final ChangeNotifier positionTicks = ChangeNotifier();
+  Duration value = Duration.zero;
+
+  @override
+  Track? get current => _track;
+  @override
+  Duration get precisePosition => value;
+  late final Listenable _all = Listenable.merge(<Listenable>[
+    this,
+    positionTicks,
+  ]);
+  @override
+  Listenable get all => _all;
+
+  void tick(Duration position) {
+    value = position;
+    positionTicks.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    positionTicks.dispose();
+    super.dispose();
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('covered transport stops ticking and catches up when revealed', (
+    tester,
+  ) async {
+    final state = _TickState();
+    final visible = ValueNotifier<bool>(true);
+    addTearDown(state.dispose);
+    addTearDown(visible.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildLegacyTheme(brightness: Brightness.dark),
+        home: Scaffold(
+          body: ValueListenableBuilder<bool>(
+            valueListenable: visible,
+            builder: (context, enabled, child) =>
+                TickerMode(enabled: enabled, child: child!),
+            child: LegacyPlayerBar(state: state, onOpen: () {}),
+          ),
+        ),
+      ),
+    );
+    LegacyThinSeekBar seekBar() =>
+        tester.widget<LegacyThinSeekBar>(find.byType(LegacyThinSeekBar));
+    state.tick(const Duration(seconds: 30));
+    await tester.pump();
+    expect(seekBar().progress, closeTo(1 / 6, 0.001));
+
+    visible.value = false;
+    await tester.pump();
+    state.tick(const Duration(seconds: 90));
+    await tester.pump();
+    expect(seekBar().progress, closeTo(1 / 6, 0.001));
+
+    visible.value = true;
+    await tester.pump();
+    expect(seekBar().progress, closeTo(.5, 0.001));
+  });
+
+  testWidgets('player bar skips unrelated reports and parent rebuilds', (
+    tester,
+  ) async {
+    final state = _TickState();
+    final parent = ValueNotifier<int>(0);
+    addTearDown(state.dispose);
+    addTearDown(parent.dispose);
+    void open() {}
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildLegacyTheme(brightness: Brightness.dark),
+        home: Scaffold(
+          body: ValueListenableBuilder<int>(
+            valueListenable: parent,
+            builder: (context, value, _) =>
+                LegacyPlayerBar(state: state, onOpen: open),
+          ),
+        ),
+      ),
+    );
+    var glassBuilds = 0;
+    debugOnRebuildDirtyWidget = (element, builtOnce) {
+      if (element.widget is AppleGlass) glassBuilds++;
+    };
+    addTearDown(() => debugOnRebuildDirtyWidget = null);
+    await state.setLyricFontSize(26);
+    await tester.pump();
+    expect(glassBuilds, 0);
+    parent.value++;
+    await tester.pump();
+    expect(glassBuilds, 0);
+    state.toggleShuffle();
+    await tester.pump();
+    expect(glassBuilds, greaterThan(0));
+    expect(find.byIcon(Icons.shuffle_rounded), findsOneWidget);
+    // A preview does not notify, but an ensuing parent rebuild must see it.
+    state.previewVolume(0);
+    parent.value++;
+    await tester.pump();
+    expect(find.byIcon(Icons.volume_off_rounded), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('cached player bar follows theme and callback changes', (
+    tester,
+  ) async {
+    final state = _TickState();
+    addTearDown(state.dispose);
+    var first = 0;
+    var second = 0;
+    void onFirst() => first++;
+    void onSecond() => second++;
+    Widget app(Brightness brightness, VoidCallback callback) => MaterialApp(
+      theme: buildLegacyTheme(brightness: brightness),
+      home: Scaffold(
+        body: LegacyPlayerBar(state: state, onOpen: callback),
+      ),
+    );
+    await tester.pumpWidget(app(Brightness.dark, onFirst));
+    final dark = tester.widget<AppleGlass>(find.byType(AppleGlass)).color;
+    await tester.tap(find.text(_track.title));
+    expect(first, 1);
+    await tester.pumpWidget(app(Brightness.light, onSecond));
+    await tester.pumpAndSettle();
+    final light = tester.widget<AppleGlass>(find.byType(AppleGlass)).color;
+    expect(light, isNot(dark));
+    await tester.tap(find.text(_track.title));
+    expect(second, 1);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('opening the player rebuilds nothing but the player itself', (
     tester,

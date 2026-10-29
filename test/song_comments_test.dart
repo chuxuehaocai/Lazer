@@ -1,6 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lazer_nextgen/data/models.dart';
+import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/widgets/song_comments_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/song_comments.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
@@ -65,6 +69,49 @@ class _Gateway extends NeteaseGateway {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('long comment pages build lazily and retain the last card', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final gateway = _Gateway();
+    gateway.read = (_, _) async =>
+        _page(hot: [], latest: List<int>.generate(500, (i) => i + 1));
+    final controller = SongCommentsController(gateway);
+    final state = AppState();
+    addTearDown(controller.dispose);
+    addTearDown(state.dispose);
+    const track = Track(
+      id: '42',
+      title: 'Song',
+      artist: 'Artist',
+      album: 'Album',
+      duration: Duration(minutes: 3),
+      coverSeed: 1,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SongCommentsView(
+            state: state,
+            track: track,
+            controller: controller,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('comment-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('comment-500')), findsNothing);
+    final scroll = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    scroll.position.jumpTo(scroll.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('comment-500')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   test(
     'parses service comment IDs, nullable metadata, avatars and quoted replies',
@@ -239,5 +286,4 @@ void main() {
       expect(gateway.reads, [(42, 0), (42, 1), (42, 1)]);
     },
   );
-
 }

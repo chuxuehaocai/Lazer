@@ -1,8 +1,21 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/local/local_library.dart';
 import 'package:lazer_nextgen/local/local_music_scanner.dart';
+
+class _StreamingDirectory extends Fake implements Directory {
+  _StreamingDirectory(this.path, this.events);
+  @override
+  final String path;
+  final StreamController<FileSystemEntity> events;
+  @override
+  Stream<FileSystemEntity> list({
+    bool recursive = false,
+    bool followLinks = true,
+  }) => events.stream;
+}
 
 void main() {
   late Directory root;
@@ -35,10 +48,15 @@ void main() {
       'two',
     ]);
     expect(
-      result.tracks.every((LocalTrack entry) => entry.source == LocalTrackSource.scan),
+      result.tracks.every(
+        (LocalTrack entry) => entry.source == LocalTrackSource.scan,
+      ),
       isTrue,
     );
-    expect(result.tracks.every((LocalTrack entry) => entry.path.isNotEmpty), isTrue);
+    expect(
+      result.tracks.every((LocalTrack entry) => entry.path.isNotEmpty),
+      isTrue,
+    );
   });
 
   test('reuses entries whose size and mtime are unchanged', () async {
@@ -80,5 +98,19 @@ void main() {
     );
     expect(result.tracks, isEmpty);
     expect(result.skipped, greaterThan(0));
+  });
+
+  test('processes files before directory enumeration completes', () async {
+    final file = await write('stream.mp3', <int>[0x49, 0x44, 0x33]);
+    final events = StreamController<FileSystemEntity>();
+    final progress = Completer<void>();
+    final scan = LocalMusicScanner().scan(
+      _StreamingDirectory(root.path, events),
+      onProgress: (_, _) => progress.complete(),
+    );
+    events.add(file);
+    await progress.future.timeout(const Duration(seconds: 2));
+    await events.close();
+    expect((await scan).tracks.single.track.title, 'stream');
   });
 }

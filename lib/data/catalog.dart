@@ -162,7 +162,9 @@ class Catalog {
       return await pending.future as T;
     }
     final remembered = _memory[key];
-    if (remembered?.value is T && _fresh(remembered!.savedAt, ttl)) {
+    if (!_invalidatedKeys.contains(key) &&
+        remembered?.value is T &&
+        _fresh(remembered!.savedAt, ttl)) {
       _touch(key, remembered);
       return remembered.value as T;
     }
@@ -173,14 +175,18 @@ class Catalog {
       T? previous = remembered?.value is T ? remembered!.value as T : null;
       if (previous == null) {
         final saved = await cache.readJson(key);
-        if (saved != null) {
+        if (saved != null && (_epochs[key] ?? 0) == epoch) {
           try {
             previous = decode(saved.data);
           } catch (_) {
-            await cache.remove(CacheBucket.data, key, extension: 'json');
+            if ((_epochs[key] ?? 0) == epoch) {
+              await cache.remove(CacheBucket.data, key, extension: 'json');
+            }
           }
-          if (previous != null) {
-            _remember(key, previous, saved.savedAt);
+          if (previous != null && (_epochs[key] ?? 0) == epoch) {
+            if (!_invalidatedKeys.contains(key)) {
+              _remember(key, previous, saved.savedAt);
+            }
             // An invalidated key may still have a fresh-looking disk copy if
             // its tombstone write failed; never serve that as a hit.
             if (!_invalidatedKeys.contains(key) && saved.fresh(ttl)) {
@@ -195,8 +201,10 @@ class Catalog {
         // its response predates the mutation, so it must not refill the cache.
         if ((_epochs[key] ?? 0) == epoch) {
           await cache.writeJson(key, encode(result));
-          _remember(key, result, DateTime.now());
-          _invalidatedKeys.remove(key);
+          if ((_epochs[key] ?? 0) == epoch) {
+            _remember(key, result, DateTime.now());
+            _invalidatedKeys.remove(key);
+          }
         }
         return result;
       } catch (_) {
@@ -237,6 +245,7 @@ class Catalog {
     T Function(Map<String, dynamic>) decode,
   ) async {
     if (_invalidatedKeys.contains(key)) return null;
+    final int epoch = _epochs[key] ?? 0;
     final remembered = _memory[key];
     if (remembered?.value is T && !_invalidated(remembered!.savedAt)) {
       _touch(key, remembered);
@@ -250,10 +259,15 @@ class Catalog {
     }
     try {
       final value = decode(saved.data);
+      if ((_epochs[key] ?? 0) != epoch || _invalidatedKeys.contains(key)) {
+        return null;
+      }
       _remember(key, value, saved.savedAt);
       return value;
     } catch (_) {
-      await cache.remove(CacheBucket.data, key, extension: 'json');
+      if ((_epochs[key] ?? 0) == epoch) {
+        await cache.remove(CacheBucket.data, key, extension: 'json');
+      }
       return null;
     }
   }

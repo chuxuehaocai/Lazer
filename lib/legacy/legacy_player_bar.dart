@@ -25,7 +25,7 @@ import 'legacy_widgets.dart';
 ///     Column(weight 1)      transport row + thin seek row
 ///     Row(width 168, end)   volume, queue, now playing
 /// ```
-class LegacyPlayerBar extends StatelessWidget {
+class LegacyPlayerBar extends StatefulWidget {
   const LegacyPlayerBar({
     super.key,
     required this.state,
@@ -47,157 +47,217 @@ class LegacyPlayerBar extends StatelessWidget {
   final VoidCallback? onComments;
 
   @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: state,
-      builder: (BuildContext context, _) {
-        final Track? track = state.current;
-        if (compact) {
-          final AppleSemanticColors apple = AppleSemanticColors.of(context);
-          return AppleGlass(
-            borderRadius: BorderRadius.zero,
-            blurSigma: 16,
-            color: apple.glassStrong,
-            border: Border(top: BorderSide(color: apple.separator, width: .5)),
-            child: SizedBox(
-              height: 60,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _NowPlayingTile(
-                        track: track,
-                        onTap: track == null ? null : onOpen,
-                        artworkSize: 42,
+  State<LegacyPlayerBar> createState() => _LegacyPlayerBarState();
+}
+
+typedef _PlayerBarSignature = (Track?, bool, bool, bool, LoopMode, double);
+
+class _LegacyPlayerBarState extends State<LegacyPlayerBar> {
+  late _PlayerBarSignature _signature;
+  Widget? _bar;
+  AppState get state => widget.state;
+
+  _PlayerBarSignature get _currentSignature => (
+    state.current,
+    state.playing,
+    state.currentLiked,
+    state.shuffle,
+    state.repeat,
+    state.volume,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _signature = _currentSignature;
+    state.addListener(_onStateChanged);
+  }
+
+  void _onStateChanged() {
+    final next = _currentSignature;
+    if (next == _signature) return;
+    _signature = next;
+    setState(() => _bar = null);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _bar = null;
+  }
+
+  @override
+  void didUpdateWidget(covariant LegacyPlayerBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.removeListener(_onStateChanged);
+      state.addListener(_onStateChanged);
+    }
+    final next = _currentSignature;
+    if (next != _signature) {
+      _signature = next;
+      _bar = null;
+    }
+    if (oldWidget.state != widget.state ||
+        oldWidget.compact != widget.compact ||
+        oldWidget.comments != widget.comments ||
+        oldWidget.onOpen != widget.onOpen ||
+        oldWidget.onComments != widget.onComments) {
+      _bar = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    state.removeListener(_onStateChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _bar ??= _buildBar(context);
+
+  Widget _buildBar(BuildContext context) {
+    final Track? track = state.current;
+    if (widget.compact) {
+      final AppleSemanticColors apple = AppleSemanticColors.of(context);
+      return AppleGlass(
+        borderRadius: BorderRadius.zero,
+        blurSigma: 16,
+        color: apple.glassStrong,
+        border: Border(top: BorderSide(color: apple.separator, width: .5)),
+        child: SizedBox(
+          height: 60,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _NowPlayingTile(
+                    track: track,
+                    onTap: track == null ? null : widget.onOpen,
+                    artworkSize: 42,
+                  ),
+                ),
+                _CompactIcon(
+                  icon: state.playing
+                      ? Icons.pause_rounded
+                      : Icons.play_arrow_rounded,
+                  tooltip: state.playing ? '暂停' : '播放',
+                  iconSize: 27,
+                  onPressed: track == null ? null : state.togglePlay,
+                ),
+                const SizedBox(width: 2),
+                _CompactIcon(
+                  icon: Icons.skip_next_rounded,
+                  tooltip: '下一首',
+                  iconSize: 25,
+                  onPressed: track == null ? null : state.next,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    return AppleGlass(
+      borderRadius: BorderRadius.zero,
+      blurSigma: 16,
+      color: apple.glassStrong,
+      border: Border(top: BorderSide(color: apple.separator, width: .5)),
+      child: SizedBox(
+        height: 84,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 250,
+                child: _NowPlayingTile(
+                  track: track,
+                  onTap: track == null ? null : widget.onOpen,
+                  artworkSize: 50,
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _CompactIcon(
+                            icon: state.currentLiked
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            tooltip: state.currentLiked ? '取消喜欢' : '喜欢',
+                            selected: state.currentLiked,
+                            onPressed: track == null
+                                ? null
+                                : () => unawaited(state.toggleLikeCurrent()),
+                          ),
+                          const SizedBox(width: 3),
+                          _CompactIcon(
+                            icon: Icons.skip_previous_rounded,
+                            tooltip: '上一首',
+                            onPressed: track == null ? null : state.previous,
+                          ),
+                          const SizedBox(width: 3),
+                          _PlayButton(state: state),
+                          const SizedBox(width: 3),
+                          _CompactIcon(
+                            icon: Icons.skip_next_rounded,
+                            tooltip: '下一首',
+                            onPressed: track == null ? null : state.next,
+                          ),
+                          const SizedBox(width: 3),
+                          _CompactIcon(
+                            icon: _playModeIcon(state),
+                            tooltip: _playModeLabel(context, state),
+                            selected:
+                                state.shuffle || state.repeat != LoopMode.off,
+                            onPressed: state.cyclePlayMode,
+                          ),
+                        ],
                       ),
-                    ),
-                    _CompactIcon(
-                      icon: state.playing
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                      tooltip: state.playing ? '暂停' : '播放',
-                      iconSize: 27,
-                      onPressed: track == null ? null : state.togglePlay,
-                    ),
+                      const SizedBox(height: 2),
+                      _SeekRow(state: state),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 168,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    _VolumeButton(state: state),
                     const SizedBox(width: 2),
+                    LegacyQueueButton(state: state),
+                    const SizedBox(width: 2),
+                    if (widget.onComments != null) ...[
+                      _CompactIcon(
+                        icon: Icons.mode_comment_outlined,
+                        tooltip: '评论',
+                        selected: widget.comments,
+                        onPressed: widget.onComments,
+                      ),
+                      const SizedBox(width: 2),
+                    ],
                     _CompactIcon(
-                      icon: Icons.skip_next_rounded,
-                      tooltip: '下一首',
-                      iconSize: 25,
-                      onPressed: track == null ? null : state.next,
+                      icon: Icons.lyrics_outlined,
+                      tooltip: '歌词',
+                      onPressed: widget.onOpen,
                     ),
                   ],
                 ),
               ),
-            ),
-          );
-        }
-        final AppleSemanticColors apple = AppleSemanticColors.of(context);
-        return AppleGlass(
-          borderRadius: BorderRadius.zero,
-          blurSigma: 16,
-          color: apple.glassStrong,
-          border: Border(top: BorderSide(color: apple.separator, width: .5)),
-          child: SizedBox(
-            height: 84,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 250,
-                    child: _NowPlayingTile(
-                      track: track,
-                      onTap: track == null ? null : onOpen,
-                      artworkSize: 50,
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 18),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              _CompactIcon(
-                                icon: state.currentLiked
-                                    ? Icons.favorite_rounded
-                                    : Icons.favorite_border_rounded,
-                                tooltip: state.currentLiked ? '取消喜欢' : '喜欢',
-                                selected: state.currentLiked,
-                                onPressed: track == null
-                                    ? null
-                                    : () =>
-                                          unawaited(state.toggleLikeCurrent()),
-                              ),
-                              const SizedBox(width: 3),
-                              _CompactIcon(
-                                icon: Icons.skip_previous_rounded,
-                                tooltip: '上一首',
-                                onPressed: track == null
-                                    ? null
-                                    : state.previous,
-                              ),
-                              const SizedBox(width: 3),
-                              _PlayButton(state: state),
-                              const SizedBox(width: 3),
-                              _CompactIcon(
-                                icon: Icons.skip_next_rounded,
-                                tooltip: '下一首',
-                                onPressed: track == null ? null : state.next,
-                              ),
-                              const SizedBox(width: 3),
-                              _CompactIcon(
-                                icon: _playModeIcon(state),
-                                tooltip: _playModeLabel(context, state),
-                                selected:
-                                    state.shuffle ||
-                                    state.repeat != LoopMode.off,
-                                onPressed: state.cyclePlayMode,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          _SeekRow(state: state),
-                        ],
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 168,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        _VolumeButton(state: state),
-                        const SizedBox(width: 2),
-                        LegacyQueueButton(state: state),
-                        const SizedBox(width: 2),
-                        if (onComments != null) ...[
-                          _CompactIcon(
-                            icon: Icons.mode_comment_outlined,
-                            tooltip: '评论',
-                            selected: comments,
-                            onPressed: onComments,
-                          ),
-                          const SizedBox(width: 2),
-                        ],
-                        _CompactIcon(
-                          icon: Icons.lyrics_outlined,
-                          tooltip: '歌词',
-                          onPressed: onOpen,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
@@ -425,7 +485,12 @@ class _SeekRowState extends State<_SeekRow> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: widget.state.all,
+      // TickerMode does not mute ChangeNotifier notifications. The shell
+      // disables it while the full player covers this bar, so stop listening
+      // to position ticks until the bar is visible again.
+      animation: TickerMode.valuesOf(context).enabled
+          ? widget.state.all
+          : widget.state,
       builder: (BuildContext context, _) {
         final ThemeData theme = Theme.of(context);
         final ColorScheme scheme = theme.colorScheme;

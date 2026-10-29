@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/animation/lyric_spring.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
+import 'package:lazer_nextgen/data/lyrics.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/legacy/legacy_theme.dart';
@@ -52,6 +53,26 @@ class _Catalog extends Catalog {
         coverSeed: i,
       ),
   ];
+}
+
+class _WordPlaybackState extends AppState {
+  _WordPlaybackState() {
+    lyrics = const [
+      LyricLine(
+        Duration.zero,
+        'Animated lyric',
+        words: [
+          LyricWord(Duration.zero, Duration(seconds: 30), 'Animated lyric'),
+        ],
+      ),
+    ];
+  }
+  @override
+  Track? get current => _track;
+  @override
+  bool get playing => true;
+  @override
+  Duration get precisePosition => const Duration(seconds: 1);
 }
 
 void main() {
@@ -239,6 +260,47 @@ void main() {
     await tester.pump();
     await tester.pumpWidget(const SizedBox.shrink());
   });
+  testWidgets(
+    'settled word animation repaints without rebuilding the position stack',
+    (tester) async {
+      final state = _WordPlaybackState();
+      addTearDown(state.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: LyricViewport(state: state)),
+        ),
+      );
+      for (var i = 0; i < 240; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      var stackBuilds = 0;
+      var wordColorBuilds = 0;
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        if (element.widget.key ==
+            const ValueKey<String>('lyric-position-stack')) {
+          stackBuilds++;
+        }
+        if (element.widget is AnimatedBuilder &&
+            find
+                .descendant(
+                  of: find.byWidget(element.widget),
+                  matching: find.byKey(const ValueKey('lyric-color-0')),
+                )
+                .evaluate()
+                .isNotEmpty) {
+          wordColorBuilds++;
+        }
+      };
+      addTearDown(() => debugOnRebuildDirtyWidget = null);
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(stackBuilds, 0);
+      expect(wordColorBuilds, greaterThan(0));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('manual scrolling mounts only nearby lyric rows', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;

@@ -169,14 +169,14 @@ class LazerMediaHandler extends BaseAudioHandler {
       mediaItem.add(null);
       queue.add(const []);
     } else {
-      _lastQueue = const [];
+      _lastQueueRevision = -1;
       _track = null;
       _stateChanged();
       _startClock();
     }
   }
 
-  List<Track> _lastQueue = const [];
+  int _lastQueueRevision = -1;
   Track? _track;
   int _artGeneration = 0;
   bool _closed = false;
@@ -197,9 +197,9 @@ class LazerMediaHandler extends BaseAudioHandler {
     }
     if (!_enabled) return;
     if (state.playing) _stopped = false;
-    final tracks = state.queue;
-    if (!listEquals(_lastQueue, tracks)) {
-      _lastQueue = tracks;
+    if (_lastQueueRevision != state.queueRevision) {
+      final tracks = state.queue;
+      _lastQueueRevision = state.queueRevision;
       queue.add(tracks.map(_item).toList());
     }
     final current = state.current;
