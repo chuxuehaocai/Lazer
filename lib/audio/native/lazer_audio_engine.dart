@@ -46,6 +46,8 @@ class NativeAudioEngine
     implements
         AudioEngine,
         BufferedAudioEngine,
+        BufferChangeReportingAudioEngine,
+        SeekBoundaryReportingAudioEngine,
         QueueAudioEngine,
         FailureReportingAudioEngine,
         FocusAwareAudioEngine {
@@ -140,6 +142,8 @@ class NativeAudioEngine
   int _engineAddress = 0;
 
   final StreamController<void> _completed = StreamController<void>.broadcast();
+  final StreamController<void> _bufferChanges =
+      StreamController<void>.broadcast();
   final StreamController<int> _advanced = StreamController<int>.broadcast();
   final StreamController<String> _failures =
       StreamController<String>.broadcast();
@@ -207,6 +211,9 @@ class NativeAudioEngine
   Stream<void> get completed => _completed.stream;
 
   @override
+  Stream<void> get bufferChanges => _bufferChanges.stream;
+
+  @override
   Stream<int> get indexStream => _advanced.stream;
 
   @override
@@ -242,10 +249,14 @@ class NativeAudioEngine
   Duration? get duration => _duration;
 
   @override
+  bool get seekIsLimitedByBuffer => _activeEntry?.complete == false;
+
+  @override
   Duration get bufferedPosition {
     final AudioStreamEntry? entry = _activeEntry;
     final Duration? total = _duration;
-    if (entry == null || total == null || total == Duration.zero) {
+    if (entry == null) return total ?? _position;
+    if (total == null || total == Duration.zero) {
       return _position;
     }
     final Duration buffered = total * entry.progress;
@@ -322,15 +333,16 @@ class NativeAudioEngine
   }
 
   @override
-  Future<void> playQueuedNext() async {
+  Future<bool> playQueuedNext() async {
     final String? next = _queuedUrl ?? _pendingUrls.firstOrNull;
-    if (next == null) return;
+    if (next == null) return false;
     final int generation = ++_generation;
-    await _serialize(() async {
+    return _serialize(() async {
       await _clearQueued();
-      if (generation != _generation) return;
+      if (generation != _generation) return false;
       _queueIndex++;
       await _openSource(next, generation);
+      return generation == _generation;
     });
   }
 
@@ -494,6 +506,7 @@ class NativeAudioEngine
     if (_streamInfoBuffer != null) calloc.free(_streamInfoBuffer!);
     _streamInfoBuffer = null;
     await _completed.close();
+    await _bufferChanges.close();
     await _advanced.close();
     await _failures.close();
     await _streamInfos.close();
@@ -542,9 +555,17 @@ class NativeAudioEngine
         if (reader == null) {
           throw StateError('the reader bridge rejected ${entry.file.path}');
         }
+        final NativeStreamReader sourceReader = reader;
+        final AudioStreamEntry sourceEntry = entry;
         entry
-          ..onAppended = reader.notifyAppended
-          ..onFinished = (bool failed) => reader!.finish(failed: failed);
+          ..onAppended = () {
+            sourceReader.notifyAppended();
+            if (identical(_activeEntry, sourceEntry)) _emitBufferChange();
+          }
+          ..onFinished = (bool failed) {
+            sourceReader.finish(failed: failed);
+            if (identical(_activeEntry, sourceEntry)) _emitBufferChange();
+          };
       }
 
       final int status = await _openWithDsdPolicy(
@@ -564,6 +585,7 @@ class NativeAudioEngine
       _releaseActive();
       _activeEntry = entry;
       _activeReader = reader;
+      _emitBufferChange();
       _sourceLoaded = true;
       if (generation != _generation) {
         // A newer request arrived while this one was opening. It is queued behind
@@ -687,9 +709,16 @@ class NativeAudioEngine
       // completion callback still signals the bridge instead of throwing from
       // the cache's unawaited download future.
       final NativeStreamReader queuedReader = reader;
+      final AudioStreamEntry queuedEntry = entry;
       entry
-        ..onAppended = queuedReader.notifyAppended
-        ..onFinished = (bool failed) => queuedReader.finish(failed: failed);
+        ..onAppended = () {
+          queuedReader.notifyAppended();
+          if (identical(_activeEntry, queuedEntry)) _emitBufferChange();
+        }
+        ..onFinished = (bool failed) {
+          queuedReader.finish(failed: failed);
+          if (identical(_activeEntry, queuedEntry)) _emitBufferChange();
+        };
       final int status = _status(
         await _worker.call(LazerWorkerOp.queueReader, <Object?>[
           address,
@@ -768,6 +797,7 @@ class NativeAudioEngine
       _sourceLoaded = true;
       _completionSent = false;
       _queueIndex++;
+      _emitBufferChange();
       _publishStreamInfo(readStreamInfo());
       if (!_advanced.isClosed) _advanced.add(_queueIndex);
       return;
@@ -819,6 +849,11 @@ class NativeAudioEngine
     _activeReader = null;
     _activeEntry?.cancel();
     _activeEntry = null;
+    _emitBufferChange();
+  }
+
+  void _emitBufferChange() {
+    if (!_bufferChanges.isClosed) _bufferChanges.add(null);
   }
 
   void _publishStreamInfo(LazerStreamInfo? info) {
@@ -891,6 +926,7 @@ class NativeAudioEngine
     _sourceLoaded = true;
     previousReader?.release();
     previousEntry?.cancel();
+    _emitBufferChange();
     _publishStreamInfo(readStreamInfo());
     if (!_advanced.isClosed) _advanced.add(_queueIndex);
     // A multi-URL queue can already hold the following track; the app otherwise

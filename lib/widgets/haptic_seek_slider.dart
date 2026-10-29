@@ -21,7 +21,9 @@ class _HapticSeekSliderState extends State<HapticSeekSlider> {
   void _nudge(double delta) {
     final AppState state = widget.state;
     if (state.current == null) return;
-    state.seek((state.progress + delta).clamp(0.0, 1.0));
+    state.seek(
+      (state.progress + delta).clamp(0.0, state.seekLimitFraction).toDouble(),
+    );
   }
 
   @override
@@ -29,6 +31,7 @@ class _HapticSeekSliderState extends State<HapticSeekSlider> {
     final Widget slider = AccessibleSlider(
       semanticLabel: '播放进度',
       value: widget.state.progress,
+      secondaryTrackValue: widget.state.seekLimitFraction,
       detentFeedback: true,
       onChanged: widget.state.current == null ? null : widget.state.seek,
     );

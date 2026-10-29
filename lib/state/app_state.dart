@@ -159,6 +159,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             _onEngineFailure,
           )
         : null;
+    _bufferSubscription = engine is BufferChangeReportingAudioEngine
+        ? (engine as BufferChangeReportingAudioEngine).bufferChanges.listen(
+            (_) => _onBufferChanged(),
+          )
+        : null;
   }
 
   /// HiFi output settings: device, exclusive/bit-perfect policy, DSD mode, buffer,
@@ -375,8 +380,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     state: this,
   );
   StreamSubscription<void>? _completionSubscription;
+  StreamSubscription<void>? _bufferSubscription;
   StreamSubscription<int>? _indexSubscription;
   StreamSubscription<String>? _failureSubscription;
+  Timer? _bufferPulseTimer;
   static const playbackInterval = Duration(milliseconds: 100);
   bool hapticsEnabled = true;
   final AppHaptics haptics = AppHaptics();
@@ -1565,7 +1572,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   // -- transport ------------------------------------------------------------
   //
   // Two notification lanes. `notifyListeners()` fires only on structural
-  // changes (session, queue, play state); the 100 ms position ticks go
+  // changes (session, queue, play state); position ticks and buffer progress go
   // through the private [ticks] lane so leaf transport widgets update
   // without rebuilding whole screens. This keeps the semantics tree stable
   // while playing — the churn behind the Windows UIA log storm and the
@@ -1573,7 +1580,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   final _TickNotifier _tickNotifier = _TickNotifier();
 
-  /// Position/progress updates only (fires every 100 ms while playing).
+  /// Position/progress updates (100 ms while playing, buffer changes while paused).
   Listenable get ticks => _tickNotifier;
 
   /// Structural changes AND ticks — for the transport widgets that mirror
@@ -1680,11 +1687,33 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? t = current;
     final int duration = t?.duration.inMilliseconds ?? 0;
     if (duration <= 0) return 0;
+    if (audioEngine == null) return 0;
+    if (!_seekLimitedByBuffer) return 1;
     final AudioEngine? engine = audioEngine;
+    final Duration playhead = precisePosition;
     final Duration buffered = engine is BufferedAudioEngine
         ? (engine as BufferedAudioEngine).bufferedPosition
-        : _position;
-    return (buffered.inMilliseconds / duration).clamp(0.0, 1.0);
+        : playhead;
+    final Duration available = buffered > playhead ? buffered : playhead;
+    return (available.inMilliseconds / duration).clamp(0.0, 1.0);
+  }
+
+  /// Seeking can move through buffered audio, but never past it.
+  /// Keep the current playhead reachable if a backend reports a shorter buffer.
+  double get seekLimitFraction {
+    if (!_seekLimitedByBuffer) return 1;
+    final double buffered = bufferedFraction;
+    final double played = progress;
+    return buffered > played ? buffered : played;
+  }
+
+  double clampSeekFraction(double fraction) =>
+      fraction.clamp(0.0, seekLimitFraction).toDouble();
+
+  bool get _seekLimitedByBuffer {
+    final AudioEngine? engine = audioEngine;
+    return engine is SeekBoundaryReportingAudioEngine &&
+        (engine as SeekBoundaryReportingAudioEngine).seekIsLimitedByBuffer;
   }
 
   void playQueue(List<Track> tracks, {int startIndex = 0}) {
@@ -1953,7 +1982,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void seek(double fraction) {
     final Track? t = current;
     if (t == null) return;
-    final Duration target = t.duration * fraction.clamp(0, 1);
+    final Duration target = t.duration * clampSeekFraction(fraction);
     _position = target;
     if (_realActive) unawaited(audioEngine!.seek(target));
     // Position-only change: tick lane, not a structural rebuild.
@@ -2147,13 +2176,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<void> _crossIntoQueuedTrack() async {
     final QueueAudioEngine? engine = _queueEngine;
     if (engine == null) return;
+    final int generation = _generation;
+    final int targetIndex = _queueIndex;
+    var crossed = false;
     try {
-      await engine.playQueuedNext();
+      crossed = await engine.playQueuedNext();
     } catch (_) {
-      if (_playing) unawaited(_startAudio());
+      // A queue implementation may reject the hand-off. The normal source
+      // path below still gives the requested track a chance to play.
+    }
+    // A newer switch, stop or pause owns the engine now. Do not let a delayed
+    // queue operation restart playback or overwrite that newer choice.
+    if (!_playing || generation != _generation || targetIndex != _queueIndex) {
       return;
     }
-    if (!_playing) return;
+    if (!crossed) {
+      unawaited(_startAudio());
+      return;
+    }
+    // Some queue engines switch tracks by opening the prepared source again;
+    // that leaves their output paused even though the app is still in the
+    // playing state. Calling play is harmless for engines that preserved
+    // playback and is required for engines that reopened the source.
+    unawaited(_resumeAudio());
     unawaited(_prefetchNext());
   }
 
@@ -2552,6 +2597,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // The URL is still loading. Do not invent elapsed time.
   }
 
+  void _onBufferChanged() {
+    // Playback ticks already repaint the rail. While paused, coalesce buffer
+    // updates into a modest refresh rate so cache progress stays visible.
+    if (_playing || _bufferPulseTimer != null) return;
+    _bufferPulseTimer = Timer(const Duration(milliseconds: 250), () {
+      _bufferPulseTimer = null;
+      _tickNotifier.pulse();
+    });
+  }
+
   /// Accumulates how much of [track] was actually heard.
   ///
   /// Position deltas are used instead of wall-clock time: a buffering stall
@@ -2803,8 +2858,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // disposed: the controller is lazy, so this may be its first access.
     listenTogether.dispose();
     _completionSubscription?.cancel();
+    _bufferSubscription?.cancel();
     _indexSubscription?.cancel();
     _failureSubscription?.cancel();
+    _bufferPulseTimer?.cancel();
     _ticker?.cancel();
     _tickNotifier.dispose();
     if (_ownsDownloadManager) downloadManager.dispose();
@@ -2831,8 +2888,8 @@ class _PlayReport {
   final int sourceId;
 }
 
-/// Tick-only heartbeat lane. `notifyListeners()` is @protected, so this thin
-/// subclass exposes [pulse] for the 100 ms position updates that must not
+/// Transport heartbeat lane. `notifyListeners()` is @protected, so this thin
+/// subclass exposes [pulse] for position and buffer updates that must not
 /// rebuild whole screens (see AppState's transport note).
 class _TickNotifier extends ChangeNotifier with BuildSafeNotifier {
   void pulse() => notifyListeners();

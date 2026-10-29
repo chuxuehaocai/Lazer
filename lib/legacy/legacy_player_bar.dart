@@ -517,12 +517,17 @@ class _SeekRowState extends State<_SeekRow> {
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 child: LegacyThinSeekBar(
                   progress: fraction,
+                  bufferedProgress: widget.state.bufferedFraction,
+                  seekLimit: widget.state.seekLimitFraction,
                   semanticLabel: '播放进度',
                   onSeek: duration <= 0
                       ? null
                       : (double value) {
-                          setState(() => _drag = value);
-                          widget.state.seek(value);
+                          final double target = widget.state.clampSeekFraction(
+                            value,
+                          );
+                          setState(() => _drag = target);
+                          widget.state.seek(target);
                         },
                   onSeekFinished: duration <= 0
                       ? null
@@ -556,6 +561,7 @@ class LegacyThinSeekBar extends StatefulWidget {
     super.key,
     required this.progress,
     this.bufferedProgress,
+    this.seekLimit,
     this.onSeek,
     this.onSeekFinished,
     this.onSeekCommit,
@@ -567,6 +573,9 @@ class LegacyThinSeekBar extends StatefulWidget {
 
   /// Muted lead-in painted behind the played fraction, as on the mobile rail.
   final double? bufferedProgress;
+
+  /// Furthest fraction the current stream can seek to.
+  final double? seekLimit;
   final ValueChanged<double>? onSeek;
   final VoidCallback? onSeekFinished;
   final ValueChanged<double>? onSeekCommit;
@@ -586,9 +595,12 @@ class _LegacyThinSeekBarState extends State<LegacyThinSeekBar> {
   bool _focused = false;
   Timer? _nudgeTimer;
 
+  double _limit(double fraction) =>
+      fraction.clamp(0.0, (widget.seekLimit ?? 1.0).clamp(0.0, 1.0)).toDouble();
+
   void _seekTo(double dx, double width) {
     if (widget.onSeek == null || width <= 0) return;
-    final double fraction = (dx / width).clamp(0.0, 1.0);
+    final double fraction = _limit(dx / width);
     setState(() => _drag = fraction);
     widget.onSeek!(fraction);
   }
@@ -607,7 +619,7 @@ class _LegacyThinSeekBarState extends State<LegacyThinSeekBar> {
   void _nudge(double delta) {
     if (widget.onSeek == null) return;
     final double base = _drag ?? widget.progress;
-    final double next = (base + delta).clamp(0.0, 1.0);
+    final double next = _limit(base + delta);
     setState(() => _drag = next);
     widget.onSeek!(next);
     widget.onSeekCommit?.call(next);

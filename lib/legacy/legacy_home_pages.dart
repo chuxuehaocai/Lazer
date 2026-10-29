@@ -531,46 +531,93 @@ class _MovingCoverMosaic extends StatefulWidget {
 }
 
 class _MovingCoverMosaicState extends State<_MovingCoverMosaic>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _motion = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 18),
-  );
-  // The 18-second drift is slow enough that display-rate updates are
-  // invisible, while a full-rate ticker rebuilt every visible mosaic 100+
-  // times a second. Sample the controller at 30 fps instead.
+    with WidgetsBindingObserver {
+  static const Duration _driftDuration = Duration(seconds: 18);
+  static const Duration _frameInterval = Duration(milliseconds: 33);
+
+  // This is intentionally a 30 fps timer, not an AnimationController. A
+  // controller still wakes the UI isolate on every display vsync (165+ times
+  // a second on high-refresh screens) even if its listener only publishes a
+  // value every 33 ms.
   final ValueNotifier<double> _phase = ValueNotifier<double>(0);
-  final Stopwatch _gate = Stopwatch()..start();
-  int _lastSampleMs = 0;
+  final Stopwatch _clock = Stopwatch();
+  Timer? _timer;
+  Duration _lastAdvance = Duration.zero;
+  double _phaseValue = 0;
+  bool _reduceMotion = false;
+  bool _tickerAllowed = true;
+  bool _appActive = true;
 
   @override
   void initState() {
     super.initState();
-    _motion.addListener(_sample);
+    WidgetsBinding.instance.addObserver(this);
+    _syncPlayback();
   }
 
-  void _sample() {
-    final int now = _gate.elapsedMilliseconds;
-    if (now - _lastSampleMs < 33) return;
-    _lastSampleMs = now;
-    _phase.value = _motion.value;
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final bool active = state == AppLifecycleState.resumed;
+    if (active == _appActive) return;
+    _appActive = active;
+    _syncPlayback();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _motion.stop();
-    } else if (!_motion.isAnimating) {
-      _motion.repeat();
+    final bool reduce = MediaQuery.disableAnimationsOf(context);
+    final bool allowed = TickerMode.valuesOf(context).enabled;
+    if (reduce != _reduceMotion || allowed != _tickerAllowed) {
+      _reduceMotion = reduce;
+      _tickerAllowed = allowed;
+      _syncPlayback();
     }
   }
 
   @override
+  void didUpdateWidget(covariant _MovingCoverMosaic oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncPlayback();
+  }
+
+  bool get _hasCovers => widget.covers.any((url) => url?.isNotEmpty ?? false);
+
+  bool get _runs =>
+      _hasCovers && !_reduceMotion && _tickerAllowed && _appActive;
+
+  void _syncPlayback() {
+    if (_runs) {
+      if (_timer != null) return;
+      _clock
+        ..reset()
+        ..start();
+      _lastAdvance = Duration.zero;
+      _timer = Timer.periodic(_frameInterval, (_) => _advance());
+    } else {
+      _timer?.cancel();
+      _timer = null;
+      _clock.stop();
+      _lastAdvance = Duration.zero;
+    }
+  }
+
+  void _advance() {
+    if (!mounted) return;
+    final Duration elapsed = _clock.elapsed;
+    final double delta =
+        (elapsed - _lastAdvance).inMicroseconds / _driftDuration.inMicroseconds;
+    _lastAdvance = elapsed;
+    if (delta <= 0) return;
+    _phaseValue = (_phaseValue + delta) % 1;
+    _phase.value = _phaseValue;
+  }
+
+  @override
   void dispose() {
-    _motion
-      ..removeListener(_sample)
-      ..dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _clock.stop();
     _phase.dispose();
     super.dispose();
   }

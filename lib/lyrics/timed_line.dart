@@ -91,6 +91,28 @@ class _Segment {
   final bool emphasized, last;
 }
 
+class _Word {
+  const _Word({
+    required this.startMs,
+    required this.durationMs,
+    required this.emphasized,
+    required this.last,
+    required this.segments,
+  });
+
+  final double startMs;
+  final double durationMs;
+  final bool emphasized;
+  final bool last;
+  final List<_Segment> segments;
+
+  /// The emphasized motion includes per-glyph stagger and a trailing float.
+  /// Two durations cover both, including the special treatment for the last
+  /// word, after which its glyphs are static and can be painted as one clip.
+  double get settledAtMs =>
+      math.max(1000, durationMs) * (last ? 1.2 : 1) * (emphasized ? 2 : 1);
+}
+
 class _WordLayout {
   _WordLayout(
     this.line,
@@ -120,6 +142,15 @@ class _WordLayout {
     var offset = 0;
     for (var wi = 0; wi < line.words.length; wi++) {
       final word = line.words[wi];
+      final double startMs = word.start.inMicroseconds / 1000;
+      final double durationMs = word.duration.inMicroseconds / 1000;
+      final chars = word.text.characters.toList();
+      final trimmedLength = word.text.trim().characters.length;
+      final bool emphasized =
+          word.duration >= const Duration(milliseconds: 1000) &&
+          (_WordPainter.cjk.hasMatch(word.text) ||
+              trimmedLength > 1 && trimmedLength <= 7);
+      final List<_Segment> wordSegments = <_Segment>[];
       final rects = bright
           .getBoxesForSelection(
             TextSelection(
@@ -130,12 +161,6 @@ class _WordLayout {
           .map((box) => box.toRect())
           .toList();
       final totalWidth = rects.fold<double>(0, (sum, rect) => sum + rect.width);
-      final chars = word.text.characters.toList();
-      final trimmedLength = word.text.trim().characters.length;
-      final emphasized =
-          word.duration >= const Duration(milliseconds: 1000) &&
-          (_WordPainter.cjk.hasMatch(word.text) ||
-              trimmedLength > 1 && trimmedLength <= 7);
       for (var ci = 0; ci < chars.length; ci++) {
         final end = offset + chars[ci].length;
         for (final box in bright.getBoxesForSelection(
@@ -161,7 +186,7 @@ class _WordLayout {
               }
               consumed += part.width;
             }
-            segments.add(
+            wordSegments.add(
               _Segment(
                 ci,
                 chars.length,
@@ -169,8 +194,8 @@ class _WordLayout {
                 wordLeft,
                 consumed,
                 totalWidth,
-                word.start.inMicroseconds / 1000,
-                word.duration.inMicroseconds / 1000,
+                startMs,
+                durationMs,
                 emphasized,
                 wi == line.words.length - 1,
               ),
@@ -179,12 +204,21 @@ class _WordLayout {
         }
         offset = end;
       }
+      words.add(
+        _Word(
+          startMs: startMs,
+          durationMs: durationMs,
+          emphasized: emphasized,
+          last: wi == line.words.length - 1,
+          segments: wordSegments,
+        ),
+      );
     }
   }
   final LyricLine line;
   late final TextPainter bright, dim;
   late final double fontSize;
-  final List<_Segment> segments = [];
+  final List<_Word> words = <_Word>[];
   final Path baseClip = Path();
   void dispose() {
     bright.dispose();
@@ -234,82 +268,129 @@ class _WordPainter extends CustomPainter {
     canvas.clipPath(layout.baseClip);
     layout.dim.paint(canvas, Offset.zero);
     canvas.restore();
-    for (final segment in layout.segments) {
-      final elapsed = now - segment.startMs;
-      final duration = segment.durationMs;
-      final motion = segment.emphasized
-          ? LyricWordMotion.emphasized(
+
+    // Completed words no longer move or glow. Collect their glyph clips and
+    // paint the bright line once per final baseline instead of calling
+    // TextPainter.paint for every already-finished character on every frame.
+    final Path settledEmphasized = Path();
+    final Path settledOrdinary = Path();
+    final List<_Word> animatingWords = <_Word>[];
+    for (final _Word word in layout.words) {
+      final double elapsed = now - word.startMs;
+      if (elapsed < 0 || word.segments.isEmpty) continue;
+      if (elapsed < word.settledAtMs) {
+        animatingWords.add(word);
+        continue;
+      }
+      final Path target = word.emphasized ? settledEmphasized : settledOrdinary;
+      for (final _Segment segment in word.segments) {
+        final Rect rect = segment.rect;
+        target.addRect(
+          Rect.fromLTRB(
+            rect.left,
+            rect.top - layout.fontSize * .15,
+            rect.right,
+            rect.bottom + layout.fontSize * .15,
+          ),
+        );
+      }
+    }
+    if (!settledEmphasized.getBounds().isEmpty) {
+      canvas.save();
+      canvas.clipPath(settledEmphasized);
+      layout.bright.paint(canvas, Offset.zero);
+      canvas.restore();
+    }
+    if (!settledOrdinary.getBounds().isEmpty) {
+      canvas.save();
+      canvas.translate(0, -layout.fontSize * .05);
+      canvas.clipPath(settledOrdinary);
+      layout.bright.paint(canvas, Offset.zero);
+      canvas.restore();
+    }
+
+    for (final _Word word in animatingWords) {
+      for (final _Segment segment in word.segments) {
+        final elapsed = now - segment.startMs;
+        final duration = segment.durationMs;
+        final motion = segment.emphasized
+            ? LyricWordMotion.emphasized(
+                elapsed,
+                duration,
+                segment.character,
+                segment.count,
+                last: segment.last,
+              )
+            : LyricWordMotion.ordinary(elapsed, duration);
+        final rect = segment.rect;
+        final boundary =
+            segment.wordLeft +
+            LyricWordMotion.maskBoundary(
               elapsed,
               duration,
-              segment.character,
-              segment.count,
-              last: segment.last,
-            )
-          : LyricWordMotion.ordinary(elapsed, duration);
-      final rect = segment.rect;
-      final boundary =
-          segment.wordLeft +
-          LyricWordMotion.maskBoundary(elapsed, duration, segment.totalWidth) -
-          segment.consumed;
-      final fade = math.max(1.0, rect.height * .5);
-      canvas.save();
-      canvas.translate(
-        motion.xEm * layout.fontSize * focus,
-        motion.yEm * layout.fontSize * focus,
-      );
-      canvas.translate(rect.center.dx, rect.center.dy);
-      canvas.scale(1 + (motion.scale - 1) * focus);
-      canvas.translate(-rect.center.dx, -rect.center.dy);
-      final clip = Rect.fromLTRB(
-        rect.left,
-        rect.top - layout.fontSize * .15,
-        rect.right,
-        rect.bottom + layout.fontSize * .15,
-      );
-      canvas.clipRect(clip);
-      if (boundary + fade / 2 >= rect.left) {
-        if (boundary - fade / 2 >= rect.right) {
-          // Fully highlighted glyphs need no mask or glow: paint straight
-          // into the clip. The old path pushed an offscreen saveLayer per
-          // glyph on every frame — dozens of full-line rasterizations even
-          // though only the moving boundary needs blending.
-          canvas.save();
-          canvas.clipRect(clip);
-          layout.bright.paint(canvas, Offset.zero);
-          canvas.restore();
-        } else {
-          canvas.saveLayer(clip, Paint());
-          if (motion.glow > .001) {
-            canvas.saveLayer(
-              clip,
-              Paint()
-                ..imageFilter = ui.ImageFilter.blur(
-                  sigmaX: motion.glowRadiusEm * layout.fontSize,
-                  sigmaY: motion.glowRadiusEm * layout.fontSize,
-                )
-                ..colorFilter = ColorFilter.mode(
-                  Colors.white.withValues(alpha: motion.glow),
-                  BlendMode.srcIn,
-                ),
-            );
+              segment.totalWidth,
+            ) -
+            segment.consumed;
+        final fade = math.max(1.0, rect.height * .5);
+        canvas.save();
+        canvas.translate(
+          motion.xEm * layout.fontSize * focus,
+          motion.yEm * layout.fontSize * focus,
+        );
+        canvas.translate(rect.center.dx, rect.center.dy);
+        canvas.scale(1 + (motion.scale - 1) * focus);
+        canvas.translate(-rect.center.dx, -rect.center.dy);
+        final clip = Rect.fromLTRB(
+          rect.left,
+          rect.top - layout.fontSize * .15,
+          rect.right,
+          rect.bottom + layout.fontSize * .15,
+        );
+        canvas.clipRect(clip);
+        if (boundary + fade / 2 >= rect.left) {
+          if (boundary - fade / 2 >= rect.right) {
+            // Fully highlighted glyphs need no mask or glow: paint straight
+            // into the clip. The old path pushed an offscreen saveLayer per
+            // glyph on every frame — dozens of full-line rasterizations even
+            // though only the moving boundary needs blending.
+            canvas.save();
+            canvas.clipRect(clip);
             layout.bright.paint(canvas, Offset.zero);
             canvas.restore();
+          } else {
+            canvas.saveLayer(clip, Paint());
+            if (motion.glow > .001) {
+              canvas.saveLayer(
+                clip,
+                Paint()
+                  ..imageFilter = ui.ImageFilter.blur(
+                    sigmaX: motion.glowRadiusEm * layout.fontSize,
+                    sigmaY: motion.glowRadiusEm * layout.fontSize,
+                  )
+                  ..colorFilter = ColorFilter.mode(
+                    Colors.white.withValues(alpha: motion.glow),
+                    BlendMode.srcIn,
+                  ),
+              );
+              layout.bright.paint(canvas, Offset.zero);
+              canvas.restore();
+            }
+            layout.bright.paint(canvas, Offset.zero);
+            canvas.drawRect(
+              clip,
+              Paint()
+                ..blendMode = BlendMode.dstIn
+                ..shader = ui.Gradient.linear(
+                  Offset(boundary - fade / 2, 0),
+                  Offset(boundary + fade / 2, 0),
+                  [Colors.white, Colors.transparent],
+                ),
+            );
+            canvas.restore();
           }
-          layout.bright.paint(canvas, Offset.zero);
-          canvas.drawRect(
-            clip,
-            Paint()
-              ..blendMode = BlendMode.dstIn
-              ..shader = ui.Gradient.linear(
-                Offset(boundary - fade / 2, 0),
-                Offset(boundary + fade / 2, 0),
-                [Colors.white, Colors.transparent],
-              ),
-          );
-          canvas.restore();
         }
+        canvas.restore();
       }
-      canvas.restore();
     }
     canvas.restore();
   }

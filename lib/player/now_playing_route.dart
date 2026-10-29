@@ -120,9 +120,14 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
         final double travelled = _dragging
             ? animation.value
             : _transitionCurve.transform(animation.value);
+        // The page is still mounted for the reverse transition. Pause its
+        // ambient and lyric tickers so the compositor can move one stable
+        // layer offscreen without also repainting the full player each frame.
+        final bool tickersEnabled =
+            !_dragging && animation.status != AnimationStatus.reverse;
         return FractionalTranslation(
           translation: Offset(0, 1 - travelled),
-          child: child,
+          child: TickerMode(enabled: tickersEnabled, child: child!),
         );
       },
     );

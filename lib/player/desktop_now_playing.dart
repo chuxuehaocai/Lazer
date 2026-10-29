@@ -409,15 +409,18 @@ class _Presentation extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: [
       Row(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
+          Flexible(
+            fit: FlexFit.loose,
             child: CopyableSongTitle(
               title: track.title,
               child: Text(
                 track.title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+                textWidthBasis: TextWidthBasis.longestLine,
                 style: context.type.heading.copyWith(
                   fontSize: compact ? 22 : 30,
                   height: 1.2,

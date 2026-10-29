@@ -12,6 +12,19 @@ abstract interface class BufferedAudioEngine {
   Duration get bufferedPosition;
 }
 
+/// Optional notifications when an engine's buffered position changes.
+///
+/// This is separate from playback ticks so a paused track can still paint cache
+/// progress as bytes continue arriving.
+abstract interface class BufferChangeReportingAudioEngine {
+  Stream<void> get bufferChanges;
+}
+
+/// Optional capability for streams that cannot seek past their buffered data.
+abstract interface class SeekBoundaryReportingAudioEngine {
+  bool get seekIsLimitedByBuffer;
+}
+
 /// Optional engine capability: a queue the platform keeps decoding across.
 ///
 /// [AudioEngine.setUrl] replaces the source, which tears the decoder down and
@@ -37,7 +50,11 @@ abstract interface class QueueAudioEngine {
   Future<bool> appendToQueue(int queueId, String url);
 
   /// Moves to the next item of the loaded queue without reloading it.
-  Future<void> playQueuedNext();
+  ///
+  /// Returns `false` when the platform queue no longer has a next item. The
+  /// caller can then load the requested track as a fresh source instead of
+  /// leaving the UI ahead of the audio.
+  Future<bool> playQueuedNext();
 
   /// Fires when the platform crosses into the next item on its own — the
   /// gapless hand-off. Seeks, loads and appends are not reported.
@@ -90,6 +107,8 @@ class JustAudioEngine
     implements
         AudioEngine,
         BufferedAudioEngine,
+        BufferChangeReportingAudioEngine,
+        SeekBoundaryReportingAudioEngine,
         QueueAudioEngine,
         FocusAwareAudioEngine {
   JustAudioEngine({AudioPlayer? player, this.activateSession})
@@ -129,6 +148,8 @@ class JustAudioEngine
 
   /// Platform queue and the identifier the app takes back when appending.
   ConcatenatingAudioSource? _queue;
+  List<String> _queueUrls = <String>[];
+  String? _currentUrl;
   int _queueId = 0;
 
   /// Index the engine itself asked the platform for, so a platform-side index
@@ -155,7 +176,11 @@ class JustAudioEngine
   }
 
   void _onPlatformIndex(int? index) {
-    if (index == null || !_hadSource || _advanced.isClosed) return;
+    if (index == null) return;
+    if (index >= 0 && index < _queueUrls.length) {
+      _currentUrl = _queueUrls[index];
+    }
+    if (!_hadSource || _advanced.isClosed) return;
     if (index == _commandedIndex) return;
     // The platform moved on without being asked: the gapless hand-off.
     _commandedIndex = index;
@@ -175,7 +200,26 @@ class JustAudioEngine
   Duration get bufferedPosition => _player.bufferedPosition;
 
   @override
+  bool get seekIsLimitedByBuffer {
+    final String? scheme = Uri.tryParse(
+      _currentUrl ?? '',
+    )?.scheme.toLowerCase();
+    return scheme == 'http' || scheme == 'https';
+  }
+
+  @override
   Stream<void> get completed => _completed.stream;
+
+  @override
+  Stream<void> get bufferChanges {
+    try {
+      return _player.bufferedPositionStream.map<void>((Duration _) {});
+    } on NoSuchMethodError {
+      // Small injected players used by embedders may expose a position but no
+      // buffered-position stream.
+      return const Stream<void>.empty();
+    }
+  }
 
   @override
   Stream<int> get indexStream => _advanced.stream;
@@ -186,6 +230,8 @@ class JustAudioEngine
     _hadSource = false;
     _completionSent = false;
     _queue = null;
+    _queueUrls = <String>[url];
+    _currentUrl = url;
     _commandedIndex = null;
     // The single-source fallback has to take its turn with the queue loads:
     // otherwise a `setQueue` that failed while another track was already
@@ -218,6 +264,10 @@ class JustAudioEngine
     _commandedIndex = null;
     final int queueId = ++_queueId;
     _queue = null;
+    _queueUrls = List<String>.of(urls);
+    _currentUrl = urls.isEmpty
+        ? null
+        : urls[startIndex.clamp(0, urls.length - 1).toInt()];
     return _serialize(() async {
       // Rapid next/previous presses queue several of these; only the newest
       // should reach the platform. The older ones return their queue id so the
@@ -250,19 +300,29 @@ class JustAudioEngine
       final ConcatenatingAudioSource? queue = _queue;
       if (queue == null || queueId != _queueId) return false;
       await queue.add(AudioSource.uri(Uri.parse(url)));
-      return queueId == _queueId;
+      if (queueId != _queueId) return false;
+      _queueUrls.add(url);
+      final int? currentIndex = _player.currentIndex;
+      if (currentIndex != null && currentIndex < _queueUrls.length) {
+        _currentUrl = _queueUrls[currentIndex];
+      }
+      return true;
     });
   }
 
   @override
-  Future<void> playQueuedNext() {
+  Future<bool> playQueuedNext() {
     return _serialize(() async {
       final ConcatenatingAudioSource? queue = _queue;
       final int? index = _player.currentIndex;
-      if (queue == null || index == null) return;
-      if (index + 1 >= queue.children.length) return;
+      if (queue == null || index == null) return false;
+      if (index + 1 >= queue.children.length) return false;
       _commandedIndex = index + 1;
       await _player.seek(Duration.zero, index: index + 1);
+      if (index + 1 < _queueUrls.length) {
+        _currentUrl = _queueUrls[index + 1];
+      }
+      return true;
     });
   }
 
@@ -305,6 +365,8 @@ class JustAudioEngine
     _hadSource = false;
     _completionSent = false;
     _queue = null;
+    _queueUrls = <String>[];
+    _currentUrl = null;
     _commandedIndex = null;
     // `AudioPlayer.stop()` deactivates the platform, which for media_kit means
     // releasing the native mpv player. Ordered behind the source mutations so
@@ -318,6 +380,8 @@ class JustAudioEngine
     ++_generation;
     ++_playGeneration;
     _hadSource = false;
+    _queueUrls = <String>[];
+    _currentUrl = null;
     _completionSubscription.cancel();
     _indexSubscription?.cancel();
     _completed.close();

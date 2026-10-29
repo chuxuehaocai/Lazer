@@ -34,6 +34,7 @@ class AccessibleSlider extends StatefulWidget {
     required this.onChanged,
     this.min = 0,
     this.max = 1,
+    this.secondaryTrackValue,
     this.divisions,
     this.label,
     this.onChangeStart,
@@ -47,6 +48,7 @@ class AccessibleSlider extends StatefulWidget {
   final double value;
   final double min;
   final double max;
+  final double? secondaryTrackValue;
   final int? divisions;
   final String? label;
   final String? semanticLabel;
@@ -80,6 +82,7 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
             value: widget.value,
             min: widget.min,
             max: widget.max,
+            secondaryTrackValue: widget.secondaryTrackValue,
             divisions: widget.divisions,
             label: widget.label == null ? null : context.tr(widget.label!),
             onChangeStart: widget.detentFeedback
