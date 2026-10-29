@@ -180,10 +180,16 @@ elseif(WIN32)
         file(GLOB candidates
             "${LAZER_FFMPEG_ROOT}/lib/${component}-[0-9]*.lib"
             "${LAZER_FFMPEG_ROOT}/lib/${component}.lib"
+            "${LAZER_FFMPEG_ROOT}/bin/${component}-[0-9]*.lib"
+            "${LAZER_FFMPEG_ROOT}/bin/${component}.lib"
             "$ENV{FFMPEG_ROOT}/lib/${component}-[0-9]*.lib"
-            "$ENV{FFMPEG_ROOT}/lib/${component}.lib")
+            "$ENV{FFMPEG_ROOT}/lib/${component}.lib"
+            "$ENV{FFMPEG_ROOT}/bin/${component}-[0-9]*.lib"
+            "$ENV{FFMPEG_ROOT}/bin/${component}.lib")
         if(NOT candidates)
-            message(FATAL_ERROR "FFmpeg import library '${component}' was not found under ${LAZER_FFMPEG_ROOT}/lib")
+            message(FATAL_ERROR
+                "FFmpeg import library '${component}' was not found under "
+                "${LAZER_FFMPEG_ROOT}/lib or ${LAZER_FFMPEG_ROOT}/bin")
         endif()
         list(SORT candidates COMPARE NATURAL ORDER DESCENDING)
         list(GET candidates 0 chosen)
