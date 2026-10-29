@@ -75,7 +75,7 @@ jobs:
           set -euo pipefail
           command -v cl.exe
           prefix="$(cygpath -u "$LAZER_FFMPEG_ROOT")"
-          ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
+          bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
       - run: flutter build windows --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Package EXE, DLLs, resources and Visual C++ runtime
         shell: pwsh
@@ -122,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           ffmpeg_root="$RUNNER_TEMP/lazer-ffmpeg"
-          ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$ffmpeg_root"
+          bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$ffmpeg_root"
           dart run tool/build_native_audio.dart --ffmpeg-root "$ffmpeg_root"
           mkdir -p dist/licenses/lazer-ffmpeg
           cp build/native-audio/*.dylib dist/
@@ -285,7 +285,7 @@ jobs:
         run: |
           set -euo pipefail
           prefix="$RUNNER_TEMP/lazer-ffmpeg"
-          ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
+          bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
           echo "LAZER_FFMPEG_ROOT=$prefix" >> "$GITHUB_ENV"
       - run: flutter build linux --release --no-pub --target-platform ${{ matrix.flutter_target }} --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Bundle GTK, libmpv and Flutter into AppImage

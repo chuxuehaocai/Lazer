@@ -61,9 +61,6 @@ case "$platform" in
             --toolchain=msvc
             --target-os=win32
             --arch=x86_64
-            --cc=cl.exe
-            --cxx=cl.exe
-            --ld=link.exe
             --enable-w32threads
         )
         ;;
@@ -80,7 +77,12 @@ if [[ "$platform" == Darwin ]]; then
 fi
 printf 'FFmpeg revision: %s\nConfigure options: %s\n' \
     "$FFmpeg_REVISION" "${configure_args[*]}" | tee "$work_root/build-info.txt"
-./configure "${configure_args[@]}" 2>&1 | tee "$work_root/configure.log"
+if ! ./configure "${configure_args[@]}" 2>&1 | tee "$work_root/configure.log"; then
+    if [[ -f ffbuild/config.log ]]; then
+        tail -n 120 ffbuild/config.log >&2
+    fi
+    exit 1
+fi
 make -j"${FFMPEG_BUILD_JOBS:-2}"
 make install
 
