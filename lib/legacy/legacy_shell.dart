@@ -1457,7 +1457,7 @@ class _LegacyShellState extends State<LegacyShell>
     return AnimatedSwitcher(
       // [_contentMotion] mirrors this duration: keep the two in step.
       duration: motion ? const Duration(milliseconds: 420) : Duration.zero,
-      switchInCurve: Curves.easeOutQuart,
+      switchInCurve: const Cubic(0.32, 0.72, 0, 1),
       switchOutCurve: Curves.easeInCubic,
       layoutBuilder: (Widget? current, List<Widget> previous) => Stack(
         alignment: Alignment.topCenter,
@@ -1488,23 +1488,18 @@ class _LegacyShellState extends State<LegacyShell>
         ],
       ),
       transitionBuilder: (Widget child, Animation<double> animation) {
-        final Animation<double> eased = CurvedAnimation(
-          parent: animation,
-          // A gentle Apple-style arrival: most of the travel happens early,
-          // the last pixels settle slowly.
-          curve: const Cubic(0.32, 0.72, 0, 1),
-          reverseCurve: Curves.easeInCubic,
-        );
+        // AnimatedSwitcher owns the curved animation and its disposal. Reusing
+        // it avoids retaining another status listener on every state report.
         // Fast first, slow on arrival. The slide is a few pixels of vertical
         // travel (a compositor transform), not a layout change, and the fade
         // keeps the outgoing page readable until the new one owns the frame.
         return FadeTransition(
-          opacity: eased,
+          opacity: animation,
           child: SlideTransition(
             position: Tween<Offset>(
               begin: Offset(0, largeScreen ? .012 : .04),
               end: Offset.zero,
-            ).animate(eased),
+            ).animate(animation),
             child: MotionSnapshot(animation: animation, child: child),
           ),
         );
@@ -1725,10 +1720,7 @@ class _LibraryRefreshButtonState extends State<_LibraryRefreshButton>
         child: SizedBox.square(
           dimension: 16,
           child: RotationTransition(
-            turns: CurvedAnimation(
-              parent: _rotation,
-              curve: Curves.easeOutCubic,
-            ),
+            turns: _rotation.drive(CurveTween(curve: Curves.easeOutCubic)),
             child: Icon(
               Icons.sync_rounded,
               size: 12,

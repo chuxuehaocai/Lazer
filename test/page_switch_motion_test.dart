@@ -99,8 +99,51 @@ Future<void> _openSearch(WidgetTester tester) async {
   );
 }
 
+class _StatusTrackedAnimation extends AlwaysStoppedAnimation<double> {
+  _StatusTrackedAnimation() : super(1);
+
+  final statusListeners = <AnimationStatusListener>{};
+
+  @override
+  void addStatusListener(AnimationStatusListener listener) =>
+      statusListeners.add(listener);
+
+  @override
+  void removeStatusListener(AnimationStatusListener listener) =>
+      statusListeners.remove(listener);
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('rebuilding a page transition releases its animation listeners', (
+    tester,
+  ) async {
+    await _phoneShell(tester);
+    final switcher = tester.widget<AnimatedSwitcher>(
+      find
+          .ancestor(
+            of: find.byType(LegacyHomePage),
+            matching: find.byType(AnimatedSwitcher),
+          )
+          .first,
+    );
+    final buildTransition = switcher.transitionBuilder;
+    await tester.pumpWidget(const SizedBox.shrink());
+    final animation = _StatusTrackedAnimation();
+    for (var rebuild = 0; rebuild < 10; rebuild++) {
+      await tester.pumpWidget(
+        _app(buildTransition(Text('Page $rebuild'), animation)),
+      );
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(
+      animation.statusListeners,
+      isEmpty,
+      reason:
+          'State reports must not accumulate listeners until the next page switch.',
+    );
+  });
 
   testWidgets('a page switch parks the ambient mesh until it lands', (
     tester,

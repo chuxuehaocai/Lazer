@@ -36,6 +36,11 @@ independent. Browsing defaults to 30 fps; the player follows display vsync unles
 a manual rate is selected. Static and hidden backgrounds do not keep the flow
 ticker running.
 
+The shared page switcher also reuses the animation owned by `AnimatedSwitcher`.
+Previously, rebuilding its transition ten times left ten additional status
+listeners attached after the widgets were removed. The lifecycle regression in
+`test/page_switch_motion_test.dart` now verifies that no listeners remain.
+
 Run focused regression checks with:
 
 ```sh
