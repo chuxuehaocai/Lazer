@@ -144,6 +144,8 @@ class NeteaseTransport {
 
   String? cookie;
 
+  void close() => _client.close(force: true);
+
   Future<Map<String, dynamic>> request(
     String alias,
     Map<String, String> parameters,

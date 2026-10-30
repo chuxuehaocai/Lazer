@@ -8,6 +8,10 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../theme/tokens.dart' show AppFonts;
+import '../animation/view_transitions.dart';
+import '../widgets/music_provider_badge.dart';
+import '../gateway/gateway.dart';
+import 'navidrome_login_fields.dart';
 
 /// Present the sign-in card in the Apple sheet language.
 Future<void> showLegacyLoginDialog(BuildContext context, AppState state) {
@@ -48,6 +52,8 @@ class _LegacyLoginDialogState extends State<_LegacyLoginDialog> {
   static final RegExp _phonePattern = RegExp(r'^1\d{10}$');
 
   _Mode _mode = _Mode.qr;
+  late bool _navidrome = state.isNavidrome;
+  bool _navBusy = false;
   _Phase _phase = _Phase.creating;
   String? _url;
   Timer? _poll;
@@ -72,10 +78,11 @@ class _LegacyLoginDialogState extends State<_LegacyLoginDialog> {
   @override
   void initState() {
     super.initState();
-    unawaited(_start());
+    if (!_navidrome) unawaited(_start());
   }
 
   Future<void> _start() async {
+    if (_navidrome) return;
     final int generation = ++_qrGeneration;
     _poll?.cancel();
     setState(() {
@@ -84,7 +91,12 @@ class _LegacyLoginDialogState extends State<_LegacyLoginDialog> {
       _error = null;
     });
     final String? url = await state.beginQrLogin();
-    if (!mounted || _mode != _Mode.qr || generation != _qrGeneration) return;
+    if (!mounted ||
+        _navidrome ||
+        _mode != _Mode.qr ||
+        generation != _qrGeneration) {
+      return;
+    }
     setState(() {
       _url = url;
       _phase = url == null ? _Phase.error : _Phase.waiting;
@@ -96,11 +108,11 @@ class _LegacyLoginDialogState extends State<_LegacyLoginDialog> {
   }
 
   Future<void> _tick(String url) async {
-    if (_polling || !mounted || _mode != _Mode.qr) return;
+    if (_polling || !mounted || _navidrome || _mode != _Mode.qr) return;
     _polling = true;
     try {
       final int code = await state.pollQrLogin(url);
-      if (!mounted) return;
+      if (!mounted || _navidrome) return;
       if (code == 803) {
         // The poll may confirm after the card switched to another tab; the
         // session is already adopted, so close it from here as well.
@@ -132,6 +144,17 @@ class _LegacyLoginDialogState extends State<_LegacyLoginDialog> {
       _notice = null;
     });
     if (mode == _Mode.qr) unawaited(_start());
+  }
+
+  void _switchPlatform(bool navidrome) {
+    if (_navBusy || _submitting || _navidrome == navidrome) return;
+    _poll?.cancel();
+    _qrGeneration++;
+    setState(() {
+      _navidrome = navidrome;
+      _error = null;
+    });
+    if (!navidrome && _mode == _Mode.qr) unawaited(_start());
   }
 
   Future<void> _submitCookie() async {
@@ -269,29 +292,113 @@ class _LegacyLoginDialogState extends State<_LegacyLoginDialog> {
                   ),
                   IconButton(
                     tooltip: context.tr('取消'),
-                    onPressed: () => Navigator.of(context).maybePop(),
+                    onPressed: _navBusy || _submitting
+                        ? null
+                        : () => Navigator.of(context).maybePop(),
                     icon: const Icon(Icons.close_rounded, size: 18),
                   ),
                 ],
               ),
-              Text(
-                context.tr(switch (_mode) {
-                  _Mode.qr => '使用网易云音乐 App 扫描二维码登录。',
-                  _Mode.sms => '使用手机号和短信验证码登录。',
-                  _Mode.cookie => '粘贴浏览器里网易云音乐的登录 Cookie。',
-                }),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: apple.secondaryLabel,
+              SegmentedButton<bool>(
+                selected: {_navidrome},
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: false, label: TrText('网易云音乐')),
+                  ButtonSegment(value: true, label: Text('Navidrome')),
+                ],
+                onSelectionChanged: _navBusy || _submitting
+                    ? null
+                    : (values) => _switchPlatform(values.single),
+              ),
+              if (_navidrome)
+                const Padding(
+                  padding: EdgeInsets.only(top: 10),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: ExperimentalMusicBadge(),
+                  ),
+                ),
+              if (state.musicConnections.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey(
+                      'login-connections-${state.activeConnectionKey}',
+                    ),
+                    initialValue: state.activeConnectionKey,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: context.tr('已保存的连接'),
+                    ),
+                    items: [
+                      for (final gateway in state.musicConnections)
+                        DropdownMenuItem(
+                          value: GatewayRegistry.keyOf(gateway),
+                          child: Text(
+                            gateway is NavidromeGateway
+                                ? 'Navidrome · ${gateway.username} @ ${gateway.server.authority}${gateway.server.path}'
+                                : context.tr('网易云音乐'),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: _navBusy || _submitting
+                        ? null
+                        : (key) async {
+                            if (key == null) return;
+                            _poll?.cancel();
+                            _qrGeneration++;
+                            await state.selectMusicConnection(key);
+                            if (!mounted) return;
+                            setState(() => _navidrome = state.isNavidrome);
+                            if (!_navidrome && _mode == _Mode.qr) {
+                              unawaited(_start());
+                            }
+                          },
+                  ),
+                ),
+              const SizedBox(height: 12),
+              if (!_navidrome)
+                Text(
+                  context.tr(switch (_mode) {
+                    _Mode.qr => '使用网易云音乐 App 扫描二维码登录。',
+                    _Mode.sms => '使用手机号和短信验证码登录。',
+                    _Mode.cookie => '粘贴浏览器里网易云音乐的登录 Cookie。',
+                  }),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: apple.secondaryLabel,
+                  ),
+                ),
+              const SizedBox(height: 18),
+              ViewTransitionSwitcher(
+                expand: false,
+                child: KeyedSubtree(
+                  key: ValueKey(
+                    _navidrome
+                        ? 'navidrome-${state.activeConnectionKey}'
+                        : _mode.name,
+                  ),
+                  child: _navidrome
+                      ? NavidromeLoginFields(
+                          state: state,
+                          onConnected: () => Navigator.of(context).maybePop(),
+                          onBusy: (busy) => setState(() => _navBusy = busy),
+                        )
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (_mode == _Mode.sms)
+                              ..._smsFields(theme, apple)
+                            else if (_mode == _Mode.cookie)
+                              ..._cookieFields(theme)
+                            else
+                              ..._qrFields(theme),
+                            ..._modeLinks(),
+                          ],
+                        ),
                 ),
               ),
-              const SizedBox(height: 18),
-              if (_mode == _Mode.sms)
-                ..._smsFields(theme, apple)
-              else if (_mode == _Mode.cookie)
-                ..._cookieFields(theme)
-              else
-                ..._qrFields(theme),
-              ..._modeLinks(),
             ],
           ),
         ),

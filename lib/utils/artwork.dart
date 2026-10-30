@@ -24,6 +24,12 @@ String? normalizedArtworkUrl(String? raw) {
   if (trimmed.startsWith('//')) return 'https:$trimmed';
   final String lower = trimmed.toLowerCase();
   if (lower.startsWith('http://')) {
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null &&
+        !_isNeteaseCdn(uri.host) &&
+        uri.path.endsWith('/getCoverArt.view')) {
+      return trimmed;
+    }
     return 'https://${trimmed.substring('http://'.length)}';
   }
   if (lower.startsWith('https://')) return trimmed;

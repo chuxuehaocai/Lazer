@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -33,13 +34,17 @@ class _Catalog extends Catalog {
   );
 }
 
-Future<AppState> _pumpPlayer(WidgetTester tester) async {
+Future<AppState> _pumpPlayer(
+  WidgetTester tester, {
+  Track track = _track,
+  List<Track>? queue,
+}) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final AppState state = AppState(catalog: _Catalog());
   addTearDown(state.dispose);
-  state.playQueue(const <Track>[_track]);
+  state.playQueue(queue ?? <Track>[track]);
   await tester.pumpWidget(
     MaterialApp(
       theme: buildLegacyTheme(brightness: Brightness.dark),
@@ -73,13 +78,7 @@ void main() {
     expect(find.byKey(const ValueKey('now-playing-more')), findsOneWidget);
     expect(find.byTooltip('更多'), findsOneWidget);
     expect(find.byTooltip('返回'), findsOneWidget);
-    for (final String gone in <String>[
-      '歌词',
-      '添加到歌单',
-      '下载歌曲',
-      '查看评论',
-      '播放队列',
-    ]) {
+    for (final String gone in <String>['歌词', '添加到歌单', '下载歌曲', '查看评论', '播放队列']) {
       expect(
         find.byTooltip(gone),
         findsNothing,
@@ -108,6 +107,7 @@ void main() {
     for (final String action in <String>[
       '歌词',
       '保存封面',
+      '在 osu! 中搜索',
       '添加到歌单',
       '下载歌曲',
       '查看评论',
@@ -121,6 +121,164 @@ void main() {
     }
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'the osu! action opens the encoded search for the original track metadata',
+    (tester) async {
+      const MethodChannel channel = MethodChannel('dev.naominet.lazer/updates');
+      final List<MethodCall> calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        MethodCall call,
+      ) async {
+        calls.add(call);
+        return true;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+
+      const Track track = Track(
+        id: 'osu-search-fixture',
+        title: '  歌曲 & remix  ',
+        artist: '  A+B / C  ',
+        album: 'Album',
+        translatedTitle: 'Translated title',
+        duration: Duration(minutes: 3),
+        coverSeed: 2,
+      );
+      await _pumpPlayer(tester, track: track);
+      await _openMore(tester);
+
+      final Finder search = _inSheet(find.text('在 osu! 中搜索'));
+      expect(search, findsOneWidget);
+      await tester.ensureVisible(search);
+      await tester.tap(search);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(calls, hasLength(1));
+      expect(calls.single.method, 'openUrl');
+      expect(calls.single.arguments, <String, Object>{
+        'url':
+            'https://osu.ppy.sh/beatmapsets?q=A%2BB+%2F+C+%E6%AD%8C%E6%9B%B2+%26+remix',
+      });
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    variant: const TargetPlatformVariant(<TargetPlatform>{
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    }),
+  );
+
+  testWidgets(
+    'the open sheet follows track changes and searches the current song',
+    (tester) async {
+      const MethodChannel channel = MethodChannel('dev.naominet.lazer/updates');
+      final List<MethodCall> calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        MethodCall call,
+      ) async {
+        calls.add(call);
+        return true;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      const Track next = Track(
+        id: 'next-fixture',
+        title: 'Next song',
+        artist: 'Next artist',
+        album: 'Next album',
+        duration: Duration(minutes: 4),
+        coverSeed: 4,
+      );
+      final AppState state = await _pumpPlayer(
+        tester,
+        queue: <Track>[_track, next],
+      );
+      await _openMore(tester);
+      expect(_inSheet(find.text(_track.title)), findsOneWidget);
+
+      state.next();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(state.current, same(next));
+      expect(_inSheet(find.text(_track.title)), findsNothing);
+      expect(_inSheet(find.text(next.title)), findsOneWidget);
+      expect(_inSheet(find.text(next.album)), findsOneWidget);
+
+      final Finder search = _inSheet(find.text('在 osu! 中搜索'));
+      await tester.ensureVisible(search);
+      await tester.tap(search);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(calls, hasLength(1));
+      expect(calls.single.arguments, <String, Object>{
+        'url': 'https://osu.ppy.sh/beatmapsets?q=Next+artist+Next+song',
+      });
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  testWidgets(
+    'the osu! action is disabled when there is no searchable metadata',
+    (tester) async {
+      const MethodChannel channel = MethodChannel('dev.naominet.lazer/updates');
+      final List<MethodCall> calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        MethodCall call,
+      ) async {
+        calls.add(call);
+        return true;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+
+      const Track track = Track(
+        id: 'osu-empty-fixture',
+        title: '   ',
+        artist: ' 未知歌手 ',
+        album: 'Album',
+        duration: Duration(minutes: 3),
+        coverSeed: 3,
+      );
+      await _pumpPlayer(tester, track: track);
+      await _openMore(tester);
+
+      final Finder search = _inSheet(find.text('在 osu! 中搜索'));
+      expect(search, findsOneWidget);
+      final Finder action = find.ancestor(
+        of: search,
+        matching: find.byType(InkWell),
+      );
+      expect(action, findsOneWidget);
+      expect(tester.widget<InkWell>(action).onTap, isNull);
+      await tester.ensureVisible(search);
+      await tester.tap(search);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(calls, isEmpty);
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    variant: const TargetPlatformVariant(<TargetPlatform>{
+      TargetPlatform.android,
+    }),
+  );
 
   testWidgets('the sheet opens the lyrics and the queue', (tester) async {
     await _pumpPlayer(tester);

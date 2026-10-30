@@ -30,7 +30,7 @@ class CatalogDetailPage extends StatefulWidget {
   final ArtistRef? artist;
   final Album? album;
   String get identity =>
-      artist == null ? 'album:${album!.id}' : 'artist:${artist!.id}';
+      artist == null ? 'album:${album!.id}' : 'artist:${artist!.key}';
   @override
   State<CatalogDetailPage> createState() => _CatalogDetailPageState();
 }
@@ -90,8 +90,8 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
           setState(() => _artist = data);
         }
       } else {
-        final data = await widget.state.catalog.albumDetails(
-          int.parse(widget.album!.id),
+        final data = await widget.state.catalog.albumDetailsFor(
+          widget.album!.id,
           force: force,
         );
         if (mounted && generation == _generation) setState(() => _album = data);
@@ -120,8 +120,8 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
       _albumsError = null;
     });
     try {
-      final page = await widget.state.catalog.artistAlbumPage(
-        widget.artist!.id,
+      final page = await widget.state.catalog.artistAlbumPageFor(
+        widget.artist!,
         offset: reset ? 0 : _albumOffset,
         force: force,
       );

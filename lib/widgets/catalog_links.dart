@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/models.dart';
+import '../gateway/music_models.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/detail_requests.dart';
@@ -16,7 +17,8 @@ Future<void> openArtists(
 ) async {
   final available = {
     for (final artist in artists)
-      if (artist.id > 0 && artist.name.trim().isNotEmpty) artist.id: artist,
+      if (artist.hasIdentity && artist.name.trim().isNotEmpty)
+        artist.key: artist,
   }.values.toList();
   if (available.isEmpty) return;
   final selected = available.length == 1
@@ -63,7 +65,10 @@ Future<void> openAlbumDetails(
   AppState state,
   Album album,
 ) async {
-  if ((int.tryParse(album.id) ?? 0) <= 0) return;
+  if ((int.tryParse(album.id) ?? 0) <= 0 &&
+      MusicId.tryParse(album.id)?.kind != MusicEntityKind.album) {
+    return;
+  }
   // The shell owns the detail slot and slides the player away, so an album tap
   // loads on the right of the main page instead of taking over the window.
   Navigator.of(context).popUntil((Route<void> route) => route.isFirst);
@@ -128,7 +133,9 @@ class ArtistNameLink extends StatelessWidget {
     style: style,
     maxLines: maxLines,
     onTap:
-        artists.any((artist) => artist.id > 0 && artist.name.trim().isNotEmpty)
+        artists.any(
+          (artist) => artist.hasIdentity && artist.name.trim().isNotEmpty,
+        )
         ? () => unawaited(openArtists(context, state, artists))
         : null,
   );
@@ -148,13 +155,13 @@ class AlbumNameLink extends StatelessWidget {
   Widget build(BuildContext context) => CatalogTextLink(
     text: track.album,
     style: style,
-    onTap: track.albumId > 0
+    onTap: track.hasAlbum
         ? () => unawaited(
             openAlbumDetails(
               context,
               state,
               Album(
-                id: '${track.albumId}',
+                id: track.albumIdentity,
                 title: track.album,
                 artist: track.artist,
                 artists: track.artists,

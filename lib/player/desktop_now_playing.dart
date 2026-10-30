@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:math' as math;
 import '../widgets/catalog_links.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../data/models.dart';
@@ -20,6 +22,7 @@ import '../widgets/interaction_feedback.dart';
 import '../widgets/listen_together_dialog.dart';
 import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/volume_control.dart';
+import 'osu_search.dart';
 import '../theme/font_preferences.dart';
 
 enum DesktopNowPlayingPane { lyrics, comments, queue }
@@ -99,6 +102,15 @@ class DesktopNowPlaying extends StatelessWidget {
                         icon: const Icon(Icons.keyboard_arrow_down_rounded),
                       ),
                       const Spacer(),
+                      AccessibleIconButton(
+                        key: const ValueKey('desktop-search-osu'),
+                        tooltip: '在 osu! 中搜索',
+                        onPressed: osuBeatmapSearchUri(track) == null
+                            ? null
+                            : () => unawaited(searchInOsu(context, track)),
+                        color: context.colors.onPlayer,
+                        icon: const Icon(Icons.search_rounded),
+                      ),
                       const SizedBox(width: 2),
                       _AddToPlaylistButton(state: state, track: track),
                       const SizedBox(width: 2),
@@ -241,8 +253,7 @@ class _AddToPlaylistButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool cloud =
-        int.tryParse(track.id) != null && track.localPath == null;
+    final bool cloud = track.isServiceTrack && track.localPath == null;
     return AccessibleIconButton(
       key: const ValueKey('desktop-add-to-playlist'),
       tooltip: cloud ? '添加到歌单' : '本地歌曲无法添加到云端歌单',
@@ -269,7 +280,7 @@ class _DownloadButton extends StatelessWidget {
   Widget build(BuildContext context) {
     // Local files (imports, scans and downloads played back from the library)
     // have no service id to resolve.
-    if (int.tryParse(track.id) == null || track.localPath != null) {
+    if (!track.isServiceTrack || track.localPath != null) {
       return AccessibleIconButton(
         key: const ValueKey('desktop-download'),
         tooltip: '本地歌曲无需下载',
@@ -408,7 +419,7 @@ class _Presentation extends StatelessWidget {
       ),
       items: <PopupMenuEntry<String>>[
         PopupMenuItem<String>(value: 'save', child: TrText('保存封面')),
-        if (int.tryParse(track.id) != null)
+        if (track.isServiceTrack)
           PopupMenuItem<String>(value: 'download', child: TrText('下载歌曲')),
       ],
     );
@@ -423,11 +434,9 @@ class _Presentation extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: [
       Row(
-        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flexible(
-            fit: FlexFit.loose,
+          Expanded(
             child: CopyableSongTitle(
               title: track.title,
               child: Text(
@@ -435,16 +444,25 @@ class _Presentation extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textWidthBasis: TextWidthBasis.longestLine,
-                style: context.fonts.apply(FontCategory.playerTitle, TextStyle(fontSize: compact ? 22 : 30, fontWeight: FontWeight.w700, height: 1.2, color: context.colors.slateDark)),
+                style: context.fonts.apply(
+                  FontCategory.playerTitle,
+                  TextStyle(
+                    fontSize: compact ? 22 : 30,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                    color: context.colors.slateDark,
+                  ),
+                ),
               ),
             ),
           ),
-          AccessibleIconButton(
-            tooltip: '一起听',
-            onPressed: () =>
-                unawaited(showListenTogetherDialog(context, state)),
-            icon: const Icon(Icons.group_rounded),
-          ),
+          if (!state.isNavidrome)
+            AccessibleIconButton(
+              tooltip: '一起听',
+              onPressed: () =>
+                  unawaited(showListenTogetherDialog(context, state)),
+              icon: const Icon(Icons.group_rounded),
+            ),
           AccessibleIconButton(
             tooltip: state.signedIn ? '收藏歌曲' : '登录后收藏',
             onPressed: state.signedIn
@@ -479,13 +497,25 @@ class _Presentation extends StatelessWidget {
         artists: track.artists,
         fallback: track.artist,
         maxLines: 2,
-        style: context.fonts.apply(FontCategory.playerArtist, TextStyle(fontSize: compact ? 14 : 18, color: context.colors.slateDark)),
+        style: context.fonts.apply(
+          FontCategory.playerArtist,
+          TextStyle(
+            fontSize: compact ? 14 : 18,
+            color: context.colors.slateDark,
+          ),
+        ),
       ),
       SizedBox(height: compact ? 4 : 6),
       AlbumNameLink(
         state: state,
         track: track,
-        style: context.fonts.apply(FontCategory.playerArtist, TextStyle(fontSize: compact ? 12 : 15, color: context.colors.cloudDark)),
+        style: context.fonts.apply(
+          FontCategory.playerArtist,
+          TextStyle(
+            fontSize: compact ? 12 : 15,
+            color: context.colors.cloudDark,
+          ),
+        ),
       ),
       AnimatedNotice(message: state.likeError),
     ],
@@ -509,22 +539,97 @@ class _Presentation extends StatelessWidget {
           ),
         );
       }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            child: AspectRatio(
-              aspectRatio: 1,
-              child: RepaintBoundary(child: _cover(context)),
-            ),
-          ),
-          const SizedBox(height: 24),
-          _metadata(context),
-        ],
+      return _ArtworkAndMetadata(
+        artwork: RepaintBoundary(child: _cover(context)),
+        metadata: _metadata(context),
       );
     },
   );
+}
+
+/// Keeps the metadata as wide as the height-constrained square artwork.
+class _ArtworkAndMetadata extends MultiChildRenderObjectWidget {
+  _ArtworkAndMetadata({required Widget artwork, required Widget metadata})
+    : super(children: [artwork, metadata]);
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderArtworkAndMetadata();
+}
+
+class _ArtworkAndMetadataParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderArtworkAndMetadata extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _ArtworkAndMetadataParentData>,
+        RenderBoxContainerDefaultsMixin<
+          RenderBox,
+          _ArtworkAndMetadataParentData
+        > {
+  static const double _gap = 24;
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _ArtworkAndMetadataParentData) {
+      child.parentData = _ArtworkAndMetadataParentData();
+    }
+  }
+
+  @override
+  void performLayout() {
+    size = constraints.biggest;
+    final RenderBox artwork = firstChild!;
+    final RenderBox metadata = childAfter(artwork)!;
+
+    // First measure the metadata at full width, then match it to the artwork.
+    // Narrower text may wrap, so recompute the available artwork size once.
+    metadata.layout(BoxConstraints(maxWidth: size.width), parentUsesSize: true);
+    double artworkSize = math.min(
+      size.width,
+      math.max(0, size.height - _gap - metadata.size.height),
+    );
+    if (artworkSize < size.width && artworkSize >= 96) {
+      metadata.layout(
+        BoxConstraints.tightFor(width: artworkSize),
+        parentUsesSize: true,
+      );
+      final double available = math.max(
+        0,
+        size.height - _gap - metadata.size.height,
+      );
+      if (artworkSize > available) {
+        artworkSize = available;
+        metadata.layout(
+          BoxConstraints.tightFor(width: artworkSize),
+          parentUsesSize: true,
+        );
+      }
+    }
+
+    artwork.layout(
+      BoxConstraints.tightForFinite(width: artworkSize, height: artworkSize),
+    );
+    final double top = math.max(
+      0,
+      (size.height - artworkSize - _gap - metadata.size.height) / 2,
+    );
+    (artwork.parentData! as _ArtworkAndMetadataParentData).offset = Offset(
+      0,
+      top,
+    );
+    (metadata.parentData! as _ArtworkAndMetadataParentData).offset = Offset(
+      0,
+      top + artworkSize + _gap,
+    );
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
 }
 
 class _DesktopDock extends StatelessWidget {
@@ -657,16 +762,18 @@ class _DesktopDock extends StatelessWidget {
                                       DesktopNowPlayingPane.lyrics,
                                     ),
                                   ),
-                                  _PaneTab(
-                                    key: const ValueKey('desktop-comments'),
-                                    label: '评论',
-                                    icon: Icons.chat_bubble_outline_rounded,
-                                    active:
-                                        pane == DesktopNowPlayingPane.comments,
-                                    onPressed: () => onPaneChanged(
-                                      DesktopNowPlayingPane.comments,
+                                  if (!state.isNavidrome)
+                                    _PaneTab(
+                                      key: const ValueKey('desktop-comments'),
+                                      label: '评论',
+                                      icon: Icons.chat_bubble_outline_rounded,
+                                      active:
+                                          pane ==
+                                          DesktopNowPlayingPane.comments,
+                                      onPressed: () => onPaneChanged(
+                                        DesktopNowPlayingPane.comments,
+                                      ),
                                     ),
-                                  ),
                                   _PaneTab(
                                     key: const ValueKey('desktop-queue'),
                                     label: '播放队列 (Q)',

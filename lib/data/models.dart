@@ -1,6 +1,8 @@
 /// Models presented by the player, mapped from the gateway response.
 library;
 
+import '../gateway/music_models.dart';
+
 /// One row of the listener's play record, as returned by the gateway.
 ///
 /// [playCount] is the number of plays the official app shows in 听歌排行;
@@ -30,19 +32,30 @@ class TrackPlayStat {
 }
 
 class ArtistRef {
-  const ArtistRef({required this.id, required this.name, this.coverUrl});
+  const ArtistRef({
+    required this.id,
+    required this.name,
+    this.coverUrl,
+    this.platformKey,
+  });
   final int id;
   final String name;
   final String? coverUrl;
+  final String? platformKey;
+  String get key => platformKey ?? '$id';
+  bool get hasIdentity =>
+      id > 0 || MusicId.tryParse(key)?.kind == MusicEntityKind.artist;
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
-    'coverUrl': coverUrl,
+    'coverUrl': platformKey == null ? coverUrl : null,
+    if (platformKey != null) 'platformKey': platformKey,
   };
   factory ArtistRef.fromJson(Map<String, dynamic> json) => ArtistRef(
     id: (json['id'] as num?)?.toInt() ?? 0,
     name: json['name'] as String? ?? '',
     coverUrl: json['coverUrl'] as String?,
+    platformKey: json['platformKey'] as String?,
   );
   static List<ArtistRef> list(Object? values) => values is List
       ? [
@@ -63,6 +76,7 @@ class Track {
     this.accent = 0,
     this.coverUrl,
     this.albumId = 0,
+    this.albumKey,
     this.translatedTitle,
     this.artists = const [],
     this.localPath,
@@ -81,6 +95,16 @@ class Track {
   final int accent;
   final String? coverUrl;
   final int albumId;
+  final String? albumKey;
+  String get albumIdentity => albumKey ?? '$albumId';
+  bool get hasAlbum =>
+      albumId > 0 ||
+      MusicId.tryParse(albumIdentity)?.kind == MusicEntityKind.album;
+  String? get persistedCoverUrl =>
+      MusicId.tryParse(id) == null ? coverUrl : null;
+  bool get isServiceTrack =>
+      int.tryParse(id) != null ||
+      MusicId.tryParse(id)?.kind == MusicEntityKind.song;
   final String? translatedTitle;
   final List<ArtistRef> artists;
 
@@ -99,6 +123,7 @@ class Track {
         accent: accent,
         coverUrl: coverUrl ?? this.coverUrl,
         albumId: albumId,
+        albumKey: albumKey,
         translatedTitle: translatedTitle,
         artists: artists,
         localPath: localPath ?? this.localPath,
@@ -112,8 +137,9 @@ class Track {
     'durationMs': duration.inMilliseconds,
     'coverSeed': coverSeed,
     'accent': accent,
-    'coverUrl': coverUrl,
+    'coverUrl': persistedCoverUrl,
     'albumId': albumId,
+    if (albumKey != null) 'albumKey': albumKey,
     'translatedTitle': translatedTitle,
     'artists': artists.map((artist) => artist.toJson()).toList(),
     'localPath': localPath,
@@ -129,6 +155,7 @@ class Track {
     accent: json['accent'] as int? ?? 0,
     coverUrl: json['coverUrl'] as String?,
     albumId: json['albumId'] as int? ?? 0,
+    albumKey: json['albumKey'] as String?,
     translatedTitle: json['translatedTitle'] as String?,
     artists: ArtistRef.list(json['artists']),
     localPath: json['localPath'] as String?,
@@ -160,7 +187,7 @@ class Playlist {
     'trackIds': trackIds,
     'coverSeed': coverSeed,
     'description': description,
-    'coverUrl': coverUrl,
+    'coverUrl': MusicId.tryParse(id) == null ? coverUrl : null,
     'trackCount': trackCount,
   };
 
@@ -392,7 +419,7 @@ class Album {
     'note': note,
     'accent': accent,
     'trackCount': trackCount,
-    'coverUrl': coverUrl,
+    'coverUrl': MusicId.tryParse(id) == null ? coverUrl : null,
     'artists': artists.map((artist) => artist.toJson()).toList(),
     'releaseType': releaseType,
     'subType': subType,

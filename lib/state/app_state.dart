@@ -36,6 +36,8 @@ import 'hifi_settings.dart';
 import 'ui_preferences.dart';
 import '../theme/font_preferences.dart';
 
+part 'music_platform_state.dart';
+
 /// How the session was authenticated.
 enum AuthMethod { qrcode, sms, password, cookie }
 
@@ -141,6 +143,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.hifiSettings = const HifiSettings(),
     this.hifi,
     this.artworkSeedLoader = albumSeedForCover,
+    this.navidromeFactory,
   }) : catalog = catalog ?? Catalog(),
        localLibrary = localLibrary ?? LocalLibrary(),
        _queueStore = queueStore ?? PlaybackQueueStore(),
@@ -381,6 +384,38 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   static const int _recentTracksLimit = 60;
 
   final Catalog catalog;
+  final NavidromeGateway Function(
+    String server,
+    String username,
+    bool allowHttp,
+  )?
+  navidromeFactory;
+  late final _MusicPlatformState _musicPlatforms = _MusicPlatformState(this);
+  MusicProvider get musicProvider => catalog.activeGateway.provider;
+  String get activeConnectionKey =>
+      GatewayRegistry.keyOf(catalog.activeGateway);
+  bool get isNavidrome => musicProvider.id == 'navidrome';
+  String audioQualityLabel(AudioQuality value) =>
+      isNavidrome && value == AudioQuality.lossless ? '原始音质' : value.label;
+  String audioQualityDetail(AudioQuality value) =>
+      isNavidrome && value == AudioQuality.lossless
+      ? '服务器原始文件，不转码'
+      : value.detail;
+  String audioQualityBitrate(AudioQuality value) =>
+      isNavidrome && value == AudioQuality.lossless
+      ? '原始格式'
+      : value.bitrateLabel;
+  List<MusicGateway> get musicConnections => catalog.connections.connections;
+  bool get platformChanging => _musicPlatforms.busy;
+  bool supportsMusic(MusicCapability capability) =>
+      catalog.activeGateway.supports(capability);
+  Future<AuthOutcome> signInWithNavidrome({
+    required String serverUrl,
+    required String username,
+    required String password,
+    bool allowInsecureHttp = false,
+  }) => _musicPlatforms.login(serverUrl, username, password, allowInsecureHttp);
+  Future<void> selectMusicConnection(String key) => _musicPlatforms.select(key);
   late final ListenTogetherController listenTogether = ListenTogetherController(
     state: this,
   );
@@ -1057,6 +1092,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Loads the play record once per account. The library asks for it lazily;
   /// a guest never issues the request.
   Future<void> loadPlayStats({bool force = false}) async {
+    if (isNavidrome) return;
     final int uid = user.userId;
     if (uid <= 0) {
       playStats = const <TrackPlayStat>[];
@@ -1092,6 +1128,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> refreshCollections({bool force = false}) {
+    if (_presentationDisposed) return Future<void>.value();
     final int uid = user.userId;
     if (uid <= 0) {
       collections = UserCollections.empty;
@@ -1117,6 +1154,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> _refreshCollections(int uid, {required bool force}) async {
+    if (_presentationDisposed) return;
+    final connection = activeConnectionKey;
     collectionsLoading = true;
     collectionsError = null;
     notifyListeners();
@@ -1132,17 +1171,35 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         final UserCollections? stored = await catalog.cachedUserCollections(
           uid,
         );
-        if (stored != null && user.userId == uid) {
+        if (!_presentationDisposed &&
+            stored != null &&
+            user.userId == uid &&
+            activeConnectionKey == connection) {
           collections = stored;
           notifyListeners();
         }
       }
       final loaded = await catalog.userCollections(uid);
-      if (user.userId == uid) collections = loaded;
+      if (!_presentationDisposed &&
+          user.userId == uid &&
+          activeConnectionKey == connection) {
+        collections = loaded;
+        if (isNavidrome) {
+          _musicPlatforms.liked
+            ..clear()
+            ..addAll(loaded.liked?.trackIds ?? const []);
+        }
+      }
     } catch (_) {
-      if (user.userId == uid) collectionsError = '歌单读取失败，请重试。';
+      if (!_presentationDisposed &&
+          user.userId == uid &&
+          activeConnectionKey == connection) {
+        collectionsError = '歌单读取失败，请重试。';
+      }
     } finally {
-      if (user.userId == uid) {
+      if (!_presentationDisposed &&
+          user.userId == uid &&
+          activeConnectionKey == connection) {
         collectionsLoading = false;
         notifyListeners();
       }
@@ -1168,12 +1225,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Set<int> _likedSongIds = <int>{};
   String? likeError;
   bool get currentLiked {
+    if (MusicId.tryParse(current?.id ?? '') != null) {
+      return _musicPlatforms.liked.contains(current?.id);
+    }
     final id = int.tryParse(current?.id ?? '');
     return id != null && _likedSongIds.contains(id);
   }
 
   /// Size of the loaded personal like list (0 while guest or not yet loaded).
-  int get likedCount => _likedSongIds.length;
+  int get likedCount =>
+      isNavidrome ? collections.liked?.trackCount ?? 0 : _likedSongIds.length;
 
   /// Whether the gateway was reachable on the last interaction.
   bool get online => catalog.online;
@@ -1357,11 +1418,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     unawaited(_loadCurrentArtwork());
     unawaited(ensureCurrentLyrics());
     await _restoreSession();
+    await _musicPlatforms.restore();
     if (signedIn) unawaited(_flushPlayUploads());
     await refreshHome();
   }
 
   Future<void> refreshHome({bool force = false}) async {
+    if (_presentationDisposed) return;
     if (force) {
       await catalog.invalidateHome(userId: signedIn ? _user.userId : null);
     }
@@ -1374,6 +1437,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> refreshDiscoveryCharts({bool force = false}) async {
+    if (isNavidrome) {
+      discoveryCharts = const [];
+      discoveryChartsError = null;
+      return;
+    }
     if (discoveryChartsLoading) return;
     discoveryChartsLoading = true;
     discoveryChartsError = null;
@@ -1459,6 +1527,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<AuthOutcome> signInWithCookie(String cookie) async {
     try {
+      if (isNavidrome) await _musicPlatforms.selectNetease();
       final GatewayLoginStatus status = await gateway.loginWithCookie(cookie);
       final GatewayUserProfile? profile = status.profile;
       if (!status.signedIn || profile == null) {
@@ -1480,6 +1549,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     String password,
   ) async {
     try {
+      if (isNavidrome) await _musicPlatforms.selectNetease();
       final GatewayLoginResult result = await gateway.loginWithPhonePassword(
         phone,
         password,
@@ -1495,6 +1565,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     String captcha,
   ) async {
     try {
+      if (isNavidrome) await _musicPlatforms.selectNetease();
       final GatewayLoginResult result = await gateway.loginWithPhoneCaptcha(
         phone,
         captcha,
@@ -1519,6 +1590,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _qrConfirmed = false;
     qrPollError = null;
     try {
+      if (isNavidrome) await _musicPlatforms.selectNetease();
       final String key = await gateway.createQrKey();
       if (key.isEmpty) return null;
       final String url = await gateway.createQrCodeUrl(key);
@@ -1575,6 +1647,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// `MUSIC_U` is already installed by [pollQrLogin], but `/login/status`
   /// can answer "not signed in" for a beat after the confirmation.
   Future<bool> _adoptQrSession() async {
+    final connection = activeConnectionKey;
     for (int attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) {
         await Future<void>.delayed(const Duration(milliseconds: 400));
@@ -1582,7 +1655,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       try {
         final GatewayLoginStatus status = await gateway.loginStatus();
         final GatewayUserProfile? profile = status.profile;
-        if (status.signedIn && profile != null) {
+        if (status.signedIn &&
+            profile != null &&
+            activeConnectionKey == connection &&
+            !isNavidrome) {
           _qrConfirmed = false;
           _adoptSession(profile, AuthMethod.qrcode, '扫码登录');
           return true;
@@ -1629,6 +1705,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Back to the guest session — stay in the shell, drop the credentials.
   Future<void> signOut() async {
+    _musicPlatforms.cancelPending();
     collections = UserCollections.empty;
     collectionsLoading = false;
     collectionsError = null;
@@ -1662,8 +1739,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     playStats = const <TrackPlayStat>[];
     playStatsError = null;
     _playStatsUid = null;
-    gateway.clearSession();
-    unawaited(_forgetSession());
+    if (isNavidrome) {
+      catalog.activeGateway.clearSession();
+      _musicPlatforms.liked.clear();
+    } else {
+      gateway.clearSession();
+      _musicPlatforms.neteaseUser = SessionUser.guest;
+      unawaited(_forgetSession());
+    }
     unawaited(refreshHome());
     notifyListeners();
   }
@@ -1697,8 +1780,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> playAlbum(String albumId) async {
-    final int id = int.tryParse(albumId) ?? 0;
-    final List<Track> tracks = await catalog.albumTracks(id);
+    final List<Track> tracks = MusicId.tryParse(albumId) != null
+        ? await catalog.albumTracksFor(albumId)
+        : await catalog.albumTracks(int.tryParse(albumId) ?? 0);
     playQueue(tracks);
   }
 
@@ -1715,6 +1799,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (!signedIn) throw StateError('Sign in to create a playlist.');
     final String trimmed = name.trim();
     if (trimmed.isEmpty) throw ArgumentError('name cannot be blank.');
+    if (isNavidrome) return _musicPlatforms.createPlaylist(trimmed, privacy);
     final GatewayPlaylist? created = await gateway.createPlaylist(
       trimmed,
       privacy: privacy,
@@ -1742,6 +1827,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// invalidated so opening it shows the new song.
   Future<void> addSongToCloudPlaylist(String playlistId, String trackId) async {
     if (!signedIn) throw StateError('Sign in to add songs to a playlist.');
+    if (MusicId.tryParse(playlistId) != null ||
+        MusicId.tryParse(trackId) != null) {
+      await _musicPlatforms.addSong(playlistId, trackId);
+      return;
+    }
     final int pid = int.tryParse(playlistId) ?? 0;
     final int sid = int.tryParse(trackId) ?? 0;
     if (pid <= 0 || sid <= 0) {
@@ -1859,7 +1949,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queueSnapshot = null;
   }
 
-  List<Track> get recentTracks => List<Track>.unmodifiable(_recentTracks);
+  List<Track> get recentTracks => List<Track>.unmodifiable(
+    _recentTracks.where((track) {
+      final reference = MusicId.tryParse(track.id);
+      return reference == null
+          ? !isNavidrome
+          : reference.connection == catalog.activeGateway.connectionId;
+    }),
+  );
 
   /// Counts without allocating an immutable snapshot of the queue.
   int get queueLength => _queue.length;
@@ -2488,6 +2585,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         _metadataPending.contains(track.id)) {
       return;
     }
+    if (MusicId.tryParse(track.id) case final reference?) {
+      await _musicPlatforms.hydrate(track, reference);
+      return;
+    }
     final id = int.tryParse(track.id);
     if (id == null || id <= 0) return;
     _metadataPending.add(track.id);
@@ -2616,6 +2717,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> _refreshLikedSongs() async {
+    if (_presentationDisposed) return;
+    if (isNavidrome) {
+      await refreshCollections(force: true);
+      return;
+    }
     final uid = _user.userId;
     if (uid <= 0) return;
     try {
@@ -2629,6 +2735,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> toggleLikeCurrent() async {
+    if (MusicId.tryParse(current?.id ?? '') != null) {
+      await _musicPlatforms.toggleLike();
+      return;
+    }
     final id = int.tryParse(current?.id ?? '');
     final uid = _user.userId;
     if (id == null || uid <= 0) return;
@@ -2902,6 +3012,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _reportPlayStart(Track track) {
+    if (MusicId.tryParse(track.id) != null) {
+      unawaited(_musicPlatforms.report(track, Duration.zero, false));
+      return;
+    }
     final int? songId = int.tryParse(track.id);
     if (songId == null || songId <= 0 || !signedIn) return;
     _enqueuePlay(
@@ -2940,6 +3054,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? track = _playSessionTrack;
     if (track == null || !_playSessionQualified || _playSessionSent) return;
     _playSessionSent = true;
+    if (MusicId.tryParse(track.id) != null) {
+      unawaited(_musicPlatforms.report(track, _playSessionTime, true));
+      return;
+    }
     final int? songId = int.tryParse(track.id);
     if (songId == null || songId <= 0 || !signedIn) return;
     final int durationSeconds = track.duration.inSeconds;
@@ -3024,6 +3142,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// on the next track boundary or the next library refresh, so an offline
   /// spell does not silently lose plays.
   Future<void> _flushPlayUploads() async {
+    if (isNavidrome) return;
     if (_playUploadInFlight || !signedIn) return;
     _playUploadInFlight = true;
     var uploaded = false;
@@ -3096,6 +3215,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   static String _friendly(Object error) {
+    if (error is MusicGatewayException) {
+      return error.authenticationFailure
+          ? '服务器拒绝了登录，请检查用户名和密码。'
+          : '音乐服务器连接失败，请检查地址和网络后重试。';
+    }
     if (error is GatewayHttpException) {
       return '网络请求失败（HTTP ${error.statusCode}）。';
     }
@@ -3107,6 +3231,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _musicPlatforms.cancelPending();
+    catalog.connections.close();
     _presentationDisposed = true;
     ++_seekRequest;
     playerPresented.dispose();

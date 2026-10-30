@@ -209,88 +209,96 @@ class _LegacySearchPageState extends State<LegacySearchPage> {
           ),
         ),
         Expanded(
-          child: ViewTransitionSwitcher(child: KeyedSubtree(
-            key: ValueKey(_tab),
-            child: switch (_tab) {
-            _SearchTab.songs => ListView.builder(
-              padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
-              itemCount: results.tracks.length,
-              itemBuilder: (BuildContext context, int i) {
-                final Track track = results.tracks[i];
-                return LegacyTrackRow(
-                  track: track,
-                  index: i,
-                  current: widget.state.current?.id == track.id,
-                  playing: widget.state.playing,
-                  onTap: () =>
-                      widget.state.playQueue(results.tracks, startIndex: i),
-                  onMenuRequested: (Offset position) =>
-                      showTrackActions(context, widget.state, track, position),
-                );
-              },
-            ),
-            _SearchTab.albums => ListView.builder(
-              padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
-              itemCount: results.albums.length,
-              itemBuilder: (BuildContext context, int i) {
-                final Album album = results.albums[i];
-                return AppleListTile(
-                  title: album.title,
-                  subtitle: album.artist,
-                  minHeight: 56,
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  leading: LegacyCover(
-                    url: album.coverUrl,
-                    size: 44,
-                    radius: 6,
-                  ),
-                  onTap: () =>
-                      unawaited(openAlbumDetails(context, widget.state, album)),
-                );
-              },
-            ),
-            _SearchTab.artists => ListView.builder(
-              padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
-              itemCount: results.artists.length,
-              itemBuilder: (BuildContext context, int i) {
-                final ArtistRef artist = results.artists[i];
-                return AppleListTile(
-                  title: artist.name,
-                  subtitle: context.tr('歌手'),
-                  minHeight: 56,
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  leading: ClipOval(
-                    child: LegacyCover(
-                      url: artist.coverUrl,
-                      size: 44,
-                      radius: 22,
-                    ),
-                  ),
-                  onTap: () => artistDetailRequest.value = artist,
-                );
-              },
-            ),
-            _SearchTab.playlists => LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints box) {
-                final LegacyPlaylistGridLayout grid = LegacyPlaylistGridLayout(
-                  (box.maxWidth - inset * 2).clamp(0, double.infinity),
-                );
-                return CustomScrollView(
-                  slivers: <Widget>[
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
-                      sliver: LegacyPlaylistRowsSliver(
-                        playlists: results.playlists,
-                        layout: grid,
-                        onOpen: widget.onOpenPlaylist,
+          child: ViewTransitionSwitcher(
+            child: KeyedSubtree(
+              key: ValueKey(_tab),
+              child: switch (_tab) {
+                _SearchTab.songs => ListView.builder(
+                  padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
+                  itemCount: results.tracks.length,
+                  itemBuilder: (BuildContext context, int i) {
+                    final Track track = results.tracks[i];
+                    return LegacyTrackRow(
+                      track: track,
+                      index: i,
+                      current: widget.state.current?.id == track.id,
+                      playing: widget.state.playing,
+                      onTap: () =>
+                          widget.state.playQueue(results.tracks, startIndex: i),
+                      onMenuRequested: (Offset position) => showTrackActions(
+                        context,
+                        widget.state,
+                        track,
+                        position,
                       ),
-                    ),
-                  ],
-                );
+                    );
+                  },
+                ),
+                _SearchTab.albums => ListView.builder(
+                  padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
+                  itemCount: results.albums.length,
+                  itemBuilder: (BuildContext context, int i) {
+                    final Album album = results.albums[i];
+                    return AppleListTile(
+                      title: album.title,
+                      subtitle: album.artist,
+                      minHeight: 56,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      leading: LegacyCover(
+                        url: album.coverUrl,
+                        size: 44,
+                        radius: 6,
+                      ),
+                      onTap: () => unawaited(
+                        openAlbumDetails(context, widget.state, album),
+                      ),
+                    );
+                  },
+                ),
+                _SearchTab.artists => ListView.builder(
+                  padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
+                  itemCount: results.artists.length,
+                  itemBuilder: (BuildContext context, int i) {
+                    final ArtistRef artist = results.artists[i];
+                    return AppleListTile(
+                      title: artist.name,
+                      subtitle: context.tr('歌手'),
+                      minHeight: 56,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      leading: ClipOval(
+                        child: LegacyCover(
+                          url: artist.coverUrl,
+                          size: 44,
+                          radius: 22,
+                        ),
+                      ),
+                      onTap: () => artistDetailRequest.value = artist,
+                    );
+                  },
+                ),
+                _SearchTab.playlists => LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints box) {
+                    final LegacyPlaylistGridLayout grid =
+                        LegacyPlaylistGridLayout(
+                          (box.maxWidth - inset * 2).clamp(0, double.infinity),
+                        );
+                    return CustomScrollView(
+                      slivers: <Widget>[
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
+                          sliver: LegacyPlaylistRowsSliver(
+                            playlists: results.playlists,
+                            layout: grid,
+                            onOpen: widget.onOpenPlaylist,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               },
             ),
-          },
-          )),
+          ),
         ),
       ],
     );

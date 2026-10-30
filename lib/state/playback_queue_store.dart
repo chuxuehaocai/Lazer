@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import '../gateway/music_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/models.dart';
@@ -106,10 +107,11 @@ String _encodeTracks(List<Track> tracks) => jsonEncode([
       'artists': [for (final artist in track.artists) artist.toJson()],
       'album': track.album,
       'albumId': track.albumId,
+      if (track.albumKey != null) 'albumKey': track.albumKey,
       'durationMs': track.duration.inMilliseconds,
       'coverSeed': track.coverSeed,
       'accent': track.accent,
-      'coverUrl': track.coverUrl,
+      'coverUrl': track.persistedCoverUrl,
     },
 ]);
 
@@ -133,7 +135,10 @@ PlaybackQueueSnapshot? _decodeQueue(String raw) {
   for (final item in json['tracks'] as List) {
     if (item is! Map<String, dynamic>) continue;
     final id = item['id'] as String? ?? '';
-    if (int.tryParse(id) == null) continue;
+    if (int.tryParse(id) == null &&
+        MusicId.tryParse(id)?.kind != MusicEntityKind.song) {
+      continue;
+    }
     tracks.add(
       Track(
         id: id,
@@ -147,6 +152,7 @@ PlaybackQueueSnapshot? _decodeQueue(String raw) {
         coverSeed: (item['coverSeed'] as num?)?.toInt() ?? 0,
         accent: (item['accent'] as num?)?.toInt() ?? 0,
         albumId: (item['albumId'] as num?)?.toInt() ?? 0,
+        albumKey: item['albumKey'] as String?,
         coverUrl: item['coverUrl'] as String?,
         translatedTitle: item['translatedTitle'] as String?,
       ),

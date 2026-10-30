@@ -160,7 +160,7 @@ class _LegacyPlaylistPageState extends State<LegacyPlaylistPage> {
       if (album != null) {
         // The list row only carries a stub Album; the full description lives
         // on the album detail endpoint.
-        final details = await catalog.albumDetails(int.parse(album.id));
+        final details = await catalog.albumDetailsFor(album.id);
         tracks = details.tracks;
         note = details.description;
       } else {

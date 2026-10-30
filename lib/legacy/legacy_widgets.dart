@@ -24,7 +24,8 @@ String legacyDuration(Duration value) {
 String legacyArtistNames(Track track) {
   final List<String> names = <String>[
     for (final ArtistRef artist in track.artists)
-      if (artist.id > 0 && artist.name.trim().isNotEmpty) artist.name.trim(),
+      if (artist.hasIdentity && artist.name.trim().isNotEmpty)
+        artist.name.trim(),
   ];
   return names.isEmpty ? track.artist : names.join(' / ');
 }

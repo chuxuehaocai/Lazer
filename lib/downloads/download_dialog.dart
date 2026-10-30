@@ -37,11 +37,8 @@ Future<DownloadRequest?> showDownloadDialog(
   if (tracks.isEmpty) return Future<DownloadRequest?>.value(null);
   return showDialog<DownloadRequest>(
     context: context,
-    builder: (BuildContext context) => _DownloadDialog(
-      state: state,
-      tracks: tracks,
-      folderName: folderName,
-    ),
+    builder: (BuildContext context) =>
+        _DownloadDialog(state: state, tracks: tracks, folderName: folderName),
   );
 }
 
@@ -52,7 +49,7 @@ Future<void> showTrackActions(
   Track track,
   Offset globalPosition,
 ) async {
-  final bool downloadable = int.tryParse(track.id) != null;
+  final bool downloadable = track.isServiceTrack;
   final RenderBox? overlay =
       Overlay.of(context).context.findRenderObject() as RenderBox?;
   final bool hasImportedLyrics = await state.importedLyrics.has(track);
@@ -73,15 +70,9 @@ Future<void> showTrackActions(
           child: TrText('本地歌曲无需下载'),
         ),
       const PopupMenuDivider(),
-      PopupMenuItem<String>(
-        value: 'import-lyrics',
-        child: TrText('导入歌词…'),
-      ),
+      PopupMenuItem<String>(value: 'import-lyrics', child: TrText('导入歌词…')),
       if (hasImportedLyrics)
-        PopupMenuItem<String>(
-          value: 'remove-lyrics',
-          child: TrText('移除导入歌词'),
-        ),
+        PopupMenuItem<String>(value: 'remove-lyrics', child: TrText('移除导入歌词')),
     ],
   );
   if (!context.mounted) return;
@@ -106,7 +97,7 @@ Future<void> downloadTracks(
   String? folderName,
 }) async {
   final List<Track> downloadable = tracks
-      .where((Track track) => int.tryParse(track.id) != null)
+      .where((Track track) => track.isServiceTrack)
       .toList();
   if (downloadable.isEmpty) return;
   final DownloadRequest? request = await showDownloadDialog(
@@ -195,14 +186,14 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = '无法打开目录选择器');  // i18n:key
+      setState(() => _error = '无法打开目录选择器'); // i18n:key
     }
   }
 
   Future<void> _confirm() async {
     final String? directory = _directory;
     if (directory == null || directory.trim().isEmpty) {
-      setState(() => _error = '请选择保存目录');  // i18n:key
+      setState(() => _error = '请选择保存目录'); // i18n:key
       return;
     }
     setState(() {
@@ -220,7 +211,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = '这个目录不可写，请换一个位置';  // i18n:key
+        _error = '这个目录不可写，请换一个位置'; // i18n:key
       });
       return;
     }
@@ -247,9 +238,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
     final int estimate = _quality.estimatedBytes(total);
     return AlertDialog(
       title: TrText(
-        widget.tracks.length == 1
-            ? '下载歌曲'
-            : '下载 ${widget.tracks.length} 首歌曲',
+        widget.tracks.length == 1 ? '下载歌曲' : '下载 ${widget.tracks.length} 首歌曲',
       ),
       content: SizedBox(
         width: 430,
@@ -282,9 +271,11 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                         contentPadding: EdgeInsets.zero,
                         dense: true,
                         title: Text(
-                          '${context.tr(quality.label)}  ${quality.bitrateLabel}',
+                          '${context.tr(widget.state.audioQualityLabel(quality))}  ${context.tr(widget.state.audioQualityBitrate(quality))}',
                         ),
-                        subtitle: Text(context.tr(quality.detail)),
+                        subtitle: Text(
+                          context.tr(widget.state.audioQualityDetail(quality)),
+                        ),
                       ),
                   ],
                 ),

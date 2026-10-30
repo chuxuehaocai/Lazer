@@ -53,7 +53,7 @@ class _LegacyArtistPageState extends State<LegacyArtistPage> {
   @override
   void didUpdateWidget(covariant LegacyArtistPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.artist.id != widget.artist.id ||
+    if (oldWidget.artist.key != widget.artist.key ||
         oldWidget.state != widget.state) {
       _details = null;
       unawaited(_load());
@@ -80,8 +80,8 @@ class _LegacyArtistPageState extends State<LegacyArtistPage> {
       var more = true;
       final Set<String> ids = <String>{};
       while (more) {
-        final ArtistAlbumPage page = await catalog.artistAlbumPage(
-          artist.id,
+        final ArtistAlbumPage page = await catalog.artistAlbumPageFor(
+          artist,
           offset: offset,
           force: force,
         );
@@ -416,7 +416,7 @@ class _LegacyArtistReleasesPageState extends State<LegacyArtistReleasesPage> {
   @override
   void didUpdateWidget(covariant LegacyArtistReleasesPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.artist.id != widget.artist.id ||
+    if (oldWidget.artist.key != widget.artist.key ||
         oldWidget.group != widget.group ||
         oldWidget.state != widget.state) {
       _albums = null;
@@ -426,7 +426,7 @@ class _LegacyArtistReleasesPageState extends State<LegacyArtistReleasesPage> {
 
   Future<void> _load({bool force = false}) async {
     final int serial = ++_requestSerial;
-    final int artistId = widget.artist.id;
+    final artistRef = widget.artist;
     final AlbumReleaseGroup group = widget.group;
     setState(() {
       _error = null;
@@ -439,11 +439,8 @@ class _LegacyArtistReleasesPageState extends State<LegacyArtistReleasesPage> {
       final List<Album> releases = <Album>[];
       final Set<String> ids = <String>{};
       while (more) {
-        final ArtistAlbumPage page = await widget.state.catalog.artistAlbumPage(
-          artistId,
-          offset: offset,
-          force: force,
-        );
+        final ArtistAlbumPage page = await widget.state.catalog
+            .artistAlbumPageFor(artistRef, offset: offset, force: force);
         if (!mounted || serial != _requestSerial) return;
         for (final Album album in page.albums) {
           final bool matches = group == AlbumReleaseGroup.album
@@ -635,7 +632,7 @@ class _LegacyArtistSongsPageState extends State<LegacyArtistSongsPage> {
   @override
   void didUpdateWidget(covariant LegacyArtistSongsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.artist.id != widget.artist.id ||
+    if (oldWidget.artist.key != widget.artist.key ||
         oldWidget.state != widget.state) {
       _tracks = null;
       unawaited(_load());
@@ -648,7 +645,7 @@ class _LegacyArtistSongsPageState extends State<LegacyArtistSongsPage> {
     final catalog = widget.state.catalog;
     setState(() => _error = null);
     try {
-      final tracks = await catalog.artistSongs(artist.id, force: force);
+      final tracks = await catalog.artistSongsFor(artist, force: force);
       if (mounted && serial == _requestSerial) {
         setState(() => _tracks = tracks);
       }

@@ -14,6 +14,8 @@ import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../theme/tokens.dart';
 import '../animation/motion_snapshot.dart';
+import '../gateway/music_models.dart';
+import '../widgets/music_provider_badge.dart';
 import '../widgets/shared_browse_background.dart';
 import '../tv/large_screen_chrome.dart';
 import '../tv/large_screen_pages.dart';
@@ -144,6 +146,7 @@ class _LegacyShellState extends State<LegacyShell>
   bool? _coveredShellLargeScreen;
 
   AppState get state => widget.state;
+  late String _connectionKey = state.activeConnectionKey;
 
   @override
   void initState() {
@@ -217,6 +220,17 @@ class _LegacyShellState extends State<LegacyShell>
   /// is held back and folded into the rebuild that ends the switch.
   void _onAppStateChanged() {
     if (!mounted) return;
+    if (_connectionKey != state.activeConnectionKey) {
+      _connectionKey = state.activeConnectionKey;
+      _playlist = null;
+      _album = null;
+      _artist = null;
+      _chart = null;
+      _comments = false;
+      _artistSongs = false;
+      _artistReleases = null;
+      _coveredShell = null;
+    }
     if (_contentSwitching && !_nowPlayingOpen) return;
     // Progress ticks use AppState.ticks; structural reports must all reach the
     // page, including changes whose list lengths or track IDs stay the same.
@@ -452,6 +466,7 @@ class _LegacyShellState extends State<LegacyShell>
   }
 
   void _toggleComments() {
+    if (!state.supportsMusic(MusicCapability.comments)) return;
     setState(() {
       _comments = !_comments;
       if (_comments) {
@@ -1299,7 +1314,7 @@ class _LegacyShellState extends State<LegacyShell>
   }
 
   void _onAccountSelected(String value) {
-    if (value == 'login') {
+    if (value == 'login' || value == 'platform') {
       unawaited(showLegacyLoginDialog(context, state));
     } else if (value == 'logout') {
       state.signOut();
@@ -1329,13 +1344,24 @@ class _LegacyShellState extends State<LegacyShell>
     else
       PopupMenuItem<String>(value: 'logout', child: TrText('退出登录')),
     PopupMenuItem<String>(value: 'settings', child: TrText('设置')),
+    PopupMenuItem<String>(
+      value: 'platform',
+      child: Row(
+        children: [
+          const Expanded(child: TrText('音乐平台')),
+          if (state.musicProvider.experimental) const ExperimentalMusicBadge(),
+        ],
+      ),
+    ),
   ];
 
   /// avatar + name on the left, the theme toggle on its right. Tapping the
   /// avatar opens the account menu; a guest gets the login flow instead.
   Widget _accountRow(AppleSemanticColors apple) {
     final String name = state.isGuest ? context.tr('游客') : state.user.name;
-    final String detail = state.isGuest
+    final String detail = state.isNavidrome
+        ? 'Navidrome · ${context.tr('实验性')}'
+        : state.isGuest
         ? context.tr('登录以同步资料库')
         : context.tr(state.user.vipLabel ?? '普通用户');
     return PopupMenuButton<String>(
@@ -1493,7 +1519,9 @@ class _LegacyShellState extends State<LegacyShell>
     );
   }
 
-  String get _contentKey {
+  String get _contentKey => '$activePlatformContentKey:$_pageContentKey';
+  String get activePlatformContentKey => state.activeConnectionKey;
+  String get _pageContentKey {
     if (_comments) return 'comments';
     if (_localMusic) return 'local-music';
     if (_chart != null) return 'chart:${_chart!.id}';
@@ -1503,7 +1531,7 @@ class _LegacyShellState extends State<LegacyShell>
           : _artistReleases == null
           ? 'overview'
           : 'releases:${_artistReleases!.name}';
-      return 'artist:${_artist!.id}:$view';
+      return 'artist:${_artist!.key}:$view';
     }
     final Playlist? playlist = _playlist;
     if (playlist != null) return 'playlist:${playlist.id}';

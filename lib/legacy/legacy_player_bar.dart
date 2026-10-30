@@ -237,7 +237,7 @@ class _LegacyPlayerBarState extends State<LegacyPlayerBar> {
                     const SizedBox(width: 2),
                     LegacyQueueButton(state: state),
                     const SizedBox(width: 2),
-                    if (widget.onComments != null) ...[
+                    if (widget.onComments != null && !state.isNavidrome) ...[
                       _CompactIcon(
                         icon: Icons.mode_comment_outlined,
                         tooltip: '评论',

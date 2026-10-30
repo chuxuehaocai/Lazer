@@ -17,6 +17,7 @@ import '../widgets/ui_scaling.dart';
 import 'legacy_widgets.dart';
 
 import 'legacy_page_utils.dart';
+import 'legacy_login.dart';
 
 /// Apple-style browse page: a large title, one featured card, a horizontal
 /// recommendation shelf and the quick-pick track list.
@@ -93,7 +94,13 @@ class _LegacyHomePageState extends State<LegacyHomePage> {
     if (feed == null) {
       return LegacyNotice(
         message: widget.state.homeError ?? '正在加载曲库…',
-        action: widget.state.homeError == null
+        action: widget.state.isNavidrome && widget.state.isGuest
+            ? FilledButton(
+                onPressed: () =>
+                    unawaited(showLegacyLoginDialog(context, widget.state)),
+                child: const TrText('登录'),
+              )
+            : widget.state.homeError == null
             ? null
             : FilledButton(
                 onPressed: () =>
@@ -106,7 +113,7 @@ class _LegacyHomePageState extends State<LegacyHomePage> {
     final List<Track> recent = widget.state.recentTracks;
     final ArtistRef? stationArtist = recent
         .expand((track) => track.artists)
-        .where((artist) => artist.id > 0)
+        .where((artist) => artist.hasIdentity)
         .firstOrNull;
     final double inset = legacyPageInset(context);
     final bool compact = MediaQuery.sizeOf(context).width < 720;
@@ -123,6 +130,7 @@ class _LegacyHomePageState extends State<LegacyHomePage> {
               sliver: SliverList(
                 delegate: SliverChildListDelegate(<Widget>[
                   HomeActionShelf(
+                    serverLibrary: widget.state.isNavidrome,
                     busy: _startingStation,
                     covers: <String?>[
                       ...recent.map((track) => track.coverUrl),
@@ -175,23 +183,25 @@ class _LegacyHomePageState extends State<LegacyHomePage> {
                       compact: compact,
                     ),
                   ],
-                  const SizedBox(height: 38),
-                  const LegacySectionHeader(title: '排行榜'),
-                  const SizedBox(height: 14),
-                  if (widget.state.discoveryCharts.isNotEmpty)
-                    ChartShelf(
-                      charts: widget.state.discoveryCharts,
-                      onOpen: widget.onOpenChart,
-                      compact: compact,
-                    )
-                  else
-                    ChartLoadCard(
-                      loading: widget.state.discoveryChartsLoading,
-                      message: widget.state.discoveryChartsError,
-                      onRetry: () => unawaited(
-                        widget.state.refreshDiscoveryCharts(force: true),
+                  if (!widget.state.isNavidrome) ...[
+                    const SizedBox(height: 38),
+                    const LegacySectionHeader(title: '排行榜'),
+                    const SizedBox(height: 14),
+                    if (widget.state.discoveryCharts.isNotEmpty)
+                      ChartShelf(
+                        charts: widget.state.discoveryCharts,
+                        onOpen: widget.onOpenChart,
+                        compact: compact,
+                      )
+                    else
+                      ChartLoadCard(
+                        loading: widget.state.discoveryChartsLoading,
+                        message: widget.state.discoveryChartsError,
+                        onRetry: () => unawaited(
+                          widget.state.refreshDiscoveryCharts(force: true),
+                        ),
                       ),
-                    ),
+                  ],
                   if (recommendations.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 38),
                     const LegacySectionHeader(title: '猜你喜欢'),
@@ -262,6 +272,7 @@ class HomeActionShelf extends StatelessWidget {
     this.onHeart,
     this.onReplay,
     this.large = false,
+    this.serverLibrary = false,
   });
 
   final bool busy;
@@ -273,14 +284,15 @@ class HomeActionShelf extends StatelessWidget {
 
   /// Ten-foot layout: four larger cards across the browse width.
   final bool large;
+  final bool serverLibrary;
 
   @override
   Widget build(BuildContext context) {
     final items =
         <({String title, String subtitle, IconData icon, VoidCallback? tap})>[
           (
-            title: '每日推荐', // i18n:key
-            subtitle: '今日限定好歌', // i18n:key
+            title: serverLibrary ? '随机发现' : '每日推荐', // i18n:key
+            subtitle: serverLibrary ? '探索服务器里的音乐' : '今日限定好歌', // i18n:key
             icon: Icons.calendar_today_rounded,
             tap: onDaily,
           ),
@@ -292,7 +304,7 @@ class HomeActionShelf extends StatelessWidget {
           ),
           (
             title: '心动模式', // i18n:key
-            subtitle: '红心与相似推荐', // i18n:key
+            subtitle: serverLibrary ? '随机播放喜欢的音乐' : '红心与相似推荐', // i18n:key
             icon: Icons.favorite_rounded,
             tap: onHeart,
           ),

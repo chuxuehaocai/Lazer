@@ -727,10 +727,12 @@ void main() {
     await tester.scrollUntilVisible(
       lyricCard,
       400,
-      scrollable: find.descendant(
-        of: find.byKey(const ValueKey('settings-detail-subview')),
-        matching: find.byType(Scrollable),
-      ).last,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('settings-detail-subview')),
+            matching: find.byType(Scrollable),
+          )
+          .last,
     );
     final Finder lyricSize = find.descendant(
       of: lyricCard,

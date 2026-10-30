@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../data/audio_quality.dart';
 import '../data/models.dart';
 import '../downloads/download_dialog.dart';
 import 'player_backdrop.dart';
@@ -34,6 +33,7 @@ import '../widgets/song_comments_view.dart';
 import 'desktop_now_playing.dart';
 import 'artwork_lyrics_layout.dart';
 import '../theme/font_preferences.dart';
+import 'osu_search.dart';
 
 /// Shared comments entry from the player header.
 Future<void> showSongComments(
@@ -666,6 +666,10 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
               Navigator.of(sheetContext).pop();
               unawaited(_saveArtwork(track));
             },
+            onSearchOsu: () {
+              Navigator.of(sheetContext).pop();
+              unawaited(searchInOsu(this.context, widget.state.current));
+            },
             onAddToPlaylist: () {
               Navigator.of(sheetContext).pop();
               unawaited(
@@ -1142,12 +1146,13 @@ class _TrackDetails extends StatelessWidget {
               ),
             ),
           ),
-          AccessibleIconButton(
-            tooltip: '一起听',
-            onPressed: () =>
-                unawaited(showListenTogetherDialog(context, state)),
-            icon: const Icon(Icons.group_rounded),
-          ),
+          if (!state.isNavidrome)
+            AccessibleIconButton(
+              tooltip: '一起听',
+              onPressed: () =>
+                  unawaited(showListenTogetherDialog(context, state)),
+              icon: const Icon(Icons.group_rounded),
+            ),
           AccessibleIconButton(
             tooltip: state.signedIn ? '收藏歌曲' : '登录后收藏',
             onPressed: state.signedIn
@@ -1410,6 +1415,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
     required this.lyricsOpen,
     required this.onLyrics,
     required this.onSaveArtwork,
+    required this.onSearchOsu,
     required this.onAddToPlaylist,
     required this.onDownload,
     required this.onComments,
@@ -1421,6 +1427,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
   final bool lyricsOpen;
   final VoidCallback onLyrics;
   final VoidCallback onSaveArtwork;
+  final VoidCallback onSearchOsu;
   final VoidCallback onAddToPlaylist;
   final VoidCallback onDownload;
   final VoidCallback onComments;
@@ -1508,7 +1515,9 @@ class _NowPlayingMoreSheet extends StatelessWidget {
               _DetailLine(label: context.tr('时长'), value: fmt(track.duration)),
               _DetailLine(
                 label: context.tr('音质'),
-                value: context.tr(state.playbackQuality.label),
+                value: context.tr(
+                  state.audioQualityLabel(state.playbackQuality),
+                ),
               ),
               _DetailLine(
                 label: context.tr('来源'),
@@ -1525,7 +1534,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 selected: lyricsOpen,
                 onTap: onLyrics,
               ),
-              if (state.showArtworkWithLyrics)
+              if (state.showArtworkWithLyrics && !state.isNavidrome)
                 _MoreAction(
                   icon: Icons.group_rounded,
                   label: context.tr('一起听'),
@@ -1538,6 +1547,11 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 onTap: onSaveArtwork,
               ),
               _MoreAction(
+                icon: Icons.search_rounded,
+                label: context.tr('在 osu! 中搜索'),
+                onTap: osuBeatmapSearchUri(track) == null ? null : onSearchOsu,
+              ),
+              _MoreAction(
                 icon: Icons.playlist_add_rounded,
                 label: context.tr('添加到歌单'),
                 onTap: onAddToPlaylist,
@@ -1547,11 +1561,12 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 label: context.tr('下载歌曲'),
                 onTap: onDownload,
               ),
-              _MoreAction(
-                icon: Icons.chat_bubble_outline_rounded,
-                label: context.tr('查看评论'),
-                onTap: onComments,
-              ),
+              if (!state.isNavidrome)
+                _MoreAction(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  label: context.tr('查看评论'),
+                  onTap: onComments,
+                ),
               _MoreAction(
                 icon: Icons.queue_music_rounded,
                 label: context.tr('播放队列'),

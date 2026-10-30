@@ -7,6 +7,14 @@ const MethodChannel _updatesChannel = MethodChannel(
   'dev.naominet.lazer/updates',
 );
 
+@visibleForTesting
+Future<Process> Function(
+  String executable,
+  List<String> arguments, {
+  ProcessStartMode mode,
+})
+startExternalProcess = Process.start;
+
 /// Opens an http(s) link in the system browser.
 ///
 /// The app deliberately carries no `url_launcher` dependency: desktop shells
@@ -36,24 +44,22 @@ Future<bool> openExternalUrl(String raw) async {
     }
   }
   try {
-    final Process process;
     if (Platform.isWindows) {
-      process = await Process.start('rundll32', <String>[
+      await startExternalProcess('rundll32', <String>[
         'url.dll,FileProtocolHandler',
         uri.toString(),
       ], mode: ProcessStartMode.detached);
     } else if (Platform.isMacOS) {
-      process = await Process.start('open', <String>[
+      await startExternalProcess('open', <String>[
         uri.toString(),
       ], mode: ProcessStartMode.detached);
     } else if (Platform.isLinux) {
-      process = await Process.start('xdg-open', <String>[
+      await startExternalProcess('xdg-open', <String>[
         uri.toString(),
       ], mode: ProcessStartMode.detached);
     } else {
       return false;
     }
-    process.exitCode.ignore();
     return true;
   } catch (_) {
     return false;

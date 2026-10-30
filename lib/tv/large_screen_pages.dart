@@ -67,21 +67,22 @@ List<Album> _uniqueAlbums(Iterable<Album> albums) {
 }
 
 List<ArtistRef> _artistsFrom(List<Track> tracks, List<Album> albums) {
-  final Map<int, ArtistRef> byId = <int, ArtistRef>{};
+  final Map<String, ArtistRef> byId = <String, ArtistRef>{};
   for (final Track track in tracks) {
     for (final ArtistRef artist in track.artists) {
-      if (artist.id > 0 && artist.name.trim().isNotEmpty) {
-        byId.putIfAbsent(artist.id, () => artist);
+      if (artist.hasIdentity && artist.name.trim().isNotEmpty) {
+        byId.putIfAbsent(artist.key, () => artist);
       }
     }
   }
   for (final Album album in albums) {
     for (final ArtistRef artist in album.artists) {
-      if (artist.id > 0 && artist.name.trim().isNotEmpty) {
+      if (artist.hasIdentity && artist.name.trim().isNotEmpty) {
         byId.putIfAbsent(
-          artist.id,
+          artist.key,
           () => ArtistRef(
             id: artist.id,
+            platformKey: artist.platformKey,
             name: artist.name,
             coverUrl: artist.coverUrl ?? album.coverUrl,
           ),
@@ -304,6 +305,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
             // guest gets the login sheet instead of a dead tile, and keeping
             // the top shelf actionable also gives the page a focus anchor.
             child: HomeActionShelf(
+              serverLibrary: _state.isNavidrome,
               busy: _startingStation,
               covers: covers,
               large: true,
@@ -391,37 +393,39 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
       );
     }
 
-    addSection(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: inset),
-            child: const LargeScreenSectionHeader(title: '排行榜'),
-          ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: inset),
-            // The chart shelf keeps the desktop/mobile card: a cover mosaic,
-            // the board logo and its top three rows, with the same paging
-            // behaviour; the loading card is the shared one too.
-            child: charts.isNotEmpty
-                ? ChartShelf(
-                    charts: charts,
-                    onOpen: widget.actions.onOpenChart,
-                    large: true,
-                  )
-                : ChartLoadCard(
-                    loading: _state.discoveryChartsLoading,
-                    message: _state.discoveryChartsError,
-                    large: true,
-                    onRetry: () =>
-                        unawaited(_state.refreshDiscoveryCharts(force: true)),
-                  ),
-          ),
-        ],
-      ),
-    );
+    if (!_state.isNavidrome) {
+      addSection(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: inset),
+              child: const LargeScreenSectionHeader(title: '排行榜'),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: inset),
+              // The chart shelf keeps the desktop/mobile card: a cover mosaic,
+              // the board logo and its top three rows, with the same paging
+              // behaviour; the loading card is the shared one too.
+              child: charts.isNotEmpty
+                  ? ChartShelf(
+                      charts: charts,
+                      onOpen: widget.actions.onOpenChart,
+                      large: true,
+                    )
+                  : ChartLoadCard(
+                      loading: _state.discoveryChartsLoading,
+                      message: _state.discoveryChartsError,
+                      large: true,
+                      onRetry: () =>
+                          unawaited(_state.refreshDiscoveryCharts(force: true)),
+                    ),
+            ),
+          ],
+        ),
+      );
+    }
 
     if (recommendations.isNotEmpty) {
       addSection(
@@ -1036,8 +1040,8 @@ class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage> {
       final List<Track> tracks;
       String? note;
       if (album != null) {
-        final AlbumDetails details = await widget.state.catalog.albumDetails(
-          int.parse(album.id),
+        final AlbumDetails details = await widget.state.catalog.albumDetailsFor(
+          album.id,
         );
         tracks = details.tracks;
         note = details.description;
@@ -1286,7 +1290,7 @@ class _LargeScreenArtistPageState extends State<LargeScreenArtistPage> {
   @override
   void didUpdateWidget(covariant LargeScreenArtistPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.artist.id != widget.artist.id) unawaited(_load());
+    if (oldWidget.artist.key != widget.artist.key) unawaited(_load());
   }
 
   Future<void> _load() async {
@@ -1298,10 +1302,8 @@ class _LargeScreenArtistPageState extends State<LargeScreenArtistPage> {
       final ArtistDetails details = await widget.state.catalog.artistDetails(
         widget.artist,
       );
-      final ArtistAlbumPage albums = await widget.state.catalog.artistAlbumPage(
-        widget.artist.id,
-        offset: 0,
-      );
+      final ArtistAlbumPage albums = await widget.state.catalog
+          .artistAlbumPageFor(widget.artist, offset: 0);
       if (!mounted) return;
       setState(() {
         _details = details;
@@ -1360,7 +1362,7 @@ class _LargeScreenArtistPageState extends State<LargeScreenArtistPage> {
       ],
     );
     return SingleChildScrollView(
-      key: PageStorageKey<String>('large-screen-artist-${artist.id}'),
+      key: PageStorageKey<String>('large-screen-artist-${artist.key}'),
       padding: EdgeInsets.fromLTRB(
         inset,
         22,

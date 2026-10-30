@@ -30,6 +30,7 @@ import 'legacy_login.dart';
 import 'legacy_widgets.dart';
 import 'font_settings_page.dart';
 import 'shortcut_settings_page.dart';
+import '../widgets/music_provider_badge.dart';
 
 /// A single-column, inset-grouped Settings page, following the iOS Settings
 /// information architecture rather than a desktop form grid.
@@ -435,7 +436,7 @@ class _SettingsOverview extends StatelessWidget {
                 children: <Widget>[
                   _LegacySettingRow(
                     label: '播放音质',
-                    subtitle: state.playbackQuality.detail,
+                    subtitle: state.audioQualityDetail(state.playbackQuality),
                     trailing: DropdownButton<AudioQuality>(
                       key: const ValueKey('playback-quality'),
                       value: state.playbackQuality,
@@ -445,7 +446,7 @@ class _SettingsOverview extends StatelessWidget {
                         for (final AudioQuality quality in AudioQuality.values)
                           DropdownMenuItem<AudioQuality>(
                             value: quality,
-                            child: TrText(quality.label),
+                            child: TrText(state.audioQualityLabel(quality)),
                           ),
                       ],
                       onChanged: (AudioQuality? value) {
@@ -473,7 +474,7 @@ class _SettingsOverview extends StatelessWidget {
                 children: <Widget>[
                   _LegacySettingRow(
                     label: '下载音质',
-                    subtitle: state.downloadQuality.detail,
+                    subtitle: state.audioQualityDetail(state.downloadQuality),
                     trailing: DropdownButton<AudioQuality>(
                       key: const ValueKey('download-quality'),
                       value: state.downloadQuality,
@@ -483,7 +484,7 @@ class _SettingsOverview extends StatelessWidget {
                         for (final AudioQuality quality in AudioQuality.values)
                           DropdownMenuItem<AudioQuality>(
                             value: quality,
-                            child: TrText(quality.label),
+                            child: TrText(state.audioQualityLabel(quality)),
                           ),
                       ],
                       onChanged: (AudioQuality? value) {
@@ -733,6 +734,24 @@ class _SettingsOverview extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
+                  AppleListTile(
+                    key: const ValueKey('music-platform-settings'),
+                    title: context.tr('音乐平台'),
+                    subtitle: state.isNavidrome
+                        ? 'Navidrome'
+                        : context.tr('网易云音乐'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (state.musicProvider.experimental)
+                          const ExperimentalMusicBadge(),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
+                    onTap: () =>
+                        unawaited(showLegacyLoginDialog(context, state)),
+                  ),
                   _LegacySettingRow(
                     label: state.isGuest ? '游客' : state.user.name,
                     subtitle: state.isGuest
@@ -750,15 +769,16 @@ class _SettingsOverview extends StatelessWidget {
                             child: const TrText('退出登录'),
                           ),
                   ),
-                  _LegacySettingRow(
-                    label: '一起听',
-                    subtitle: '和朋友同步听歌',
-                    trailing: OutlinedButton(
-                      onPressed: () =>
-                          unawaited(showListenTogetherDialog(context, state)),
-                      child: const TrText('打开'),
+                  if (!state.isNavidrome)
+                    _LegacySettingRow(
+                      label: '一起听',
+                      subtitle: '和朋友同步听歌',
+                      trailing: OutlinedButton(
+                        onPressed: () =>
+                            unawaited(showListenTogetherDialog(context, state)),
+                        child: const TrText('打开'),
+                      ),
                     ),
-                  ),
                   _LegacySettingRow(
                     label: '刷新曲库',
                     subtitle: '重新拉取首页、歌单和每日推荐',

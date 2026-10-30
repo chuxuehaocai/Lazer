@@ -62,6 +62,11 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<bool> create() async {
+    if (state.isNavidrome) {
+      error = '当前音乐平台不支持一起听。';
+      _notify();
+      return false;
+    }
     if (!state.signedIn) {
       error = '请先登录后再一起听'; // i18n:key
       _notify();

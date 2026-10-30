@@ -14,6 +14,8 @@ import 'biliboard.dart';
 import 'models.dart';
 import 'catalog_details.dart';
 
+part 'platform_catalog.dart';
+
 /// Music returned by the gateway.
 class HomeFeed {
   const HomeFeed({
@@ -97,6 +99,24 @@ class Catalog {
        audioCache = AudioCache(disk: cache);
 
   final NeteaseGateway gateway;
+  late final GatewayRegistry connections = GatewayRegistry()
+    ..add(NeteaseMusicGateway(connectionId: 'netease', gateway: gateway));
+  late final _PlatformCatalog _platform = _PlatformCatalog(this);
+  MusicGateway get activeGateway => connections.active!;
+  bool get usesPlatformGateway => activeGateway.provider.id != 'netease';
+  Track trackFromMusicSong(MusicSong song) => _platform.track(song);
+  Playlist playlistFromMusicPlaylist(MusicPlaylist playlist) =>
+      _platform.playlist(playlist);
+  int _platformEpoch = 0;
+
+  void selectConnection(String key) {
+    connections.select(key);
+    _platformEpoch++;
+    _home = null;
+    _homeError = null;
+    _online = false;
+  }
+
   final DiskCache cache;
   final BiliboardClient charts;
   final BillboardClient billboard;
@@ -138,6 +158,7 @@ class Catalog {
 
   // Private playlists and recommendations must not cross session boundaries.
   String get _scope {
+    if (usesPlatformGateway) return activeGateway.cacheNamespace;
     final cookie = gateway.sessionCookie;
     return cookie == null
         ? 'guest'
@@ -275,6 +296,9 @@ class Catalog {
   /// The last stored track list for [playlistId], stale or not, or null when
   /// this playlist has never been opened in the current session scope.
   Future<List<Track>?> cachedPlaylistTracks(String playlistId) {
+    if (MusicId.tryParse(playlistId) != null) {
+      return Future.value(null);
+    }
     if ((int.tryParse(playlistId) ?? 0) <= 0) {
       return Future<List<Track>?>.value(null);
     }
@@ -329,22 +353,35 @@ class Catalog {
   HomeFeed? get home => _home;
 
   Future<HomeFeed?> loadHome({int? userId}) async {
+    final epoch = _platformEpoch;
+    final selected = usesPlatformGateway ? activeGateway : null;
+    if (selected != null && selected.user == null) {
+      _home = null;
+      _homeError = '请登录 Navidrome 服务器。';
+      return null;
+    }
     _homeError = null;
     try {
-      _home = await _cached(
-        'home:$_scope:${userId ?? 0}',
-        const Duration(minutes: 20),
-        _decodeHome,
-        _encodeHome,
-        () async {
-          final feed = await _loadHome(userId: userId);
-          if (feed == null) throw StateError('Home unavailable');
-          return feed;
-        },
-      );
+      final loaded = selected != null
+          ? await _platform.home(selected)
+          : await _cached(
+              'home:$_scope:${userId ?? 0}',
+              const Duration(minutes: 20),
+              _decodeHome,
+              _encodeHome,
+              () async {
+                final feed = await _loadHome(userId: userId);
+                if (feed == null) throw StateError('Home unavailable');
+                return feed;
+              },
+            );
+      if (epoch != _platformEpoch) return _home;
+      _home = loaded;
+      if (selected != null) _online = true;
       _homeError = null;
       return _home;
     } catch (_) {
+      if (epoch != _platformEpoch) return _home;
       _homeError = '曲库加载失败，请检查网络后重试。'; // i18n:key
       return _home = null;
     }
@@ -476,18 +513,18 @@ class Catalog {
     _online = firstFailure == null || !feed.isEmpty;
     if (feed.isEmpty && firstFailure != null) {
       _homeError = '曲库加载失败，请检查网络后重试。'; // i18n:key
-      _home = null;
+      return null;
     } else {
       if (feed.isEmpty) _homeError = '当前没有可展示的音乐。'; // i18n:key
-      _home = feed;
+      return feed;
     }
-    return _home;
   }
 
   /// Search the live catalogue. Errors propagate to the search view.
   Future<SearchResults> search(String rawQuery) async {
     final String query = rawQuery.trim();
     if (query.isEmpty) return SearchResults.empty;
+    if (usesPlatformGateway) return _platform.search(activeGateway, query);
     try {
       final List<Object?> results = await Future.wait<Object?>(
         <Future<Object?>>[
@@ -538,8 +575,11 @@ class Catalog {
     }
   }
 
-  Future<List<Track>> personalFmTracks() async =>
-      (await gateway.personalFm()).map(trackFromSong).toList();
+  Future<List<Track>> personalFmTracks() async => usesPlatformGateway
+      ? (await activeGateway.recommendations()).items
+            .map(_platform.track)
+            .toList()
+      : (await gateway.personalFm()).map(trackFromSong).toList();
 
   /// External rankings load independently from the main discovery feed. A
   /// slow chart host must never hold the entire home page hostage.
@@ -676,6 +716,10 @@ class Catalog {
     int? seedSongId,
     int count = 30,
   }) async {
+    if (MusicId.tryParse(liked.id) != null) {
+      final tracks = await playlistTracks(liked.id);
+      return List<Track>.of(tracks)..shuffle();
+    }
     final int playlistId = int.tryParse(liked.id) ?? 0;
     if (playlistId <= 0) return const <Track>[];
     // The liked list is only needed to pick a seed when nothing is playing
@@ -786,6 +830,7 @@ class Catalog {
   ) => gateway.listenTogetherPlayCommand(roomId, commandInfo);
 
   Future<List<Track>> artistStationTracks(ArtistRef seed) async {
+    if (seed.platformKey != null) return artistSongsFor(seed);
     if (seed.id <= 0) return const <Track>[];
     final similar = await gateway.similarArtists(seed.id);
     final artistIds = <int>[
@@ -1044,13 +1089,18 @@ class Catalog {
       .trim();
 
   /// Reuses recent snapshots; expired snapshots remain available offline.
-  Future<List<Track>> playlistTracks(String playlistId) => _cached(
-    'playlist-v2:$_scope:$playlistId',
-    const Duration(minutes: 10),
-    (json) => _decodeTracks(json['tracks']),
-    (tracks) => {'tracks': tracks.map((track) => track.toJson()).toList()},
-    () => _playlistTracks(playlistId),
-  );
+  Future<List<Track>> playlistTracks(String playlistId) =>
+      MusicId.tryParse(playlistId) != null
+      ? _platform.playlistTracks(playlistId)
+      : _cached(
+          'playlist-v2:$_scope:$playlistId',
+          const Duration(minutes: 10),
+          (json) => _decodeTracks(json['tracks']),
+          (tracks) => {
+            'tracks': tracks.map((track) => track.toJson()).toList(),
+          },
+          () => _playlistTracks(playlistId),
+        );
 
   /// Fetches the complete playlist in stable 500-song pages.
   Future<List<Track>> _playlistTracks(String playlistId) async {
@@ -1155,7 +1205,9 @@ class Catalog {
 
   /// The signed-in user's own collections: liked songs, created playlists,
   /// subscribed playlists. Errors propagate to the profile view.
-  Future<UserCollections> userCollections(int uid) => uid <= 0
+  Future<UserCollections> userCollections(int uid) => usesPlatformGateway
+      ? _platform.collections(activeGateway)
+      : uid <= 0
       ? Future.value(UserCollections.empty)
       : _cached(
           _collectionsKey(uid),
@@ -1209,6 +1261,27 @@ class Catalog {
     return (await albumDetails(albumId)).tracks;
   }
 
+  Future<List<Track>> albumTracksFor(String key) async =>
+      (await albumDetailsFor(key)).tracks;
+
+  Future<AlbumDetails> albumDetailsFor(String key, {bool force = false}) =>
+      MusicId.tryParse(key) != null
+      ? _platform.albumDetails(key)
+      : albumDetails(int.parse(key), force: force);
+
+  Future<ArtistAlbumPage> artistAlbumPageFor(
+    ArtistRef artist, {
+    int offset = 0,
+    bool force = false,
+  }) => artist.platformKey != null
+      ? _platform.artistAlbumPage(artist, offset)
+      : artistAlbumPage(artist.id, offset: offset, force: force);
+
+  Future<List<Track>> artistSongsFor(ArtistRef artist, {bool force = false}) =>
+      artist.platformKey != null
+      ? _platform.artistSongs(artist)
+      : artistSongs(artist.id, force: force);
+
   Future<AlbumDetails> albumDetails(int albumId, {bool force = false}) async {
     if (albumId <= 0) throw ArgumentError.value(albumId, 'albumId');
     final key = 'album-detail:$albumId';
@@ -1248,6 +1321,7 @@ class Catalog {
     ArtistRef seed, {
     bool force = false,
   }) async {
+    if (seed.platformKey != null) return _platform.artistDetails(seed);
     if (seed.id <= 0) throw ArgumentError.value(seed.id, 'artistId');
     final key = 'artist-detail:${seed.id}';
     if (force) await _expire(key);
@@ -1376,6 +1450,10 @@ class Catalog {
     AudioQuality quality = AudioQuality.exhigh,
     bool useCache = true,
   }) async {
+    final reference = MusicId.tryParse(track.id);
+    if (reference != null) {
+      return _platform.audioSource(reference, quality, useCache);
+    }
     final int id = int.tryParse(track.id) ?? 0;
     if (id <= 0) return null;
     Object? failure;
@@ -1532,6 +1610,7 @@ class Catalog {
   );
 
   Future<GatewayLyrics?> _lyricsFor(Track track) async {
+    if (MusicId.tryParse(track.id) != null) return _platform.lyrics(track.id);
     final int id = int.tryParse(track.id) ?? 0;
     if (id <= 0) return null;
     try {
