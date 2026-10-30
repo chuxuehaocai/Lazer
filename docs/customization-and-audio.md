@@ -64,7 +64,7 @@ The root DLL is a local build output: do not commit it or add an ignore rule.
 
 | Platform | Engine library | Output |
 | --- | --- | --- |
-| Android 8.0+ (arm64-v8a, x86_64) | liblazer-audio.so | AAudio shared PCM |
+| Android 8.0+ (armeabi-v7a, arm64-v8a, x86_64) | liblazer-audio.so | AAudio shared PCM |
 | Windows | lazer-audio.dll | WASAPI |
 | Linux | liblazer-audio.so | ALSA |
 | macOS | liblazer-audio.dylib | CoreAudio |
@@ -100,7 +100,7 @@ detached nodes, preventing a stale animated descendant from invalidating AXTree.
 
 GitHub Actions stages the engine, reader bridge and required FFmpeg runtime/license
 files into Windows, Linux and macOS runnable packages. Android additionally runs
-`ci/build-android-audio.sh`, builds both supported ABIs with NDK 28.2.13676358,
+`ci/build-android-audio.sh`, builds the supported ABIs with NDK 28.2.13676358,
 and checks the final APK for both native libraries in each ABI directory.
 
 To build Android engines on Linux/macOS, set `ANDROID_HOME` and install the pinned
@@ -108,7 +108,7 @@ NDK, CMake, Ninja, pkg-config and NASM, then run:
 
 ```sh
 bash ci/build-android-audio.sh
-flutter build apk --release --target-platform android-arm64,android-x64
+flutter build apk --release --target-platform android-arm,android-arm64,android-x64
 ```
 
 Generated Android libraries and FFmpeg license files are ignored by Git. The

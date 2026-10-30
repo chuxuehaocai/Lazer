@@ -15,9 +15,9 @@ if(ANDROID AND NOT LAZER_ANDROID_BUILD_ENGINE)
             "LAZER_ANDROID_BUILD_DSD=ON.")
     endif()
     foreach(_lazer_android_abi IN ITEMS "${ANDROID_ABI}" "${CMAKE_ANDROID_ARCH_ABI}")
-        if(_lazer_android_abi AND NOT _lazer_android_abi MATCHES "^(arm64-v8a|x86_64)$")
+        if(_lazer_android_abi AND NOT _lazer_android_abi MATCHES "^(arm64-v8a|armeabi-v7a|x86_64)$")
             message(FATAL_ERROR
-                "The Android native audio targets support arm64-v8a and x86_64; "
+                "The Android native audio targets support arm64-v8a, armeabi-v7a and x86_64; "
                 "requested ${_lazer_android_abi}.")
         endif()
     endforeach()

@@ -1,7 +1,7 @@
 # Android Audio Engine
 
-The full native engine supports Android API 26 and newer on `arm64-v8a` and
-`x86_64`. It uses the same decoder, gapless queue, DSP and public C ABI as the
+The full native engine supports Android API 26 and newer on `armeabi-v7a`,
+`arm64-v8a` and `x86_64`. It uses the same decoder, gapless queue, DSP and public C ABI as the
 desktop engines. AAudio provides shared PCM output. It does not advertise
 exclusive, bit-perfect, DoP or native DSD output on Android.
 
@@ -17,11 +17,11 @@ on Linux or macOS. Set `ANDROID_HOME`, then run:
 
 ```sh
 bash ci/build-android-audio.sh
-flutter build apk --release --target-platform android-arm64,android-x64
+flutter build apk --release --target-platform android-arm,android-arm64,android-x64
 python3 ci/verify-android-audio.py --apk build/app/outputs/flutter-apk/app-release.apk
 ```
 
-The helper stages `liblazer-audio.so` and `liblazer-audio-bridge.so` for both ABIs
+The helper stages `liblazer-audio.so` and `liblazer-audio-bridge.so` for each ABI
 under Android's `jniLibs` directory. The APK verifier checks ELF architecture,
 required C exports, runtime dependencies, absence of private FFmpeg exports,
 16 KiB load alignment, uncompressed ZIP-entry alignment and license notices.

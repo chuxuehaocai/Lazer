@@ -6,7 +6,8 @@ import struct
 import zipfile
 from pathlib import Path
 
-ABIS = {"arm64-v8a": 183, "x86_64": 62}
+# e_machine values. armeabi-v7a is ELF32; the other two are ELF64.
+ABIS = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40), "x86_64": (2, 62)}
 LIBRARIES = ("liblazer-audio.so", "liblazer-audio-bridge.so")
 SYSTEM_LIBRARIES = {
     "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
@@ -35,23 +36,40 @@ def check(condition, message):
 
 
 def verify_elf(data, abi, library, bundled=()):
-    check(len(data) >= 64 and data[:6] == b"\x7fELF\x02\x01", "expected little-endian ELF64")
-    header = struct.unpack_from("<HHIQQQIHHHHHH", data, 16)
+    elf_class, machine_id = ABIS[abi]
+    ident = b"\x7fELF" + bytes((elf_class, 1))
+    check(len(data) >= 64 and data[:6] == ident, "expected little-endian ELF for " + abi)
+    if elf_class == 2:
+        header = struct.unpack_from("<HHIQQQIHHHHHH", data, 16)
+        section_format, section_size = "<IIQQQQIIQQ", 64
+        program_format = "<IIQQQQQQ"
+        dynamic_format = "<qQ"
+        symbol_format = "<IBBHQQ"
+    else:
+        header = struct.unpack_from("<HHIIIIIHHHHHH", data, 16)
+        section_format, section_size = "<IIIIIIIIII", 40
+        program_format = "<IIIIIIII"
+        dynamic_format = "<iI"
+        symbol_format = "<IIIBBH"
     kind, machine = header[:2]
-    check(kind == 3 and machine == ABIS[abi], f"wrong ELF type/architecture: {kind}/{machine}")
+    check(kind == 3 and machine == machine_id, f"wrong ELF type/architecture: {kind}/{machine}")
     phoff, shoff, phsize, phcount, shsize, shcount = (
         header[4], header[5], header[8], header[9], header[10], header[11]
     )
+    # ELF64 stores p_offset before p_vaddr; ELF32 stores p_offset after p_type.
+    offset_field, address_field = (2, 3) if elf_class == 2 else (1, 2)
     loads = 0
     for i in range(phcount):
-        segment = struct.unpack_from("<IIQQQQQQ", data, phoff + phsize * i)
+        segment = struct.unpack_from(program_format, data, phoff + phsize * i)
         if segment[0] == 1:
             loads += 1
             check(segment[7] >= 16384, "LOAD segment is not 16KB aligned")
-            check(segment[2] % 16384 == segment[3] % 16384, "LOAD offset/address alignment mismatch")
+            check(segment[offset_field] % 16384 == segment[address_field] % 16384,
+                  "LOAD offset/address alignment mismatch")
     check(loads > 0, "ELF has no loadable segments")
-    sections = [struct.unpack_from("<IIQQQQIIQQ", data, shoff + shsize * i)
+    sections = [struct.unpack_from(section_format, data, shoff + shsize * i)
                 for i in range(shcount)]
+    check(section_size == shsize, f"unexpected section header size {shsize}")
 
     def section_bytes(section):
         return data[section[4]:section[4] + section[5]]
@@ -68,12 +86,15 @@ def verify_elf(data, abi, library, bundled=()):
         check(section[9] > 0, "dynamic section has zero-sized entries")
         for offset in range(0, len(entries), section[9]):
             if section[1] == 6:
-                tag, value = struct.unpack_from("<qQ", entries, offset)
+                tag, value = struct.unpack_from(dynamic_format, entries, offset)
                 check(tag != 22 and not (tag == 30 and value & 4), "ELF contains text relocations")
                 if tag == 1:
                     dependencies.add(text(strings, value))
             else:
-                name, info, _, index, _, _ = struct.unpack_from("<IBBHQQ", entries, offset)
+                if elf_class == 2:
+                    name, info, _, index, _, _ = struct.unpack_from(symbol_format, entries, offset)
+                else:
+                    name, _, _, info, _, index = struct.unpack_from(symbol_format, entries, offset)
                 if name and index and info >> 4 in (1, 2):
                     exports.add(text(strings, name))
     required = ENGINE_EXPORTS if library == LIBRARIES[0] else BRIDGE_EXPORTS

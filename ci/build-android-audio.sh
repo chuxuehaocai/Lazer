@@ -13,7 +13,7 @@ case "$(uname -s)" in
 esac
 strip="$ndk/toolchains/llvm/prebuilt/$host/bin/llvm-strip"
 
-for abi in arm64-v8a x86_64; do
+for abi in arm64-v8a armeabi-v7a x86_64; do
   prefix="$repo/build/android-ffmpeg/$abi"
   bash "$repo/native/lazer-audio/tools/build_android_dsd_ffmpeg.sh" "$prefix" "$ndk" "$abi"
   output="$repo/build/android-audio/$abi"

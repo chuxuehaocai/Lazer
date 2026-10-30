@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--build", type=Path, required=True)
     parser.add_argument("--ffmpeg", type=Path, required=True)
-    parser.add_argument("--abi", choices=("arm64-v8a", "x86_64"), required=True)
+    parser.add_argument("--abi", choices=("arm64-v8a", "armeabi-v7a", "x86_64"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     repo = Path(__file__).resolve().parent.parent
@@ -33,7 +33,11 @@ def main():
             raise SystemExit(f"Missing relinking material: {path}")
     staging = args.build / "relink-package"
     staging.mkdir(parents=True, exist_ok=True)
-    target = "aarch64-linux-android26" if args.abi == "arm64-v8a" else "x86_64-linux-android26"
+    target = {
+        "arm64-v8a": "aarch64-linux-android26",
+        "armeabi-v7a": "armv7a-linux-androideabi26",
+        "x86_64": "x86_64-linux-android26",
+    }[args.abi]
     relink = staging / "relink.sh"
     relink.write_text(f"""#!/usr/bin/env bash
 set -euo pipefail

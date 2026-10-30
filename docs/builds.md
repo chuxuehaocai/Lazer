@@ -31,7 +31,7 @@ The desktop playback engine ported from `master` (FFmpeg + WASAPI/ALSA/CoreAudio
 DSD/DoP, gapless, EQ/limiter) is built into all Windows, macOS and Linux cloud
 artifacts together with the matching DSD-capable FFmpeg runtime and its LGPL
 notice. Packaging checks fail if any required engine, bridge or FFmpeg library is
-missing. Android packages the native AAudio engine for arm64-v8a and x86_64;
+missing. Android packages the native AAudio engine for armeabi-v7a, arm64-v8a and x86_64;
 iOS uses `just_audio`. On Windows the engine and FFmpeg are built with MSVC so
 their import libraries match the app toolchain. See
 [audio-engine.md](audio-engine.md) for local build variables and the settings page.

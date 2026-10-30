@@ -421,7 +421,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             export ORG_GRADLE_PROJECT_lazerRequireReleaseSigning=true
           fi
-          flutter build apk --release --no-pub --target-platform android-arm64,android-x64 \
+          flutter build apk --release --no-pub --target-platform android-arm,android-arm64,android-x64 \
             --dart-define=LAZER_COMMIT=${{ github.sha }} \
             --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Verify Android Audio Engine is bundled

@@ -9,7 +9,7 @@ readonly ANDROID_API="24"
 readonly PROFILE_REVISION="pcm-file-v2"
 
 if [[ $# -lt 1 || $# -gt 3 || -z "$1" ]]; then
-    echo "Usage: $0 <install-prefix> [android-ndk-root] [arm64-v8a|x86_64]" >&2
+    echo "Usage: $0 <install-prefix> [android-ndk-root] [arm64-v8a|armeabi-v7a|x86_64]" >&2
     exit 2
 fi
 
@@ -20,6 +20,13 @@ case "$abi" in
         ffmpeg_arch="aarch64"
         ffmpeg_cpu="armv8-a"
         ;;
+    armeabi-v7a)
+        target="armv7a-linux-androideabi"
+        # The NDK triple already selects Thumb-2, NEON and the softfp ABI that
+        # the engine objects use. Extra -mfpu flags would risk disagreeing with it.
+        ffmpeg_arch="arm"
+        ffmpeg_cpu="armv7-a"
+        ;;
     x86_64)
         target="x86_64-linux-android"
         # FFmpeg's configure canonicalizes all x86 targets under arch=x86, then
@@ -28,7 +35,7 @@ case "$abi" in
         ffmpeg_cpu="x86-64"
         ;;
     *)
-        echo "Unsupported Android ABI '$abi'; choose arm64-v8a or x86_64." >&2
+        echo "Unsupported Android ABI '$abi'; choose arm64-v8a, armeabi-v7a or x86_64." >&2
         exit 2
         ;;
 esac
