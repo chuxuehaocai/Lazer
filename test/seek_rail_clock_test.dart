@@ -6,11 +6,13 @@ import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
+import 'package:lazer_nextgen/data/lyrics.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/legacy/legacy_theme.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/player_seek_bar.dart';
+import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
 
 const Track _track = Track(
   id: 'seek-fixture',
@@ -100,6 +102,120 @@ Finder _railSlider() => find.descendant(
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets(
+    'foreground resume immediately aligns line lyrics and rail to live audio',
+    (tester) async {
+      final state = await _pumpPlayer(tester, const Size(390, 844));
+      final engine = state.audioEngine! as _Engine;
+      state.lyrics = parseLrc(
+        '[00:00.00]First\n[00:30.00]Second\n[01:00.00]Third\n[01:30.00]Fourth\n[02:00.00]Fifth',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildLegacyTheme(),
+          home: Scaffold(
+            body: Column(
+              children: [
+                Expanded(child: LyricViewport(state: state)),
+                PlayerSeekBar(state: state),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      final lifecycle = AppLifecycleListener(
+        onResume: state.synchronizePlaybackAfterResume,
+      );
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      engine.position = const Duration(seconds: 95);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(state.position, const Duration(seconds: 95));
+      expect(
+        tester.widget<Slider>(_railSlider()).value,
+        closeTo(95 / 240, 1e-9),
+      );
+      final viewport = tester.getRect(find.byType(LyricViewport));
+      final line = tester.getRect(find.byKey(const ValueKey('lyric-blur-3')));
+      expect(line.center.dy, closeTo(viewport.top + viewport.height * .35, 1));
+      expect(
+        tester
+            .widget<ImageFiltered>(find.byKey(const ValueKey('lyric-blur-3')))
+            .enabled,
+        isFalse,
+      );
+      lifecycle.dispose();
+      state.pause();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'backgrounding cancels an unfinished seek without committing its preview',
+    (tester) async {
+      final state = await _pumpPlayer(tester, const Size(390, 844));
+      final engine = state.audioEngine! as _Engine;
+      final rect = tester.getRect(_railSlider());
+      final gesture = await tester.startGesture(
+        Offset(rect.left + rect.width * .3, rect.center.dy),
+      );
+      await gesture.moveTo(Offset(rect.left + rect.width * .7, rect.center.dy));
+      await tester.pump();
+      expect(tester.widget<Slider>(_railSlider()).value, greaterThan(.5));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      engine.position = const Duration(seconds: 40);
+      state.pause();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      state.synchronizePlaybackAfterResume();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await gesture.cancel();
+      await tester.pump();
+      expect(engine.seekRequests, isEmpty);
+      expect(state.playing, isFalse);
+      expect(
+        tester.widget<Slider>(_railSlider()).value,
+        closeTo(40 / 240, 1e-9),
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  for (final toggle in [false, true]) {
+    testWidgets(
+      'playback clock keeps updating after ${toggle ? 'toggle' : 'play'} resumes a paused source',
+      (tester) async {
+        final state = await _pumpPlayer(tester, const Size(390, 844));
+        final engine = state.audioEngine! as _Engine;
+        state.pause();
+        if (toggle) {
+          state.togglePlay();
+        } else {
+          state.play();
+        }
+        await tester.pump();
+        engine.position = const Duration(seconds: 70);
+        await tester.pump(const Duration(milliseconds: 120));
+        expect(state.position, engine.position);
+        expect(
+          tester.widget<Slider>(_railSlider()).value,
+          closeTo(70 / 240, 1e-9),
+        );
+        state.pause();
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
 
   testWidgets(
     'dragging holds the preview across ticks and seeks once without flashing back',

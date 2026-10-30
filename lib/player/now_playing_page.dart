@@ -916,7 +916,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
         controlsVisible: visible,
         header: _headerControls(),
         summary: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+          padding: const EdgeInsets.fromLTRB(24, 18, 24, 6),
           child: PlayerTrackSummary(
             key: const ValueKey('compact-player-summary'),
             track: track,

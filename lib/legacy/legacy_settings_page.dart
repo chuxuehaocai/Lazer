@@ -30,6 +30,7 @@ import 'legacy_login.dart';
 import 'legacy_widgets.dart';
 import 'font_settings_page.dart';
 import 'shortcut_settings_page.dart';
+import 'scheduled_pause_settings.dart';
 import '../widgets/music_provider_badge.dart';
 
 /// A single-column, inset-grouped Settings page, following the iOS Settings
@@ -462,6 +463,19 @@ class _SettingsOverview extends StatelessWidget {
                     value: state.independentPlayback,
                     onChanged: (bool value) =>
                         unawaited(state.setIndependentPlayback(value)),
+                  ),
+                  AppleListTile(
+                    key: const ValueKey('open-scheduled-pause'),
+                    title: context.tr('定时关闭'),
+                    subtitle: context.tr(
+                      state.scheduledPauseActive ? '当前处于暂停时段' : '自定义每天自动暂停的时间段',
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => SettingsDetailHost.open(
+                      context,
+                      page: (_) => ScheduledPauseSettingsPage(state: state),
+                      view: (_) => ScheduledPauseSettingsPage(state: state),
+                    ),
                   ),
                 ],
               ),

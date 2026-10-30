@@ -3,6 +3,7 @@
 //
 //   dart run tool/build_native_audio.dart --ffmpeg-root /path/to/ffmpeg
 //   LAZER_FFMPEG_ROOT=/path/to/ffmpeg dart run tool/build_native_audio.dart
+//   dart run tool/build_native_audio.dart --project-root
 //
 // What it does:
 //   1. configures CMake over `native/` into `build/native-audio/cmake`,
@@ -13,8 +14,8 @@
 //
 // `flutter build windows` / `flutter build linux` do the equivalent through
 // `native/CMakeLists.txt` and install the same libraries into the bundle, so this
-// script is for `flutter run` during development and for macOS, whose Xcode build
-// has no CMake step.
+// script also supports standalone builds and macOS, whose Xcode build has no
+// CMake step. --project-root also places the Windows engine at the checkout root.
 //
 // FFmpeg must be built with the DSD sample format; a distro package is rejected by
 // the engine's configure check (see `native/lazer-audio/cmake/FindLazerFFmpeg.cmake`).
@@ -31,7 +32,8 @@ Future<int> _build(List<String> arguments) async {
   final String? ffmpegRoot =
       _optionValue(arguments, '--ffmpeg-root') ??
       Platform.environment['LAZER_FFMPEG_ROOT'] ??
-      Platform.environment['FFMPEG_ROOT'];
+      Platform.environment['FFMPEG_ROOT'] ??
+      _cachedFfmpegRoot();
 
   if (ffmpegRoot == null || ffmpegRoot.isEmpty) {
     stderr.writeln(
@@ -50,9 +52,20 @@ Future<int> _build(List<String> arguments) async {
 
   final String configuration = _optionValue(arguments, '--config') ?? 'Release';
   final String cmakeDirectory = '$_outputDirectory/cmake';
+  final String? cmake = _which('cmake') ?? _visualStudioCmake();
+  if (cmake == null) {
+    stderr.writeln(
+      'CMake was not found. Install the C++ CMake tools in Visual Studio.',
+    );
+    return 2;
+  }
+  if (arguments.contains('--project-root') && !Platform.isWindows) {
+    stderr.writeln('--project-root is only supported on Windows.');
+    return 2;
+  }
 
   final int configured = await _run(<String>[
-    'cmake',
+    cmake,
     '-S',
     'native',
     '-B',
@@ -66,7 +79,7 @@ Future<int> _build(List<String> arguments) async {
   if (configured != 0) return configured;
 
   final int built = await _run(<String>[
-    'cmake',
+    cmake,
     '--build',
     cmakeDirectory,
     '--config',
@@ -87,11 +100,22 @@ Future<int> _build(List<String> arguments) async {
 
   final Directory target = Directory(_outputDirectory);
   await target.create(recursive: true);
-  final int staged = await _stage(cmakeDirectory, target, ffmpegPrefix);
+  final int staged = await _stage(
+    cmakeDirectory,
+    target,
+    ffmpegPrefix,
+    configuration,
+  );
   if (staged == 0) {
+    if (arguments.contains('--project-root')) {
+      await File('${target.path}/lazer-audio.dll').copy('lazer-audio.dll');
+      stdout.writeln('staged lazer-audio.dll at the project root (local only)');
+    }
     stdout.writeln('\nStaged native audio libraries in ${target.path}');
-    stdout.writeln('Playback now uses the native engine when the app runs from the '
-        'repository root.');
+    stdout.writeln(
+      'Playback now uses the native engine when the app runs from the '
+      'repository root.',
+    );
   }
   return staged;
 }
@@ -101,6 +125,7 @@ Future<int> _stage(
   String cmakeDirectory,
   Directory target,
   String ffmpegRoot,
+  String configuration,
 ) async {
   final List<String> wanted = <String>[
     if (Platform.isWindows) ...<String>[
@@ -111,29 +136,41 @@ Future<int> _stage(
     ] else if (Platform.isMacOS) ...<String>[
       'liblazer-audio.dylib',
       'liblazer-audio-bridge.dylib',
-    ] else ...<String>[
-      'liblazer-audio.so',
-      'liblazer-audio-bridge.so',
-    ],
+    ] else ...<String>['liblazer-audio.so', 'liblazer-audio-bridge.so'],
   ];
-  int staged = 0;
+  final Set<String> staged = <String>{};
   // Visual Studio writes a release build under `Release/`; Ninja and Makefiles put
   // it next to the sources. A recursive walk covers both.
-  await for (final FileSystemEntity entity in Directory(cmakeDirectory).list(
-    recursive: true,
-    followLinks: false,
-  )) {
+  await for (final FileSystemEntity entity in Directory(
+    cmakeDirectory,
+  ).list(recursive: true, followLinks: false)) {
     if (entity is! File) continue;
     final String name = entity.uri.pathSegments.last;
     if (!wanted.contains(name)) continue;
-    final File destination = File('${target.path}${Platform.pathSeparator}$name');
+    if (entity.uri.pathSegments.any(
+      (part) =>
+          const [
+            'Debug',
+            'Profile',
+            'Release',
+            'RelWithDebInfo',
+            'MinSizeRel',
+          ].contains(part) &&
+          part != configuration,
+    )) {
+      continue;
+    }
+    final File destination = File(
+      '${target.path}${Platform.pathSeparator}$name',
+    );
     await entity.copy(destination.path);
     stdout.writeln('staged ${destination.path}');
-    staged++;
+    staged.add(name);
   }
-  if (staged == 0) {
+  if (!staged.any((name) => !name.contains('bridge')) ||
+      !staged.any((name) => name.contains('bridge'))) {
     stderr.writeln(
-      'Nothing to stage: the build produced none of ${wanted.join(', ')}.',
+      'The build must produce both the engine and its reader bridge; found $staged.',
     );
     return 1;
   }
@@ -169,6 +206,48 @@ Future<int> _stage(
   return 0;
 }
 
+String? _cachedFfmpegRoot() {
+  for (final prefix in <String>[
+    'third_party/ffmpeg',
+    'native/ffmpeg',
+    if (Platform.isWindows) ...[
+      'build/native-ffmpeg/windows-${_msvcArchitecture()}',
+      if (Abi.current() == Abi.windowsX64) 'build/windows-ffmpeg-local',
+    ],
+  ]) {
+    if (File('$prefix/include/libavformat/avformat.h').existsSync()) {
+      return prefix;
+    }
+  }
+  return null;
+}
+
+String? _visualStudioCmake() {
+  if (!Platform.isWindows) return null;
+  for (final root in <String>[
+    'C:/Program Files (x86)/Microsoft Visual Studio/Installer',
+    'C:/Program Files/Microsoft Visual Studio/Installer',
+  ]) {
+    final vswhere = File('$root/vswhere.exe');
+    if (!vswhere.existsSync()) continue;
+    final result = Process.runSync(vswhere.path, <String>[
+      '-latest',
+      '-products',
+      '*',
+      '-requires',
+      'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+      '-property',
+      'installationPath',
+    ]);
+    final prefix = '${result.stdout}'.trim();
+    final cmake = File(
+      '$prefix/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe',
+    );
+    if (cmake.existsSync()) return cmake.path;
+  }
+  return null;
+}
+
 /// Honours `--generator`, and otherwise picks a toolchain that can actually build
 /// the engine.
 ///
@@ -182,14 +261,22 @@ List<String> _generatorArguments(List<String> arguments) {
     return <String>[
       '-G',
       generator,
-      if (Platform.isWindows && generator.startsWith('Visual Studio'))
-        ...<String>['-A', _msvcArchitecture()],
+      if (Platform.isWindows &&
+          generator.startsWith('Visual Studio')) ...<String>[
+        '-A',
+        _msvcArchitecture(),
+      ],
     ];
   }
   if (Platform.isWindows) {
     final String? version = _visualStudioVersion();
     if (version != null) {
-      return <String>['-G', 'Visual Studio $version', '-A', _msvcArchitecture()];
+      return <String>[
+        '-G',
+        'Visual Studio $version',
+        '-A',
+        _msvcArchitecture(),
+      ];
     }
     stderr.writeln(
       'No Visual Studio installation was found. The engine needs MSVC on Windows '

@@ -21,8 +21,25 @@ class PlayerSeekBar extends StatefulWidget {
   State<PlayerSeekBar> createState() => _PlayerSeekBarState();
 }
 
-class _PlayerSeekBarState extends State<PlayerSeekBar> {
+class _PlayerSeekBarState extends State<PlayerSeekBar>
+    with WidgetsBindingObserver {
   bool _grabbing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      _setGrabbing(false);
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   void _setGrabbing(bool value) {
     if (_grabbing == value) return;
@@ -31,10 +48,12 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
 
   @override
   Widget build(BuildContext context) {
-    final double railHeight =
-        _grabbing ? widget.trackHeight + 3 : widget.trackHeight;
-    final double thumbRadius =
-        _grabbing ? widget.thumbRadius + 3 : widget.thumbRadius;
+    final double railHeight = _grabbing
+        ? widget.trackHeight + 3
+        : widget.trackHeight;
+    final double thumbRadius = _grabbing
+        ? widget.thumbRadius + 3
+        : widget.thumbRadius;
     // Leaf: the only part of Now Playing that consumes 100 ms ticks.
     return Listener(
       onPointerDown: (_) => _setGrabbing(true),

@@ -217,6 +217,7 @@ class _LazerAppState extends State<LazerApp> {
   bool _rootRebuildScheduled = false;
   late _RootUiSignature _rootUi;
   final BrowseNavigationObserver _browseNavigation = BrowseNavigationObserver();
+  late final AppLifecycleListener _playbackLifecycle;
 
   _RootUiSignature get _rootUiSignature => (
     _state.legacyAccentSeed,
@@ -237,6 +238,9 @@ class _LazerAppState extends State<LazerApp> {
     super.initState();
     _rootUi = _rootUiSignature;
     _state.addListener(_onRootUiChanged);
+    _playbackLifecycle = AppLifecycleListener(
+      onResume: _state.synchronizePlaybackAfterResume,
+    );
     _state.bootstrap();
   }
 
@@ -265,6 +269,7 @@ class _LazerAppState extends State<LazerApp> {
 
   @override
   void dispose() {
+    _playbackLifecycle.dispose();
     _browseNavigation.dispose();
     _state.removeListener(_onRootUiChanged);
     widget.media.close();

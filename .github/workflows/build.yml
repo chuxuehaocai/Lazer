@@ -95,6 +95,21 @@ jobs:
       - name: Package EXE, DLLs, resources and Visual C++ runtime
         shell: pwsh
         run: ./ci/package-windows.ps1
+      - name: Verify bundled Audio Engine loads without the SDK search path
+        shell: pwsh
+        run: |
+          $release = (Resolve-Path 'build/windows/x64/runner/Release').Path
+          $probe = Join-Path $release 'native-bundle-check.exe'
+          dart compile exe tool/native_bundle_check.dart -o $probe
+          if ($LASTEXITCODE -ne 0) { throw 'Could not compile native bundle check' }
+          Push-Location $env:RUNNER_TEMP
+          try {
+            & $probe
+            if ($LASTEXITCODE -ne 0) { throw 'Bundled native engine failed to load' }
+          } finally {
+            Pop-Location
+            Remove-Item -LiteralPath $probe -Force
+          }
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: Lazer-Windows-x86_64
@@ -494,6 +509,9 @@ jobs:
       actions: read
       contents: write
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Download all platform artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -508,7 +526,13 @@ jobs:
           set -euo pipefail
           mapfile -t assets < <(find release-assets -type f -print | sort)
           test "${#assets[@]}" -gt 0
-          release_args=(--verify-tag --title "$GITHUB_REF_NAME" --generate-notes)
+          release_args=(--verify-tag --title "$GITHUB_REF_NAME")
+          notes="docs/releases/$GITHUB_REF_NAME.md"
+          if [[ -f "$notes" ]]; then
+            release_args+=(--notes-file "$notes")
+          else
+            release_args+=(--generate-notes)
+          fi
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             release_args+=(--prerelease)
           fi

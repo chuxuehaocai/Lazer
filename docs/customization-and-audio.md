@@ -45,6 +45,22 @@ keep the system's own momentum, and Apple touch scrolling uses native bounce.
 Settings → HiFi playback → Audio engine selects the bundled/imported Audio Engine or the system
 audio engine. Engine selection and imports apply on the next application launch.
 An unavailable/incompatible native library falls back to the system engine.
+New installations prefer the bundled native engine. An explicit system-engine
+selection or imported-engine override is preserved across upgrades.
+
+On Windows, `flutter run -d windows` also compiles the engine whenever a
+DSD-capable FFmpeg SDK is available. CMake discovers `third_party/ffmpeg`,
+`native/ffmpeg`, `build/native-ffmpeg/windows-x64` and the local
+`build/windows-ffmpeg-local` cache; `LAZER_FFMPEG_ROOT` takes precedence.
+Debug/Profile builds update `lazer-audio.dll` at the checkout root, with the
+reader bridge and FFmpeg runtime in `build/native-audio`. Development checkouts
+load that root engine before bundled copies. Release builds search their own
+bundle and ignore repository artifacts.
+
+For a standalone local Windows build, run
+`dart run tool/build_native_audio.dart --project-root`. This discovers cached
+SDKs and Visual Studio's CMake without requiring a developer command prompt.
+The root DLL is a local build output: do not commit it or add an ignore rule.
 
 | Platform | Engine library | Output |
 | --- | --- | --- |

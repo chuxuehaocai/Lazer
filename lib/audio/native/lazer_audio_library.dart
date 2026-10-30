@@ -14,6 +14,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'lazer_audio_abi.dart';
+import 'lazer_audio_paths.dart';
 
 /// Result of trying to load the engine.
 ///
@@ -659,8 +660,8 @@ abstract final class LazerAudioLoader {
     );
     if (enginePath == null) {
       return LazerAudioAvailability.unavailable(
-        '${engineFileNames.first} was not found next to the executable, in the '
-        'working directory, or in build/native',
+        '${engineFileNames.first} was not found in the app bundle, configured '
+        'override, or development checkout',
       );
     }
     final String engineFileName = enginePath.pathSegments.last;
@@ -726,9 +727,7 @@ abstract final class LazerAudioLoader {
     final Uri? bridgePath = _resolve(
       fileNames: bridgeFileNames,
       environmentVariable: bridgeOverrideVariable,
-      siblingDirectory: (engineOverride ?? importedLibraryPath) == null
-          ? null
-          : File(enginePath.toFilePath()).parent.path,
+      siblingDirectory: File(enginePath.toFilePath()).parent.path,
     );
     if (bridgePath != null) {
       try {
@@ -746,13 +745,10 @@ abstract final class LazerAudioLoader {
   /// the engine depends on.
   static final List<DynamicLibrary> _preloadedDependencies = <DynamicLibrary>[];
 
-  /// Loads the FFmpeg libraries that sit next to [enginePath], in dependency order
-  /// (codecs before the demuxer that uses them). Failures are ignored: the engine
-  /// may still load if the DLLs are found another way.
+  /// Root development engines keep their FFmpeg runtime under build/native-audio;
+  /// bundles and imports resolve dependencies beside the selected engine.
   static void _preloadDependencies(Uri enginePath) {
     if (!Platform.isWindows) return;
-    final Directory directory = File(enginePath.toFilePath()).parent;
-    if (!directory.existsSync()) return;
     const List<String> order = <String>[
       'avutil',
       'swresample',
@@ -760,15 +756,17 @@ abstract final class LazerAudioLoader {
       'avformat',
     ];
     final List<File> candidates = <File>[];
-    try {
-      candidates.addAll(
-        directory.listSync().whereType<File>().where(
-          (File file) => file.path.toLowerCase().endsWith('.dll'),
-        ),
-      );
-    } catch (error) {
-      developer.log('listing $directory failed: $error', name: 'lazer-audio');
-      return;
+    for (final directory in _paths.dependencyDirectories(enginePath)) {
+      if (!directory.existsSync()) continue;
+      try {
+        candidates.addAll(
+          directory.listSync().whereType<File>().where(
+            (File file) => file.path.toLowerCase().endsWith('.dll'),
+          ),
+        );
+      } catch (error) {
+        developer.log('listing $directory failed: $error', name: 'lazer-audio');
+      }
     }
     for (final String library in order) {
       for (final File file in candidates) {
@@ -778,6 +776,7 @@ abstract final class LazerAudioLoader {
         }
         try {
           _preloadedDependencies.add(DynamicLibrary.open(file.path));
+          break;
         } catch (error) {
           developer.log(
             'preloading ${file.path} failed: $error',
@@ -788,70 +787,25 @@ abstract final class LazerAudioLoader {
     }
   }
 
-  /// Resolution order: explicit environment override, the executable's own
-  /// directory (and its `lib/` child on Linux), the working directory (`flutter run` from
-  /// the repo root), then the trees `tool/build_native_audio.dart` and CMake
-  /// produce under `build/native-audio`.
+  static NativeAudioLibraryPaths get _paths => NativeAudioLibraryPaths(
+    workingDirectory: Directory.current,
+    executableDirectory: File(Platform.resolvedExecutable).parent,
+    development: !const bool.fromEnvironment('dart.vm.product'),
+    linux: Platform.isLinux,
+    android: Platform.isAndroid,
+  );
+
+  /// Imports and environment overrides take precedence. Development checkouts
+  /// use the freshly built root engine; installed apps use their own bundle.
   static Uri? _resolve({
     required List<String> fileNames,
     required String environmentVariable,
     String? explicitPath,
     String? siblingDirectory,
-  }) {
-    if (explicitPath != null) {
-      final File file = File(explicitPath);
-      return file.existsSync() ? file.absolute.uri : null;
-    }
-    if (siblingDirectory != null) {
-      for (final name in fileNames) {
-        final file = File('$siblingDirectory${Platform.pathSeparator}$name');
-        if (file.existsSync()) return file.absolute.uri;
-      }
-    }
-    final String? override = Platform.environment[environmentVariable];
-    if (override != null && override.trim().isNotEmpty) {
-      final File file = File(override.trim());
-      if (file.existsSync()) return file.absolute.uri;
-    }
-    if (Platform.isAndroid) return Uri.file(fileNames.first);
-    final String separator = Platform.pathSeparator;
-    final String cwd = Directory.current.path;
-    final String executableDirectory = File(
-      Platform.resolvedExecutable,
-    ).parent.path;
-    final List<String> directories = <String>[
-      executableDirectory,
-      if (Platform.isLinux) '$executableDirectory${separator}lib',
-      cwd,
-    ];
-    // Multi-config generators nest artefacts under a configuration directory and
-    // each CMake target gets its own output directory.
-    for (final String root in <String>['build/native-audio', 'build/native']) {
-      for (final String subdirectory in <String>[
-        '',
-        'lazer-audio',
-        'lazer-audio-bridge',
-      ]) {
-        for (final String configuration in <String>['', 'Release', 'Debug']) {
-          directories.add(
-            <String>[
-              cwd,
-              root,
-              subdirectory,
-              configuration,
-            ].where((String part) => part.isNotEmpty).join(separator),
-          );
-        }
-      }
-    }
-    for (final String directory in directories) {
-      for (final String fileName in fileNames) {
-        final File candidate = File(
-          <String>[directory, fileName].join(Platform.pathSeparator),
-        );
-        if (candidate.existsSync()) return candidate.absolute.uri;
-      }
-    }
-    return null;
-  }
+  }) => _paths.resolve(
+    fileNames: fileNames,
+    explicitPath: explicitPath,
+    environmentOverride: Platform.environment[environmentVariable],
+    siblingDirectory: siblingDirectory,
+  );
 }

@@ -121,16 +121,28 @@ LAZER_FFMPEG_ROOT=/path/to/ffmpeg flutter build linux --release
 executable. Without `LAZER_FFMPEG_ROOT` (or `third_party/ffmpeg`) the engine is
 skipped with a status message and the app builds against `just_audio`.
 
-For `flutter run` during development, and for macOS (whose Xcode build has no
-CMake step), stage the libraries into `build/native-audio/`, which the loader also
-searches:
+Windows `flutter run` automatically compiles the native targets when the SDK is
+available. Debug/Profile builds also update the root `lazer-audio.dll` and keep
+the bridge/FFmpeg DLLs in `build/native-audio`. Cached SDKs at
+`build/native-ffmpeg/windows-x64` or `build/windows-ffmpeg-local` are discovered
+automatically. The FFmpeg SDK remains a build prerequisite on a fresh checkout.
+
+For a standalone Windows build with a root DLL, use
+`dart run tool/build_native_audio.dart --project-root`. The generated root DLL
+is local only; do not stage it or add a `.gitignore` entry.
+
+For macOS (whose Xcode build has no CMake step), or a standalone host build,
+stage the libraries into `build/native-audio/`:
 
 ```bash
 dart run tool/build_native_audio.dart --ffmpeg-root /path/to/ffmpeg
 ```
 
 `LAZER_AUDIO_LIBRARY` and `LAZER_AUDIO_BRIDGE_LIBRARY` override the resolved paths
-for one process.
+for one process. Non-release development checkouts prefer root/staged libraries.
+Installed release builds use the executable's directory (or its Linux `lib/`
+child) and fall back to the system engine when unavailable. Imported engines
+and an explicit system-engine preference remain authoritative.
 
 ## Verification
 

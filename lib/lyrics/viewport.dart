@@ -41,7 +41,7 @@ class LyricViewport extends StatefulWidget {
 }
 
 class _LyricViewportState extends State<LyricViewport>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   Ticker? _ticker;
   late final AnimationController _blur = AnimationController(
     vsync: this,
@@ -97,6 +97,34 @@ class _LyricViewportState extends State<LyricViewport>
     super.initState();
     _trackId = widget.state.current?.id;
     widget.state.all.addListener(_onLane);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _resume?.cancel();
+    _dragging = false;
+    _middlePointer = null;
+    _velocity = 0;
+    _coast = null;
+    _lastMedia = null;
+    _manual = _selection.active;
+    _onLane();
+    if (!identical(_lines, widget.state.lyrics) || _lines.isEmpty) return;
+    // Discard pre-background spring trajectories instead of replaying them.
+    _targets(seeking: true, stagger: false);
+    if (!_manual) {
+      for (final spring in [..._ys, ..._scales]) {
+        spring.setPosition(spring.target);
+      }
+    }
+    _frames.value++;
+    _emphasisFrames.value++;
+    if (_active >= 0 && _active < _rowFrames.length) {
+      _rowFrames[_active].value++;
+    }
+    _updateBlur();
   }
 
   @override
@@ -1027,6 +1055,7 @@ class _LyricViewportState extends State<LyricViewport>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _resume?.cancel();
     for (final notifier in _rowFrames) {
       notifier.dispose();

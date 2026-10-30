@@ -34,6 +34,7 @@ import 'media_shortcuts.dart';
 import 'playback_queue_store.dart';
 import 'hifi_settings.dart';
 import 'ui_preferences.dart';
+import 'scheduled_pause.dart';
 import '../theme/font_preferences.dart';
 
 part 'music_platform_state.dart';
@@ -144,6 +145,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.hifi,
     this.artworkSeedLoader = albumSeedForCover,
     this.navidromeFactory,
+    this.scheduledPauseClock = DateTime.now,
   }) : catalog = catalog ?? Catalog(),
        localLibrary = localLibrary ?? LocalLibrary(),
        _queueStore = queueStore ?? PlaybackQueueStore(),
@@ -180,6 +182,47 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Owns applying those settings; null when the app runs on `just_audio`.
   final HifiController? hifi;
+
+  static const scheduledPauseKey = 'lazer_scheduled_pause';
+  ScheduledPauseSettings scheduledPause = ScheduledPauseSettings();
+  late final ScheduledPauseController _pauseSchedule = ScheduledPauseController(
+    now: () => scheduledPauseClock(),
+    onCheck: (active) {
+      if (active) pause();
+      if (_scheduledPauseActive != active) {
+        _scheduledPauseActive = active;
+        notifyListeners();
+      }
+    },
+  );
+  final DateTime Function() scheduledPauseClock;
+  bool _scheduledPauseActive = false;
+  bool get scheduledPauseActive =>
+      scheduledPause.activeAt(scheduledPauseClock());
+  late final _pauseScheduleWriter = CoalescingWriter(() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(scheduledPauseKey, scheduledPause.encode());
+  });
+
+  Future<void> setScheduledPause(ScheduledPauseSettings value) async {
+    scheduledPause = value;
+    _pauseSchedule.update(value);
+    notifyListeners();
+    await _pauseScheduleWriter.request();
+  }
+
+  void checkScheduledPause() => _pauseSchedule.check();
+
+  /// Reconcile the UI with audio that kept running while frames were suspended.
+  void synchronizePlaybackAfterResume() {
+    if (_presentationDisposed) return;
+    checkScheduledPause();
+    if (_realActive && audioEngine?.active == true) {
+      _position = precisePosition;
+    }
+    if (_playing) _ensureTicker();
+    _tickNotifier.pulse();
+  }
 
   /// Persists the HiFi settings; a single writer so a value the engine refused is
   /// not stored as if it had taken effect.
@@ -1255,6 +1298,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final int initialQueueActivity = _queueActivity;
     try {
       final prefs = await SharedPreferences.getInstance();
+      scheduledPause = ScheduledPauseSettings.decode(
+        prefs.getString(scheduledPauseKey),
+      );
+      _pauseSchedule.update(scheduledPause);
       _independentPlayback =
           prefs.getBool('lazer_independent_playback') ?? _independentPlayback;
       hapticsEnabled = prefs.getBool('lazer_haptics') ?? true;
@@ -2103,6 +2150,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _replaceQueue(List<Track> tracks, {int startIndex = 0}) {
+    if (scheduledPauseActive) return;
     if (tracks.isEmpty) return;
     _finishPlaySession();
     trackChangeDirection = 1;
@@ -2120,15 +2168,19 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void togglePlay() {
+    if (scheduledPauseActive) {
+      pause();
+      return;
+    }
     if (current == null) return;
     _playing = !_playing;
     if (_playing) {
+      _ensureTicker();
       if (_realActive) {
         unawaited(_resumeAudio());
       } else {
         playbackError = null;
         unawaited(_startAudio());
-        _ensureTicker();
       }
     } else {
       _ticker?.cancel();
@@ -2138,14 +2190,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void play() {
+    if (scheduledPauseActive) return;
     if (current == null || _playing) return;
     _playing = true;
+    _ensureTicker();
     if (_realActive) {
       unawaited(_resumeAudio());
     } else {
       playbackError = null;
       unawaited(_startAudio());
-      _ensureTicker();
     }
     notifyListeners();
   }
@@ -2382,6 +2435,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void playTrackAt(int index) {
+    if (scheduledPauseActive) return;
     if (index < 0 || index >= _queue.length) return;
     _finishPlaySession();
     trackChangeDirection = index < _queueIndex ? -1 : 1;
@@ -2708,9 +2762,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> _resumeAudio() async {
+    if (_presentationDisposed) return;
+    if (!_playing || scheduledPauseActive) {
+      pause();
+      return;
+    }
     final generation = _generation;
     try {
       await audioEngine!.play();
+      if (_presentationDisposed) return;
+      // A pending native play may finish after the pause boundary.
+      if (!_playing || scheduledPauseActive) {
+        pause();
+        await audioEngine!.pause();
+      }
     } catch (_) {
       if (generation == _generation) _failPlayback('播放中断，请重试。');
     }
@@ -3231,6 +3296,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _pauseSchedule.dispose();
     _musicPlatforms.cancelPending();
     catalog.connections.close();
     _presentationDisposed = true;

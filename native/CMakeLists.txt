@@ -5,9 +5,8 @@
 # EQ/limiter chain, behind one C ABI (`lazer_audio_api.h`). Dart talks to it
 # through `lib/audio/native/`.
 #
-# It is opt-in because it needs a *DSD-capable* FFmpeg build, which distro
-# packages usually are not. Without one the app still builds and plays through
-# just_audio; the native path simply reports unavailable and the app falls back.
+# A DSD-capable FFmpeg SDK is required. Cached developer SDKs are discovered
+# automatically; an explicit prefix takes precedence over those caches.
 #
 #   cmake -DLAZER_FFMPEG_ROOT=/path/to/ffmpeg ...
 #
@@ -47,6 +46,19 @@ endif()
 if(NOT LAZER_FFMPEG_ROOT AND EXISTS "${_lazer_repo_root}/native/ffmpeg/include/libavformat/avformat.h")
     set(LAZER_FFMPEG_ROOT "${_lazer_repo_root}/native/ffmpeg")
 endif()
+if(WIN32 AND NOT LAZER_FFMPEG_ROOT)
+    set(_lazer_sdk_candidates "build/native-ffmpeg/windows-${CMAKE_GENERATOR_PLATFORM}")
+    if(CMAKE_GENERATOR_PLATFORM STREQUAL "x64" OR
+       (NOT CMAKE_GENERATOR_PLATFORM AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64"))
+        list(APPEND _lazer_sdk_candidates "build/windows-ffmpeg-local")
+    endif()
+    foreach(_lazer_sdk IN LISTS _lazer_sdk_candidates)
+        if(EXISTS "${_lazer_repo_root}/${_lazer_sdk}/include/libavformat/avformat.h")
+            set(LAZER_FFMPEG_ROOT "${_lazer_repo_root}/${_lazer_sdk}")
+            break()
+        endif()
+    endforeach()
+endif()
 if(LAZER_FFMPEG_ROOT)
     file(TO_CMAKE_PATH "${LAZER_FFMPEG_ROOT}" LAZER_FFMPEG_ROOT)
 endif()
@@ -83,6 +95,18 @@ if(LAZER_AUDIO_NATIVE_ENGINE)
             # because `install` runs outside this subdirectory's variable scope.
             file(GLOB LAZER_AUDIO_NATIVE_RUNTIME_FILES
                 "${LAZER_FFMPEG_ROOT}/bin/*.dll")
+            # flutter run builds these targets too. Keep a developer engine at
+            # the checkout root and its companion/runtime DLLs under build/.
+            add_custom_target(lazer-audio-development ALL
+                COMMAND "${CMAKE_COMMAND}"
+                    "-DLAZER_AUDIO_CONFIG=$<CONFIG>"
+                    "-DLAZER_AUDIO_ENGINE=$<TARGET_FILE:lazer-audio>"
+                    "-DLAZER_AUDIO_BRIDGE=$<TARGET_FILE:lazer-audio-bridge>"
+                    "-DLAZER_AUDIO_REPO=${_lazer_repo_root}"
+                    "-DLAZER_AUDIO_FFMPEG=${LAZER_FFMPEG_ROOT}"
+                    -P "${CMAKE_CURRENT_LIST_DIR}/stage_development.cmake"
+                DEPENDS lazer-audio lazer-audio-bridge
+                VERBATIM)
         endif()
         message(STATUS
             "lazer-audio: building the native engine against FFmpeg at ${LAZER_FFMPEG_ROOT}")

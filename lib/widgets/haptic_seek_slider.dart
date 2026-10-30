@@ -12,7 +12,8 @@ class HapticSeekSlider extends StatefulWidget {
   State<HapticSeekSlider> createState() => _HapticSeekSliderState();
 }
 
-class _HapticSeekSliderState extends State<HapticSeekSlider> {
+class _HapticSeekSliderState extends State<HapticSeekSlider>
+    with WidgetsBindingObserver {
   /// A D-pad step on the seek rail, in fractional track length.
   static const double _step = .02;
 
@@ -20,6 +21,29 @@ class _HapticSeekSliderState extends State<HapticSeekSlider> {
   bool _dragging = false;
   String? _dragTrackId;
   double? _preview;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Losing the pointer while backgrounding must not commit or retain a seek.
+    if (state != AppLifecycleState.resumed && !_dragging) return;
+    setState(() {
+      _dragging = false;
+      _dragTrackId = null;
+      _preview = null;
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   void _start(double value) {
     _dragging = true;

@@ -697,5 +697,22 @@
   "随机发现": "Shuffle discovery",
   "探索服务器里的音乐": "Explore music on your server",
   "随机播放喜欢的音乐": "Shuffle your favorite songs",
-  "密码": "Password"
+  "密码": "Password",
+  "定时关闭": "Scheduled pause",
+  "启用定时关闭": "Enable scheduled pause",
+  "当前处于暂停时段": "A pause period is active",
+  "到达指定时段后自动暂停播放": "Automatically pause during your selected periods",
+  "自定义每天自动暂停的时间段": "Choose daily periods to pause playback",
+  "每日重复，按本地时间执行。时段内保持暂停，结束后不会自动播放。": "Repeats daily in local time. Playback stays paused during each period and does not resume automatically afterwards.",
+  "还没有暂停时段": "No pause periods yet",
+  "每天 · 跨午夜": "Daily · Overnight",
+  "每天": "Daily",
+  "添加暂停时段": "Add pause period",
+  "编辑暂停时段": "Edit pause period",
+  "开始时间": "Start time",
+  "结束时间": "End time",
+  "请输入有效的24小时制时间，例如23:30": "Enter a valid 24-hour time, e.g. 23:30",
+  "开始时间和结束时间不能相同": "Start and end times must differ",
+  "结束时间早于开始时间时，时段会延续到次日。": "An end time before the start continues into the next day.",
+  "编辑": "Edit"
 }

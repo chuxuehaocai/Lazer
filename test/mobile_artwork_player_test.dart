@@ -139,6 +139,11 @@ void main() {
 
         await tester.pump(const Duration(seconds: 3));
         await tester.pump(const Duration(milliseconds: 400));
+        final summary = tester.getRect(
+          find.byKey(const ValueKey('compact-player-summary')),
+        );
+        expect(summary.top, greaterThanOrEqualTo(24 + 18));
+        expect(summary.bottom, lessThan(size.height - 20));
         expect(
           tester
               .widget<FadeTransition>(
