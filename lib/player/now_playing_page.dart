@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -32,6 +32,8 @@ import '../widgets/player_seek_bar.dart';
 import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/song_comments_view.dart';
 import 'desktop_now_playing.dart';
+import 'artwork_lyrics_layout.dart';
+import '../theme/font_preferences.dart';
 
 /// Shared comments entry from the player header.
 Future<void> showSongComments(
@@ -201,10 +203,42 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   final GlobalKey _backdropKey = GlobalKey();
   late SongCommentsController _commentsController;
   Timer? _hideTimer;
+  final Set<int> _activeControlPointers = {};
+
+  void _beginControlPointer(int pointer) {
+    _activeControlPointers.add(pointer);
+    _hideTimer?.cancel();
+  }
+
+  void _endControlPointer(int pointer) {
+    _activeControlPointers.remove(pointer);
+    _armHide();
+  }
+
+  Color? _themeSeed;
+  FontPreferences? _themeFonts;
+  ThemeData? _cachedPlayerTheme;
+  (Color, FontPreferences)? _cachedPlayerThemeKey;
+
+  ThemeData _playerTheme(BuildContext context) {
+    final Color accent =
+        widget.state.legacyAccentSeed ?? Theme.of(context).colorScheme.primary;
+    final key = (accent, widget.state.fontPreferences);
+    if (_cachedPlayerThemeKey != key) {
+      _cachedPlayerThemeKey = key;
+      _cachedPlayerTheme = buildAppTheme(
+        brightness: Brightness.dark,
+        accent: accent,
+        fonts: widget.state.fontPreferences,
+      );
+    }
+    return _cachedPlayerTheme!;
+  }
 
   @override
   void initState() {
     super.initState();
+    widget.state.playerPresentationChanged(true);
     _commentsController = SongCommentsController(widget.state.gateway);
     widget.state.addListener(_preferencesChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -213,6 +247,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   }
 
   bool get _canAutoHide =>
+      _activeControlPointers.isEmpty &&
       !_selectionOpen &&
       !_commentsOpen &&
       !_queueOpen &&
@@ -224,6 +259,12 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       widget.state.lyrics.isNotEmpty;
 
   void _preferencesChanged() {
+    if (_themeSeed != widget.state.legacyAccentSeed ||
+        _themeFonts != widget.state.fontPreferences) {
+      _themeSeed = widget.state.legacyAccentSeed;
+      _themeFonts = widget.state.fontPreferences;
+      if (mounted) setState(() {});
+    }
     if (!_canAutoHide && !_controlsVisible) _wakeControls();
     _armHide();
   }
@@ -292,6 +333,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
 
   @override
   void dispose() {
+    widget.state.playerPresentationChanged(false);
     _hideTimer?.cancel();
     widget.state.removeListener(_preferencesChanged);
     _commentsController.dispose();
@@ -384,23 +426,34 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   }
 
   /// 移动端整屏歌词：标题固定，正文占满剩余高度。
-  Widget _mobileLyrics() => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const InlineLabel('歌词'),
-        const SizedBox(height: AppSpacing.md),
-        Expanded(
-          child: _settledGate(
-            LyricViewport(
-              state: widget.state,
-              backdropKey: _backdropKey,
-              onSelectionChanged: _selectionChanged,
+  Widget _mobileLyrics({bool withArtwork = false}) => LayoutBuilder(
+    builder: (context, box) => Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: 4,
+        vertical: !withArtwork
+            ? 16
+            : box.maxHeight < 240
+            ? 4
+            : 12,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!withArtwork || box.maxHeight >= 240) ...[
+            const InlineLabel('歌词'),
+            SizedBox(height: withArtwork ? 12 : AppSpacing.md),
+          ],
+          Expanded(
+            child: _settledGate(
+              LyricViewport(
+                state: widget.state,
+                backdropKey: _backdropKey,
+                onSelectionChanged: _selectionChanged,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 
@@ -484,17 +537,29 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       onLongPress: () => unawaited(_saveArtwork(track)),
       child: AspectRatio(
         aspectRatio: 1,
-        child: DecoratedBox(
+        child: AnimatedContainer(
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 420),
+          curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x66000000),
-                blurRadius: 24,
-                spreadRadius: 1,
-                offset: Offset(0, 8),
-              ),
-            ],
+            boxShadow:
+                widget.state.showArtworkWithLyrics &&
+                    _lyricsMode &&
+                    useCompactLayout(
+                      widget.state.uiMode,
+                      MediaQuery.sizeOf(context).width,
+                    )
+                ? const []
+                : const [
+                    BoxShadow(
+                      color: Color(0x66000000),
+                      blurRadius: 24,
+                      spreadRadius: 1,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
@@ -520,42 +585,46 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     ignoring: compact && !_controlsVisible,
     child: AnimatedOpacity(
       opacity: compact && !_controlsVisible ? 0 : 1,
-      duration: const Duration(milliseconds: 200),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-        child: Row(
-          children: <Widget>[
-            AccessibleIconButton(
-              tooltip: '返回',
-              onPressed: _closePage,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded),
-            ),
-            const Spacer(),
-            if (_saving)
-              const Padding(
-                padding: EdgeInsets.only(right: 12),
-                child: SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            AccessibleIconButton(
-              key: const ValueKey('now-playing-more'),
-              tooltip: '更多',
-              onPressed: () => unawaited(_showMore()),
-              icon: const Icon(Icons.more_horiz_rounded),
-            ),
-          ],
+      curve: Curves.easeOutCubic,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 360),
+      child: _headerControls(),
+    ),
+  );
+
+  Widget _headerControls() => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+    child: Row(
+      children: <Widget>[
+        AccessibleIconButton(
+          tooltip: '返回',
+          onPressed: _closePage,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded),
         ),
-      ),
+        const Spacer(),
+        if (_saving)
+          const Padding(
+            padding: EdgeInsets.only(right: 12),
+            child: SizedBox.square(
+              dimension: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        AccessibleIconButton(
+          key: const ValueKey('now-playing-more'),
+          tooltip: '更多',
+          onPressed: () => unawaited(_showMore()),
+          icon: const Icon(Icons.more_horiz_rounded),
+        ),
+      ],
     ),
   );
 
   /// Opens the song sheet: what the player knows about the track, and every
   /// action the header used to spell out with its own icon.
   Future<void> _showMore() async {
-    final Track? track = widget.state.current;
-    if (track == null || _moreOpen) return;
+    if (widget.state.current == null || _moreOpen) return;
     _moreOpen = true;
     _hideTimer?.cancel();
     await showModalBottomSheet<void>(
@@ -563,35 +632,65 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       isScrollControlled: true,
       backgroundColor: context.colors.ivoryLight,
       showDragHandle: true,
-      builder: (BuildContext sheetContext) => _NowPlayingMoreSheet(
-        state: widget.state,
-        track: track,
-        lyricsOpen: _lyricsMode,
-        onLyrics: () {
-          Navigator.of(sheetContext).pop();
-          _toggleLyrics();
-        },
-        onSaveArtwork: () {
-          Navigator.of(sheetContext).pop();
-          unawaited(_saveArtwork(track));
-        },
-        onAddToPlaylist: () {
-          Navigator.of(sheetContext).pop();
-          unawaited(
-            showAddToPlaylistDialog(context, widget.state, track: track),
+      builder: (BuildContext sheetContext) => AnimatedBuilder(
+        animation: widget.state,
+        builder: (BuildContext context, Widget? child) {
+          final Track? track = widget.state.current;
+          if (track == null) {
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                child: Row(
+                  children: <Widget>[
+                    const Expanded(child: TrText('没有正在播放的曲目')),
+                    AccessibleIconButton(
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          return _NowPlayingMoreSheet(
+            state: widget.state,
+            track: track,
+            lyricsOpen: _lyricsMode,
+            onLyrics: () {
+              Navigator.of(sheetContext).pop();
+              _toggleLyrics();
+            },
+            onSaveArtwork: () {
+              Navigator.of(sheetContext).pop();
+              unawaited(_saveArtwork(track));
+            },
+            onAddToPlaylist: () {
+              Navigator.of(sheetContext).pop();
+              unawaited(
+                showAddToPlaylistDialog(
+                  this.context,
+                  widget.state,
+                  track: track,
+                ),
+              );
+            },
+            onDownload: () {
+              Navigator.of(sheetContext).pop();
+              unawaited(
+                downloadTracks(this.context, widget.state, <Track>[track]),
+              );
+            },
+            onComments: () {
+              Navigator.of(sheetContext).pop();
+              unawaited(_openComments());
+            },
+            onQueue: () {
+              Navigator.of(sheetContext).pop();
+              unawaited(_queue());
+            },
           );
-        },
-        onDownload: () {
-          Navigator.of(sheetContext).pop();
-          unawaited(downloadTracks(context, widget.state, <Track>[track]));
-        },
-        onComments: () {
-          Navigator.of(sheetContext).pop();
-          unawaited(_openComments());
-        },
-        onQueue: () {
-          Navigator.of(sheetContext).pop();
-          unawaited(_queue());
         },
       ),
     );
@@ -603,10 +702,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
 
   @override
   Widget build(BuildContext context) => Theme(
-    data: buildAppTheme(
-      brightness: Brightness.dark,
-      accent: Theme.of(context).colorScheme.primary,
-    ),
+    data: _playerTheme(context),
     child: Scaffold(
       backgroundColor: Colors.black,
       body: AnimatedBuilder(
@@ -624,13 +720,18 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                   // The immersive player owns its canvas: browse-page backdrop
                   // settings (including "不使用" or a custom picture) must not
                   // strip the song's album-colour flow from here.
-                  mode: LegacyBackgroundMode.nowPlayingDynamic,
+                  mode: widget.state.playerBackground,
+                  frameRate: widget.state.playerBackgroundFps == 0
+                      ? null
+                      : widget.state.playerBackgroundFps,
+                  solidColor: widget.state.playerBackgroundColor,
+                  imagePath: widget.state.playerBackgroundImagePath,
                   pageColor: Colors.black,
                   animationsEnabled: settled && widget.state.playing,
                   // Reads the live preference: the shell rebuilds this page on
                   // every state report, so dragging the slider is reflected on
                   // the next frame instead of on the next opening.
-                  quality: widget.state.dynamicBackgroundQuality,
+                  quality: widget.state.playerBackgroundQuality,
                   // The slide re-executes the whole page display list once per
                   // frame; a single gradient instead of the warped mesh keeps
                   // those frames affordable.
@@ -690,6 +791,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                   unawaited(_toggleFullscreen()),
                               controlsVisible: _controlsVisible,
                               onActivity: _controlsActivity,
+                              onPointerStart: _beginControlPointer,
+                              onPointerEnd: _endControlPointer,
                             ),
                           ),
                           ?_pullDownLayer(box),
@@ -698,9 +801,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                     }
                     return Listener(
                       behavior: HitTestBehavior.translucent,
-                      onPointerDown: (_) => _onTouchDown(),
-                      onPointerUp: (_) => _armHide(),
-                      onPointerCancel: (_) => _armHide(),
+                      onPointerDown: (event) {
+                        _onTouchDown();
+                        _beginControlPointer(event.pointer);
+                      },
+                      onPointerUp: (event) => _endControlPointer(event.pointer),
+                      onPointerCancel: (event) =>
+                          _endControlPointer(event.pointer),
                       child: Stack(
                         fit: StackFit.expand,
                         children: <Widget>[
@@ -711,12 +818,14 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                                 ? _stepBackFromLyrics
                                 : null,
                             child: SafeArea(
-                              child: Column(
-                                children: [
-                                  _header(compact),
-                                  Expanded(child: _mobile(track)),
-                                ],
-                              ),
+                              child: widget.state.showArtworkWithLyrics
+                                  ? _mobile(track)
+                                  : Column(
+                                      children: [
+                                        _header(compact),
+                                        Expanded(child: _mobile(track)),
+                                      ],
+                                    ),
                             ),
                           ),
                           ?_pullDownLayer(box),
@@ -749,8 +858,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       child: PlayerPullDownRegion(
         pullDown: pullDown,
         travel: box.maxHeight,
-        enabled:
-            !_selectionOpen && !_commentsOpen && !_queueOpen && !_moreOpen,
+        enabled: !_selectionOpen && !_commentsOpen && !_queueOpen && !_moreOpen,
       ),
     );
   }
@@ -798,6 +906,33 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   Widget _mobile(Track track) {
     final size = MediaQuery.sizeOf(context);
     final visible = !_lyricsMode || _controlsVisible;
+    if (widget.state.showArtworkWithLyrics) {
+      return ArtworkLyricsLayout(
+        lyricsVisible: _lyricsMode,
+        controlsVisible: visible,
+        header: _headerControls(),
+        summary: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+          child: PlayerTrackSummary(
+            key: const ValueKey('compact-player-summary'),
+            track: track,
+            onTap: _controlsActivity,
+          ),
+        ),
+        artwork: _cover(track),
+        lyrics: _mobileLyrics(withArtwork: true),
+        details: SingleChildScrollView(
+          child: _ArtworkTrackDetails(track: track, state: widget.state),
+        ),
+        transport: SingleChildScrollView(
+          child: _PlaybackTransport(
+            track: track,
+            state: widget.state,
+            edgeToEdge: true,
+          ),
+        ),
+      );
+    }
     if (size.height < 500 && size.width > size.height) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -879,6 +1014,88 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   }
 }
 
+/// A compact metadata row leaves the whole text column aligned with the cover.
+/// Secondary actions stay in More rather than squeezing the song title.
+class _ArtworkTrackDetails extends StatelessWidget {
+  const _ArtworkTrackDetails({required this.track, required this.state});
+  final Track track;
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    key: const ValueKey('artwork-track-details'),
+    children: [
+      Expanded(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CopyableSongTitle(
+              title: track.title,
+              child: Text(
+                track.title,
+                key: const ValueKey('artwork-track-title'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.fonts.apply(
+                  FontCategory.playerTitle,
+                  const TextStyle(
+                    fontFamily: AppFonts.sans,
+                    fontSize: 21,
+                    height: 1.2,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 5),
+            ArtistNameLink(
+              key: const ValueKey('artwork-track-artist'),
+              state: state,
+              artists: track.artists,
+              fallback: track.artist,
+              style: context.fonts.apply(
+                FontCategory.playerArtist,
+                const TextStyle(
+                  fontFamily: AppFonts.sans,
+                  fontSize: 16,
+                  height: 1.2,
+                  color: Color(0xCCFFFFFF),
+                ),
+              ),
+            ),
+            if (state.likeError != null)
+              TrText(
+                state.likeError!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.type.caption.copyWith(
+                  color: context.colors.clayDeep,
+                ),
+              ),
+          ],
+        ),
+      ),
+      const SizedBox(width: 4),
+      AccessibleIconButton(
+        tooltip: state.signedIn ? '收藏歌曲' : '登录后收藏',
+        onPressed: state.signedIn
+            ? () => unawaited(state.toggleLikeCurrent())
+            : null,
+        icon: Icon(
+          state.currentLiked
+              ? Icons.favorite_rounded
+              : Icons.favorite_border_rounded,
+          color: state.currentLiked
+              ? context.colors.clayDeep
+              : context.colors.cloudDark,
+        ),
+      ),
+    ],
+  );
+}
+
 class _TrackInfo extends StatelessWidget {
   const _TrackInfo({required this.track, required this.state});
   final Track track;
@@ -913,8 +1130,14 @@ class _TrackDetails extends StatelessWidget {
                 track.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: context.type.subheading.copyWith(
-                  fontSize: MediaQuery.sizeOf(context).width < 720 ? 24 : 28,
+                style: context.fonts.apply(
+                  FontCategory.playerTitle,
+                  const TextStyle(
+                    fontFamily: AppFonts.sans,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
@@ -955,9 +1178,13 @@ class _TrackDetails extends StatelessWidget {
       ],
       const SizedBox(height: 4),
       DefaultTextStyle(
-        style: context.type.body.copyWith(
-          fontSize: 17,
-          color: context.colors.cloudDark,
+        style: context.fonts.apply(
+          FontCategory.playerArtist,
+          TextStyle(
+            fontFamily: AppFonts.sans,
+            fontSize: 17,
+            color: context.colors.cloudDark,
+          ),
         ),
         child: Row(
           children: [
@@ -991,16 +1218,24 @@ class _TrackDetails extends StatelessWidget {
 }
 
 class _PlaybackTransport extends StatelessWidget {
-  const _PlaybackTransport({required this.track, required this.state});
+  const _PlaybackTransport({
+    required this.track,
+    required this.state,
+    this.edgeToEdge = false,
+  });
   final Track track;
   final AppState state;
+  final bool edgeToEdge;
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(16),
     child: DecoratedBox(
       decoration: const BoxDecoration(color: Colors.transparent),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: EdgeInsets.symmetric(
+          horizontal: edgeToEdge ? 0 : 12,
+          vertical: edgeToEdge ? 4 : 12,
+        ),
         child: Column(
           key: const ValueKey('now-playing-transport'),
           mainAxisSize: MainAxisSize.min,
@@ -1010,7 +1245,7 @@ class _PlaybackTransport extends StatelessWidget {
               onDismiss: state.clearPlaybackError,
             ),
             PlayerSeekBar(state: state),
-            const SizedBox(height: AppSpacing.sm),
+            SizedBox(height: edgeToEdge ? 0 : AppSpacing.sm),
             // Time labels ride the tick lane so position updates never rebuild
             // the whole page.
             AnimatedBuilder(
@@ -1023,7 +1258,7 @@ class _PlaybackTransport extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: edgeToEdge ? 8 : 12),
             // Fill the rail width so the last control has no trailing empty slab.
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1270,10 +1505,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 label: context.tr('专辑'),
                 value: track.album.isEmpty ? '—' : track.album,
               ),
-              _DetailLine(
-                label: context.tr('时长'),
-                value: fmt(track.duration),
-              ),
+              _DetailLine(label: context.tr('时长'), value: fmt(track.duration)),
               _DetailLine(
                 label: context.tr('音质'),
                 value: context.tr(state.playbackQuality.label),
@@ -1293,6 +1525,13 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 selected: lyricsOpen,
                 onTap: onLyrics,
               ),
+              if (state.showArtworkWithLyrics)
+                _MoreAction(
+                  icon: Icons.group_rounded,
+                  label: context.tr('一起听'),
+                  onTap: () =>
+                      unawaited(showListenTogetherDialog(context, state)),
+                ),
               _MoreAction(
                 icon: Icons.save_alt_rounded,
                 label: context.tr('保存封面'),
@@ -1373,12 +1612,14 @@ class _MoreAction extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final bool selected;
 
   @override
   Widget build(BuildContext context) {
-    final Color color = selected
+    final Color color = onTap == null
+        ? context.colors.cloudMedium
+        : selected
         ? context.colors.clayDeep
         : context.colors.slateDark;
     return InkWell(

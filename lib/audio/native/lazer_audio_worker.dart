@@ -174,6 +174,9 @@ abstract final class LazerWorkerOp {
   static const int setDevice = 7;
   static const int setVolume = 8;
   static const int setDsp = 9;
+  static const int play = 10;
+  static const int pause = 11;
+  static const int seek = 12;
 }
 
 /// The owning side of the worker isolate.
@@ -213,7 +216,7 @@ class LazerAudioWorker {
 
     final Isolate isolate = await Isolate.spawn<_WorkerStart>(
       _workerMain,
-      _WorkerStart(replies.sendPort),
+      _WorkerStart(replies.sendPort, LazerAudioLoader.importedLibraryPath),
       debugName: 'lazer-audio-worker',
       onError: replies.sendPort,
       onExit: replies.sendPort,
@@ -292,13 +295,15 @@ class LazerAudioWorker {
 
 /// Startup payload: where the worker sends replies and its readiness signal.
 class _WorkerStart {
-  const _WorkerStart(this.replies);
+  const _WorkerStart(this.replies, this.libraryPath);
 
   final SendPort replies;
+  final String? libraryPath;
 }
 
 /// Worker entry point. Every engine call here may block; the isolate exists for that.
 Future<void> _workerMain(_WorkerStart start) async {
+  LazerAudioLoader.importedLibraryPath = start.libraryPath;
   final ReceivePort inbox = ReceivePort();
   final LazerAudioAvailability availability = LazerAudioLoader.load();
   final LazerAudioApi? api = availability.api;
@@ -315,7 +320,8 @@ Future<void> _workerMain(_WorkerStart start) async {
     final List<Object?> call = message.cast<Object?>();
     final int id = call[0] as int;
     final int op = call[1] as int;
-    final List<Object?> params = (call[2] as List<Object?>?) ?? const <Object?>[];
+    final List<Object?> params =
+        (call[2] as List<Object?>?) ?? const <Object?>[];
     Object? value;
     String? error;
     try {
@@ -357,6 +363,15 @@ Object? _execute(LazerAudioApi api, int op, List<Object?> params) {
       );
     case LazerWorkerOp.setDsp:
       return _setDsp(api, params);
+    case LazerWorkerOp.play:
+      return api.play(Pointer<Void>.fromAddress(params[0] as int));
+    case LazerWorkerOp.pause:
+      return api.pause(Pointer<Void>.fromAddress(params[0] as int));
+    case LazerWorkerOp.seek:
+      return api.seek(
+        Pointer<Void>.fromAddress(params[0] as int),
+        params[1] as int,
+      );
     default:
       throw StateError('unknown audio worker command $op');
   }
@@ -374,13 +389,15 @@ Object? _create(LazerAudioApi api, List<Object?> params) {
     config.ref
       ..abiVersion = lazerAudioAbiVersion
       ..structSize = sizeOf<LazerAudioEngineConfig>();
-    config.ref.events.onEvent = Pointer<
-      NativeFunction<LazerAudioEventNative>
-    >.fromAddress(params[6] as int);
+    config.ref.events.onEvent =
+        Pointer<NativeFunction<LazerAudioEventNative>>.fromAddress(
+          params[6] as int,
+        );
     config.ref.events.context = nullptr;
-    config.ref.log.onLog = Pointer<
-      NativeFunction<LazerAudioLogNative>
-    >.fromAddress(params[7] as int);
+    config.ref.log.onLog =
+        Pointer<NativeFunction<LazerAudioLogNative>>.fromAddress(
+          params[7] as int,
+        );
     config.ref.log.context = nullptr;
     final Pointer<Void> engine = api.create(config);
     return engine == nullptr ? null : engine.address;
@@ -392,7 +409,8 @@ Object? _create(LazerAudioApi api, List<Object?> params) {
 /// `[engine, path, open params...]`.
 Object? _openFile(LazerAudioApi api, List<Object?> params) {
   final Pointer<Utf8> path = (params[1] as String).toNativeUtf8();
-  final Pointer<LazerAudioOpenParams> openParams = calloc<LazerAudioOpenParams>();
+  final Pointer<LazerAudioOpenParams> openParams =
+      calloc<LazerAudioOpenParams>();
   try {
     _writeOpenParams(openParams, params.sublist(2));
     return api.openFileUtf8(
@@ -408,7 +426,8 @@ Object? _openFile(LazerAudioApi api, List<Object?> params) {
 
 /// `[engine, reader address, open params...]`.
 Object? _openReader(LazerAudioApi api, List<Object?> params) {
-  final Pointer<LazerAudioOpenParams> openParams = calloc<LazerAudioOpenParams>();
+  final Pointer<LazerAudioOpenParams> openParams =
+      calloc<LazerAudioOpenParams>();
   try {
     _writeOpenParams(openParams, params.sublist(2));
     return api.openReader(
@@ -423,7 +442,8 @@ Object? _openReader(LazerAudioApi api, List<Object?> params) {
 
 /// `[engine, queue generation, reader address, open params...]`.
 Object? _queueReader(LazerAudioApi api, List<Object?> params) {
-  final Pointer<LazerAudioOpenParams> openParams = calloc<LazerAudioOpenParams>();
+  final Pointer<LazerAudioOpenParams> openParams =
+      calloc<LazerAudioOpenParams>();
   try {
     _writeOpenParams(openParams, params.sublist(3));
     return api.queueReader(
@@ -443,10 +463,7 @@ Object? _setDevice(LazerAudioApi api, List<Object?> params) {
       calloc<LazerAudioDeviceConfig>();
   try {
     _writeDevice(device.ref, params.sublist(1, 7));
-    return api.setDevice(
-      Pointer<Void>.fromAddress(params[0] as int),
-      device,
-    );
+    return api.setDevice(Pointer<Void>.fromAddress(params[0] as int), device);
   } finally {
     calloc.free(device);
   }

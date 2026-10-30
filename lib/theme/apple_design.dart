@@ -5,6 +5,9 @@ import 'package:flutter/cupertino.dart'
         CupertinoThemeData;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'font_preferences.dart';
+import 'adaptive_contrast.dart';
+import '../animation/view_transitions.dart';
 
 import 'tokens.dart';
 
@@ -234,9 +237,7 @@ class AppleSemanticColors extends ThemeExtension<AppleSemanticColors> {
   }
 }
 
-/// Apple HIG type ramp. The family intentionally stays unspecified so Flutter
-/// uses SF Pro on Apple platforms and the native UI face on Windows/Linux;
-/// CJK glyphs fall through to the platform CJK face and then bundled MiSans.
+/// Apple HIG type ramp with bundled MiSans on every platform.
 const List<String> appleFontFallback = <String>[
   'SF Pro Display',
   'SF Pro Text',
@@ -249,7 +250,7 @@ const List<String> appleFontFallback = <String>[
   'sans-serif',
 ];
 
-TextTheme appleTextTheme({Color? color, String? fontFamily}) {
+TextTheme appleTextTheme({Color? color, String? fontFamily = AppFonts.sans}) {
   TextStyle s(
     double size,
     double height,
@@ -292,11 +293,14 @@ TextTheme appleTextTheme({Color? color, String? fontFamily}) {
 ThemeData buildAppleTheme({
   Brightness brightness = Brightness.light,
   Color? seedAccent,
+  FontPreferences fonts = const FontPreferences(),
 }) {
   final AppleSemanticColors base = brightness == Brightness.dark
       ? AppleSemanticColors.dark
       : AppleSemanticColors.light;
-  final Color accent = seedAccent ?? base.accent;
+  final Color accent = seedAccent == null
+      ? base.accent
+      : adaptiveAccent(seedAccent, base.background);
   final AppleSemanticColors apple = base.copyWith(
     accent: accent,
     accentSoft: accent.withValues(
@@ -306,7 +310,7 @@ ThemeData buildAppleTheme({
   final ColorScheme scheme = ColorScheme(
     brightness: brightness,
     primary: accent,
-    onPrimary: Colors.white,
+    onPrimary: contrastingLabel(accent),
     primaryContainer: apple.accentSoft,
     onPrimaryContainer: apple.label,
     primaryFixed: apple.accentSoft,
@@ -352,18 +356,12 @@ ThemeData buildAppleTheme({
     shadow: Colors.black,
     scrim: Colors.black,
   );
-  // Apple platforms get their native SF face; everywhere else the bundled
-  // MiSans keeps Latin and CJK visually consistent (and renders correctly in
-  // widget tests, which otherwise fall back to Flutter's square Ahem face).
-  final String? uiFont =
-      defaultTargetPlatform == TargetPlatform.iOS ||
-          defaultTargetPlatform == TargetPlatform.macOS
-      ? null
-      : AppFonts.sans;
-  final TextTheme text = appleTextTheme(color: apple.label, fontFamily: uiFont);
-  final TextTheme hintText = appleTextTheme(
-    color: apple.secondaryLabel,
-    fontFamily: uiFont,
+  const String uiFont = AppFonts.sans;
+  final TextTheme text = fonts.applyTo(
+    appleTextTheme(color: apple.label, fontFamily: uiFont),
+  );
+  final TextTheme hintText = fonts.applyTo(
+    appleTextTheme(color: apple.secondaryLabel, fontFamily: uiFont),
   );
   return ThemeData(
     useMaterial3: true,
@@ -383,15 +381,15 @@ ThemeData buildAppleTheme({
     highlightColor: apple.fill,
     visualDensity: VisualDensity.standard,
     materialTapTargetSize: MaterialTapTargetSize.padded,
-    extensions: <ThemeExtension<dynamic>>[apple],
+    extensions: <ThemeExtension<dynamic>>[apple, fonts],
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: <TargetPlatform, PageTransitionsBuilder>{
         TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.android: CupertinoPageTransitionsBuilder(),
         TargetPlatform.fuchsia: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
-        TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+        TargetPlatform.windows: LazerPageTransitionsBuilder(),
+        TargetPlatform.linux: LazerPageTransitionsBuilder(),
       },
     ),
     appBarTheme: AppBarTheme(
@@ -449,7 +447,7 @@ ThemeData buildAppleTheme({
           color: states.contains(WidgetState.selected)
               ? apple.accent
               : apple.secondaryLabel,
-          fontWeight: FontWeight.w500,
+          fontWeight: fonts.weightFor(FontCategory.controls, FontWeight.w500),
         ),
       ),
     ),
@@ -460,7 +458,7 @@ ThemeData buildAppleTheme({
       unselectedIconTheme: IconThemeData(color: apple.secondaryLabel),
       selectedLabelTextStyle: text.bodyMedium?.copyWith(
         color: apple.label,
-        fontWeight: FontWeight.w600,
+        fontWeight: fonts.weightFor(FontCategory.controls, FontWeight.w600),
       ),
       unselectedLabelTextStyle: text.bodyMedium?.copyWith(
         color: apple.secondaryLabel,
@@ -479,7 +477,7 @@ ThemeData buildAppleTheme({
         minimumSize: const Size(52, 44),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
         backgroundColor: accent,
-        foregroundColor: Colors.white,
+        foregroundColor: contrastingLabel(accent),
         disabledBackgroundColor: apple.fill,
         disabledForegroundColor: apple.tertiaryLabel,
         shape: const StadiumBorder(),
@@ -537,10 +535,14 @@ ThemeData buildAppleTheme({
     ),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith<Color?>(
-        (Set<WidgetState> states) => Colors.white,
+        (Set<WidgetState> states) => states.contains(WidgetState.disabled)
+            ? Colors.white.withValues(alpha: .5)
+            : Colors.white,
       ),
       trackColor: WidgetStateProperty.resolveWith<Color?>(
-        (Set<WidgetState> states) => states.contains(WidgetState.selected)
+        (Set<WidgetState> states) => states.contains(WidgetState.disabled)
+            ? apple.tertiaryFill
+            : states.contains(WidgetState.selected)
             ? apple.accent
             : apple.tertiaryFill,
       ),
@@ -555,6 +557,9 @@ ThemeData buildAppleTheme({
       inactiveTrackColor: apple.tertiaryFill,
       secondaryActiveTrackColor: apple.accent.withValues(alpha: .3),
       thumbColor: Colors.white,
+      disabledThumbColor: apple.tertiaryLabel,
+      disabledActiveTrackColor: apple.tertiaryLabel,
+      disabledInactiveTrackColor: apple.tertiaryFill,
       overlayColor: apple.accent.withValues(alpha: .12),
       valueIndicatorColor: apple.secondaryGroupedBackground,
       valueIndicatorTextStyle: text.labelMedium?.copyWith(color: apple.label),
@@ -676,9 +681,13 @@ ThemeData buildAppleTheme({
       scaffoldBackgroundColor: apple.background,
       textTheme: CupertinoTextThemeData(
         textStyle: text.bodyLarge,
+        actionTextStyle: text.bodyLarge?.copyWith(color: accent),
+        navActionTextStyle: text.bodyLarge?.copyWith(color: accent),
         navTitleTextStyle: text.titleLarge,
         navLargeTitleTextStyle: text.displayLarge,
         tabLabelTextStyle: text.labelSmall,
+        pickerTextStyle: text.titleLarge,
+        dateTimePickerTextStyle: text.titleLarge,
       ),
     ),
   );

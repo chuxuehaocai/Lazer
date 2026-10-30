@@ -4,6 +4,7 @@ import '../navigation/pull_down_to_close.dart';
 import '../state/app_state.dart';
 import '../theme/tokens.dart';
 import 'now_playing_page.dart';
+import '../animation/motion_snapshot.dart';
 
 /// Material open-upwards presentation: the player rises from the window
 /// bottom to the top and reverses on close.
@@ -20,6 +21,24 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   NowPlayingRoute({required this.state});
 
   final AppState state;
+  final ValueNotifier<bool> _settled = ValueNotifier(false);
+
+  @override
+  void install() {
+    super.install();
+    animation!.addStatusListener(_onStatus);
+  }
+
+  void _onStatus(AnimationStatus status) {
+    _settled.value = status == AnimationStatus.completed;
+  }
+
+  @override
+  void dispose() {
+    animation?.removeStatusListener(_onStatus);
+    _settled.dispose();
+    super.dispose();
+  }
 
   /// Time the pull takes to cover its whole travel when it settles.
   static const Duration _settleDuration = Duration(milliseconds: 260);
@@ -42,6 +61,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   @override
   void startPull() {
     _dragging = true;
+    _settled.value = false;
     controller?.stop();
   }
 
@@ -99,7 +119,16 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
     BuildContext context,
     Animation<double> animation,
     Animation<double> secondaryAnimation,
-  ) => NowPlayingPage(state: state, pullDown: this);
+  ) => ValueListenableBuilder<bool>(
+    valueListenable: _settled,
+    child: NowPlayingPage(
+      state: state,
+      pullDown: this,
+      entranceSettled: _settled,
+    ),
+    builder: (context, settled, child) =>
+        ExcludeSemantics(excluding: !settled, child: child),
+  );
 
   @override
   Widget buildTransitions(
@@ -115,7 +144,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
     // fast and settles into place instead of easing away and stopping dead.
     return AnimatedBuilder(
       animation: animation,
-      child: RepaintBoundary(child: child),
+      child: MotionSnapshot(animation: animation, child: child),
       builder: (BuildContext context, Widget? child) {
         final double travelled = _dragging
             ? animation.value
@@ -124,7 +153,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
         // ambient and lyric tickers so the compositor can move one stable
         // layer offscreen without also repainting the full player each frame.
         final bool tickersEnabled =
-            !_dragging && animation.status != AnimationStatus.reverse;
+            !_dragging && animation.status == AnimationStatus.completed;
         return FractionalTranslation(
           translation: Offset(0, 1 - travelled),
           child: TickerMode(enabled: tickersEnabled, child: child!),

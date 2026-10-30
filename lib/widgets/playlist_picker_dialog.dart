@@ -25,7 +25,11 @@ Future<void> showAddToPlaylistDialog(
     context: context,
     barrierColor: Colors.black.withValues(alpha: .32),
     builder: (BuildContext context) => Theme(
-      data: buildAppleTheme(brightness: brightness, seedAccent: accent),
+      data: buildAppleTheme(
+        brightness: brightness,
+        seedAccent: accent,
+        fonts: state.fontPreferences,
+      ),
       child: _AddToPlaylistDialog(state: state, track: track),
     ),
   );
@@ -45,7 +49,11 @@ Future<void> showCreateCloudPlaylistDialog(
     context: context,
     barrierColor: Colors.black.withValues(alpha: .32),
     builder: (BuildContext context) => Theme(
-      data: buildAppleTheme(brightness: brightness, seedAccent: accent),
+      data: buildAppleTheme(
+        brightness: brightness,
+        seedAccent: accent,
+        fonts: state.fontPreferences,
+      ),
       child: _AddToPlaylistDialog(state: state),
     ),
   );

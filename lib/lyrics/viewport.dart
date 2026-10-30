@@ -49,6 +49,7 @@ class _LyricViewportState extends State<LyricViewport>
     value: widget.state.lyricBlurEnabled ? 1 : 0,
   );
   final ValueNotifier<int> _frames = ValueNotifier(0);
+  final ValueNotifier<int> _emphasisFrames = ValueNotifier(0);
   final Stopwatch _wall = Stopwatch()..start();
   List<LyricLine> _lines = [];
   bool _hasWordTimings = false;
@@ -301,6 +302,7 @@ class _LyricViewportState extends State<LyricViewport>
         _manual && _velocity.abs() > 5 ||
         widget.state.playing && _hasWordTimings;
     var positionsChanged = false;
+    var emphasisChanged = false;
     for (var i = 0; i < _ys.length; i++) {
       final double y = _ys[i].value;
       final double scale = _scales[i].value;
@@ -308,6 +310,7 @@ class _LyricViewportState extends State<LyricViewport>
       _scales[i].update(dt);
       positionsChanged =
           positionsChanged || y != _ys[i].value || scale != _scales[i].value;
+      emphasisChanged = emphasisChanged || scale != _scales[i].value;
       moving = moving || !_ys[i].arrived || !_scales[i].arrived;
     }
     // Only the active word row needs a paint every frame; a row whose scale
@@ -323,6 +326,7 @@ class _LyricViewportState extends State<LyricViewport>
     // rebuilding the whole stack every vsync adds layout and semantics work
     // without changing the geometry.
     if (positionsChanged) _frames.value++;
+    if (emphasisChanged) _emphasisFrames.value++;
     if (!moving) _ticker?.stop();
   }
 
@@ -393,20 +397,43 @@ class _LyricViewportState extends State<LyricViewport>
     height: 1.45,
     color: Colors.white,
   );
-  double _measureText(
-    String text,
-    TextStyle style,
-    double width,
-    TextScaler scaler,
-  ) {
+  List<double> _measureHeights(TextScaler scaler) {
+    final originalStyle = _originalStyle;
+    final translationStyle = _translationStyle;
+    final originalHeights = <String, double>{};
+    final translationHeights = <String, double>{};
     final painter = TextPainter(
-      text: TextSpan(text: text.isEmpty ? ' ' : text, style: style),
       textDirection: TextDirection.ltr,
       textScaler: scaler,
-    )..layout(maxWidth: width);
-    final height = painter.height;
-    painter.dispose();
-    return height;
+    );
+    double measure(String text, TextStyle style, Map<String, double> heights) =>
+        heights.putIfAbsent(text, () {
+          painter.text = TextSpan(
+            text: text.isEmpty ? ' ' : text,
+            style: style,
+          );
+          painter.layout(maxWidth: _textWidth);
+          return painter.height;
+        });
+    try {
+      // Repeated choruses share heights for this width and typography. Keep
+      // only scalar results during measurement; no paragraphs are retained.
+      return [
+        for (final line in _lines)
+          measure(line.text, originalStyle, originalHeights) +
+              (line.translation == null
+                  ? 0
+                  : 5 +
+                        measure(
+                          line.translation!,
+                          translationStyle,
+                          translationHeights,
+                        )) +
+              20,
+      ];
+    } finally {
+      painter.dispose();
+    }
   }
 
   void _layout(Size size, TextScaler scaler) {
@@ -433,20 +460,7 @@ class _LyricViewportState extends State<LyricViewport>
     _hasWordTimings = _lines.any((line) => line.words.isNotEmpty);
     _active = _activeAt(widget.state.precisePosition);
     if (needsMeasure) {
-      _heights = [
-        for (final line in _lines)
-          _measureText(line.text, _originalStyle, _textWidth, scaler) +
-              (line.translation == null
-                  ? 0
-                  : 5 +
-                        _measureText(
-                          line.translation!,
-                          _translationStyle,
-                          _textWidth,
-                          scaler,
-                        )) +
-              20,
-      ];
+      _heights = _measureHeights(scaler);
       var sum = 0.0;
       _prefix = [
         for (final height in _heights)
@@ -704,7 +718,7 @@ class _LyricViewportState extends State<LyricViewport>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AnimatedBuilder(
-            animation: rowFrames,
+            animation: _emphasisFrames,
             builder: (context, child) => ColorFiltered(
               key: ValueKey('lyric-color-$index'),
               colorFilter: ColorFilter.mode(
@@ -740,10 +754,14 @@ class _LyricViewportState extends State<LyricViewport>
           ),
           if (_lines[index].translation != null) ...[
             const SizedBox(height: 5),
-            ColorFiltered(
-              colorFilter: ColorFilter.mode(
-                Colors.white.withValues(alpha: mainAlpha() * 0.58),
-                BlendMode.srcIn,
+            AnimatedBuilder(
+              animation: _emphasisFrames,
+              builder: (context, child) => ColorFiltered(
+                colorFilter: ColorFilter.mode(
+                  Colors.white.withValues(alpha: mainAlpha() * 0.58),
+                  BlendMode.srcIn,
+                ),
+                child: child,
               ),
               child: _interactiveText(
                 index,
@@ -801,6 +819,23 @@ class _LyricViewportState extends State<LyricViewport>
     return _blurFilters[step] ??= ui.ImageFilter.blur(
       sigmaX: step / 8,
       sigmaY: step / 8,
+    );
+  }
+
+  Widget _positionedRows() {
+    final visible = <int>{
+      for (var i = 0; i < _lines.length; i++)
+        if (_ys[i].value + _heights[i] >= -80 &&
+            _ys[i].value <= _size.height + 80)
+          i,
+    };
+    // Manual browsing may visit an entire long transcript without changing
+    // the playback line. Retain widgets only for rows that are still mounted.
+    _rowCache.removeWhere((index, _) => !visible.contains(index));
+    return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: [for (final index in visible) _positionedRow(index)],
     );
   }
 
@@ -939,16 +974,7 @@ class _LyricViewportState extends State<LyricViewport>
                     AnimatedBuilder(
                       key: const ValueKey<String>('lyric-position-stack'),
                       animation: Listenable.merge([_frames, _blur]),
-                      builder: (context, _) => Stack(
-                        fit: StackFit.expand,
-                        clipBehavior: Clip.none,
-                        children: [
-                          for (var i = 0; i < _lines.length; i++)
-                            if (_ys[i].value + _heights[i] >= -80 &&
-                                _ys[i].value <= _size.height + 80)
-                              _positionedRow(i),
-                        ],
-                      ),
+                      builder: (context, _) => _positionedRows(),
                     ),
                   ),
                 ),
@@ -1010,6 +1036,7 @@ class _LyricViewportState extends State<LyricViewport>
     _ticker?.dispose();
     _blur.dispose();
     _frames.dispose();
+    _emphasisFrames.dispose();
     super.dispose();
   }
 }

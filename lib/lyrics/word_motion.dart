@@ -3,18 +3,39 @@
 import 'dart:math' as math;
 
 double _bezier(double x, double x1, double y1, double x2, double y2) {
-  double axis(double t, double a, double b) =>
-      3 * (1 - t) * (1 - t) * t * a + 3 * (1 - t) * t * t * b + t * t * t;
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  final cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  final cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  double sampleX(double t) => ((ax * t + bx) * t + cx) * t;
+  double sampleY(double t) => ((ay * t + by) * t + cy) * t;
   var lo = 0.0, hi = 1.0;
-  for (var i = 0; i < 40; i++) {
-    final t = (lo + hi) / 2;
-    if (axis(t, x1, x2) < x) {
+  var t = x;
+  // Safeguarded Newton steps preserve the curve, including its flat ends,
+  // without paying for forty bisections per glyph on every frame.
+  for (var i = 0; i < 8; i++) {
+    final error = sampleX(t) - x;
+    if (error.abs() < 1e-13) return sampleY(t);
+    if (error < 0) {
       lo = t;
     } else {
       hi = t;
     }
+    final slope = (3 * ax * t + 2 * bx) * t + cx;
+    final next = slope.abs() > 1e-12 ? t - error / slope : double.nan;
+    t = next > lo && next < hi ? next : (lo + hi) / 2;
   }
-  return axis((lo + hi) / 2, y1, y2);
+  for (var i = 0; i < 40; i++) {
+    final error = sampleX(t) - x;
+    if (error.abs() < 1e-13) break;
+    if (error < 0) {
+      lo = t;
+    } else {
+      hi = t;
+    }
+    t = (lo + hi) / 2;
+  }
+  return sampleY(t);
 }
 
 double _emp(double x) => x < .5
@@ -71,9 +92,8 @@ class LyricWordMotion {
   }) {
     var du = math.max(1000.0, durationMs);
     var amount = du / 2000, blur = du / 3000;
-    amount =
-        (amount > 1 ? math.sqrt(amount) : math.pow(amount, 3).toDouble()) * .6;
-    blur = (blur > 1 ? math.sqrt(blur) : math.pow(blur, 3).toDouble()) * .5;
+    amount = (amount > 1 ? math.sqrt(amount) : amount * amount * amount) * .6;
+    blur = (blur > 1 ? math.sqrt(blur) : blur * blur * blur) * .5;
     if (last) {
       amount *= 1.6;
       blur *= 1.5;
@@ -87,19 +107,21 @@ class LyricWordMotion {
       (elapsedMs - delay + 400) / (du * 1.4),
       _floatSamples,
     );
-    final settled = _bezier(
-      ((elapsedMs - delay) / du).clamp(0.0, 1.0),
-      0,
-      0,
-      .58,
-      1,
-    );
     return LyricWordMotion(
       scale: 1 + emp * .1 * amount,
       xEm: -emp * .03 * amount * (count / 2 - index),
       // Ordinary words rise monotonically to the float target instead of
       // peaking with the emphasis curve and drifting back to the baseline.
-      yEm: holdFloat ? -.05 * settled : -emp * .025 * amount - float * .05,
+      yEm: holdFloat
+          ? -.05 *
+                _bezier(
+                  ((elapsedMs - delay) / du).clamp(0.0, 1.0),
+                  0,
+                  0,
+                  .58,
+                  1,
+                )
+          : -emp * .025 * amount - float * .05,
       glow: emp * blur,
       glowRadiusEm: math.min(.3, blur * .3),
     );

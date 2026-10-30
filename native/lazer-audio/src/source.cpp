@@ -27,6 +27,13 @@ constexpr AVRational kMillisTimeBase{1, 1000};
  * keeps the reader contract readable without pulling stdio macros into this file. */
 constexpr int64_t kAvioSeekSet = 0;
 
+AVSampleFormat targetAvFormat(const TargetFormat &target) {
+    if (target.isFloat()) return AV_SAMPLE_FMT_FLT;
+    if (target.bitsPerSample <= 8) return AV_SAMPLE_FMT_U8;
+    if (target.bitsPerSample <= 16) return AV_SAMPLE_FMT_S16;
+    return AV_SAMPLE_FMT_S32;
+}
+
 bool isDsdCodec(AVCodecID codecId) {
     switch (codecId) {
         case AV_CODEC_ID_DSD_LSBF:
@@ -791,7 +798,7 @@ int32_t AudioSource::configureResampler() {
     }
 
     SwrContext *context = nullptr;
-    int result = swr_alloc_set_opts2(&context, &outputLayout, target_.avFormat(),
+    int result = swr_alloc_set_opts2(&context, &outputLayout, targetAvFormat(target_),
         target_.sampleRate, &inputLayout, codec_->sample_fmt, codec_->sample_rate, 0, nullptr);
     av_channel_layout_uninit(&outputLayout);
     if (ownedInputLayout) av_channel_layout_uninit(&inputLayout);
@@ -1464,7 +1471,7 @@ int32_t AudioSource::emitAVFrame(AVFrame *frame, SourceConsumer &consumer) {
     const bool exactIntegerFrame = description_.lossless && description_.integerPcm &&
         description_.decoderFormatMatchesStream && frame->sample_rate == target_.sampleRate &&
         frame->ch_layout.nb_channels == target_.channels &&
-        frameLayoutMatchesStream && framePackedFormat == target_.avFormat() && bytesPerSample > 0 &&
+        frameLayoutMatchesStream && framePackedFormat == targetAvFormat(target_) && bytesPerSample > 0 &&
         target_.bitsPerSample != 0;
     if (target_.bitsPerSample != 0 && !exactIntegerFrame) {
         lastError_ = "the decoded integer frame does not match the negotiated bit-perfect format";

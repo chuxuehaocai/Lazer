@@ -210,6 +210,10 @@ void main() {
     );
     expect(find.textContaining('网格 22×14'), findsNothing);
 
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('dynamic-background-quality-reset')),
+    );
+    await tester.pump();
     await tester.tap(
       find.byKey(const ValueKey('dynamic-background-quality-reset')),
     );
@@ -257,7 +261,7 @@ void main() {
       audioEngine: _Engine(),
     );
     addTearDown(state.dispose);
-    await state.setDynamicBackgroundQuality(0.5);
+    await state.setPlayerBackgroundQuality(0.5);
     state.playQueue(const <Track>[_track]);
 
     await tester.pumpWidget(_app(LegacyShell(state: state)));

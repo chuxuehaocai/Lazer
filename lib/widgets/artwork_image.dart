@@ -35,9 +35,9 @@ class ArtworkImage extends ImageProvider<ArtworkImage> {
 
   Future<ui.Codec> _load(ArtworkImage key, ImageDecoderCallback decode) async {
     try {
-      final bytes = await ArtworkCache.shared.bytes(key.url);
+      final buffer = await ArtworkCache.shared.buffer(key.url);
       try {
-        return await decode(await ui.ImmutableBuffer.fromUint8List(bytes));
+        return await decode(buffer);
       } catch (_) {
         await ArtworkCache.shared.evict(key.url);
         rethrow;

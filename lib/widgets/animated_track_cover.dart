@@ -19,10 +19,12 @@ class AnimatedTrackCover extends StatelessWidget {
     super.key,
     required this.track,
     required this.direction,
+    this.size = 480,
   });
 
   final Track track;
   final int direction;
+  final double size;
 
   static const Curve _dissolve = Cubic(0.4, 0.0, 0.2, 1.0);
 
@@ -44,8 +46,8 @@ class AnimatedTrackCover extends StatelessWidget {
       layoutBuilder: (Widget? current, List<Widget> previous) => Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          for (final Widget old in previous)
-            ExcludeSemantics(child: IgnorePointer(child: old)),
+          if (previous.isNotEmpty)
+            ExcludeSemantics(child: IgnorePointer(child: previous.last)),
           ?current,
         ],
       ),
@@ -54,6 +56,7 @@ class AnimatedTrackCover extends StatelessWidget {
         seed: track.coverSeed,
         coverUrl: track.coverUrl,
         radius: BorderRadius.zero,
+        size: size,
       ),
     ),
   );

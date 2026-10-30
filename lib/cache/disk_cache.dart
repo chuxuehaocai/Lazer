@@ -25,6 +25,7 @@ class DiskCache {
   Future<Directory?>? _root;
   final _writes = <String, Future<File?>>{};
   final _maintenance = <CacheBucket, Future<void>>{};
+  final _pruneRequested = <CacheBucket, Uri>{};
   final Map<String, Future<void>> _jsonOperations = <String, Future<void>>{};
   int _serial = 0;
 
@@ -157,19 +158,7 @@ class DiskCache {
       }
       await partial.rename(target.path);
       partial = null;
-      // Serialize pruning so concurrent cover downloads share one LRU pass.
-      // The scan itself stays off the caller's critical path: a cache write
-      // should hand the file back immediately and let maintenance catch up.
-      final previous = _maintenance[bucket] ?? Future<void>.value();
-      final next = previous.then((_) => _prune(bucket, target.path));
-      _maintenance[bucket] = next;
-      unawaited(
-        next.whenComplete(() {
-          if (identical(_maintenance[bucket], next)) {
-            _maintenance.remove(bucket);
-          }
-        }),
-      );
+      _schedulePrune(bucket, target.uri);
       return target;
     } catch (_) {
       return null;
@@ -183,7 +172,26 @@ class DiskCache {
     }
   }
 
-  Future<void> _prune(CacheBucket bucket, String keep) async {
+  void _schedulePrune(CacheBucket bucket, Uri keep) {
+    _pruneRequested[bucket] = keep;
+    _maintenance.putIfAbsent(bucket, () => _maintain(bucket));
+  }
+
+  Future<void> _maintain(CacheBucket bucket) async {
+    try {
+      while (_pruneRequested.containsKey(bucket)) {
+        // A shelf can finish dozens of cover downloads together. Share one
+        // scan per burst, including writes arriving while a scan is active.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final keep = _pruneRequested.remove(bucket)!;
+        await _prune(bucket, keep);
+      }
+    } finally {
+      _maintenance.remove(bucket);
+    }
+  }
+
+  Future<void> _prune(CacheBucket bucket, Uri keep) async {
     try {
       final root = await _open();
       if (root == null) return;
@@ -204,10 +212,12 @@ class DiskCache {
         files.add((entry, stat));
         total += stat.size;
       }
+      final budget = limits[bucket] ?? 0;
+      if (total <= budget) return;
       files.sort((a, b) => a.$2.modified.compareTo(b.$2.modified));
       for (final (file, stat) in files) {
-        if (total <= (limits[bucket] ?? 0)) break;
-        if (file.path == keep) continue;
+        if (total <= budget) break;
+        if (file.uri == keep || file.uri == _pruneRequested[bucket]) continue;
         try {
           await file.delete();
           total -= stat.size;

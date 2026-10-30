@@ -41,7 +41,10 @@ class _Catalog extends Catalog {
   @override
   Future<HomeFeed?> loadHome({int? userId}) async => null;
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => 'fixture';
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => 'fixture';
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics(
     lrc: '[00:00]First line\n[00:01]Second line\n[00:02]Third line',
@@ -215,127 +218,124 @@ void main() {
     variant: TargetPlatformVariant({TargetPlatform.iOS}),
   );
 
-  testWidgets(
-    'iOS intensity is saved and switches are rendered by the app',
-    (tester) async {
-      tester.view.physicalSize = const Size(1280, 1600);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final state = AppState(catalog: _Catalog());
-      addTearDown(state.dispose);
-      await tester.pumpWidget(
-        MaterialApp(
+  testWidgets('iOS intensity is saved and switches are rendered by the app', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildLegacyTheme(),
+        home: Scaffold(body: LegacySettingsPage(state: state)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final intensity = find.byWidgetPredicate(
+      (w) => w is AccessibleSlider && w.semanticLabel == '震动强度',
+    );
+    await tester.scrollUntilVisible(intensity, 200);
+    await tester.pumpAndSettle();
+    final slider = find.descendant(
+      of: intensity,
+      matching: find.byType(Slider),
+    );
+    await tester.drag(slider, const Offset(90, 0));
+    await tester.pumpAndSettle();
+    expect(state.hapticIntensity, greaterThan(.5));
+    expect(
+      (await SharedPreferences.getInstance()).getDouble(
+        'lazer_haptic_intensity',
+      ),
+      state.hapticIntensity,
+    );
+    expect(find.byType(CupertinoSwitch), findsNothing);
+  }, variant: TargetPlatformVariant({TargetPlatform.iOS}));
+
+  testWidgets('setting sliders click through detents and stop when disabled', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      AppHaptics.channel,
+      (call) async {
+        calls.add(call);
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        AppHaptics.channel,
+        null,
+      ),
+    );
+    final state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      InteractionFeedback(
+        state: state,
+        child: MaterialApp(
           theme: buildLegacyTheme(),
           home: Scaffold(body: LegacySettingsPage(state: state)),
         ),
-      );
-      await tester.pumpAndSettle();
-      final intensity = find.byWidgetPredicate(
-        (w) => w is AccessibleSlider && w.semanticLabel == '震动强度',
-      );
-      await tester.ensureVisible(intensity);
-      await tester.pumpAndSettle();
-      final slider = find.descendant(
-        of: intensity,
-        matching: find.byType(Slider),
-      );
-      await tester.drag(slider, const Offset(90, 0));
-      await tester.pumpAndSettle();
-      expect(state.hapticIntensity, greaterThan(.5));
-      expect(
-        (await SharedPreferences.getInstance()).getDouble(
-          'lazer_haptic_intensity',
-        ),
-        state.hapticIntensity,
-      );
-      expect(find.byType(CupertinoSwitch), findsNothing);
-    },
-    variant: TargetPlatformVariant({TargetPlatform.iOS}),
-  );
-
-  testWidgets(
-    'setting sliders click through detents and stop when disabled',
-    (tester) async {
-      tester.view.physicalSize = const Size(1280, 1600);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final calls = <MethodCall>[];
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        AppHaptics.channel,
-        (call) async {
-          calls.add(call);
-          return null;
-        },
-      );
-      addTearDown(
-        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-          AppHaptics.channel,
-          null,
-        ),
-      );
-      final state = AppState(catalog: _Catalog());
-      addTearDown(state.dispose);
-      await tester.pumpWidget(
-        InteractionFeedback(
-          state: state,
-          child: MaterialApp(
-            theme: buildLegacyTheme(),
-            home: Scaffold(body: LegacySettingsPage(state: state)),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final slider = find.byWidgetPredicate(
-        (w) => w is AccessibleSlider && w.semanticLabel == '歌词控件自动隐藏',
-      );
-      expect(tester.widget<AccessibleSlider>(slider).detentFeedback, isTrue);
-      await tester.ensureVisible(slider);
-      await tester.pumpAndSettle();
-      calls.clear();
-      final track = tester.getRect(
-        find.descendant(of: slider, matching: find.byType(Slider)),
-      );
-      final gesture = await tester.startGesture(
-        Offset(track.left + 300, track.center.dy),
-      );
+      ),
+    );
+    await tester.pumpAndSettle();
+    final slider = find.byWidgetPredicate(
+      (w) => w is AccessibleSlider && w.semanticLabel == '歌词控件自动隐藏',
+    );
+    await tester.scrollUntilVisible(slider, 200);
+    expect(tester.widget<AccessibleSlider>(slider).detentFeedback, isTrue);
+    await tester.ensureVisible(slider);
+    await tester.pumpAndSettle();
+    calls.clear();
+    final track = tester.getRect(
+      find.descendant(of: slider, matching: find.byType(Slider)),
+    );
+    final gesture = await tester.startGesture(
+      Offset(track.left + 300, track.center.dy),
+    );
+    await tester.pump();
+    for (var dx = 250.0; dx >= 0; dx -= 25) {
+      await gesture.moveTo(Offset(track.left + dx, track.center.dy));
       await tester.pump();
-      for (var dx = 250.0; dx >= 0; dx -= 25) {
-        await gesture.moveTo(Offset(track.left + dx, track.center.dy));
-        await tester.pump();
-      }
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(calls, isNotEmpty);
-      expect(state.lyricControlsSeconds, 1);
-      expect(
-        calls.map((call) => (call.arguments as Map)['kind']),
-        everyElement(anyOf(equals('detent'), equals('boundary'))),
-      );
-      expect(
-        calls.map((call) => (call.arguments as Map)['kind']),
-        contains('detent'),
-      );
-      expect(
-        calls.map((call) => (call.arguments as Map)['kind']),
-        contains('boundary'),
-      );
-      await state.setHapticsEnabled(false);
-      calls.clear();
-      final back = await tester.startGesture(
-        Offset(track.left + 5, track.center.dy),
-      );
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(calls, isNotEmpty);
+    expect(state.lyricControlsSeconds, 1);
+    expect(
+      calls.map((call) => (call.arguments as Map)['kind']),
+      everyElement(anyOf(equals('detent'), equals('boundary'))),
+    );
+    expect(
+      calls.map((call) => (call.arguments as Map)['kind']),
+      contains('detent'),
+    );
+    expect(
+      calls.map((call) => (call.arguments as Map)['kind']),
+      contains('boundary'),
+    );
+    await state.setHapticsEnabled(false);
+    calls.clear();
+    final back = await tester.startGesture(
+      Offset(track.left + 5, track.center.dy),
+    );
+    await tester.pump();
+    for (var dx = 50.0; dx <= 300; dx += 25) {
+      await back.moveTo(Offset(track.left + dx, track.center.dy));
       await tester.pump();
-      for (var dx = 50.0; dx <= 300; dx += 25) {
-        await back.moveTo(Offset(track.left + dx, track.center.dy));
-        await tester.pump();
-      }
-      await back.up();
-      await tester.pumpAndSettle();
-      expect(state.lyricControlsSeconds, greaterThan(1));
-      expect(calls, isEmpty);
-    },
-    variant: TargetPlatformVariant({TargetPlatform.iOS}),
-  );
+    }
+    await back.up();
+    await tester.pumpAndSettle();
+    expect(state.lyricControlsSeconds, greaterThan(1));
+    expect(calls, isEmpty);
+  }, variant: TargetPlatformVariant({TargetPlatform.iOS}));
 
   test('SliderDetents quantizes by divisions and stays silent when idle', () {
     final detents = SliderDetents(min: 1, max: 10, steps: 18);
@@ -457,5 +457,4 @@ void main() {
       expect(find.byTooltip('复制所选歌词'), findsOneWidget);
     },
   );
-
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
+import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/interaction_feedback.dart';
 import '../utils/artwork.dart';
@@ -203,7 +204,10 @@ class _LegacyPlaylistCardState extends State<LegacyPlaylistCard> {
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: apple.label,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: context.fonts.weightFor(
+                      FontCategory.title,
+                      FontWeight.w500,
+                    ),
                   ),
                 ),
                 if (detail.isNotEmpty) ...<Widget>[
@@ -349,9 +353,12 @@ class _LegacyTrackRowState extends State<LegacyTrackRow> {
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: titleColor,
-                            fontWeight: widget.current
-                                ? FontWeight.w600
-                                : FontWeight.w500,
+                            fontWeight: context.fonts.weightFor(
+                              FontCategory.title,
+                              widget.current
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                            ),
                           ),
                         ),
                       ),
@@ -440,7 +447,10 @@ class LegacySectionHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleLarge?.copyWith(
                     color: apple.label,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: context.fonts.weightFor(
+                      FontCategory.title,
+                      FontWeight.w700,
+                    ),
                     letterSpacing: -.35,
                   ),
                 ),
@@ -538,9 +548,10 @@ class _LegacyRailItemState extends State<LegacyRailItem> {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: labelColor,
-                      fontWeight: widget.selected
-                          ? FontWeight.w600
-                          : FontWeight.w400,
+                      fontWeight: context.fonts.weightFor(
+                        FontCategory.controls,
+                        widget.selected ? FontWeight.w600 : FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),
@@ -629,7 +640,10 @@ class _LegacyArtistTrackCardState extends State<LegacyArtistTrackCard> {
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: widget.current ? apple.accent : apple.label,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: context.fonts.weightFor(
+                            FontCategory.title,
+                            FontWeight.w600,
+                          ),
                         ),
                       ),
                       Text(

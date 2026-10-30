@@ -311,6 +311,7 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   /// is exactly what a desktop drag does when it starts — so only the hold may
   /// act on those callbacks.
   bool _heldByLongPress = false;
+  String? _lastHoveredSlot;
 
   @override
   void initState() {
@@ -568,6 +569,9 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
     final String? over = _cardAt(globalPosition);
     if (over == null) return;
     final List<String> base = _preview ?? _committed;
+    // Repeated hits on a moving slot must not restart its easing curve.
+    if (over == _lastHoveredSlot) return;
+    _lastHoveredSlot = over;
     final List<String> moved = <String>[...base]..remove(dragging);
     final int at = moved.indexOf(over);
     if (at < 0) return;
@@ -656,6 +660,7 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   }
 
   void _finishDrag() {
+    _lastHoveredSlot = null;
     _heldByLongPress = false;
     _proxy?.remove();
     _proxy = null;
@@ -692,12 +697,12 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
       // shrinks that growth away as it travels.
       final double scale = settle > 0
           ? 1.02 - .02 * Curves.easeOutCubic.transform(settle)
-          : .9 + .12 * Curves.easeOutBack.transform(lift);
+          : 1 + .025 * Curves.easeOutCubic.transform(lift);
       return Positioned.fromRect(
         rect: rect,
         child: IgnorePointer(
           child: Opacity(
-            opacity: settle > .9 ? (1 - (settle - .9) / .1).clamp(0.0, 1.0) : 1,
+            opacity: 1,
             child: Transform.scale(scale: scale, child: child),
           ),
         ),

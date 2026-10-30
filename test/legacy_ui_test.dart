@@ -613,7 +613,7 @@ void main() {
 
   testWidgets('the legacy settings expose every preference', (tester) async {
     // Tall enough that the lazy list builds every row, About included.
-    tester.view.physicalSize = const Size(1280, 4200);
+    tester.view.physicalSize = const Size(1280, 6000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final AppState state = AppState(catalog: _Catalog());
@@ -638,8 +638,9 @@ void main() {
       '语言',
       '震动反馈',
       '歌词控件自动隐藏',
-      '歌词字号',
-      '歌词粗细',
+      '字体自定义',
+      '歌词同时显示封面',
+      '音频引擎',
       '歌词模糊',
       '手动浏览后恢复跟随',
       '滚动惯性',
@@ -651,7 +652,13 @@ void main() {
     expect(find.text('70%'), findsOneWidget);
     // The precision slider reads its stored percentage and reports the mesh
     // that setting draws.
-    expect(find.text('80%'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('dynamic-background-quality')),
+        matching: find.text('80%'),
+      ),
+      findsOneWidget,
+    );
     expect(find.textContaining('网格 22×14'), findsOneWidget);
     // DPI 100% and the default scroll acceleration both read 100%.
     expect(find.text('100%'), findsWidgets);
@@ -710,16 +717,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.dpiScale, greaterThan(1.0));
 
-    // Lyrics: size slider, weight chips and the blur switch.
-    final Finder lyricSize = controlFor<Slider>('歌词字号');
+    // Font controls live on their own page; lyric behaviour stays in Settings.
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('open-font-settings')),
+    );
+    await tester.tap(find.byKey(const ValueKey('open-font-settings')));
+    await tester.pumpAndSettle();
+    final lyricCard = find.byKey(const ValueKey('font-card-lyrics'));
+    await tester.scrollUntilVisible(
+      lyricCard,
+      400,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('settings-detail-subview')),
+        matching: find.byType(Scrollable),
+      ).last,
+    );
+    final Finder lyricSize = find.descendant(
+      of: lyricCard,
+      matching: find.byType(Slider),
+    );
     await tester.ensureVisible(lyricSize);
     await tester.drag(lyricSize, const Offset(200, 0));
     await tester.pumpAndSettle();
     expect(state.lyricFontSize, greaterThan(22));
-    await tester.ensureVisible(find.text('粗体'));
-    await tester.tap(find.text('粗体'));
+    await tester.tap(
+      find.descendant(
+        of: lyricCard,
+        matching: find.byType(DropdownButton<int>),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('粗体').last);
     await tester.pumpAndSettle();
     expect(state.lyricFontWeight, 700);
+    await tester.tap(find.byKey(const ValueKey('settings-detail-back')));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('歌词模糊'));
     await tester.tap(controlFor<Switch>('歌词模糊'));
     await tester.pumpAndSettle();

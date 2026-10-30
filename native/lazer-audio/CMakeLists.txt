@@ -5,7 +5,8 @@ option(LAZER_AUDIO_BUILD_PROBE "Build the lazer-audio-probe console harness" OFF
 option(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL
     "Allow the test-only ALSA null PCM route (requires a Linux probe build)" OFF)
 
-if(ANDROID)
+option(LAZER_ANDROID_BUILD_ENGINE "Build the complete Android AAudio playback engine" OFF)
+if(ANDROID AND NOT LAZER_ANDROID_BUILD_ENGINE)
     option(LAZER_ANDROID_BUILD_UAC2 "Build Android UAC2 USB direct-output native transport" OFF)
     option(LAZER_ANDROID_BUILD_DSD "Build the Android DSD decoder" OFF)
     if(NOT LAZER_ANDROID_BUILD_UAC2 AND NOT LAZER_ANDROID_BUILD_DSD)
@@ -188,6 +189,9 @@ if(WIN32)
         src/endpoint_volume_wasapi.cpp
         src/pcm_format_probe_wasapi.cpp)
     list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES ole32 mmdevapi user32 advapi32)
+elseif(ANDROID)
+    list(APPEND LAZER_AUDIO_PLATFORM_SOURCES src/output_aaudio.cpp)
+    list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES aaudio android log)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(ALSA REQUIRED IMPORTED_TARGET alsa)
@@ -232,6 +236,17 @@ target_link_libraries(lazer-audio PRIVATE ${LAZER_FFMPEG_LIBRARIES}
     ${LAZER_AUDIO_PLATFORM_LIBRARIES})
 target_compile_features(lazer-audio PRIVATE cxx_std_20)
 target_compile_definitions(lazer-audio PRIVATE LAZER_AUDIO_EXPORTS)
+if(ANDROID)
+    # FFmpeg's static SIMD objects refer directly to internal tables. Keep them
+    # local to this DSO, both for PIC linkage and to avoid interposing other
+    # plugins' FFmpeg/libc++ symbols. Only the app's stable C ABI is exported.
+    target_link_options(lazer-audio PRIVATE
+        "-Wl,--exclude-libs,ALL"
+        "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/src/exports_android.map"
+        "-Wl,-z,max-page-size=16384")
+    set_property(TARGET lazer-audio APPEND PROPERTY LINK_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/src/exports_android.map")
+endif()
 if(WIN32)
     target_compile_definitions(lazer-audio PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()

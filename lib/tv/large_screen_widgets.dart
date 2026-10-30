@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
+import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/copyable_song_title.dart';
 import '../utils/artwork.dart';
@@ -116,58 +117,73 @@ class LargeScreenTapTarget extends StatelessWidget {
 abstract final class LargeScreenType {
   const LargeScreenType._();
 
-  static TextStyle display(BuildContext context) =>
-      _base(context, Theme.of(context).textTheme.displayLarge).copyWith(
-        fontSize: 40,
-        height: 1.12,
-        fontWeight: FontWeight.w700,
-        letterSpacing: -.8,
-        color: AppleSemanticColors.of(context).label,
-      );
+  static TextStyle display(BuildContext context) => context.fonts.apply(
+    FontCategory.pageTitle,
+    _base(context, Theme.of(context).textTheme.displayLarge).copyWith(
+      fontSize: 40,
+      height: 1.12,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -.8,
+      color: AppleSemanticColors.of(context).label,
+    ),
+  );
 
-  static TextStyle section(BuildContext context) =>
-      _base(context, Theme.of(context).textTheme.titleLarge).copyWith(
-        fontSize: 26,
-        height: 1.18,
-        fontWeight: FontWeight.w700,
-        letterSpacing: -.5,
-        color: AppleSemanticColors.of(context).label,
-      );
+  static TextStyle section(BuildContext context) => context.fonts.apply(
+    FontCategory.title,
+    _base(context, Theme.of(context).textTheme.titleLarge).copyWith(
+      fontSize: 26,
+      height: 1.18,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -.5,
+      color: AppleSemanticColors.of(context).label,
+    ),
+  );
 
-  static TextStyle cardTitle(BuildContext context) =>
-      _base(context, Theme.of(context).textTheme.titleMedium).copyWith(
-        fontSize: 20,
-        height: 1.24,
-        fontWeight: FontWeight.w600,
-        color: AppleSemanticColors.of(context).label,
-      );
+  static TextStyle cardTitle(BuildContext context) => context.fonts.apply(
+    FontCategory.title,
+    _base(context, Theme.of(context).textTheme.titleMedium).copyWith(
+      fontSize: 20,
+      height: 1.24,
+      fontWeight: FontWeight.w600,
+      color: AppleSemanticColors.of(context).label,
+    ),
+  );
 
-  static TextStyle cardMeta(BuildContext context) =>
-      _base(context, Theme.of(context).textTheme.bodySmall).copyWith(
-        fontSize: 15.5,
-        height: 1.32,
-        color: AppleSemanticColors.of(context).secondaryLabel,
-      );
+  static TextStyle cardMeta(BuildContext context) => context.fonts.apply(
+    FontCategory.caption,
+    _base(context, Theme.of(context).textTheme.bodySmall).copyWith(
+      fontSize: 15.5,
+      height: 1.32,
+      color: AppleSemanticColors.of(context).secondaryLabel,
+    ),
+  );
 
-  static TextStyle rowTitle(BuildContext context) =>
-      _base(context, Theme.of(context).textTheme.bodyLarge).copyWith(
-        fontSize: 20,
-        height: 1.26,
-        fontWeight: FontWeight.w500,
-        color: AppleSemanticColors.of(context).label,
-      );
+  static TextStyle rowTitle(BuildContext context) => context.fonts.apply(
+    FontCategory.title,
+    _base(context, Theme.of(context).textTheme.bodyLarge).copyWith(
+      fontSize: 20,
+      height: 1.26,
+      fontWeight: FontWeight.w500,
+      color: AppleSemanticColors.of(context).label,
+    ),
+  );
 
-  static TextStyle rowMeta(BuildContext context) =>
-      _base(context, Theme.of(context).textTheme.bodySmall).copyWith(
-        fontSize: 15.5,
-        height: 1.3,
-        color: AppleSemanticColors.of(context).secondaryLabel,
-      );
+  static TextStyle rowMeta(BuildContext context) => context.fonts.apply(
+    FontCategory.caption,
+    _base(context, Theme.of(context).textTheme.bodySmall).copyWith(
+      fontSize: 15.5,
+      height: 1.3,
+      color: AppleSemanticColors.of(context).secondaryLabel,
+    ),
+  );
 
-  static TextStyle button(BuildContext context) => _base(
-    context,
-    Theme.of(context).textTheme.titleSmall,
-  ).copyWith(fontSize: 17, height: 1.2, fontWeight: FontWeight.w600);
+  static TextStyle button(BuildContext context) => context.fonts.apply(
+    FontCategory.controls,
+    _base(
+      context,
+      Theme.of(context).textTheme.titleSmall,
+    ).copyWith(fontSize: 17, height: 1.2, fontWeight: FontWeight.w600),
+  );
 
   static TextStyle _base(BuildContext context, TextStyle? style) =>
       style ?? Theme.of(context).textTheme.bodyMedium ?? const TextStyle();

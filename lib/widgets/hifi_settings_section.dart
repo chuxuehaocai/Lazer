@@ -23,6 +23,8 @@ import '../tv/tv_mode.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
 import 'ui_scaling.dart';
+import 'audio_engine_settings.dart';
+import 'settings_detail.dart';
 
 /// Renders the 高保真播放 group: engine status, output device, exclusive/bit-perfect
 /// policy, DSD mode, buffer, equaliser and the live format readout.
@@ -69,7 +71,15 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
   @override
   Widget build(BuildContext context) {
     final HifiController? hifi = _controller;
-    if (hifi == null) return const SizedBox.shrink();
+    if (hifi == null) {
+      return Column(
+        children: [
+          const _SectionLabel('高保真播放'),
+          AudioEngineSettings(state: widget.state),
+          EqualizerSettingsEntry(state: widget.state),
+        ],
+      );
+    }
     final HifiSettings settings = widget.state.hifiSettings;
     final bool native = hifi.nativeAvailable;
 
@@ -77,6 +87,8 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         const _SectionLabel('高保真播放'),
+        AudioEngineSettings(state: widget.state),
+        EqualizerSettingsEntry(state: widget.state),
         AppleGroupedCard(
           margin: EdgeInsets.zero,
           child: Column(
@@ -85,7 +97,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                 label: '播放引擎',
                 subtitle: _engineSubtitle(hifi, native),
                 trailing: Text(
-                  native ? '原生引擎' : '兼容引擎',
+                  context.tr(native ? '原生引擎' : '兼容引擎'),
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: native
                         ? AppleSemanticColors.of(context).label
@@ -98,7 +110,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   child: Text(
-                    hifi.status.nativeReason ?? '原生音频引擎不可用',
+                    context.tr(hifi.status.nativeReason ?? '原生音频引擎不可用'),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppleSemanticColors.of(context).secondaryLabel,
                     ),
@@ -340,117 +352,6 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
               ],
             ),
           ),
-          const _SectionLabel('均衡器'),
-          AppleGroupedCard(
-            margin: EdgeInsets.zero,
-            child: Column(
-              children: <Widget>[
-                _SwitchRow(
-                  label: '启用均衡器',
-                  subtitle: settings.bitPerfect
-                      ? 'Bit-perfect 输出时 EQ 被旁路，先关闭 Bit-perfect'
-                      : 'DSP 处理会改变样本，因此不再属于 bit-perfect 路径',
-                  value: settings.eqActive,
-                  enabled: !settings.bitPerfect,
-                  onChanged: (bool value) => _update(
-                    settings.copyWith(
-                      equalizer: settings.equalizer.copyWith(enabled: value),
-                    ),
-                  ),
-                ),
-                if (settings.eqActive) ...<Widget>[
-                  _SettingRow(
-                    label: '预设',
-                    subtitle: settings.equalizer.matchingPresetId == null
-                        ? '自定义曲线'
-                        : '选择预设会自动启用均衡器',
-                    trailing: DropdownButton<String>(
-                      key: const ValueKey('hifi-eq-preset'),
-                      value: settings.equalizer.matchingPresetId,
-                      hint: const Text('自定义'),
-                      underline: const SizedBox.shrink(),
-                      borderRadius: BorderRadius.circular(12),
-                      items: <DropdownMenuItem<String>>[
-                        for (final HifiEqPreset preset in hifiEqPresets)
-                          DropdownMenuItem<String>(
-                            value: preset.id,
-                            child: Text(preset.label),
-                          ),
-                      ],
-                      onChanged: (String? id) {
-                        if (id == null) return;
-                        final HifiEqPreset preset = hifiEqPresets.firstWhere(
-                          (HifiEqPreset candidate) => candidate.id == id,
-                        );
-                        unawaited(
-                          _update(
-                            settings.copyWith(
-                              equalizer: settings.equalizer
-                                  .withPreset(preset)
-                                  .copyWith(enabled: true),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  _SettingRow(
-                    label: '前级',
-                    subtitle:
-                        '${settings.equalizer.preampDb.toStringAsFixed(1)} dB',
-                    trailing: SizedBox(
-                      width: 200,
-                      child: SemanticsPortal(
-                        child: Slider(
-                          value: settings.equalizer.preampDb,
-                          min: kMinHifiPreampDb,
-                          max: kMaxHifiPreampDb,
-                          onChanged: (double value) => _update(
-                            settings.copyWith(
-                              equalizer: settings.equalizer.copyWith(
-                                preampDb: clampHifiPreampDb(_tenthDb(value)),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  _SwitchRow(
-                    label: '限幅器',
-                    subtitle: '样本峰值上限 −1 dBFS，防止 EQ 提升导致削波',
-                    value: settings.equalizer.limiterEnabled,
-                    onChanged: (bool value) => _update(
-                      settings.copyWith(
-                        equalizer: settings.equalizer.copyWith(
-                          limiterEnabled: value,
-                        ),
-                      ),
-                    ),
-                  ),
-                  _EqBandEditor(
-                    equalizer: settings.equalizer,
-                    onChanged: (int index, double gainDb) => _update(
-                      settings.copyWith(
-                        equalizer: settings.equalizer.withBandGain(
-                          index,
-                          gainDb,
-                        ),
-                      ),
-                    ),
-                    onReset: () => _update(
-                      settings.copyWith(
-                        equalizer: settings.equalizer.copyWith(
-                          bands: defaultHifiEqBands(),
-                          preampDb: 0,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
           _FormatCard(hifi: hifi),
         ],
       ],
@@ -681,7 +582,10 @@ class _DevicePicker extends StatelessWidget {
             underline: const SizedBox.shrink(),
             borderRadius: BorderRadius.circular(12),
             items: <DropdownMenuItem<String?>>[
-              const DropdownMenuItem<String?>(value: null, child: Text('系统默认')),
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: TrText('系统默认'),
+              ),
               for (final LazerOutputDevice device in devices)
                 DropdownMenuItem<String?>(
                   value: device.token,
@@ -707,6 +611,184 @@ class _DevicePicker extends StatelessWidget {
           tooltip: context.tr('刷新设备列表'),
           onPressed: hifi.busy ? null : () => unawaited(hifi.refreshDevices()),
           icon: const Icon(Icons.refresh, size: 18),
+        ),
+      ],
+    );
+  }
+}
+
+class EqualizerSettingsEntry extends StatelessWidget {
+  const EqualizerSettingsEntry({super.key, required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) => AppleGroupedCard(
+    margin: const EdgeInsets.only(bottom: 16),
+    child: AppleListTile(
+      key: const ValueKey('open-equalizer-settings'),
+      title: context.tr('均衡器'),
+      subtitle: context.tr(state.hifiSettings.eqActive ? '已启用' : '已关闭'),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => SettingsDetailHost.open(
+        context,
+        page: (_) => EqualizerSettingsPage(state: state),
+        view: (_) => EqualizerSettingsView(state: state),
+      ),
+    ),
+  );
+}
+
+class EqualizerSettingsPage extends StatelessWidget {
+  const EqualizerSettingsPage({super.key, required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) => EqualizerSettingsView(state: state);
+}
+
+class EqualizerSettingsView extends StatelessWidget {
+  const EqualizerSettingsView({super.key, required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: state,
+    builder: (context, _) => SettingsDetailScaffold(
+      title: '均衡器',
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: _EqualizerControls(state: state),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _EqualizerControls extends StatelessWidget {
+  const _EqualizerControls({required this.state});
+  final AppState state;
+  Future<void> _update(HifiSettings next) => state.setHifiSettings(next);
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = state.hifiSettings;
+    return Column(
+      children: [
+        if (state.hifi?.nativeAvailable != true)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: TrText('当前引擎不支持均衡器，切换到 Audio Engine 并重启后生效。'),
+          ),
+        AppleGroupedCard(
+          margin: EdgeInsets.zero,
+          child: Column(
+            children: <Widget>[
+              _SwitchRow(
+                label: '启用均衡器',
+                subtitle: settings.bitPerfect
+                    ? 'Bit-perfect 输出时 EQ 被旁路，先关闭 Bit-perfect'
+                    : 'DSP 处理会改变样本，因此不再属于 bit-perfect 路径',
+                value: settings.eqActive,
+                enabled: !settings.bitPerfect,
+                onChanged: (bool value) => _update(
+                  settings.copyWith(
+                    equalizer: settings.equalizer.copyWith(enabled: value),
+                  ),
+                ),
+              ),
+              if (settings.eqActive) ...<Widget>[
+                _SettingRow(
+                  label: '预设',
+                  subtitle: settings.equalizer.matchingPresetId == null
+                      ? '自定义曲线'
+                      : '选择预设会自动启用均衡器',
+                  trailing: DropdownButton<String>(
+                    key: const ValueKey('hifi-eq-preset'),
+                    value: settings.equalizer.matchingPresetId,
+                    hint: const TrText('自定义'),
+                    underline: const SizedBox.shrink(),
+                    borderRadius: BorderRadius.circular(12),
+                    items: <DropdownMenuItem<String>>[
+                      for (final HifiEqPreset preset in hifiEqPresets)
+                        DropdownMenuItem<String>(
+                          value: preset.id,
+                          child: TrText(preset.label),
+                        ),
+                    ],
+                    onChanged: (String? id) {
+                      if (id == null) return;
+                      final HifiEqPreset preset = hifiEqPresets.firstWhere(
+                        (HifiEqPreset candidate) => candidate.id == id,
+                      );
+                      unawaited(
+                        _update(
+                          settings.copyWith(
+                            equalizer: settings.equalizer
+                                .withPreset(preset)
+                                .copyWith(enabled: true),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                _SettingRow(
+                  label: '前级',
+                  subtitle:
+                      '${settings.equalizer.preampDb.toStringAsFixed(1)} dB',
+                  trailing: SizedBox(
+                    width: 200,
+                    child: SemanticsPortal(
+                      child: Slider(
+                        value: settings.equalizer.preampDb,
+                        min: kMinHifiPreampDb,
+                        max: kMaxHifiPreampDb,
+                        onChanged: (double value) => _update(
+                          settings.copyWith(
+                            equalizer: settings.equalizer.copyWith(
+                              preampDb: clampHifiPreampDb(_tenthDb(value)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                _SwitchRow(
+                  label: '限幅器',
+                  subtitle: '样本峰值上限 −1 dBFS，防止 EQ 提升导致削波',
+                  value: settings.equalizer.limiterEnabled,
+                  onChanged: (bool value) => _update(
+                    settings.copyWith(
+                      equalizer: settings.equalizer.copyWith(
+                        limiterEnabled: value,
+                      ),
+                    ),
+                  ),
+                ),
+                _EqBandEditor(
+                  equalizer: settings.equalizer,
+                  onChanged: (int index, double gainDb) => _update(
+                    settings.copyWith(
+                      equalizer: settings.equalizer.withBandGain(index, gainDb),
+                    ),
+                  ),
+                  onReset: () => _update(
+                    settings.copyWith(
+                      equalizer: settings.equalizer.copyWith(
+                        bands: defaultHifiEqBands(),
+                        preampDb: 0,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ],
     );

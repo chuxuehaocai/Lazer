@@ -18,11 +18,6 @@ extern "C" {
 
 namespace lazer::audio {
 
-void LogProxy::write(LazerAudioLogLevel level, const char *message) const {
-    if (handler_.on_log == nullptr || message == nullptr) return;
-    handler_.on_log(handler_.context, static_cast<int32_t>(level), message);
-}
-
 void AudioFrame::reset() noexcept {
     if (frame_ != nullptr) {
         av_frame_free(&frame_);

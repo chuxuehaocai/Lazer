@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show Color, ThemeMode;
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../audio/audio_engine.dart';
@@ -16,6 +17,7 @@ import '../data/audio_quality.dart';
 import '../data/catalog.dart';
 import '../data/lyrics.dart';
 import '../local/local_library.dart';
+import '../local/coalescing_writer.dart';
 import '../scrolling/scroll_motion.dart';
 import '../l10n/app_language.dart';
 import '../data/models.dart';
@@ -25,12 +27,14 @@ import '../lyrics/imported_lyrics_store.dart';
 import '../updates/release_version.dart';
 import '../updates/update_checker.dart';
 import '../utils/background_image.dart';
+import '../legacy/legacy_background.dart' show albumSeedForCover;
 import 'build_safe_notifier.dart';
 import 'listen_together.dart';
 import 'media_shortcuts.dart';
 import 'playback_queue_store.dart';
 import 'hifi_settings.dart';
 import 'ui_preferences.dart';
+import '../theme/font_preferences.dart';
 
 /// How the session was authenticated.
 enum AuthMethod { qrcode, sms, password, cookie }
@@ -136,6 +140,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.deviceIsTelevision = false,
     this.hifiSettings = const HifiSettings(),
     this.hifi,
+    this.artworkSeedLoader = albumSeedForCover,
   }) : catalog = catalog ?? Catalog(),
        localLibrary = localLibrary ?? LocalLibrary(),
        _queueStore = queueStore ?? PlaybackQueueStore(),
@@ -503,20 +508,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// arranged ones, so a fresh subscription still shows up and a playlist
   /// removed on another device never leaves a hole.
   List<String> playlistOrder = const <String>[];
+  late final CoalescingWriter _playlistOrderWriter = CoalescingWriter(() async {
+    final snapshot = playlistOrder.join('\n');
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_playlist_order',
+      snapshot,
+    );
+  });
 
   /// Stores the order the library was dragged into.
   Future<void> setPlaylistOrder(List<String> order) async {
-    final List<String> next = List<String>.unmodifiable(<String>[
+    final List<String> next = List<String>.unmodifiable(<String>{
       for (final String id in order)
         if (id.isNotEmpty) id,
-    ]);
+    });
     if (listEquals(playlistOrder, next)) return;
     playlistOrder = next;
     notifyListeners();
-    await (await SharedPreferences.getInstance()).setString(
-      'lazer_playlist_order',
-      next.join('\n'),
-    );
+    await _playlistOrderWriter.request();
   }
 
   /// Legacy shell backdrop: the album-coloured flowing canvas, the listener's
@@ -531,6 +540,70 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// `内容不透明度` of the legacy shell — how much of the backdrop the content
   /// veil hides.
   double legacyUiAlpha = 0.7;
+  double browseBackgroundFps = 30;
+  double playerBackgroundFps = 0;
+  LegacyBackgroundMode playerBackground =
+      LegacyBackgroundMode.nowPlayingDynamic;
+  Color? browseBackgroundColor, playerBackgroundColor;
+  String? playerBackgroundImagePath;
+
+  Future<void> setBackgroundFps(double fps, {bool player = false}) async {
+    if (!fps.isFinite) return;
+    final double value = player && fps == 0
+        ? 0
+        : fps.clamp(10, 1000).roundToDouble();
+    if (player) {
+      playerBackgroundFps = value;
+    } else {
+      browseBackgroundFps = value;
+    }
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      player ? 'lazer_player_background_fps' : 'lazer_browse_background_fps',
+      value,
+    );
+  }
+
+  Future<void> setPlayerBackground(LegacyBackgroundMode mode) async {
+    playerBackground = mode;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_player_background',
+      mode.name,
+    );
+  }
+
+  Future<void> setBackgroundColor(Color? color, {bool player = false}) async {
+    if (player) {
+      playerBackgroundColor = color;
+    } else {
+      browseBackgroundColor = color;
+    }
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    final key = player
+        ? 'lazer_player_background_color'
+        : 'lazer_browse_background_color';
+    if (color == null) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setInt(key, color.toARGB32());
+    }
+  }
+
+  Future<void> setPlayerBackgroundImage(String? path) async {
+    playerBackgroundImagePath = path;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (path == null) {
+      await prefs.remove('lazer_player_background_image');
+    } else {
+      await prefs.setString(
+        'lazer_player_background_image',
+        backgroundImageStore.preferenceValue(path),
+      );
+    }
+  }
 
   Future<void> setLegacyBackground(LegacyBackgroundMode value) async {
     if (legacyBackground == value) return;
@@ -605,6 +678,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// redrawn, 0.1 … 1.0. It is the one knob a slow GPU needs: at 1.0 the mesh
   /// paints 551 warped vertices thirty times a second.
   double dynamicBackgroundQuality = kDynamicBackgroundQualityDefault;
+  double playerBackgroundQuality = kDynamicBackgroundQualityDefault;
+
+  Future<void> setPlayerBackgroundQuality(double value) async {
+    final next = normalizeDynamicBackgroundQuality(value);
+    if (playerBackgroundQuality == next) return;
+    playerBackgroundQuality = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_player_background_quality',
+      next,
+    );
+  }
 
   /// Applies a precision setting, snapped to the slider grid and clamped to
   /// the supported range.
@@ -689,6 +774,111 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   double lyricFontSize = 22;
   int lyricFontWeight = 600;
+  FontPreferences fontPreferences = const FontPreferences();
+  final ValueNotifier<bool> playerPresented = ValueNotifier(false);
+  final ValueNotifier<bool> browseTransitionActive = ValueNotifier(false);
+  int _playerPresentations = 0;
+  bool _presentationDisposed = false;
+
+  void playerPresentationChanged(bool entered) {
+    if (_presentationDisposed) return;
+    _playerPresentations += entered ? 1 : -1;
+    if (_playerPresentations < 0) _playerPresentations = 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_presentationDisposed) {
+        playerPresented.value = _playerPresentations > 0;
+      }
+    });
+  }
+
+  void browseTransitionChanged(bool moving) {
+    if (_presentationDisposed) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_presentationDisposed) browseTransitionActive.value = moving;
+    });
+  }
+
+  final Future<Color?> Function(String?) artworkSeedLoader;
+  int _paletteGeneration = 0;
+  (String?, String?)? _paletteIdentity;
+
+  Future<void> refreshArtworkSeed() async {
+    final Track? track = current;
+    final identity = (track?.id, track?.coverUrl);
+    if (_paletteIdentity == identity) return;
+    _paletteIdentity = identity;
+    final int generation = ++_paletteGeneration;
+    try {
+      final seed = await artworkSeedLoader(track?.coverUrl);
+      if (generation == _paletteGeneration &&
+          current?.id == track?.id &&
+          current?.coverUrl == track?.coverUrl) {
+        setLegacySeed(seed);
+      }
+    } catch (_) {
+      if (generation == _paletteGeneration) setLegacySeed(null);
+    }
+  }
+
+  bool showArtworkWithLyrics = false;
+  String? importedEnginePath;
+
+  Future<void> setImportedEnginePath(String? path) async {
+    importedEnginePath = path;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (path == null) {
+      await prefs.remove('lazer_native_engine_path');
+    } else {
+      await prefs.setString('lazer_native_engine_path', path);
+    }
+  }
+
+  Future<void> setFontCustomization(
+    FontCategory category,
+    FontCustomization? value,
+  ) async {
+    final normalized = value == null
+        ? null
+        : FontCustomization(
+            scale: FontCustomization.normalizeScale(value.scale),
+            weight: value.weight == null
+                ? null
+                : FontCustomization.normalizeWeight(value.weight!),
+          );
+    if (fontPreferences[category] ==
+        (normalized ?? const FontCustomization())) {
+      return;
+    }
+    fontPreferences = fontPreferences.update(category, normalized);
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_font_preferences',
+      fontPreferences.encode(),
+    );
+  }
+
+  Future<void> resetFonts() async {
+    fontPreferences = const FontPreferences();
+    lyricFontSize = 22;
+    lyricFontWeight = 600;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('lazer_font_preferences');
+    await prefs.remove('lazer_lyric_font_size');
+    await prefs.remove('lazer_lyric_font_weight');
+  }
+
+  Future<void> setShowArtworkWithLyrics(bool value) async {
+    if (showArtworkWithLyrics == value) return;
+    showArtworkWithLyrics = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      'lazer_show_artwork_with_lyrics',
+      value,
+    );
+  }
+
   static int normalizeLyricWeight(int value) =>
       (value.clamp(400, 700) / 100).round() * 100;
 
@@ -1017,6 +1207,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       legacyBackground = LegacyBackgroundModeLabels.parse(
         prefs.getString('lazer_legacy_background'),
       );
+      playerBackground = LegacyBackgroundModeLabels.parse(
+        prefs.getString('lazer_player_background'),
+      );
+      final browseFps = prefs.getDouble('lazer_browse_background_fps') ?? 30;
+      browseBackgroundFps = browseFps.isFinite ? browseFps.clamp(10, 1000) : 30;
+      final playerFps = prefs.getDouble('lazer_player_background_fps') ?? 0;
+      playerBackgroundFps = playerFps.isFinite
+          ? (playerFps == 0 ? 0 : playerFps.clamp(10, 1000))
+          : 0;
+      final browseColor = prefs.getInt('lazer_browse_background_color');
+      browseBackgroundColor = browseColor == null ? null : Color(browseColor);
+      final playerColor = prefs.getInt('lazer_player_background_color');
+      playerBackgroundColor = playerColor == null ? null : Color(playerColor);
+      playerBackgroundImagePath = await backgroundImageStore.restore(
+        prefs.getString('lazer_player_background_image'),
+      );
       final String? storedBackgroundImage = prefs.getString(
         'lazer_legacy_background_image',
       );
@@ -1041,6 +1247,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       dynamicBackgroundQuality = normalizeDynamicBackgroundQuality(
         prefs.getDouble('lazer_dynamic_background_quality') ??
+            kDynamicBackgroundQualityDefault,
+      );
+      playerBackgroundQuality = normalizeDynamicBackgroundQuality(
+        prefs.getDouble('lazer_player_background_quality') ??
             kDynamicBackgroundQualityDefault,
       );
       uiMode = AppUiModeLabels.parse(prefs.getString('lazer_ui_mode'));
@@ -1110,6 +1320,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricFontWeight = normalizeLyricWeight(
         prefs.getInt('lazer_lyric_font_weight') ?? 600,
       );
+      fontPreferences = FontPreferences.decode(
+        prefs.getString('lazer_font_preferences'),
+      );
+      importedEnginePath = prefs.getString('lazer_native_engine_path');
+      showArtworkWithLyrics =
+          prefs.getBool('lazer_show_artwork_with_lyrics') ?? false;
       legacyPalette = LegacyPaletteModeLabels.parse(
         prefs.getString('lazer_legacy_palette'),
       );
@@ -1650,9 +1866,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Track? get current =>
       _queue.isEmpty ? null : _queue[_queueIndex.clamp(0, _queue.length - 1)];
   Duration get position => _position;
-  Duration get precisePosition => _realActive && audioEngine?.active == true
-      ? audioEngine!.position
-      : _position;
+  Duration? _optimisticSeek;
+  int _optimisticSeekGeneration = 0;
+  int _seekRequest = 0;
+  final Stopwatch _optimisticSeekClock = Stopwatch();
+  Duration get precisePosition {
+    final bool active = _realActive && audioEngine?.active == true;
+    final actual = active ? audioEngine!.position : _position;
+    final pending = _optimisticSeek;
+    if (pending != null) {
+      final acknowledged =
+          active &&
+          (actual - pending).abs() <= const Duration(milliseconds: 500);
+      if (_optimisticSeekGeneration == _generation &&
+          !acknowledged &&
+          _optimisticSeekClock.elapsed < const Duration(seconds: 3)) {
+        return pending;
+      }
+      _optimisticSeek = null;
+      _optimisticSeekClock.stop();
+    }
+    return actual;
+  }
+
   bool get playing => _playing;
   bool get audioReady => _realActive && (audioEngine?.active ?? false);
   int get queueIndex => _queueIndex;
@@ -1984,7 +2220,25 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (t == null) return;
     final Duration target = t.duration * clampSeekFraction(fraction);
     _position = target;
-    if (_realActive) unawaited(audioEngine!.seek(target));
+    if (_realActive) {
+      _optimisticSeek = target;
+      _optimisticSeekGeneration = _generation;
+      _optimisticSeekClock
+        ..reset()
+        ..start();
+      final request = ++_seekRequest;
+      unawaited(
+        Future<void>.sync(() => audioEngine!.seek(target)).catchError((
+          Object error,
+        ) {
+          if (request == _seekRequest) {
+            _optimisticSeek = null;
+            _tickNotifier.pulse();
+          }
+          debugPrint('Seek failed: $error');
+        }),
+      );
+    }
     // Position-only change: tick lane, not a structural rebuild.
     _tickNotifier.pulse();
   }
@@ -1995,7 +2249,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (t == null) return;
     final int total = t.duration.inMilliseconds;
     if (total <= 0) return;
-    final int target = (_position + delta).inMilliseconds.clamp(0, total);
+    final int target = (precisePosition + delta).inMilliseconds.clamp(0, total);
     seek(target / total);
   }
 
@@ -2227,6 +2481,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> _loadCurrentArtwork() async {
+    unawaited(refreshArtworkSeed());
     final track = current;
     if (track == null ||
         _metadataLoaded.contains(track.id) ||
@@ -2271,6 +2526,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       }).toList();
       if (changed) {
         _markQueueChanged();
+        unawaited(refreshArtworkSeed());
         unawaited(_saveQueue());
         final Track? hydrated = current;
         if (hydrated != null) unawaited(_replaceRecentMetadata(hydrated));
@@ -2851,6 +3107,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _presentationDisposed = true;
+    ++_seekRequest;
+    playerPresented.dispose();
+    browseTransitionActive.dispose();
+    _paletteGeneration++;
     _queueActivity++;
     ++_generation;
     ++_lyricGeneration;

@@ -114,20 +114,21 @@ class _Word {
 }
 
 class _WordLayout {
-  _WordLayout(
-    this.line,
-    TextStyle style,
-    double width,
-    TextScaler scaler,
-    Locale? locale,
-  ) {
+  _WordLayout(this.line, this.style, this.width, this.scaler, this.locale) {
     bright = TextPainter(
       text: TextSpan(text: line.text, style: style),
       textDirection: TextDirection.ltr,
       textScaler: scaler,
       locale: locale,
     )..layout(maxWidth: width);
-    dim = TextPainter(
+    fontSize = scaler.scale(style.fontSize ?? 22);
+  }
+
+  // Off-focus rows need one paragraph, not a dim paragraph and a selection
+  // box for every grapheme. Materialize those only when word effects paint.
+  void prepareWords() {
+    if (_dim != null) return;
+    _dim = TextPainter(
       text: TextSpan(
         text: line.text,
         style: style.copyWith(
@@ -138,7 +139,6 @@ class _WordLayout {
       textScaler: scaler,
       locale: locale,
     )..layout(maxWidth: width);
-    fontSize = scaler.scale(style.fontSize ?? 22);
     var offset = 0;
     for (var wi = 0; wi < line.words.length; wi++) {
       final word = line.words[wi];
@@ -215,14 +215,63 @@ class _WordLayout {
       );
     }
   }
+
   final LyricLine line;
-  late final TextPainter bright, dim;
+  final TextStyle style;
+  final double width;
+  final TextScaler scaler;
+  final Locale? locale;
+  late final TextPainter bright;
+  TextPainter? _dim;
+  TextPainter get dim => _dim!;
   late final double fontSize;
   final List<_Word> words = <_Word>[];
-  final Path baseClip = Path();
+  late final Path baseClip = Path();
+  Path settledEmphasized = Path();
+  Path settledOrdinary = Path();
+  final List<_Word> animatingWords = <_Word>[];
+  double _lastPositionMs = double.negativeInfinity;
+  double _nextChangeMs = double.negativeInfinity;
+
+  void updatePaintGroups(double now) {
+    if (now >= _lastPositionMs && now < _nextChangeMs) {
+      _lastPositionMs = now;
+      return;
+    }
+    _lastPositionMs = now;
+    _nextChangeMs = double.infinity;
+    settledEmphasized = Path();
+    settledOrdinary = Path();
+    animatingWords.clear();
+    for (final word in words) {
+      if (word.segments.isEmpty) continue;
+      if (now < word.startMs) {
+        _nextChangeMs = math.min(_nextChangeMs, word.startMs);
+        continue;
+      }
+      final settlesAt = word.startMs + word.settledAtMs;
+      if (now < settlesAt) {
+        animatingWords.add(word);
+        _nextChangeMs = math.min(_nextChangeMs, settlesAt);
+        continue;
+      }
+      final target = word.emphasized ? settledEmphasized : settledOrdinary;
+      for (final segment in word.segments) {
+        target.addRect(_glyphClip(segment.rect));
+      }
+    }
+  }
+
+  Rect _glyphClip(Rect rect) => Rect.fromLTRB(
+    rect.left,
+    rect.top - fontSize * .15,
+    rect.right,
+    rect.bottom + fontSize * .15,
+  );
+
   void dispose() {
     bright.dispose();
-    dim.dispose();
+    _dim?.dispose();
   }
 }
 
@@ -257,11 +306,17 @@ class _WordPainter extends CustomPainter {
     }
     // Retain the word painter while the row exits; fade its emphasis using
     // the same spring as the row's scale and color instead of swapping to Text.
-    canvas.saveLayer(
-      null,
-      Paint()..color = Colors.white.withValues(alpha: focus),
-    );
+    // An opaque group has nothing to blend. Keep the layer only during the
+    // focus transition, where applying alpha to the group remains necessary.
+    if (focus < 1) {
+      canvas.saveLayer(
+        null,
+        Paint()..color = Colors.white.withValues(alpha: focus),
+      );
+    }
     final now = position().inMicroseconds / 1000;
+    layout.prepareWords();
+    layout.updatePaintGroups(now);
     // Each clipped glyph used to repaint the entire dim lyric line. Paint the
     // same base once, then retain the existing per-glyph highlight effects.
     canvas.save();
@@ -272,29 +327,8 @@ class _WordPainter extends CustomPainter {
     // Completed words no longer move or glow. Collect their glyph clips and
     // paint the bright line once per final baseline instead of calling
     // TextPainter.paint for every already-finished character on every frame.
-    final Path settledEmphasized = Path();
-    final Path settledOrdinary = Path();
-    final List<_Word> animatingWords = <_Word>[];
-    for (final _Word word in layout.words) {
-      final double elapsed = now - word.startMs;
-      if (elapsed < 0 || word.segments.isEmpty) continue;
-      if (elapsed < word.settledAtMs) {
-        animatingWords.add(word);
-        continue;
-      }
-      final Path target = word.emphasized ? settledEmphasized : settledOrdinary;
-      for (final _Segment segment in word.segments) {
-        final Rect rect = segment.rect;
-        target.addRect(
-          Rect.fromLTRB(
-            rect.left,
-            rect.top - layout.fontSize * .15,
-            rect.right,
-            rect.bottom + layout.fontSize * .15,
-          ),
-        );
-      }
-    }
+    final settledEmphasized = layout.settledEmphasized;
+    final settledOrdinary = layout.settledOrdinary;
     if (!settledEmphasized.getBounds().isEmpty) {
       canvas.save();
       canvas.clipPath(settledEmphasized);
@@ -309,9 +343,12 @@ class _WordPainter extends CustomPainter {
       canvas.restore();
     }
 
-    for (final _Word word in animatingWords) {
+    for (final _Word word in layout.animatingWords) {
+      final double elapsed = now - word.startMs;
+      final ordinary = word.emphasized
+          ? null
+          : LyricWordMotion.ordinary(elapsed, word.durationMs);
       for (final _Segment segment in word.segments) {
-        final elapsed = now - segment.startMs;
         final duration = segment.durationMs;
         final motion = segment.emphasized
             ? LyricWordMotion.emphasized(
@@ -321,7 +358,7 @@ class _WordPainter extends CustomPainter {
                 segment.count,
                 last: segment.last,
               )
-            : LyricWordMotion.ordinary(elapsed, duration);
+            : ordinary!;
         final rect = segment.rect;
         final boundary =
             segment.wordLeft +
@@ -392,7 +429,7 @@ class _WordPainter extends CustomPainter {
         canvas.restore();
       }
     }
-    canvas.restore();
+    if (focus < 1) canvas.restore();
   }
 
   @override

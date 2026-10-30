@@ -1,4 +1,5 @@
 #include "output_wasapi.h"
+#include "internal.h"
 
 #include <algorithm>
 #include <cstring>

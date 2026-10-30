@@ -1,13 +1,34 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lazer_nextgen/theme/apple_design.dart';
 
 void main() {
+  test(
+    'Material and Cupertino text consistently use MiSans on every platform',
+    () {
+      for (final platform in TargetPlatform.values) {
+        debugDefaultTargetPlatformOverride = platform;
+        try {
+          final theme = buildAppleTheme();
+          expect(theme.textTheme.bodyLarge!.fontFamily, 'MiSans');
+          expect(theme.textTheme.displayLarge!.fontFamily, 'MiSans');
+          final text = theme.cupertinoOverrideTheme!.textTheme!;
+          expect(text.textStyle.fontFamily, 'MiSans');
+          expect(text.actionTextStyle.fontFamily, 'MiSans');
+          expect(text.pickerTextStyle.fontFamily, 'MiSans');
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      }
+    },
+  );
   test('Apple theme exposes semantic system colours and the HIG type ramp', () {
     final ThemeData light = buildAppleTheme();
-    final AppleSemanticColors lightSemantics =
-        light.extension<AppleSemanticColors>()!;
+    final AppleSemanticColors lightSemantics = light
+        .extension<AppleSemanticColors>()!;
 
     expect(light.brightness, Brightness.light);
     expect(light.colorScheme.primary, AppleColors.musicRed);
@@ -20,8 +41,8 @@ void main() {
     expect(light.textTheme.bodySmall?.fontSize, 13);
 
     final ThemeData dark = buildAppleTheme(brightness: Brightness.dark);
-    final AppleSemanticColors darkSemantics =
-        dark.extension<AppleSemanticColors>()!;
+    final AppleSemanticColors darkSemantics = dark
+        .extension<AppleSemanticColors>()!;
     expect(dark.brightness, Brightness.dark);
     expect(dark.scaffoldBackgroundColor, Colors.black);
     expect(darkSemantics.secondaryGroupedBackground, const Color(0xFF1C1C1E));
@@ -35,8 +56,8 @@ void main() {
       brightness: Brightness.dark,
       seedAccent: seed,
     );
-    final AppleSemanticColors seededSemantics =
-        seeded.extension<AppleSemanticColors>()!;
+    final AppleSemanticColors seededSemantics = seeded
+        .extension<AppleSemanticColors>()!;
 
     expect(seeded.colorScheme.primary, seed);
     expect(seededSemantics.accent, seed);

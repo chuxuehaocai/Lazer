@@ -44,9 +44,15 @@ void sleepIdle() {
 }  // namespace
 
 struct Engine::SourceSlot final : SourceConsumer {
-    explicit SourceSlot(Engine *engine, LazerAudioLogHandler handler)
+    explicit SourceSlot(Engine *engine, LazerAudioLogHandler)
         : owner(engine), source(&log) {
-        log.install(handler);
+        log.install({
+            [](void *context, int32_t level, const char *message) {
+                static_cast<Engine *>(context)->log_.write(
+                    static_cast<LazerAudioLogLevel>(level), message);
+            },
+            engine,
+        }, false);
     }
 
     ~SourceSlot() {

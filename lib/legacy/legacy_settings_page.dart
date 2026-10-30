@@ -7,19 +7,20 @@ import 'package:flutter/material.dart';
 import '../audio/audio_device_report.dart';
 import '../data/audio_quality.dart';
 import '../diagnostics/build_info.dart';
+import '../diagnostics/export_logs.dart';
 import '../downloads/download_queue_sheet.dart';
 import '../l10n/app_language.dart';
 import '../l10n/app_localizations.dart';
 import '../scrolling/scroll_motion.dart';
 import '../state/app_state.dart';
-import '../state/media_shortcuts.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/hifi_settings_section.dart';
 import '../widgets/listen_together_dialog.dart';
-import '../widgets/shortcut_recorder_dialog.dart';
+import '../widgets/settings_detail.dart';
+import '../widgets/settings_choice.dart';
 import '../tv/tv_mode.dart';
 import '../updates/update_dialog.dart';
 import '../utils/background_image.dart';
@@ -27,6 +28,8 @@ import '../utils/byte_format.dart';
 import '../widgets/ui_scaling.dart';
 import 'legacy_login.dart';
 import 'legacy_widgets.dart';
+import 'font_settings_page.dart';
+import 'shortcut_settings_page.dart';
 
 /// A single-column, inset-grouped Settings page, following the iOS Settings
 /// information architecture rather than a desktop form grid.
@@ -48,16 +51,33 @@ class LegacySettingsPage extends StatelessWidget {
   final Future<String?> Function()? backgroundImagePicker;
 
   @override
+  Widget build(BuildContext context) => SettingsDetailHost(
+    compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
+    child: _SettingsOverview(
+      state: state,
+      onOpenLocalMusic: onOpenLocalMusic,
+      backgroundImagePicker: backgroundImagePicker,
+    ),
+  );
+}
+
+class _SettingsOverview extends StatelessWidget {
+  const _SettingsOverview({
+    required this.state,
+    this.onOpenLocalMusic,
+    this.backgroundImagePicker,
+  });
+  final AppState state;
+  final VoidCallback? onOpenLocalMusic;
+  final Future<String?> Function()? backgroundImagePicker;
+
+  @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final double minScale = UiMetrics.minScaleOf(context);
     final double shownScale = UiMetrics.scaleOf(context);
     final bool car = UiMetrics.carOf(context);
-    final bool shortcutsCustomised = MediaShortcutAction.values.any(
-      (MediaShortcutAction action) =>
-          state.mediaShortcuts[action] != kDefaultMediaShortcuts[action],
-    );
     final DynamicBackgroundPrecision flowPrecision =
         DynamicBackgroundPrecision.of(state.dynamicBackgroundQuality);
     final double inset = legacyPageInset(context);
@@ -65,6 +85,7 @@ class LegacySettingsPage extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760),
         child: ListView(
+          key: const PageStorageKey('settings-overview-scroll'),
           padding: EdgeInsets.fromLTRB(inset, 8, inset, 36),
           children: <Widget>[
             const ApplePageTitle(
@@ -77,6 +98,17 @@ class LegacySettingsPage extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
+                  AppleListTile(
+                    key: const ValueKey('open-font-settings'),
+                    title: context.tr('字体自定义'),
+                    subtitle: context.tr('调节页面文字与歌词的大小和粗细'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => SettingsDetailHost.open(
+                      context,
+                      page: (_) => FontSettingsPage(state: state),
+                      view: (_) => FontSettingsView(state: state),
+                    ),
+                  ),
                   _LegacySettingRow(
                     label: '配色',
                     subtitle: state.legacyPalette.detail,
@@ -202,10 +234,9 @@ class LegacySettingsPage extends StatelessWidget {
                   _LegacySettingRow(
                     label: '背景',
                     subtitle: state.legacyBackground.detail,
-                    trailing: DropdownButton<LegacyBackgroundMode>(
+                    trailing: SettingsChoice<LegacyBackgroundMode>(
+                      key: const ValueKey('browse-background-mode'),
                       value: state.legacyBackground,
-                      underline: const SizedBox.shrink(),
-                      borderRadius: BorderRadius.circular(12),
                       items: <DropdownMenuItem<LegacyBackgroundMode>>[
                         for (final LegacyBackgroundMode mode
                             in LegacyBackgroundMode.values)
@@ -292,6 +323,7 @@ class LegacySettingsPage extends StatelessWidget {
                         : (double value) =>
                               unawaited(state.setLegacyUiAlpha(value)),
                   ),
+                  _BackgroundPreferences(state: state, player: false),
                   // The flowing canvas is the app's only continuously
                   // repainting surface, so its precision is the setting a
                   // struggling GPU needs. Both halves of it are shown —
@@ -305,7 +337,7 @@ class LegacySettingsPage extends StatelessWidget {
                     // One literal on purpose: the translation table matches
                     // it as a single pattern key.
                     subtitle:
-                        '网格 ${flowPrecision.columns}×${flowPrecision.rows}，每 ${flowPrecision.frameInterval.inMilliseconds} ms 刷新一次',
+                        '网格 ${flowPrecision.columns}×${flowPrecision.rows}，帧率单独设置',
                     value: state.dynamicBackgroundQuality,
                     min: kDynamicBackgroundQualityMin,
                     max: kDynamicBackgroundQualityMax,
@@ -385,6 +417,15 @@ class LegacySettingsPage extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+            ),
+            const _LegacySectionLabel('动态背景'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: _BackgroundPreferences(
+                state: state,
+                player: true,
+                picker: backgroundImagePicker,
               ),
             ),
             const _LegacySectionLabel('播放'),
@@ -548,36 +589,16 @@ class LegacySettingsPage extends StatelessWidget {
             const _LegacySectionLabel('快捷键'),
             AppleGroupedCard(
               margin: EdgeInsets.zero,
-              child: Column(
-                children: <Widget>[
-                  _LegacySettingRow(
-                    label: '媒体快捷键',
-                    subtitle: '在应用内用键盘控制播放；在文本框中输入时快捷键不会触发',
-                    trailing: TextButton(
-                      key: const ValueKey('media-shortcut-reset'),
-                      onPressed: shortcutsCustomised
-                          ? () => unawaited(state.resetMediaShortcuts())
-                          : null,
-                      child: const TrText('恢复默认'),
-                    ),
-                  ),
-                  for (final MediaShortcutAction action
-                      in MediaShortcutAction.values)
-                    _LegacySettingRow(
-                      label: action.label,
-                      subtitle: action.detail,
-                      trailing: OutlinedButton(
-                        key: ValueKey('media-shortcut-${action.name}'),
-                        onPressed: () => unawaited(
-                          _editMediaShortcut(context, state, action),
-                        ),
-                        child: Text(
-                          state.mediaShortcutFor(action)?.label ??
-                              context.tr('未设置'),
-                        ),
-                      ),
-                    ),
-                ],
+              child: AppleListTile(
+                key: const ValueKey('open-shortcut-settings'),
+                title: context.tr('快捷键设置'),
+                subtitle: context.tr('自定义播放控制的键盘快捷键'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => SettingsDetailHost.open(
+                  context,
+                  page: (_) => ShortcutSettingsPage(state: state),
+                  view: (_) => ShortcutSettingsView(state: state),
+                ),
               ),
             ),
             const _LegacySectionLabel('歌词'),
@@ -585,34 +606,13 @@ class LegacySettingsPage extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
-                  _LegacySliderRow(
-                    label: '歌词字号',
-                    valueText: '${state.lyricFontSize.round()}',
-                    value: state.lyricFontSize.clamp(14.0, 40.0),
-                    min: 14,
-                    max: 40,
-                    divisions: 26,
-                    onChanged: (double value) =>
-                        unawaited(state.setLyricFontSize(value)),
-                  ),
-                  _LegacyChoiceRow(
-                    label: '歌词粗细',
-                    valueText: context.tr(switch (state.lyricFontWeight) {
-                      400 => '常规',
-                      500 => '中等',
-                      600 => '半粗',
-                      _ => '粗体',
-                    }),
-                    choices: const <int>[400, 500, 600, 700],
-                    selected: state.lyricFontWeight,
-                    labelOf: (int weight) => context.tr(switch (weight) {
-                      400 => '常规',
-                      500 => '中等',
-                      600 => '半粗',
-                      _ => '粗体',
-                    }),
-                    onSelected: (int weight) =>
-                        unawaited(state.setLyricFontWeight(weight)),
+                  _LegacySwitchRow(
+                    key: const ValueKey('artwork-with-lyrics-switch'),
+                    label: '歌词同时显示封面',
+                    subtitle: '仅移动端：封面缩至歌曲信息旁，随播放控件收起；顶部保留歌曲信息',
+                    value: state.showArtworkWithLyrics,
+                    onChanged: (value) =>
+                        unawaited(state.setShowArtworkWithLyrics(value)),
                   ),
                   _LegacySwitchRow(
                     label: '歌词模糊',
@@ -777,6 +777,13 @@ class LegacySettingsPage extends StatelessWidget {
               child: Column(
                 children: <Widget>[
                   _VersionSecretTile(state: state),
+                  AppleListTile(
+                    key: const ValueKey('export-logs'),
+                    title: context.tr('导出日志'),
+                    subtitle: context.tr('保存运行日志与播放诊断信息'),
+                    trailing: const Icon(Icons.file_download_outlined),
+                    onTap: () => unawaited(exportLogs(context, state)),
+                  ),
                   _LegacySettingRow(
                     label: '检查更新',
                     subtitle: '从 GitHub 获取最新版本',
@@ -915,7 +922,7 @@ class _LegacySwitchRow extends StatelessWidget {
   final String label;
   final String subtitle;
   final bool value;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1241,88 +1248,6 @@ class _LegacySliderRow extends StatelessWidget {
   }
 }
 
-class _LegacyChoiceRow extends StatelessWidget {
-  const _LegacyChoiceRow({
-    required this.label,
-    required this.valueText,
-    required this.choices,
-    required this.selected,
-    required this.labelOf,
-    required this.onSelected,
-  });
-
-  final String label;
-  final String valueText;
-  final List<int> choices;
-  final int selected;
-  final String Function(int value) labelOf;
-  final ValueChanged<int> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final AppleSemanticColors apple = AppleSemanticColors.of(context);
-    return TvFocusHighlight(
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: apple.separator, width: .5)),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 13, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    context.tr(label),
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: apple.label,
-                    ),
-                  ),
-                ),
-                Text(
-                  context.tr(valueText),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: apple.secondaryLabel,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final int choice in choices)
-                  ChoiceChip(
-                    label: Text(
-                      context.tr(labelOf(choice)),
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.values[choice ~/ 100 - 1],
-                        color: selected == choice ? apple.accent : apple.label,
-                      ),
-                    ),
-                    showCheckmark: false,
-                    selected: selected == choice,
-                    selectedColor: apple.accentSoft,
-                    backgroundColor: apple.fill,
-                    side: BorderSide.none,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    onSelected: (_) => onSelected(choice),
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// `#RRGGBB` label shown beside the custom accent swatch.
 String _accentHex(Color color) =>
     '#${((color.toARGB32() & 0xFFFFFF).toRadixString(16)).padLeft(6, '0').toUpperCase()}';
@@ -1342,6 +1267,7 @@ Future<void> _pickBackgroundImage(
   BuildContext context,
   AppState state, [
   Future<String?> Function()? picker,
+  bool player = false,
 ]) async {
   String? stored;
   try {
@@ -1351,46 +1277,183 @@ Future<void> _pickBackgroundImage(
     return;
   }
   if (stored == null) return;
-  final String? previous = state.legacyBackgroundImagePath;
-  await state.setLegacyBackgroundImage(stored);
-  await state.setLegacyBackground(LegacyBackgroundMode.customImage);
-  if (previous != stored) await deleteCustomBackgroundImage(previous);
+  final String? previous = player
+      ? state.playerBackgroundImagePath
+      : state.legacyBackgroundImagePath;
+  if (player) {
+    await state.setPlayerBackgroundImage(stored);
+    await state.setPlayerBackground(LegacyBackgroundMode.customImage);
+  } else {
+    await state.setLegacyBackgroundImage(stored);
+    await state.setLegacyBackground(LegacyBackgroundMode.customImage);
+  }
+  if (previous != stored &&
+      previous != state.playerBackgroundImagePath &&
+      previous != state.legacyBackgroundImagePath) {
+    await deleteCustomBackgroundImage(previous);
+  }
+}
+
+class _BackgroundPreferences extends StatelessWidget {
+  const _BackgroundPreferences({
+    required this.state,
+    required this.player,
+    this.picker,
+  });
+  final AppState state;
+  final bool player;
+  final Future<String?> Function()? picker;
+
+  @override
+  Widget build(BuildContext context) {
+    final mode = player ? state.playerBackground : state.legacyBackground;
+    final double reported = View.of(context).display.refreshRate;
+    final double refresh = (reported.isFinite && reported > 0 ? reported : 60.0)
+        .clamp(10, 1000);
+    final double stored = player
+        ? state.playerBackgroundFps
+        : state.browseBackgroundFps;
+    final double shown = (stored == 0 ? refresh : stored).clamp(10, refresh);
+    final color = player
+        ? state.playerBackgroundColor
+        : state.browseBackgroundColor;
+    return Column(
+      children: [
+        if (player)
+          _LegacySettingRow(
+            label: '正在播放页面',
+            subtitle: mode.detail,
+            trailing: SettingsChoice<LegacyBackgroundMode>(
+              key: const ValueKey('player-background-mode'),
+              value: mode,
+              items: [
+                for (final option in LegacyBackgroundMode.values)
+                  DropdownMenuItem(value: option, child: TrText(option.label)),
+              ],
+              onChanged: (value) {
+                if (value == null) return;
+                unawaited(state.setPlayerBackground(value));
+                if (value == LegacyBackgroundMode.customImage &&
+                    state.playerBackgroundImagePath == null) {
+                  unawaited(_pickBackgroundImage(context, state, picker, true));
+                }
+              },
+            ),
+          ),
+        if (player && mode == LegacyBackgroundMode.customImage)
+          _LegacySettingRow(
+            label: '背景图片',
+            subtitle: '正在播放页面的背景图片',
+            trailing: Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (state.playerBackgroundImagePath != null)
+                  TextButton(
+                    key: const ValueKey('player-background-image-clear'),
+                    onPressed: () async {
+                      final path = state.playerBackgroundImagePath;
+                      await state.setPlayerBackgroundImage(null);
+                      await state.setPlayerBackground(LegacyBackgroundMode.off);
+                      if (path != state.legacyBackgroundImagePath) {
+                        await deleteCustomBackgroundImage(path);
+                      }
+                    },
+                    child: const TrText('移除'),
+                  ),
+                OutlinedButton(
+                  key: const ValueKey('player-background-image-pick'),
+                  onPressed: () => unawaited(
+                    _pickBackgroundImage(context, state, picker, true),
+                  ),
+                  child: TrText(
+                    state.playerBackgroundImagePath == null ? '选择图片' : '更换',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (mode == LegacyBackgroundMode.solidColor)
+          _LegacySettingRow(
+            label: '背景颜色',
+            subtitle: color == null ? '根据主题色生成' : '自定义',
+            trailing: Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                TextButton(
+                  onPressed: () =>
+                      unawaited(state.setBackgroundColor(null, player: player)),
+                  child: const TrText('跟随主题色'),
+                ),
+                _LegacyAccentSwatch(
+                  color: color ?? Theme.of(context).colorScheme.primary,
+                  onTap: () async {
+                    final chosen = await showDialog<Color>(
+                      context: context,
+                      builder: (_) => _LegacyAccentDialog(
+                        initial: color ?? Theme.of(context).colorScheme.primary,
+                      ),
+                    );
+                    if (chosen != null) {
+                      await state.setBackgroundColor(chosen, player: player);
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        if (player)
+          _LegacySwitchRow(
+            key: const ValueKey('player-background-follow-display'),
+            label: '跟随屏幕刷新率',
+            subtitle: '播放背景按当前屏幕刷新率运行',
+            value: stored == 0,
+            onChanged: mode == LegacyBackgroundMode.nowPlayingDynamic
+                ? (value) => unawaited(
+                    state.setBackgroundFps(value ? 0 : refresh, player: true),
+                  )
+                : null,
+          ),
+        _LegacySliderRow(
+          key: ValueKey(
+            player ? 'player-background-fps' : 'browse-background-fps',
+          ),
+          label: player ? '播放背景帧率' : '浏览背景帧率',
+          valueText: '${shown.round()} fps',
+          value: shown,
+          min: 10,
+          max: refresh,
+          divisions: (refresh - 10).round().clamp(1, 990),
+          subtitle: player ? '最低 10fps；关闭跟随屏幕后可手动调节' : '默认 30fps，仅影响其他页面的动态背景',
+          onChanged:
+              mode != LegacyBackgroundMode.nowPlayingDynamic ||
+                  (player && stored == 0)
+              ? null
+              : (value) =>
+                    unawaited(state.setBackgroundFps(value, player: player)),
+        ),
+        if (player)
+          _LegacySliderRow(
+            key: const ValueKey('player-background-quality'),
+            label: '播放背景渲染精度',
+            valueText: '${(state.playerBackgroundQuality * 100).round()}%',
+            value: state.playerBackgroundQuality,
+            min: .1,
+            max: 1,
+            divisions: 18,
+            onChanged:
+                mode == LegacyBackgroundMode.nowPlayingDynamic ||
+                    mode == LegacyBackgroundMode.nowPlayingStatic
+                ? (value) => unawaited(state.setPlayerBackgroundQuality(value))
+                : null,
+          ),
+      ],
+    );
+  }
 }
 
 /// Opens the key recorder for [action] and persists the chosen combination.
-Future<void> _editMediaShortcut(
-  BuildContext context,
-  AppState state,
-  MediaShortcutAction action,
-) async {
-  final ShortcutSelection? selection = await showShortcutRecorderDialog(
-    context,
-    action: action,
-    current: state.mediaShortcutFor(action),
-    conflict: (MediaShortcutBinding binding) => mediaShortcutConflict(
-      state.mediaShortcuts,
-      action: action,
-      binding: binding,
-    ),
-  );
-  if (selection == null) return;
-  if (selection.cleared) {
-    await state.setMediaShortcut(action, null);
-    return;
-  }
-  final MediaShortcutBinding? binding = selection.binding;
-  if (binding == null) return;
-  if (mediaShortcutConflict(
-        state.mediaShortcuts,
-        action: action,
-        binding: binding,
-      ) !=
-      null) {
-    return;
-  }
-  await state.setMediaShortcut(action, binding);
-}
-
 class _LegacyAccentSwatch extends StatelessWidget {
   const _LegacyAccentSwatch({
     super.key,

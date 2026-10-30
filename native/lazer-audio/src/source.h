@@ -21,49 +21,6 @@
 
 namespace lazer::audio {
 
-/* Blocks leave the source in the format the output declared, so the ring carries device bytes rather
- * than an assumed float layout. */
-struct TargetFormat {
-    int32_t sampleRate = 44100;
-    int32_t channels = 2;
-    /* Valid sample precision. Zero requests float32. */
-    int32_t bitsPerSample = 0;
-    /* Physical storage width used by the output device. Zero uses the packed width for valid bits. */
-    int32_t containerBitsPerSample = 0;
-    /* The 24-bit samples contain preformatted DoP carrier words and must bypass PCM conversion. */
-    bool doP = false;
-    /* Raw DSD bytes are grouped into exact ALSA DSD_U8/U16/U32 native words. */
-    bool nativeDsd = false;
-    bool nativeDsdBigEndian = true;
-    /* Raw interleaved DSD byte frames for the Engine's session-level Native DSD packer. */
-    bool nativeDsdRawBytes = false;
-    /* Physical output word width for nativeDsdRawBytes seek alignment; zero keeps the generic byte grid. */
-    int32_t nativeDsdWordBytes = 0;
-
-    [[nodiscard]] bool isFloat() const noexcept { return bitsPerSample == 0; }
-    [[nodiscard]] int32_t frameBytes() const noexcept {
-        const int32_t containerBits = containerBitsPerSample > 0
-            ? containerBitsPerSample
-            : bitsPerSample == 0 ? 32 : bitsPerSample;
-        const int32_t bytes = (containerBits + 7) / 8;
-        return std::max(channels, 1) * std::max(bytes, 1);
-    }
-    /* FFmpeg has no packed 24-bit sample format; it converts 24-bit PCM through S32 and the source
-     * packs the most-significant three bytes before handing frames to the output. */
-    [[nodiscard]] int32_t conversionFrameBytes() const noexcept {
-        const AVSampleFormat format = avFormat();
-        const int32_t bytes = format == AV_SAMPLE_FMT_U8 ? 1
-            : format == AV_SAMPLE_FMT_S16 ? 2 : 4;
-        return std::max(channels, 1) * bytes;
-    }
-    [[nodiscard]] AVSampleFormat avFormat() const noexcept {
-        if (isFloat()) return AV_SAMPLE_FMT_FLT;
-        if (bitsPerSample <= 8) return AV_SAMPLE_FMT_U8;
-        if (bitsPerSample <= 16) return AV_SAMPLE_FMT_S16;
-        return AV_SAMPLE_FMT_S32;
-    }
-};
-
 class SourceConsumer {
 public:
     virtual ~SourceConsumer() = default;

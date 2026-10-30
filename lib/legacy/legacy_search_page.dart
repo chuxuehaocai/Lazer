@@ -14,6 +14,7 @@ import '../widgets/apple_ui.dart';
 import '../widgets/catalog_links.dart';
 import 'legacy_widgets.dart';
 import 'legacy_playlist_grid.dart';
+import '../animation/view_transitions.dart';
 
 export 'legacy_playlist_grid.dart' show LegacyPlaylistGrid;
 
@@ -208,7 +209,9 @@ class _LegacySearchPageState extends State<LegacySearchPage> {
           ),
         ),
         Expanded(
-          child: switch (_tab) {
+          child: ViewTransitionSwitcher(child: KeyedSubtree(
+            key: ValueKey(_tab),
+            child: switch (_tab) {
             _SearchTab.songs => ListView.builder(
               padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
               itemCount: results.tracks.length,
@@ -287,6 +290,7 @@ class _LegacySearchPageState extends State<LegacySearchPage> {
               },
             ),
           },
+          )),
         ),
       ],
     );
@@ -324,6 +328,7 @@ class _SearchTabButton extends StatelessWidget {
             cursor: SystemMouseCursors.click,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
+              curve: ViewMotion.curve,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: active ? apple.label.withValues(alpha: .1) : null,

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../data/models.dart';
 import '../legacy/legacy_background.dart';
 import '../state/ui_preferences.dart';
+import '../theme/adaptive_contrast.dart';
 
 /// The immersive player canvas: album-colour flow + a real, heavily blurred
 /// cover bloom + Apple Music's dark vignette.
@@ -18,9 +19,17 @@ class AlbumBlurFlow extends StatefulWidget {
     this.quality = kDynamicBackgroundQualityDefault,
     this.preview = false,
     this.boundaryKey,
+    this.onSeed,
+    this.frameRate,
+    this.solidColor,
+    this.imagePath,
   });
 
   final Track? track;
+  final ValueChanged<Color?>? onSeed;
+  final double? frameRate;
+  final Color? solidColor;
+  final String? imagePath;
   final LegacyBackgroundMode mode;
   final Color pageColor;
   final bool animationsEnabled;
@@ -63,8 +72,9 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
     final List<Color>? mesh = await albumMeshColorsForCover(coverUrl);
-    final Color? seed = mesh == null ? await albumSeedForCover(coverUrl) : null;
+    final Color? seed = await albumSeedForCover(coverUrl);
     if (!mounted || generation != _generation) return;
+    widget.onSeed?.call(seed);
     setState(
       () => _colors = mesh ?? albumFlowColors(seed ?? kAlbumDefaultSeed),
     );
@@ -79,13 +89,28 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
           fit: StackFit.expand,
           children: <Widget>[
             ColoredBox(color: widget.pageColor),
-            if (widget.mode != LegacyBackgroundMode.off)
+            if (widget.mode == LegacyBackgroundMode.solidColor)
+              ColoredBox(
+                color:
+                    widget.solidColor ??
+                    backgroundFromTheme(
+                      Theme.of(context).colorScheme.primary,
+                      Brightness.dark,
+                    ),
+              )
+            else if (widget.mode == LegacyBackgroundMode.customImage)
+              CustomImageBackdrop(
+                path: widget.imagePath,
+                pageColor: widget.pageColor,
+              )
+            else if (widget.mode != LegacyBackgroundMode.off)
               AlbumFlowBackground(
                 colors: _colors,
                 animated:
                     widget.animationsEnabled &&
                     widget.mode == LegacyBackgroundMode.nowPlayingDynamic,
-                solid: widget.mode == LegacyBackgroundMode.nowPlayingStatic,
+                solid: false,
+                frameRate: widget.frameRate,
                 quality: widget.quality,
                 preview: widget.preview,
               ),

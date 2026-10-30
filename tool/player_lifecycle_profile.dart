@@ -8,6 +8,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:lazer_nextgen/data/lyrics.dart';
+import 'package:lazer_nextgen/accessibility/lazer_binding.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/player/now_playing_route.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
@@ -133,7 +134,8 @@ Future<Map<String, Object>> _measure(
 }
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  LazerWidgetsBinding();
+  final semantics = WidgetsBinding.instance.ensureSemantics();
   await windowManager.ensureInitialized();
   await windowManager.setSize(const Size(1280, 800));
   final _ProfileState state = _ProfileState();
@@ -165,5 +167,6 @@ Future<void> main() async {
   };
   debugPrint('PLAYER_LIFECYCLE_PROFILE ${jsonEncode(output)}');
   state.dispose();
+  semantics.dispose();
   exit(0);
 }

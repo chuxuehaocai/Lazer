@@ -3,6 +3,9 @@ import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 
 import 'design_tokens.dart';
 import 'app_palette.dart';
+import 'font_preferences.dart';
+import 'adaptive_contrast.dart';
+import '../animation/view_transitions.dart';
 
 /// Builds the [ThemeData] for the parchment system.
 ///
@@ -13,12 +16,19 @@ import 'app_palette.dart';
 ThemeData buildAppTheme({
   Brightness brightness = Brightness.light,
   Color? accent,
+  FontPreferences fonts = const FontPreferences(),
 }) {
-  final palette = AppPalette(brightness == Brightness.dark, accent: accent);
+  final bool dark = brightness == Brightness.dark;
+  final palette = AppPalette(
+    dark,
+    accent: accent == null
+        ? null
+        : adaptiveAccent(accent, AppPalette(dark).ivoryMedium),
+  );
   final ColorScheme scheme = ColorScheme(
     brightness: brightness,
     primary: palette.clay,
-    onPrimary: Colors.white,
+    onPrimary: contrastingLabel(palette.clay),
     secondary: palette.oatWarm,
     onSecondary: palette.slateDark,
     surface: palette.ivoryLight,
@@ -48,8 +58,8 @@ ThemeData buildAppTheme({
         TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
         TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
-        TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+        TargetPlatform.windows: LazerPageTransitionsBuilder(),
+        TargetPlatform.linux: LazerPageTransitionsBuilder(),
       },
     ),
     highlightColor: Colors.transparent,
@@ -79,6 +89,14 @@ ThemeData buildAppTheme({
     // renders in bundled MiSans instead of the system fallback.
     fontFamily: AppFonts.sans,
     fontFamilyFallback: AppFonts.sansFallback,
+    textTheme: fonts.applyTo(
+      ThemeData(brightness: brightness).textTheme.apply(
+        fontFamily: AppFonts.sans,
+        bodyColor: palette.slateDark,
+        displayColor: palette.slateDark,
+      ),
+    ),
+    extensions: <ThemeExtension<dynamic>>[fonts],
     textSelectionTheme: TextSelectionThemeData(
       cursorColor: palette.clayDeep,
       selectionColor: palette.oatWarm,

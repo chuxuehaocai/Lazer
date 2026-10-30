@@ -5,12 +5,14 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 
 import '../data/models.dart';
 import '../state/ui_preferences.dart';
 import '../utils/artwork.dart';
 import '../widgets/artwork_image.dart';
 import 'legacy_theme.dart';
+import '../theme/adaptive_contrast.dart';
 
 export '../player/player_backdrop.dart' show AlbumBlurFlow;
 
@@ -71,6 +73,7 @@ class AlbumFlowBackground extends StatefulWidget {
     this.cornerRadius = 0,
     this.quality = kDynamicBackgroundQualityDefault,
     this.preview = false,
+    this.frameRate = 30,
   });
 
   final List<Color> colors;
@@ -86,8 +89,7 @@ class AlbumFlowBackground extends StatefulWidget {
 
   final double cornerRadius;
 
-  /// `动态背景渲染精度`, 0.1 … 1.0: the mesh density and update cadence this
-  /// canvas runs at. See [DynamicBackgroundPrecision].
+  /// `动态背景渲染精度`, 0.1 … 1.0: mesh density, independent of [frameRate].
   final double quality;
 
   /// Paints one vertical ramp instead of the warped mesh.
@@ -98,6 +100,7 @@ class AlbumFlowBackground extends StatefulWidget {
   /// stops moving, using the same five colours, so the handover is a warp
   /// appearing rather than a colour change.
   final bool preview;
+  final double? frameRate;
 
   @override
   State<AlbumFlowBackground> createState() => _AlbumFlowBackgroundState();
@@ -107,12 +110,8 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   static const Duration _paletteFade = Duration(milliseconds: 650);
 
-  /// The mesh drifts on a ten-second time base: over one 120 fps frame the
-  /// change is a fraction of a percent of the warp. Re-rendering it at the
-  /// display rate therefore buys nothing visible while spending the whole
-  /// frame budget. The cadence actually used comes from the `动态背景渲染精度`
-  /// setting — 100 ms per update at 0.1, 16 ms at 1.0 — and never faster than
-  /// that, which leaves the UI thread free for page and lyric motion.
+  /// Mesh density and frame rate have separate controls, so lowering detail
+  /// preserves the chosen background cadence.
   late DynamicBackgroundPrecision _precision = DynamicBackgroundPrecision.of(
     widget.quality,
   );
@@ -125,13 +124,17 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     value: 1,
   );
   final ValueNotifier<int> _frames = ValueNotifier<int>(0);
-  final Stopwatch _clock = Stopwatch();
-  Timer? _timer;
-  Duration _lastAdvance = Duration.zero;
+  late final Ticker _flowTicker = createTicker(_advance);
+  int _lastAdvanceUs = 0;
+  double _nextFrameUs = 0;
+  Duration _frameInterval = const Duration(microseconds: 33333);
+  bool _paintEveryVsync = false;
   double _phase = 0;
   bool _reduceMotion = false;
   bool _tickerAllowed = true;
   bool _appActive = true;
+  _FlowPainter? _cachedPainter;
+  (int, int, Color, bool, bool)? _painterConfiguration;
 
   @override
   void initState() {
@@ -151,15 +154,13 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     _syncPlayback();
   }
 
-  /// The palette crossfade used to repaint the whole mesh at the display
-  /// rate. It now shares the mesh's 30 fps cadence; a 650 ms colour fade is
-  /// far too slow for the intermediate frames to be visible.
+  /// Palette changes share the mesh's selected cadence.
   final Stopwatch _paletteClock = Stopwatch()..start();
   int _lastPaletteFrameUs = 0;
 
   void _onPaletteFrame() {
     final int now = _paletteClock.elapsedMicroseconds;
-    if (now - _lastPaletteFrameUs < _precision.frameInterval.inMicroseconds) {
+    if (now - _lastPaletteFrameUs < _frameInterval.inMicroseconds) {
       return;
     }
     _lastPaletteFrameUs = now;
@@ -178,11 +179,27 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     super.didChangeDependencies();
     final bool reduce = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final bool allowed = TickerMode.valuesOf(context).enabled;
+    _configureFrameRate();
     if (reduce != _reduceMotion || allowed != _tickerAllowed) {
       _reduceMotion = reduce;
       _tickerAllowed = allowed;
       _syncPlayback();
     }
+  }
+
+  void _configureFrameRate() {
+    final double reported = View.of(context).display.refreshRate;
+    final double refresh = reported.isFinite && reported > 0 ? reported : 60;
+    final double requested = widget.frameRate?.clamp(10, 1000) ?? refresh;
+    _paintEveryVsync = widget.frameRate == null || requested >= refresh;
+    _frameInterval = Duration(
+      microseconds: (1000000 / math.min(refresh, requested)).round(),
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (mounted) _configureFrameRate();
   }
 
   @override
@@ -192,28 +209,26 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     if (!_samePalette(next, _to)) {
       _from = _rawPalette();
       _to = next;
-      if (_reduceMotion) {
+      if (_reduceMotion || !widget.animated || widget.solid) {
         _palette.value = 1;
       } else {
         _palette.forward(from: 0);
       }
+      _frames.value++;
     }
     final DynamicBackgroundPrecision precision = DynamicBackgroundPrecision.of(
       widget.quality,
     );
     if (precision != _precision) {
       _precision = precision;
-      // The timer period is fixed when it starts: drop it and start the lane
-      // again so the new cadence applies immediately instead of on the next
-      // rebuild.
-      _timer?.cancel();
-      _timer = null;
-      _syncPlayback();
+      // Rebuild the painter with the new mesh density on this frame.
       _frames.value++;
     }
     if (oldWidget.animated != widget.animated ||
         oldWidget.solid != widget.solid ||
-        oldWidget.preview != widget.preview) {
+        oldWidget.preview != widget.preview ||
+        oldWidget.frameRate != widget.frameRate) {
+      _configureFrameRate();
       _syncPlayback();
     }
   }
@@ -221,7 +236,8 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
+    _flowTicker.dispose();
+    _cachedPainter?.releaseResources();
     _palette
       ..removeListener(_onPaletteFrame)
       ..removeStatusListener(_onPaletteStatus)
@@ -239,27 +255,31 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
       _appActive;
 
   void _syncPlayback() {
+    if ((!widget.animated || widget.solid || widget.preview || _reduceMotion) &&
+        (_palette.isAnimating || _palette.value != 1)) {
+      _palette.stop();
+      _palette.value = 1;
+    }
     if (_runs) {
-      if (_timer == null) {
-        _clock
-          ..reset()
-          ..start();
-        _lastAdvance = Duration.zero;
-        _timer = Timer.periodic(_precision.frameInterval, (_) => _advance());
+      if (!_flowTicker.isActive) {
+        _lastAdvanceUs = 0;
+        _nextFrameUs = _frameInterval.inMicroseconds.toDouble();
+        _flowTicker.start();
       }
     } else {
-      _timer?.cancel();
-      _timer = null;
-      _clock.stop();
+      _flowTicker.stop();
     }
   }
 
-  void _advance() {
-    final Duration elapsed = _clock.elapsed;
+  void _advance(Duration elapsed) {
+    final int now = elapsed.inMicroseconds;
+    if (!_paintEveryVsync && now < _nextFrameUs) return;
     final double delta =
-        (elapsed - _lastAdvance).inMicroseconds /
-        Duration.microsecondsPerSecond;
-    _lastAdvance = elapsed;
+        (now - _lastAdvanceUs) / Duration.microsecondsPerSecond;
+    _lastAdvanceUs = now;
+    final int interval = _frameInterval.inMicroseconds;
+    _nextFrameUs +=
+        interval * math.max(1, ((now - _nextFrameUs) / interval).floor() + 1);
     // Slowly rotating/breathing mesh: AMLL drives its WebGL mesh from a
     // 10-second time base, with a volume-responsive UV rotation.
     _phase = (_phase + delta.clamp(0.0, .1)) % 10000;
@@ -286,23 +306,33 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
 
   @override
   Widget build(BuildContext context) {
+    final configuration = (
+      _precision.columns,
+      _precision.rows,
+      widget.veil,
+      widget.solid,
+      widget.preview,
+    );
+    if (_painterConfiguration != configuration) {
+      _cachedPainter?.releaseResources();
+      _painterConfiguration = configuration;
+      _cachedPainter = _FlowPainter(
+        palette: _currentPalette,
+        phase: () => _phase,
+        veil: widget.veil,
+        solid: widget.solid,
+        preview: widget.preview,
+        columns: _precision.columns,
+        rows: _precision.rows,
+        repaint: _frames,
+      );
+    }
     return RepaintBoundary(
       child: ClipRRect(
         borderRadius: BorderRadius.circular(widget.cornerRadius),
         child: CustomPaint(
           key: ValueKey<String>(widget.solid ? 'solid' : 'flow'),
-          painter: _FlowPainter(
-            palette: _currentPalette,
-            phase: () => _phase,
-            veil: widget.veil,
-            solid: widget.solid,
-            preview: widget.preview,
-            columns: _precision.columns,
-            rows: _precision.rows,
-            // The palette controller reports through [_onPaletteFrame], so
-            // the painter only follows the throttled mesh lane.
-            repaint: _frames,
-          ),
+          painter: _cachedPainter,
           isComplex: true,
           willChange: _runs,
           child: const SizedBox.expand(),
@@ -473,37 +503,56 @@ class _FlowPainter extends CustomPainter {
     }
   }
 
-  Color _samplePalette(List<Color> colors, double amount) {
-    if (colors.length == 1) return colors.first;
-    final double scaled = amount.clamp(0.0, .999999) * (colors.length - 1);
-    final int low = scaled.floor();
-    final int high = (low + 1).clamp(0, colors.length - 1);
-    return Color.lerp(colors[low], colors[high], scaled - low) ?? colors[low];
+  static int _blendChannel(
+    double a,
+    double b,
+    double c,
+    double d,
+    double ta,
+    double tb,
+    double mix,
+  ) {
+    final upper = a + (b - a) * ta;
+    final lower = c + (d - c) * tb;
+    return ((upper + (lower - upper) * mix) * 255).round().clamp(0, 255);
   }
 
-  Color _meshColor(
+  int _meshColorArgb(
     List<Color> colors,
     double waveA,
     double waveB,
     double waveMix,
   ) {
-    final double sampleA = (.08 + waveA * .58).clamp(0.0, 1.0);
-    final double sampleB = (.38 + waveB * .60).clamp(0.0, 1.0);
-    final Color upper = _samplePalette(colors, sampleA);
-    final Color lower = _samplePalette(colors, sampleB);
+    final double sampleA = (.08 + waveA * .58).clamp(0.0, .999999) * 4;
+    final double sampleB = (.38 + waveB * .60).clamp(0.0, .999999) * 4;
+    final int ia = sampleA.floor(), ib = sampleB.floor();
+    final double ta = sampleA - ia, tb = sampleB - ib;
+    final a = colors[ia],
+        b = colors[ia + 1],
+        c = colors[ib],
+        d = colors[ib + 1];
     final double mix = (.42 + .25 * waveMix).clamp(0.0, 1.0);
-    // The palette arrives already saturation/lightness-treated, so this is a
-    // plain colour blend — no HSL conversion per vertex.
-    return Color.lerp(upper, lower, mix) ?? lower;
+    // Blend straight into the vertex buffer, avoiding three Color allocations
+    // per vertex on every display frame.
+    return (_blendChannel(a.a, b.a, c.a, d.a, ta, tb, mix) << 24) |
+        (_blendChannel(a.r, b.r, c.r, d.r, ta, tb, mix) << 16) |
+        (_blendChannel(a.g, b.g, c.g, d.g, ta, tb, mix) << 8) |
+        _blendChannel(a.b, b.b, c.b, d.b, ta, tb, mix);
   }
 
   ui.Shader? _veilShader;
   double _veilExtent = -1;
   Color? _veilTint;
 
+  void releaseResources() {
+    _veilShader?.dispose();
+    _veilShader = null;
+  }
+
   ui.Shader _veilShaderFor(Size size, Color veil) {
     final double extent = size.shortestSide;
     if (_veilShader == null || _veilExtent != extent || _veilTint != veil) {
+      _veilShader?.dispose();
       _veilExtent = extent;
       _veilTint = veil;
       _veilShader = ui.Gradient.radial(
@@ -652,12 +701,7 @@ class _FlowPainter extends CustomPainter {
               uCosMix[column] * vCosMix[row] + uSinMix[column] * vSinMix[row];
           final double waveMix =
               baseMixSin * cosMixShift + baseMixCos * sinMixShift;
-          vertexColors[vertex] = _meshColor(
-            colors,
-            waveA,
-            waveB,
-            waveMix,
-          ).toARGB32();
+          vertexColors[vertex] = _meshColorArgb(colors, waveA, waveB, waveMix);
           vertex++;
         }
       }
@@ -668,6 +712,7 @@ class _FlowPainter extends CustomPainter {
         indices: _indices,
       );
       canvas.drawVertices(vertices, BlendMode.srcOver, Paint());
+      vertices.dispose();
     }
     if (veil.a > 0) {
       final Rect bounds = Offset.zero & size;
@@ -888,12 +933,21 @@ double _colorDistance(Color a, Color b) {
 }
 
 final Map<String, List<Color>> _meshPaletteCache = <String, List<Color>>{};
+final Map<String, Future<List<Color>?>> _paletteRequests = {};
 
 Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async {
   final String? url = albumPaletteArtworkUrl(coverUrl);
   if (url == null) return null;
   final List<Color>? cached = _meshPaletteCache[url];
   if (cached != null) return cached;
+  return _paletteRequests.putIfAbsent(
+    url,
+    () =>
+        _readCoverPalette(url).whenComplete(() => _paletteRequests.remove(url)),
+  );
+}
+
+Future<List<Color>?> _readCoverPalette(String url) async {
   final ui.Image? image = await _decode(ArtworkImage(url));
   if (image == null) return null;
   try {
@@ -910,6 +964,12 @@ Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async {
       _meshPaletteCache.remove(_meshPaletteCache.keys.first);
     }
     _meshPaletteCache[url] = colors;
+    if (_seedCache.length >= 24) _seedCache.remove(_seedCache.keys.first);
+    _seedCache[url] = albumSeedFromPixels(
+      pixels.buffer.asUint8List(),
+      image.width,
+      image.height,
+    );
     return colors;
   } finally {
     image.dispose();
@@ -938,26 +998,8 @@ Future<Color?> albumSeedForCover(String? coverUrl) async {
   if (url == null) return null;
   final Color? cached = _seedCache[url];
   if (cached != null) return cached;
-  final ui.Image? image = await _decode(ArtworkImage(url));
-  if (image == null) return null;
-  try {
-    final ByteData? pixels = await image.toByteData(
-      format: ui.ImageByteFormat.rawRgba,
-    );
-    if (pixels == null) return null;
-    final Color seed = albumSeedFromPixels(
-      pixels.buffer.asUint8List(),
-      image.width,
-      image.height,
-    );
-    if (_seedCache.length >= 24) {
-      _seedCache.remove(_seedCache.keys.first);
-    }
-    _seedCache[url] = seed;
-    return seed;
-  } finally {
-    image.dispose();
-  }
+  await albumMeshColorsForCover(coverUrl);
+  return _seedCache[url];
 }
 
 Future<ui.Image?> _decode(ImageProvider provider) {
@@ -966,7 +1008,8 @@ Future<ui.Image?> _decode(ImageProvider provider) {
   late final ImageStreamListener listener;
   listener = ImageStreamListener(
     (ImageInfo info, bool synchronousCall) {
-      if (!completer.isCompleted) completer.complete(info.image);
+      if (!completer.isCompleted) completer.complete(info.image.clone());
+      info.dispose();
       stream.removeListener(listener);
     },
     onError: (Object error, StackTrace? stack) {
@@ -991,6 +1034,8 @@ class LegacyAlbumBackdrop extends StatefulWidget {
     this.pageColor,
     this.quality = kDynamicBackgroundQualityDefault,
     this.onSeed,
+    this.frameRate = 30,
+    this.solidColor,
   });
 
   final Track? track;
@@ -1017,6 +1062,8 @@ class LegacyAlbumBackdrop extends StatefulWidget {
   /// Reports the extracted artwork seed so the shell can seed its palette even
   /// when the backdrop itself is off.
   final ValueChanged<Color>? onSeed;
+  final double? frameRate;
+  final Color? solidColor;
 
   @override
   State<LegacyAlbumBackdrop> createState() => _LegacyAlbumBackdropState();
@@ -1062,8 +1109,15 @@ class _LegacyAlbumBackdropState extends State<LegacyAlbumBackdrop> {
           : ColoredBox(color: pageColor);
     }
     final ColorScheme scheme = Theme.of(context).colorScheme;
+    if (widget.mode == LegacyBackgroundMode.solidColor) {
+      return ColoredBox(
+        color:
+            widget.solidColor ??
+            backgroundFromTheme(scheme.primary, scheme.brightness),
+      );
+    }
     if (widget.mode == LegacyBackgroundMode.customImage) {
-      return _CustomImageBackdrop(
+      return CustomImageBackdrop(
         path: widget.imagePath,
         pageColor: pageColor ?? scheme.surface,
       );
@@ -1076,7 +1130,8 @@ class _LegacyAlbumBackdropState extends State<LegacyAlbumBackdrop> {
         AlbumFlowBackground(
           colors: _colors,
           animated: widget.mode == LegacyBackgroundMode.nowPlayingDynamic,
-          solid: widget.mode == LegacyBackgroundMode.nowPlayingStatic,
+          solid: false,
+          frameRate: widget.frameRate,
           quality: widget.quality,
           veil: widget.veil ?? const Color(0x00000000),
         ),
@@ -1092,8 +1147,12 @@ class _LegacyAlbumBackdropState extends State<LegacyAlbumBackdrop> {
 /// A missing or undecodable file falls back to [pageColor], so a stale
 /// preference never leaves a hole in the window. The content veil that keeps
 /// labels readable is drawn by the shell above this widget.
-class _CustomImageBackdrop extends StatelessWidget {
-  const _CustomImageBackdrop({required this.path, required this.pageColor});
+class CustomImageBackdrop extends StatelessWidget {
+  const CustomImageBackdrop({
+    super.key,
+    required this.path,
+    required this.pageColor,
+  });
 
   final String? path;
   final Color pageColor;

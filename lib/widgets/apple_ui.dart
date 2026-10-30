@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
+import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
 
 /// A translucent Apple material: blur plus a semantic glass tint and hairline.
@@ -78,14 +79,16 @@ class ApplePageTitle extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final bool compact = MediaQuery.sizeOf(context).width < 720;
-    final TextStyle style = (theme.textTheme.displayLarge ?? const TextStyle())
-        .copyWith(
-          fontSize: compact ? 34 : 32,
-          height: (compact ? 41 : 38) / (compact ? 34 : 32),
-          fontWeight: FontWeight.w700,
-          letterSpacing: .37,
-          color: apple.label,
-        );
+    final TextStyle style = context.fonts.apply(
+      FontCategory.pageTitle,
+      (theme.textTheme.displayLarge ?? const TextStyle()).copyWith(
+        fontSize: compact ? 34 : 32,
+        height: (compact ? 41 : 38) / (compact ? 34 : 32),
+        fontWeight: FontWeight.w700,
+        letterSpacing: .37,
+        color: apple.label,
+      ),
+    );
     return Padding(
       padding: padding,
       child: Row(

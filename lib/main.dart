@@ -7,7 +7,6 @@ import 'l10n/app_localizations.dart';
 import 'package:flutter/foundation.dart'
     show LicenseRegistry, LicenseEntryWithLineBreaks;
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio/audio_engine.dart';
@@ -17,15 +16,19 @@ import 'audio/system_media_handler.dart';
 import 'audio/native/lazer_audio_library.dart';
 import 'audio/playback_session.dart';
 import 'diagnostics/frame_stats.dart';
+import 'diagnostics/app_log.dart';
 import 'legacy/legacy_shell.dart';
 import 'theme/apple_design.dart';
 import 'state/app_state.dart';
 import 'state/ui_preferences.dart';
+import 'theme/font_preferences.dart';
+import 'accessibility/lazer_binding.dart';
 import 'state/hifi_settings.dart';
 import 'tv/tv_mode.dart';
 import 'widgets/window_frame.dart';
 import 'widgets/media_shortcut_listener.dart';
 import 'widgets/interaction_feedback.dart';
+import 'widgets/shared_browse_background.dart';
 import 'widgets/app_scroll_behavior.dart';
 import 'widgets/ui_scaling.dart';
 
@@ -55,7 +58,20 @@ Future<void> main() async {
   // the zone stays current for callbacks scheduled from here onward.
   await runZoned<Future<void>>(
     () async {
-      WidgetsFlutterBinding.ensureInitialized();
+      LazerWidgetsBinding();
+      final previousFlutterError = FlutterError.onError;
+      FlutterError.onError = (details) {
+        AppLog.shared.record(
+          '${details.exceptionAsString()}\n${details.stack ?? ""}',
+        );
+        previousFlutterError?.call(details);
+      };
+      final dispatcher = WidgetsBinding.instance.platformDispatcher;
+      final previousPlatformError = dispatcher.onError;
+      dispatcher.onError = (error, stack) {
+        AppLog.shared.record('$error\n$stack');
+        return previousPlatformError?.call(error, stack) ?? false;
+      };
       LicenseRegistry.addLicense(() async* {
         yield LicenseEntryWithLineBreaks([
           'Lazer',
@@ -71,13 +87,11 @@ Future<void> main() async {
           'https://hyperos.mi.com/font/en/download/',
         );
       });
-      JustAudioMediaKit.ensureInitialized();
       // Queue playback hands the next track to libmpv while the current one is
       // still playing, but mpv only opens that entry early with
       // `--prefetch-playlist`. Without it a streamed boundary waits for the
       // CDN round trip (measured: 171 ms of buffering at the switch with a
       // 150 ms server, versus 1 ms with the prefetch on) — an audible hole.
-      JustAudioMediaKit.prefetchPlaylist = true;
       // Desktop replaces the system title bar with the app's own parchment
       // frame; must run before the first frame, which is also when the
       // runner decides to show the window.
@@ -90,8 +104,13 @@ Future<void> main() async {
       final Future<SharedPreferences> prefsFuture =
           SharedPreferences.getInstance();
       final Future<bool> televisionFuture = detectTelevision();
-      final Future<AudioEngineSelection> selectionFuture = createAudioEngine();
       final prefs = await prefsFuture;
+      LazerAudioLoader.importedLibraryPath = prefs.getString(
+        'lazer_native_engine_path',
+      );
+      final Future<AudioEngineSelection> selectionFuture = createAudioEngine(
+        preferNative: prefs.getBool('hifi_native_engine') ?? true,
+      );
       final bool television = await televisionFuture;
       final AudioEngineSelection selection = await selectionFuture;
       final AudioEngine audio = selection.engine;
@@ -116,7 +135,7 @@ Future<void> main() async {
           'hifi_equalizer': prefs.getString('hifi_equalizer'),
         }),
         engine: selection.native,
-        catalogApi: LazerAudioLoader.load().api,
+        catalogApi: selection.isNative ? LazerAudioLoader.load().api : null,
         persist: (HifiSettings value) async {
           final SharedPreferences prefs = await SharedPreferences.getInstance();
           for (final MapEntry<String, Object?> entry in value.toMap().entries) {
@@ -151,6 +170,7 @@ Future<void> main() async {
     zoneSpecification: ZoneSpecification(
       print: (Zone self, ZoneDelegate parent, Zone zone, String line) {
         if (_isMutedLog(line)) return;
+        AppLog.shared.record(line);
         parent.print(self, line);
       },
     ),
@@ -189,12 +209,14 @@ typedef _RootUiSignature = (
   double,
   bool,
   bool,
+  FontPreferences,
 );
 
 class _LazerAppState extends State<LazerApp> {
   AppState get _state => widget.state;
   bool _rootRebuildScheduled = false;
   late _RootUiSignature _rootUi;
+  final BrowseNavigationObserver _browseNavigation = BrowseNavigationObserver();
 
   _RootUiSignature get _rootUiSignature => (
     _state.legacyAccentSeed,
@@ -207,6 +229,7 @@ class _LazerAppState extends State<LazerApp> {
     _state.dpiScale,
     _state.deviceIsTelevision,
     _state.showFrameStats,
+    _state.fontPreferences,
   );
 
   @override
@@ -242,6 +265,7 @@ class _LazerAppState extends State<LazerApp> {
 
   @override
   void dispose() {
+    _browseNavigation.dispose();
     _state.removeListener(_onRootUiChanged);
     widget.media.close();
     widget.session?.close();
@@ -260,13 +284,20 @@ class _LazerAppState extends State<LazerApp> {
       child: MaterialApp(
         title: 'Lazer · Field Player',
         debugShowCheckedModeBanner: false,
+        navigatorObservers: [_browseNavigation],
+        themeAnimationCurve: Curves.easeOutCubic,
         // One Apple surface theme drives the custom window frame, root
         // dialogs and the adaptive shell. Pages refine their local player
         // theme where Apple Music intentionally switches to a dark canvas.
-        theme: buildAppleTheme(brightness: Brightness.light, seedAccent: seed),
+        theme: buildAppleTheme(
+          brightness: Brightness.light,
+          seedAccent: seed,
+          fonts: _state.fontPreferences,
+        ),
         darkTheme: buildAppleTheme(
           brightness: Brightness.dark,
           seedAccent: seed,
+          fonts: _state.fontPreferences,
         ),
         themeMode: _state.themeMode,
         locale: _state.language.locale,
@@ -293,7 +324,22 @@ class _LazerAppState extends State<LazerApp> {
           children: <Widget>[
             UiScaling(
               state: _state,
-              child: CarMetrics(child: WindowFrame(child: child!)),
+              child: CarMetrics(
+                child: WindowFrame(
+                  child: Builder(
+                    builder: (context) => Theme(
+                      data: Theme.of(
+                        context,
+                      ).copyWith(scaffoldBackgroundColor: Colors.transparent),
+                      child: SharedBrowseBackground(
+                        state: _state,
+                        navigation: _browseNavigation,
+                        child: child!,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
             if (_state.showFrameStats) const FrameStatsOverlay(),
           ],

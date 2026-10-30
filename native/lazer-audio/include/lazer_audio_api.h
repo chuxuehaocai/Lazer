@@ -571,6 +571,14 @@ LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_queue_reader(
 LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_clear_queued_reader(
     LazerAudioEngine engine, uint64_t queue_generation);
 
+/* Optional additive ABI extension. Polls an owned copy of one warning/error.
+ * Unlike on_log, the text remains valid after this call until the caller changes
+ * its own buffer. Returns bytes including NUL, zero if empty, or a negative
+ * error. BufferTooSmall leaves the entry queued. A 2048-byte buffer always fits.
+ * Bounded to the last 128 entries. Older libraries may omit this export. */
+LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_read_log(
+    LazerAudioEngine engine, int32_t *out_level, char *message, uint32_t capacity);
+
 #ifdef __cplusplus
 }
 #endif

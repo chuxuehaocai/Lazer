@@ -1,0 +1,6 @@
+{
+    global:
+        lazer_audio_*;
+    local:
+        *;
+};

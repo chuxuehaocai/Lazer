@@ -34,13 +34,17 @@ int _failures = 0;
 
 void _expect(String what, Object? actual, Object? expected) {
   final bool ok = '$actual' == '$expected';
-  stdout.writeln('${ok ? 'ok  ' : 'FAIL'} $what: $actual'
-      '${ok ? '' : ' (expected $expected)'}');
+  stdout.writeln(
+    '${ok ? 'ok  ' : 'FAIL'} $what: $actual'
+    '${ok ? '' : ' (expected $expected)'}',
+  );
   if (!ok) _failures++;
 }
 
 void _expectTrue(String what, bool condition, [String? detail]) {
-  stdout.writeln('${condition ? 'ok  ' : 'FAIL'} $what${detail == null ? '' : ': $detail'}');
+  stdout.writeln(
+    '${condition ? 'ok  ' : 'FAIL'} $what${detail == null ? '' : ': $detail'}',
+  );
   if (!condition) _failures++;
 }
 
@@ -58,9 +62,13 @@ class _Event {
 
 Future<void> main(List<String> arguments) async {
   final LazerAudioAvailability availability = LazerAudioLoader.load();
-  stdout.writeln('library: ${availability.isAvailable ? 'loaded' : availability.reason}');
+  stdout.writeln(
+    'library: ${availability.isAvailable ? 'loaded' : availability.reason}',
+  );
   if (!availability.isAvailable) {
-    stderr.writeln('The native engine is not loadable; see docs/audio-engine.md.');
+    stderr.writeln(
+      'The native engine is not loadable; see docs/audio-engine.md.',
+    );
     exit(2);
   }
   final LazerAudioApi api = availability.api!;
@@ -92,7 +100,11 @@ Future<void> main(List<String> arguments) async {
     stdout.writeln('      token=${device.token}');
     stdout.writeln('      identity=${device.identityKey}');
   }
-  _expectTrue('at least one output device', devices.isNotEmpty, '${devices.length}');
+  _expectTrue(
+    'at least one output device',
+    devices.isNotEmpty,
+    '${devices.length}',
+  );
   if (devices.isNotEmpty) {
     // The endpoint volume is per endpoint, so query the one that is actually the
     // default output rather than whichever happens to be listed first.
@@ -120,36 +132,33 @@ Future<void> main(List<String> arguments) async {
         'restored to ${restored?.toStringAsFixed(3)}',
       );
     }
-    final List<LazerPcmFormatProbe> probes = probeExclusivePcmFormats(
-      api,
-      first.token,
-      <LazerPcmFormatProbe>[
-        const LazerPcmFormatProbe(
-          sampleRate: 44100,
-          channels: 2,
-          containerBits: 16,
-          validBits: 16,
-          status: 0,
-          nativeStatus: 0,
-        ),
-        const LazerPcmFormatProbe(
-          sampleRate: 44100,
-          channels: 2,
-          containerBits: 24,
-          validBits: 24,
-          status: 0,
-          nativeStatus: 0,
-        ),
-        const LazerPcmFormatProbe(
-          sampleRate: 192000,
-          channels: 2,
-          containerBits: 24,
-          validBits: 24,
-          status: 0,
-          nativeStatus: 0,
-        ),
-      ],
-    );
+    final List<LazerPcmFormatProbe> probes =
+        probeExclusivePcmFormats(api, first.token, <LazerPcmFormatProbe>[
+          const LazerPcmFormatProbe(
+            sampleRate: 44100,
+            channels: 2,
+            containerBits: 16,
+            validBits: 16,
+            status: 0,
+            nativeStatus: 0,
+          ),
+          const LazerPcmFormatProbe(
+            sampleRate: 44100,
+            channels: 2,
+            containerBits: 24,
+            validBits: 24,
+            status: 0,
+            nativeStatus: 0,
+          ),
+          const LazerPcmFormatProbe(
+            sampleRate: 192000,
+            channels: 2,
+            containerBits: 24,
+            validBits: 24,
+            status: 0,
+            nativeStatus: 0,
+          ),
+        ]);
     for (final LazerPcmFormatProbe probe in probes) {
       stdout.writeln('  exclusive query: $probe');
     }
@@ -159,23 +168,19 @@ Future<void> main(List<String> arguments) async {
   final List<_Event> events = <_Event>[];
   final Stopwatch clock = Stopwatch()..start();
   final NativeCallable<LazerAudioEventNative> listener =
-      NativeCallable<LazerAudioEventNative>.listener(
-        (Pointer<Void> context, int event, int detail, int positionMillis) {
-          events.add(_Event(event, detail, positionMillis, clock.elapsed));
-        },
-      );
-  final NativeCallable<LazerAudioLogNative> logListener =
-      NativeCallable<LazerAudioLogNative>.listener(
-        (Pointer<Void> context, int level, Pointer<Uint8> message) {
-          if (level >= lazerAudioLogWarning) {
-            stdout.writeln('  engine log($level): ${lazerReadCString(message)}');
-          }
-        },
-      );
+      NativeCallable<LazerAudioEventNative>.listener((
+        Pointer<Void> context,
+        int event,
+        int detail,
+        int positionMillis,
+      ) {
+        events.add(_Event(event, detail, positionMillis, clock.elapsed));
+      });
 
   final LazerAudioWorker worker = await LazerAudioWorker.spawn();
   final Pointer<LazerAudioSnapshot> snapshot = calloc<LazerAudioSnapshot>();
-  final Pointer<LazerAudioStreamInfo> streamInfo = calloc<LazerAudioStreamInfo>();
+  final Pointer<LazerAudioStreamInfo> streamInfo =
+      calloc<LazerAudioStreamInfo>();
   int? address;
 
   /// Both helpers refresh the snapshot; reading the struct without another call
@@ -195,7 +200,7 @@ Future<void> main(List<String> arguments) async {
     final Object? created = await worker.call(LazerWorkerOp.create, <Object?>[
       ...const LazerDeviceSettings().toDeviceMessage(),
       listener.nativeFunction.address,
-      logListener.nativeFunction.address,
+      0,
     ]);
     _expectTrue('engine created', created != null);
     if (created == null) {
@@ -215,11 +220,13 @@ Future<void> main(List<String> arguments) async {
     // ---- open a local file through the engine's own file reader -------------
     final String wavPath = _fixture(arguments, 'tone441.wav');
     _expectTrue('fixture exists', File(wavPath).existsSync(), wavPath);
-    final int openStatus = await worker.call(LazerWorkerOp.openFile, <Object?>[
-      address,
-      wavPath,
-      ...const LazerOpenSettings().toMessage(),
-    ]) as int;
+    final int openStatus =
+        await worker.call(LazerWorkerOp.openFile, <Object?>[
+              address,
+              wavPath,
+              ...const LazerOpenSettings().toMessage(),
+            ])
+            as int;
     _expect('open local WAV', openStatus, lazerAudioOk);
     if (openStatus != lazerAudioOk) {
       stdout.writeln('  last error: ${api.lastError(engine)}');
@@ -243,7 +250,7 @@ Future<void> main(List<String> arguments) async {
         'output format is reported',
         info.outputSampleRate > 0 && info.outputBitsPerSample > 0,
         '${info.outputSampleRate} Hz/${info.outputBitsPerSample}-bit '
-        'float=${info.outputIsFloat} selection=${info.outputFormatSelection}',
+            'float=${info.outputIsFloat} selection=${info.outputFormatSelection}',
       );
 
       _expect('play', api.play(engine), lazerAudioOk);
@@ -301,22 +308,22 @@ Future<void> main(List<String> arguments) async {
       ).toDeviceMessage(),
       null,
     ]);
-    final int exclusiveOpen = await worker.call(
-          LazerWorkerOp.openFile,
-          <Object?>[
-            address,
-            _fixture(arguments, 'tone441.wav'),
-            ...const LazerOpenSettings().toMessage(),
-          ],
-        )
-        as int;
+    final int exclusiveOpen =
+        await worker.call(LazerWorkerOp.openFile, <Object?>[
+              address,
+              _fixture(arguments, 'tone441.wav'),
+              ...const LazerOpenSettings().toMessage(),
+            ])
+            as int;
     stdout.writeln('exclusive open status: $exclusiveOpen');
     if (exclusiveOpen == lazerAudioOk) {
       api.streamInfo(engine, streamInfo);
       final LazerStreamInfo info = LazerStreamInfo.fromNative(streamInfo.ref);
-      stdout.writeln('  exclusive stream: ${info.summary} '
-          'exclusive=${info.outputExclusive} bitPerfect=${info.bitPerfectActive} '
-          'selection=${info.outputFormatSelection}');
+      stdout.writeln(
+        '  exclusive stream: ${info.summary} '
+        'exclusive=${info.outputExclusive} bitPerfect=${info.bitPerfectActive} '
+        'selection=${info.outputFormatSelection}',
+      );
       _expectTrue('exclusive session is exclusive', info.outputExclusive);
       _expectTrue(
         'bit-perfect reaches the source format',
@@ -328,8 +335,11 @@ Future<void> main(List<String> arguments) async {
       );
       _expect('play exclusive', api.play(engine), lazerAudioOk);
       await Future<void>.delayed(const Duration(milliseconds: 500));
-      _expectTrue('exclusive playback advanced', snapshotPosition() > 150,
-          '${snapshotPosition()}ms');
+      _expectTrue(
+        'exclusive playback advanced',
+        snapshotPosition() > 150,
+        '${snapshotPosition()}ms',
+      );
       api.stop(engine);
       await Future<void>.delayed(const Duration(milliseconds: 100));
     } else {
@@ -354,11 +364,14 @@ Future<void> main(List<String> arguments) async {
     // message. This is what proves the page is not decorative.
     final HifiSettings eqSettings = HifiSettings(
       buffer: HifiBufferSize.medium,
-      equalizer: const HifiEqualizerState(
-        enabled: true,
-        preampDb: 6,
-        limiterEnabled: true,
-      ).withPreset(hifiEqPresets.firstWhere((HifiEqPreset p) => p.id == 'bass')),
+      equalizer:
+          const HifiEqualizerState(
+            enabled: true,
+            preampDb: 6,
+            limiterEnabled: true,
+          ).withPreset(
+            hifiEqPresets.firstWhere((HifiEqPreset p) => p.id == 'bass'),
+          ),
       // Crossfeed is on too, so this exercises both DSP stages in one session.
       crossfeed: const HifiCrossfeedState(
         enabled: true,
@@ -373,23 +386,25 @@ Future<void> main(List<String> arguments) async {
       request.token,
     ]);
     final LazerDspRequest dsp = eqSettings.toDspRequest();
-    final int dspStatus2 = await worker.call(LazerWorkerOp.setDsp, <Object?>[
-      address,
-      dsp.preampDb,
-      dsp.limiterEnabled ? 1 : 0,
-      dsp.limiterThresholdDb,
-      <Object?>[
-        for (final HifiEqBandMessage band in dsp.bands)
-          <Object?>[
-            band.kind,
-            band.frequencyHz,
-            band.gainDb,
-            band.q,
-            band.enabled,
-          ],
-      ],
-      dsp.toCrossfeedMessage(),
-    ]) as int;
+    final int dspStatus2 =
+        await worker.call(LazerWorkerOp.setDsp, <Object?>[
+              address,
+              dsp.preampDb,
+              dsp.limiterEnabled ? 1 : 0,
+              dsp.limiterThresholdDb,
+              <Object?>[
+                for (final HifiEqBandMessage band in dsp.bands)
+                  <Object?>[
+                    band.kind,
+                    band.frequencyHz,
+                    band.gainDb,
+                    band.q,
+                    band.enabled,
+                  ],
+              ],
+              dsp.toCrossfeedMessage(),
+            ])
+            as int;
     _expect('settings: apply device + DSP', dspStatus2, lazerAudioOk);
     _expect('settings: band count handed to the engine', dsp.bands.length, 10);
     _expect('settings: preamp handed to the engine', dsp.preampDb, -3.0);
@@ -399,11 +414,13 @@ Future<void> main(List<String> arguments) async {
     _expect('settings: crossfeed delay', dsp.crossfeedDelayMs, 0.22);
     _expect('settings: crossfeed cutoff', dsp.crossfeedCutoffHz, 700.0);
 
-    final int eqOpen = await worker.call(LazerWorkerOp.openFile, <Object?>[
-      address,
-      _fixture(arguments, 'tone441.wav'),
-      ...const LazerOpenSettings().toMessage(),
-    ]) as int;
+    final int eqOpen =
+        await worker.call(LazerWorkerOp.openFile, <Object?>[
+              address,
+              _fixture(arguments, 'tone441.wav'),
+              ...const LazerOpenSettings().toMessage(),
+            ])
+            as int;
     _expect('settings: open with the EQ enabled', eqOpen, lazerAudioOk);
     if (eqOpen == lazerAudioOk) {
       api.play(engine);
@@ -466,15 +483,13 @@ Future<void> main(List<String> arguments) async {
       if (reader != null) {
         // A static file is already "fully downloaded".
         reader.finish();
-        final int status = await worker.call(
-              LazerWorkerOp.openReader,
-              <Object?>[
-                address,
-                reader.address,
-                ...const LazerOpenSettings().toMessage(),
-              ],
-            )
-            as int;
+        final int status =
+            await worker.call(LazerWorkerOp.openReader, <Object?>[
+                  address,
+                  reader.address,
+                  ...const LazerOpenSettings().toMessage(),
+                ])
+                as int;
         _expect('open FLAC through the reader bridge', status, lazerAudioOk);
         if (status == lazerAudioOk) {
           api.streamInfo(engine, streamInfo);
@@ -500,17 +515,15 @@ Future<void> main(List<String> arguments) async {
       // ---- gapless: a queued successor crosses without reopening the device --
       final String first = _fixture(arguments, 'tone24.wav');
       final String second = _fixture(arguments, 'tone441_short.flac');
-      final int firstStatus = await worker.call(
-            LazerWorkerOp.openFile,
-            <Object?>[
-              address,
-              first,
-              ...const LazerOpenSettings(
-                durationHint: Duration(seconds: 1),
-              ).toMessage(),
-            ],
-          )
-          as int;
+      final int firstStatus =
+          await worker.call(LazerWorkerOp.openFile, <Object?>[
+                address,
+                first,
+                ...const LazerOpenSettings(
+                  durationHint: Duration(seconds: 1),
+                ).toMessage(),
+              ])
+              as int;
       _expect('open first track', firstStatus, lazerAudioOk);
       if (firstStatus == lazerAudioOk) {
         final NativeStreamReader? successor = NativeStreamReader.create(
@@ -520,16 +533,14 @@ Future<void> main(List<String> arguments) async {
         );
         if (successor != null) {
           successor.finish();
-          final int queued = await worker.call(
-                LazerWorkerOp.queueReader,
-                <Object?>[
-                  address,
-                  1,
-                  successor.address,
-                  ...const LazerOpenSettings().toMessage(),
-                ],
-              )
-              as int;
+          final int queued =
+              await worker.call(LazerWorkerOp.queueReader, <Object?>[
+                    address,
+                    1,
+                    successor.address,
+                    ...const LazerOpenSettings().toMessage(),
+                  ])
+                  as int;
           _expect('queue successor', queued, lazerAudioOk);
           events.clear();
           api.play(engine);
@@ -559,15 +570,17 @@ Future<void> main(List<String> arguments) async {
     }
 
     // ---- DSP: a preamp must be visible in the telemetry --------------------
-    final int dspStatus = await worker.call(LazerWorkerOp.setDsp, <Object?>[
-      address,
-      6.0,
-      1,
-      -1.0,
-      <Object?>[
-        <Object?>[lazerAudioEqBandPeak, 1000.0, 3.0, 1.0, 1],
-      ],
-    ]) as int;
+    final int dspStatus =
+        await worker.call(LazerWorkerOp.setDsp, <Object?>[
+              address,
+              6.0,
+              1,
+              -1.0,
+              <Object?>[
+                <Object?>[lazerAudioEqBandPeak, 1000.0, 3.0, 1.0, 1],
+              ],
+            ])
+            as int;
     _expect('apply DSP', dspStatus, lazerAudioOk);
 
     // ---- teardown ----------------------------------------------------------
@@ -577,7 +590,6 @@ Future<void> main(List<String> arguments) async {
   } finally {
     await worker.close();
     listener.close();
-    logListener.close();
     calloc.free(snapshot);
     calloc.free(streamInfo);
     clock.stop();
@@ -598,5 +610,8 @@ String _fixture(List<String> arguments, String name) {
       return arguments[index + 1];
     }
   }
-  return <String>['build/native-audio/testdata', name].join(Platform.pathSeparator);
+  return <String>[
+    'build/native-audio/testdata',
+    name,
+  ].join(Platform.pathSeparator);
 }

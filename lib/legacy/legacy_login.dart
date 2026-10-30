@@ -7,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
+import '../theme/tokens.dart' show AppFonts;
 
 /// Present the sign-in card in the Apple sheet language.
 Future<void> showLegacyLoginDialog(BuildContext context, AppState state) {
@@ -16,7 +17,11 @@ Future<void> showLegacyLoginDialog(BuildContext context, AppState state) {
     context: context,
     barrierColor: Colors.black.withValues(alpha: .32),
     builder: (BuildContext context) => Theme(
-      data: buildAppleTheme(brightness: brightness, seedAccent: accent),
+      data: buildAppleTheme(
+        brightness: brightness,
+        seedAccent: accent,
+        fonts: state.fontPreferences,
+      ),
       child: _LegacyLoginDialog(state: state),
     ),
   );
@@ -439,7 +444,7 @@ class _LegacyLoginDialogState extends State<_LegacyLoginDialog> {
         maxLines: 5,
         autofocus: true,
         style: theme.textTheme.bodySmall?.copyWith(
-          fontFamily: 'monospace',
+          fontFamily: AppFonts.mono,
           height: 1.5,
         ),
         decoration: const InputDecoration(hintText: 'MUSIC_U=…  __csrf=…'),

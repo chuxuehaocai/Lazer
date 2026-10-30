@@ -184,4 +184,10 @@ const char *lazer_audio_build_information(void) {
     return information.c_str();
 }
 
+int32_t lazer_audio_read_log(
+    LazerAudioEngine engine, int32_t *out_level, char *message, uint32_t capacity) {
+    if (engine == nullptr) return LazerAudioErrorInvalidArgument;
+    return handle(engine)->readLog(out_level, message, capacity);
+}
+
 }  // extern "C"

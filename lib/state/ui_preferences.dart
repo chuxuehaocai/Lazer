@@ -62,6 +62,7 @@ enum LegacyBackgroundMode {
   nowPlayingDynamic,
   nowPlayingStatic,
   customImage,
+  solidColor,
   off,
 }
 
@@ -69,15 +70,17 @@ extension LegacyBackgroundModeLabels on LegacyBackgroundMode {
   /// Chinese source string, translated through `context.tr`.
   String get label => switch (this) {
     LegacyBackgroundMode.nowPlayingDynamic => '跟随当前歌曲（流动）',
-    LegacyBackgroundMode.nowPlayingStatic => '当前歌曲纯色',
+    LegacyBackgroundMode.nowPlayingStatic => '静态背景',
     LegacyBackgroundMode.customImage => '自定义图片',
+    LegacyBackgroundMode.solidColor => '纯色背景',
     LegacyBackgroundMode.off => '不使用',
   };
 
   String get detail => switch (this) {
     LegacyBackgroundMode.nowPlayingDynamic => '使用当前歌曲封面主色渲染整页画布',
-    LegacyBackgroundMode.nowPlayingStatic => '以当前歌曲封面主色铺满整页',
+    LegacyBackgroundMode.nowPlayingStatic => '用动态背景生成一帧，保留为静态背景',
     LegacyBackgroundMode.customImage => '使用你选择的图片铺满整页',
+    LegacyBackgroundMode.solidColor => '自选背景颜色，或根据主题色生成',
     LegacyBackgroundMode.off => '关闭画布，只保留主题底色',
   };
 

@@ -1,6 +1,6 @@
 // Loading and binding of the native `lazer-audio` engine and its reader bridge.
 //
-// The engine is a single C ABI shared library (`lazer_audio_api.h`, ABI v23);
+// The engine is a single C ABI shared library (`lazer_audio_api.h`, ABI v24);
 // the bridge is a tiny companion that implements the engine's reader callbacks
 // over a growing cache file, because Dart cannot service a blocking native
 // callback from an engine thread (see `lazer_audio_reader.dart`).
@@ -63,18 +63,22 @@ class LazerAudioApi {
       );
 
   late final Pointer<Void> Function(Pointer<LazerAudioEngineConfig>) create =
-      _library
-          .lookupFunction<
-            Pointer<Void> Function(Pointer<LazerAudioEngineConfig>),
-            Pointer<Void> Function(Pointer<LazerAudioEngineConfig>)
-          >('lazer_audio_create');
+      _library.lookupFunction<
+        Pointer<Void> Function(Pointer<LazerAudioEngineConfig>),
+        Pointer<Void> Function(Pointer<LazerAudioEngineConfig>)
+      >('lazer_audio_create');
 
   late final void Function(Pointer<Void>) destroy = _library
-      .lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
-        'lazer_audio_destroy',
-      );
+      .lookupFunction<
+        Void Function(Pointer<Void>),
+        void Function(Pointer<Void>)
+      >('lazer_audio_destroy');
 
-  late final int Function(Pointer<Void>, Pointer<Uint8>, Pointer<LazerAudioOpenParams>)
+  late final int Function(
+    Pointer<Void>,
+    Pointer<Uint8>,
+    Pointer<LazerAudioOpenParams>,
+  )
   openFileUtf8 = _library
       .lookupFunction<
         Int32 Function(
@@ -137,19 +141,22 @@ class LazerAudioApi {
       >('lazer_audio_clear_queued_reader');
 
   late final int Function(Pointer<Void>) play = _library
-      .lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
-        'lazer_audio_play',
-      );
+      .lookupFunction<
+        Int32 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('lazer_audio_play');
 
   late final int Function(Pointer<Void>) pause = _library
-      .lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
-        'lazer_audio_pause',
-      );
+      .lookupFunction<
+        Int32 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('lazer_audio_pause');
 
   late final int Function(Pointer<Void>) stop = _library
-      .lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
-        'lazer_audio_stop',
-      );
+      .lookupFunction<
+        Int32 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('lazer_audio_stop');
 
   late final int Function(Pointer<Void>, int) seek = _library
       .lookupFunction<
@@ -164,16 +171,12 @@ class LazerAudioApi {
       >('lazer_audio_set_volume');
 
   late final int Function(Pointer<Void>, Pointer<LazerAudioDspConfig>) setDsp =
-      _library
-          .lookupFunction<
-            Int32 Function(Pointer<Void>, Pointer<LazerAudioDspConfig>),
-            int Function(Pointer<Void>, Pointer<LazerAudioDspConfig>)
-          >('lazer_audio_set_dsp');
+      _library.lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<LazerAudioDspConfig>),
+        int Function(Pointer<Void>, Pointer<LazerAudioDspConfig>)
+      >('lazer_audio_set_dsp');
 
-  late final int Function(
-    Pointer<Void>,
-    Pointer<LazerAudioDeviceConfig>,
-  )
+  late final int Function(Pointer<Void>, Pointer<LazerAudioDeviceConfig>)
   setDevice = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>, Pointer<LazerAudioDeviceConfig>),
@@ -181,11 +184,10 @@ class LazerAudioApi {
       >('lazer_audio_set_device');
 
   late final int Function(Pointer<Void>, Pointer<LazerAudioSnapshot>) snapshot =
-      _library
-          .lookupFunction<
-            Int32 Function(Pointer<Void>, Pointer<LazerAudioSnapshot>),
-            int Function(Pointer<Void>, Pointer<LazerAudioSnapshot>)
-          >('lazer_audio_snapshot');
+      _library.lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<LazerAudioSnapshot>),
+        int Function(Pointer<Void>, Pointer<LazerAudioSnapshot>)
+      >('lazer_audio_snapshot');
 
   late final int Function(Pointer<Void>, Pointer<LazerAudioStreamInfo>)
   streamInfo = _library
@@ -211,6 +213,17 @@ class LazerAudioApi {
     return () => lazerReadCString(raw(), maxBytes: 1 << 16);
   }();
 
+  /// Owned log copies avoid retaining a native callback's temporary char*.
+  /// Optional for imported libraries built before this additive ABI extension.
+  late final int Function(Pointer<Void>, Pointer<Int32>, Pointer<Uint8>, int)?
+  readLog = _optional(
+    () =>
+        _library.lookupFunction<
+          Int32 Function(Pointer<Void>, Pointer<Int32>, Pointer<Uint8>, Uint32),
+          int Function(Pointer<Void>, Pointer<Int32>, Pointer<Uint8>, int)
+        >('lazer_audio_read_log'),
+  );
+
   /// Looks a symbol up and returns null when this platform does not export it.
   ///
   /// The catalogs are per platform: Windows exports the wide-character endpoint
@@ -226,43 +239,276 @@ class LazerAudioApi {
   }
 
   /// UTF-8 output catalog (Linux ALSA `hw:` PCMs, macOS CoreAudio UIDs).
-  late final int Function(Pointer<Pointer<Void>>)? outputDeviceCatalogCreate = _optional<int Function(Pointer<Pointer<Void>>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Pointer<Void>>), int Function(Pointer<Pointer<Void>>)>('lazer_audio_output_device_catalog_create'),
-  );
-  late final int Function(Pointer<Void>, Pointer<Uint32>)? outputDeviceCatalogCount = _optional<int Function(Pointer<Void>, Pointer<Uint32>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Uint32>), int Function(Pointer<Void>, Pointer<Uint32>)>('lazer_audio_output_device_catalog_count'),
-  );
-  late final int Function(Pointer<Void>, int, Pointer<LazerAudioOutputDeviceInfo>, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Uint8>, int, Pointer<Uint32>)? outputDeviceCatalogGet = _optional<int Function(Pointer<Void>, int, Pointer<LazerAudioOutputDeviceInfo>, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Uint8>, int, Pointer<Uint32>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Void>, Uint32, Pointer<LazerAudioOutputDeviceInfo>, Pointer<Uint8>, Uint32, Pointer<Uint32>, Pointer<Uint8>, Uint32, Pointer<Uint32>, Pointer<Uint8>, Uint32, Pointer<Uint32>), int Function(Pointer<Void>, int, Pointer<LazerAudioOutputDeviceInfo>, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Uint8>, int, Pointer<Uint32>)>('lazer_audio_output_device_catalog_get'),
-  );
-  late final void Function(Pointer<Void>)? outputDeviceCatalogDestroy = _optional<void Function(Pointer<Void>)>(
-    () => _library.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('lazer_audio_output_device_catalog_destroy'),
-  );
+  late final int Function(Pointer<Pointer<Void>>)? outputDeviceCatalogCreate =
+      _optional<int Function(Pointer<Pointer<Void>>)>(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(Pointer<Pointer<Void>>),
+              int Function(Pointer<Pointer<Void>>)
+            >('lazer_audio_output_device_catalog_create'),
+      );
+  late final int Function(Pointer<Void>, Pointer<Uint32>)?
+  outputDeviceCatalogCount =
+      _optional<int Function(Pointer<Void>, Pointer<Uint32>)>(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(Pointer<Void>, Pointer<Uint32>),
+              int Function(Pointer<Void>, Pointer<Uint32>)
+            >('lazer_audio_output_device_catalog_count'),
+      );
+  late final int Function(
+    Pointer<Void>,
+    int,
+    Pointer<LazerAudioOutputDeviceInfo>,
+    Pointer<Uint8>,
+    int,
+    Pointer<Uint32>,
+    Pointer<Uint8>,
+    int,
+    Pointer<Uint32>,
+    Pointer<Uint8>,
+    int,
+    Pointer<Uint32>,
+  )?
+  outputDeviceCatalogGet =
+      _optional<
+        int Function(
+          Pointer<Void>,
+          int,
+          Pointer<LazerAudioOutputDeviceInfo>,
+          Pointer<Uint8>,
+          int,
+          Pointer<Uint32>,
+          Pointer<Uint8>,
+          int,
+          Pointer<Uint32>,
+          Pointer<Uint8>,
+          int,
+          Pointer<Uint32>,
+        )
+      >(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(
+                Pointer<Void>,
+                Uint32,
+                Pointer<LazerAudioOutputDeviceInfo>,
+                Pointer<Uint8>,
+                Uint32,
+                Pointer<Uint32>,
+                Pointer<Uint8>,
+                Uint32,
+                Pointer<Uint32>,
+                Pointer<Uint8>,
+                Uint32,
+                Pointer<Uint32>,
+              ),
+              int Function(
+                Pointer<Void>,
+                int,
+                Pointer<LazerAudioOutputDeviceInfo>,
+                Pointer<Uint8>,
+                int,
+                Pointer<Uint32>,
+                Pointer<Uint8>,
+                int,
+                Pointer<Uint32>,
+                Pointer<Uint8>,
+                int,
+                Pointer<Uint32>,
+              )
+            >('lazer_audio_output_device_catalog_get'),
+      );
+  late final void Function(Pointer<Void>)? outputDeviceCatalogDestroy =
+      _optional<void Function(Pointer<Void>)>(
+        () =>
+            _library.lookupFunction<
+              Void Function(Pointer<Void>),
+              void Function(Pointer<Void>)
+            >('lazer_audio_output_device_catalog_destroy'),
+      );
+
   /// Windows render-endpoint catalog; strings are `wchar_t` (UTF-16), so buffers
   /// are `Uint16` and counts are UTF-16 code units.
-  late final int Function(Pointer<Pointer<Void>>)? deviceCatalogCreate = _optional<int Function(Pointer<Pointer<Void>>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Pointer<Void>>), int Function(Pointer<Pointer<Void>>)>('lazer_audio_device_catalog_create'),
-  );
-  late final int Function(Pointer<Void>, Pointer<Uint32>)? deviceCatalogCount = _optional<int Function(Pointer<Void>, Pointer<Uint32>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Uint32>), int Function(Pointer<Void>, Pointer<Uint32>)>('lazer_audio_device_catalog_count'),
-  );
-  late final int Function(Pointer<Void>, int, Pointer<LazerAudioDeviceInfo>, Pointer<Uint16>, int, Pointer<Uint32>, Pointer<Uint16>, int, Pointer<Uint32>, Pointer<Uint16>, int, Pointer<Uint32>)? deviceCatalogGet = _optional<int Function(Pointer<Void>, int, Pointer<LazerAudioDeviceInfo>, Pointer<Uint16>, int, Pointer<Uint32>, Pointer<Uint16>, int, Pointer<Uint32>, Pointer<Uint16>, int, Pointer<Uint32>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Void>, Uint32, Pointer<LazerAudioDeviceInfo>, Pointer<Uint16>, Uint32, Pointer<Uint32>, Pointer<Uint16>, Uint32, Pointer<Uint32>, Pointer<Uint16>, Uint32, Pointer<Uint32>), int Function(Pointer<Void>, int, Pointer<LazerAudioDeviceInfo>, Pointer<Uint16>, int, Pointer<Uint32>, Pointer<Uint16>, int, Pointer<Uint32>, Pointer<Uint16>, int, Pointer<Uint32>)>('lazer_audio_device_catalog_get'),
-  );
-  late final void Function(Pointer<Void>)? deviceCatalogDestroy = _optional<void Function(Pointer<Void>)>(
-    () => _library.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('lazer_audio_device_catalog_destroy'),
-  );
+  late final int Function(Pointer<Pointer<Void>>)? deviceCatalogCreate =
+      _optional<int Function(Pointer<Pointer<Void>>)>(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(Pointer<Pointer<Void>>),
+              int Function(Pointer<Pointer<Void>>)
+            >('lazer_audio_device_catalog_create'),
+      );
+  late final int Function(Pointer<Void>, Pointer<Uint32>)? deviceCatalogCount =
+      _optional<int Function(Pointer<Void>, Pointer<Uint32>)>(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(Pointer<Void>, Pointer<Uint32>),
+              int Function(Pointer<Void>, Pointer<Uint32>)
+            >('lazer_audio_device_catalog_count'),
+      );
+  late final int Function(
+    Pointer<Void>,
+    int,
+    Pointer<LazerAudioDeviceInfo>,
+    Pointer<Uint16>,
+    int,
+    Pointer<Uint32>,
+    Pointer<Uint16>,
+    int,
+    Pointer<Uint32>,
+    Pointer<Uint16>,
+    int,
+    Pointer<Uint32>,
+  )?
+  deviceCatalogGet =
+      _optional<
+        int Function(
+          Pointer<Void>,
+          int,
+          Pointer<LazerAudioDeviceInfo>,
+          Pointer<Uint16>,
+          int,
+          Pointer<Uint32>,
+          Pointer<Uint16>,
+          int,
+          Pointer<Uint32>,
+          Pointer<Uint16>,
+          int,
+          Pointer<Uint32>,
+        )
+      >(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(
+                Pointer<Void>,
+                Uint32,
+                Pointer<LazerAudioDeviceInfo>,
+                Pointer<Uint16>,
+                Uint32,
+                Pointer<Uint32>,
+                Pointer<Uint16>,
+                Uint32,
+                Pointer<Uint32>,
+                Pointer<Uint16>,
+                Uint32,
+                Pointer<Uint32>,
+              ),
+              int Function(
+                Pointer<Void>,
+                int,
+                Pointer<LazerAudioDeviceInfo>,
+                Pointer<Uint16>,
+                int,
+                Pointer<Uint32>,
+                Pointer<Uint16>,
+                int,
+                Pointer<Uint32>,
+                Pointer<Uint16>,
+                int,
+                Pointer<Uint32>,
+              )
+            >('lazer_audio_device_catalog_get'),
+      );
+  late final void Function(Pointer<Void>)? deviceCatalogDestroy =
+      _optional<void Function(Pointer<Void>)>(
+        () =>
+            _library.lookupFunction<
+              Void Function(Pointer<Void>),
+              void Function(Pointer<Void>)
+            >('lazer_audio_device_catalog_destroy'),
+      );
+
   /// Exact-exclusive PCM format query for one Windows endpoint.
-  late final int Function(Pointer<Uint16>, Pointer<LazerAudioPcmFormatCandidate>, int, Pointer<LazerAudioPcmFormatProbeResult>)? probePcmFormats = _optional<int Function(Pointer<Uint16>, Pointer<LazerAudioPcmFormatCandidate>, int, Pointer<LazerAudioPcmFormatProbeResult>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Uint16>, Pointer<LazerAudioPcmFormatCandidate>, Uint32, Pointer<LazerAudioPcmFormatProbeResult>), int Function(Pointer<Uint16>, Pointer<LazerAudioPcmFormatCandidate>, int, Pointer<LazerAudioPcmFormatProbeResult>)>('lazer_audio_device_probe_pcm_formats'),
-  );
+  late final int Function(
+    Pointer<Uint16>,
+    Pointer<LazerAudioPcmFormatCandidate>,
+    int,
+    Pointer<LazerAudioPcmFormatProbeResult>,
+  )?
+  probePcmFormats =
+      _optional<
+        int Function(
+          Pointer<Uint16>,
+          Pointer<LazerAudioPcmFormatCandidate>,
+          int,
+          Pointer<LazerAudioPcmFormatProbeResult>,
+        )
+      >(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(
+                Pointer<Uint16>,
+                Pointer<LazerAudioPcmFormatCandidate>,
+                Uint32,
+                Pointer<LazerAudioPcmFormatProbeResult>,
+              ),
+              int Function(
+                Pointer<Uint16>,
+                Pointer<LazerAudioPcmFormatCandidate>,
+                int,
+                Pointer<LazerAudioPcmFormatProbeResult>,
+              )
+            >('lazer_audio_device_probe_pcm_formats'),
+      );
+
   /// Windows endpoint master volume; never software gain, never USB `SET_CUR`.
-  late final int Function(Pointer<Uint16>, Pointer<Float>, Pointer<Uint32>, Pointer<Int32>)? endpointVolumeGet = _optional<int Function(Pointer<Uint16>, Pointer<Float>, Pointer<Uint32>, Pointer<Int32>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Uint16>, Pointer<Float>, Pointer<Uint32>, Pointer<Int32>), int Function(Pointer<Uint16>, Pointer<Float>, Pointer<Uint32>, Pointer<Int32>)>('lazer_audio_endpoint_volume_get'),
-  );
-  late final int Function(Pointer<Uint16>, double, Pointer<Uint32>, Pointer<Int32>)? endpointVolumeSet = _optional<int Function(Pointer<Uint16>, double, Pointer<Uint32>, Pointer<Int32>)>(
-    () => _library.lookupFunction<Int32 Function(Pointer<Uint16>, Float, Pointer<Uint32>, Pointer<Int32>), int Function(Pointer<Uint16>, double, Pointer<Uint32>, Pointer<Int32>)>('lazer_audio_endpoint_volume_set'),
-  );
+  late final int Function(
+    Pointer<Uint16>,
+    Pointer<Float>,
+    Pointer<Uint32>,
+    Pointer<Int32>,
+  )?
+  endpointVolumeGet =
+      _optional<
+        int Function(
+          Pointer<Uint16>,
+          Pointer<Float>,
+          Pointer<Uint32>,
+          Pointer<Int32>,
+        )
+      >(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(
+                Pointer<Uint16>,
+                Pointer<Float>,
+                Pointer<Uint32>,
+                Pointer<Int32>,
+              ),
+              int Function(
+                Pointer<Uint16>,
+                Pointer<Float>,
+                Pointer<Uint32>,
+                Pointer<Int32>,
+              )
+            >('lazer_audio_endpoint_volume_get'),
+      );
+  late final int Function(
+    Pointer<Uint16>,
+    double,
+    Pointer<Uint32>,
+    Pointer<Int32>,
+  )?
+  endpointVolumeSet =
+      _optional<
+        int Function(Pointer<Uint16>, double, Pointer<Uint32>, Pointer<Int32>)
+      >(
+        () =>
+            _library.lookupFunction<
+              Int32 Function(
+                Pointer<Uint16>,
+                Float,
+                Pointer<Uint32>,
+                Pointer<Int32>,
+              ),
+              int Function(
+                Pointer<Uint16>,
+                double,
+                Pointer<Uint32>,
+                Pointer<Int32>,
+              )
+            >('lazer_audio_endpoint_volume_set'),
+      );
 }
 
 /// Typed bindings for `lazer-audio-bridge`, the growing-file reader.
@@ -279,9 +525,10 @@ class LazerAudioBridgeApi {
       >('lazer_bridge_reader_create');
 
   late final void Function(Pointer<Void>) readerNotify = _library
-      .lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
-        'lazer_bridge_reader_notify',
-      );
+      .lookupFunction<
+        Void Function(Pointer<Void>),
+        void Function(Pointer<Void>)
+      >('lazer_bridge_reader_notify');
 
   late final void Function(Pointer<Void>, int) readerFinish = _library
       .lookupFunction<
@@ -290,25 +537,31 @@ class LazerAudioBridgeApi {
       >('lazer_bridge_reader_finish');
 
   late final void Function(Pointer<Void>) readerDestroy = _library
-      .lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
-        'lazer_bridge_reader_destroy',
-      );
+      .lookupFunction<
+        Void Function(Pointer<Void>),
+        void Function(Pointer<Void>)
+      >('lazer_bridge_reader_destroy');
 
   late final int Function(Pointer<Void>) readerBytesAvailable = _library
-      .lookupFunction<Int64 Function(Pointer<Void>), int Function(Pointer<Void>)>(
-        'lazer_bridge_reader_bytes_available',
-      );
+      .lookupFunction<
+        Int64 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('lazer_bridge_reader_bytes_available');
 
   /// Addresses of the five callbacks the engine invokes on its own threads.
   ///
   /// These are ordinary exported C functions, so they are taken with
   /// `DynamicLibrary.lookup` — the address of the function itself, not the result of
   /// calling it.
-  late final Pointer<NativeFunction<LazerAudioReadNative>> readPointer = _library
-      .lookup<NativeFunction<LazerAudioReadNative>>('lazer_bridge_reader_read');
+  late final Pointer<NativeFunction<LazerAudioReadNative>> readPointer =
+      _library.lookup<NativeFunction<LazerAudioReadNative>>(
+        'lazer_bridge_reader_read',
+      );
 
-  late final Pointer<NativeFunction<LazerAudioSeekNative>> seekPointer = _library
-      .lookup<NativeFunction<LazerAudioSeekNative>>('lazer_bridge_reader_seek');
+  late final Pointer<NativeFunction<LazerAudioSeekNative>> seekPointer =
+      _library.lookup<NativeFunction<LazerAudioSeekNative>>(
+        'lazer_bridge_reader_seek',
+      );
 
   late final Pointer<NativeFunction<LazerAudioLengthNative>> lengthPointer =
       _library.lookup<NativeFunction<LazerAudioLengthNative>>(
@@ -334,12 +587,15 @@ abstract final class LazerAudioLoader {
   static const String bridgeOverrideVariable = 'LAZER_AUDIO_BRIDGE_LIBRARY';
 
   static LazerAudioAvailability? _cached;
+  static String? importedLibraryPath;
+
+  static LazerAudioAvailability inspect(String path) =>
+      _load(engineOverride: path);
 
   /// Whether the host platform has an engine backend at all.
   ///
-  /// Windows (WASAPI), Linux (ALSA) and macOS (CoreAudio) do. Android and iOS
-  /// need the JNI path from the master branch, which this port does not wire up
-  /// yet, so they always report unavailable and the app keeps `just_audio`.
+  /// Windows (WASAPI), Linux (ALSA), macOS (CoreAudio) and 64-bit Android
+  /// (AAudio) share this ABI. Other hosts keep the system engine.
   static bool get isSupportedHost => _engineFileNames.isNotEmpty;
 
   /// File names to try, most specific first.
@@ -347,11 +603,12 @@ abstract final class LazerAudioLoader {
   /// MinGW prefixes DLLs with `lib` while MSVC does not, so both spellings are
   /// accepted on Windows; the POSIX names already carry the prefix.
   static List<String> get _engineFileNames => switch (Abi.current()) {
-    Abi.windowsX64 || Abi.windowsArm64 => <String>[
-      'lazer-audio.dll',
-      'liblazer-audio.dll',
-    ],
-    Abi.linuxX64 || Abi.linuxArm64 => <String>['liblazer-audio.so'],
+    Abi.windowsX64 ||
+    Abi.windowsArm64 => <String>['lazer-audio.dll', 'liblazer-audio.dll'],
+    Abi.linuxX64 ||
+    Abi.linuxArm64 ||
+    Abi.androidArm64 ||
+    Abi.androidX64 => <String>['liblazer-audio.so'],
     Abi.macosX64 || Abi.macosArm64 => <String>['liblazer-audio.dylib'],
     _ => const <String>[],
   };
@@ -361,7 +618,10 @@ abstract final class LazerAudioLoader {
       'lazer-audio-bridge.dll',
       'liblazer-audio-bridge.dll',
     ],
-    Abi.linuxX64 || Abi.linuxArm64 => <String>['liblazer-audio-bridge.so'],
+    Abi.linuxX64 ||
+    Abi.linuxArm64 ||
+    Abi.androidArm64 ||
+    Abi.androidX64 => <String>['liblazer-audio-bridge.so'],
     Abi.macosX64 || Abi.macosArm64 => <String>['liblazer-audio-bridge.dylib'],
     _ => const <String>[],
   };
@@ -376,8 +636,11 @@ abstract final class LazerAudioLoader {
     return result;
   }
 
-  static LazerAudioAvailability _load() {
-    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) {
+  static LazerAudioAvailability _load({String? engineOverride}) {
+    if (!Platform.isWindows &&
+        !Platform.isLinux &&
+        !Platform.isMacOS &&
+        !Platform.isAndroid) {
       return const LazerAudioAvailability.unavailable(
         'this platform has no native audio backend',
       );
@@ -392,6 +655,7 @@ abstract final class LazerAudioLoader {
     final Uri? enginePath = _resolve(
       fileNames: engineFileNames,
       environmentVariable: libraryOverrideVariable,
+      explicitPath: engineOverride ?? importedLibraryPath,
     );
     if (enginePath == null) {
       return LazerAudioAvailability.unavailable(
@@ -430,6 +694,31 @@ abstract final class LazerAudioLoader {
         '$lazerAudioAbiVersion',
       );
     }
+    for (final symbol in const [
+      'lazer_audio_create',
+      'lazer_audio_destroy',
+      'lazer_audio_open_file_utf8',
+      'lazer_audio_open_reader',
+      'lazer_audio_queue_reader',
+      'lazer_audio_clear_queued_reader',
+      'lazer_audio_play',
+      'lazer_audio_pause',
+      'lazer_audio_stop',
+      'lazer_audio_seek',
+      'lazer_audio_set_volume',
+      'lazer_audio_set_dsp',
+      'lazer_audio_set_device',
+      'lazer_audio_snapshot',
+      'lazer_audio_stream_info',
+      'lazer_audio_last_error',
+      'lazer_audio_build_information',
+    ]) {
+      if (!api._library.providesSymbol(symbol)) {
+        return LazerAudioAvailability.unavailable(
+          '$engineFileName is missing $symbol',
+        );
+      }
+    }
     // The bridge is optional: without it the engine still plays local files,
     // it just cannot stream. A load failure is reported through
     // `supportsStreaming` rather than downgrading the whole engine.
@@ -437,6 +726,9 @@ abstract final class LazerAudioLoader {
     final Uri? bridgePath = _resolve(
       fileNames: bridgeFileNames,
       environmentVariable: bridgeOverrideVariable,
+      siblingDirectory: (engineOverride ?? importedLibraryPath) == null
+          ? null
+          : File(enginePath.toFilePath()).parent.path,
     );
     if (bridgePath != null) {
       try {
@@ -470,10 +762,9 @@ abstract final class LazerAudioLoader {
     final List<File> candidates = <File>[];
     try {
       candidates.addAll(
-        directory
-            .listSync()
-            .whereType<File>()
-            .where((File file) => file.path.toLowerCase().endsWith('.dll')),
+        directory.listSync().whereType<File>().where(
+          (File file) => file.path.toLowerCase().endsWith('.dll'),
+        ),
       );
     } catch (error) {
       developer.log('listing $directory failed: $error', name: 'lazer-audio');
@@ -504,16 +795,30 @@ abstract final class LazerAudioLoader {
   static Uri? _resolve({
     required List<String> fileNames,
     required String environmentVariable,
+    String? explicitPath,
+    String? siblingDirectory,
   }) {
+    if (explicitPath != null) {
+      final File file = File(explicitPath);
+      return file.existsSync() ? file.absolute.uri : null;
+    }
+    if (siblingDirectory != null) {
+      for (final name in fileNames) {
+        final file = File('$siblingDirectory${Platform.pathSeparator}$name');
+        if (file.existsSync()) return file.absolute.uri;
+      }
+    }
     final String? override = Platform.environment[environmentVariable];
     if (override != null && override.trim().isNotEmpty) {
       final File file = File(override.trim());
       if (file.existsSync()) return file.absolute.uri;
     }
+    if (Platform.isAndroid) return Uri.file(fileNames.first);
     final String separator = Platform.pathSeparator;
     final String cwd = Directory.current.path;
-    final String executableDirectory =
-        File(Platform.resolvedExecutable).parent.path;
+    final String executableDirectory = File(
+      Platform.resolvedExecutable,
+    ).parent.path;
     final List<String> directories = <String>[
       executableDirectory,
       if (Platform.isLinux) '$executableDirectory${separator}lib',
@@ -521,24 +826,20 @@ abstract final class LazerAudioLoader {
     ];
     // Multi-config generators nest artefacts under a configuration directory and
     // each CMake target gets its own output directory.
-    for (final String root in <String>[
-      'build/native-audio',
-      'build/native',
-    ]) {
+    for (final String root in <String>['build/native-audio', 'build/native']) {
       for (final String subdirectory in <String>[
         '',
         'lazer-audio',
         'lazer-audio-bridge',
       ]) {
-        for (final String configuration in <String>[
-          '',
-          'Release',
-          'Debug',
-        ]) {
+        for (final String configuration in <String>['', 'Release', 'Debug']) {
           directories.add(
-            <String>[cwd, root, subdirectory, configuration]
-                .where((String part) => part.isNotEmpty)
-                .join(separator),
+            <String>[
+              cwd,
+              root,
+              subdirectory,
+              configuration,
+            ].where((String part) => part.isNotEmpty).join(separator),
           );
         }
       }

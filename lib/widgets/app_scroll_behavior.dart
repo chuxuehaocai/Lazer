@@ -33,11 +33,28 @@ class AppScrollBehavior extends MaterialScrollBehavior {
     details: details,
     retention: retention,
     acceleration: acceleration,
+    smoothDiscreteWheel:
+        getPlatform(context) == TargetPlatform.windows ||
+        getPlatform(context) == TargetPlatform.linux,
     child: child,
   );
   @override
-  ScrollPhysics getScrollPhysics(BuildContext context) =>
-      InertiaScrollPhysics(retention: retention, acceleration: acceleration);
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    final platform = getPlatform(context);
+    if ((platform == TargetPlatform.iOS || platform == TargetPlatform.macOS) &&
+        ScrollMotion.isNative(
+          retention: retention,
+          acceleration: acceleration,
+        )) {
+      return const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      );
+    }
+    return InertiaScrollPhysics(
+      retention: retention,
+      acceleration: acceleration,
+    );
+  }
 }
 
 class InertiaScrollPhysics extends ClampingScrollPhysics {
@@ -118,11 +135,13 @@ class _WheelMomentum extends StatefulWidget {
     required this.details,
     required this.retention,
     required this.acceleration,
+    required this.smoothDiscreteWheel,
     required this.child,
   });
   final ScrollableDetails details;
   final double retention;
   final double acceleration;
+  final bool smoothDiscreteWheel;
   final Widget child;
   @override
   State<_WheelMomentum> createState() => _WheelMomentumState();
@@ -162,7 +181,13 @@ class _WheelMomentumState extends State<_WheelMomentum>
       return;
     }
     if (dt <= 0 || dt > 0.1) return;
-    final next = (position.pixels + _velocity * dt).clamp(
+    final native = ScrollMotion.isNative(
+      retention: widget.retention,
+      acceleration: widget.acceleration,
+    );
+    final double decay = -math.log(native ? .95 : widget.retention) * 60;
+    final double factor = math.exp(-decay * dt);
+    final next = (position.pixels + _velocity * (1 - factor) / decay).clamp(
       position.minScrollExtent,
       position.maxScrollExtent,
     );
@@ -171,7 +196,7 @@ class _WheelMomentumState extends State<_WheelMomentum>
       return;
     }
     position.jumpTo(next);
-    _velocity *= math.pow(widget.retention, dt * 60);
+    _velocity *= factor;
   }
 
   void _wheel(PointerSignalEvent event) {
@@ -180,9 +205,10 @@ class _WheelMomentumState extends State<_WheelMomentum>
     // default settings must feel exactly like that, so leave the signal alone
     // until the inertia sliders are actually moved.
     if (ScrollMotion.isNative(
-      retention: widget.retention,
-      acceleration: widget.acceleration,
-    )) {
+          retention: widget.retention,
+          acceleration: widget.acceleration,
+        ) &&
+        !widget.smoothDiscreteWheel) {
       return;
     }
     final position = _position;
@@ -193,6 +219,8 @@ class _WheelMomentumState extends State<_WheelMomentum>
     final horizontal =
         axisDirectionToAxis(widget.details.direction) == Axis.horizontal;
     var delta = horizontal ? event.scrollDelta.dx : event.scrollDelta.dy;
+    // High-resolution trackpad deltas already carry operating-system momentum.
+    if (widget.smoothDiscreteWheel && delta.abs() < 18) return;
     if (widget.details.direction == AxisDirection.up ||
         widget.details.direction == AxisDirection.left) {
       delta = -delta;

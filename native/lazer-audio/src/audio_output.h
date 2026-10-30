@@ -8,10 +8,12 @@
 #include <memory>
 #include <string>
 
-#include "internal.h"
-#include "source.h"
+#include "lazer_audio_api.h"
+#include "audio_format.h"
 
 namespace lazer::audio {
+
+class LogProxy;
 
 struct AudioOutputRequest {
     /* UTF-8 opaque device token; each backend resolves the token in its own device namespace. */
@@ -102,7 +104,8 @@ public:
     /* Non-blocking drain observation. Call after waitForReady() so backend completion state is fresh. */
     virtual OutputDrainResult drain(std::string &error) = 0;
 
-    /* Copies whole frames to the endpoint. FixedPeriod sessions require exactly one period. */
+    /* Returns frames accepted, not LazerAudioOk. Negative values mean failure.
+     * FixedPeriod sessions require exactly one period. */
     virtual int32_t write(const uint8_t *bytes, int32_t frameCount, std::string &error) = 0;
 
     [[nodiscard]] virtual bool isOpen() const noexcept = 0;

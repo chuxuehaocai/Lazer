@@ -13,6 +13,8 @@ import '../state/detail_requests.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../theme/tokens.dart';
+import '../animation/motion_snapshot.dart';
+import '../widgets/shared_browse_background.dart';
 import '../tv/large_screen_chrome.dart';
 import '../tv/large_screen_pages.dart';
 import '../tv/large_screen_widgets.dart';
@@ -239,6 +241,7 @@ class _LegacyShellState extends State<LegacyShell>
   /// from inside the build.
   void _startContentMotion() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) state.browseTransitionChanged(true);
       if (mounted) _contentMotion.forward(from: 0);
     });
   }
@@ -246,6 +249,7 @@ class _LegacyShellState extends State<LegacyShell>
   void _onContentMotionStatus(AnimationStatus status) {
     if (!mounted) return;
     if (status == AnimationStatus.completed) {
+      state.browseTransitionChanged(false);
       // Reports held back during the switch need no replay: this rebuild
       // already reads the newest state.
       setState(() => _contentSwitching = false);
@@ -273,7 +277,8 @@ class _LegacyShellState extends State<LegacyShell>
         container: true,
         child: ExcludeSemantics(
           excluding: !settled,
-          child: RepaintBoundary(
+          child: MotionSnapshot(
+            animation: _nowPlayingMotion,
             // Focus starts on the first control of the player so a remote can
             // operate it at once.
             child: TvFocusRegion(focusToken: settled, child: page!),
@@ -551,10 +556,20 @@ class _LegacyShellState extends State<LegacyShell>
 
   @override
   Widget build(BuildContext context) {
+    final bool sharedBackground = BrowseBackgroundScope.contains(context);
     final Brightness brightness = Theme.of(context).brightness;
     final Color accent = state.legacyAccentSeed ?? AppleColors.musicRed;
     return Theme(
-      data: buildAppleTheme(brightness: brightness, seedAccent: accent),
+      data:
+          buildAppleTheme(
+            brightness: brightness,
+            seedAccent: accent,
+            fonts: state.fontPreferences,
+          ).copyWith(
+            scaffoldBackgroundColor: sharedBackground
+                ? Colors.transparent
+                : null,
+          ),
       child: AnimatedBuilder(
         animation: _repaint,
         builder: (BuildContext context, _) {
@@ -609,11 +624,13 @@ class _LegacyShellState extends State<LegacyShell>
           final Widget shell = reuseShell
               ? cachedShell
               : Scaffold(
-                  backgroundColor: canvas,
+                  backgroundColor: sharedBackground
+                      ? Colors.transparent
+                      : canvas,
                   body: Stack(
                     fit: StackFit.expand,
                     children: <Widget>[
-                      if (paintedBackdrop || needsSeed)
+                      if (!sharedBackground && (paintedBackdrop || needsSeed))
                         // The mesh drifts on a ten second time base: freezing
                         // it for the length of a page switch is invisible and
                         // hands the frame budget to the transition.
@@ -625,7 +642,8 @@ class _LegacyShellState extends State<LegacyShell>
                             imagePath: state.legacyBackgroundImagePath,
                             uiAlpha: state.legacyUiAlpha,
                             quality: state.dynamicBackgroundQuality,
-                            onSeed: state.setLegacySeed,
+                            frameRate: state.browseBackgroundFps,
+                            solidColor: state.browseBackgroundColor,
                           ),
                         ),
                       // Content sits on a semantic system background from
@@ -633,18 +651,19 @@ class _LegacyShellState extends State<LegacyShell>
                       // Keeping this veil opaque enough is what makes Apple's
                       // high-contrast labels remain readable over arbitrary
                       // artwork.
-                      Positioned.fill(
-                        child: ColoredBox(
-                          color: paintedBackdrop
-                              ? apple.background.withValues(
-                                  alpha: (state.legacyUiAlpha * .9).clamp(
-                                    .56,
-                                    .92,
-                                  ),
-                                )
-                              : canvas,
+                      if (!sharedBackground)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: paintedBackdrop
+                                ? apple.background.withValues(
+                                    alpha: (state.legacyUiAlpha * .9).clamp(
+                                      .56,
+                                      .92,
+                                    ),
+                                  )
+                                : canvas,
+                          ),
                         ),
-                      ),
                       SafeArea(
                         bottom: false,
                         // Televisions overscan: keep the chrome inside the
@@ -1422,11 +1441,13 @@ class _LegacyShellState extends State<LegacyShell>
           // transition only pays for the fade, not two live pages. Each child
           // is also its own layer, which lets the opacity and slide below be
           // composited instead of re-rasterising both pages every frame.
-          for (final Widget old in previous)
+          if (previous.isNotEmpty)
             TickerMode(
               enabled: false,
               child: IgnorePointer(
-                child: ExcludeSemantics(child: RepaintBoundary(child: old)),
+                child: ExcludeSemantics(
+                  child: RepaintBoundary(child: previous.last),
+                ),
               ),
             ),
           // Pause the incoming page's own tickers for the duration of the
@@ -1458,7 +1479,7 @@ class _LegacyShellState extends State<LegacyShell>
               begin: Offset(0, largeScreen ? .012 : .04),
               end: Offset.zero,
             ).animate(eased),
-            child: RepaintBoundary(child: child),
+            child: MotionSnapshot(animation: animation, child: child),
           ),
         );
       },

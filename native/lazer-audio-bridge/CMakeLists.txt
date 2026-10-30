@@ -22,6 +22,10 @@ elseif(UNIX)
     set_target_properties(lazer-audio-bridge PROPERTIES
         BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN")
 endif()
+if(ANDROID)
+    target_link_options(lazer-audio-bridge PRIVATE
+        "-Wl,--exclude-libs,ALL" "-Wl,-z,max-page-size=16384")
+endif()
 if(WIN32 AND NOT MSVC)
     # The Dart loader opens the DLL by name; MinGW would otherwise add a `lib`
     # prefix that only the Linux naming convention has.

@@ -69,6 +69,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.showFrameStats, isTrue);
     await tester.ensureVisible(version);
+    await tester.pump();
     for (var tap = 0; tap < 7; tap++) {
       await tester.tap(version);
       await tester.pump(const Duration(milliseconds: 40));

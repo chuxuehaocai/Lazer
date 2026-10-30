@@ -296,7 +296,11 @@ void main() {
         await tester.pump(const Duration(milliseconds: 16));
       }
       expect(stackBuilds, 0);
-      expect(wordColorBuilds, greaterThan(0));
+      expect(
+        wordColorBuilds,
+        0,
+        reason: 'word highlights repaint without rebuilding settled colors',
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -333,6 +337,65 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'cached lyric heights match wrapped text after width and font changes',
+    (tester) async {
+      final state = _WordPlaybackState()
+        ..lyrics = [
+          for (var i = 0; i < 30; i++)
+            LyricLine(
+              Duration(seconds: i * 4),
+              i.isEven
+                  ? 'A repeated chorus with enough words to wrap'
+                  : 'Short verse $i',
+              translation: i % 3 == 0
+                  ? 'A repeated translated chorus with multiple words'
+                  : null,
+            ),
+        ];
+      addTearDown(state.dispose);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      for (final width in [240.0, 640.0]) {
+        tester.view.physicalSize = Size(width, 700);
+        for (final fontSize in [22.0, 30.0]) {
+          await state.setLyricFontSize(fontSize);
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: buildLegacyTheme(),
+              home: Scaffold(body: LyricViewport(state: state)),
+            ),
+          );
+          await tester.pump();
+          final rows = find.byWidgetPredicate(
+            (widget) =>
+                widget is Positioned &&
+                widget.key is ValueKey<String> &&
+                (widget.key! as ValueKey<String>).value.startsWith(
+                  'lyric-line-',
+                ),
+          );
+          expect(rows, findsWidgets);
+          for (final element in rows.evaluate()) {
+            final row = element.widget as Positioned;
+            final texts = find.descendant(
+              of: find.byKey(row.key!),
+              matching: find.byType(Text),
+            );
+            var height = 20.0;
+            for (final text in texts.evaluate()) {
+              height += tester.getSize(find.byWidget(text.widget)).height;
+            }
+            if (texts.evaluate().length > 1) height += 5;
+            expect(row.height, closeTo(height, .001));
+          }
+        }
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
   testWidgets('wheel scrolling has momentum and no framework scrollbar', (
     tester,
   ) async {

@@ -1,4 +1,5 @@
 #include "output_alsa.h"
+#include "internal.h"
 
 #include <algorithm>
 #include <cerrno>

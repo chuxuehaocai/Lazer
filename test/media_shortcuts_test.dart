@@ -226,6 +226,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    final entry = find.byKey(const ValueKey('open-shortcut-settings'));
+    await tester.scrollUntilVisible(entry, 200);
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
     final Finder row = find.byKey(const ValueKey('media-shortcut-playPause'));
     await tester.scrollUntilVisible(
       row,

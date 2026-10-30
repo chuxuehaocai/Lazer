@@ -56,7 +56,6 @@ class NativeAudioEngine
     this._bridge,
     this._worker,
     this._events,
-    this._logs,
     this._cache,
     this._deviceSettings,
   );
@@ -77,7 +76,6 @@ class NativeAudioEngine
     final LazerAudioApi api = availability.api!;
     LazerAudioWorker? worker;
     NativeCallable<LazerAudioEventNative>? events;
-    NativeCallable<LazerAudioLogNative>? logs;
     AudioStreamCache? streamCache = cache;
     NativeAudioEngine? engine;
     try {
@@ -92,32 +90,32 @@ class NativeAudioEngine
       ) {
         engine?._handleEvent(event, detail, positionMillis);
       });
-      logs = NativeCallable<LazerAudioLogNative>.listener((
-        Pointer<Void> context,
-        int level,
-        Pointer<Uint8> message,
-      ) {
-        engine?._handleLog(level, message);
-      });
       streamCache ??= AudioStreamCache(getApplicationSupportDirectory);
       engine = NativeAudioEngine._(
         api,
         availability.bridge,
         worker,
         events,
-        logs,
         streamCache,
         deviceSettings,
       );
       final Object? address = await worker.call(LazerWorkerOp.create, <Object?>[
         ...deviceSettings.toDeviceMessage(),
         events.nativeFunction.address,
-        logs.nativeFunction.address,
+        // on_log's char* expires when the native callback returns. Dart
+        // listeners are asynchronous, so pull owned log copies instead.
+        0,
       ]);
       if (address == null) {
         throw StateError('lazer_audio_create returned no engine');
       }
       engine._engineAddress = address as int;
+      if (api.readLog != null) {
+        engine._logTimer = Timer.periodic(
+          const Duration(seconds: 1),
+          (_) => engine?._drainLogs(),
+        );
+      }
       return engine;
     } catch (error, stack) {
       debugPrint('lazer-audio: engine startup failed: $error\n$stack');
@@ -125,7 +123,6 @@ class NativeAudioEngine
       if (cache == null) streamCache?.close();
       if (engine == null) {
         events?.close();
-        logs?.close();
         await worker?.close();
       }
       return null;
@@ -136,7 +133,9 @@ class NativeAudioEngine
   final LazerAudioBridgeApi? _bridge;
   final LazerAudioWorker _worker;
   final NativeCallable<LazerAudioEventNative> _events;
-  final NativeCallable<LazerAudioLogNative> _logs;
+  Timer? _logTimer;
+  Pointer<Int32>? _logLevel;
+  Pointer<Uint8>? _logBuffer;
   final AudioStreamCache _cache;
   LazerDeviceSettings _deviceSettings;
   int _engineAddress = 0;
@@ -154,6 +153,7 @@ class NativeAudioEngine
   Future<void> _operations = Future<void>.value();
 
   int _generation = 0;
+  int _transportRequest = 0;
   int _queueId = 0;
   int _queueGeneration = 0;
   int _queueIndex = 0;
@@ -348,6 +348,8 @@ class NativeAudioEngine
 
   @override
   Future<void> play() async {
+    final int generation = _generation;
+    final int request = ++_transportRequest;
     final int? address = _engineAddressOrNull;
     if (address == null || !_sourceLoaded) return;
     // Focus first: starting the device before the session is active is what makes
@@ -356,8 +358,15 @@ class NativeAudioEngine
     if (focus != null && !await focus()) {
       throw StateError('Audio session activation denied');
     }
-    if (!_sourceLoaded || _disposed) return;
-    final int status = _api.play(Pointer<Void>.fromAddress(address));
+    if (!_sourceLoaded ||
+        _disposed ||
+        generation != _generation ||
+        request != _transportRequest) {
+      return;
+    }
+    final int status = _status(
+      await _worker.call(LazerWorkerOp.play, [address]),
+    );
     if (status != lazerAudioOk) {
       throw StateError('lazer-audio: play failed ($status): ${lastError()}');
     }
@@ -365,20 +374,26 @@ class NativeAudioEngine
 
   @override
   Future<void> pause() async {
+    ++_transportRequest;
     final int? address = _engineAddressOrNull;
     if (address == null) return;
-    _api.pause(Pointer<Void>.fromAddress(address));
+    await _worker.call(LazerWorkerOp.pause, [address]);
   }
 
   @override
   Future<void> seek(Duration position) async {
+    final int generation = _generation;
     final int? address = _engineAddressOrNull;
     if (address == null || position < Duration.zero) return;
-    final int status = _api.seek(
-      Pointer<Void>.fromAddress(address),
-      position.inMilliseconds,
+    final int status = _status(
+      await _worker.call(LazerWorkerOp.seek, [
+        address,
+        position.inMilliseconds,
+      ]),
     );
-    if (status != lazerAudioOk) return;
+    if (status != lazerAudioOk || generation != _generation || _disposed) {
+      return;
+    }
     _position = position;
     // The engine's published position only moves once the decode side applied
     // the seek; reporting the target meanwhile keeps the rail from jumping back.
@@ -472,6 +487,8 @@ class NativeAudioEngine
   Future<void> _shutdown() async {
     if (_shutdownStarted) return;
     _shutdownStarted = true;
+    _logTimer?.cancel();
+    _drainLogs();
     _disposed = true;
     ++_generation;
     _sourceLoaded = false;
@@ -500,7 +517,10 @@ class NativeAudioEngine
     _queuedEntry = null;
     await _worker.close();
     _events.close();
-    _logs.close();
+    if (_logLevel != null) calloc.free(_logLevel!);
+    if (_logBuffer != null) calloc.free(_logBuffer!);
+    _logLevel = null;
+    _logBuffer = null;
     if (_snapshotBuffer != null) calloc.free(_snapshotBuffer!);
     _snapshotBuffer = null;
     if (_streamInfoBuffer != null) calloc.free(_streamInfoBuffer!);
@@ -861,9 +881,22 @@ class NativeAudioEngine
     if (!_streamInfos.isClosed) _streamInfos.add(info);
   }
 
-  void _handleLog(int level, Pointer<Uint8> message) {
-    if (level < lazerAudioLogWarning) return;
-    debugPrint('lazer-audio: ${lazerReadCString(message)}');
+  void _drainLogs() {
+    final read = _api.readLog;
+    final address = _engineAddressOrNull;
+    if (read == null || address == null) return;
+    final level = _logLevel ??= calloc<Int32>();
+    final buffer = _logBuffer ??= calloc<Uint8>(2048);
+    for (var i = 0; i < 32; i++) {
+      final count = read(
+        Pointer<Void>.fromAddress(address),
+        level,
+        buffer,
+        2048,
+      );
+      if (count <= 0) break;
+      debugPrint('lazer-audio: ${lazerReadCString(buffer, maxBytes: count)}');
+    }
   }
 
   void _handleEvent(int event, int detail, int positionMillis) {

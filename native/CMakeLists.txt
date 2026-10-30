@@ -70,6 +70,9 @@ if(LAZER_AUDIO_NATIVE_ENGINE)
             "lazer-audio: '${LAZER_FFMPEG_ROOT}' has no include/libavformat/avformat.h; "
             "the native engine is not built.")
     else()
+        if(ANDROID)
+            set(LAZER_ANDROID_BUILD_ENGINE ON CACHE BOOL "Build the complete Android engine" FORCE)
+        endif()
         set(LAZER_AUDIO_BUILD_PROBE ${LAZER_AUDIO_NATIVE_PROBES} CACHE BOOL
             "Build the native audio probe harness" FORCE)
         add_subdirectory(lazer-audio)
@@ -86,21 +89,30 @@ if(LAZER_AUDIO_NATIVE_ENGINE)
     endif()
 endif()
 
+# The install helper is called from the parent platform directory. Preserve the
+# resolved bundle inputs across that CMake scope boundary.
+set_property(GLOBAL PROPERTY LAZER_AUDIO_BUNDLE_TARGETS "${LAZER_AUDIO_NATIVE_TARGETS}")
+set_property(GLOBAL PROPERTY LAZER_AUDIO_BUNDLE_RUNTIME_FILES "${LAZER_AUDIO_NATIVE_RUNTIME_FILES}")
+set_property(GLOBAL PROPERTY LAZER_AUDIO_BUNDLE_FFMPEG_ROOT "${LAZER_FFMPEG_ROOT}")
+
 # Copies the built libraries (and the FFmpeg DLLs they load) into a bundle
 # directory. Call from a platform CMakeLists once its install prefix is known.
 function(lazer_install_native_audio destination)
-    install(TARGETS ${LAZER_AUDIO_NATIVE_TARGETS}
+    get_property(bundle_targets GLOBAL PROPERTY LAZER_AUDIO_BUNDLE_TARGETS)
+    get_property(bundle_runtime_files GLOBAL PROPERTY LAZER_AUDIO_BUNDLE_RUNTIME_FILES)
+    get_property(bundle_ffmpeg_root GLOBAL PROPERTY LAZER_AUDIO_BUNDLE_FFMPEG_ROOT)
+    install(TARGETS ${bundle_targets}
         RUNTIME DESTINATION "${destination}"
         LIBRARY DESTINATION "${destination}"
         COMPONENT Runtime)
-    if(LAZER_AUDIO_ENGINE_ENABLED AND LAZER_AUDIO_NATIVE_RUNTIME_FILES)
-        install(FILES ${LAZER_AUDIO_NATIVE_RUNTIME_FILES}
+    if(bundle_runtime_files)
+        install(FILES ${bundle_runtime_files}
             DESTINATION "${destination}"
             COMPONENT Runtime)
     endif()
-    if(LAZER_FFMPEG_ROOT AND
-       EXISTS "${LAZER_FFMPEG_ROOT}/share/lazer-ffmpeg")
-        install(DIRECTORY "${LAZER_FFMPEG_ROOT}/share/lazer-ffmpeg/"
+    if(bundle_ffmpeg_root AND
+       EXISTS "${bundle_ffmpeg_root}/share/lazer-ffmpeg")
+        install(DIRECTORY "${bundle_ffmpeg_root}/share/lazer-ffmpeg/"
             DESTINATION "${destination}/licenses/lazer-ffmpeg"
             COMPONENT Runtime)
     endif()

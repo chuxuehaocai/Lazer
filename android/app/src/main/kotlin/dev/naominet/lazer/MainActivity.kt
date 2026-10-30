@@ -25,9 +25,34 @@ import kotlin.math.roundToInt
 class MainActivity : AudioServiceActivity() {
     private var vibrator: Vibrator? = null
     private var permissionResult: MethodChannel.Result? = null
+    private var logExportResult: MethodChannel.Result? = null
+    private var logExportText: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.naominet.lazer/logs")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "export") {
+                    result.notImplemented()
+                } else if (logExportResult != null) {
+                    result.error("busy", "An export is already open", null)
+                } else {
+                    logExportText = call.argument<String>("text") ?: ""
+                    logExportResult = result
+                    try {
+                        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TITLE, call.argument<String>("name") ?: "Lazer-log.txt")
+                        }
+                        startActivityForResult(intent, 4102)
+                    } catch (error: Exception) {
+                        logExportResult = null
+                        logExportText = null
+                        result.error("export_failed", error.message, null)
+                    }
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HAPTICS_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method != "impact") {
@@ -68,6 +93,36 @@ class MainActivity : AudioServiceActivity() {
                 }
                 result.success(openInBrowser(url))
             }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 4102) return
+        val pending = logExportResult ?: return
+        val text = logExportText ?: ""
+        logExportText = null
+        if (resultCode != RESULT_OK || data?.data == null) {
+            logExportResult = null
+            pending.success(false)
+            return
+        }
+        val destination = data.data!!
+        Thread({
+            try {
+                val output = contentResolver.openOutputStream(destination)
+                    ?: throw IllegalStateException("Cannot open the selected file")
+                output.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                runOnUiThread {
+                    logExportResult = null
+                    pending.success(true)
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    logExportResult = null
+                    pending.error("export_failed", error.message, null)
+                }
+            }
+        }, "lazer-log-export").start()
     }
 
     /// Opens a release page without carrying `url_launcher` just for one link.

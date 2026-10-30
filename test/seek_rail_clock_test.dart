@@ -35,6 +35,8 @@ class _Catalog extends Catalog {
 /// A transport whose position only moves when the test says so: the engine
 /// clock is the live value, the 100 ms transport tick is a snapshot of it.
 class _Engine implements AudioEngine {
+  bool delaySeeks = false;
+  final List<Duration> seekRequests = [];
   @override
   bool active = false;
   @override
@@ -50,7 +52,11 @@ class _Engine implements AudioEngine {
   @override
   Future<void> pause() async {}
   @override
-  Future<void> seek(Duration value) async => position = value;
+  Future<void> seek(Duration value) async {
+    seekRequests.add(value);
+    if (!delaySeeks) position = value;
+  }
+
   @override
   Future<void> setVolume(double volume) async {}
   @override
@@ -94,6 +100,54 @@ Finder _railSlider() => find.descendant(
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets(
+    'dragging holds the preview across ticks and seeks once without flashing back',
+    (tester) async {
+      final state = await _pumpPlayer(tester, const Size(390, 844));
+      final engine = state.audioEngine! as _Engine;
+      engine.delaySeeks = true;
+      engine.seekRequests.clear();
+      engine.position = const Duration(seconds: 20);
+      await _rebuildWithoutTick(tester, state);
+      final rect = tester.getRect(_railSlider());
+      final gesture = await tester.startGesture(
+        Offset(rect.left + rect.width * .3, rect.center.dy),
+      );
+      await gesture.moveTo(Offset(rect.left + rect.width * .7, rect.center.dy));
+      await tester.pump();
+      final preview = tester.widget<Slider>(_railSlider()).value;
+      expect(preview, greaterThan(.5));
+      engine.position = const Duration(seconds: 21);
+      await tester.pump(const Duration(milliseconds: 180));
+      expect(
+        tester.widget<Slider>(_railSlider()).value,
+        closeTo(preview, .001),
+      );
+      expect(engine.seekRequests, isEmpty);
+      await gesture.up();
+      await tester.pump();
+      expect(engine.seekRequests, hasLength(1));
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(
+        tester.widget<Slider>(_railSlider()).value,
+        closeTo(preview, .001),
+      );
+      engine.position =
+          engine.seekRequests.single + const Duration(milliseconds: 250);
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(
+        tester.widget<Slider>(_railSlider()).value,
+        closeTo(
+          engine.position.inMilliseconds / _track.duration.inMilliseconds,
+          .001,
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      state.pause();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('the phone rail and elapsed time follow the engine clock', (
     tester,

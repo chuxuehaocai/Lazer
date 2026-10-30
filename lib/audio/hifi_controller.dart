@@ -121,12 +121,16 @@ class HifiController extends ChangeNotifier {
     return _devices.isEmpty ? null : _devices.first;
   }
 
+  String? get _nativeReason => !_settings.preferNativeEngine
+      ? '已选择系统音频引擎'
+      : LazerAudioLoader.load().reason;
+
   HifiStatus get status => HifiStatus(
     nativeAvailable: nativeAvailable,
-    nativeReason: nativeAvailable ? null : LazerAudioLoader.load().reason,
+    nativeReason: nativeAvailable ? null : _nativeReason,
     engineDescription: nativeAvailable
         ? 'native (lazer-audio)'
-        : 'just_audio${LazerAudioLoader.load().reason == null ? '' : ' (${LazerAudioLoader.load().reason})'}',
+        : 'just_audio${_nativeReason == null ? '' : ' ($_nativeReason)'}',
     catalogKind: catalogApi == null
         ? null
         : outputDeviceCatalogKind(catalogApi!),

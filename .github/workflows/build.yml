@@ -40,6 +40,11 @@ jobs:
       - run: flutter pub get --enforce-lockfile
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub --reporter expanded
+      - name: Test Android output contract without hardware
+        run: |
+          cmake -S native/lazer-audio/tests/aaudio -B build/aaudio-contract -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/aaudio-contract --parallel 2
+          ctest --test-dir build/aaudio-contract --output-on-failure
 
   windows:
     name: Windows EXE (x86_64)
@@ -360,6 +365,16 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get --enforce-lockfile
+      - name: Build and stage Android Audio Engine
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config nasm
+          sdkmanager "ndk;28.2.13676358"
+          bash ci/build-android-audio.sh
       - name: Materialise the release keystore
         shell: bash
         run: |
@@ -391,9 +406,12 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             export ORG_GRADLE_PROJECT_lazerRequireReleaseSigning=true
           fi
-          flutter build apk --release --no-pub \
+          flutter build apk --release --no-pub --target-platform android-arm64,android-x64 \
             --dart-define=LAZER_COMMIT=${{ github.sha }} \
             --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Verify Android Audio Engine is bundled
+        shell: bash
+        run: python3 ci/verify-android-audio.py --apk build/app/outputs/flutter-apk/app-release.apk
       - name: Verify the APK signature
         shell: bash
         run: |

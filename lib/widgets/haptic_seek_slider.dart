@@ -17,6 +17,33 @@ class _HapticSeekSliderState extends State<HapticSeekSlider> {
   static const double _step = .02;
 
   bool _focused = false;
+  bool _dragging = false;
+  String? _dragTrackId;
+  double? _preview;
+
+  void _start(double value) {
+    _dragging = true;
+    _dragTrackId = widget.state.current?.id;
+    setState(() => _preview = value);
+  }
+
+  void _change(double value) {
+    if (!_dragging) {
+      widget.state.seek(value);
+    } else if (_dragTrackId == widget.state.current?.id) {
+      setState(() => _preview = value.clamp(0, widget.state.seekLimitFraction));
+    }
+  }
+
+  void _end(double value) {
+    if (_dragging && _dragTrackId == widget.state.current?.id) {
+      widget.state.seek(value);
+    }
+    setState(() {
+      _dragging = false;
+      _preview = null;
+    });
+  }
 
   void _nudge(double delta) {
     final AppState state = widget.state;
@@ -30,10 +57,14 @@ class _HapticSeekSliderState extends State<HapticSeekSlider> {
   Widget build(BuildContext context) {
     final Widget slider = AccessibleSlider(
       semanticLabel: '播放进度',
-      value: widget.state.progress,
+      value: _dragging && _dragTrackId == widget.state.current?.id
+          ? (_preview ?? widget.state.progress)
+          : widget.state.progress,
       secondaryTrackValue: widget.state.seekLimitFraction,
       detentFeedback: true,
-      onChanged: widget.state.current == null ? null : widget.state.seek,
+      onChanged: widget.state.current == null ? null : _change,
+      onChangeStart: _start,
+      onChangeEnd: _end,
     );
     final bool tv = TvScope.isActive(context);
     // Material sliders spend the up/down keys on their value. Those keys must

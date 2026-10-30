@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'design_tokens.dart';
+import 'font_preferences.dart';
 
 @immutable
 class AppPalette {
@@ -14,6 +15,7 @@ class AppPalette {
       accent: theme.colorScheme.primary,
     );
   }
+
   Color get slateDark => dark ? const Color(0xFFF0EEE6) : AppColors.slateDark;
   Color get ivoryMedium =>
       dark ? const Color(0xFF191918) : AppColors.ivoryMedium;
@@ -39,25 +41,37 @@ class AppPalette {
 }
 
 class AppTypography {
-  const AppTypography(this.colors);
+  const AppTypography(this.colors, [this.fonts = const FontPreferences()]);
   final AppPalette colors;
-  TextStyle _main(TextStyle style) => style.copyWith(color: colors.slateDark);
-  TextStyle _muted(TextStyle style) =>
-      style.copyWith(color: colors.cloudMedium);
-  TextStyle get caption => _main(AppText.caption);
+  final FontPreferences fonts;
+  TextStyle _main(
+    TextStyle style, [
+    FontCategory category = FontCategory.body,
+  ]) => fonts.apply(category, style.copyWith(color: colors.slateDark));
+  TextStyle _muted(TextStyle style) => fonts.apply(
+    FontCategory.caption,
+    style.copyWith(color: colors.cloudMedium),
+  );
+  TextStyle get caption => _main(AppText.caption, FontCategory.caption);
   TextStyle get captionMuted => _muted(AppText.captionMuted);
-  TextStyle get captionStrong => _main(AppText.captionStrong);
+  TextStyle get captionStrong =>
+      _main(AppText.captionStrong, FontCategory.caption);
   TextStyle get bodySm => _main(AppText.bodySm);
   TextStyle get bodySmMuted => _muted(AppText.bodySmMuted);
   TextStyle get body => _main(AppText.body);
-  TextStyle get bodyMuted =>
-      AppText.bodyMuted.copyWith(color: colors.cloudDark);
-  TextStyle get subheading => _main(AppText.subheading);
-  TextStyle get heading => _main(AppText.heading);
-  TextStyle get display => _main(AppText.display);
-  TextStyle get mono => _main(AppText.mono);
-  TextStyle get monoSm => AppText.monoSm.copyWith(color: colors.cloudDark);
-  TextStyle get wordmark => _main(AppText.wordmark);
+  TextStyle get bodyMuted => fonts.apply(
+    FontCategory.body,
+    AppText.bodyMuted.copyWith(color: colors.cloudDark),
+  );
+  TextStyle get subheading => _main(AppText.subheading, FontCategory.title);
+  TextStyle get heading => _main(AppText.heading, FontCategory.pageTitle);
+  TextStyle get display => _main(AppText.display, FontCategory.pageTitle);
+  TextStyle get mono => _main(AppText.mono, FontCategory.caption);
+  TextStyle get monoSm => fonts.apply(
+    FontCategory.caption,
+    AppText.monoSm.copyWith(color: colors.cloudDark),
+  );
+  TextStyle get wordmark => _main(AppText.wordmark, FontCategory.controls);
 }
 
 class AppBorderPalette {
@@ -71,6 +85,6 @@ class AppBorderPalette {
 
 extension AppAppearance on BuildContext {
   AppPalette get colors => AppPalette.of(this);
-  AppTypography get type => AppTypography(colors);
+  AppTypography get type => AppTypography(colors, fonts);
   AppBorderPalette get borders => AppBorderPalette(colors);
 }

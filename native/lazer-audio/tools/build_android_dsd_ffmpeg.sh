@@ -4,8 +4,9 @@ set -euo pipefail
 
 readonly FFMPEG_URL="https://github.com/FFmpeg/FFmpeg.git"
 readonly FFMPEG_REVISION="c6e28adabac09745f3406ffbf3833b8ac7f3f46a"
-readonly NDK_REVISION="30.0.16248370"
+readonly NDK_REVISION="${LAZER_ANDROID_NDK_VERSION:-28.2.13676358}"
 readonly ANDROID_API="24"
+readonly PROFILE_REVISION="pcm-file-v2"
 
 if [[ $# -lt 1 || $# -gt 3 || -z "$1" ]]; then
     echo "Usage: $0 <install-prefix> [android-ndk-root] [arm64-v8a|x86_64]" >&2
@@ -40,7 +41,10 @@ if [[ -f "$ffmpeg_lib/libavformat.a" &&
     -f "$ffmpeg_lib/libavcodec.a" &&
     -f "$ffmpeg_lib/libavutil.a" &&
     -f "$ffmpeg_lib/libswresample.a" &&
-    -f "$ffmpeg_lib/pkgconfig/libavformat.pc" ]]; then
+    -f "$ffmpeg_lib/pkgconfig/libavformat.pc" &&
+    -s "$prefix/share/lazer-ffmpeg/ffmpeg-source.tar.gz" &&
+    -f "$prefix/share/lazer-ffmpeg/PROFILE.txt" ]] &&
+    grep -Fxq "$FFMPEG_REVISION $NDK_REVISION $abi $PROFILE_REVISION" "$prefix/share/lazer-ffmpeg/PROFILE.txt"; then
     echo "Using the existing Android FFmpeg static SDK at $prefix."
     exit 0
 fi
@@ -50,11 +54,11 @@ if [[ -z "$ndk_root" && -n "${ANDROID_HOME:-}" ]]; then
     ndk_root="$ANDROID_HOME/ndk/$NDK_REVISION"
 fi
 if [[ -z "$ndk_root" || ! -f "$ndk_root/source.properties" ]]; then
-    echo "Pass the Android NDK r30 root as the second argument or ANDROID_NDK_HOME." >&2
+    echo "Pass the pinned Android NDK root as the second argument or ANDROID_NDK_HOME." >&2
     exit 2
 fi
 if ! grep -Fxq "Pkg.Revision = $NDK_REVISION" "$ndk_root/source.properties"; then
-    echo "Expected Android NDK $NDK_REVISION (r30) at $ndk_root." >&2
+    echo "Expected Android NDK $NDK_REVISION at $ndk_root." >&2
     exit 2
 fi
 
@@ -123,6 +127,7 @@ configure_args=(
     --disable-swscale
     --disable-network
     --disable-protocols
+    --enable-protocol=file
     --disable-devices
     --disable-zlib
     --disable-bzlib
@@ -134,6 +139,10 @@ configure_args=(
     --enable-demuxer=dsf
     --enable-demuxer=iff
     --enable-decoder=dsd_lsbf_planar,dsd_msbf_planar,dst
+    --enable-demuxer=aac,mp3,mov,flac,ogg,wav,matroska,ape,asf,wv
+    --enable-decoder=aac,mp3,mp3float,flac,vorbis,opus,alac,ape,wmav1,wmav2,wmalossless,wavpack
+    '--enable-decoder=pcm*'
+    --enable-parser=aac,aac_latm,mpegaudio,flac,vorbis,opus
 )
 
 cd "$source_dir"
@@ -145,7 +154,10 @@ printf 'FFmpeg revision: %s\nNDK revision: %s\nTarget: %s, API %s\nConfigure opt
 # DSF has its own demuxer, while DFF (including DST-in-DFF) is handled by IFF.
 # Keep this explicit: the decoder can link successfully while DFF inputs remain
 # unavailable if the required demuxer was omitted from this minimal build.
-for component in CONFIG_DSF_DEMUXER CONFIG_IFF_DEMUXER; do
+for component in CONFIG_DSF_DEMUXER CONFIG_IFF_DEMUXER CONFIG_MOV_DEMUXER \
+    CONFIG_MP3_DEMUXER CONFIG_FLAC_DEMUXER CONFIG_OGG_DEMUXER CONFIG_WAV_DEMUXER \
+    CONFIG_AAC_DECODER CONFIG_MP3FLOAT_DECODER CONFIG_FLAC_DECODER CONFIG_ALAC_DECODER \
+    CONFIG_VORBIS_DECODER CONFIG_OPUS_DECODER CONFIG_PCM_S16LE_DECODER CONFIG_FILE_PROTOCOL; do
     if ! grep -qE "^#define ${component} 1$" config_components.h; then
         echo "The Android FFmpeg configuration is missing required $component." >&2
         exit 1
@@ -174,5 +186,13 @@ install -m 0644 COPYING.LGPLv2.1 "$license_dir/COPYING.LGPLv2.1"
     printf 'Source: https://github.com/FFmpeg/FFmpeg/tree/%s\n' "$FFMPEG_REVISION"
     printf 'License: LGPL-2.1-or-later (FFmpeg upstream default configure profile)\n'
 } > "$license_dir/BUILDINFO.txt"
+
+# Static LGPL linkage needs the corresponding source and relinkable engine
+# objects, not just a license notice. The CI packager pairs this source archive
+# with the engine build's objects and exact linker invocation for each ABI.
+git archive --format=tar --prefix=ffmpeg/ "$FFMPEG_REVISION" | gzip -n \
+    > "$license_dir/ffmpeg-source.tar.gz"
+printf '%s %s %s %s\n' "$FFMPEG_REVISION" "$NDK_REVISION" "$abi" "$PROFILE_REVISION" \
+    > "$license_dir/PROFILE.txt"
 
 printf 'Installed static Android FFmpeg SDK at %s\n' "$prefix"

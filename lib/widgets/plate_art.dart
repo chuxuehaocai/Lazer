@@ -51,7 +51,15 @@ class PlateArt extends StatelessWidget {
       child: url == null || url.isEmpty
           ? fallback
           : Image(
-              image: ArtworkImage(url),
+              image: ResizeImage.resizeIfNeeded(
+                size == null
+                    ? null
+                    : (size! * MediaQuery.devicePixelRatioOf(context)).ceil(),
+                size == null
+                    ? null
+                    : (size! * MediaQuery.devicePixelRatioOf(context)).ceil(),
+                ArtworkImage(url),
+              ),
               fit: BoxFit.cover,
               gaplessPlayback: true,
               errorBuilder:

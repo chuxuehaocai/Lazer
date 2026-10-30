@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
 
@@ -34,6 +35,24 @@ class ArtworkCache {
         _pending.remove(key);
       }
     });
+  }
+
+  /// Decoders can map cached files directly into an engine buffer instead of
+  /// retaining a Dart byte array plus a second native copy of every cover.
+  Future<ui.ImmutableBuffer> buffer(String url) async {
+    final key = _key(url);
+    if (key.startsWith('file:')) {
+      return ui.ImmutableBuffer.fromFilePath(File.fromUri(Uri.parse(key)).path);
+    }
+    final cached = await disk.find(CacheBucket.artwork, key);
+    if (cached != null) {
+      try {
+        return await ui.ImmutableBuffer.fromFilePath(cached.path);
+      } catch (_) {
+        // The OS can evict a cache file between lookup and opening it.
+      }
+    }
+    return ui.ImmutableBuffer.fromUint8List(await bytes(key));
   }
 
   Future<Uint8List> _load(String key) async {
@@ -96,6 +115,8 @@ class ArtworkCache {
   Future<File?> file(String url) async {
     final key = _key(url);
     if (key.startsWith('file:')) return File.fromUri(Uri.parse(key));
+    final cached = await disk.find(CacheBucket.artwork, key);
+    if (cached != null) return cached;
     await bytes(key);
     return disk.find(CacheBucket.artwork, key);
   }

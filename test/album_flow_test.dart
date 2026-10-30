@@ -42,7 +42,10 @@ class _Catalog extends Catalog {
     albums: <Album>[],
   );
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => null;
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => null;
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async =>
       const GatewayLyrics(lrc: '[00:00.00]第一句');
@@ -153,9 +156,7 @@ void main() {
     ];
     for (var y = 0; y < size; y++) {
       for (var x = 0; x < size; x++) {
-        final Color color = source[
-            (y ~/ 8) * 2 + (x ~/ 8)
-        ];
+        final Color color = source[(y ~/ 8) * 2 + (x ~/ 8)];
         final int offset = (y * size + x) * 4;
         pixels[offset] = (color.r * 255).round();
         pixels[offset + 1] = (color.g * 255).round();
@@ -163,11 +164,7 @@ void main() {
         pixels[offset + 3] = 255;
       }
     }
-    final List<Color> palette = albumMeshColorsFromPixels(
-      pixels,
-      size,
-      size,
-    );
+    final List<Color> palette = albumMeshColorsFromPixels(pixels, size, size);
     expect(palette, hasLength(5));
     final Set<int> hueBuckets = <int>{
       for (final Color color in palette)
@@ -288,18 +285,18 @@ void main() {
     expect(find.text('70%'), findsOneWidget);
 
     await tester.ensureVisible(
-      find.byType(DropdownButton<LegacyBackgroundMode>),
+      find.byKey(const ValueKey('browse-background-mode')),
     );
-    await tester.tap(find.byType(DropdownButton<LegacyBackgroundMode>));
+    await tester.tap(find.byKey(const ValueKey('browse-background-mode')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('不使用').last);
     await tester.pumpAndSettle();
     expect(state.legacyBackground, LegacyBackgroundMode.off);
     expect(find.byType(LegacyAlbumBackdrop), findsNothing);
 
-    await tester.tap(find.byType(DropdownButton<LegacyBackgroundMode>));
+    await tester.tap(find.byKey(const ValueKey('browse-background-mode')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('当前歌曲纯色').last);
+    await tester.tap(find.text('静态背景').last);
     await tester.pumpAndSettle();
     expect(state.legacyBackground, LegacyBackgroundMode.nowPlayingStatic);
 

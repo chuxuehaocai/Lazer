@@ -20,6 +20,7 @@ import '../widgets/interaction_feedback.dart';
 import '../widgets/listen_together_dialog.dart';
 import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/volume_control.dart';
+import '../theme/font_preferences.dart';
 
 enum DesktopNowPlayingPane { lyrics, comments, queue }
 
@@ -40,6 +41,8 @@ class DesktopNowPlaying extends StatelessWidget {
     required this.onFullscreen,
     required this.controlsVisible,
     required this.onActivity,
+    this.onPointerStart,
+    this.onPointerEnd,
   });
   final AppState state;
   final Track track;
@@ -49,6 +52,7 @@ class DesktopNowPlaying extends StatelessWidget {
   final VoidCallback onBack, onSaveArtwork, onFullscreen;
   final bool controlsVisible;
   final VoidCallback onActivity;
+  final ValueChanged<int>? onPointerStart, onPointerEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -67,9 +71,18 @@ class DesktopNowPlaying extends StatelessWidget {
         onHover: (_) => onActivity(),
         child: Listener(
           behavior: HitTestBehavior.translucent,
-          onPointerDown: (_) => onActivity(),
-          onPointerUp: (_) => onActivity(),
-          onPointerCancel: (_) => onActivity(),
+          onPointerDown: (event) {
+            onPointerStart?.call(event.pointer);
+            onActivity();
+          },
+          onPointerUp: (event) {
+            onPointerEnd?.call(event.pointer);
+            onActivity();
+          },
+          onPointerCancel: (event) {
+            onPointerEnd?.call(event.pointer);
+            onActivity();
+          },
           onPointerSignal: (_) => onActivity(),
           child: SafeArea(
             minimum: tvSafeInsets(context),
@@ -86,6 +99,7 @@ class DesktopNowPlaying extends StatelessWidget {
                         icon: const Icon(Icons.keyboard_arrow_down_rounded),
                       ),
                       const Spacer(),
+                      const SizedBox(width: 2),
                       _AddToPlaylistButton(state: state, track: track),
                       const SizedBox(width: 2),
                       _DownloadButton(state: state, track: track),
@@ -421,10 +435,7 @@ class _Presentation extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textWidthBasis: TextWidthBasis.longestLine,
-                style: context.type.heading.copyWith(
-                  fontSize: compact ? 22 : 30,
-                  height: 1.2,
-                ),
+                style: context.fonts.apply(FontCategory.playerTitle, TextStyle(fontSize: compact ? 22 : 30, fontWeight: FontWeight.w700, height: 1.2, color: context.colors.slateDark)),
               ),
             ),
           ),
@@ -468,13 +479,13 @@ class _Presentation extends StatelessWidget {
         artists: track.artists,
         fallback: track.artist,
         maxLines: 2,
-        style: context.type.body.copyWith(fontSize: compact ? 14 : 18),
+        style: context.fonts.apply(FontCategory.playerArtist, TextStyle(fontSize: compact ? 14 : 18, color: context.colors.slateDark)),
       ),
       SizedBox(height: compact ? 4 : 6),
       AlbumNameLink(
         state: state,
         track: track,
-        style: context.type.bodySmMuted.copyWith(fontSize: compact ? 12 : 15),
+        style: context.fonts.apply(FontCategory.playerArtist, TextStyle(fontSize: compact ? 12 : 15, color: context.colors.cloudDark)),
       ),
       AnimatedNotice(message: state.likeError),
     ],

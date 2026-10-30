@@ -1,4 +1,5 @@
 #include "output_coreaudio.h"
+#include "internal.h"
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>

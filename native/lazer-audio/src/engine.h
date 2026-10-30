@@ -44,6 +44,9 @@ public:
     void snapshot(LazerAudioSnapshot &out);
     void streamInfo(LazerAudioStreamInfo &out);
     [[nodiscard]] const std::string &lastError() const { return lastError_; }
+    int32_t readLog(int32_t *level, char *message, uint32_t capacity) {
+        return log_.read(level, message, capacity);
+    }
 
     static std::string buildInformation();
 

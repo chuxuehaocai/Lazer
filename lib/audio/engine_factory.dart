@@ -8,6 +8,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 import 'audio_engine.dart';
 import 'native/lazer_audio_engine.dart';
@@ -17,7 +18,11 @@ import 'native/lazer_audio_worker.dart';
 /// The engine plus, when present, the native session and its diagnostics.
 @immutable
 class AudioEngineSelection {
-  const AudioEngineSelection({required this.engine, this.native, this.platform});
+  const AudioEngineSelection({
+    required this.engine,
+    this.native,
+    this.platform,
+  });
 
   /// The engine the app drives; one of [native] or [platform].
   final AudioEngine engine;
@@ -48,17 +53,24 @@ Future<AudioEngineSelection> createAudioEngine({
   bool preferNative = true,
   LazerDeviceSettings deviceSettings = const LazerDeviceSettings(),
 }) async {
+  AudioEngineSelection._nativeUnavailableReason = preferNative
+      ? null
+      : 'system engine selected';
   if (preferNative && LazerAudioLoader.isSupportedHost) {
     try {
       final NativeAudioEngine? native = await NativeAudioEngine.create(
         deviceSettings: deviceSettings,
       );
       if (native != null) {
-        debugPrint('Audio engine: ${native.buildInformation.split('\n').first}');
+        debugPrint(
+          'Audio engine: ${native.buildInformation.split('\n').first}',
+        );
         return AudioEngineSelection(engine: native, native: native);
       }
     } catch (error, stack) {
-      debugPrint('Audio engine: native start-up threw, falling back: $error\n$stack');
+      debugPrint(
+        'Audio engine: native start-up threw, falling back: $error\n$stack',
+      );
     }
     AudioEngineSelection._nativeUnavailableReason =
         LazerAudioLoader.load().reason;
@@ -67,6 +79,8 @@ Future<AudioEngineSelection> createAudioEngine({
       '(${AudioEngineSelection._nativeUnavailableReason})',
     );
   }
+  JustAudioMediaKit.ensureInitialized();
+  JustAudioMediaKit.prefetchPlaylist = true;
   final JustAudioEngine platform = JustAudioEngine();
   return AudioEngineSelection(engine: platform, platform: platform);
 }
