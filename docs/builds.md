@@ -18,7 +18,7 @@ upload the following **Artifacts**. Each binary/archive has its own SHA-256 file
 | `Lazer-macOS-x86_64` | ZIP with a native Intel App and native audio engine |
 | `Lazer-Linux-x86_64` | x86_64 AppImage with GTK, libmpv and the native audio engine |
 | `Lazer-Linux-aarch64` | ARM64 AppImage with GTK, libmpv and the native audio engine |
-| `Lazer-Android-universal` | Universal release APK using the development signing configuration |
+| `Lazer-Android-universal` | Universal release APK signed with the release key from repository secrets |
 | `Lazer-iOS-aarch64` | Unsigned device IPA containing `Payload/Runner.app` |
 
 All artifact names follow `Lazer-<OS>-<Arch>`. `universal` denotes a multi-architecture
@@ -31,9 +31,56 @@ The desktop playback engine ported from `master` (FFmpeg + WASAPI/ALSA/CoreAudio
 DSD/DoP, gapless, EQ/limiter) is built into all Windows, macOS and Linux cloud
 artifacts together with the matching DSD-capable FFmpeg runtime and its LGPL
 notice. Packaging checks fail if any required engine, bridge or FFmpeg library is
-missing. Android and iOS continue to use `just_audio`. On Windows the engine and
-FFmpeg are built with MSVC so their import libraries match the app toolchain. See
+missing. Android packages the native AAudio engine for arm64-v8a and x86_64;
+iOS uses `just_audio`. On Windows the engine and FFmpeg are built with MSVC so
+their import libraries match the app toolchain. See
 [audio-engine.md](audio-engine.md) for local build variables and the settings page.
+
+## Android release signing
+
+The Android job signs the release APK with a dedicated upload key. The keystore and
+`android/key.properties` are git-ignored; CI recreates both from repository secrets
+before building, and `android/app/build.gradle.kts` reads `key.properties`
+(`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) when it exists.
+
+Create the key once per repository with:
+
+```powershell
+./ci/generate-android-keystore.ps1
+```
+
+The script writes `android/app/upload-keystore.jks`, `android/key.properties`, and an
+export bundle in `dist/android-signing/` holding `upload-keystore.jks`, the base64
+copy, and `github-secrets.txt`. Add these four repository secrets
+(**Settings → Secrets and variables → Actions**):
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | Full content of `upload-keystore.jks.base64.txt` |
+| `ANDROID_KEYSTORE_PASSWORD` | `storePassword` from `key.properties` |
+| `ANDROID_KEY_ALIAS` | `keyAlias` from `key.properties` |
+| `ANDROID_KEY_PASSWORD` | `keyPassword` from `key.properties` |
+
+Behaviour:
+
+- With the secrets present, every Android build — branch, PR, or tag — is signed with
+  the release key.
+- On a `v*` tag the build fails if the secrets are missing, so a release can never be
+  debug-signed.
+- Pull requests from forks cannot read secrets; they fall back to the debug key so the
+  job still turns green.
+- After the build the job compares the APK signer's SHA-256 certificate digest with the
+  keystore's and fails on a mismatch.
+
+The key is the root of trust for every future update: an APK signed by a different key
+cannot upgrade an installed build, so keep `dist/android-signing/` in offline storage.
+Losing it forces a new application id or an uninstall/reinstall for every user. Builds
+published before this key existed were debug-signed and need one manual uninstall to
+move onto release-keyed updates.
+
+`flutter run --release` and local release builds keep working without a keystore: the
+release build type then falls back to the debug signing configuration. To make a local
+build insist on the real key, run Gradle with `-PlazerRequireReleaseSigning=true`.
 
 ## Build stamp
 

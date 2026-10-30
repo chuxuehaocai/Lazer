@@ -104,7 +104,7 @@ flutter run
 | `Lazer-macOS-x86_64.zip` | Intel App，使用原生 Intel runner 构建 |
 | `Lazer-Linux-x86_64.AppImage` | Linux x86_64，包含 GTK 与 libmpv |
 | `Lazer-Linux-aarch64.AppImage` | Linux ARM64，使用原生 ARM runner 构建 |
-| `Lazer-Android-universal.apk` | 通用 APK，使用当前开发签名 |
+| `Lazer-Android-universal.apk` | 通用 APK，使用仓库密钥库中的发布签名（详见[构建说明](docs/builds.md#android-release-signing)） |
 | `Lazer-iOS-aarch64.ipa` | 未签名的 iOS 真机 IPA |
 
 构建完成后，在对应运行页面的 **Artifacts** 中下载，需登录 GitHub，保留 30 天。

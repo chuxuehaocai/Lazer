@@ -107,7 +107,7 @@ marked as pre-releases. Output filenames follow `Lazer-<OS>-<Arch>`.
 | `Lazer-macOS-x86_64.zip` | Intel App built on a native Intel runner |
 | `Lazer-Linux-x86_64.AppImage` | Linux x86_64, including GTK and libmpv |
 | `Lazer-Linux-aarch64.AppImage` | Linux ARM64 built on a native ARM runner |
-| `Lazer-Android-universal.apk` | Universal APK using the current development signing configuration |
+| `Lazer-Android-universal.apk` | Universal APK signed with the release key from repository secrets (see [build details](docs/builds.md#android-release-signing)) |
 | `Lazer-iOS-aarch64.ipa` | Unsigned device IPA |
 
 Download from a completed run's **Artifacts** section while signed in to GitHub;
