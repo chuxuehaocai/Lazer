@@ -525,6 +525,7 @@ class HifiSettings {
     this.outputName,
     this.exclusiveMode = false,
     this.bitPerfect = false,
+    this.dspStageOrder = defaultDspStageOrder,
     this.dsdOutputMode = HifiDsdOutputMode.auto,
     this.dsdRatePolicy = HifiDsdRatePolicy.pcmFallback,
     this.volumeNormalization = HifiVolumeNormalization.off,
@@ -542,6 +543,14 @@ class HifiSettings {
 
   final bool exclusiveMode;
   final bool bitPerfect;
+
+  /// The explicit DSP chain, front to back (`LazerAudioDspStage` values).
+  ///
+  /// The order is part of the audio result, not a display preference: a limiter in
+  /// front of the EQ protects the pre-EQ signal, behind it protects what actually
+  /// leaves the chain. [defaultDspStageOrder] is the engine's own default, so a
+  /// settings value that was never edited asks for exactly today's behaviour.
+  final List<int> dspStageOrder;
   final HifiDsdOutputMode dsdOutputMode;
   final HifiDsdRatePolicy dsdRatePolicy;
   final HifiVolumeNormalization volumeNormalization;
@@ -574,6 +583,7 @@ class HifiSettings {
     bool clearOutput = false,
     bool? exclusiveMode,
     bool? bitPerfect,
+    List<int>? dspStageOrder,
     HifiDsdOutputMode? dsdOutputMode,
     HifiDsdRatePolicy? dsdRatePolicy,
     HifiVolumeNormalization? volumeNormalization,
@@ -586,6 +596,7 @@ class HifiSettings {
     outputName: clearOutput ? null : (outputName ?? this.outputName),
     exclusiveMode: exclusiveMode ?? this.exclusiveMode,
     bitPerfect: bitPerfect ?? this.bitPerfect,
+    dspStageOrder: dspStageOrder ?? this.dspStageOrder,
     dsdOutputMode: dsdOutputMode ?? this.dsdOutputMode,
     dsdRatePolicy: dsdRatePolicy ?? this.dsdRatePolicy,
     volumeNormalization: volumeNormalization ?? this.volumeNormalization,
@@ -600,6 +611,7 @@ class HifiSettings {
     'hifi_output_name': outputName,
     'hifi_exclusive': exclusiveMode,
     'hifi_bit_perfect': bitPerfect,
+    'hifi_dsp_order': encodeDspStageOrder(dspStageOrder),
     'hifi_dsd_mode': dsdOutputMode.name,
     'hifi_dsd_rate_policy': dsdRatePolicy.name,
     'hifi_volume_normalization': volumeNormalization.name,
@@ -614,6 +626,7 @@ class HifiSettings {
     outputName: map['hifi_output_name'] as String?,
     exclusiveMode: map['hifi_exclusive'] as bool? ?? false,
     bitPerfect: map['hifi_bit_perfect'] as bool? ?? false,
+    dspStageOrder: decodeDspStageOrder(map['hifi_dsp_order'] as String?),
     dsdOutputMode: HifiDsdOutputMode.parse(map['hifi_dsd_mode'] as String?),
     dsdRatePolicy: HifiDsdRatePolicy.parse(
       map['hifi_dsd_rate_policy'] as String?,
@@ -659,6 +672,7 @@ class HifiSettings {
     crossfeedDelayMs: crossfeed.effectiveDelayMs,
     crossfeedCutoffHz: crossfeed.effectiveCutoffHz,
     bands: equalizer.toEngineMessage(eqActive: eqActive).bands,
+    stageOrder: dspStageOrder,
   );
 
   /// True when the user has DSP configured that bit-perfect keeps out of the
@@ -742,6 +756,7 @@ extension HifiEqualizerEngineMapping on HifiEqualizerState {
 /// Flutter-free mirror of the engine's DSP request for the settings layer.
 class LazerDspRequest {
   const LazerDspRequest({
+    this.stageOrder = const <int>[],
     this.preampDb = 0,
     this.limiterEnabled = false,
     this.limiterThresholdDb = -1,
@@ -752,6 +767,9 @@ class LazerDspRequest {
     this.crossfeedCutoffHz = 700,
     this.bands = const <HifiEqBandMessage>[],
   });
+
+  /// The chain the engine should apply, or empty for the engine's default order.
+  final List<int> stageOrder;
 
   final double preampDb;
   final bool limiterEnabled;
@@ -815,4 +833,24 @@ class LazerOutputRequest {
     'bufferMillis': bufferMillis,
     'dsdOutputMode': dsdOutputMode.name,
   };
+}
+
+/// The engine's default chain, mirrored from `lazerAudioDefaultDspStageOrder` so the
+/// settings layer can name it instead of assuming it.
+const List<int> defaultDspStageOrder = <int>[0, 1, 2, 3, 4];
+
+/// Encodes a chain order for persistence: `0,1,2,3,4`.
+String encodeDspStageOrder(List<int> order) => order.join(',');
+
+/// Decodes a persisted chain order, dropping anything that is not a known stage and
+/// falling back to the engine default when nothing usable is left. A malformed value
+/// must not silently reorder the chain.
+List<int> decodeDspStageOrder(String? encoded) {
+  if (encoded == null) return defaultDspStageOrder;
+  final List<int> order = <int>[
+    for (final String part in encoded.split(','))
+      if (int.tryParse(part.trim()) case final int value)
+        if (value >= 0 && value <= 4) value,
+  ];
+  return order.isEmpty ? defaultDspStageOrder : order;
 }

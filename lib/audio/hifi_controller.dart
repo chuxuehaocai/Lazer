@@ -257,6 +257,7 @@ class HifiController extends ChangeNotifier {
             enabled: band.enabled != 0,
           ),
       ],
+      stageOrder: dsp.stageOrder,
       crossfeed: LazerCrossfeedSettings(
         enabled: dsp.crossfeedEnabled,
         strength: dsp.crossfeedStrength,

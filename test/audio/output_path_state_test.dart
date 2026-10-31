@@ -298,4 +298,45 @@ void main() {
       expect(withDsp.dspBypassedByBitPerfect, isFalse);
     });
   });
+
+
+  group('the explicit DSP chain', () {
+    test('defaults to the engine order and round-trips through persistence', () {
+      expect(decodeDspStageOrder(null), defaultDspStageOrder);
+
+      const HifiSettings custom = HifiSettings(dspStageOrder: <int>[3, 1]);
+      final HifiSettings restored = HifiSettings.fromMap(custom.toMap());
+
+      expect(restored.dspStageOrder, <int>[3, 1]);
+      expect(restored.toDspRequest().stageOrder, <int>[3, 1]);
+    });
+
+    test('drops unknown stages instead of silently reordering', () {
+      expect(decodeDspStageOrder('9,1,x'), <int>[1]);
+      expect(decodeDspStageOrder('nonsense'), defaultDspStageOrder);
+      expect(decodeDspStageOrder(''), defaultDspStageOrder);
+    });
+
+    test('the order survives bit-perfect while the processing does not', () {
+      const HifiSettings reordered = HifiSettings(
+        dspStageOrder: <int>[1, 3],
+        equalizer: HifiEqualizerState(
+          enabled: true,
+          preampDb: 4,
+          bands: <HifiEqBand>[HifiEqBand(frequencyHz: 1000, gainDb: 4)],
+        ),
+      );
+
+      final LazerDspRequest withBitPerfect = reordered
+          .copyWith(bitPerfect: true)
+          .toDspRequest();
+
+      // The engine refuses processing during a bit-perfect session, so the
+      // settings layer neutralises it; the chain it would apply afterwards is
+      // still the one the user ordered.
+      expect(withBitPerfect.preampDb, 0);
+      expect(withBitPerfect.bands, isEmpty);
+      expect(withBitPerfect.stageOrder, <int>[1, 3]);
+    });
+  });
 }

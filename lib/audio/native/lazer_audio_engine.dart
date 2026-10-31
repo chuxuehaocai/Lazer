@@ -470,6 +470,7 @@ class NativeAudioEngine
     double limiterThresholdDb = -1,
     List<LazerEqBandSettings> bands = const <LazerEqBandSettings>[],
     LazerCrossfeedSettings crossfeed = const LazerCrossfeedSettings(),
+    List<int> stageOrder = const <int>[],
   }) async {
     final int? address = _engineAddressOrNull;
     if (address == null) return;
@@ -480,6 +481,8 @@ class NativeAudioEngine
       limiterThresholdDb,
       <Object?>[for (final LazerEqBandSettings band in bands) band.toMessage()],
       crossfeed.toMessage(),
+      // Empty means the engine's default order; see `HifiSettings.dspStageOrder`.
+      stageOrder,
     ]);
   }
 
