@@ -69,11 +69,14 @@ class OutputPathState {
 
   /// Bit-perfect requires all three conditions at once.
   ///
-  /// Derived here instead of copied from the engine so a stale flag cannot light
-  /// the indicator: the engine's own answer is only compared against it
-  /// ([agreesWithEngine]).
+  /// For a DoP or Native DSD session [formatMatchesSource] means the carrier (or
+  /// the endpoint's DSD word format) carries the decoded bitstream exactly — the
+  /// engine refuses to open such a session otherwise — so the same three
+  /// conditions decide it. Derived here instead of copied from the engine so a
+  /// stale flag cannot light the indicator: the engine's own answer is only
+  /// compared against it ([agreesWithEngine]).
   bool get bitPerfect =>
-      live && !isDsdPath && exclusive && !dspActive && formatMatchesSource;
+      live && exclusive && !dspActive && formatMatchesSource;
 
   /// Whether the engine's flag and the three conditions tell the same story.
   ///
@@ -85,11 +88,16 @@ class OutputPathState {
   /// Empty exactly when [bitPerfect] is true.
   List<String> get failingConditions => <String>[
     if (!live) '没有已初始化的输出会话',
-    if (isDsdPath) 'DSD 路径的 bit-perfect 语义尚未定义',
-    if (live && !isDsdPath && !exclusive) '输出不是独占',
-    if (live && !isDsdPath && dspActive) 'DSP 在信号路径中',
-    if (live && !isDsdPath && !formatMatchesSource) '输出格式与源不一致',
+    if (live && !exclusive) '输出不是独占',
+    if (live && dspActive) 'DSP 在信号路径中',
+    if (live && !formatMatchesSource)
+      isDsdPath ? 'DoP 载波 / 原生 DSD 字格式与源不一致' : '输出格式与源不一致',
   ];
+
+  /// What a bit-perfect verdict means for this path, for the panel's wording.
+  String get bitPerfectMeaning => isDsdPath
+      ? 'DSD 位流原样进入 DoP 载波 / 原生 DSD 字'
+      : 'PCM 样本原样进入设备';
 
   /// The format the session actually runs, for the diagnostics panel.
   String get formatLabel => live

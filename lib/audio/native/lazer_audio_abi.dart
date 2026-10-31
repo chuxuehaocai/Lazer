@@ -16,7 +16,7 @@ import 'dart:ffi';
 ///
 /// v24 appended the crossfeed fields to [LazerAudioDspConfig]; this mirror and the
 /// vendored engine are updated together (see docs/audio-engine.md).
-const int lazerAudioAbiVersion = 27;
+const int lazerAudioAbiVersion = 28;
 
 /// `LAZER_AUDIO_MAX_EQ_BANDS`.
 const int lazerAudioMaxEqBands = 32;

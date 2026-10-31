@@ -637,6 +637,40 @@ PASS: the chain reports the 5-stage order it applies
 
 ---
 
+## 14. 阶段 5 落地记录（DSD/DoP 的 bit-perfect 语义）
+
+阶段 5 的第一件事是**定义** DSD 路径下"bit-perfect"是什么意思——阶段 2 的结论当时是"语义尚未定义"，
+引擎对 DoP / 原生 DSD 一律报 `bit_perfect_active = 0`，那是一个保守占位，不是结论。
+
+**定义**：DoP 会把解码得到的 DSD 位流原样放进 24-bit 载波，原生 DSD 会把位流原样放进端点自己的
+DSD 字格式。两种情况下 `configurePipeline` 在开会话时已经**拒绝**了任何不匹配的契约（采样率换算、
+声道数、位深/字宽、独占），所以会话一旦打开，"源被原样承载"就已经成立。因此 DSD 路径复用与 PCM
+相同的三个事实：
+
+| 事实 | DoP / 原生 DSD 下的含义 |
+| --- | --- |
+| `output_exclusive` | 独占端点（开会话时强制） |
+| `output_dsp_active` | float DSP/音量链不在信号路径中（DSD 路径本来就绕开它，且 `setDsp` 拒绝处理请求） |
+| `output_format_matches_source` | 载波 / DSD 字格式与源完全一致（不满足就开不了会话） |
+
+于是 `bit_perfect_active = exclusive && !dsp && matches` 对 DSD 同样成立，ABI 升到 **28**（语义变化，
+按头文件规则 bump）。
+
+| 改动 | 位置 |
+| --- | --- |
+| 引擎：DSD 会话按上述定义发布三个事实 | `native/lazer-audio/src/engine.cpp`（`configurePipeline` 末尾） |
+| Dart：`OutputPathState` 不再对 DSD 路径强制"未定义"，并新增 `bitPerfectMeaning` 说明结论的含义 | `lib/audio/native/output_path_state.dart` |
+| 探针：`lazer-audio-engine-dop` 断言 DoP 会话 `exclusive=1, dsp_active=0, format_matches=1, bit_perfect=1` | `tools/lazer_audio_engine_dop_probe.cpp` |
+| 探针：`lazer-audio-engine-native-dsd` 断言原生 DSD 同样成立，且 `output_telemetry_valid` 仍为 0（PCM 遥测不适用） | `tools/lazer_audio_engine_native_dsd_probe.cpp` |
+
+**验证**：引擎探针 **20/20**；`flutter analyze` 无问题；`flutter test` **655 项通过**；`native_abi_check` 与
+`native_engine_check` 通过。
+
+**仍未做**：DSD 的**物理层**验证（没有 DSD 源、没有 DoP-capable DAC，这一点从阶段 0 起就没变过），
+以及卷积/VST 等扩展——它们需要先有 DSP 模块契约的第三类实现，不属于本次范围。
+
+---
+
 ## 附：本阶段用到的复现命令
 
 ```powershell

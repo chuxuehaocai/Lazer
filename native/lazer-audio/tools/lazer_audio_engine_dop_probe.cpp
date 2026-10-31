@@ -469,6 +469,16 @@ int runDopCase() {
         engine->destroy();
         return fail("raw DSD stream did not publish its DoP carrier format and selection metadata");
     }
+    /* ABI v28 / phase 5: a DoP session carries the decoded DSD bitstream unchanged, so it reports the
+     * same three facts as a bit-perfect PCM session — exclusive, no DSP in the path, and the output
+     * format matching the source (for DSD that means the carrier contract, which the engine refuses to
+     * open without). Before this, DSD paths reported "bit-perfect: no" purely as a placeholder. */
+    if (info.output_exclusive == 0 || info.output_dsp_active != 0 ||
+        info.output_format_matches_source == 0 || info.bit_perfect_active == 0) {
+                std::cerr << "DoP bit-perfect state: exclusive=" << info.output_exclusive << " dsp_active=" << info.output_dsp_active << " format_matches=" << info.output_format_matches_source << " bit_perfect=" << info.bit_perfect_active << std::endl;
+        engine->destroy();
+        return fail("a DoP session did not report the carrier bit-perfect state");
+    }
     if (engine->play() != LazerAudioOk || !waitForEnd(events)) {
         std::cerr << "events=";
         for (int32_t event : events.values) std::cerr << ' ' << event;

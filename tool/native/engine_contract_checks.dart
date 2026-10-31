@@ -117,9 +117,9 @@ List<String> verifyEngineContracts() {
     outputFormatKind: lazerAudioOutputFormatDoP,
     outputDsdRateMultiplier: 128,
     lossless: true,
-    bitPerfectActive: false,
+    bitPerfectActive: true,
     dspActive: false,
-    formatMatchesSource: false,
+    formatMatchesSource: true,
     peakMilliDbfs: 0,
     limiterGainReductionMilliDb: 0,
     clippedSampleCount: 0,
@@ -129,11 +129,12 @@ List<String> verifyEngineContracts() {
   expect('dsd has a DSD source', dsd.hasDsdSource, true);
   expect('dsd is DoP', dsd.isDoPOutput, true);
   expect('dsd is not native DSD', dsd.isNativeDsdOutput, false);
-  // The PCM triple does not describe a DoP carrier, so the state says its
-  // bit-perfect meaning is undefined rather than claiming "no".
-  expect('dsd path is not reported as a bit-perfect PCM path',
-      dsd.outputPath.bitPerfect, false);
+  // A DoP session carries the decoded bitstream unchanged, so it is bit-perfect in
+  // the DSD sense: exclusive, no DSP, carrier exact.
+  expect('dsd path is bit-perfect through its carrier', dsd.outputPath.bitPerfect, true);
   expect('dsd path is flagged as a DSD path', dsd.outputPath.isDsdPath, true);
+  expect('dsd path states what its verdict means',
+      dsd.outputPath.bitPerfectMeaning.contains('DoP'), true);
 
   return failures;
 }

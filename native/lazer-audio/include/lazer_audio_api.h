@@ -30,7 +30,7 @@
 #define LAZER_AUDIO_CALL
 #endif
 
-#define LAZER_AUDIO_ABI_VERSION 27u
+#define LAZER_AUDIO_ABI_VERSION 28u
 
 #define LAZER_AUDIO_MAX_EQ_BANDS 32u
 /* Upper bound on the explicit DSP chain length; see LazerAudioDspStage. */
@@ -211,7 +211,9 @@ typedef struct LazerAudioStreamInfo {
     int32_t output_channels;
     int32_t output_bits_per_sample;
     int32_t output_exclusive;
-    /* Set only when the exact lossless PCM format was accepted and DSP/digital volume are bypassed. */
+    /* Set only when the output carries the source unaltered and DSP/digital volume are bypassed: for
+     * PCM that means the exact lossless format was accepted, for DoP/Native DSD that the carrier or
+     * DSD word contract holds (the engine refuses to open such a session otherwise). */
     int32_t bit_perfect_active;
     /* Append-only in ABI v3: container width and encoding of the initialized output session. */
     int32_t output_container_bits_per_sample;
@@ -244,9 +246,11 @@ typedef struct LazerAudioStreamInfo {
      * check the claim instead of trusting it. `output_dsp_active` is true only while the float
      * DSP/volume chain is actually in the signal path (it is false when the samples are routed
      * straight through, and false for the DoP and Native DSD paths, whose bit-perfect semantics are
-     * defined separately). `output_format_matches_source` is true only when the initialized output
-     * session runs the source's own sample rate, channel count and sample depth, with no resampling
-     * or requantization. `bit_perfect_active` is true only when the session is exclusive, the DSP is
+     * defined separately, and reported through these same fields: for DoP/Native DSD
+     * `output_format_matches_source` means the carrier or DSD word format carries the source stream
+     * exactly, which is what the session cannot open without). `output_format_matches_source` is true
+     * only when the initialized output session runs the source's own format with no resampling or
+     * requantization. `bit_perfect_active` is true only when the session is exclusive, the DSP is
      * not in the path and the format matches the source. */
     int32_t output_dsp_active;
     int32_t output_format_matches_source;
