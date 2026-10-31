@@ -160,6 +160,9 @@ Future<void> main() async {
             prefs.getBool('lazer_independent_playback') ?? false,
         hifiSettings: hifi.settings,
         hifi: hifi,
+        // Null on the native engine. Otherwise the player shows this verbatim,
+        // so a fallback this launch cannot be mistaken for a HiFi session.
+        hifiPathNotice: selection.path.notice,
       );
       final session = PlaybackSession(state, audio);
       final media = SystemMediaController(state);

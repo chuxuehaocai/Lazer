@@ -66,9 +66,22 @@ abstract interface class QueueAudioEngine {
 /// `just_audio` surfaces those through its own player streams, but an engine
 /// backed by a native callback has no throw site to hand them to. [AppState]
 /// listens when the engine offers it and otherwise keeps the load-time handling.
+///
+/// The capability also carries the *startup* downgrade: when the native engine
+/// could not start, the app runs on `just_audio` and the reason is reported
+/// through this interface rather than only written to the log, so "not on the
+/// HiFi path" is a fact the UI can state.
 abstract interface class FailureReportingAudioEngine {
   /// User-facing text for a terminal failure (device lost, decode error).
   Stream<String> get failures;
+
+  /// A reason already known before any listener could attach — the fallback this
+  /// launch started with. Null when the session came up on the native engine.
+  ///
+  /// Separate from [failures] because the downgrade happens while the engine is
+  /// being constructed, before the app subscribes: a broadcast event sent then
+  /// would be dropped.
+  String? get pendingFailure;
 }
 
 /// Optional engine capability: the app installs its audio-focus policy here.
@@ -110,15 +123,19 @@ class JustAudioEngine
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
         QueueAudioEngine,
-        FocusAwareAudioEngine {
-  JustAudioEngine({AudioPlayer? player, this.activateSession})
-    : _player =
-          player ??
-          AudioPlayer(
-            handleInterruptions: false,
-            handleAudioSessionActivation: false,
-            androidApplyAudioAttributes: false,
-          ) {
+        FocusAwareAudioEngine,
+        FailureReportingAudioEngine {
+  JustAudioEngine({
+    AudioPlayer? player,
+    this.activateSession,
+    this.fallbackNotice,
+  }) : _player =
+           player ??
+           AudioPlayer(
+             handleInterruptions: false,
+             handleAudioSessionActivation: false,
+             androidApplyAudioAttributes: false,
+           ) {
     _completionSubscription = _player.processingStateStream.listen((state) {
       if (state != ProcessingState.completed) _completionSent = false;
       if (state == ProcessingState.completed) _emitCompletion();
@@ -128,6 +145,34 @@ class JustAudioEngine
   /// Optional application-owned focus policy; absent in independent playback.
   @override
   Future<bool> Function()? activateSession;
+
+  /// Why this launch runs on `just_audio` instead of the native engine, when
+  /// that was already decided before the app could subscribe.
+  ///
+  /// `just_audio` has no failure callback of its own to route here — its errors
+  /// arrive through the player's streams — so this is normally the only value
+  /// [pendingFailure] ever holds. A future fallback that happens *during*
+  /// playback (the native engine losing its device) can be pushed through
+  /// [reportFailure] and reaches the app through [failures].
+  final String? fallbackNotice;
+
+  final StreamController<String> _failures = StreamController<String>.broadcast();
+
+  @override
+  Stream<String> get failures => _failures.stream;
+
+  @override
+  String? get pendingFailure => fallbackNotice;
+
+  /// Reports a failure that happened after start-up on the fallback engine.
+  ///
+  /// Returns false once the engine is disposed, so a late caller can tell the
+  /// report went nowhere instead of assuming the UI saw it.
+  bool reportFailure(String message) {
+    if (_failures.isClosed) return false;
+    _failures.add(message);
+    return true;
+  }
 
   Future<void> applyAudioAttributes(AndroidAudioAttributes attributes) =>
       _player.setAndroidAudioAttributes(attributes);
@@ -386,6 +431,7 @@ class JustAudioEngine
     _indexSubscription?.cancel();
     _completed.close();
     _advanced.close();
+    _failures.close();
     _player.dispose();
   }
 }

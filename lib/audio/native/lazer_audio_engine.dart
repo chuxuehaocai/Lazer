@@ -29,6 +29,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../audio_engine.dart';
+import 'audio_path_log.dart';
 import 'audio_stream_cache.dart';
 import 'lazer_audio_abi.dart';
 import 'lazer_audio_library.dart';
@@ -64,12 +65,15 @@ class NativeAudioEngine
   ///
   /// Returns null (logging why) when the native library is missing, its ABI
   /// version does not match, or the engine cannot be created on this device.
+  /// [lastStartupFailure] then holds that reason, so `engine_factory.dart` can
+  /// report a *session* failure instead of reusing the loader's (null) reason.
   static Future<NativeAudioEngine?> create({
     LazerDeviceSettings deviceSettings = const LazerDeviceSettings(),
     AudioStreamCache? cache,
   }) async {
     final LazerAudioAvailability availability = LazerAudioLoader.load();
     if (!availability.isAvailable) {
+      lastStartupFailure = availability.reason;
       debugPrint('lazer-audio unavailable: ${availability.reason}');
       return null;
     }
@@ -116,8 +120,10 @@ class NativeAudioEngine
           (_) => engine?._drainLogs(),
         );
       }
+      lastStartupFailure = null;
       return engine;
     } catch (error, stack) {
+      lastStartupFailure = '$error';
       debugPrint('lazer-audio: engine startup failed: $error\n$stack');
       await engine?._shutdown();
       if (cache == null) streamCache?.close();
@@ -128,6 +134,10 @@ class NativeAudioEngine
       return null;
     }
   }
+
+  /// Why the last [create] returned null, or null when it succeeded (or when the
+  /// failure was the loader's, which already reports its own reason).
+  static String? lastStartupFailure;
 
   final LazerAudioApi _api;
   final LazerAudioBridgeApi? _bridge;
@@ -206,6 +216,12 @@ class NativeAudioEngine
 
   @override
   Stream<String> get failures => _failures.stream;
+
+  /// Always null: a native session that failed to start never becomes this
+  /// object, so its reason travels with the fallback engine instead
+  /// (`JustAudioEngine.pendingFailure`).
+  @override
+  String? get pendingFailure => null;
 
   @override
   Stream<void> get completed => _completed.stream;
@@ -879,6 +895,26 @@ class NativeAudioEngine
   void _publishStreamInfo(LazerStreamInfo? info) {
     _streamInfo = info;
     if (!_streamInfos.isClosed) _streamInfos.add(info);
+    // The negotiation record: what the endpoint accepted, not what was asked
+    // for. One line per open / gapless hand-off / DSD policy retry.
+    logAudioPathEvent('format', <String, Object?>{
+      'codec': info?.codec,
+      'source': info == null
+          ? null
+          : info.hasDsdSource
+          ? 'DSD${info.sourceDsdRateMultiplier}x'
+          : '${info.sourceSampleRate}/${info.sourceBitsPerSample}/${info.sourceChannels}',
+      'output': info == null
+          ? null
+          : '${info.outputSampleRate}/${info.outputBitsPerSample}/${info.outputChannels}',
+      'container_bits': info?.outputContainerBitsPerSample,
+      'float': info == null ? null : (info.outputIsFloat ? 1 : 0),
+      'exclusive': info == null ? null : (info.outputExclusive ? 1 : 0),
+      'selection': info?.outputFormatSelection,
+      'bit_perfect': info == null ? null : (info.bitPerfectActive ? 1 : 0),
+      'requested_bit_perfect': _deviceSettings.bitPerfect ? 1 : 0,
+      'requested_exclusive': _deviceSettings.exclusive ? 1 : 0,
+    });
   }
 
   void _drainLogs() {

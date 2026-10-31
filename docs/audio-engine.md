@@ -9,8 +9,11 @@ unchanged.
 
 `just_audio`/media_kit is still the fallback. The native engine is used only when
 its shared library is next to the app and reports the ABI version this build
-expects; otherwise the app plays exactly as it did before. That keeps Android,
-iOS, and any desktop build without a DSD-capable FFmpeg working.
+expects; otherwise the app plays exactly as it did before — and now says so: the
+launch decision (`AudioEnginePathDecision`) is reported through
+`FailureReportingAudioEngine.pendingFailure` and shown in the player by
+`AudioPathBadge`, so a downgrade is never silent. That keeps Android, iOS, and any
+desktop build without a DSD-capable FFmpeg working.
 
 ```
 AppState ──► AudioEngine ──► NativeAudioEngine ──► LazerAudioWorker (isolate)

@@ -16,6 +16,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../state/hifi_settings.dart';
+import 'native/audio_path_log.dart';
 import 'native/lazer_audio_devices.dart';
 import 'native/lazer_audio_engine.dart';
 import 'native/lazer_audio_library.dart';
@@ -325,12 +326,19 @@ class HifiController extends ChangeNotifier {
     if (api == null) {
       _devices = const <LazerOutputDevice>[];
       _deviceError = 'this host has no device catalog';
+      logAudioPathEvent('device_catalog', <String, Object?>{
+        'kind': null,
+        'count': 0,
+        'default': null,
+        'error': _deviceError,
+      });
       notifyListeners();
       return;
     }
     _busy = true;
     notifyListeners();
     try {
+      _deviceError = null;
       _devices = enumerateOutputDevices(
         api,
         onError: (String message) => _deviceError = message,
@@ -340,6 +348,14 @@ class HifiController extends ChangeNotifier {
       _deviceError = '$error';
     } finally {
       _busy = false;
+      // The catalog record: which namespace answered, how many endpoints it
+      // found, and which one playback would default to.
+      logAudioPathEvent('device_catalog', <String, Object?>{
+        'kind': outputDeviceCatalogKind(api),
+        'count': _devices.length,
+        'default': defaultDevice?.displayName,
+        'error': _deviceError,
+      });
       notifyListeners();
     }
   }

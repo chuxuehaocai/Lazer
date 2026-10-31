@@ -414,6 +414,76 @@ abstract interface class FailureReportingAudioEngine {
 
 ---
 
+## 10. 阶段 1 落地记录
+
+阶段 1 的目标是"原生引擎成为默认路径，且降级对 UI 可见"。基线（第 3.1 节）显示默认路径
+**已经成立**，所以本阶段的实际工作集中在三处缺口：回退原因会丢失、UI 只在设置页可见、
+以及"默认产物走原生"没有任何自动化断言。
+
+| 基线缺口 | 处理 | 代码位置 |
+| --- | --- | --- |
+| 库可加载但会话创建失败时，回退原因为 `null` | 新增决策模型，区分 `libraryUnavailable` 与 `sessionStartupFailed`；`NativeAudioEngine.lastStartupFailure` 保留会话失败文本 | `lib/audio/native/engine_selection.dart`、`lib/audio/native/lazer_audio_engine.dart:68-140`、`lib/audio/engine_factory.dart:60-118` |
+| 回退原因存在静态可变字段里，跨调用残留 | 删除静态缓存，原因作为 `AudioEngineSelection.path` 随选择对象传递 | `lib/audio/engine_factory.dart:22-57` |
+| 降级只写日志，`FailureReportingAudioEngine` 不参与 | 该契约新增 `pendingFailure`（订阅前就已发生的启动期降级），`JustAudioEngine` 实作它并携带原因；`NativeAudioEngine` 恒为 null | `lib/audio/audio_engine.dart:74-95`、`lib/audio/audio_engine.dart:119-180`、`lib/audio/native/lazer_audio_engine.dart:224` |
+| 非 HiFi 路径只在设置页可见 | 新增常驻标识，出现在桌面播放器与移动端播放器；原生路径下不渲染任何东西 | `lib/widgets/audio_path_badge.dart`、`lib/player/desktop_now_playing.dart:679`、`lib/player/now_playing_page.dart:1249`、`lib/state/app_state.dart:1136-1139` |
+| 运行期设备丢失只闪一条错误 | 终态失败同时把路径标记为"非 HiFi"并常驻显示 | `lib/state/app_state.dart:2956-2971` |
+| 初始化 / 设备枚举 / 格式协商没有统一日志 | 三条结构化 `audio.path` 记录（`select`/`session`、`device_catalog`、`format`） | `lib/audio/native/audio_path_log.dart`、`lib/audio/engine_factory.dart:77-118`、`lib/audio/hifi_controller.dart:324-368`、`lib/audio/native/lazer_audio_engine.dart:895` |
+| "默认产物走原生引擎"没有断言 | `tool/native_path_check.dart`：用与 app 相同的决策函数检查打包产物，`--play` 播放自生成的已知 WAV；CI 在 Windows 打包后以 `--expect-native` 运行 | `tool/native_path_check.dart`、`.github/workflows/build.yml:113-131` |
+
+### 10.1 证据
+
+打包产物运行（原生路径）：
+
+```
+audio.path event=select path=native fallback=- detail=-
+audio.path event=session engine=lazer-audio build="FFmpeg avformat 63.17.100, avcodec 63.25.101, swresample 7.7.100"
+Audio engine: native (lazer-audio)
+```
+
+同一产物隐藏引擎后运行（降级 → just_audio 并带原因）：
+
+```
+audio.path event=select path=just_audio fallback=libraryUnavailable detail="lazer-audio.dll was not found in the app bundle, configured override, or development checkout"
+Audio engine: just_audio (lazer-audio.dll was not found in the app bundle, configured override, or development checkout)
+```
+
+打包产物内的路径检查（从无关工作目录 `%TEMP%` 运行 `native-path-check.exe`）：
+
+```
+（引擎在位）audio.path event=check cwd=C:\Users\...\Temp host_supported=1 library=loaded bridge=loaded decision=native fallback=- detail=- → all checks passed, exit=0
+（引擎移走）audio.path event=check cwd=C:\Users\...\Temp host_supported=1 library=unavailable decision=system fallback=libraryUnavailable detail="lazer-audio.dll was not found in the app bundle, configured override, or development checkout" → all checks passed, exit=0
+```
+
+（`dart compile exe` 产物的 `dart.vm.product` 为真，所以它按"已安装构建"只查可执行文件目录，
+这正是 CI 想断言的解析方式。）
+
+真实播放（`--play`，自生成的 44.1 kHz/16-bit WAV，走引擎自身文件读取）：
+
+```
+ok   engine session created
+ok   open known WAV
+audio.path event=check.format summary="..." initialized=1 exclusive=0 bit_perfect=0
+ok   the output session initialized
+ok   the source decoded as the 44.1 kHz/16-bit WAV it is — 44100/16
+ok   the engine clock advanced — 1560ms
+```
+
+UI：`test/audio/audio_engine_path_test.dart` 断言原生路径下标识不渲染、降级时显示"非 HiFi 路径"
+与具体原因；`flutter test` 全量 630 项通过，`flutter analyze` 无问题。
+
+### 10.2 本阶段**没有**做的事（诚实边界）
+
+* 运行期**热切换**到 just_audio 未实现：设备丢失时只上报并停播（`app_state.dart:2950-2967`），
+  引擎仍在下次启动时重新选择。热切换要改 `AppState` 持有引擎的方式，留待后续阶段。
+* Linux / macOS 的 CI 断言未加：本地只能验证 Windows 产物；Linux 的 AppImage 步骤已有启动
+  冒烟，但"选中原生引擎"的断言需要先在本机验证过再上 CI。
+* 阶段 1 未改 DSD、EQ、limiter 的任何行为（符合约束）。
+* 格式协商日志（`audio.path event=format`）挂在 `_publishStreamInfo`（`lazer_audio_engine.dart:895`），
+  由"打开源 / 无缝交接 / DSD 策略重试"触发；本机 GUI 无法在无人登录的状态下装载曲目，因此
+  该行的现场证据来自 `native_path_check --play`（同一批字段），而不是 GUI 日志。
+
+---
+
 ## 附：本阶段用到的复现命令
 
 ```powershell
@@ -427,6 +497,12 @@ cd $env:RUNNER_TEMP; & D:\Lazer\build\windows\x64\runner\Release\native-bundle-c
 
 # 运行默认产物并抓引擎选择日志
 & build\windows\x64\runner\Release\lazer_nextgen.exe   # 期望：Audio engine: native (lazer-audio)
+
+# 打包产物是否真的选中原生引擎（从无关目录运行；CI 用的就是这条）
+dart compile exe tool/native_path_check.dart -o build/windows/x64/runner/Release/native-path-check.exe
+cd $env:RUNNER_TEMP
+& D:\Lazer\build\windows\x64\runner\Release\native-path-check.exe --expect-native
+& D:\Lazer\build\windows\x64\runner\Release\native-path-check.exe --expect-native --play   # 真实播放自生成的 WAV
 
 # 引擎离线探针（17 项）
 cmake -S native -B build/native-probes -G "Visual Studio 17 2022" -A x64 `

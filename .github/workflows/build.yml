@@ -110,6 +110,25 @@ jobs:
             Pop-Location
             Remove-Item -LiteralPath $probe -Force
           }
+      - name: Verify the shipped bundle selects the native engine
+        shell: pwsh
+        run: |
+          # The release is only a HiFi build if the app actually *chooses* the
+          # engine it ships: same resolution the app performs, same decision
+          # function (lib/audio/native/engine_selection.dart), run from an
+          # unrelated working directory so checkout artifacts cannot satisfy it.
+          $release = (Resolve-Path 'build/windows/x64/runner/Release').Path
+          $probe = Join-Path $release 'native-path-check.exe'
+          dart compile exe tool/native_path_check.dart -o $probe
+          if ($LASTEXITCODE -ne 0) { throw 'Could not compile native path check' }
+          Push-Location $env:RUNNER_TEMP
+          try {
+            & $probe --expect-native
+            if ($LASTEXITCODE -ne 0) { throw 'The shipped bundle does not select the native engine' }
+          } finally {
+            Pop-Location
+            Remove-Item -LiteralPath $probe -Force
+          }
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: Lazer-Windows-x86_64
