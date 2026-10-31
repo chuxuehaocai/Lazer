@@ -47,7 +47,7 @@ Everything else in the tree is the master branch's, including its probes.
 
 | Path | What it is |
 | --- | --- |
-| `native/lazer-audio/` | The engine from `master`, unmodified: `include/lazer_audio_api.h` (ABI v23), FFmpeg decode, WASAPI/ALSA/CoreAudio output, DSD/DoP, DSP chain, offline probes. |
+| `native/lazer-audio/` | The engine from `master` plus the crossfeed stage above: `include/lazer_audio_api.h` (**ABI v24**), FFmpeg decode, WASAPI/ALSA/CoreAudio output, DSD/DoP, DSP chain, offline probes. |
 | `native/lazer-audio-bridge/` | Growing-file reader over a cache file, plus the ABI layout probe. |
 | `native/CMakeLists.txt` | Builds both for the host when an FFmpeg prefix is available. |
 | `lib/audio/native/lazer_audio_abi.dart` | Dart mirror of the C ABI (structs, enums, constants). |
@@ -227,7 +227,7 @@ Status of this port:
 | Reader bridge | Built and exercised end to end. |
 | Streaming cache | Exercised end to end. |
 | `AudioEngine` transport, gapless queue, buffered position, failure reporting | Implemented and verified live. |
-| Windows bundle integration | Built with MSVC against a DSD-capable FFmpeg; **CTest 16/16** under both the Ninja and Visual Studio generators. |
+| Windows bundle integration | Built with MSVC against a DSD-capable FFmpeg; **CTest 17/17** under both the Ninja and Visual Studio generators. |
 | Linux bundle integration | Written; not built or run here. |
 | macOS bundle integration | Manual staging only; not run. |
 | Real playback through WASAPI | **Verified on one Windows host**: shared and exclusive, seek, pause/stop, gapless crossing, reader-bridge streaming, EQ. |
@@ -240,7 +240,8 @@ Status of this port:
 | Settings page (device, exclusive, bit-perfect, DSD, buffer, EQ + presets, live format) | Written; **not run**, because this machine cannot build the Flutter app (see below). |
 | ReplayGain | Supported per source by the ABI; the app does not compute or pass it yet. |
 | Linux/macOS playback | Not run. The code is the master branch's, unchanged, but ALSA/CoreAudio device behaviour is unverified here. |
-| Android/iOS | Not wired. Those need the JNI path from the master branch (`android_dsd_jni.cpp`, UAC2 transport); this port targets desktop. The app keeps `just_audio` there. |
+| Android | Wired at the build and load layers: CI builds the engine for `arm64-v8a`, `armeabi-v7a` and `x86_64`, stages them into `jniLibs` and verifies the APK, and `LazerAudioLoader` resolves `liblazer-audio.so` on `androidArm64`/`androidX64`. See `docs/android-audio.md`. **`armeabi-v7a` is not in the loader's candidate list**, so a 32-bit ARM build ships the engine without ever selecting it; Android has no exclusive/bit-perfect/DSD path (AAudio shared PCM only). |
+| iOS | Not wired. The app keeps `just_audio` there. |
 
 Nothing here is evidence of bit-perfect output: the engine reports what the
 platform endpoint accepted, which is necessary but not sufficient, and no digital
@@ -248,11 +249,17 @@ loopback has been captured for any device. The exclusive/bit-perfect result abov
 means the endpoint accepted the exact format and the engine reported no processing —
 not that a DAC received those bits unaltered.
 
-This machine cannot build the Flutter app itself: `flutter build` and `flutter test`
-need Windows Developer Mode for plugin symlinks, which requires administrator rights
-this account does not have. Everything under `lib/` is therefore covered by
-`flutter analyze` plus the plain-Dart checks that share its logic — not by a running
-app.
+This machine could not build the Flutter app itself when this port was written: `flutter build`
+and `flutter test` need Windows Developer Mode for plugin symlinks, which required administrator
+rights the account did not have. **That no longer holds** — Developer Mode is enabled, and on
+2026-10-31 `flutter build windows --release` produced a bundle whose `Audio engine: native
+(lazer-audio)` log line and `native-bundle-check` run both pass locally, and the engine's own
+CTest suite is 17/17 here. Everything under `lib/` used to be covered by `flutter analyze` plus
+the plain-Dart checks that share its logic; it can now be exercised by a running app.
+
+The factual baseline for what the engine does and does not do today — build switches, CI
+enablement, the `QueueAudioEngine`/`FailureReportingAudioEngine` contracts, the native symbol
+surface bound from Dart, and a per-phase gap list — is `docs/audio-engine-status.md`.
 
 ## Settings surface
 
