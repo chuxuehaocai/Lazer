@@ -16,7 +16,7 @@ import 'dart:ffi';
 ///
 /// v24 appended the crossfeed fields to [LazerAudioDspConfig]; this mirror and the
 /// vendored engine are updated together (see docs/audio-engine.md).
-const int lazerAudioAbiVersion = 28;
+const int lazerAudioAbiVersion = 29;
 
 /// `LAZER_AUDIO_MAX_EQ_BANDS`.
 const int lazerAudioMaxEqBands = 32;
@@ -30,6 +30,17 @@ const int lazerAudioDspStageEq = 1;
 const int lazerAudioDspStageCrossfeed = 2;
 const int lazerAudioDspStageLimiter = 3;
 const int lazerAudioDspStageVolume = 4;
+
+/// Convolution with a caller-supplied impulse response (ABI v29).
+///
+/// The engine implements it and the probes prove it, but nothing in the app enables
+/// it: there is no setting, no default IR and no UI. It exists so the stage contract
+/// (ordered chain, caller-owned taps, bit-perfect invalidation) is testable before
+/// anything ships on top of it.
+const int lazerAudioDspStageConvolver = 5;
+
+/// Longest impulse response the engine accepts (`Convolver::kMaxTaps`).
+const int lazerAudioMaxConvolverTaps = 4096;
 
 /// The order the engine applies when a request names none. Keeping it here as
 /// well as in `dsp_chain.h` is what lets the settings layer state the chain it
@@ -514,6 +525,18 @@ final class LazerAudioDspConfig extends Struct {
 
   @Array(8)
   external Array<Int32> stageOrder;
+
+  /// The impulse response for `lazerAudioDspStageConvolver` (ABI v29), channel-major:
+  /// `impulseResponse[channel * impulseResponseFrames + tap]`. The engine copies it
+  /// before `set_dsp` returns, so the caller keeps ownership. Zero frames leaves the
+  /// stage inert even when it is listed in the order.
+  external Pointer<Float> impulseResponse;
+
+  @Uint32()
+  external int impulseResponseFrames;
+
+  @Uint32()
+  external int impulseResponseChannels;
 }
 
 /// `LazerAudioDspConfig.crossfeed_algorithm` values.

@@ -302,6 +302,48 @@ void Crossfeed::process(float *interleaved, size_t frameCount, size_t channels) 
     }
 }
 
+bool Convolver::configure(const float *taps, int32_t channels, size_t frames) {
+    if (taps == nullptr || channels <= 0 || frames == 0 || frames > kMaxTaps) return false;
+    taps_.assign(taps, taps + static_cast<size_t>(channels) * frames);
+    tapFrames_ = frames;
+    channels_ = channels;
+    history_.assign(static_cast<size_t>(channels) * frames * 2, 0.0f);
+    cursor_ = 0;
+    return true;
+}
+
+void Convolver::reset() noexcept {
+    std::fill(history_.begin(), history_.end(), 0.0f);
+    cursor_ = 0;
+}
+
+void Convolver::process(float *interleaved, size_t frameCount) noexcept {
+    if (!active() || interleaved == nullptr || frameCount == 0) return;
+    const size_t channels = static_cast<size_t>(channels_);
+    const size_t taps = tapFrames_;
+    for (size_t frame = 0; frame < frameCount; ++frame) {
+        float *samples = interleaved + frame * channels;
+        /* Mirror the new sample so the tap window stays contiguous; the newest sample ends up at
+         * `cursor + taps`, and y[n] = sum over k of taps[k] * x[n-k] walks backwards from there. */
+        for (size_t channel = 0; channel < channels; ++channel) {
+            const float value = samples[channel];
+            const size_t base = channel * taps * 2;
+            history_[base + cursor_] = value;
+            history_[base + cursor_ + taps] = value;
+        }
+        for (size_t channel = 0; channel < channels; ++channel) {
+            const float *channelTaps = taps_.data() + channel * taps;
+            const float *channelHistory = history_.data() + channel * taps * 2 + cursor_ + taps;
+            float accumulator = 0.0f;
+            for (size_t tap = 0; tap < taps; ++tap) {
+                accumulator += channelTaps[tap] * channelHistory[-static_cast<ptrdiff_t>(tap)];
+            }
+            samples[channel] = accumulator;
+        }
+        cursor_ = (cursor_ + 1) % taps;
+    }
+}
+
 void DspChain::configureFormat(PcmFormat format) {
     format_ = format;
     sections_.clear();
@@ -326,11 +368,23 @@ void DspChain::requestConfig(const LazerAudioDspConfig &config) {
     pendingCrossfeed_.algorithm = config.crossfeed_algorithm;
     pendingCrossfeed_.delayMs = config.crossfeed_delay_ms;
     pendingCrossfeed_.cutoffHz = config.crossfeed_cutoff_hz;
+    pendingTapFrames_ = static_cast<size_t>(config.impulse_response_frames);
+    pendingTapChannels_ = static_cast<int32_t>(config.impulse_response_channels);
+    if (config.impulse_response == nullptr || pendingTapFrames_ == 0 ||
+        pendingTapChannels_ <= 0 || pendingTapFrames_ > Convolver::kMaxTaps) {
+        pendingTapFrames_ = 0;
+        pendingTapChannels_ = 0;
+        pendingTaps_.clear();
+    } else {
+        /* The caller's buffer is not ours after this returns. */
+        pendingTaps_.assign(config.impulse_response,
+            config.impulse_response + pendingTapFrames_ * static_cast<size_t>(pendingTapChannels_));
+    }
     pendingOrder_.clear();
     const uint32_t stageCount = std::min<uint32_t>(config.stage_count, LAZER_AUDIO_MAX_DSP_STAGES);
     for (uint32_t index = 0; index < stageCount; ++index) {
         const int32_t value = config.stage_order[index];
-        if (value < LazerAudioDspStagePreamp || value > LazerAudioDspStageVolume) {
+        if (value < LazerAudioDspStagePreamp || value > LazerAudioDspStageConvolver) {
             /* An unknown stage is ignored rather than failing the whole request: the chain still
              * has to keep the stages the caller did name. */
             continue;
@@ -350,6 +404,7 @@ void DspChain::reset() noexcept {
     for (auto &section : sections_) section.reset();
     crossfeed_.reset();
     limiter_.reset();
+    convolver_.reset();
 }
 
 bool DspChain::eqActive() const noexcept {
@@ -375,6 +430,7 @@ void DspChain::applyOrder(const std::vector<Stage> &order) {
     if (!listed(Stage::Eq)) sections_.clear();
     if (!listed(Stage::Crossfeed)) crossfeed_.reset();
     if (!listed(Stage::Limiter)) limiter_.configure(format_.sampleRate, -1.0, false);
+    if (!listed(Stage::Convolver)) convolver_.reset();
 }
 
 void DspChain::applyPendingConfig() {
@@ -383,6 +439,9 @@ void DspChain::applyPendingConfig() {
     bool limiterEnabled = false;
     double limiterThresholdDb = -1.0;
     Crossfeed::Specification crossfeed;
+    std::vector<float> taps;
+    size_t tapFrames = 0;
+    int32_t tapChannels = 0;
     {
         std::lock_guard guard(pendingMutex_);
         if (!pendingDirty_) return;
@@ -391,6 +450,9 @@ void DspChain::applyPendingConfig() {
         limiterEnabled = pendingLimiterEnabled_;
         limiterThresholdDb = pendingLimiterThresholdDb_;
         crossfeed = pendingCrossfeed_;
+        taps = pendingTaps_;
+        tapFrames = pendingTapFrames_;
+        tapChannels = pendingTapChannels_;
         pendingDirty_ = false;
     }
 
@@ -433,6 +495,14 @@ void DspChain::applyPendingConfig() {
     crossfeed_.configure(crossfeed, format_.sampleRate, format_.channels);
     limiter_.configure(format_.sampleRate, limiterThresholdDb, limiterEnabled);
     limiter_.reset();
+    if (tapFrames > 0 && static_cast<int32_t>(tapChannels) == format_.channels) {
+        convolver_.configure(taps.data(), tapChannels, tapFrames);
+    } else if (!taps.empty()) {
+        /* An IR whose channel count does not match the session would silently mix channels; drop it
+         * and leave the stage inert instead. */
+        convolver_.reset();
+        convolver_.configure(nullptr, 0, 0);
+    }
     applyOrder(pendingOrder_);
 }
 
@@ -480,6 +550,10 @@ double DspChain::process(float *interleaved, size_t frameCount) {
                 break;
             case Stage::Volume:
                 volume_.process(interleaved, frameCount, channels);
+                break;
+            case Stage::Convolver:
+                if (!convolverActive()) break;
+                convolver_.process(interleaved, frameCount);
                 break;
         }
     }

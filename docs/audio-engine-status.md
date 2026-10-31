@@ -671,6 +671,39 @@ DSD 字格式。两种情况下 `configurePipeline` 在开会话时已经**拒�
 
 ---
 
+## 15. 卷积级（阶段 5 的第二件，**不随发布暴露**）
+
+按需求"先确保引擎可用、后期发布不要涉及这些"，卷积只做到**引擎能力 + 探针**：没有设置项、没有默认 IR、
+没有 UI 入口，`HifiSettings.decodeDspStageOrder` 仍然只接受 0–4，所以应用无法打开它。
+
+| 内容 | 说明 | 位置 |
+| --- | --- | --- |
+| `LazerAudioDspStageConvolver` = 5 | 链上的第六级，ABI 29（纯追加） | `include/lazer_audio_api.h` |
+| IR 参数 | `impulse_response`（channel-major）、`impulse_response_frames`、`impulse_response_channels`；引擎在 `set_dsp` 返回前复制，调用方保留所有权 | 同上 |
+| 实现 | 直接型 FIR，镜像历史缓冲避免环绕判断；会话建立时一次性分配，`renderLoop` 不分配 | `src/dsp_chain.h`（`Convolver`） |
+| 护栏 | 超过 4096 taps 拒绝、声道数与会话不符则整段惰性、未列入 `stage_order` 即旁路并清空历史 | 同上 |
+| 可观测 | 启用后 `dsp_active=1`，`OutputPathState.bitPerfect` 自动变假，"信号路径"面板显示 DSP 介入 | 阶段 2 的既有规则，无需新 UI |
+
+**验证** — 新增 CTest `lazer-audio-convolver`：
+
+```
+PASS: a unit impulse is the identity through the convolver
+PASS: a two-tap response matches a direct convolution sample for sample
+PASS: an IR left out of the order does not touch the signal
+PASS: an IR that does not match the session channels is refused
+PASS: an IR longer than 4096 taps is refused and the stage stays inert
+PASS: bypassing the stage clears its history
+```
+
+引擎探针 **21/21**；`flutter analyze` 无问题；`flutter test` 655 项通过；`native_abi_check` 通过。
+（过程中真抓到一个 bug：`requestConfig` 的阶段合法性上界还停在 `Volume`，导致 `Convolver` 被当作未知级静默忽略——探针的"两点响应"用例把它暴露出来，已修。）
+
+**边界**：直接型 FIR 在 4096 taps 时约 0.4 GFLOP/s（44.1 kHz 立体声），更长 IR 需要换成 partitioned FFT；
+这一步只证明"接口位置正确"，不证明"性能足够跑房间校正"。发布前若要启用它，还需要：IR 加载与持久化、
+FFT 实现、以及至少一台真实设备上的听感与负载验证。
+
+---
+
 ## 附：本阶段用到的复现命令
 
 ```powershell
