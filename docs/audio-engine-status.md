@@ -414,6 +414,229 @@ abstract interface class FailureReportingAudioEngine {
 
 ---
 
+## 10. 阶段 1 落地记录
+
+阶段 1 的目标是"原生引擎成为默认路径，且降级对 UI 可见"。基线（第 3.1 节）显示默认路径
+**已经成立**，所以本阶段的实际工作集中在三处缺口：回退原因会丢失、UI 只在设置页可见、
+以及"默认产物走原生"没有任何自动化断言。
+
+| 基线缺口 | 处理 | 代码位置 |
+| --- | --- | --- |
+| 库可加载但会话创建失败时，回退原因为 `null` | 新增决策模型，区分 `libraryUnavailable` 与 `sessionStartupFailed`；`NativeAudioEngine.lastStartupFailure` 保留会话失败文本 | `lib/audio/native/engine_selection.dart`、`lib/audio/native/lazer_audio_engine.dart:68-140`、`lib/audio/engine_factory.dart:60-118` |
+| 回退原因存在静态可变字段里，跨调用残留 | 删除静态缓存，原因作为 `AudioEngineSelection.path` 随选择对象传递 | `lib/audio/engine_factory.dart:22-57` |
+| 降级只写日志，`FailureReportingAudioEngine` 不参与 | 该契约新增 `pendingFailure`（订阅前就已发生的启动期降级），`JustAudioEngine` 实作它并携带原因；`NativeAudioEngine` 恒为 null | `lib/audio/audio_engine.dart:74-95`、`lib/audio/audio_engine.dart:119-180`、`lib/audio/native/lazer_audio_engine.dart:224` |
+| 非 HiFi 路径只在设置页可见 | 新增常驻标识，出现在桌面播放器与移动端播放器；原生路径下不渲染任何东西 | `lib/widgets/audio_path_badge.dart`、`lib/player/desktop_now_playing.dart:679`、`lib/player/now_playing_page.dart:1249`、`lib/state/app_state.dart:1136-1139` |
+| 运行期设备丢失只闪一条错误 | 终态失败同时把路径标记为"非 HiFi"并常驻显示 | `lib/state/app_state.dart:2956-2971` |
+| 初始化 / 设备枚举 / 格式协商没有统一日志 | 三条结构化 `audio.path` 记录（`select`/`session`、`device_catalog`、`format`） | `lib/audio/native/audio_path_log.dart`、`lib/audio/engine_factory.dart:77-118`、`lib/audio/hifi_controller.dart:324-368`、`lib/audio/native/lazer_audio_engine.dart:895` |
+| "默认产物走原生引擎"没有断言 | `tool/native_path_check.dart`：用与 app 相同的决策函数检查打包产物，`--play` 播放自生成的已知 WAV；CI 在 Windows 打包后以 `--expect-native` 运行 | `tool/native_path_check.dart`、`.github/workflows/build.yml:113-131` |
+
+### 10.1 证据
+
+打包产物运行（原生路径）：
+
+```
+audio.path event=select path=native fallback=- detail=-
+audio.path event=session engine=lazer-audio build="FFmpeg avformat 63.17.100, avcodec 63.25.101, swresample 7.7.100"
+Audio engine: native (lazer-audio)
+```
+
+同一产物隐藏引擎后运行（降级 → just_audio 并带原因）：
+
+```
+audio.path event=select path=just_audio fallback=libraryUnavailable detail="lazer-audio.dll was not found in the app bundle, configured override, or development checkout"
+Audio engine: just_audio (lazer-audio.dll was not found in the app bundle, configured override, or development checkout)
+```
+
+打包产物内的路径检查（从无关工作目录 `%TEMP%` 运行 `native-path-check.exe`）：
+
+```
+（引擎在位）audio.path event=check cwd=C:\Users\...\Temp host_supported=1 library=loaded bridge=loaded decision=native fallback=- detail=- → all checks passed, exit=0
+（引擎移走）audio.path event=check cwd=C:\Users\...\Temp host_supported=1 library=unavailable decision=system fallback=libraryUnavailable detail="lazer-audio.dll was not found in the app bundle, configured override, or development checkout" → all checks passed, exit=0
+```
+
+（`dart compile exe` 产物的 `dart.vm.product` 为真，所以它按"已安装构建"只查可执行文件目录，
+这正是 CI 想断言的解析方式。）
+
+真实播放（`--play`，自生成的 44.1 kHz/16-bit WAV，走引擎自身文件读取）：
+
+```
+ok   engine session created
+ok   open known WAV
+audio.path event=check.format summary="..." initialized=1 exclusive=0 bit_perfect=0
+ok   the output session initialized
+ok   the source decoded as the 44.1 kHz/16-bit WAV it is — 44100/16
+ok   the engine clock advanced — 1560ms
+```
+
+UI：`test/audio/audio_engine_path_test.dart` 断言原生路径下标识不渲染、降级时显示"非 HiFi 路径"
+与具体原因；`flutter test` 全量 630 项通过，`flutter analyze` 无问题。
+
+### 10.2 本阶段**没有**做的事（诚实边界）
+
+* 运行期**热切换**到 just_audio 未实现：设备丢失时只上报并停播（`app_state.dart:2950-2967`），
+  引擎仍在下次启动时重新选择。热切换要改 `AppState` 持有引擎的方式，留待后续阶段。
+* Linux / macOS 的 CI 断言未加：本地只能验证 Windows 产物；Linux 的 AppImage 步骤已有启动
+  冒烟，但"选中原生引擎"的断言需要先在本机验证过再上 CI。
+* 阶段 1 未改 DSD、EQ、limiter 的任何行为（符合约束）。
+* 格式协商日志（`audio.path event=format`）挂在 `_publishStreamInfo`（`lazer_audio_engine.dart:895`），
+  由"打开源 / 无缝交接 / DSD 策略重试"触发；本机 GUI 无法在无人登录的状态下装载曲目，因此
+  该行的现场证据来自 `native_path_check --play`（同一批字段），而不是 GUI 日志。
+
+---
+
+## 11. 阶段 2 落地记录
+
+阶段 2 的目标是"Bit-Perfect 可观测而非宣称"。基线（第 3.2 节）显示：引擎只发布一个打开时
+决定的布尔值 `bit_perfect_active`，DSP 请求在 bit-perfect 会话中被静默丢弃，欠载水位等原始
+数据虽在 ABI 里但 Dart 侧从未读取。本阶段把"结论"拆成"可核对的事实"，并让两者必须一致。
+
+| 基线缺口 | 处理 | 代码位置 |
+| --- | --- | --- |
+| `bit_perfect_active` 无法被核对 | ABI v25 在 `LazerAudioStreamInfo` 追加 `output_dsp_active` 与 `output_format_matches_source`，在 `LazerAudioSnapshot` 追加 `ring_fill_frames` / `ring_capacity_frames` | `native/lazer-audio/include/lazer_audio_api.h:240-251`、`:272-279` |
+| 三条件未拆分 | 引擎侧分别计算并发布：`dspInPath()`（DSP 是否真的在信号路径）、`formatMatchesSource_`（是否源格式原样） | `native/lazer-audio/src/engine.cpp:1175-1234`（`streamInfo`）、`:1236-1243`（`dspInPath`）、`:500`、`:633`（`configurePipeline`） |
+| 会话语义：无会话时不得残留 | 三个事实只在"输出会话已初始化且未失败"时发布，因此不存在会话时派生结果必然为假，与 `bit_perfect_active` 一致 | `native/lazer-audio/src/engine.cpp:1225-1231` |
+| bit-perfect 会静默吃掉 DSP 请求 | `setDsp` 在 bit-perfect 生效时对"会改变样本"的请求（preamp/bands/limiter/crossfeed）**显式返回 `LazerAudioErrorUnsupported`**，不再接受后忽略 | `native/lazer-audio/src/engine.cpp:1092-1121` |
+| Dart 侧只是照搬引擎布尔值 | 新增 `OutputPathState`：从三个事实派生 `bitPerfect`，并提供 `agreesWithEngine`、`failingConditions`、实际采样率/位深/声道 | `lib/audio/native/output_path_state.dart`、`lib/audio/native/lazer_stream_info.dart:77-88` |
+| 指示器不区分原因 | 信号路径面板拆成"Bit-perfect / 独占 / DSP / 格式与源一致"四行，亮起时给出三项条件，熄灭时列出未满足项 | `lib/widgets/hifi_settings_section.dart:915-975` |
+| 欠载/水位从未读取 | `LazerEngineMetrics` 读快照的环形缓冲占用与欠载计数，进入信号路径面板的"输出缓冲"行，并在欠载状态翻转时写一条 `audio.path event=metrics` | `lib/audio/native/engine_metrics.dart`、`lib/audio/native/lazer_audio_engine.dart:311-325`、`lib/audio/hifi_controller.dart:158-183` |
+| 逐 bit 回环没有独立门禁 | 新增 CTest `lazer-audio-engine-bit-perfect`，四例：逐字节相等、DSP 介入即失效、格式不匹配即失效、bit-perfect 下 DSP 请求被拒且输出仍逐字节相等 | `native/lazer-audio/tools/lazer_audio_engine_bit_perfect_probe.cpp`、`native/lazer-audio/CMakeLists.txt:323-359` |
+| 探针不在 CI | Windows job 新增 `Run the engine's device-free probe suite`（配置 + 构建 + ctest） | `.github/workflows/build.yml:84-101` |
+| 设置层会把 DSP 设置送到会被拒绝的引擎 | `HifiSettings.toDspRequest()` 在 bit-perfect 时发送中性请求（不丢设置，关闭后照常生效），页面用 `dspBypassedByBitPerfect` 明说 DSP 未进入信号路径 | `lib/state/hifi_settings.dart:652-676` |
+
+### 11.1 证据
+
+**回环（离线、假端点抓取引擎真实输出字节）**——`ctest -R lazer-audio-engine-bit-perfect`：
+
+```
+PASS: bit-perfect exclusive output reproduces the source PCM bytes exactly (51200 bytes) and reports exclusive + no DSP + format match
+PASS: DSP in the signal path clears bit-perfect and alters the output (exclusive=1, dsp_active=1, format_matches_source=1)
+PASS: a resampled session reports format_matches_source=0 and is not bit-perfect (source 44100 Hz, output 48000 Hz)
+PASS: a DSP request during bit-perfect is refused with an error and the output stays byte-exact
+```
+
+**真机（本机默认端点）**——同一个打包产物、同一个自生成 44.1 kHz/16-bit WAV：
+
+```
+共享模式（默认）:
+audio.path event=check.format ... exclusive=0 dsp_active=1 format_matches_source=0 bit_perfect=0 engine_claims_bit_perfect=0
+unmet="输出不是独占,DSP 在信号路径中,输出格式与源不一致" ring_fill=8192 ring_capacity=8192
+
+独占 + bit-perfect 请求:
+audio.path event=check.format ... exclusive=1 dsp_active=0 format_matches_source=1 bit_perfect=1 engine_claims_bit_perfect=1 unmet=-
+ok   an exclusive bit-perfect request produced a bit-perfect path
+ok   the engine flag agrees with the derived state
+```
+
+即：指示器在"独占 + 无 DSP + 格式一致"时亮起（`bit_perfect=1`），在任一条件不满足时熄灭并
+给出未满足项；引擎自己的布尔值与派生结果始终一致（`engine flag agrees with the derived state`）。
+
+**测试**：`flutter analyze` 无问题；`flutter test` 647 项通过（新增 `test/audio/output_path_state_test.dart`
+18 项：三条件组合、会话缺失、DSD 路径、陈旧布尔值不可信、指标派生、面板文案、设置层旁路）。
+引擎探针 18/18 通过。
+
+### 11.2 本阶段**没有**做的事（诚实边界）
+
+* **不做 DSP 开启时的重新协商**：bit-perfect 生效期间引擎拒绝处理请求；"打开 EQ 后自动关闭
+  bit-perfect 并重新协商输出"属于阶段 4（DSP 链显式化）的工作，本阶段只保证状态真实。
+* **DSD 路径的 bit-perfect 语义仍未定义**（`failingConditions` 里明确写"语义尚未定义"），
+  按任务要求留到阶段 5。
+* **水位只有观测、没有策略**：环形缓冲的低/高水位驱动（泵线程加速/休眠）属于阶段 3。
+* **物理层未验证**：回环是"引擎写给端点的字节"，不是 DAC 收到的位；真实数字回环仍需硬件。
+
+---
+
+## 12. 阶段 3 落地记录
+
+阶段 3 的目标是"输出侧时钟驱动消费，实时线程只从环形缓冲取数交给设备"。基线（第 3.3 节）显示
+无锁环形缓冲与设备时钟驱动**已经存在**，缺口集中在三处：实时线程仍在取互斥量与堆分配、没有
+水位策略、没有压力测试与审查清单。
+
+| 基线缺口 | 处理 | 代码位置 |
+| --- | --- | --- |
+| 实时线程取 `sourceMutex_`（`publishTrackChanged`、`activeDurationMillis`、`currentPositionMillis`、`currentSourceEnded`） | 生产者在准备后继曲目时把可听曲目的标量发布到 `RenderPresentation` 镜像，实时线程在帧缝处用**纯原子写**提交；位置、时长、结束标志都改为读原子镜像 | `native/lazer-audio/src/engine.h:113-165`、`engine.cpp:1254-1290`（`renderPositionMillis`）、`engine.cpp:1700-1765`（提交）、`engine.cpp:1904-1910`（`sourceEndedNow`）、`engine.cpp:1410-1420`（生产者镜像与 codec 提交） |
+| 实时线程堆分配（`std::deque` 台账、`push_back`） | 改为会话建立时预分配的定长环形台账（容量 1024，溢出丢最旧一条并触发重新同步），`renderLoop` 内不再有任何分配 | `engine.cpp:1810-1850` |
+| 没有低/高水位 | 定义并发布水位：到**高水位（环形缓冲容量）**停止喂入，降到**低水位（容量 25%）**恢复；曲目缝在飞或暂停超过 50 ms 时强制恢复，保证解码不会被消费者卡死 | `engine.cpp:625-650`（计算与发布）、`engine.cpp:1425-1455`（`accept()` 中的迟滞） |
+| 水位不可观测 | ABI 26 在快照里发布 `ring_low_watermark_frames` / `ring_high_watermark_frames`，Dart 侧进入"输出缓冲"行（含"已到高水位暂停喂入"） | `include/lazer_audio_api.h:272-284`、`lib/audio/native/engine_metrics.dart:36-90`、`lib/widgets/hifi_settings_section.dart:958` |
+| 会话起始的一次静音被算作欠载 | 共享（Variable）模式在提交第一个周期前先等生产者填满一个周期（有界：最多 8 次设备等待），启动抖动不再污染欠载计数 | `engine.cpp:1831-1845` |
+| 没有压力测试 | 新增 CTest `lazer-audio-ring-stress`：40 秒素材 + 有节奏的假端点（约 58× 实时）跑满整条 生产者→环→实时线程 路径 | `native/lazer-audio/tools/lazer_audio_ring_stress_probe.cpp`、`CMakeLists.txt` |
+| 没有审查清单 | 新增 `docs/audio-engine-rt-checklist.md`：禁令、逐项核对、被明确允许的例外、计时基线 | `docs/audio-engine-rt-checklist.md` |
+| 设备时钟驱动未逐平台确认 | 逐后端核对并记录：WASAPI 事件回调、ALSA `poll()` 事件、CoreAudio IOProc 健康/宿主时钟 | 见 12.1 |
+
+### 12.1 证据
+
+**逐平台"消费由设备时钟驱动"核对**：
+
+| 后端 | waitForReady 的等待对象 | 结论 |
+| --- | --- | --- |
+| WASAPI | `AUDCLNT_STREAMFLAGS_EVENTCALLBACK` + `SetEventHandle` 的事件句柄；独占用 FixedPeriod 每次提交一个周期 | 设备/驱动周期驱动 | 
+| ALSA | 对 PCM 的 poll 描述符 `poll()`（`output_alsa.cpp:857-880`） | ALSA period/available 信号驱动 |
+| CoreAudio | IOProc 回调健康位与回调序号/宿主时钟（`output_coreaudio.cpp:1078-1105`） | 设备 IOProc 驱动 |
+
+**压力测试**（`ctest -R lazer-audio-ring-stress`）：
+
+```
+PASS: 40 s through a paced endpoint with no stall: 0 padded frames, fill peak 16384/16384, watermarks 4096/16384
+PASS: a 800 ms stall (ring covers ~371 ms) produced 10752 padded frames, bounded by the stall, and recovered
+```
+
+即：生产者跟得上时**欠载为 0**；注入 800 ms 解码停顿时，欠载计数为正、**被停顿长度界定**
+（10752 帧 ≈ 244 ms，小于 800 ms 可解释上限），且停顿结束后恢复（会话结束时 `underrun_active = 0`）。
+
+**回归**：引擎探针 **19/19** 通过（含 `lazer-audio-engine-bit-perfect` 逐字节回环与
+`lazer-audio-engine-pcm-matrix` 的格式矩阵/无缝/ReplayGain 用例）；`flutter test` 649 项通过；
+`flutter analyze` 无问题。
+
+### 12.2 本阶段**没有**做的事（诚实边界）
+
+* `snapshot()` / `streamInfo()` 若被事件回调**同步**重入，仍会取 `lifecycleMutex_`（`try_lock`）与
+  `sourceMutex_`；出货路径（Dart 侧 `NativeCallable.listener`，异步投递）不会触发，已在审查清单
+  第 3 节列为明确例外。把它们也改成无锁镜像属于后续工作。
+* 水位策略只做"停止/恢复喂入"，没有做"加速"（解码速度不由引擎控制）。
+* 压力测试是离线假端点：它证明的是引擎内部的行为，不是某台设备上的真实欠载率。
+* ALSA/CoreAudio 的核对是**代码级**的，本机没有这两个平台的运行证据。
+
+---
+
+## 13. 阶段 4 落地记录（引擎侧）
+
+阶段 4 的目标是把 DSP 从"固定配置"变成"显式有序链"。基线（第 3.4 节）显示：链的顺序写死在
+`DspChain::process()` 里，没有任何排序/旁路概念。本次落地的是**引擎侧契约**：链的顺序由调用方
+按 ABI 指定，未列出的级即旁路。
+
+| 基线缺口 | 处理 | 代码位置 |
+| --- | --- | --- |
+| 顺序写死，不可排序 | `LazerAudioDspConfig` 追加 `stage_count` + `stage_order[8]`（ABI 27，纯追加）；`DspChain` 按该顺序逐级派发，`stage_count == 0` 表示沿用文档化的默认顺序（Preamp→Eq→Crossfeed→Limiter→Volume） | `include/lazer_audio_api.h:305-330`、`src/dsp_chain.h:147-200`、`src/dsp_chain.cpp:305-345`、`:405-470` |
+| 级可开关/旁路 | 未列入顺序的级被旁路，并且**释放其状态**（EQ 段清空、limiter 重新配置为关闭、crossfeed 复位），而不是在调用点跳过 | `src/dsp_chain.cpp`（`applyOrder`） |
+| 未知级 | 忽略该级，其余照常生效（而不是整条请求失败） | `src/dsp_chain.cpp`（`requestConfig`） |
+| 链上模块启用使 bit-perfect 失效 | 阶段 2 的规则不变：bit-perfect 会话里引擎拒绝处理请求（`engine.cpp:1092-1121`），非 bit-perfect 会话里 `dsp_active` 恒为真，派生结果必然为 false | 见第 11 节 |
+
+**证据** — 新增 CTest `lazer-audio-dsp-order`（`native/lazer-audio/tools/lazer_audio_dsp_order_probe.cpp`）：
+
+```
+PASS: an empty stage list reproduces the documented default order exactly
+PASS: limiter-before-EQ and EQ-before-limiter differ in 8172 of 8192 samples
+PASS: omitting the EQ from the order bypasses it (8190 samples differ)
+PASS: a disabled limiter is transparent in the same order
+PASS: an unknown stage is ignored and the named stages still apply
+PASS: the chain reports the 5-stage order it applies
+```
+
+引擎探针 **20/20** 通过（含逐 bit 回环、格式矩阵、水位压力测试——DSP 重构不得改变无 DSP 时的逐字节结果）；
+`flutter analyze` 无问题；`flutter test` **649 项通过**。
+
+### 13.1 本阶段**没有**做的事（诚实边界）
+
+* **阶段 4b 已落地**：顺序可持久化（`hifi_dsp_order`，畸形值回落默认且丢弃未知级）、经
+  `LazerDspRequest` → `setEqualizer` → worker 写入 `stageCount/stage_order`，设置页有「DSP 链顺序」
+  下拉框（引擎默认 / 限幅优先 / 旁路 EQ 与串扰，未知顺序显示为「自定义」而不是断言）。
+  仍未做的是**该控件的 widget 测试**：它只在原生引擎运行时可达，而 widget 测试无法构造
+  `NativeAudioEngine`，覆盖它需要引入测试接缝。因此「用户可以排序/开关」的依据是引擎侧探针
+  （顺序确实改变输出）+ 模型层测试（预设合法性、编码往返、摘要文案）+ 静态检查，不含渲染级断言。
+* 重采样仍未作为链内模块存在：它由设备协商路径决定（第 3.4 节的结论未变）。
+* 抖动仍与整数量化绑定在输出边界（`pcm_output.cpp`），没有独立成链内一级。
+
+---
+
 ## 附：本阶段用到的复现命令
 
 ```powershell
@@ -428,9 +651,17 @@ cd $env:RUNNER_TEMP; & D:\Lazer\build\windows\x64\runner\Release\native-bundle-c
 # 运行默认产物并抓引擎选择日志
 & build\windows\x64\runner\Release\lazer_nextgen.exe   # 期望：Audio engine: native (lazer-audio)
 
-# 引擎离线探针（17 项）
+# 打包产物是否真的选中原生引擎（从无关目录运行；CI 用的就是这条）
+dart compile exe tool/native_path_check.dart -o build/windows/x64/runner/Release/native-path-check.exe
+cd $env:RUNNER_TEMP
+& D:\Lazer\build\windows\x64\runner\Release\native-path-check.exe --expect-native
+& D:\Lazer\build\windows\x64\runner\Release\native-path-check.exe --expect-native --play   # 真实播放自生成的 WAV
+& D:\Lazer\build\windows\x64\runner\Release\native-path-check.exe --play --bit-perfect     # 三条件 + 派生结果（阶段 2）
+
+# 引擎离线探针（18 项）
 cmake -S native -B build/native-probes -G "Visual Studio 17 2022" -A x64 `
   -DLAZER_FFMPEG_ROOT="D:/Lazer/build/third_party/ffmpeg" -DLAZER_AUDIO_NATIVE_PROBES=ON
 cmake --build build/native-probes --config Release --parallel 4
 ctest --test-dir build/native-probes -C Release --output-on-failure
+ctest --test-dir build/native-probes -C Release -R lazer-audio-engine-bit-perfect --output-on-failure
 ```

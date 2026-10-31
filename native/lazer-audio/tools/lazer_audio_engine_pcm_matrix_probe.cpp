@@ -579,7 +579,14 @@ bool runPcmFormatReopenCase() {
 bool runPresentationBoundaryCase() {
     gTraceBoundary.store(true, std::memory_order_release);
     constexpr int32_t sampleRate = 44'100;
-    constexpr int32_t firstFrames = 6'144;  // Larger than the fake engine's 4,096-frame ring.
+    /* The producer fills the ring up to its high watermark — the ring capacity — and stops there, so
+     * a 44.1 kHz / 60 ms session (4,096-frame ring) reaches `4096 + the four periods the gated
+     * endpoint writes` = 6,144 frames. The case is calibrated to that reach on purpose: it is the
+     * point where the outgoing track's decoder must still be able to finish while the endpoint is
+     * parked. `verifyRingWatermarks` below asserts the policy this constant assumes, so a change to
+     * the marks fails loudly instead of stalling. */
+    constexpr int32_t expectedHighWatermark = 4'096;
+    constexpr int32_t firstFrames = 6'144;
     constexpr int32_t secondFrames = 1'024;
     MemoryReader first(makePcmWave(firstFrames, sampleRate, 16, 1'000));
     MemoryReader second(makePcmWave(secondFrames, sampleRate, 24, -2'000));
@@ -615,6 +622,23 @@ bool runPresentationBoundaryCase() {
         return fail("could not prepare a same-rate successor");
     }
     if (engine->play() != LazerAudioOk) return fail("could not start fake output");
+    {
+        /* The calibration above assumes a specific hysteresis band; if the marks move, this reports
+         * the assumption instead of letting the case stall five seconds later. */
+        LazerAudioSnapshot snapshot{};
+        engine->snapshot(snapshot);
+        if (snapshot.ring_high_watermark_frames != expectedHighWatermark ||
+            snapshot.ring_low_watermark_frames <= 0 ||
+            snapshot.ring_low_watermark_frames >= snapshot.ring_high_watermark_frames) {
+            std::cerr << "FAIL: presentation-boundary case: ring watermarks are "
+                << snapshot.ring_low_watermark_frames << "/"
+                << snapshot.ring_high_watermark_frames << ", expected a low mark below "
+                << expectedHighWatermark << "\n";
+            releaseCaptureGate(capture);
+            engine->destroy();
+            return false;
+        }
+    }
     if (!waitForWrites(capture, 4, std::chrono::seconds(5))) {
         return fail("fake output did not reach its gate");
     }

@@ -16,10 +16,31 @@ import 'dart:ffi';
 ///
 /// v24 appended the crossfeed fields to [LazerAudioDspConfig]; this mirror and the
 /// vendored engine are updated together (see docs/audio-engine.md).
-const int lazerAudioAbiVersion = 24;
+const int lazerAudioAbiVersion = 27;
 
 /// `LAZER_AUDIO_MAX_EQ_BANDS`.
 const int lazerAudioMaxEqBands = 32;
+
+/// Upper bound on the explicit DSP chain length (ABI v27).
+const int lazerAudioMaxDspStages = 8;
+
+/// `LazerAudioDspStage`: the stages a caller may name in `stage_order`.
+const int lazerAudioDspStagePreamp = 0;
+const int lazerAudioDspStageEq = 1;
+const int lazerAudioDspStageCrossfeed = 2;
+const int lazerAudioDspStageLimiter = 3;
+const int lazerAudioDspStageVolume = 4;
+
+/// The order the engine applies when a request names none. Keeping it here as
+/// well as in `dsp_chain.h` is what lets the settings layer state the chain it
+/// is asking for instead of assuming one.
+const List<int> lazerAudioDefaultDspStageOrder = <int>[
+  lazerAudioDspStagePreamp,
+  lazerAudioDspStageEq,
+  lazerAudioDspStageCrossfeed,
+  lazerAudioDspStageLimiter,
+  lazerAudioDspStageVolume,
+];
 
 /// Reader callback results (positive counts are byte counts).
 const int lazerAudioReaderEof = -1;
@@ -318,6 +339,23 @@ final class LazerAudioSnapshot extends Struct {
 
   @Int64()
   external int terminalPositionMillis;
+
+  /// Whole frames waiting in the engine's lock-free output ring, and its size
+  /// (ABI v25). Producer is the decode/DSP thread, consumer is the render thread.
+  @Int32()
+  external int ringFillFrames;
+
+  @Int32()
+  external int ringCapacityFrames;
+
+  /// The hysteresis band the producer works in (ABI v26): it stops at the high
+  /// mark and resumes at the low one, so the render thread keeps a cushion
+  /// without the ring being pinned full. Zero while no stream is configured.
+  @Int32()
+  external int ringLowWatermarkFrames;
+
+  @Int32()
+  external int ringHighWatermarkFrames;
 }
 
 /// `LazerAudioStreamInfo` — source metadata plus the format the initialized
@@ -398,6 +436,15 @@ final class LazerAudioStreamInfo extends Struct {
 
   @Int32()
   external int outputCoreAudioNonMixable;
+
+  /// True only while the float DSP/volume chain is on the signal path (ABI v25).
+  @Int32()
+  external int outputDspActive;
+
+  /// True only when the output session runs the source's own rate, channels and
+  /// depth — no resampling, no requantization (ABI v25).
+  @Int32()
+  external int outputFormatMatchesSource;
 }
 
 /// `LazerAudioEqBand`.
@@ -458,6 +505,15 @@ final class LazerAudioDspConfig extends Struct {
   /// Custom algorithm only; the named ones fix the cutoff.
   @Double()
   external double crossfeedCutoffHz;
+
+  /// The explicit chain, front to back (ABI v27): `LazerAudioDspStage` values,
+  /// `stageCount == 0` leaves the engine's default order unchanged, and a stage
+  /// that is not listed is bypassed. Order is part of the audio result.
+  @Uint32()
+  external int stageCount;
+
+  @Array(8)
+  external Array<Int32> stageOrder;
 }
 
 /// `LazerAudioDspConfig.crossfeed_algorithm` values.

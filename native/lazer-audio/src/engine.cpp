@@ -23,6 +23,8 @@ namespace {
 constexpr int32_t kRenderWaitMillis = 50;
 constexpr int32_t kIdleSleepMillis = 3;
 constexpr size_t kRenderBlockFrames = 960;
+/* How long the producer may stay parked at the high watermark before it tries again regardless. */
+constexpr int32_t kProducerPauseLimitMillis = 50;
 
 bool doPOutputApplies(int32_t dsdOutputMode, const StreamDescription &source) noexcept {
     return dsdOutputMode == LazerAudioDsdOutputRequireDoP && source.dsd && source.rawDsd &&
@@ -267,6 +269,9 @@ void Engine::retireCurrentSources() {
         pendingPresentationReady_.store(false, std::memory_order_release);
         pendingPresentationSeek_.store(false, std::memory_order_release);
         pendingTrackChangedFrame_.store(-1, std::memory_order_release);
+        /* Clear the render thread's mirror too: it must not keep describing a retired source. */
+        activePresentation_.publish(StreamDescription{}, 0);
+        pendingPresentation_.publish(StreamDescription{}, 0);
     }
     for (const auto &slot : {active, queued, preparing}) {
         if (slot != nullptr) {
@@ -400,6 +405,9 @@ int32_t Engine::open(
         presentationSeekTargetMillis_ = openingSource->source.seekTargetMillis();
         presentationBufferedPercent_ = static_cast<int32_t>(
             openingSource->source.bufferedFraction() * 100.0);
+        /* The opening source is audible immediately: publish it as the active presentation too. */
+        activePresentation_.publish(presentationDescription_, presentationSeekTargetMillis_);
+        pendingPresentation_.publish(presentationDescription_, presentationSeekTargetMillis_);
     }
     if (result != LazerAudioOk) {
         setErrorLocked(currentSource().lastError(), result);
@@ -496,6 +504,8 @@ int32_t Engine::open(
 int32_t Engine::configurePipeline() {
     const StreamDescription &description = currentSource().description();
     const TargetFormat &target = outputSession_.target;
+    /* Every early return below leaves the previous session's answer behind otherwise. */
+    formatMatchesSource_ = false;
     const bool requireDoP = doPOutputApplies(device_.dsd_output_mode, description);
     const bool requireNativeDsd = nativeDsdOutputApplies(device_.dsd_output_mode, description);
     if (requireDoP != outputSession_.doP || requireNativeDsd != outputSession_.nativeDsd) {
@@ -611,6 +621,30 @@ int32_t Engine::configurePipeline() {
         outputSession_.bufferFrames * 3,
         outputSession_.target.sampleRate * std::max(device_.buffer_millis, 60) / 1000);
     ring_.reset(wantedFrames, frameBytes);
+    /* Hysteresis marks for the producer: it stops at the high mark and resumes at the low one. A
+     * quarter/three-quarters split, widened to at least two render blocks when the ring is short so
+     * a tiny buffer still has a band to work in instead of toggling every block. */
+    {
+        const int32_t capacity = ring_.capacityFrames();
+        const int32_t minimumBand = static_cast<int32_t>(kRenderBlockFrames) * 2;
+        /* Stop at the capacity — the same reach the pipeline always had, so a consumer that parks
+         * still lets the decoder finish the outgoing track — and resume only once a quarter of the
+         * ring has drained. Resuming the moment a single frame frees up is what keeps the producer
+         * awake through a whole period; waiting for the low mark gives the render thread a real
+         * cushion after a starvation instead of one block. */
+        int32_t highMark = capacity;
+        int32_t lowMark = capacity / 4;
+        if (capacity <= 0) {
+            lowMark = 0;
+            highMark = 0;
+        } else if (highMark - lowMark < minimumBand) {
+            highMark = std::min(capacity, minimumBand);
+            lowMark = std::max(0, highMark - minimumBand);
+        }
+        ringLowWatermarkFrames_.store(lowMark, std::memory_order_relaxed);
+        ringHighWatermarkFrames_.store(highMark, std::memory_order_relaxed);
+        producerPausedForRing_ = false;
+    }
     convertScratch_.assign(static_cast<size_t>(wantedFrames) * frameBytes, 0);
     const size_t queuedScratchFrames = std::max(kRenderBlockFrames,
         static_cast<size_t>(std::max(outputSession_.bufferFrames, 1)));
@@ -626,6 +660,9 @@ int32_t Engine::configurePipeline() {
     replayGainCurrentLinear_ = source_->replayGainLinear;
     replayGainTargetLinear_ = source_->replayGainLinear;
     replayGainRampRemainingFrames_ = 0;
+    /* DoP and Native DSD carry a bitstream whose bit-perfect meaning is defined separately (the
+     * carrier or the DSD word layout, not the PCM triple), so they never claim a PCM format match. */
+    formatMatchesSource_ = exactPcmFormat && !outputSession_.doP && !outputSession_.nativeDsd;
     bitPerfectActive_.store(dspBypassed_, std::memory_order_release);
     return LazerAudioOk;
 }
@@ -927,6 +964,9 @@ int32_t Engine::tryStartQueuedSource(bool &started, std::string &error) {
         }
         pendingPresentationDescription_ = source_->source.description();
         pendingPresentationSeekTargetMillis_ = source_->source.seekTargetMillis();
+        /* Mirror for the render thread, which commits it at the audible seam without a lock. */
+        pendingPresentation_.publish(source_->source.description(),
+            pendingPresentationSeekTargetMillis_);
         pendingPresentationSeek_.store(false, std::memory_order_release);
         boundaryFrame = acceptedFrames_.load(std::memory_order_acquire);
         if (nativeDsdActive_.load(std::memory_order_acquire) &&
@@ -1040,6 +1080,7 @@ int32_t Engine::stop() {
         source_ = std::make_shared<SourceSlot>(this, config_.log);
     }
     bitPerfectActive_.store(false, std::memory_order_release);
+    formatMatchesSource_ = false;
     dopActive_.store(false, std::memory_order_release);
     nativeDsdActive_.store(false, std::memory_order_release);
     state_.store(LazerAudioStateStopped, std::memory_order_release);
@@ -1085,11 +1126,22 @@ int32_t Engine::setVolume(double volume) {
 
 int32_t Engine::setDsp(const LazerAudioDspConfig &dsp) {
     if (dsp.band_count > LAZER_AUDIO_MAX_EQ_BANDS) return LazerAudioErrorInvalidArgument;
-    if ((dopActive_.load(std::memory_order_acquire) ||
-        nativeDsdActive_.load(std::memory_order_acquire)) &&
-        (dsp.preamp_db != 0.0 || dsp.band_count > 0 || dsp.limiter_enabled != 0)) {
+    /* A module that would alter the samples. Bypassed stages (a disabled band, a limiter that is
+     * off) do not count: sending them is how the settings layer keeps its state in one piece. */
+    const bool wantsProcessing = dsp.preamp_db != 0.0 || dsp.band_count > 0 ||
+        dsp.limiter_enabled != 0 || dsp.crossfeed_enabled != 0;
+    if (wantsProcessing && (dopActive_.load(std::memory_order_acquire) ||
+            nativeDsdActive_.load(std::memory_order_acquire))) {
         setError("EQ and limiter are unavailable while direct DSD output is active",
             LazerAudioErrorUnsupported);
+        return LazerAudioErrorUnsupported;
+    }
+    /* A bit-perfect session routes the decoded samples straight to the device, so a processing
+     * request cannot be honoured. Saying so beats accepting the request and silently dropping it:
+     * the caller would otherwise believe the EQ is applied while the state reports no DSP. */
+    if (wantsProcessing && bitPerfectActive_.load(std::memory_order_acquire)) {
+        setError("EQ, limiter and crossfeed are unavailable while bit-perfect output is active; "
+            "turn bit-perfect off first", LazerAudioErrorUnsupported);
         return LazerAudioErrorUnsupported;
     }
     dsp_.requestConfig(dsp);
@@ -1115,6 +1167,7 @@ int32_t Engine::setDevice(const LazerAudioDeviceConfig &device) {
         device_.device_id = nullptr;
     }
     bitPerfectActive_.store(false, std::memory_order_release);
+    formatMatchesSource_ = false;
     dopActive_.store(false, std::memory_order_release);
     nativeDsdActive_.store(false, std::memory_order_release);
     if (device_.buffer_millis <= 0) device_.buffer_millis = 120;
@@ -1127,10 +1180,14 @@ void Engine::snapshot(LazerAudioSnapshot &out) {
     std::lock_guard sourceGuard(sourceMutex_);
     if (source_ != nullptr) {
         const bool transitionPending = pendingTrackChangedFrame_.load(std::memory_order_acquire) >= 0;
-        const StreamDescription &description = transitionPending
-            ? presentationDescription_ : currentSource().description();
         out.position_millis = currentPositionMillisLocked();
-        out.duration_millis = description.durationMillis;
+        /* During a transition the audible track is the one the render thread committed at the seam,
+         * so its duration comes from the same atomics the render thread published — not from
+         * `presentationDescription_`, whose codec-string commit the producer may not have applied
+         * yet. A synchronous `snapshot()` from the TrackChanged callback must report the successor. */
+        out.duration_millis = transitionPending
+            ? activePresentation_.durationMillis.load(std::memory_order_acquire)
+            : currentSource().description().durationMillis;
         out.buffered_percent = transitionPending
             ? presentationBufferedPercent_
             : static_cast<int32_t>(currentSource().bufferedFraction() * 100.0);
@@ -1148,6 +1205,12 @@ void Engine::snapshot(LazerAudioSnapshot &out) {
         ? 0 : terminalDetail_.load(std::memory_order_relaxed);
     out.terminal_position_millis = terminalEvent == -1
         ? 0 : terminalPositionMillis_.load(std::memory_order_relaxed);
+    /* Both cursors are atomics, so this is a lock-free read from the polling thread and the one
+     * number that separates "the decoder cannot keep up" from "the device is being starved". */
+    out.ring_fill_frames = ring_.readableFrames();
+    out.ring_capacity_frames = ring_.capacityFrames();
+    out.ring_low_watermark_frames = ringLowWatermarkFrames_.load(std::memory_order_relaxed);
+    out.ring_high_watermark_frames = ringHighWatermarkFrames_.load(std::memory_order_relaxed);
 }
 
 void Engine::streamInfo(LazerAudioStreamInfo &out) {
@@ -1164,14 +1227,33 @@ void Engine::streamInfo(LazerAudioStreamInfo &out) {
         ? presentationDescription_ : currentSource().description();
     const size_t length = std::min(description.codec.size(), sizeof(out.codec) - 1);
     std::memcpy(out.codec, description.codec.data(), length);
-    out.source_sample_rate = description.dsd ? 0 : description.sampleRate;
-    out.source_channels = description.channels;
-    out.source_bits_per_sample = description.dsd ? 0 : description.bitsPerSample;
-    out.source_bitrate_kbps = description.bitrateKbps;
-    out.lossless = description.lossless;
-    out.source_format_kind = description.dsd
+    /* The scalars the render thread may query synchronously (from a TrackChanged callback) come from
+     * the commit it made at the seam; only the codec string is left for the producer to publish,
+     * because it is the one field that is not a plain atomic. */
+    const bool dsd = transitionPending
+        ? activePresentation_.dsd.load(std::memory_order_acquire) != 0
+        : description.dsd;
+    out.source_sample_rate = dsd
+        ? 0
+        : (transitionPending
+            ? activePresentation_.sampleRate.load(std::memory_order_acquire)
+            : description.sampleRate);
+    out.source_channels = transitionPending
+        ? activePresentation_.channels.load(std::memory_order_acquire) : description.channels;
+    out.source_bits_per_sample = dsd
+        ? 0
+        : (transitionPending
+            ? activePresentation_.bitsPerSample.load(std::memory_order_acquire)
+            : description.bitsPerSample);
+    out.source_bitrate_kbps = transitionPending
+        ? activePresentation_.bitrateKbps.load(std::memory_order_acquire) : description.bitrateKbps;
+    out.lossless = transitionPending
+        ? activePresentation_.lossless.load(std::memory_order_acquire) : (description.lossless ? 1 : 0);
+    out.source_format_kind = dsd
         ? LazerAudioSourceFormatDsd : LazerAudioSourceFormatPcm;
-    out.source_dsd_rate_multiplier = description.dsdRateMultiplier;
+    out.source_dsd_rate_multiplier = transitionPending
+        ? activePresentation_.dsdRateMultiplier.load(std::memory_order_acquire)
+        : description.dsdRateMultiplier;
     out.output_format_kind = LazerAudioOutputFormatPcm;
     out.output_peak_millidbfs = outputPeakMilliDbfs_.load(std::memory_order_acquire);
     out.limiter_gain_reduction_millidb = limiterGainReductionMilliDb_.load(std::memory_order_acquire);
@@ -1200,13 +1282,52 @@ void Engine::streamInfo(LazerAudioStreamInfo &out) {
             : outputSession_.doP ? LazerAudioOutputFormatDoP : LazerAudioOutputFormatPcm;
         out.output_dsd_rate_multiplier = (outputSession_.doP || outputSession_.nativeDsd)
             ? description.dsdRateMultiplier : 0;
+        /* The three facts behind `bit_perfect_active`, published so a caller can check the claim
+         * rather than trust it. They live inside this block on purpose: once the session is gone
+         * (failed, idle, preparing) there is no exclusive output, no format and no DSP path left to
+         * describe, and a reader deriving bit-perfect from the three must come out false. Keeping
+         * them here is what makes the derived answer agree with `bit_perfect_active`. */
+        out.output_dsp_active = dspInPath() ? 1 : 0;
+        out.output_format_matches_source = formatMatchesSource_ ? 1 : 0;
     }
     out.bit_perfect_active = bitPerfectActive_.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+bool Engine::dspInPath() const {
+    /* The float DSP/volume chain only processes the samples when the pipeline chose the processed
+     * branch: the direct-integer path, DoP and Native DSD all route around it. */
+    if (dspBypassed_) return false;
+    if (dopActive_.load(std::memory_order_acquire)) return false;
+    if (nativeDsdActive_.load(std::memory_order_acquire)) return false;
+    return true;
 }
 
 int64_t Engine::currentPositionMillis() const {
     std::lock_guard sourceGuard(sourceMutex_);
     return currentPositionMillisLocked();
+}
+
+int64_t Engine::renderPositionMillis() const noexcept {
+    /* The render thread's own position: same arithmetic as `currentPositionMillisLocked`, but every
+     * input is an atomic it can read without sourceMutex_. The seek target comes from the published
+     * presentation because the render thread must never reach into `source_`. */
+    const int32_t rate = outputSession_.target.sampleRate;
+    const int64_t seekTarget = activePresentation_.seekTargetMillis.load(std::memory_order_acquire);
+    if (rate <= 0) return seekTarget;
+    const int64_t rendered = renderedFrames_.load(std::memory_order_acquire);
+    const int64_t trackStart = trackStartOutputFrame_.load(std::memory_order_acquire);
+    return seekTarget + std::max<int64_t>(rendered - trackStart, 0) * 1000 / rate;
+}
+
+void Engine::applyPendingPresentationCommit() {
+    const uint64_t requested = presentationCommitRequested_.load(std::memory_order_acquire);
+    if (requested == presentationCommitApplied_.load(std::memory_order_acquire)) return;
+    /* The render thread already published the audible scalars; this moves the full description
+     * (codec string included) for the UI-facing readers. Producer thread, so taking the lock is
+     * fine — it is never held by the render thread. */
+    std::lock_guard sourceGuard(sourceMutex_);
+    presentationDescription_ = pendingPresentationDescription_;
+    presentationCommitApplied_.store(requested, std::memory_order_release);
 }
 
 int64_t Engine::currentPositionMillisLocked() const {
@@ -1291,6 +1412,43 @@ void Engine::resetTimelineForSeek() {
 
 int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
     if (frameCount <= 0) return 0;
+    /* Producer-side upkeep, done once per accepted block: apply a codec-string commit the render
+     * thread asked for at a frame seam, and republish the end-of-stream flag the render thread reads
+     * instead of locking. Both are cheap atomic operations on data the pump thread already owns. */
+    applyPendingPresentationCommit();
+    sourceEndedMirror_.store(currentSourceEnded(), std::memory_order_release);
+    /* Ring hysteresis. The render thread works out of a cushion: feeding past the high watermark
+     * only pins the ring full (every late decode block then becomes audible immediately), while
+     * dropping below the low one is what actually risks a gap. So the producer stops at the high
+     * mark and resumes at the low mark rather than tracking the fill frame by frame.
+     *
+     * A pending track boundary suspends the pause: the render thread is then holding the last
+     * period of the outgoing track until the ring reaches it, and throttling the producer in that
+     * window is how a seam turns into a stall. */
+    const int32_t fill = ring_.readableFrames();
+    const int32_t highMark = ringHighWatermarkFrames_.load(std::memory_order_relaxed);
+    const int32_t lowMark = ringLowWatermarkFrames_.load(std::memory_order_relaxed);
+    /* A seam in flight keeps the producer running: the pump parks in its own wait loop until the
+     * render thread crosses that boundary, and the render thread needs ring frames to get there, so
+     * throttling the producer in that window is a deadlock rather than a cushion. */
+    const bool seamInFlight =
+        pendingTrackChangedFrame_.load(std::memory_order_acquire) >= 0 ||
+        pendingPresentationReady_.load(std::memory_order_acquire);
+    if (producerPausedForRing_) {
+        /* Resume when the ring drains to the low mark — that is the hysteresis — but never stay
+         * latched: a consumer that has parked (a stalled endpoint, a paused device) must not be able
+         * to stop the decoder from finishing the outgoing track, which is exactly what the gapless
+         * path needs it to do. */
+        const bool drained = !seamInFlight && fill > lowMark;
+        const bool latchedTooLong = std::chrono::steady_clock::now() - producerPausedSince_ >
+            std::chrono::milliseconds(kProducerPauseLimitMillis);
+        if (drained && !latchedTooLong) return 0;
+        producerPausedForRing_ = false;
+    } else if (highMark > 0 && !seamInFlight && fill >= highMark) {
+        producerPausedForRing_ = true;
+        producerPausedSince_ = std::chrono::steady_clock::now();
+        return 0;
+    }
     if (nativeDsdActive_.load(std::memory_order_acquire)) {
         const size_t wordBytes = static_cast<size_t>(outputSession_.target.containerBitsPerSample / 8);
         const size_t outputFrameBytes = static_cast<size_t>(outputSession_.target.frameBytes());
@@ -1549,7 +1707,7 @@ void Engine::renderLoop() {
         setError(error.empty() ? "the output backend could not initialise its render thread" : error,
             threadSetup);
         bitPerfectActive_.store(false, std::memory_order_release);
-        publishTerminal(LazerAudioEventDeviceLost, threadSetup, currentPositionMillis());
+        publishTerminal(LazerAudioEventDeviceLost, threadSetup, renderPositionMillis());
         output_->leaveRenderThread();
         return;
     }
@@ -1567,7 +1725,7 @@ void Engine::renderLoop() {
         setError(error.empty() ? "the output backend failed while waiting for a period" : error,
             LazerAudioErrorDevice);
         bitPerfectActive_.store(false, std::memory_order_release);
-        publishTerminal(LazerAudioEventDeviceLost, 0, currentPositionMillis());
+        publishTerminal(LazerAudioEventDeviceLost, 0, renderPositionMillis());
         return -1;
     };
     const auto publishTrackChanged = [this, &seenFlush]() {
@@ -1578,17 +1736,51 @@ void Engine::renderLoop() {
             renderedFrames_.load(std::memory_order_acquire) < boundary) return;
         bool committed = false;
         {
-            std::lock_guard sourceGuard(sourceMutex_);
+            /* No lock: the whole commit is atomic stores the producer cannot observe half-applied
+             * (it only ever reads these after `pendingPresentationReady_` is cleared, and the new
+             * track's scalars are published by the producer before the boundary can be reached).
+             * This is the render thread's only way to make the seam visible to `snapshot()` and
+             * `streamInfo()`, so it has to happen here rather than on the producer. */
             int64_t expected = boundary;
             if (!seekFlushRequested_.load(std::memory_order_acquire) &&
                 ring_.flushSequence() == seenFlush &&
                 pendingTrackChangedFrame_.compare_exchange_strong(
                     expected, -1, std::memory_order_acq_rel)) {
-                presentationDescription_ = std::move(pendingPresentationDescription_);
-                presentationSeekTargetMillis_ = pendingPresentationSeek_.load(
-                    std::memory_order_acquire)
-                    ? source_->source.seekTargetMillis()
-                    : pendingPresentationSeekTargetMillis_;
+                const bool seekedIntoSuccessor =
+                    pendingPresentationSeek_.load(std::memory_order_acquire);
+                int64_t seekTarget = pendingPresentation_.seekTargetMillis.load(
+                    std::memory_order_acquire);
+                if (seekedIntoSuccessor) {
+                    /* A seek was applied to the successor after it was prepared; the producer
+                     * republishes its target, so take the freshly published value. */
+                    seekTarget = pendingPresentation_.seekTargetMillis.load(
+                        std::memory_order_acquire);
+                }
+                activePresentation_.durationMillis.store(
+                    pendingPresentation_.durationMillis.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                activePresentation_.seekTargetMillis.store(seekTarget, std::memory_order_release);
+                activePresentation_.sampleRate.store(
+                    pendingPresentation_.sampleRate.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                activePresentation_.channels.store(
+                    pendingPresentation_.channels.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                activePresentation_.bitsPerSample.store(
+                    pendingPresentation_.bitsPerSample.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                activePresentation_.bitrateKbps.store(
+                    pendingPresentation_.bitrateKbps.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                activePresentation_.dsd.store(
+                    pendingPresentation_.dsd.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                activePresentation_.dsdRateMultiplier.store(
+                    pendingPresentation_.dsdRateMultiplier.load(std::memory_order_acquire),
+                    std::memory_order_release);
+                activePresentation_.lossless.store(
+                    pendingPresentation_.lossless.load(std::memory_order_acquire),
+                    std::memory_order_release);
                 trackStartOutputFrame_.store(boundary, std::memory_order_release);
                 pendingPresentationReady_.store(false, std::memory_order_release);
                 pendingPresentationSeek_.store(false, std::memory_order_release);
@@ -1596,34 +1788,70 @@ void Engine::renderLoop() {
             }
         }
         if (committed) {
+            /* Ask the producer to move the full description (codec string); it owns that string and
+             * the UI readers take sourceMutex_ to read it. */
+            presentationCommitRequested_.fetch_add(1, std::memory_order_acq_rel);
             /* Event callbacks may synchronously query the snapshot or stream info. */
-            raise(LazerAudioEventTrackChanged, 0, currentPositionMillis());
+            raise(LazerAudioEventTrackChanged, 0, renderPositionMillis());
         }
     };
+    /* Source end-of-stream as the producer last published it: the render thread must not take
+     * sourceMutex_ to ask the source directly. */
+    const auto sourceEndedNow = [this]() {
+        return sourceEndedMirror_.load(std::memory_order_acquire);
+    };
     const auto activeDurationMillis = [this]() {
-        std::lock_guard sourceGuard(sourceMutex_);
-        return source_ == nullptr ? int64_t{0} : source_->source.description().durationMillis;
+        return activePresentation_.durationMillis.load(std::memory_order_acquire);
     };
 
     struct VariableOutputSpan {
         int64_t outputFrames;
         int64_t sourceFrames;
     };
-    std::deque<VariableOutputSpan> variableOutputQueue;
+    /* Fixed-capacity ledger instead of a deque: the render thread must not allocate. Dropping the
+     * oldest entry on overflow only loses accounting for the frames that were submitted longest ago,
+     * which is exactly the case the resync path already handles. */
+    constexpr size_t kVariableLedgerCapacity = 1024;
+    std::vector<VariableOutputSpan> variableOutputLedger(kVariableLedgerCapacity);
+    size_t variableLedgerHead = 0;
+    size_t variableLedgerCount = 0;
+    const auto variableLedgerPush = [&](VariableOutputSpan span) {
+        if (variableLedgerCount == kVariableLedgerCapacity) {
+            variableLedgerHead = (variableLedgerHead + 1) % kVariableLedgerCapacity;
+            --variableLedgerCount;
+        }
+        variableOutputLedger[(variableLedgerHead + variableLedgerCount) % kVariableLedgerCapacity] =
+            span;
+        ++variableLedgerCount;
+    };
+    const auto variableLedgerClear = [&]() {
+        variableLedgerHead = 0;
+        variableLedgerCount = 0;
+    };
     int64_t queueDepthAtLastObservation = 0;
     int64_t submissionsSinceQueueObservation = 0;
     int64_t renderedVariableSourceFrames = 0;
     bool variableQueueNeedsResync = true;
+    /* Session start: do not submit the first period before the producer has filled one. Counting the
+     * opening silence as a source-starvation underrun would make every session look like it starved
+     * once, and the number would stop meaning "the decoder fell behind". Bounded, so a source that
+     * is slow to open still starts instead of waiting forever. */
+    bool primedForSession = false;
+    int32_t primingWaits = 0;
+    constexpr int32_t kPrimingWaitLimit = 8;
     const auto retireVariableOutputFrames = [&](int64_t retiredFrames) {
-        while (retiredFrames > 0 && !variableOutputQueue.empty()) {
-            VariableOutputSpan &span = variableOutputQueue.front();
+        while (retiredFrames > 0 && variableLedgerCount > 0) {
+            VariableOutputSpan &span = variableOutputLedger[variableLedgerHead];
             const int64_t retired = std::min(retiredFrames, span.outputFrames);
             const int64_t sourceRetired = std::min(retired, span.sourceFrames);
             renderedVariableSourceFrames += sourceRetired;
             span.outputFrames -= retired;
             span.sourceFrames -= sourceRetired;
             retiredFrames -= retired;
-            if (span.outputFrames == 0) variableOutputQueue.pop_front();
+            if (span.outputFrames == 0) {
+                variableLedgerHead = (variableLedgerHead + 1) % kVariableLedgerCapacity;
+                --variableLedgerCount;
+            }
         }
     };
 
@@ -1638,7 +1866,7 @@ void Engine::renderLoop() {
             writtenFrames_.store(0, std::memory_order_release);
             renderedFrames_.store(0, std::memory_order_release);
             exclusiveInFlightAudioFrames_.store(0, std::memory_order_release);
-            variableOutputQueue.clear();
+            variableLedgerClear();
             queueDepthAtLastObservation = 0;
             submissionsSinceQueueObservation = 0;
             renderedVariableSourceFrames = 0;
@@ -1654,6 +1882,20 @@ void Engine::renderLoop() {
         }
 
         const bool fixedPeriod = outputSession_.writeMode == OutputWriteMode::FixedPeriod;
+        if (!primedForSession && !fixedPeriod) {
+            /* Wait for the producer to fill one period before the session's first submission. */
+            const int32_t ready = std::max<int32_t>(
+                static_cast<int32_t>(kRenderBlockFrames), 0);
+            if (ring_.readableFrames() >= ready ||
+                pumpFinished_.load(std::memory_order_acquire) || sourceEndedNow() ||
+                primingWaits >= kPrimingWaitLimit) {
+                primedForSession = true;
+            } else {
+                ++primingWaits;
+                if (waitForOutput() < 0) break;
+                continue;
+            }
+        }
         if (fixedPeriod) {
             const int32_t waitResult = waitForOutput();
             if (waitResult <= 0) {
@@ -1681,7 +1923,7 @@ void Engine::renderLoop() {
                 setError(error.empty() ? "the output backend failed while draining" : error,
                     LazerAudioErrorDevice);
                 bitPerfectActive_.store(false, std::memory_order_release);
-                publishTerminal(LazerAudioEventDeviceLost, 0, currentPositionMillis());
+                publishTerminal(LazerAudioEventDeviceLost, 0, renderPositionMillis());
                 break;
             }
             if (drain == OutputDrainResult::Drained) {
@@ -1700,16 +1942,16 @@ void Engine::renderLoop() {
         if (queuedBeforeWrite < 0) {
             setError(error.empty() ? "the output backend could not report its queued frames" : error,
                 LazerAudioErrorDevice);
-            publishTerminal(LazerAudioEventDeviceLost, 0, currentPositionMillis());
+            publishTerminal(LazerAudioEventDeviceLost, 0, renderPositionMillis());
             break;
         }
         if (!fixedPeriod && outputSession_.queueDepthAvailable) {
             if (variableQueueNeedsResync) {
                 /* A seek flush clears software accounting while an endpoint may still have old
                  * carrier frames queued. Retire those as non-source audio after the queue drains. */
-                variableOutputQueue.clear();
+                variableLedgerClear();
                 if (queuedBeforeWrite > 0) {
-                    variableOutputQueue.push_back({queuedBeforeWrite, 0});
+                    variableLedgerPush({queuedBeforeWrite, 0});
                 }
                 queueDepthAtLastObservation = queuedBeforeWrite;
                 submissionsSinceQueueObservation = 0;
@@ -1732,7 +1974,7 @@ void Engine::renderLoop() {
             setError(error.empty() ? "the output backend could not report writable frames" : error,
                 LazerAudioErrorDevice);
             bitPerfectActive_.store(false, std::memory_order_release);
-            publishTerminal(LazerAudioEventDeviceLost, 0, currentPositionMillis());
+            publishTerminal(LazerAudioEventDeviceLost, 0, renderPositionMillis());
             break;
         }
         if (!fixedPeriod) room = std::min(room, static_cast<int32_t>(kRenderBlockFrames));
@@ -1752,7 +1994,7 @@ void Engine::renderLoop() {
             const auto hasEnough = [&]() {
                 const int32_t readable = ring_.readableFrames();
                 return fixedPeriod
-                    ? readable >= room || (readable > 0 && currentSourceEnded())
+                    ? readable >= room || (readable > 0 && sourceEndedNow())
                     : readable > 0;
             };
             while (!cancelled_.load(std::memory_order_acquire) &&
@@ -1766,7 +2008,7 @@ void Engine::renderLoop() {
         const int32_t frameBytes = std::max(outputSession_.target.frameBytes(), 1);
         const int32_t frames = ring_.read(block.data(), room);
         if (frames == 0 && !pumpFinished_.load(std::memory_order_acquire) &&
-            !waitedForQueuedBoundary && currentSourceEnded()) {
+            !waitedForQueuedBoundary && sourceEndedNow()) {
             /* A clean decoder EOF can race the pump's final session notification. Wait for that
              * notification rather than submitting a silent fixed period between queued tracks. */
             sleepIdle();
@@ -1781,7 +2023,7 @@ void Engine::renderLoop() {
             if (framesToWrite < 0) {
                 setError("the DoP carrier formatter rejected the output frame layout",
                     LazerAudioErrorDevice);
-                publishTerminal(LazerAudioEventDeviceLost, 0, currentPositionMillis());
+                publishTerminal(LazerAudioEventDeviceLost, 0, renderPositionMillis());
                 break;
             }
         } else if (fixedPeriod && frames < room) {
@@ -1798,7 +2040,7 @@ void Engine::renderLoop() {
                     setError(error.empty() ? "the output backend failed while draining" : error,
                         LazerAudioErrorDevice);
                     bitPerfectActive_.store(false, std::memory_order_release);
-                    publishTerminal(LazerAudioEventDeviceLost, 0, currentPositionMillis());
+                    publishTerminal(LazerAudioEventDeviceLost, 0, renderPositionMillis());
                     break;
                 }
                 if (drain == OutputDrainResult::Drained) {
@@ -1825,14 +2067,14 @@ void Engine::renderLoop() {
             ((outputSession_.doP || outputSession_.nativeDsd) && written != framesToWrite)) {
             setError(error.empty() ? "the output backend rejected the submitted PCM frames" : error,
                 written < 0 ? written : LazerAudioErrorDevice);
-            publishTerminal(LazerAudioEventDeviceLost, 0, currentPositionMillis());
+            publishTerminal(LazerAudioEventDeviceLost, 0, renderPositionMillis());
             break;
         }
         const int32_t submittedFrames = std::min(written, framesToWrite);
         const int32_t submittedSourceFrames = std::min(frames, submittedFrames);
         const int32_t paddedFrames = std::max(submittedFrames - submittedSourceFrames, 0);
         const bool currentSourceUnfinished = !pumpFinished_.load(std::memory_order_acquire) &&
-            !currentSourceEnded();
+            !sourceEndedNow();
         const bool countsAsUnderrun = paddedFrames > 0 && !waitedForQueuedBoundary &&
             !seekFlushRequested_.load(std::memory_order_acquire) &&
             ring_.flushSequence() == flush && currentSourceUnfinished;
@@ -1853,7 +2095,7 @@ void Engine::renderLoop() {
             if (outputSession_.queueDepthAvailable) {
                 /* Keep an ordered audio/DoP-idle ledger. Total device queue depth includes idle
                  * carriers, but only source carriers should advance media position. */
-                variableOutputQueue.push_back({written, sendingSilence ? 0 : sourceFrames});
+                variableLedgerPush({written, sendingSilence ? 0 : sourceFrames});
                 submissionsSinceQueueObservation += written;
             } else {
                 /* Without a queue-depth API, preserve the old immediate-render assumption while

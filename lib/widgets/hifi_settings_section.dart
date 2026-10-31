@@ -13,8 +13,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../audio/hifi_controller.dart';
+import '../audio/native/engine_metrics.dart';
 import '../audio/native/lazer_audio_devices.dart';
 import '../audio/native/lazer_audio_engine.dart';
+import '../audio/native/output_path_state.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/hifi_settings.dart';
@@ -165,6 +167,56 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
               if (native && _needsVolumeWarning(settings))
                 const _WarningRow(
                   '软件音量必须为 100%：Bit-perfect 会绕过音量与 EQ，引擎会以此拒绝直接输出',
+                ),
+              // The engine refuses processing while bit-perfect is active, so the
+              // page states that the EQ/limiter/crossfeed are held out of the path
+              // instead of showing them as applied.
+              if (native && settings.dspBypassedByBitPerfect)
+                const _WarningRow(
+                  'Bit-perfect 已开启：均衡器 / 限幅器 / 耳机串扰不会进入信号路径，关闭 Bit-perfect 后按当前设置生效',
+                ),
+              // The chain is explicit now (ABI v27), so the order is a setting rather
+              // than something the engine decides: it is part of the audio result, and
+              // the summary states what will actually be applied.
+              if (native)
+                _SettingRow(
+                  label: 'DSP 链顺序',
+                  subtitle: '当前：${settings.dspChainSummary}',
+                  trailing: DropdownButton<String>(
+                    key: const ValueKey('hifi-dsp-order'),
+                    value: _dspOrderChoice(settings),
+                    underline: const SizedBox.shrink(),
+                    borderRadius: BorderRadius.circular(12),
+                    items: <DropdownMenuItem<String>>[
+                      for (final MapEntry<String, List<int>> preset
+                          in kDspChainPresets.entries)
+                        DropdownMenuItem<String>(
+                          value: encodeDspStageOrder(preset.value),
+                          child: Text(preset.key),
+                        ),
+                      // A persisted order that matches no preset (hand-edited, or a
+                      // future preset that was removed) still has to be selectable,
+                      // otherwise the dropdown would assert on an unknown value.
+                      if (!kDspChainPresets.values
+                          .map(encodeDspStageOrder)
+                          .contains(_dspOrderChoice(settings)))
+                        DropdownMenuItem<String>(
+                          value: _dspOrderChoice(settings),
+                          child: const Text('自定义'),
+                        ),
+                    ],
+                    onChanged: (String? value) {
+                      if (value != null) {
+                        unawaited(
+                          _update(
+                            settings.copyWith(
+                              dspStageOrder: decodeDspStageOrder(value),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
                 ),
               if (native && hifi.supportsDoP)
                 _SettingRow(
@@ -889,6 +941,81 @@ class _EqBandEditor extends StatelessWidget {
 
 double _tenthDb(double value) => (value * 10).roundToDouble() / 10;
 
+/// The dropdown's value: the encoded order, because `DropdownButton` compares with
+/// `==` and two equal `List<int>`s are not equal.
+String _dspOrderChoice(HifiSettings settings) =>
+    encodeDspStageOrder(settings.dspStageOrder);
+
+/// One row of the 信号路径 panel.
+class SignalPathReadout {
+  const SignalPathReadout(this.label, this.value);
+
+  final String label;
+  final String value;
+}
+
+/// The rows the 信号路径 panel shows, derived from what the engine reported.
+///
+/// Public and pure so the bit-perfect rule is asserted directly instead of through
+/// a rendered page: the indicator may light only when the session is exclusive,
+/// the DSP is out of the path and the output format is the source's, and when it
+/// does not light it must name the condition that failed.
+List<SignalPathReadout> signalPathReadouts({
+  required LazerStreamInfo? info,
+  LazerEngineMetrics? metrics,
+}) {
+  final OutputPathState? path = info?.outputPath;
+  return <SignalPathReadout>[
+    SignalPathReadout('解码格式', info == null ? '未播放' : info.codec),
+    SignalPathReadout(
+      '源',
+      info == null
+          ? '—'
+          : info.hasDsdSource
+          ? 'DSD${info.sourceDsdRateMultiplier}x'
+          : '${info.sourceSampleRate} Hz / ${info.sourceBitsPerSample}-bit',
+    ),
+    SignalPathReadout(
+      '输出会话',
+      info == null
+          ? '—'
+          : '${info.outputSampleRate} Hz / ${info.outputBitsPerSample}-bit'
+                '${info.outputIsFloat ? ' float' : ''}'
+                '${info.outputContainerBitsPerSample > info.outputBitsPerSample ? '（${info.outputContainerBitsPerSample}-bit 容器）' : ''}',
+    ),
+    SignalPathReadout(
+      '格式选择',
+      info == null ? '—' : _FormatCard.selectionLabel(info.outputFormatSelection),
+    ),
+    SignalPathReadout(
+      'Bit-perfect',
+      path == null
+          ? '—'
+          : path.bitPerfect
+          ? '是（独占 · 无 DSP · 格式一致）'
+          : '否（${path.failingConditions.join('；')}）',
+    ),
+    SignalPathReadout('独占', path == null ? '—' : (path.exclusive ? '是' : '否')),
+    SignalPathReadout(
+      'DSP',
+      path == null ? '—' : (path.dspActive ? '在信号路径中' : '不在信号路径中'),
+    ),
+    SignalPathReadout(
+      '格式与源一致',
+      path == null ? '—' : (path.formatMatchesSource ? '是' : '否'),
+    ),
+    // The output-side counters the HiFi work has to be able to point at.
+    SignalPathReadout('输出缓冲', metrics == null ? '—' : metrics.summary),
+    if (info != null && info.telemetryValid)
+      SignalPathReadout(
+        '遥测',
+        '峰值 ${(info.peakMilliDbfs / 1000).toStringAsFixed(1)} dBFS'
+            '${info.limiterGainReductionMilliDb == 0 ? '' : ' · 限幅 ${(info.limiterGainReductionMilliDb / 1000).toStringAsFixed(1)} dB'}'
+            '${info.clippedSampleCount == 0 ? '' : ' · 削波 ${info.clippedSampleCount}'}',
+      ),
+  ];
+}
+
 /// The live format readout: what the engine negotiated, not what was requested.
 class _FormatCard extends StatelessWidget {
   const _FormatCard({required this.hifi});
@@ -899,44 +1026,10 @@ class _FormatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
-    final LazerStreamInfo? info = hifi.streamInfo;
-    final List<_Readout> rows = <_Readout>[
-      _Readout('解码格式', info == null ? '未播放' : info.codec),
-      _Readout(
-        '源',
-        info == null
-            ? '—'
-            : info.hasDsdSource
-            ? 'DSD${info.sourceDsdRateMultiplier}x'
-            : '${info.sourceSampleRate} Hz / ${info.sourceBitsPerSample}-bit',
-      ),
-      _Readout(
-        '输出会话',
-        info == null
-            ? '—'
-            : '${info.outputSampleRate} Hz / ${info.outputBitsPerSample}-bit'
-                  '${info.outputIsFloat ? ' float' : ''}'
-                  '${info.outputContainerBitsPerSample > info.outputBitsPerSample ? '（${info.outputContainerBitsPerSample}-bit 容器）' : ''}',
-      ),
-      _Readout(
-        '格式选择',
-        info == null ? '—' : _selectionLabel(info.outputFormatSelection),
-      ),
-      _Readout(
-        '独占 / Bit-perfect',
-        info == null
-            ? '—'
-            : '${info.outputExclusive ? '独占' : '共享'} / '
-                  '${info.bitPerfectActive ? '是' : '否'}',
-      ),
-      if (info != null && info.telemetryValid)
-        _Readout(
-          '遥测',
-          '峰值 ${(info.peakMilliDbfs / 1000).toStringAsFixed(1)} dBFS'
-              '${info.limiterGainReductionMilliDb == 0 ? '' : ' · 限幅 ${(info.limiterGainReductionMilliDb / 1000).toStringAsFixed(1)} dB'}'
-              '${info.clippedSampleCount == 0 ? '' : ' · 削波 ${info.clippedSampleCount}'}',
-        ),
-    ];
+    final List<SignalPathReadout> rows = signalPathReadouts(
+      info: hifi.streamInfo,
+      metrics: hifi.readMetrics(),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -945,7 +1038,7 @@ class _FormatCard extends StatelessWidget {
           margin: EdgeInsets.zero,
           child: Column(
             children: <Widget>[
-              for (final _Readout row in rows)
+              for (final SignalPathReadout row in rows)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 9, 16, 9),
                   child: Row(
@@ -987,7 +1080,8 @@ class _FormatCard extends StatelessWidget {
     );
   }
 
-  static String _selectionLabel(int selection) => switch (selection) {
+  /// How the engine selected the initialized output format, in the panel's words.
+  static String selectionLabel(int selection) => switch (selection) {
     1 => '共享混音',
     2 => '独占 · 源格式',
     3 => '独占 · 同采样率替代格式',
@@ -1002,13 +1096,6 @@ class _FormatCard extends StatelessWidget {
     12 => '原生 DSD_U32_BE',
     _ => '未知',
   };
-}
-
-class _Readout {
-  const _Readout(this.label, this.value);
-
-  final String label;
-  final String value;
 }
 
 class _SectionLabel extends StatelessWidget {

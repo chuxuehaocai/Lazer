@@ -65,6 +65,10 @@ int main() {
     FIELD(LazerAudioSnapshot, terminal_event);
     FIELD(LazerAudioSnapshot, terminal_detail);
     FIELD(LazerAudioSnapshot, terminal_position_millis);
+    FIELD(LazerAudioSnapshot, ring_fill_frames);
+    FIELD(LazerAudioSnapshot, ring_capacity_frames);
+    FIELD(LazerAudioSnapshot, ring_low_watermark_frames);
+    FIELD(LazerAudioSnapshot, ring_high_watermark_frames);
 
     std::printf("sizeof LazerAudioStreamInfo %zu\n", sizeof(LazerAudioStreamInfo));
     FIELD(LazerAudioStreamInfo, codec);
@@ -92,6 +96,8 @@ int main() {
     FIELD(LazerAudioStreamInfo, output_dsd_rate_multiplier);
     FIELD(LazerAudioStreamInfo, output_coreaudio_mixability_known);
     FIELD(LazerAudioStreamInfo, output_coreaudio_non_mixable);
+    FIELD(LazerAudioStreamInfo, output_dsp_active);
+    FIELD(LazerAudioStreamInfo, output_format_matches_source);
 
     std::printf("sizeof LazerAudioEqBand %zu\n", sizeof(LazerAudioEqBand));
     FIELD(LazerAudioEqBand, kind);
@@ -112,6 +118,8 @@ int main() {
     FIELD(LazerAudioDspConfig, crossfeed_algorithm);
     FIELD(LazerAudioDspConfig, crossfeed_delay_ms);
     FIELD(LazerAudioDspConfig, crossfeed_cutoff_hz);
+    FIELD(LazerAudioDspConfig, stage_count);
+    FIELD(LazerAudioDspConfig, stage_order);
 
     std::printf("sizeof LazerAudioOutputDeviceInfo %zu\n", sizeof(LazerAudioOutputDeviceInfo));
     FIELD(LazerAudioOutputDeviceInfo, struct_size);

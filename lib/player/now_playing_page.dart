@@ -21,6 +21,7 @@ import '../utils/cover_save.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/animated_notice.dart';
 import '../widgets/animated_track_cover.dart';
+import '../widgets/audio_path_badge.dart';
 import '../widgets/catalog_links.dart';
 import '../widgets/copyable_song_title.dart';
 import '../widgets/interaction_feedback.dart';
@@ -1245,6 +1246,7 @@ class _PlaybackTransport extends StatelessWidget {
           key: const ValueKey('now-playing-transport'),
           mainAxisSize: MainAxisSize.min,
           children: [
+            AudioPathBadge(state: state),
             AnimatedNotice(
               message: state.playbackError,
               onDismiss: state.clearPlaybackError,

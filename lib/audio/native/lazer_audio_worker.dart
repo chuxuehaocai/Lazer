@@ -499,7 +499,21 @@ Object? _setDsp(LazerAudioApi api, List<Object?> params) {
       ..bands = bandArray
       ..limiterEnabled = (params[2] as int) != 0 ? 1 : 0
       ..limiterThresholdDb = (params[3] as num).toDouble()
-      ..balanceChannels = 0;
+      ..balanceChannels = 0
+      // The chain the settings layer asked for; an empty list keeps the engine's
+      // documented default order. `stageCount` is explicit so "use the default" is
+      // a decision rather than a side effect of calloc.
+      ..stageCount = 0;
+    if (params.length > 6 && params[6] is List<Object?>) {
+      final List<Object?> order = params[6]! as List<Object?>;
+      int written = 0;
+      for (final Object? stage in order) {
+        if (written >= lazerAudioMaxDspStages) break;
+        if (stage is! int || stage < 0 || stage > 4) continue;
+        dsp.ref.stageOrder[written++] = stage;
+      }
+      dsp.ref.stageCount = written;
+    }
     if (crossfeed.length >= 5) {
       dsp.ref
         ..crossfeedEnabled = (crossfeed[0] as int) != 0 ? 1 : 0

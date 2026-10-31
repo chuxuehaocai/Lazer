@@ -16,10 +16,13 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../state/hifi_settings.dart';
+import 'native/audio_path_log.dart';
+import 'native/engine_metrics.dart';
 import 'native/lazer_audio_devices.dart';
 import 'native/lazer_audio_engine.dart';
 import 'native/lazer_audio_library.dart';
 import 'native/lazer_audio_worker.dart';
+import 'native/output_path_state.dart';
 
 /// What the settings page needs to draw itself.
 class HifiStatus {
@@ -139,6 +142,37 @@ class HifiController extends ChangeNotifier {
 
   LazerStreamInfo? get _streamInfoFromEngine => engine?.streamInfo;
 
+  /// The live output path with the bit-perfect verdict derived from its three
+  /// conditions, or null before a stream is opened.
+  OutputPathState? get outputPath => streamInfo?.outputPath;
+
+  LazerEngineMetrics? _metrics;
+
+  /// Ring occupancy and starvation counters of the current session.
+  ///
+  /// A synchronous, allocation-free snapshot read — the same call [position]
+  /// already makes while the app ticks — so the diagnostics panel can read it
+  /// during a build. The underrun transition is recorded once as an `audio.path`
+  /// line, which is what makes a starvation episode visible after the fact
+  /// without logging every frame count.
+  LazerEngineMetrics? readMetrics() {
+    final LazerEngineMetrics? next = engine?.readMetrics();
+    if (next == null) return _metrics;
+    final LazerEngineMetrics? previous = _metrics;
+    _metrics = next;
+    if (previous == null ||
+        previous.underrunActive != next.underrunActive ||
+        (next.underrunFrames > 0 && previous.underrunFrames == 0)) {
+      logAudioPathEvent('metrics', <String, Object?>{
+        'ring_fill': next.ringFillFrames,
+        'ring_capacity': next.ringCapacityFrames,
+        'underrun_active': next.underrunActive ? 1 : 0,
+        'underrun_frames': next.underrunFrames,
+      });
+    }
+    return next;
+  }
+
   /// Starts following the engine's negotiated format.
   void attach() {
     final NativeAudioEngine? native = engine;
@@ -223,6 +257,7 @@ class HifiController extends ChangeNotifier {
             enabled: band.enabled != 0,
           ),
       ],
+      stageOrder: dsp.stageOrder,
       crossfeed: LazerCrossfeedSettings(
         enabled: dsp.crossfeedEnabled,
         strength: dsp.crossfeedStrength,
@@ -325,12 +360,19 @@ class HifiController extends ChangeNotifier {
     if (api == null) {
       _devices = const <LazerOutputDevice>[];
       _deviceError = 'this host has no device catalog';
+      logAudioPathEvent('device_catalog', <String, Object?>{
+        'kind': null,
+        'count': 0,
+        'default': null,
+        'error': _deviceError,
+      });
       notifyListeners();
       return;
     }
     _busy = true;
     notifyListeners();
     try {
+      _deviceError = null;
       _devices = enumerateOutputDevices(
         api,
         onError: (String message) => _deviceError = message,
@@ -340,6 +382,14 @@ class HifiController extends ChangeNotifier {
       _deviceError = '$error';
     } finally {
       _busy = false;
+      // The catalog record: which namespace answered, how many endpoints it
+      // found, and which one playback would default to.
+      logAudioPathEvent('device_catalog', <String, Object?>{
+        'kind': outputDeviceCatalogKind(api),
+        'count': _devices.length,
+        'default': defaultDevice?.displayName,
+        'error': _deviceError,
+      });
       notifyListeners();
     }
   }

@@ -143,6 +143,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.deviceIsTelevision = false,
     this.hifiSettings = const HifiSettings(),
     this.hifi,
+    this.hifiPathNotice,
     this.artworkSeedLoader = albumSeedForCover,
     this.navidromeFactory,
     this.scheduledPauseClock = DateTime.now,
@@ -164,11 +165,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // Terminal failures of the native engine (device lost, decode error) have no
     // throw site to reach the load path, so they arrive here instead.
     final AudioEngine? engine = audioEngine;
-    _failureSubscription = engine is FailureReportingAudioEngine
-        ? (engine as FailureReportingAudioEngine).failures.listen(
-            _onEngineFailure,
-          )
+    final FailureReportingAudioEngine? reporter =
+        engine is FailureReportingAudioEngine
+        ? engine as FailureReportingAudioEngine
         : null;
+    _failureSubscription = reporter?.failures.listen(_onEngineFailure);
+    // A launch-time downgrade happened before this constructor could subscribe,
+    // so the stream cannot deliver it: take it from the engine (or from the
+    // selection the app was built with) and keep it as a standing notice.
+    hifiPathNotice = reporter?.pendingFailure ?? hifiPathNotice;
     _bufferSubscription = engine is BufferChangeReportingAudioEngine
         ? (engine as BufferChangeReportingAudioEngine).bufferChanges.listen(
             (_) => _onBufferChanged(),
@@ -1121,6 +1126,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool discoveryChartsLoading = false;
   String? discoveryChartsError;
   String? playbackError;
+
+  /// Why this session is not on the native HiFi path, or null when it is.
+  ///
+  /// Set at launch when the native engine could not start, and again when a
+  /// running native session fails terminally. The player renders it, because a
+  /// downgrade that only reached the log looks exactly like a HiFi session to
+  /// the person listening.
+  String? hifiPathNotice;
+
+  /// Whether the native HiFi engine is the running playback path.
+  bool get hifiPathIsNative => hifiPathNotice == null;
   UserCollections collections = UserCollections.empty;
   bool collectionsLoading = false;
   String? collectionsError;
@@ -2935,8 +2951,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ///
   /// The message is shown instead of silently stopping: a lost output device and a
   /// decode error both leave the user with no audio, and both are worth naming.
+  /// A terminal failure also ends the HiFi promise for this session — the output
+  /// that produced it is gone — so the path notice says so.
   void _onEngineFailure(String message) {
-    if (!_realActive) return;
+    final bool pathChanged =
+        hifiPathNotice == null && audioEngine is FailureReportingAudioEngine;
+    if (pathChanged) {
+      hifiPathNotice = '音频引擎已中断：$message（当前非 HiFi 路径）';
+    }
+    if (!_realActive) {
+      if (pathChanged) notifyListeners();
+      return;
+    }
     _failPlayback(message);
   }
 

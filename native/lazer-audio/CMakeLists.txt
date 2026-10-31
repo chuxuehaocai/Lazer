@@ -316,6 +316,84 @@ if(LAZER_AUDIO_BUILD_PROBE)
     add_test(NAME lazer-audio-engine-gapless
         COMMAND $<TARGET_FILE:lazer-audio-engine-gapless-probe>)
 
+    # The bit-perfect claim and the three facts it is derived from (ABI v25). Captures the engine's
+    # real output bytes through a fake fixed-period endpoint, so it proves byte-exactness without a
+    # device, and proves the claim goes away when the DSP is in the path or the format is not the
+    # source's.
+    add_executable(lazer-audio-engine-bit-perfect-probe
+        tools/lazer_audio_engine_bit_perfect_probe.cpp
+        src/common.cpp
+        src/dff_dsf_reader.cpp
+        src/engine.cpp
+        src/source.cpp
+        src/dop_packer.cpp
+        src/native_dsd_packer.cpp
+        src/dsp_chain.cpp
+        src/ring_buffer.cpp
+        src/pcm_output.cpp)
+    target_include_directories(lazer-audio-engine-bit-perfect-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${LAZER_FFMPEG_INCLUDE_DIR}")
+    target_link_libraries(lazer-audio-engine-bit-perfect-probe PRIVATE ${LAZER_FFMPEG_LIBRARIES})
+    target_compile_features(lazer-audio-engine-bit-perfect-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-engine-bit-perfect-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-engine-bit-perfect-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-engine-bit-perfect-probe PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    if(LAZER_FFMPEG_RUNTIME_FILES)
+        add_custom_command(TARGET lazer-audio-engine-bit-perfect-probe POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${LAZER_FFMPEG_RUNTIME_FILES}
+                    "$<TARGET_FILE_DIR:lazer-audio-engine-bit-perfect-probe>"
+            VERBATIM)
+    endif()
+    add_test(NAME lazer-audio-engine-bit-perfect
+        COMMAND $<TARGET_FILE:lazer-audio-engine-bit-perfect-probe>)
+
+    # Ring/producer stress: a paced fake endpoint runs the whole producer -> ring -> render path and
+    # the case asserts that a producer which keeps up never pads, and that an injected stall is
+    # counted, bounded by the stall and recovered from.
+    add_executable(lazer-audio-ring-stress-probe
+        tools/lazer_audio_ring_stress_probe.cpp
+        src/common.cpp
+        src/dff_dsf_reader.cpp
+        src/engine.cpp
+        src/source.cpp
+        src/dop_packer.cpp
+        src/native_dsd_packer.cpp
+        src/dsp_chain.cpp
+        src/ring_buffer.cpp
+        src/pcm_output.cpp)
+    target_include_directories(lazer-audio-ring-stress-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${LAZER_FFMPEG_INCLUDE_DIR}")
+    target_link_libraries(lazer-audio-ring-stress-probe PRIVATE ${LAZER_FFMPEG_LIBRARIES})
+    target_compile_features(lazer-audio-ring-stress-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-ring-stress-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-ring-stress-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-ring-stress-probe PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    if(LAZER_FFMPEG_RUNTIME_FILES)
+        add_custom_command(TARGET lazer-audio-ring-stress-probe POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${LAZER_FFMPEG_RUNTIME_FILES}
+                    "$<TARGET_FILE_DIR:lazer-audio-ring-stress-probe>"
+            VERBATIM)
+    endif()
+    add_test(NAME lazer-audio-ring-stress
+        COMMAND $<TARGET_FILE:lazer-audio-ring-stress-probe>)
+    set_tests_properties(lazer-audio-ring-stress PROPERTIES TIMEOUT 300)
+
     # Validate the Engine's global RequireDoP policy against PCM and raw stereo DSD using a
     # variable-write fake endpoint; no physical audio device is opened.
     add_executable(lazer-audio-engine-dop-probe
@@ -579,6 +657,31 @@ if(LAZER_AUDIO_BUILD_PROBE)
     endif()
     add_test(NAME lazer-audio-dsp
         COMMAND $<TARGET_FILE:lazer-audio-dsp-probe>)
+
+    # The chain is explicit and ordered (ABI v27): this proves an empty request still means the
+    # documented default order, that a different order really produces different samples, and that a
+    # stage left out of the order is bypassed.
+    add_executable(lazer-audio-dsp-order-probe
+        tools/lazer_audio_dsp_order_probe.cpp
+        src/dsp_chain.cpp
+        src/pcm_output.cpp
+    )
+    target_include_directories(lazer-audio-dsp-order-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${LAZER_FFMPEG_INCLUDE_DIR}")
+    target_compile_features(lazer-audio-dsp-order-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-dsp-order-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-dsp-order-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-dsp-order-probe PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    add_test(NAME lazer-audio-dsp-order
+        COMMAND $<TARGET_FILE:lazer-audio-dsp-order-probe>)
 
     # Crossfeed mixes the channels, so its properties (leakage, delay, strength,
     # transparency when off) are measurable on synthetic signals without a device.

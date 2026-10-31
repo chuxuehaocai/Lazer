@@ -9,8 +9,11 @@ unchanged.
 
 `just_audio`/media_kit is still the fallback. The native engine is used only when
 its shared library is next to the app and reports the ABI version this build
-expects; otherwise the app plays exactly as it did before. That keeps Android,
-iOS, and any desktop build without a DSD-capable FFmpeg working.
+expects; otherwise the app plays exactly as it did before — and now says so: the
+launch decision (`AudioEnginePathDecision`) is reported through
+`FailureReportingAudioEngine.pendingFailure` and shown in the player by
+`AudioPathBadge`, so a downgrade is never silent. That keeps Android, iOS, and any
+desktop build without a DSD-capable FFmpeg working.
 
 ```
 AppState ──► AudioEngine ──► NativeAudioEngine ──► LazerAudioWorker (isolate)
@@ -40,6 +43,16 @@ That change appends fields to `LazerAudioDspConfig` and bumps
 `LAZER_AUDIO_ABI_VERSION` to **24** — the header's own rule for additive changes. The
 Dart mirror, the layout expectations and the worker message were updated together, so
 `dart tool/native_abi_check.dart` fails loudly if they ever drift.
+
+A second deliberate change, for the bit-perfect work, appends to
+`LazerAudioStreamInfo` (`output_dsp_active`, `output_format_matches_source`) and to
+`LazerAudioSnapshot` (`ring_fill_frames`, `ring_capacity_frames`) and bumps the ABI to
+**25**; the output-ring rework adds `ring_low_watermark_frames` /
+`ring_high_watermark_frames` and takes it to **26**. The reason is that `bit_perfect_active` alone is a claim nobody can check: the
+engine now publishes the three facts it derives that flag from — whether the session is
+exclusive, whether the float DSP/volume chain is on the signal path, and whether the
+output runs the source's own rate/channels/depth — and `lib/audio/native/output_path_state.dart`
+derives the verdict from them, so a stale flag cannot light the indicator in the UI.
 
 Everything else in the tree is the master branch's, including its probes.
 
@@ -152,7 +165,14 @@ With `-DLAZER_AUDIO_NATIVE_PROBES=ON` the engine's own offline probes are built 
 registered with CTest. They drive fake platform-output backends, so no audio device is
 needed, and they cover PCM matrix byte-exactness across the advertised rate/depth grid,
 gapless A→B seams, DoP carrier framing, Native DSD packing, CUE segments, ReplayGain
-transitions, the DSP/limiter chain and the platform format policies:
+transitions, the DSP/limiter chain, the platform format policies, and the bit-perfect
+claim itself (`lazer-audio-engine-bit-perfect`: the captured output bytes must equal the
+source PCM exactly, and the claim must go away — with `dsp_active` /
+`format_matches_source` saying why — when the DSP is in the path or the endpoint runs a
+different format), and the output ring (`lazer-audio-ring-stress`: 40 s through a paced
+endpoint must report zero padded frames, and an injected 800 ms decoder stall must produce
+a bounded, recovered-from underrun count). The `windows` CI job runs this suite on every
+build:
 
 ```bash
 cmake -S native -B build/native-probes -DLAZER_FFMPEG_ROOT=/path/to/ffmpeg -DLAZER_AUDIO_NATIVE_PROBES=ON
@@ -227,7 +247,7 @@ Status of this port:
 | Reader bridge | Built and exercised end to end. |
 | Streaming cache | Exercised end to end. |
 | `AudioEngine` transport, gapless queue, buffered position, failure reporting | Implemented and verified live. |
-| Windows bundle integration | Built with MSVC against a DSD-capable FFmpeg; **CTest 17/17** under both the Ninja and Visual Studio generators. |
+| Windows bundle integration | Built with MSVC against a DSD-capable FFmpeg; **CTest 19/19** under both the Ninja and Visual Studio generators, and the suite runs in CI on every Windows build. |
 | Linux bundle integration | Written; not built or run here. |
 | macOS bundle integration | Manual staging only; not run. |
 | Real playback through WASAPI | **Verified on one Windows host**: shared and exclusive, seek, pause/stop, gapless crossing, reader-bridge streaming, EQ. |
@@ -243,11 +263,15 @@ Status of this port:
 | Android | Wired at the build and load layers: CI builds the engine for `arm64-v8a`, `armeabi-v7a` and `x86_64`, stages them into `jniLibs` and verifies the APK, and `LazerAudioLoader` resolves `liblazer-audio.so` on `androidArm64`/`androidX64`. See `docs/android-audio.md`. **`armeabi-v7a` is not in the loader's candidate list**, so a 32-bit ARM build ships the engine without ever selecting it; Android has no exclusive/bit-perfect/DSD path (AAudio shared PCM only). |
 | iOS | Not wired. The app keeps `just_audio` there. |
 
-Nothing here is evidence of bit-perfect output: the engine reports what the
-platform endpoint accepted, which is necessary but not sufficient, and no digital
-loopback has been captured for any device. The exclusive/bit-perfect result above
-means the endpoint accepted the exact format and the engine reported no processing —
-not that a DAC received those bits unaltered.
+Nothing here is evidence that a DAC received the source bits unaltered: the engine
+reports what the platform endpoint accepted, which is necessary but not sufficient, and
+no digital loopback has been captured for any device. What *is* now checkable is the
+engine's own output: `lazer-audio-engine-bit-perfect` captures the bytes the engine
+hands to its (fake) endpoint and requires them to equal the source PCM exactly, and the
+live `native_path_check --play --bit-perfect` prints the same three conditions
+(`exclusive`, `dsp_active`, `format_matches_source`) the UI derives its indicator from.
+An exclusive/bit-perfect session reporting the source format unchanged still means only
+that the endpoint accepted the exact format and the engine reported no processing.
 
 This machine could not build the Flutter app itself when this port was written: `flutter build`
 and `flutter test` need Windows Developer Mode for plugin symlinks, which required administrator
@@ -270,10 +294,13 @@ Ported from Twilight Echo's HiFi settings, in this app's own visual language:
 | 高保真播放 | 引擎状态, 输出设备 (with refresh), 独占输出, Bit-perfect, DSD 输出 (auto/PCM/DoP/native), DSD 倍率策略, 响度归一, 输出缓冲 |
 | 耳机串扰 | crossfeed 开关, 强度, 算法 (custom/Bauer/BS2B/Meier) |
 | 均衡器 | 开关, 预设, 前级, 限幅器, 10 段滑杆, 重置 |
-| 信号路径 | 解码格式, 源, 输出会话, 格式选择, 独占/bit-perfect, 遥测 |
+| 信号路径 | 解码格式, 源, 输出会话, 格式选择, Bit-perfect（独占 / DSP / 格式一致三项条件）, 独占, DSP, 格式与源一致, 输出缓冲（环形缓冲水位 + 欠载计数）, 遥测 |
 
 The page enforces the honest combinations rather than letting the engine refuse later:
-bit-perfect greys out the EQ and crossfeed (both are bypassed by that promise), a
+bit-perfect greys out the EQ and crossfeed (both are bypassed by that promise), holds the
+preamp and limiter out of the request it sends, states on the page that they are not in
+the signal path (the engine refuses processing during a bit-perfect session rather than
+silently dropping it), a
 non-unity software volume is called out, and policies the engine cannot implement are
 labelled as such instead of silently behaving like the fallback.
 

@@ -16,6 +16,7 @@ import '../theme/app_palette.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/animated_notice.dart';
+import '../widgets/audio_path_badge.dart';
 import '../widgets/copyable_song_title.dart';
 import '../widgets/player_seek_bar.dart';
 import '../widgets/interaction_feedback.dart';
@@ -675,6 +676,7 @@ class _DesktopDock extends StatelessWidget {
                       key: const ValueKey('now-playing-transport'),
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        AudioPathBadge(state: state),
                         AnimatedSwitcher(
                           duration: const Duration(milliseconds: 200),
                           transitionBuilder: (child, animation) =>
