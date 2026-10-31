@@ -6,6 +6,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cmath>
 #include <mutex>
 #include <vector>
@@ -140,6 +141,38 @@ private:
     bool active_ = false;
 };
 
+/* Finite impulse response convolution: a direct-form FIR over a mirrored history so the tap window
+ * is contiguous and the inner loop has no wrap test.
+ *
+ * This is deliberately the simplest correct implementation rather than a partitioned FFT: the stage
+ * contract (ordered chain, caller-supplied taps, no allocation while running) is what the engine
+ * needs to be able to prove, and a partitioned FFT can replace the guts later without touching it.
+ * The tap count is capped so a pathologically long IR is refused instead of silently costing more
+ * CPU per sample than the rest of the chain together. */
+class Convolver {
+public:
+    /* Longest impulse response the engine will accept. A 4,096-tap direct FIR is roughly 0.4 GFLOP/s
+     * at 44.1 kHz stereo; longer IRs need the FFT implementation before they are worth accepting. */
+    static constexpr size_t kMaxTaps = 4'096;
+
+    /* Copies `frames` taps per channel, channel-major. Returns false when the request is unusable
+     * (no taps, more than kMaxTaps, a channel count of zero) and leaves any previous IR in place. */
+    bool configure(const float *taps, int32_t channels, size_t frames);
+
+    void reset() noexcept;
+    [[nodiscard]] bool active() const noexcept { return tapFrames_ > 0 && channels_ > 0; }
+    /* True when the configured IR belongs to a session with this channel count. */
+    [[nodiscard]] bool matches(int32_t channels) const noexcept { return channels_ == channels; }
+    void process(float *interleaved, size_t frameCount) noexcept;
+
+private:
+    std::vector<float> taps_;
+    std::vector<float> history_;
+    size_t tapFrames_ = 0;
+    int32_t channels_ = 0;
+    size_t cursor_ = 0;
+};
+
 /* Owns the EQ sections and applies the whole chain. The engine installs a new EQ request from the
  * caller's thread; the audio thread picks it up at the next block boundary, which at ~5 ms blocks is
  * far below audibility.
@@ -157,6 +190,7 @@ public:
         Crossfeed = LazerAudioDspStageCrossfeed,
         Limiter = LazerAudioDspStageLimiter,
         Volume = LazerAudioDspStageVolume,
+        Convolver = LazerAudioDspStageConvolver,
     };
 
     /* The order used when a request does not name one. */
@@ -174,6 +208,9 @@ public:
     double process(float *interleaved, size_t frameCount);
     [[nodiscard]] bool eqActive() const noexcept;
     [[nodiscard]] bool crossfeedActive() const noexcept { return crossfeed_.active(); }
+    [[nodiscard]] bool convolverActive() const noexcept {
+        return convolver_.active() && convolver_.matches(format_.channels);
+    }
     [[nodiscard]] double gainReductionDb() const noexcept { return lastReductionDb_; }
     /* The order the audio thread currently applies, for probes and diagnostics. */
     [[nodiscard]] std::vector<Stage> activeOrder() const;
@@ -195,6 +232,10 @@ private:
     PcmFormat format_{};
     std::vector<EqSection> sections_;
     Crossfeed crossfeed_;
+    Convolver convolver_;
+    std::vector<float> pendingTaps_;
+    int32_t pendingTapChannels_ = 0;
+    size_t pendingTapFrames_ = 0;
     double preampLinear_ = 1.0;
     Limiter limiter_;
     VolumeRamp volume_;

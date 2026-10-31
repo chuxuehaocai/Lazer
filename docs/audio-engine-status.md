@@ -637,6 +637,73 @@ PASS: the chain reports the 5-stage order it applies
 
 ---
 
+## 14. 阶段 5 落地记录（DSD/DoP 的 bit-perfect 语义）
+
+阶段 5 的第一件事是**定义** DSD 路径下"bit-perfect"是什么意思——阶段 2 的结论当时是"语义尚未定义"，
+引擎对 DoP / 原生 DSD 一律报 `bit_perfect_active = 0`，那是一个保守占位，不是结论。
+
+**定义**：DoP 会把解码得到的 DSD 位流原样放进 24-bit 载波，原生 DSD 会把位流原样放进端点自己的
+DSD 字格式。两种情况下 `configurePipeline` 在开会话时已经**拒绝**了任何不匹配的契约（采样率换算、
+声道数、位深/字宽、独占），所以会话一旦打开，"源被原样承载"就已经成立。因此 DSD 路径复用与 PCM
+相同的三个事实：
+
+| 事实 | DoP / 原生 DSD 下的含义 |
+| --- | --- |
+| `output_exclusive` | 独占端点（开会话时强制） |
+| `output_dsp_active` | float DSP/音量链不在信号路径中（DSD 路径本来就绕开它，且 `setDsp` 拒绝处理请求） |
+| `output_format_matches_source` | 载波 / DSD 字格式与源完全一致（不满足就开不了会话） |
+
+于是 `bit_perfect_active = exclusive && !dsp && matches` 对 DSD 同样成立，ABI 升到 **28**（语义变化，
+按头文件规则 bump）。
+
+| 改动 | 位置 |
+| --- | --- |
+| 引擎：DSD 会话按上述定义发布三个事实 | `native/lazer-audio/src/engine.cpp`（`configurePipeline` 末尾） |
+| Dart：`OutputPathState` 不再对 DSD 路径强制"未定义"，并新增 `bitPerfectMeaning` 说明结论的含义 | `lib/audio/native/output_path_state.dart` |
+| 探针：`lazer-audio-engine-dop` 断言 DoP 会话 `exclusive=1, dsp_active=0, format_matches=1, bit_perfect=1` | `tools/lazer_audio_engine_dop_probe.cpp` |
+| 探针：`lazer-audio-engine-native-dsd` 断言原生 DSD 同样成立，且 `output_telemetry_valid` 仍为 0（PCM 遥测不适用） | `tools/lazer_audio_engine_native_dsd_probe.cpp` |
+
+**验证**：引擎探针 **20/20**；`flutter analyze` 无问题；`flutter test` **655 项通过**；`native_abi_check` 与
+`native_engine_check` 通过。
+
+**仍未做**：DSD 的**物理层**验证（没有 DSD 源、没有 DoP-capable DAC，这一点从阶段 0 起就没变过），
+以及卷积/VST 等扩展——它们需要先有 DSP 模块契约的第三类实现，不属于本次范围。
+
+---
+
+## 15. 卷积级（阶段 5 的第二件，**不随发布暴露**）
+
+按需求"先确保引擎可用、后期发布不要涉及这些"，卷积只做到**引擎能力 + 探针**：没有设置项、没有默认 IR、
+没有 UI 入口，`HifiSettings.decodeDspStageOrder` 仍然只接受 0–4，所以应用无法打开它。
+
+| 内容 | 说明 | 位置 |
+| --- | --- | --- |
+| `LazerAudioDspStageConvolver` = 5 | 链上的第六级，ABI 29（纯追加） | `include/lazer_audio_api.h` |
+| IR 参数 | `impulse_response`（channel-major）、`impulse_response_frames`、`impulse_response_channels`；引擎在 `set_dsp` 返回前复制，调用方保留所有权 | 同上 |
+| 实现 | 直接型 FIR，镜像历史缓冲避免环绕判断；会话建立时一次性分配，`renderLoop` 不分配 | `src/dsp_chain.h`（`Convolver`） |
+| 护栏 | 超过 4096 taps 拒绝、声道数与会话不符则整段惰性、未列入 `stage_order` 即旁路并清空历史 | 同上 |
+| 可观测 | 启用后 `dsp_active=1`，`OutputPathState.bitPerfect` 自动变假，"信号路径"面板显示 DSP 介入 | 阶段 2 的既有规则，无需新 UI |
+
+**验证** — 新增 CTest `lazer-audio-convolver`：
+
+```
+PASS: a unit impulse is the identity through the convolver
+PASS: a two-tap response matches a direct convolution sample for sample
+PASS: an IR left out of the order does not touch the signal
+PASS: an IR that does not match the session channels is refused
+PASS: an IR longer than 4096 taps is refused and the stage stays inert
+PASS: bypassing the stage clears its history
+```
+
+引擎探针 **21/21**；`flutter analyze` 无问题；`flutter test` 655 项通过；`native_abi_check` 通过。
+（过程中真抓到一个 bug：`requestConfig` 的阶段合法性上界还停在 `Volume`，导致 `Convolver` 被当作未知级静默忽略——探针的"两点响应"用例把它暴露出来，已修。）
+
+**边界**：直接型 FIR 在 4096 taps 时约 0.4 GFLOP/s（44.1 kHz 立体声），更长 IR 需要换成 partitioned FFT；
+这一步只证明"接口位置正确"，不证明"性能足够跑房间校正"。发布前若要启用它，还需要：IR 加载与持久化、
+FFT 实现、以及至少一台真实设备上的听感与负载验证。
+
+---
+
 ## 附：本阶段用到的复现命令
 
 ```powershell

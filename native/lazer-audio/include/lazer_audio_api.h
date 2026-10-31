@@ -30,7 +30,7 @@
 #define LAZER_AUDIO_CALL
 #endif
 
-#define LAZER_AUDIO_ABI_VERSION 27u
+#define LAZER_AUDIO_ABI_VERSION 29u
 
 #define LAZER_AUDIO_MAX_EQ_BANDS 32u
 /* Upper bound on the explicit DSP chain length; see LazerAudioDspStage. */
@@ -211,7 +211,9 @@ typedef struct LazerAudioStreamInfo {
     int32_t output_channels;
     int32_t output_bits_per_sample;
     int32_t output_exclusive;
-    /* Set only when the exact lossless PCM format was accepted and DSP/digital volume are bypassed. */
+    /* Set only when the output carries the source unaltered and DSP/digital volume are bypassed: for
+     * PCM that means the exact lossless format was accepted, for DoP/Native DSD that the carrier or
+     * DSD word contract holds (the engine refuses to open such a session otherwise). */
     int32_t bit_perfect_active;
     /* Append-only in ABI v3: container width and encoding of the initialized output session. */
     int32_t output_container_bits_per_sample;
@@ -244,9 +246,11 @@ typedef struct LazerAudioStreamInfo {
      * check the claim instead of trusting it. `output_dsp_active` is true only while the float
      * DSP/volume chain is actually in the signal path (it is false when the samples are routed
      * straight through, and false for the DoP and Native DSD paths, whose bit-perfect semantics are
-     * defined separately). `output_format_matches_source` is true only when the initialized output
-     * session runs the source's own sample rate, channel count and sample depth, with no resampling
-     * or requantization. `bit_perfect_active` is true only when the session is exclusive, the DSP is
+     * defined separately, and reported through these same fields: for DoP/Native DSD
+     * `output_format_matches_source` means the carrier or DSD word format carries the source stream
+     * exactly, which is what the session cannot open without). `output_format_matches_source` is true
+     * only when the initialized output session runs the source's own format with no resampling or
+     * requantization. `bit_perfect_active` is true only when the session is exclusive, the DSP is
      * not in the path and the format matches the source. */
     int32_t output_dsp_active;
     int32_t output_format_matches_source;
@@ -318,6 +322,9 @@ typedef enum LazerAudioDspStage {
     LazerAudioDspStageCrossfeed = 2,
     LazerAudioDspStageLimiter = 3,
     LazerAudioDspStageVolume = 4,
+    /* Append-only in ABI v29: finite impulse response convolution. The taps are supplied by the
+     * caller (the engine never reads a file here); see impulse_response below. */
+    LazerAudioDspStageConvolver = 5,
 } LazerAudioDspStage;
 
 typedef struct LazerAudioDspConfig {
@@ -341,6 +348,15 @@ typedef struct LazerAudioDspConfig {
      * before the EQ protects the pre-EQ signal, after it protects what actually leaves the chain. */
     uint32_t stage_count;
     int32_t stage_order[LAZER_AUDIO_MAX_DSP_STAGES];
+    /* Append-only in ABI v29: the impulse response for LazerAudioDspStageConvolver. The taps are
+     * channel-major (`impulse_response[channel * impulse_response_frames + tap]`) and are copied by
+     * the engine before `set_dsp` returns, so the caller keeps ownership of the buffer. Zero frames
+     * means the convolver has no impulse response and the stage is inert even when listed. A channel
+     * count that does not match the session leaves the stage inert as well rather than mixing a
+     * mono IR into stereo by accident. */
+    const float *impulse_response;
+    uint32_t impulse_response_frames;
+    uint32_t impulse_response_channels;
 } LazerAudioDspConfig;
 
 /* Immutable snapshot of the Windows render endpoints at catalog creation time. The catalog reports

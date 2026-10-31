@@ -683,6 +683,29 @@ if(LAZER_AUDIO_BUILD_PROBE)
     add_test(NAME lazer-audio-dsp-order
         COMMAND $<TARGET_FILE:lazer-audio-dsp-order-probe>)
 
+    # FIR convolution as a chain stage (ABI v29). Nothing in the app enables it; this is what makes
+    # the stage contract provable before anything ships on top of it.
+    add_executable(lazer-audio-convolver-probe
+        tools/lazer_audio_convolver_probe.cpp
+        src/dsp_chain.cpp
+        src/pcm_output.cpp)
+    target_include_directories(lazer-audio-convolver-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${LAZER_FFMPEG_INCLUDE_DIR}")
+    target_compile_features(lazer-audio-convolver-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-convolver-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-convolver-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-convolver-probe PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    add_test(NAME lazer-audio-convolver
+        COMMAND $<TARGET_FILE:lazer-audio-convolver-probe>)
+
     # Crossfeed mixes the channels, so its properties (leakage, delay, strength,
     # transparency when off) are measurable on synthetic signals without a device.
     add_executable(lazer-audio-crossfeed-probe

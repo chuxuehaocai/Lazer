@@ -20,7 +20,7 @@ void main() {
   });
 
   test('the ABI version matches the header this mirror was written for', () {
-    expect(lazerAudioAbiVersion, 27);
+    expect(lazerAudioAbiVersion, 29);
   });
 
   test('open params carry the struct size the native side validates', () {
