@@ -658,6 +658,31 @@ if(LAZER_AUDIO_BUILD_PROBE)
     add_test(NAME lazer-audio-dsp
         COMMAND $<TARGET_FILE:lazer-audio-dsp-probe>)
 
+    # The chain is explicit and ordered (ABI v27): this proves an empty request still means the
+    # documented default order, that a different order really produces different samples, and that a
+    # stage left out of the order is bypassed.
+    add_executable(lazer-audio-dsp-order-probe
+        tools/lazer_audio_dsp_order_probe.cpp
+        src/dsp_chain.cpp
+        src/pcm_output.cpp
+    )
+    target_include_directories(lazer-audio-dsp-order-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${LAZER_FFMPEG_INCLUDE_DIR}")
+    target_compile_features(lazer-audio-dsp-order-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-dsp-order-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-dsp-order-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-dsp-order-probe PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    add_test(NAME lazer-audio-dsp-order
+        COMMAND $<TARGET_FILE:lazer-audio-dsp-order-probe>)
+
     # Crossfeed mixes the channels, so its properties (leakage, delay, strength,
     # transparency when off) are measurable on synthetic signals without a device.
     add_executable(lazer-audio-crossfeed-probe

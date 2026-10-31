@@ -499,7 +499,11 @@ Object? _setDsp(LazerAudioApi api, List<Object?> params) {
       ..bands = bandArray
       ..limiterEnabled = (params[2] as int) != 0 ? 1 : 0
       ..limiterThresholdDb = (params[3] as num).toDouble()
-      ..balanceChannels = 0;
+      ..balanceChannels = 0
+      // The chain order is the engine's default (empty request) until the settings
+      // layer can edit it; `stageCount` is explicit so that is a decision, not a
+      // side effect of calloc.
+      ..stageCount = 0;
     if (crossfeed.length >= 5) {
       dsp.ref
         ..crossfeedEnabled = (crossfeed[0] as int) != 0 ? 1 : 0

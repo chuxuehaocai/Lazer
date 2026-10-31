@@ -314,7 +314,8 @@ void DspChain::configureFormat(PcmFormat format) {
 void DspChain::requestConfig(const LazerAudioDspConfig &config) {
     std::lock_guard guard(pendingMutex_);
     /* The bands pointer belongs to the caller's stack, so the specifications are copied here rather
-     * than read on the audio thread. */
+     * than read on the audio thread. The order is a fixed array in the struct, so it is copied the
+     * same way and validated on the audio thread. */
     pendingBands_.assign(config.bands, config.bands + std::min<uint32_t>(
         config.band_count, LAZER_AUDIO_MAX_EQ_BANDS));
     pendingPreampDb_ = config.preamp_db;
@@ -325,6 +326,17 @@ void DspChain::requestConfig(const LazerAudioDspConfig &config) {
     pendingCrossfeed_.algorithm = config.crossfeed_algorithm;
     pendingCrossfeed_.delayMs = config.crossfeed_delay_ms;
     pendingCrossfeed_.cutoffHz = config.crossfeed_cutoff_hz;
+    pendingOrder_.clear();
+    const uint32_t stageCount = std::min<uint32_t>(config.stage_count, LAZER_AUDIO_MAX_DSP_STAGES);
+    for (uint32_t index = 0; index < stageCount; ++index) {
+        const int32_t value = config.stage_order[index];
+        if (value < LazerAudioDspStagePreamp || value > LazerAudioDspStageVolume) {
+            /* An unknown stage is ignored rather than failing the whole request: the chain still
+             * has to keep the stages the caller did name. */
+            continue;
+        }
+        pendingOrder_.push_back(static_cast<Stage>(value));
+    }
     pendingDirty_ = true;
 }
 
@@ -343,6 +355,26 @@ void DspChain::reset() noexcept {
 bool DspChain::eqActive() const noexcept {
     return std::any_of(sections_.begin(), sections_.end(),
         [](const EqSection &section) { return section.active(); });
+}
+
+std::vector<DspChain::Stage> DspChain::activeOrder() const {
+    return order_.empty()
+        ? std::vector<Stage>(kDefaultOrder.begin(), kDefaultOrder.end())
+        : order_;
+}
+
+void DspChain::applyOrder(const std::vector<Stage> &order) {
+    order_ = order;
+    if (order_.empty()) return;
+    /* A stage the caller left out is bypassed, which for the EQ means its sections are cleared and
+     * for the limiter that it stops processing — not merely skipped at the call site, so the state
+     * it would otherwise carry into the next request is gone. */
+    const auto listed = [this](Stage stage) {
+        return std::find(order_.begin(), order_.end(), stage) != order_.end();
+    };
+    if (!listed(Stage::Eq)) sections_.clear();
+    if (!listed(Stage::Crossfeed)) crossfeed_.reset();
+    if (!listed(Stage::Limiter)) limiter_.configure(format_.sampleRate, -1.0, false);
 }
 
 void DspChain::applyPendingConfig() {
@@ -395,34 +427,62 @@ void DspChain::applyPendingConfig() {
         specification.enabled = bands[index].enabled != 0;
         sections_[index].configure(specification, format_.sampleRate);
     }
-    /* Crossfeed runs between the EQ and the limiter: the limiter therefore protects the summed
-     * signal, which is what actually leaves the chain. */
+    /* Crossfeed runs between the EQ and the limiter by default: the limiter therefore protects the
+     * summed signal, which is what actually leaves the chain. A caller that asks for another order
+     * gets exactly that order — see `process()`. */
     crossfeed_.configure(crossfeed, format_.sampleRate, format_.channels);
     limiter_.configure(format_.sampleRate, limiterThresholdDb, limiterEnabled);
     limiter_.reset();
+    applyOrder(pendingOrder_);
 }
 
 double DspChain::process(float *interleaved, size_t frameCount) {
     if (interleaved == nullptr || frameCount == 0 || !format_.isValid()) return 0.0;
     applyPendingConfig();
     const size_t channels = static_cast<size_t>(format_.channels);
-
-    for (size_t frame = 0; frame < frameCount; ++frame) {
-        float *samples = interleaved + frame * channels;
-        for (size_t channel = 0; channel < channels; ++channel) {
-            double value = samples[channel] * preampLinear_;
-            for (auto &section : sections_) {
-                if (section.active()) value = section.process(static_cast<float>(value), channel);
-            }
-            samples[channel] = static_cast<float>(value);
-        }
-    }
-
-    crossfeed_.process(interleaved, frameCount, channels);
+    const std::vector<Stage> order = activeOrder();
 
     double reduction = 0.0;
-    if (limiter_.enabled()) reduction = limiter_.process(interleaved, frameCount, channels);
-    volume_.process(interleaved, frameCount, channels);
+    for (const Stage stage : order) {
+        switch (stage) {
+            case Stage::Preamp:
+                if (preampLinear_ == 1.0) break;
+                for (size_t frame = 0; frame < frameCount; ++frame) {
+                    float *samples = interleaved + frame * channels;
+                    for (size_t channel = 0; channel < channels; ++channel) {
+                        samples[channel] = static_cast<float>(samples[channel] * preampLinear_);
+                    }
+                }
+                break;
+            case Stage::Eq:
+                if (sections_.empty()) break;
+                for (size_t frame = 0; frame < frameCount; ++frame) {
+                    float *samples = interleaved + frame * channels;
+                    for (size_t channel = 0; channel < channels; ++channel) {
+                        double value = samples[channel];
+                        for (auto &section : sections_) {
+                            if (section.active()) {
+                                value = section.process(static_cast<float>(value), channel);
+                            }
+                        }
+                        samples[channel] = static_cast<float>(value);
+                    }
+                }
+                break;
+            case Stage::Crossfeed:
+                crossfeed_.process(interleaved, frameCount, channels);
+                break;
+            case Stage::Limiter:
+                if (!limiter_.enabled()) break;
+                /* The last limiter in the chain reports its gain reduction; the telemetry row is
+                 * about the protection the listener actually gets. */
+                reduction = limiter_.process(interleaved, frameCount, channels);
+                break;
+            case Stage::Volume:
+                volume_.process(interleaved, frameCount, channels);
+                break;
+        }
+    }
     lastReductionDb_ = reduction;
     return reduction;
 }

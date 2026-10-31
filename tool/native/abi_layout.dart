@@ -538,6 +538,18 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       () => _dsp().ref.crossfeedCutoffHz = _sentinelDouble,
       _doubleMarker,
     ),
+    AbiField(
+      'stageCount',
+      80,
+      () => _dsp().ref.stageCount = _sentinel32,
+      _uint32Marker,
+    ),
+    AbiField(
+      'stageOrder',
+      84,
+      () => _dsp().ref.stageOrder[0] = _sentinel32,
+      _int32Marker,
+    ),
   ]),
   AbiStruct('LazerAudioOutputDeviceInfo', sizeOf<LazerAudioOutputDeviceInfo>(), <AbiField>[
     AbiField(
@@ -636,7 +648,7 @@ const Map<String, int> abiCStructSizes = <String, int>{
   'LazerAudioSnapshot': 80,
   'LazerAudioStreamInfo': 176,
   'LazerAudioEqBand': 40,
-  'LazerAudioDspConfig': 80,
+  'LazerAudioDspConfig': 120,
   'LazerAudioOutputDeviceInfo': 8,
   'LazerAudioDeviceInfo': 24,
   'LazerAudioPcmFormatCandidate': 12,

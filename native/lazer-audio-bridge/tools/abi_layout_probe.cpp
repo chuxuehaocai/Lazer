@@ -118,6 +118,8 @@ int main() {
     FIELD(LazerAudioDspConfig, crossfeed_algorithm);
     FIELD(LazerAudioDspConfig, crossfeed_delay_ms);
     FIELD(LazerAudioDspConfig, crossfeed_cutoff_hz);
+    FIELD(LazerAudioDspConfig, stage_count);
+    FIELD(LazerAudioDspConfig, stage_order);
 
     std::printf("sizeof LazerAudioOutputDeviceInfo %zu\n", sizeof(LazerAudioOutputDeviceInfo));
     FIELD(LazerAudioOutputDeviceInfo, struct_size);

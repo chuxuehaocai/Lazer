@@ -597,6 +597,43 @@ PASS: a 800 ms stall (ring covers ~371 ms) produced 10752 padded frames, bounded
 
 ---
 
+## 13. 阶段 4 落地记录（引擎侧）
+
+阶段 4 的目标是把 DSP 从"固定配置"变成"显式有序链"。基线（第 3.4 节）显示：链的顺序写死在
+`DspChain::process()` 里，没有任何排序/旁路概念。本次落地的是**引擎侧契约**：链的顺序由调用方
+按 ABI 指定，未列出的级即旁路。
+
+| 基线缺口 | 处理 | 代码位置 |
+| --- | --- | --- |
+| 顺序写死，不可排序 | `LazerAudioDspConfig` 追加 `stage_count` + `stage_order[8]`（ABI 27，纯追加）；`DspChain` 按该顺序逐级派发，`stage_count == 0` 表示沿用文档化的默认顺序（Preamp→Eq→Crossfeed→Limiter→Volume） | `include/lazer_audio_api.h:305-330`、`src/dsp_chain.h:147-200`、`src/dsp_chain.cpp:305-345`、`:405-470` |
+| 级可开关/旁路 | 未列入顺序的级被旁路，并且**释放其状态**（EQ 段清空、limiter 重新配置为关闭、crossfeed 复位），而不是在调用点跳过 | `src/dsp_chain.cpp`（`applyOrder`） |
+| 未知级 | 忽略该级，其余照常生效（而不是整条请求失败） | `src/dsp_chain.cpp`（`requestConfig`） |
+| 链上模块启用使 bit-perfect 失效 | 阶段 2 的规则不变：bit-perfect 会话里引擎拒绝处理请求（`engine.cpp:1092-1121`），非 bit-perfect 会话里 `dsp_active` 恒为真，派生结果必然为 false | 见第 11 节 |
+
+**证据** — 新增 CTest `lazer-audio-dsp-order`（`native/lazer-audio/tools/lazer_audio_dsp_order_probe.cpp`）：
+
+```
+PASS: an empty stage list reproduces the documented default order exactly
+PASS: limiter-before-EQ and EQ-before-limiter differ in 8172 of 8192 samples
+PASS: omitting the EQ from the order bypasses it (8190 samples differ)
+PASS: a disabled limiter is transparent in the same order
+PASS: an unknown stage is ignored and the named stages still apply
+PASS: the chain reports the 5-stage order it applies
+```
+
+引擎探针 **20/20** 通过（含逐 bit 回环、格式矩阵、水位压力测试——DSP 重构不得改变无 DSP 时的逐字节结果）；
+`flutter analyze` 无问题；`flutter test` **649 项通过**。
+
+### 13.1 本阶段**没有**做的事（诚实边界）
+
+* **UI 排序编辑器与逐级持久化尚未实现**：`HifiSettings` / 信号路径面板仍是固定顺序，Dart 侧
+  只把 `stageCount` 显式置 0（沿用引擎默认顺序）。「用户可以排序/开关 DSP 模块」这条验收标准
+  因此**只完成了一半**：能力已经在引擎与 ABI 里，界面与持久化是下一笔（4b）的工作。
+* 重采样仍未作为链内模块存在：它由设备协商路径决定（第 3.4 节的结论未变）。
+* 抖动仍与整数量化绑定在输出边界（`pcm_output.cpp`），没有独立成链内一级。
+
+---
+
 ## 附：本阶段用到的复现命令
 
 ```powershell

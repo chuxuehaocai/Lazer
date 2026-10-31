@@ -30,9 +30,11 @@
 #define LAZER_AUDIO_CALL
 #endif
 
-#define LAZER_AUDIO_ABI_VERSION 26u
+#define LAZER_AUDIO_ABI_VERSION 27u
 
 #define LAZER_AUDIO_MAX_EQ_BANDS 32u
+/* Upper bound on the explicit DSP chain length; see LazerAudioDspStage. */
+#define LAZER_AUDIO_MAX_DSP_STAGES 8u
 
 #ifdef __cplusplus
 extern "C" {
@@ -307,6 +309,17 @@ typedef struct LazerAudioEqBand {
     int32_t enabled;
 } LazerAudioEqBand;
 
+/* One processing stage of the float chain, in the order the caller asks for. Every stage reads and
+ * writes the same interleaved float buffer, carries no state outside its own configuration, and can
+ * be left out to bypass it. The engine's default order is Preamp, Eq, Crossfeed, Limiter, Volume. */
+typedef enum LazerAudioDspStage {
+    LazerAudioDspStagePreamp = 0,
+    LazerAudioDspStageEq = 1,
+    LazerAudioDspStageCrossfeed = 2,
+    LazerAudioDspStageLimiter = 3,
+    LazerAudioDspStageVolume = 4,
+} LazerAudioDspStage;
+
 typedef struct LazerAudioDspConfig {
     double preamp_db;
     uint32_t band_count;
@@ -321,6 +334,13 @@ typedef struct LazerAudioDspConfig {
     int32_t crossfeed_algorithm; /* 0 custom, 1 Bauer, 2 Bs2b, 3 Meier. */
     double crossfeed_delay_ms;   /* Custom only; the named algorithms fix it. */
     double crossfeed_cutoff_hz;  /* Custom only; the named algorithms fix it. */
+    /* Append-only in ABI v27: the explicit chain, front to back. `stage_order` holds
+     * LazerAudioDspStage values; a stage that is not listed is bypassed for this request, and
+     * `stage_count == 0` means the engine's default order unchanged. A stage listed twice is applied
+     * twice, which is a legal — if unusual — request. Order is part of the audio result: the limiter
+     * before the EQ protects the pre-EQ signal, after it protects what actually leaves the chain. */
+    uint32_t stage_count;
+    int32_t stage_order[LAZER_AUDIO_MAX_DSP_STAGES];
 } LazerAudioDspConfig;
 
 /* Immutable snapshot of the Windows render endpoints at catalog creation time. The catalog reports

@@ -9,7 +9,6 @@
 #include <cmath>
 #include <mutex>
 #include <vector>
-
 #include "internal.h"
 
 namespace lazer::audio {
@@ -143,9 +142,27 @@ private:
 
 /* Owns the EQ sections and applies the whole chain. The engine installs a new EQ request from the
  * caller's thread; the audio thread picks it up at the next block boundary, which at ~5 ms blocks is
- * far below audibility. */
+ * far below audibility.
+ *
+ * The chain itself is explicit: `LazerAudioDspConfig::stage_order` names the stages front to back and
+ * leaves the rest bypassed. Every stage reads and writes the same interleaved float buffer and owns
+ * its own state, so the order is the whole of the contract between them — which is also what makes
+ * "the EQ is in the signal path" a fact a caller can point at rather than an assumption. */
 class DspChain {
 public:
+    /* One processing stage. */
+    enum class Stage : int32_t {
+        Preamp = LazerAudioDspStagePreamp,
+        Eq = LazerAudioDspStageEq,
+        Crossfeed = LazerAudioDspStageCrossfeed,
+        Limiter = LazerAudioDspStageLimiter,
+        Volume = LazerAudioDspStageVolume,
+    };
+
+    /* The order used when a request does not name one. */
+    static constexpr std::array<Stage, 5> kDefaultOrder{
+        Stage::Preamp, Stage::Eq, Stage::Crossfeed, Stage::Limiter, Stage::Volume};
+
     void configureFormat(PcmFormat format);
     /* Safe from the caller's thread: the request is copied and the audio thread installs it at the
      * next block boundary. */
@@ -158,9 +175,12 @@ public:
     [[nodiscard]] bool eqActive() const noexcept;
     [[nodiscard]] bool crossfeedActive() const noexcept { return crossfeed_.active(); }
     [[nodiscard]] double gainReductionDb() const noexcept { return lastReductionDb_; }
+    /* The order the audio thread currently applies, for probes and diagnostics. */
+    [[nodiscard]] std::vector<Stage> activeOrder() const;
 
 private:
     void applyPendingConfig();
+    void applyOrder(const std::vector<Stage> &order);
 
     std::mutex pendingMutex_;
     std::vector<LazerAudioEqBand> pendingBands_;
@@ -168,6 +188,8 @@ private:
     bool pendingLimiterEnabled_ = false;
     double pendingLimiterThresholdDb_ = -1.0;
     Crossfeed::Specification pendingCrossfeed_;
+    /* Empty means "the engine's default order". */
+    std::vector<Stage> pendingOrder_;
     bool pendingDirty_ = false;
 
     PcmFormat format_{};
@@ -178,6 +200,8 @@ private:
     VolumeRamp volume_;
     int32_t rampMillis_ = 200;
     double lastReductionDb_ = 0.0;
+    /* Applied order, owned by the audio thread once installed. */
+    std::vector<Stage> order_;
 };
 
 }  // namespace lazer::audio
