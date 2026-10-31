@@ -175,6 +175,49 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                 const _WarningRow(
                   'Bit-perfect 已开启：均衡器 / 限幅器 / 耳机串扰不会进入信号路径，关闭 Bit-perfect 后按当前设置生效',
                 ),
+              // The chain is explicit now (ABI v27), so the order is a setting rather
+              // than something the engine decides: it is part of the audio result, and
+              // the summary states what will actually be applied.
+              if (native)
+                _SettingRow(
+                  label: 'DSP 链顺序',
+                  subtitle: '当前：${settings.dspChainSummary}',
+                  trailing: DropdownButton<String>(
+                    key: const ValueKey('hifi-dsp-order'),
+                    value: _dspOrderChoice(settings),
+                    underline: const SizedBox.shrink(),
+                    borderRadius: BorderRadius.circular(12),
+                    items: <DropdownMenuItem<String>>[
+                      for (final MapEntry<String, List<int>> preset
+                          in kDspChainPresets.entries)
+                        DropdownMenuItem<String>(
+                          value: encodeDspStageOrder(preset.value),
+                          child: Text(preset.key),
+                        ),
+                      // A persisted order that matches no preset (hand-edited, or a
+                      // future preset that was removed) still has to be selectable,
+                      // otherwise the dropdown would assert on an unknown value.
+                      if (!kDspChainPresets.values
+                          .map(encodeDspStageOrder)
+                          .contains(_dspOrderChoice(settings)))
+                        DropdownMenuItem<String>(
+                          value: _dspOrderChoice(settings),
+                          child: const Text('自定义'),
+                        ),
+                    ],
+                    onChanged: (String? value) {
+                      if (value != null) {
+                        unawaited(
+                          _update(
+                            settings.copyWith(
+                              dspStageOrder: decodeDspStageOrder(value),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
               if (native && hifi.supportsDoP)
                 _SettingRow(
                   label: 'DSD 输出',
@@ -897,6 +940,11 @@ class _EqBandEditor extends StatelessWidget {
 }
 
 double _tenthDb(double value) => (value * 10).roundToDouble() / 10;
+
+/// The dropdown's value: the encoded order, because `DropdownButton` compares with
+/// `==` and two equal `List<int>`s are not equal.
+String _dspOrderChoice(HifiSettings settings) =>
+    encodeDspStageOrder(settings.dspStageOrder);
 
 /// One row of the 信号路径 panel.
 class SignalPathReadout {

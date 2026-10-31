@@ -338,5 +338,33 @@ void main() {
       expect(withBitPerfect.bands, isEmpty);
       expect(withBitPerfect.stageOrder, <int>[1, 3]);
     });
+
+
+    test('every preset is a legal chain and survives the encoder', () {
+      for (final MapEntry<String, List<int>> preset in kDspChainPresets.entries) {
+        for (final int stage in preset.value) {
+          expect(stage, inInclusiveRange(0, 4), reason: preset.key);
+        }
+        expect(
+          decodeDspStageOrder(encodeDspStageOrder(preset.value)),
+          preset.value,
+          reason: preset.key,
+        );
+      }
+      // The first preset must be the engine's own order, or a fresh profile would
+      // silently ask for something else.
+      expect(kDspChainPresets.values.first, defaultDspStageOrder);
+    });
+
+    test('the summary names the chain the page is asking for', () {
+      expect(
+        const HifiSettings(dspStageOrder: <int>[0, 1, 2, 3, 4]).dspChainSummary,
+        '前级 → EQ → 串扰 → 限幅 → 音量',
+      );
+      expect(
+        const HifiSettings(dspStageOrder: <int>[0, 3, 1]).dspChainSummary,
+        '前级 → 限幅 → EQ',
+      );
+    });
   });
 }

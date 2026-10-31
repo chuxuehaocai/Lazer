@@ -854,3 +854,32 @@ List<int> decodeDspStageOrder(String? encoded) {
   ];
   return order.isEmpty ? defaultDspStageOrder : order;
 }
+
+/// The chain orders a user can pick without hand-editing five numbers.
+///
+/// Ordered by how much they change the result, not by how exotic they are: the
+/// default is the engine's own, "限幅优先" is the one order that reliably sounds
+/// different (the limiter then protects the pre-EQ signal instead of the summed
+/// one), and the bypass entry is what "turn the chain off" means now that the
+/// order is explicit.
+const Map<String, List<int>> kDspChainPresets = <String, List<int>>{
+  '默认（EQ → 串扰 → 限幅）': <int>[0, 1, 2, 3, 4],
+  '限幅优先（限幅 → EQ → 串扰）': <int>[0, 3, 1, 2, 4],
+  '旁路 EQ 与串扰（前级 → 限幅）': <int>[0, 3, 4],
+};
+
+/// Names one stage for the summary line.
+String dspStageLabel(int stage) => switch (stage) {
+  0 => '前级',
+  1 => 'EQ',
+  2 => '串扰',
+  3 => '限幅',
+  4 => '音量',
+  _ => '未知',
+};
+
+extension DspStageOrderSummary on HifiSettings {
+  /// `EQ → 串扰 → 限幅`, so the page can state the chain it is asking for
+  /// instead of leaving the user to infer it from two separate switches.
+  String get dspChainSummary => dspStageOrder.map(dspStageLabel).join(' → ');
+}
