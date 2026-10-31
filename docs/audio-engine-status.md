@@ -545,6 +545,58 @@ ok   the engine flag agrees with the derived state
 
 ---
 
+## 12. 阶段 3 落地记录
+
+阶段 3 的目标是"输出侧时钟驱动消费，实时线程只从环形缓冲取数交给设备"。基线（第 3.3 节）显示
+无锁环形缓冲与设备时钟驱动**已经存在**，缺口集中在三处：实时线程仍在取互斥量与堆分配、没有
+水位策略、没有压力测试与审查清单。
+
+| 基线缺口 | 处理 | 代码位置 |
+| --- | --- | --- |
+| 实时线程取 `sourceMutex_`（`publishTrackChanged`、`activeDurationMillis`、`currentPositionMillis`、`currentSourceEnded`） | 生产者在准备后继曲目时把可听曲目的标量发布到 `RenderPresentation` 镜像，实时线程在帧缝处用**纯原子写**提交；位置、时长、结束标志都改为读原子镜像 | `native/lazer-audio/src/engine.h:113-165`、`engine.cpp:1254-1290`（`renderPositionMillis`）、`engine.cpp:1700-1765`（提交）、`engine.cpp:1904-1910`（`sourceEndedNow`）、`engine.cpp:1410-1420`（生产者镜像与 codec 提交） |
+| 实时线程堆分配（`std::deque` 台账、`push_back`） | 改为会话建立时预分配的定长环形台账（容量 1024，溢出丢最旧一条并触发重新同步），`renderLoop` 内不再有任何分配 | `engine.cpp:1810-1850` |
+| 没有低/高水位 | 定义并发布水位：到**高水位（环形缓冲容量）**停止喂入，降到**低水位（容量 25%）**恢复；曲目缝在飞或暂停超过 50 ms 时强制恢复，保证解码不会被消费者卡死 | `engine.cpp:625-650`（计算与发布）、`engine.cpp:1425-1455`（`accept()` 中的迟滞） |
+| 水位不可观测 | ABI 26 在快照里发布 `ring_low_watermark_frames` / `ring_high_watermark_frames`，Dart 侧进入"输出缓冲"行（含"已到高水位暂停喂入"） | `include/lazer_audio_api.h:272-284`、`lib/audio/native/engine_metrics.dart:36-90`、`lib/widgets/hifi_settings_section.dart:958` |
+| 会话起始的一次静音被算作欠载 | 共享（Variable）模式在提交第一个周期前先等生产者填满一个周期（有界：最多 8 次设备等待），启动抖动不再污染欠载计数 | `engine.cpp:1831-1845` |
+| 没有压力测试 | 新增 CTest `lazer-audio-ring-stress`：40 秒素材 + 有节奏的假端点（约 58× 实时）跑满整条 生产者→环→实时线程 路径 | `native/lazer-audio/tools/lazer_audio_ring_stress_probe.cpp`、`CMakeLists.txt` |
+| 没有审查清单 | 新增 `docs/audio-engine-rt-checklist.md`：禁令、逐项核对、被明确允许的例外、计时基线 | `docs/audio-engine-rt-checklist.md` |
+| 设备时钟驱动未逐平台确认 | 逐后端核对并记录：WASAPI 事件回调、ALSA `poll()` 事件、CoreAudio IOProc 健康/宿主时钟 | 见 12.1 |
+
+### 12.1 证据
+
+**逐平台"消费由设备时钟驱动"核对**：
+
+| 后端 | waitForReady 的等待对象 | 结论 |
+| --- | --- | --- |
+| WASAPI | `AUDCLNT_STREAMFLAGS_EVENTCALLBACK` + `SetEventHandle` 的事件句柄；独占用 FixedPeriod 每次提交一个周期 | 设备/驱动周期驱动 | 
+| ALSA | 对 PCM 的 poll 描述符 `poll()`（`output_alsa.cpp:857-880`） | ALSA period/available 信号驱动 |
+| CoreAudio | IOProc 回调健康位与回调序号/宿主时钟（`output_coreaudio.cpp:1078-1105`） | 设备 IOProc 驱动 |
+
+**压力测试**（`ctest -R lazer-audio-ring-stress`）：
+
+```
+PASS: 40 s through a paced endpoint with no stall: 0 padded frames, fill peak 16384/16384, watermarks 4096/16384
+PASS: a 800 ms stall (ring covers ~371 ms) produced 10752 padded frames, bounded by the stall, and recovered
+```
+
+即：生产者跟得上时**欠载为 0**；注入 800 ms 解码停顿时，欠载计数为正、**被停顿长度界定**
+（10752 帧 ≈ 244 ms，小于 800 ms 可解释上限），且停顿结束后恢复（会话结束时 `underrun_active = 0`）。
+
+**回归**：引擎探针 **19/19** 通过（含 `lazer-audio-engine-bit-perfect` 逐字节回环与
+`lazer-audio-engine-pcm-matrix` 的格式矩阵/无缝/ReplayGain 用例）；`flutter test` 649 项通过；
+`flutter analyze` 无问题。
+
+### 12.2 本阶段**没有**做的事（诚实边界）
+
+* `snapshot()` / `streamInfo()` 若被事件回调**同步**重入，仍会取 `lifecycleMutex_`（`try_lock`）与
+  `sourceMutex_`；出货路径（Dart 侧 `NativeCallable.listener`，异步投递）不会触发，已在审查清单
+  第 3 节列为明确例外。把它们也改成无锁镜像属于后续工作。
+* 水位策略只做"停止/恢复喂入"，没有做"加速"（解码速度不由引擎控制）。
+* 压力测试是离线假端点：它证明的是引擎内部的行为，不是某台设备上的真实欠载率。
+* ALSA/CoreAudio 的核对是**代码级**的，本机没有这两个平台的运行证据。
+
+---
+
 ## 附：本阶段用到的复现命令
 
 ```powershell

@@ -355,6 +355,45 @@ if(LAZER_AUDIO_BUILD_PROBE)
     add_test(NAME lazer-audio-engine-bit-perfect
         COMMAND $<TARGET_FILE:lazer-audio-engine-bit-perfect-probe>)
 
+    # Ring/producer stress: a paced fake endpoint runs the whole producer -> ring -> render path and
+    # the case asserts that a producer which keeps up never pads, and that an injected stall is
+    # counted, bounded by the stall and recovered from.
+    add_executable(lazer-audio-ring-stress-probe
+        tools/lazer_audio_ring_stress_probe.cpp
+        src/common.cpp
+        src/dff_dsf_reader.cpp
+        src/engine.cpp
+        src/source.cpp
+        src/dop_packer.cpp
+        src/native_dsd_packer.cpp
+        src/dsp_chain.cpp
+        src/ring_buffer.cpp
+        src/pcm_output.cpp)
+    target_include_directories(lazer-audio-ring-stress-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${LAZER_FFMPEG_INCLUDE_DIR}")
+    target_link_libraries(lazer-audio-ring-stress-probe PRIVATE ${LAZER_FFMPEG_LIBRARIES})
+    target_compile_features(lazer-audio-ring-stress-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-ring-stress-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-ring-stress-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-ring-stress-probe PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    if(LAZER_FFMPEG_RUNTIME_FILES)
+        add_custom_command(TARGET lazer-audio-ring-stress-probe POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${LAZER_FFMPEG_RUNTIME_FILES}
+                    "$<TARGET_FILE_DIR:lazer-audio-ring-stress-probe>"
+            VERBATIM)
+    endif()
+    add_test(NAME lazer-audio-ring-stress
+        COMMAND $<TARGET_FILE:lazer-audio-ring-stress-probe>)
+    set_tests_properties(lazer-audio-ring-stress PROPERTIES TIMEOUT 300)
+
     # Validate the Engine's global RequireDoP policy against PCM and raw stereo DSD using a
     # variable-write fake endpoint; no physical audio device is opened.
     add_executable(lazer-audio-engine-dop-probe

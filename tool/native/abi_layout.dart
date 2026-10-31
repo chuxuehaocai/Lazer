@@ -302,6 +302,18 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       () => _snapshot().ref.ringCapacityFrames = _sentinel32,
       _int32Marker,
     ),
+    AbiField(
+      'ringLowWatermarkFrames',
+      72,
+      () => _snapshot().ref.ringLowWatermarkFrames = _sentinel32,
+      _int32Marker,
+    ),
+    AbiField(
+      'ringHighWatermarkFrames',
+      76,
+      () => _snapshot().ref.ringHighWatermarkFrames = _sentinel32,
+      _int32Marker,
+    ),
   ]),
   AbiStruct('LazerAudioStreamInfo', sizeOf<LazerAudioStreamInfo>(), <AbiField>[
     AbiField('codec', 0, () => _streamInfo().ref.codec[0] = 0xAB, <int>[0xAB]),
@@ -621,7 +633,7 @@ const Map<String, int> abiCStructSizes = <String, int>{
   'LazerAudioEventHandler': 16,
   'LazerAudioLogHandler': 16,
   'LazerAudioEngineConfig': 72,
-  'LazerAudioSnapshot': 72,
+  'LazerAudioSnapshot': 80,
   'LazerAudioStreamInfo': 176,
   'LazerAudioEqBand': 40,
   'LazerAudioDspConfig': 80,

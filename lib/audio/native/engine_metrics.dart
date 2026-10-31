@@ -14,6 +14,8 @@ class LazerEngineMetrics {
     required this.ringCapacityFrames,
     required this.underrunActive,
     required this.underrunFrames,
+    this.ringLowWatermarkFrames = 0,
+    this.ringHighWatermarkFrames = 0,
   });
 
   factory LazerEngineMetrics.fromNative(LazerAudioSnapshot snapshot) =>
@@ -22,6 +24,8 @@ class LazerEngineMetrics {
         ringCapacityFrames: snapshot.ringCapacityFrames,
         underrunActive: snapshot.underrunActive != 0,
         underrunFrames: snapshot.underrunFrames,
+        ringLowWatermarkFrames: snapshot.ringLowWatermarkFrames,
+        ringHighWatermarkFrames: snapshot.ringHighWatermarkFrames,
       );
 
   /// Whole frames waiting in the ring; producer is the decode/DSP thread.
@@ -30,11 +34,21 @@ class LazerEngineMetrics {
   /// Ring size in frames; zero before the first stream is configured.
   final int ringCapacityFrames;
 
+  /// The producer stops feeding at [ringHighWatermarkFrames] and resumes at
+  /// [ringLowWatermarkFrames] (or as soon as a track seam is in flight). Zero
+  /// while no stream is configured.
+  final int ringLowWatermarkFrames;
+  final int ringHighWatermarkFrames;
+
   /// True while the last submitted output contained starvation padding.
   final bool underrunActive;
 
   /// Cumulative padded frames, excluding the clean-EOF tail and queue waits.
   final int underrunFrames;
+
+  /// Whether the producer is currently held back by the high watermark.
+  bool get producerPaused => ringHighWatermarkFrames > 0 &&
+      ringFillFrames >= ringHighWatermarkFrames;
 
   /// How full the ring is, 0..1. Zero when no stream is configured.
   double get ringFillFraction => ringCapacityFrames <= 0
@@ -51,7 +65,11 @@ class LazerEngineMetrics {
   String get summary {
     if (ringCapacityFrames <= 0) return '输出缓冲未配置';
     final int percent = (ringFillFraction * 100).round();
-    return '$ringFillFrames/$ringCapacityFrames 帧（$percent%）'
+    final String marks = ringHighWatermarkFrames <= 0
+        ? ''
+        : ' · 水位 $ringLowWatermarkFrames/$ringHighWatermarkFrames';
+    return '$ringFillFrames/$ringCapacityFrames 帧（$percent%）$marks'
+        '${producerPaused ? ' · 已到高水位暂停喂入' : ''}'
         '${underrunActive ? ' · 欠载中' : ''}'
         '${underrunFrames == 0 ? '' : ' · 累计欠载 $underrunFrames 帧'}';
   }

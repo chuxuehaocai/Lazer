@@ -159,6 +159,8 @@ void main() {
       native.ref
         ..ringFillFrames = 4096
         ..ringCapacityFrames = 16384
+        ..ringLowWatermarkFrames = 4096
+        ..ringHighWatermarkFrames = 16384
         ..underrunActive = 1
         ..underrunFrames = 512;
 
@@ -168,9 +170,25 @@ void main() {
       expect(metrics.ringFillMillis(44100), 93);
       expect(metrics.underrunActive, isTrue);
       expect(metrics.underrunFrames, 512);
+      expect(metrics.producerPaused, isFalse);
       expect(metrics.summary, contains('4096/16384'));
+      expect(metrics.summary, contains('水位 4096/16384'));
       expect(metrics.summary, contains('欠载中'));
       expect(metrics.summary, contains('累计欠载 512 帧'));
+    });
+
+    test('reports the producer as held back at the high watermark', () {
+      const LazerEngineMetrics metrics = LazerEngineMetrics(
+        ringFillFrames: 16384,
+        ringCapacityFrames: 16384,
+        ringLowWatermarkFrames: 4096,
+        ringHighWatermarkFrames: 16384,
+        underrunActive: false,
+        underrunFrames: 0,
+      );
+
+      expect(metrics.producerPaused, isTrue);
+      expect(metrics.summary, contains('已到高水位暂停喂入'));
     });
 
     test('an unconfigured ring reports zero instead of dividing by zero', () {

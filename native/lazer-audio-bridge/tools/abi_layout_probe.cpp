@@ -67,6 +67,8 @@ int main() {
     FIELD(LazerAudioSnapshot, terminal_position_millis);
     FIELD(LazerAudioSnapshot, ring_fill_frames);
     FIELD(LazerAudioSnapshot, ring_capacity_frames);
+    FIELD(LazerAudioSnapshot, ring_low_watermark_frames);
+    FIELD(LazerAudioSnapshot, ring_high_watermark_frames);
 
     std::printf("sizeof LazerAudioStreamInfo %zu\n", sizeof(LazerAudioStreamInfo));
     FIELD(LazerAudioStreamInfo, codec);

@@ -68,6 +68,10 @@ private:
     int32_t configurePipeline();
     /* True while the float DSP/volume chain is actually on the signal path. */
     [[nodiscard]] bool dspInPath() const;
+    /* Position from atomics only: usable from the render thread, which must not take sourceMutex_. */
+    [[nodiscard]] int64_t renderPositionMillis() const noexcept;
+    /* Applies the codec-string commit the render thread asked for at a frame seam. Producer side. */
+    void applyPendingPresentationCommit();
     void raise(int32_t event, int32_t detail, int64_t positionMillis);
     void publishTerminal(int32_t event, int32_t detail, int64_t positionMillis);
     void setError(const std::string &text, int32_t code);
@@ -114,14 +118,62 @@ private:
     std::shared_ptr<SourceSlot> nextSource_;
     std::shared_ptr<SourceSlot> preparingSource_;
     /* During a queued transition, source_ is already decoding the successor while the ring still
-     * contains frames from the audible track. Keep the last audible metadata until its frame seam. */
+     * contains frames from the audible track. Keep the last audible metadata until its frame seam.
+     *
+     * The render thread must be able to report the audible track without taking `sourceMutex_` — a
+     * blocking acquisition inside the output callback is exactly what this engine forbids — so the
+     * scalars it needs are mirrored twice: the producer fills `pendingPresentation_` when it prepares
+     * a successor, and the render thread commits them into `activePresentation_` with plain atomic
+     * stores at the frame seam. `presentationDescription_` keeps the full description (including the
+     * codec string, which only the UI reads) and is committed by the producer once it observes the
+     * render thread's commit counter. */
+    struct RenderPresentation {
+        std::atomic<int64_t> durationMillis{0};
+        std::atomic<int64_t> seekTargetMillis{0};
+        std::atomic<int32_t> sampleRate{0};
+        std::atomic<int32_t> channels{0};
+        std::atomic<int32_t> bitsPerSample{0};
+        std::atomic<int32_t> bitrateKbps{0};
+        std::atomic<int32_t> dsd{0};
+        std::atomic<int32_t> dsdRateMultiplier{0};
+        std::atomic<int32_t> lossless{0};
+
+        /* Plain stores: each field is independent and only ever read as "the audible track's". */
+        void publish(const StreamDescription &description, int64_t seekTarget) noexcept {
+            durationMillis.store(description.durationMillis, std::memory_order_release);
+            seekTargetMillis.store(seekTarget, std::memory_order_release);
+            sampleRate.store(description.sampleRate, std::memory_order_release);
+            channels.store(description.channels, std::memory_order_release);
+            bitsPerSample.store(description.bitsPerSample, std::memory_order_release);
+            bitrateKbps.store(description.bitrateKbps, std::memory_order_release);
+            dsd.store(description.dsd ? 1 : 0, std::memory_order_release);
+            dsdRateMultiplier.store(description.dsdRateMultiplier, std::memory_order_release);
+            lossless.store(description.lossless ? 1 : 0, std::memory_order_release);
+        }
+    };
+
+    RenderPresentation pendingPresentation_;
+    RenderPresentation activePresentation_;
     StreamDescription presentationDescription_;
     StreamDescription pendingPresentationDescription_;
     int64_t presentationSeekTargetMillis_ = 0;
     int64_t pendingPresentationSeekTargetMillis_ = 0;
     int32_t presentationBufferedPercent_ = 0;
+    /* The render thread asks for the codec-string commit; the producer applies it on its own thread. */
+    std::atomic<uint64_t> presentationCommitRequested_{0};
+    std::atomic<uint64_t> presentationCommitApplied_{0};
+    /* Mirror of the current source's end-of-stream flag, published by the producer so the render
+     * thread never has to take sourceMutex_ to ask. */
+    std::atomic<bool> sourceEndedMirror_{false};
     std::unique_ptr<AudioOutput> output_;
     RingBuffer ring_;
+    /* Ring hysteresis, published for the diagnostics panel (ABI v26). */
+    std::atomic<int32_t> ringLowWatermarkFrames_{0};
+    std::atomic<int32_t> ringHighWatermarkFrames_{0};
+    /* Producer-side latch: feeding stops at the high watermark and resumes at the low one (or when
+     * the pause has lasted longer than the engine's limit, so a parked consumer cannot latch it). */
+    bool producerPausedForRing_ = false;
+    std::chrono::steady_clock::time_point producerPausedSince_{};
     DspChain dsp_;
 
     std::atomic<double> volume_{1.0};

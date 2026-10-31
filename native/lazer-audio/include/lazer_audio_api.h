@@ -30,7 +30,7 @@
 #define LAZER_AUDIO_CALL
 #endif
 
-#define LAZER_AUDIO_ABI_VERSION 25u
+#define LAZER_AUDIO_ABI_VERSION 26u
 
 #define LAZER_AUDIO_MAX_EQ_BANDS 32u
 
@@ -276,10 +276,15 @@ typedef struct LazerAudioSnapshot {
      * number that says whether the output is running ahead of the device or close to starving. */
     int32_t ring_fill_frames;
     int32_t ring_capacity_frames;
+    /* Append-only in ABI v26: the hysteresis band the producer works in. It stops feeding at the
+     * high mark and resumes at the low one, so the render thread always has a cushion without the
+     * ring being pinned full. Zero while no stream is configured. */
+    int32_t ring_low_watermark_frames;
+    int32_t ring_high_watermark_frames;
 } LazerAudioSnapshot;
 
 #if defined(__cplusplus) && defined(_WIN64)
-static_assert(sizeof(LazerAudioSnapshot) == 72, "update the JNA snapshot layout with the native ABI");
+static_assert(sizeof(LazerAudioSnapshot) == 80, "update the JNA snapshot layout with the native ABI");
 #endif
 
 /* A constant-Q biquad pair per band; the engine keeps coefficient state warm across updates so a

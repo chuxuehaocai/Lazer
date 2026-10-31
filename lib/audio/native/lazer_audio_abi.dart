@@ -16,7 +16,7 @@ import 'dart:ffi';
 ///
 /// v24 appended the crossfeed fields to [LazerAudioDspConfig]; this mirror and the
 /// vendored engine are updated together (see docs/audio-engine.md).
-const int lazerAudioAbiVersion = 25;
+const int lazerAudioAbiVersion = 26;
 
 /// `LAZER_AUDIO_MAX_EQ_BANDS`.
 const int lazerAudioMaxEqBands = 32;
@@ -326,6 +326,15 @@ final class LazerAudioSnapshot extends Struct {
 
   @Int32()
   external int ringCapacityFrames;
+
+  /// The hysteresis band the producer works in (ABI v26): it stops at the high
+  /// mark and resumes at the low one, so the render thread keeps a cushion
+  /// without the ring being pinned full. Zero while no stream is configured.
+  @Int32()
+  external int ringLowWatermarkFrames;
+
+  @Int32()
+  external int ringHighWatermarkFrames;
 }
 
 /// `LazerAudioStreamInfo` — source metadata plus the format the initialized

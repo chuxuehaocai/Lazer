@@ -47,7 +47,8 @@ Dart mirror, the layout expectations and the worker message were updated togethe
 A second deliberate change, for the bit-perfect work, appends to
 `LazerAudioStreamInfo` (`output_dsp_active`, `output_format_matches_source`) and to
 `LazerAudioSnapshot` (`ring_fill_frames`, `ring_capacity_frames`) and bumps the ABI to
-**25**. The reason is that `bit_perfect_active` alone is a claim nobody can check: the
+**25**; the output-ring rework adds `ring_low_watermark_frames` /
+`ring_high_watermark_frames` and takes it to **26**. The reason is that `bit_perfect_active` alone is a claim nobody can check: the
 engine now publishes the three facts it derives that flag from — whether the session is
 exclusive, whether the float DSP/volume chain is on the signal path, and whether the
 output runs the source's own rate/channels/depth — and `lib/audio/native/output_path_state.dart`
@@ -168,7 +169,10 @@ transitions, the DSP/limiter chain, the platform format policies, and the bit-pe
 claim itself (`lazer-audio-engine-bit-perfect`: the captured output bytes must equal the
 source PCM exactly, and the claim must go away — with `dsp_active` /
 `format_matches_source` saying why — when the DSP is in the path or the endpoint runs a
-different format). The `windows` CI job runs this suite on every build:
+different format), and the output ring (`lazer-audio-ring-stress`: 40 s through a paced
+endpoint must report zero padded frames, and an injected 800 ms decoder stall must produce
+a bounded, recovered-from underrun count). The `windows` CI job runs this suite on every
+build:
 
 ```bash
 cmake -S native -B build/native-probes -DLAZER_FFMPEG_ROOT=/path/to/ffmpeg -DLAZER_AUDIO_NATIVE_PROBES=ON
@@ -243,7 +247,7 @@ Status of this port:
 | Reader bridge | Built and exercised end to end. |
 | Streaming cache | Exercised end to end. |
 | `AudioEngine` transport, gapless queue, buffered position, failure reporting | Implemented and verified live. |
-| Windows bundle integration | Built with MSVC against a DSD-capable FFmpeg; **CTest 18/18** under both the Ninja and Visual Studio generators, and the suite runs in CI on every Windows build. |
+| Windows bundle integration | Built with MSVC against a DSD-capable FFmpeg; **CTest 19/19** under both the Ninja and Visual Studio generators, and the suite runs in CI on every Windows build. |
 | Linux bundle integration | Written; not built or run here. |
 | macOS bundle integration | Manual staging only; not run. |
 | Real playback through WASAPI | **Verified on one Windows host**: shared and exclusive, seek, pause/stop, gapless crossing, reader-bridge streaming, EQ. |
