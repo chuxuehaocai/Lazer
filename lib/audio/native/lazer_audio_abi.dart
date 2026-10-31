@@ -16,7 +16,7 @@ import 'dart:ffi';
 ///
 /// v24 appended the crossfeed fields to [LazerAudioDspConfig]; this mirror and the
 /// vendored engine are updated together (see docs/audio-engine.md).
-const int lazerAudioAbiVersion = 24;
+const int lazerAudioAbiVersion = 25;
 
 /// `LAZER_AUDIO_MAX_EQ_BANDS`.
 const int lazerAudioMaxEqBands = 32;
@@ -318,6 +318,14 @@ final class LazerAudioSnapshot extends Struct {
 
   @Int64()
   external int terminalPositionMillis;
+
+  /// Whole frames waiting in the engine's lock-free output ring, and its size
+  /// (ABI v25). Producer is the decode/DSP thread, consumer is the render thread.
+  @Int32()
+  external int ringFillFrames;
+
+  @Int32()
+  external int ringCapacityFrames;
 }
 
 /// `LazerAudioStreamInfo` — source metadata plus the format the initialized
@@ -398,6 +406,15 @@ final class LazerAudioStreamInfo extends Struct {
 
   @Int32()
   external int outputCoreAudioNonMixable;
+
+  /// True only while the float DSP/volume chain is on the signal path (ABI v25).
+  @Int32()
+  external int outputDspActive;
+
+  /// True only when the output session runs the source's own rate, channels and
+  /// depth — no resampling, no requantization (ABI v25).
+  @Int32()
+  external int outputFormatMatchesSource;
 }
 
 /// `LazerAudioEqBand`.

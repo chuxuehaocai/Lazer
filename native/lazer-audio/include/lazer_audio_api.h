@@ -30,7 +30,7 @@
 #define LAZER_AUDIO_CALL
 #endif
 
-#define LAZER_AUDIO_ABI_VERSION 24u
+#define LAZER_AUDIO_ABI_VERSION 25u
 
 #define LAZER_AUDIO_MAX_EQ_BANDS 32u
 
@@ -238,10 +238,20 @@ typedef struct LazerAudioStreamInfo {
      * `output_coreaudio_mixability_known` means unavailable/not applicable. */
     int32_t output_coreaudio_mixability_known;
     int32_t output_coreaudio_non_mixable;
+    /* Append-only in ABI v25: the three facts `bit_perfect_active` is derived from, so a caller can
+     * check the claim instead of trusting it. `output_dsp_active` is true only while the float
+     * DSP/volume chain is actually in the signal path (it is false when the samples are routed
+     * straight through, and false for the DoP and Native DSD paths, whose bit-perfect semantics are
+     * defined separately). `output_format_matches_source` is true only when the initialized output
+     * session runs the source's own sample rate, channel count and sample depth, with no resampling
+     * or requantization. `bit_perfect_active` is true only when the session is exclusive, the DSP is
+     * not in the path and the format matches the source. */
+    int32_t output_dsp_active;
+    int32_t output_format_matches_source;
 } LazerAudioStreamInfo;
 
 #if defined(__cplusplus) && defined(_WIN64)
-static_assert(sizeof(LazerAudioStreamInfo) == 168, "update the JNA stream-info layout with the native ABI");
+static_assert(sizeof(LazerAudioStreamInfo) == 176, "update the JNA stream-info layout with the native ABI");
 #endif
 
 typedef struct LazerAudioSnapshot {
@@ -261,10 +271,15 @@ typedef struct LazerAudioSnapshot {
     int32_t terminal_event;
     int32_t terminal_detail;
     int64_t terminal_position_millis;
+    /* Append-only in ABI v25: how full the engine's lock-free output ring is, in whole frames. The
+     * producer is the decode/DSP thread and the consumer is the render thread, so this is the one
+     * number that says whether the output is running ahead of the device or close to starving. */
+    int32_t ring_fill_frames;
+    int32_t ring_capacity_frames;
 } LazerAudioSnapshot;
 
 #if defined(__cplusplus) && defined(_WIN64)
-static_assert(sizeof(LazerAudioSnapshot) == 64, "update the JNA snapshot layout with the native ABI");
+static_assert(sizeof(LazerAudioSnapshot) == 72, "update the JNA snapshot layout with the native ABI");
 #endif
 
 /* A constant-Q biquad pair per band; the engine keeps coefficient state warm across updates so a

@@ -496,6 +496,8 @@ int32_t Engine::open(
 int32_t Engine::configurePipeline() {
     const StreamDescription &description = currentSource().description();
     const TargetFormat &target = outputSession_.target;
+    /* Every early return below leaves the previous session's answer behind otherwise. */
+    formatMatchesSource_ = false;
     const bool requireDoP = doPOutputApplies(device_.dsd_output_mode, description);
     const bool requireNativeDsd = nativeDsdOutputApplies(device_.dsd_output_mode, description);
     if (requireDoP != outputSession_.doP || requireNativeDsd != outputSession_.nativeDsd) {
@@ -626,6 +628,9 @@ int32_t Engine::configurePipeline() {
     replayGainCurrentLinear_ = source_->replayGainLinear;
     replayGainTargetLinear_ = source_->replayGainLinear;
     replayGainRampRemainingFrames_ = 0;
+    /* DoP and Native DSD carry a bitstream whose bit-perfect meaning is defined separately (the
+     * carrier or the DSD word layout, not the PCM triple), so they never claim a PCM format match. */
+    formatMatchesSource_ = exactPcmFormat && !outputSession_.doP && !outputSession_.nativeDsd;
     bitPerfectActive_.store(dspBypassed_, std::memory_order_release);
     return LazerAudioOk;
 }
@@ -1040,6 +1045,7 @@ int32_t Engine::stop() {
         source_ = std::make_shared<SourceSlot>(this, config_.log);
     }
     bitPerfectActive_.store(false, std::memory_order_release);
+    formatMatchesSource_ = false;
     dopActive_.store(false, std::memory_order_release);
     nativeDsdActive_.store(false, std::memory_order_release);
     state_.store(LazerAudioStateStopped, std::memory_order_release);
@@ -1085,11 +1091,22 @@ int32_t Engine::setVolume(double volume) {
 
 int32_t Engine::setDsp(const LazerAudioDspConfig &dsp) {
     if (dsp.band_count > LAZER_AUDIO_MAX_EQ_BANDS) return LazerAudioErrorInvalidArgument;
-    if ((dopActive_.load(std::memory_order_acquire) ||
-        nativeDsdActive_.load(std::memory_order_acquire)) &&
-        (dsp.preamp_db != 0.0 || dsp.band_count > 0 || dsp.limiter_enabled != 0)) {
+    /* A module that would alter the samples. Bypassed stages (a disabled band, a limiter that is
+     * off) do not count: sending them is how the settings layer keeps its state in one piece. */
+    const bool wantsProcessing = dsp.preamp_db != 0.0 || dsp.band_count > 0 ||
+        dsp.limiter_enabled != 0 || dsp.crossfeed_enabled != 0;
+    if (wantsProcessing && (dopActive_.load(std::memory_order_acquire) ||
+            nativeDsdActive_.load(std::memory_order_acquire))) {
         setError("EQ and limiter are unavailable while direct DSD output is active",
             LazerAudioErrorUnsupported);
+        return LazerAudioErrorUnsupported;
+    }
+    /* A bit-perfect session routes the decoded samples straight to the device, so a processing
+     * request cannot be honoured. Saying so beats accepting the request and silently dropping it:
+     * the caller would otherwise believe the EQ is applied while the state reports no DSP. */
+    if (wantsProcessing && bitPerfectActive_.load(std::memory_order_acquire)) {
+        setError("EQ, limiter and crossfeed are unavailable while bit-perfect output is active; "
+            "turn bit-perfect off first", LazerAudioErrorUnsupported);
         return LazerAudioErrorUnsupported;
     }
     dsp_.requestConfig(dsp);
@@ -1115,6 +1132,7 @@ int32_t Engine::setDevice(const LazerAudioDeviceConfig &device) {
         device_.device_id = nullptr;
     }
     bitPerfectActive_.store(false, std::memory_order_release);
+    formatMatchesSource_ = false;
     dopActive_.store(false, std::memory_order_release);
     nativeDsdActive_.store(false, std::memory_order_release);
     if (device_.buffer_millis <= 0) device_.buffer_millis = 120;
@@ -1148,6 +1166,10 @@ void Engine::snapshot(LazerAudioSnapshot &out) {
         ? 0 : terminalDetail_.load(std::memory_order_relaxed);
     out.terminal_position_millis = terminalEvent == -1
         ? 0 : terminalPositionMillis_.load(std::memory_order_relaxed);
+    /* Both cursors are atomics, so this is a lock-free read from the polling thread and the one
+     * number that separates "the decoder cannot keep up" from "the device is being starved". */
+    out.ring_fill_frames = ring_.readableFrames();
+    out.ring_capacity_frames = ring_.capacityFrames();
 }
 
 void Engine::streamInfo(LazerAudioStreamInfo &out) {
@@ -1200,8 +1222,24 @@ void Engine::streamInfo(LazerAudioStreamInfo &out) {
             : outputSession_.doP ? LazerAudioOutputFormatDoP : LazerAudioOutputFormatPcm;
         out.output_dsd_rate_multiplier = (outputSession_.doP || outputSession_.nativeDsd)
             ? description.dsdRateMultiplier : 0;
+        /* The three facts behind `bit_perfect_active`, published so a caller can check the claim
+         * rather than trust it. They live inside this block on purpose: once the session is gone
+         * (failed, idle, preparing) there is no exclusive output, no format and no DSP path left to
+         * describe, and a reader deriving bit-perfect from the three must come out false. Keeping
+         * them here is what makes the derived answer agree with `bit_perfect_active`. */
+        out.output_dsp_active = dspInPath() ? 1 : 0;
+        out.output_format_matches_source = formatMatchesSource_ ? 1 : 0;
     }
     out.bit_perfect_active = bitPerfectActive_.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+bool Engine::dspInPath() const {
+    /* The float DSP/volume chain only processes the samples when the pipeline chose the processed
+     * branch: the direct-integer path, DoP and Native DSD all route around it. */
+    if (dspBypassed_) return false;
+    if (dopActive_.load(std::memory_order_acquire)) return false;
+    if (nativeDsdActive_.load(std::memory_order_acquire)) return false;
+    return true;
 }
 
 int64_t Engine::currentPositionMillis() const {

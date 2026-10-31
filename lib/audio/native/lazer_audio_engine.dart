@@ -31,6 +31,7 @@ import 'package:path_provider/path_provider.dart';
 import '../audio_engine.dart';
 import 'audio_path_log.dart';
 import 'audio_stream_cache.dart';
+import 'engine_metrics.dart';
 import 'lazer_audio_abi.dart';
 import 'lazer_audio_library.dart';
 import 'lazer_audio_reader.dart';
@@ -300,6 +301,23 @@ class NativeAudioEngine
     final int? address = _engineAddressOrNull;
     if (address == null) return 'engine not initialized';
     return _api.lastError(Pointer<Void>.fromAddress(address));
+  }
+
+  /// Ring occupancy and starvation accounting for the current session.
+  ///
+  /// Synchronous and cheap on purpose — the same snapshot call [position] already
+  /// makes — so the diagnostics panel can read it while it builds. Returns null
+  /// when no engine session exists.
+  LazerEngineMetrics? readMetrics() {
+    final int? address = _engineAddressOrNull;
+    if (address == null) return null;
+    final Pointer<LazerAudioSnapshot> snapshot = _snapshotBuffer ??=
+        calloc<LazerAudioSnapshot>();
+    if (_api.snapshot(Pointer<Void>.fromAddress(address), snapshot) !=
+        lazerAudioOk) {
+      return null;
+    }
+    return LazerEngineMetrics.fromNative(snapshot.ref);
   }
 
   @override
@@ -911,7 +929,16 @@ class NativeAudioEngine
       'float': info == null ? null : (info.outputIsFloat ? 1 : 0),
       'exclusive': info == null ? null : (info.outputExclusive ? 1 : 0),
       'selection': info?.outputFormatSelection,
-      'bit_perfect': info == null ? null : (info.bitPerfectActive ? 1 : 0),
+      // The three conditions and the derived verdict, so the log answers "is this
+      // session bit-perfect, and if not, which condition failed" without a UI.
+      'dsp_active': info == null ? null : (info.dspActive ? 1 : 0),
+      'format_matches_source': info == null
+          ? null
+          : (info.formatMatchesSource ? 1 : 0),
+      'bit_perfect': info?.outputPath.bitPerfect == true ? 1 : 0,
+      'engine_claims_bit_perfect': info == null
+          ? null
+          : (info.bitPerfectActive ? 1 : 0),
       'requested_bit_perfect': _deviceSettings.bitPerfect ? 1 : 0,
       'requested_exclusive': _deviceSettings.exclusive ? 1 : 0,
     });

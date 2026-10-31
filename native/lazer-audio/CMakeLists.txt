@@ -316,6 +316,45 @@ if(LAZER_AUDIO_BUILD_PROBE)
     add_test(NAME lazer-audio-engine-gapless
         COMMAND $<TARGET_FILE:lazer-audio-engine-gapless-probe>)
 
+    # The bit-perfect claim and the three facts it is derived from (ABI v25). Captures the engine's
+    # real output bytes through a fake fixed-period endpoint, so it proves byte-exactness without a
+    # device, and proves the claim goes away when the DSP is in the path or the format is not the
+    # source's.
+    add_executable(lazer-audio-engine-bit-perfect-probe
+        tools/lazer_audio_engine_bit_perfect_probe.cpp
+        src/common.cpp
+        src/dff_dsf_reader.cpp
+        src/engine.cpp
+        src/source.cpp
+        src/dop_packer.cpp
+        src/native_dsd_packer.cpp
+        src/dsp_chain.cpp
+        src/ring_buffer.cpp
+        src/pcm_output.cpp)
+    target_include_directories(lazer-audio-engine-bit-perfect-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${LAZER_FFMPEG_INCLUDE_DIR}")
+    target_link_libraries(lazer-audio-engine-bit-perfect-probe PRIVATE ${LAZER_FFMPEG_LIBRARIES})
+    target_compile_features(lazer-audio-engine-bit-perfect-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-engine-bit-perfect-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-engine-bit-perfect-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-engine-bit-perfect-probe PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    if(LAZER_FFMPEG_RUNTIME_FILES)
+        add_custom_command(TARGET lazer-audio-engine-bit-perfect-probe POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${LAZER_FFMPEG_RUNTIME_FILES}
+                    "$<TARGET_FILE_DIR:lazer-audio-engine-bit-perfect-probe>"
+            VERBATIM)
+    endif()
+    add_test(NAME lazer-audio-engine-bit-perfect
+        COMMAND $<TARGET_FILE:lazer-audio-engine-bit-perfect-probe>)
+
     # Validate the Engine's global RequireDoP policy against PCM and raw stereo DSD using a
     # variable-write fake endpoint; no physical audio device is opened.
     add_executable(lazer-audio-engine-dop-probe

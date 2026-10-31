@@ -4,6 +4,7 @@
 // message shapes can be checked with plain Dart (`tool/native_engine_check.dart`)
 // on hosts where the Flutter toolchain or the engine binary is unavailable.
 import 'lazer_audio_abi.dart';
+import 'output_path_state.dart';
 
 /// Source and output format of one opened stream.
 ///
@@ -29,6 +30,8 @@ class LazerStreamInfo {
     required this.outputDsdRateMultiplier,
     required this.lossless,
     required this.bitPerfectActive,
+    required this.dspActive,
+    required this.formatMatchesSource,
     required this.peakMilliDbfs,
     required this.limiterGainReductionMilliDb,
     required this.clippedSampleCount,
@@ -52,11 +55,36 @@ class LazerStreamInfo {
   final int outputFormatKind;
   final int outputDsdRateMultiplier;
   final bool lossless;
+
+  /// The engine's own bit-perfect flag. Compare [outputPath] against it rather
+  /// than reporting this on its own: it is decided at open time and cannot be
+  /// checked from here.
   final bool bitPerfectActive;
+
+  /// The float DSP/volume chain is on the signal path (ABI v25).
+  final bool dspActive;
+
+  /// The session runs the source's own rate, channels and depth (ABI v25).
+  final bool formatMatchesSource;
+
   final int peakMilliDbfs;
   final int limiterGainReductionMilliDb;
   final int clippedSampleCount;
   final bool telemetryValid;
+
+  /// The three conditions behind the bit-perfect claim, with the verdict derived
+  /// from them rather than copied from the engine's flag.
+  OutputPathState get outputPath => OutputPathState(
+    live: outputFormatInitialized,
+    exclusive: outputExclusive,
+    dspActive: dspActive,
+    formatMatchesSource: formatMatchesSource,
+    actualSampleRate: outputSampleRate,
+    actualBitDepth: outputBitsPerSample,
+    channels: outputChannels,
+    engineReportedBitPerfect: bitPerfectActive,
+    isDsdPath: isDoPOutput || isNativeDsdOutput,
+  );
 
   /// Whether the source is DSD, whether it is output directly or converted.
   bool get hasDsdSource =>
@@ -89,6 +117,8 @@ class LazerStreamInfo {
     outputDsdRateMultiplier: info.outputDsdRateMultiplier,
     lossless: info.lossless != 0,
     bitPerfectActive: info.bitPerfectActive != 0,
+    dspActive: info.outputDspActive != 0,
+    formatMatchesSource: info.outputFormatMatchesSource != 0,
     peakMilliDbfs: info.outputPeakMillidbfs,
     limiterGainReductionMilliDb: info.limiterGainReductionMillidb,
     clippedSampleCount: info.outputClippedSampleCount,

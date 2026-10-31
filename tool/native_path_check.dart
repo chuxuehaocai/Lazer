@@ -4,6 +4,7 @@
 //
 //   native-path-check --expect-native            # no audio device needed
 //   native-path-check --play [--file tone.wav]   # live: needs an output device
+//   native-path-check --play --bit-perfect       # the same, asking for the direct path
 //
 // Compile it into a packaged bundle and run it from an unrelated working
 // directory, so library resolution is exercised exactly as the app exercises it
@@ -22,11 +23,13 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'package:lazer_nextgen/audio/native/engine_metrics.dart';
 import 'package:lazer_nextgen/audio/native/engine_selection.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_abi.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_library.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_worker.dart';
 import 'package:lazer_nextgen/audio/native/lazer_stream_info.dart';
+import 'package:lazer_nextgen/audio/native/output_path_state.dart';
 
 int _failures = 0;
 
@@ -94,6 +97,12 @@ Future<void> main(List<String> arguments) async {
 /// file the tool itself wrote (deterministic bytes, no fixture in the repo),
 /// starts playback, and requires the engine's own clock to advance while its
 /// stream info reports an initialized output session.
+///
+/// With `--bit-perfect` the session is opened exclusive + bit-perfect and the
+/// three conditions behind that claim are printed, derived exactly the way the
+/// UI derives them (`OutputPathState`). An endpoint that refuses the request is
+/// reported as such, not treated as a failure: on most machines the default
+/// device's mix format is not the file's.
 Future<void> _playKnownWav(
   List<String> arguments,
   LazerAudioApi api,
@@ -105,6 +114,12 @@ Future<void> _playKnownWav(
   _check('fixture exists', fixture.existsSync(), fixture.path);
   if (!fixture.existsSync()) return;
 
+  final bool bitPerfect = arguments.contains('--bit-perfect');
+  final LazerDeviceSettings settings = LazerDeviceSettings(
+    exclusive: bitPerfect,
+    bitPerfect: bitPerfect,
+  );
+
   final LazerAudioWorker worker = await LazerAudioWorker.spawn().timeout(
     const Duration(seconds: 15),
   );
@@ -113,7 +128,7 @@ Future<void> _playKnownWav(
   int address = 0;
   try {
     final Object? created = await worker.call(LazerWorkerOp.create, <Object?>[
-      ...const LazerDeviceSettings().toDeviceMessage(),
+      ...settings.toDeviceMessage(),
       0,
       0,
     ]);
@@ -129,23 +144,68 @@ Future<void> _playKnownWav(
               ...const LazerOpenSettings().toMessage(),
             ])
             as int;
-    _check('open known WAV', openStatus == lazerAudioOk, openStatus == lazerAudioOk ? null : api.lastError(engine));
-    if (openStatus != lazerAudioOk) return;
+    if (openStatus != lazerAudioOk) {
+      // A bit-perfect request the endpoint cannot honour is an answer, not a bug:
+      // the engine refuses instead of silently converting.
+      stdout.writeln(
+        formatAudioPathRecord('check.format', <String, Object?>{
+          'requested_bit_perfect': bitPerfect ? 1 : 0,
+          'open': 'refused',
+          'error': api.lastError(engine),
+        }),
+      );
+      _check(
+        'the endpoint refused an unsupported format instead of converting it',
+        bitPerfect,
+        bitPerfect ? null : api.lastError(engine),
+      );
+      return;
+    }
+    _check('open known WAV', true);
 
     api.streamInfo(engine, info);
     final LazerStreamInfo stream = LazerStreamInfo.fromNative(info.ref);
+    final OutputPathState path = stream.outputPath;
+    api.snapshot(engine, snapshot);
+    final LazerEngineMetrics metrics = LazerEngineMetrics.fromNative(
+      snapshot.ref,
+    );
     stdout.writeln(
       formatAudioPathRecord('check.format', <String, Object?>{
         'summary': stream.summary,
         'initialized': stream.outputFormatInitialized ? 1 : 0,
-        'exclusive': stream.outputExclusive ? 1 : 0,
-        'bit_perfect': stream.bitPerfectActive ? 1 : 0,
+        'exclusive': path.exclusive ? 1 : 0,
+        'dsp_active': path.dspActive ? 1 : 0,
+        'format_matches_source': path.formatMatchesSource ? 1 : 0,
+        'bit_perfect': path.bitPerfect ? 1 : 0,
+        'engine_claims_bit_perfect': path.engineReportedBitPerfect ? 1 : 0,
+        'unmet': path.failingConditions.isEmpty
+            ? null
+            : path.failingConditions.join(','),
+        'ring_fill': metrics.ringFillFrames,
+        'ring_capacity': metrics.ringCapacityFrames,
       }),
     );
     _check('the output session initialized', stream.outputFormatInitialized);
-    _check('the source decoded as the 44.1 kHz/16-bit WAV it is',
-        stream.sourceSampleRate == 44100 && stream.sourceBitsPerSample == 16,
-        '${stream.sourceSampleRate}/${stream.sourceBitsPerSample}');
+    _check(
+      'the source decoded as the 44.1 kHz/16-bit WAV it is',
+      stream.sourceSampleRate == 44100 && stream.sourceBitsPerSample == 16,
+      '${stream.sourceSampleRate}/${stream.sourceBitsPerSample}',
+    );
+    // The engine's own flag and the three facts must tell the same story; a
+    // disagreement is the bug this whole mechanism exists to expose.
+    _check(
+      'the engine flag agrees with the derived state',
+      path.agreesWithEngine,
+      path.agreesWithEngine ? null : 'engine=${path.engineReportedBitPerfect}',
+    );
+    if (bitPerfect) {
+      _check(
+        'an exclusive bit-perfect request produced a bit-perfect path',
+        path.bitPerfect,
+        path.failingConditions.join('；'),
+      );
+    }
 
     _check('play accepted', api.play(engine) == lazerAudioOk);
     final int? advanced = await _waitForClock(api, engine, snapshot, 1500);

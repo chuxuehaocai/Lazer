@@ -484,6 +484,67 @@ UI：`test/audio/audio_engine_path_test.dart` 断言原生路径下标识不渲�
 
 ---
 
+## 11. 阶段 2 落地记录
+
+阶段 2 的目标是"Bit-Perfect 可观测而非宣称"。基线（第 3.2 节）显示：引擎只发布一个打开时
+决定的布尔值 `bit_perfect_active`，DSP 请求在 bit-perfect 会话中被静默丢弃，欠载水位等原始
+数据虽在 ABI 里但 Dart 侧从未读取。本阶段把"结论"拆成"可核对的事实"，并让两者必须一致。
+
+| 基线缺口 | 处理 | 代码位置 |
+| --- | --- | --- |
+| `bit_perfect_active` 无法被核对 | ABI v25 在 `LazerAudioStreamInfo` 追加 `output_dsp_active` 与 `output_format_matches_source`，在 `LazerAudioSnapshot` 追加 `ring_fill_frames` / `ring_capacity_frames` | `native/lazer-audio/include/lazer_audio_api.h:240-251`、`:272-279` |
+| 三条件未拆分 | 引擎侧分别计算并发布：`dspInPath()`（DSP 是否真的在信号路径）、`formatMatchesSource_`（是否源格式原样） | `native/lazer-audio/src/engine.cpp:1175-1234`（`streamInfo`）、`:1236-1243`（`dspInPath`）、`:500`、`:633`（`configurePipeline`） |
+| 会话语义：无会话时不得残留 | 三个事实只在"输出会话已初始化且未失败"时发布，因此不存在会话时派生结果必然为假，与 `bit_perfect_active` 一致 | `native/lazer-audio/src/engine.cpp:1225-1231` |
+| bit-perfect 会静默吃掉 DSP 请求 | `setDsp` 在 bit-perfect 生效时对"会改变样本"的请求（preamp/bands/limiter/crossfeed）**显式返回 `LazerAudioErrorUnsupported`**，不再接受后忽略 | `native/lazer-audio/src/engine.cpp:1092-1121` |
+| Dart 侧只是照搬引擎布尔值 | 新增 `OutputPathState`：从三个事实派生 `bitPerfect`，并提供 `agreesWithEngine`、`failingConditions`、实际采样率/位深/声道 | `lib/audio/native/output_path_state.dart`、`lib/audio/native/lazer_stream_info.dart:77-88` |
+| 指示器不区分原因 | 信号路径面板拆成"Bit-perfect / 独占 / DSP / 格式与源一致"四行，亮起时给出三项条件，熄灭时列出未满足项 | `lib/widgets/hifi_settings_section.dart:915-975` |
+| 欠载/水位从未读取 | `LazerEngineMetrics` 读快照的环形缓冲占用与欠载计数，进入信号路径面板的"输出缓冲"行，并在欠载状态翻转时写一条 `audio.path event=metrics` | `lib/audio/native/engine_metrics.dart`、`lib/audio/native/lazer_audio_engine.dart:311-325`、`lib/audio/hifi_controller.dart:158-183` |
+| 逐 bit 回环没有独立门禁 | 新增 CTest `lazer-audio-engine-bit-perfect`，四例：逐字节相等、DSP 介入即失效、格式不匹配即失效、bit-perfect 下 DSP 请求被拒且输出仍逐字节相等 | `native/lazer-audio/tools/lazer_audio_engine_bit_perfect_probe.cpp`、`native/lazer-audio/CMakeLists.txt:323-359` |
+| 探针不在 CI | Windows job 新增 `Run the engine's device-free probe suite`（配置 + 构建 + ctest） | `.github/workflows/build.yml:84-101` |
+| 设置层会把 DSP 设置送到会被拒绝的引擎 | `HifiSettings.toDspRequest()` 在 bit-perfect 时发送中性请求（不丢设置，关闭后照常生效），页面用 `dspBypassedByBitPerfect` 明说 DSP 未进入信号路径 | `lib/state/hifi_settings.dart:652-676` |
+
+### 11.1 证据
+
+**回环（离线、假端点抓取引擎真实输出字节）**——`ctest -R lazer-audio-engine-bit-perfect`：
+
+```
+PASS: bit-perfect exclusive output reproduces the source PCM bytes exactly (51200 bytes) and reports exclusive + no DSP + format match
+PASS: DSP in the signal path clears bit-perfect and alters the output (exclusive=1, dsp_active=1, format_matches_source=1)
+PASS: a resampled session reports format_matches_source=0 and is not bit-perfect (source 44100 Hz, output 48000 Hz)
+PASS: a DSP request during bit-perfect is refused with an error and the output stays byte-exact
+```
+
+**真机（本机默认端点）**——同一个打包产物、同一个自生成 44.1 kHz/16-bit WAV：
+
+```
+共享模式（默认）:
+audio.path event=check.format ... exclusive=0 dsp_active=1 format_matches_source=0 bit_perfect=0 engine_claims_bit_perfect=0
+unmet="输出不是独占,DSP 在信号路径中,输出格式与源不一致" ring_fill=8192 ring_capacity=8192
+
+独占 + bit-perfect 请求:
+audio.path event=check.format ... exclusive=1 dsp_active=0 format_matches_source=1 bit_perfect=1 engine_claims_bit_perfect=1 unmet=-
+ok   an exclusive bit-perfect request produced a bit-perfect path
+ok   the engine flag agrees with the derived state
+```
+
+即：指示器在"独占 + 无 DSP + 格式一致"时亮起（`bit_perfect=1`），在任一条件不满足时熄灭并
+给出未满足项；引擎自己的布尔值与派生结果始终一致（`engine flag agrees with the derived state`）。
+
+**测试**：`flutter analyze` 无问题；`flutter test` 647 项通过（新增 `test/audio/output_path_state_test.dart`
+18 项：三条件组合、会话缺失、DSD 路径、陈旧布尔值不可信、指标派生、面板文案、设置层旁路）。
+引擎探针 18/18 通过。
+
+### 11.2 本阶段**没有**做的事（诚实边界）
+
+* **不做 DSP 开启时的重新协商**：bit-perfect 生效期间引擎拒绝处理请求；"打开 EQ 后自动关闭
+  bit-perfect 并重新协商输出"属于阶段 4（DSP 链显式化）的工作，本阶段只保证状态真实。
+* **DSD 路径的 bit-perfect 语义仍未定义**（`failingConditions` 里明确写"语义尚未定义"），
+  按任务要求留到阶段 5。
+* **水位只有观测、没有策略**：环形缓冲的低/高水位驱动（泵线程加速/休眠）属于阶段 3。
+* **物理层未验证**：回环是"引擎写给端点的字节"，不是 DAC 收到的位；真实数字回环仍需硬件。
+
+---
+
 ## 附：本阶段用到的复现命令
 
 ```powershell
@@ -503,10 +564,12 @@ dart compile exe tool/native_path_check.dart -o build/windows/x64/runner/Release
 cd $env:RUNNER_TEMP
 & D:\Lazer\build\windows\x64\runner\Release\native-path-check.exe --expect-native
 & D:\Lazer\build\windows\x64\runner\Release\native-path-check.exe --expect-native --play   # 真实播放自生成的 WAV
+& D:\Lazer\build\windows\x64\runner\Release\native-path-check.exe --play --bit-perfect     # 三条件 + 派生结果（阶段 2）
 
-# 引擎离线探针（17 项）
+# 引擎离线探针（18 项）
 cmake -S native -B build/native-probes -G "Visual Studio 17 2022" -A x64 `
   -DLAZER_FFMPEG_ROOT="D:/Lazer/build/third_party/ffmpeg" -DLAZER_AUDIO_NATIVE_PROBES=ON
 cmake --build build/native-probes --config Release --parallel 4
 ctest --test-dir build/native-probes -C Release --output-on-failure
+ctest --test-dir build/native-probes -C Release -R lazer-audio-engine-bit-perfect --output-on-failure
 ```

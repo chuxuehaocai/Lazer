@@ -87,6 +87,8 @@ List<String> verifyEngineContracts() {
     outputDsdRateMultiplier: 0,
     lossless: true,
     bitPerfectActive: true,
+    dspActive: false,
+    formatMatchesSource: true,
     peakMilliDbfs: -1000,
     limiterGainReductionMilliDb: 0,
     clippedSampleCount: 0,
@@ -95,6 +97,7 @@ List<String> verifyEngineContracts() {
   expect('pcm summary', pcm.summary, 'flac 44100 Hz/16-bit → 44100 Hz/16-bit');
   expect('pcm has no DSD source', pcm.hasDsdSource, false);
   expect('pcm is not DoP', pcm.isDoPOutput, false);
+  expect('pcm output path is bit-perfect', pcm.outputPath.bitPerfect, true);
 
   const LazerStreamInfo dsd = LazerStreamInfo(
     codec: 'dsd_lsbf_planar',
@@ -115,6 +118,8 @@ List<String> verifyEngineContracts() {
     outputDsdRateMultiplier: 128,
     lossless: true,
     bitPerfectActive: false,
+    dspActive: false,
+    formatMatchesSource: false,
     peakMilliDbfs: 0,
     limiterGainReductionMilliDb: 0,
     clippedSampleCount: 0,
@@ -124,6 +129,11 @@ List<String> verifyEngineContracts() {
   expect('dsd has a DSD source', dsd.hasDsdSource, true);
   expect('dsd is DoP', dsd.isDoPOutput, true);
   expect('dsd is not native DSD', dsd.isNativeDsdOutput, false);
+  // The PCM triple does not describe a DoP carrier, so the state says its
+  // bit-perfect meaning is undefined rather than claiming "no".
+  expect('dsd path is not reported as a bit-perfect PCM path',
+      dsd.outputPath.bitPerfect, false);
+  expect('dsd path is flagged as a DSD path', dsd.outputPath.isDsdPath, true);
 
   return failures;
 }

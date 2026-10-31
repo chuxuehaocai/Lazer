@@ -66,6 +66,8 @@ private:
     void pumpLoop();
     void renderLoop();
     int32_t configurePipeline();
+    /* True while the float DSP/volume chain is actually on the signal path. */
+    [[nodiscard]] bool dspInPath() const;
     void raise(int32_t event, int32_t detail, int64_t positionMillis);
     void publishTerminal(int32_t event, int32_t detail, int64_t positionMillis);
     void setError(const std::string &text, int32_t code);
@@ -133,6 +135,10 @@ private:
     /* One packer spans a complete Native DSD output session, including queued source boundaries. */
     NativeDsdPacker nativeDsdPacker_{};
     bool dspBypassed_ = false;
+    /* Set by configurePipeline: the initialized session runs the source's own rate, channel count
+     * and depth, with no resampling and no requantization. Reported as
+     * `output_format_matches_source` so "bit-perfect" can be checked instead of asserted. */
+    bool formatMatchesSource_ = false;
     /* Pump-thread-only per-source ReplayGain ramp; starts at the opened track's gain and retargets
      * only after the queued successor has been activated at the producer-side frame boundary. */
     double replayGainCurrentLinear_ = 1.0;

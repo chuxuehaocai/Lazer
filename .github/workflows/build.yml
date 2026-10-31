@@ -81,6 +81,21 @@ jobs:
           command -v cl.exe
           prefix="$(cygpath -u "$LAZER_FFMPEG_ROOT")"
           bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
+      - name: Run the engine's device-free probe suite
+        shell: pwsh
+        run: |
+          # The probes drive fake platform backends, so no audio device is needed and this is the
+          # only place the byte-exactness of the output path is asserted. It includes
+          # lazer-audio-engine-bit-perfect, which captures the engine's real output bytes and
+          # requires them to equal the source PCM exactly — and to stop being bit-perfect, with the
+          # published facts saying why, once the DSP is in the path or the format is not the source's.
+          cmake -S native -B build/native-probes -G "Visual Studio 17 2022" -A x64 `
+            -DLAZER_FFMPEG_ROOT="$env:LAZER_FFMPEG_ROOT" -DLAZER_AUDIO_NATIVE_PROBES=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Could not configure the native probe suite' }
+          cmake --build build/native-probes --config Release --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Could not build the native probe suite' }
+          ctest --test-dir build/native-probes -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'The native probe suite failed' }
       - run: flutter build windows --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Stage native audio and FFmpeg into the Windows bundle
         shell: pwsh

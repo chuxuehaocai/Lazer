@@ -642,9 +642,16 @@ class HifiSettings {
   ///
   /// Crossfeed is dropped when the settings would break the bit-perfect promise, and
   /// its delay/cutoff follow the chosen algorithm.
+  ///
+  /// A bit-perfect session routes the decoded samples straight to the device, and
+  /// the engine refuses processing requests while it is active. The request is
+  /// therefore neutralised here rather than sent and rejected: reporting "EQ could
+  /// not be applied" for settings the user has not touched would be noise. Nothing
+  /// is discarded — turning bit-perfect off re-sends the same settings, and
+  /// [dspBypassedByBitPerfect] is what the page states meanwhile.
   LazerDspRequest toDspRequest() => LazerDspRequest(
-    preampDb: equalizer.preampDb,
-    limiterEnabled: equalizer.limiterEnabled,
+    preampDb: bitPerfect ? 0 : equalizer.preampDb,
+    limiterEnabled: !bitPerfect && equalizer.limiterEnabled,
     limiterThresholdDb: equalizer.limiterThresholdDb,
     crossfeedEnabled: crossfeedActive,
     crossfeedStrength: crossfeed.strength,
@@ -653,6 +660,10 @@ class HifiSettings {
     crossfeedCutoffHz: crossfeed.effectiveCutoffHz,
     bands: equalizer.toEngineMessage(eqActive: eqActive).bands,
   );
+
+  /// True when the user has DSP configured that bit-perfect keeps out of the
+  /// signal path: the page says so instead of showing the EQ as applied.
+  bool get dspBypassedByBitPerfect => bitPerfect && dspActive;
 }
 
 /// One band, in the shape the engine's DSP config takes.
