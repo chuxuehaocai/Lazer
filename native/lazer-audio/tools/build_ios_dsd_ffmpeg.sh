@@ -116,7 +116,11 @@ configure_args=(
     --enable-cross-compile
     "--target-os=$ffmpeg_target_os"
     --arch=aarch64
-    --cpu=arm64
+    # `arm64` is an *arch* alias, not a CPU name: as --cpu it becomes
+    # -march=arm64, which clang rejects for an aarch64 target and which failed
+    # FFmpeg's own compiler sanity check. `generic` adds no CPU flag at all and
+    # lets the target triple pick the codegen.
+    --cpu=generic
     "--cc=$cc"
     "--cxx=$cc"
     "--as=$cc"
