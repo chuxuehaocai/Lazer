@@ -199,6 +199,26 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/output_alsa.cpp
         src/device_catalog_alsa.cpp)
     list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES PkgConfig::ALSA)
+elseif(IOS)
+    # iOS has no CoreAudio HAL: the route is chosen by the system, there is no
+    # exclusive access, and output goes through the RemoteIO AudioUnit. The
+    # backend is plain C++ against the AudioUnit C API; only AVAudioSession is
+    # Objective-C, behind src/ios_audio_session.h.
+    find_library(AUDIOTOOLBOX_FRAMEWORK AudioToolbox REQUIRED)
+    find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
+    find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    find_library(AVFAUDIO_FRAMEWORK AVFAudio)
+    if(NOT AVFAUDIO_FRAMEWORK)
+        find_library(AVFAUDIO_FRAMEWORK AVFoundation REQUIRED)
+    endif()
+    list(APPEND LAZER_AUDIO_PLATFORM_SOURCES
+        src/output_remoteio.cpp
+        src/ios_audio_session.mm)
+    list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES
+        ${AUDIOTOOLBOX_FRAMEWORK}
+        ${AVFAUDIO_FRAMEWORK}
+        ${COREAUDIO_FRAMEWORK}
+        ${COREFOUNDATION_FRAMEWORK})
 elseif(APPLE)
     find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
     find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
@@ -215,7 +235,17 @@ else()
     message(FATAL_ERROR "No local audio output backend is implemented for ${CMAKE_SYSTEM_NAME}")
 endif()
 
-add_library(lazer-audio SHARED
+# iOS does not let an app dlopen an arbitrary image it was not born with: the
+# engine is linked into the app binary and reached through
+# DynamicLibrary.process(). So the iOS build produces a static archive where
+# the desktop builds produce a shared library.
+if(IOS)
+    set(LAZER_AUDIO_LIBRARY_TYPE STATIC)
+else()
+    set(LAZER_AUDIO_LIBRARY_TYPE SHARED)
+endif()
+
+add_library(lazer-audio ${LAZER_AUDIO_LIBRARY_TYPE}
     src/common.cpp
     src/dff_dsf_reader.cpp
     src/engine.cpp
@@ -254,9 +284,9 @@ if(MSVC)
     target_link_options(lazer-audio PRIVATE "/EXPORT:lazer_audio_abi_version")
 endif()
 set_target_properties(lazer-audio PROPERTIES CXX_EXTENSIONS OFF)
-if(APPLE)
+if(APPLE AND NOT IOS)
     set_target_properties(lazer-audio PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
-elseif(UNIX)
+elseif(UNIX AND NOT APPLE)
     set_target_properties(lazer-audio PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN")
 endif()
 

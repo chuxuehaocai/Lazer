@@ -18,6 +18,11 @@
 cmake_minimum_required(VERSION 3.21)
 project(lazer_native_audio LANGUAGES C CXX)
 
+# iOS keeps the one Objective-C++ file (AVAudioSession) in the engine tree.
+if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    enable_language(OBJCXX)
+endif()
+
 set(_lazer_repo_root "${CMAKE_CURRENT_LIST_DIR}/..")
 
 option(LAZER_AUDIO_NATIVE_ENGINE
@@ -143,6 +148,9 @@ if(LAZER_AUDIO_NATIVE_ENGINE)
             # Android stages its jniLibs through ci/build-android-audio.sh; the
             # install helper below is not called from that toolchain, and the
             # SDK's own .so files must not be bundled.
+        elseif(IOS)
+            # iOS links FFmpeg and the engine straight into the app binary, so
+            # there is nothing to copy beside a library that does not exist.
         elseif(APPLE)
             # The engine's @loader_path resolves beside itself, and the linker
             # records the FFmpeg install names, so the libraries have to be

@@ -45,11 +45,16 @@ jobs:
       - run: flutter pub get --enforce-lockfile
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub --reporter expanded
-      - name: Test Android output contract without hardware
+      - name: Test platform output contracts without hardware
         run: |
           cmake -S native/lazer-audio/tests/aaudio -B build/aaudio-contract -DCMAKE_BUILD_TYPE=Release
           cmake --build build/aaudio-contract --parallel 2
           ctest --test-dir build/aaudio-contract --output-on-failure
+          # The iOS backend is plain C++ against the AudioUnit C API, so it runs
+          # here against a fake AudioUnit; only the route needs a device.
+          cmake -S native/lazer-audio/tests/remoteio -B build/remoteio-contract -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/remoteio-contract --parallel 2
+          ctest --test-dir build/remoteio-contract --output-on-failure
 
   windows:
     name: Windows EXE (x86_64)
@@ -529,6 +534,28 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+  ios-native:
+    name: iOS native audio (arm64)
+    needs: check
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: xcodebuild -version
+      - name: Build the iOS FFmpeg SDK and the engine archives
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: bash ci/build-ios-audio.sh device
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: native-deps-ios-arm64
+          path: build/ios-audio/device/stage/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
   ios:
     name: iOS unsigned IPA (arm64)

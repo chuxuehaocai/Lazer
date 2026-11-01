@@ -9,16 +9,24 @@ project(lazer_audio_bridge LANGUAGES CXX)
 option(LAZER_AUDIO_BRIDGE_BUILD_PROBES
     "Build the ABI layout probe used to verify the Dart mirror" OFF)
 
-add_library(lazer-audio-bridge SHARED src/growing_reader.cpp)
+# iOS links the bridge into the app binary beside the engine (no dlopen of a
+# dylib the app did not ship with), so the archive is static there.
+if(IOS)
+    set(LAZER_BRIDGE_LIBRARY_TYPE STATIC)
+else()
+    set(LAZER_BRIDGE_LIBRARY_TYPE SHARED)
+endif()
+
+add_library(lazer-audio-bridge ${LAZER_BRIDGE_LIBRARY_TYPE} src/growing_reader.cpp)
 target_compile_features(lazer-audio-bridge PRIVATE cxx_std_20)
 target_compile_definitions(lazer-audio-bridge PRIVATE LAZER_BRIDGE_EXPORTS)
 set_target_properties(lazer-audio-bridge PROPERTIES
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON)
-if(APPLE)
+if(APPLE AND NOT IOS)
     set_target_properties(lazer-audio-bridge PROPERTIES
         BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
-elseif(UNIX)
+elseif(UNIX AND NOT APPLE)
     set_target_properties(lazer-audio-bridge PROPERTIES
         BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN")
 endif()
