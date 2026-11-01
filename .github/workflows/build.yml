@@ -559,7 +559,7 @@ jobs:
 
   ios:
     name: iOS unsigned IPA (arm64)
-    needs: check
+    needs: [check, ios-native]
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -573,7 +573,18 @@ jobs:
           cache: true
       - run: xcodebuild -version
       - run: flutter pub get --enforce-lockfile
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: native-deps-ios-arm64
+          path: build/native-deps-ios
+      - name: Link the native audio engine into the app
+        run: |
+          set -euo pipefail
+          python3 ci/verify-ios-audio.py --archive build/native-deps-ios/lib
+          bash ci/ios-audio-xcconfig.sh build/native-deps-ios/lib
       - run: flutter build ios --release --no-codesign --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Verify the app exports the native engine ABI
+        run: python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
       - name: Create unsigned IPA with the required Payload directory
         shell: bash
         run: |
