@@ -61,6 +61,10 @@ dependencies:
   gal: ^2.3.3
   file_selector: ^1.1.0
   image_picker: ^1.2.4
+  # The iOS runtime probe uses this plugin. Flutter's Android release
+  # registrant also references it, so it must be on the release classpath.
+  integration_test:
+    sdk: flutter
 
 dev_dependencies:
   flutter_test:

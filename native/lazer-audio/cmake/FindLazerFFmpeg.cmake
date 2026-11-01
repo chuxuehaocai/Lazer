@@ -1,5 +1,7 @@
-# Android consumes the selected-ABI static SDK through its isolated pkg-config metadata. Other platforms
-# retain the existing shared/import-library discovery behavior below.
+# Android consumes the selected-ABI static SDK through its isolated pkg-config metadata. iOS links the
+# four static archives straight into the app, so it reads the fixed layout that
+# tools/build_ios_dsd_ffmpeg.sh installs instead of depending on pkg-config. Other platforms retain the
+# existing shared/import-library discovery behavior below.
 if(ANDROID)
     if(NOT LAZER_FFMPEG_ROOT AND DEFINED ENV{FFMPEG_ROOT})
         set(LAZER_FFMPEG_ROOT "$ENV{FFMPEG_ROOT}")
@@ -165,6 +167,54 @@ if(ANDROID)
     set(LazerFFmpeg_FOUND TRUE)
     message(STATUS
         "Lazer Android FFmpeg static SDK: ${_lazer_android_ffmpeg_root} (${LAZER_FFMPEG_VERSION})")
+elseif(IOS)
+    if(NOT LAZER_FFMPEG_ROOT AND DEFINED ENV{FFMPEG_ROOT})
+        set(LAZER_FFMPEG_ROOT "$ENV{FFMPEG_ROOT}")
+    endif()
+    if(NOT LAZER_FFMPEG_ROOT)
+        message(FATAL_ERROR
+            "iOS requires the static DSD-capable FFmpeg SDK. Pass -DLAZER_FFMPEG_ROOT=<prefix> or set "
+            "FFMPEG_ROOT to the prefix built by native/lazer-audio/tools/build_ios_dsd_ffmpeg.sh.")
+    endif()
+
+    file(TO_CMAKE_PATH "${LAZER_FFMPEG_ROOT}" _lazer_ios_ffmpeg_root)
+    set(_lazer_ios_ffmpeg_include "${_lazer_ios_ffmpeg_root}/include")
+    if(NOT EXISTS "${_lazer_ios_ffmpeg_include}/libavformat/avformat.h")
+        message(FATAL_ERROR
+            "iOS FFmpeg root '${_lazer_ios_ffmpeg_root}' has no include/libavformat/avformat.h; the "
+            "engine needs the headers from build_ios_dsd_ffmpeg.sh.")
+    endif()
+
+    set(_lazer_ios_ffmpeg_archives "")
+    foreach(component avformat avcodec avutil swresample)
+        if(NOT EXISTS "${_lazer_ios_ffmpeg_root}/lib/lib${component}.a")
+            message(FATAL_ERROR
+                "iOS FFmpeg root '${_lazer_ios_ffmpeg_root}' is missing lib/lib${component}.a.")
+        endif()
+        file(GLOB _lazer_ios_ffmpeg_shared
+            "${_lazer_ios_ffmpeg_root}/lib/lib${component}*.dylib"
+            "${_lazer_ios_ffmpeg_root}/lib/lib${component}*.so*")
+        if(_lazer_ios_ffmpeg_shared)
+            message(FATAL_ERROR
+                "The iOS FFmpeg SDK must be static; found a shared lib${component} in "
+                "${_lazer_ios_ffmpeg_root}/lib. iOS ships no image the app was not built with.")
+        endif()
+        list(APPEND _lazer_ios_ffmpeg_archives "${_lazer_ios_ffmpeg_root}/lib/lib${component}.a")
+    endforeach()
+
+    # The archives are linked through the generated xcconfig at app level; this target carries what the
+    # engine target itself needs to compile and, for probe builds, to link.
+    add_library(LazerFFmpeg::Static INTERFACE IMPORTED GLOBAL)
+    set_property(TARGET LazerFFmpeg::Static PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES "${_lazer_ios_ffmpeg_include}")
+    set_property(TARGET LazerFFmpeg::Static PROPERTY
+        INTERFACE_LINK_LIBRARIES "${_lazer_ios_ffmpeg_archives};-lm")
+    set(LAZER_FFMPEG_LIBRARIES LazerFFmpeg::Static)
+    set(LAZER_FFMPEG_INCLUDE_DIR "${_lazer_ios_ffmpeg_include}")
+    set(LAZER_FFMPEG_INCLUDE_DIRS "${_lazer_ios_ffmpeg_include}")
+    set(LAZER_FFMPEG_RUNTIME_FILES "")
+    set(LazerFFmpeg_FOUND TRUE)
+    message(STATUS "Lazer iOS FFmpeg static SDK: ${_lazer_ios_ffmpeg_root}")
 elseif(WIN32)
     include(FindPackageHandleStandardArgs)
 

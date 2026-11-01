@@ -5,6 +5,7 @@
 //   native-path-check --expect-native            # no audio device needed
 //   native-path-check --play [--file tone.wav]   # live: needs an output device
 //   native-path-check --play --bit-perfect       # the same, asking for the direct path
+//   native-path-check --play --convolver [ir]    # put the FIR stage in the path, optionally with a WAV IR
 //
 // Compile it into a packaged bundle and run it from an unrelated working
 // directory, so library resolution is exercised exactly as the app exercises it
@@ -206,6 +207,10 @@ Future<void> _playKnownWav(
         path.failingConditions.join('；'),
       );
     }
+    final String? convolverIr = _valueOf(arguments, '--convolver');
+    if (convolverIr != null || arguments.contains('--convolver')) {
+      await _applyConvolver(api, engine, info, convolverIr);
+    }
 
     _check('play accepted', api.play(engine) == lazerAudioOk);
     final int? advanced = await _waitForClock(api, engine, snapshot, 1500);
@@ -303,4 +308,150 @@ String? _valueOf(List<String> arguments, String flag) {
   final int index = arguments.indexOf(flag);
   if (index < 0 || index + 1 >= arguments.length) return null;
   return arguments[index + 1];
+}
+
+/// Puts the FIR convolution stage in the signal path, so the one thing that needs real
+/// hardware — "does the DSP change what leaves the engine, and does the path stop claiming
+/// bit-perfect" — can be checked with one command.
+///
+/// The stage is not reachable from the app by design (no setting, no default IR, no UI). An
+/// explicit `<ir>` takes a WAV file: PCM 8/16/24/32-bit or 32-bit float, channel count must
+/// match the session (the engine refuses a mono IR on stereo rather than mixing channels).
+/// Without a value a synthetic decaying echo is used, which is audible and obviously not
+/// the source.
+Future<void> _applyConvolver(
+  LazerAudioApi api,
+  Pointer<Void> engine,
+  Pointer<LazerAudioStreamInfo> info,
+  String? irPath,
+) async {
+  final List<List<double>> channels = irPath == null
+      ? _syntheticImpulse()
+      : _readWavImpulse(File(irPath));
+  if (channels.isEmpty) {
+    _check('the impulse response could be read', false, irPath ?? '(synthetic)');
+    return;
+  }
+  final int frames = channels.first.length;
+  final Pointer<Float> taps = calloc<Float>(frames * channels.length);
+  final Pointer<LazerAudioDspConfig> config = calloc<LazerAudioDspConfig>();
+  try {
+    for (int channel = 0; channel < channels.length; channel++) {
+      for (int tap = 0; tap < frames; tap++) {
+        taps[channel * frames + tap] = channels[channel][tap];
+      }
+    }
+    config.ref
+      ..stageCount = 1
+      ..impulseResponse = taps
+      ..impulseResponseFrames = frames
+      ..impulseResponseChannels = channels.length;
+    config.ref.stageOrder[0] = lazerAudioDspStageConvolver;
+    final int status = api.setDsp(engine, config);
+    stdout.writeln(
+      formatAudioPathRecord('check.convolver', <String, Object?>{
+        'taps': frames,
+        'channels': channels.length,
+        'status': status,
+        'error': status == lazerAudioOk ? null : api.lastError(engine),
+      }),
+    );
+    _check('the convolver accepted the impulse response', status == lazerAudioOk);
+    if (status != lazerAudioOk) return;
+    /* Re-read the path: whatever it was before, a chain with the convolver in it is
+     * processing, so `dsp_active` must be set and the derived bit-perfect verdict false. */
+    api.streamInfo(engine, info);
+    final OutputPathState after = LazerStreamInfo.fromNative(info.ref).outputPath;
+    _check('the convolver is in the signal path', after.dspActive);
+    _check('the path no longer claims bit-perfect', !after.bitPerfect,
+        after.bitPerfectMeaning);
+    _check(
+      'the engine agrees with the derived verdict',
+      after.agreesWithEngine,
+      'engine=${after.engineReportedBitPerfect}',
+    );
+  } finally {
+    calloc.free(taps);
+    calloc.free(config);
+  }
+}
+
+/// A stereo decaying echo: 8 taps at 0, 16 taps at 0.35, 40 taps at 0.15, rest silent.
+List<List<double>> _syntheticImpulse() {
+  const int frames = 64;
+  List<double> channel() {
+    final List<double> taps = List<double>.filled(frames, 0);
+    taps[0] = 0.7;
+    taps[16] = 0.35;
+    taps[40] = 0.15;
+    return taps;
+  }
+
+  return <List<double>>[channel(), channel()];
+}
+
+/// Reads a WAV file as float taps per channel. Returns an empty list when the file is not a
+/// WAV this harness understands, so the caller reports that instead of guessing.
+List<List<double>> _readWavImpulse(File file) {
+  if (!file.existsSync()) return const <List<double>>[];
+  final Uint8List bytes = file.readAsBytesSync();
+  if (bytes.length < 44) return const <List<double>>[];
+  final ByteData data = ByteData.sublistView(bytes);
+  if (String.fromCharCodes(bytes.sublist(0, 4)) != 'RIFF' ||
+      String.fromCharCodes(bytes.sublist(8, 12)) != 'WAVE') {
+    return const <List<double>>[];
+  }
+  int offset = 12;
+  int channels = 0;
+  int bits = 0;
+  int formatTag = 0;
+  int dataOffset = 0;
+  int dataLength = 0;
+  while (offset + 8 <= bytes.length) {
+    final String id = String.fromCharCodes(bytes.sublist(offset, offset + 4));
+    final int size = data.getUint32(offset + 4, Endian.little);
+    final int body = offset + 8;
+    if (id == 'fmt ' && body + 16 <= bytes.length) {
+      formatTag = data.getUint16(body, Endian.little);
+      channels = data.getUint16(body + 2, Endian.little);
+      bits = data.getUint16(body + 14, Endian.little);
+    } else if (id == 'data') {
+      dataOffset = body;
+      dataLength = size;
+    }
+    offset = body + size + (size.isOdd ? 1 : 0);
+  }
+  if (channels <= 0 || dataOffset == 0 || dataLength <= 0) return const <List<double>>[];
+  final bool floatFormat = formatTag == 3 && bits == 32;
+  final int bytesPerSample = bits ~/ 8;
+  if (!floatFormat && bytesPerSample != 1 && bytesPerSample != 2 &&
+      bytesPerSample != 3 && bytesPerSample != 4) {
+    return const <List<double>>[];
+  }
+  final int frames = dataLength ~/ (bytesPerSample * channels);
+  final List<List<double>> taps = List<List<double>>.generate(
+    channels,
+    (_) => List<double>.filled(frames, 0),
+  );
+  for (int frame = 0; frame < frames; frame++) {
+    for (int channel = 0; channel < channels; channel++) {
+      final int at = dataOffset + (frame * channels + channel) * bytesPerSample;
+      double value;
+      if (floatFormat) {
+        value = data.getFloat32(at, Endian.little);
+      } else if (bytesPerSample == 1) {
+        value = (bytes[at] - 128) / 128.0;
+      } else if (bytesPerSample == 2) {
+        value = data.getInt16(at, Endian.little) / 32768.0;
+      } else if (bytesPerSample == 3) {
+        final int raw = bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16);
+        final int signed = raw & 0x800000 != 0 ? raw - 0x1000000 : raw;
+        value = signed / 8388608.0;
+      } else {
+        value = data.getInt32(at, Endian.little) / 2147483648.0;
+      }
+      taps[channel][frame] = value;
+    }
+  }
+  return taps;
 }

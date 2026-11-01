@@ -550,6 +550,24 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       () => _dsp().ref.stageOrder[0] = _sentinel32,
       _int32Marker,
     ),
+    AbiField(
+      'impulseResponse',
+      120,
+      () => _dsp().ref.impulseResponse = Pointer<Float>.fromAddress(_sentinel64),
+      _pointerMarker,
+    ),
+    AbiField(
+      'impulseResponseFrames',
+      128,
+      () => _dsp().ref.impulseResponseFrames = _sentinel32,
+      _uint32Marker,
+    ),
+    AbiField(
+      'impulseResponseChannels',
+      132,
+      () => _dsp().ref.impulseResponseChannels = _sentinel32,
+      _uint32Marker,
+    ),
   ]),
   AbiStruct('LazerAudioOutputDeviceInfo', sizeOf<LazerAudioOutputDeviceInfo>(), <AbiField>[
     AbiField(
@@ -648,7 +666,7 @@ const Map<String, int> abiCStructSizes = <String, int>{
   'LazerAudioSnapshot': 80,
   'LazerAudioStreamInfo': 176,
   'LazerAudioEqBand': 40,
-  'LazerAudioDspConfig': 120,
+  'LazerAudioDspConfig': 136,
   'LazerAudioOutputDeviceInfo': 8,
   'LazerAudioDeviceInfo': 24,
   'LazerAudioPcmFormatCandidate': 12,

@@ -385,14 +385,21 @@ int runNativeDsdCase() {
 
     LazerAudioStreamInfo info{};
     engine->streamInfo(info);
+    /* ABI v28: Native DSD reports the same three facts as a bit-perfect PCM session. It carries the
+     * decoded DSD bitstream unchanged inside the endpoint's own DSD word format, which the engine
+     * only opens when the rate, channels, word width and exclusivity all match the source; the float
+     * DSP is out of the path and processing requests are refused while it is active. So the session
+     * is bit-perfect in the DSD sense, while `output_telemetry_valid` stays 0: the peak/limiter
+     * telemetry describes the float PCM path this stream never enters. */
     if (info.output_format_kind != LazerAudioOutputFormatNativeDsd ||
         info.output_dsd_rate_multiplier != 64 ||
         info.output_format_selection != LazerAudioFormatSelectionNativeDsdU32Be ||
         info.output_sample_rate != kNativeDsdRate || info.output_channels != kStereo ||
         info.output_bits_per_sample != 32 || info.output_container_bits_per_sample != 32 ||
-        info.output_telemetry_valid != 0 || info.bit_perfect_active != 0) {
+        info.output_telemetry_valid != 0 || info.output_dsp_active != 0 ||
+        info.output_format_matches_source != 1 || info.bit_perfect_active != 1) {
         engine->destroy();
-        return fail("Native DSD session telemetry was reported as PCM or bit-perfect PCM");
+        return fail("Native DSD session did not report the DSD bit-perfect state");
     }
 
     if (engine->setVolume(0.5) != LazerAudioErrorUnsupported) {

@@ -22,6 +22,11 @@ env:
   # branch builds stamp the branch name, which BuildInfo rejects in favour of
   # its pubspec fallback.
   LAZER_VERSION: ${{ github.ref_name }}
+  # Packaging always ships the native audio engine. Every job below builds its
+  # own FFmpeg SDK first, so the engine must be buildable; if it is not, the
+  # configure step fails here instead of producing a bundle that quietly falls
+  # back to just_audio. Local developer builds leave this unset.
+  LAZER_AUDIO_REQUIRE_ENGINE: 'ON'
 
 jobs:
   check:
@@ -40,11 +45,16 @@ jobs:
       - run: flutter pub get --enforce-lockfile
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub --reporter expanded
-      - name: Test Android output contract without hardware
+      - name: Test platform output contracts without hardware
         run: |
           cmake -S native/lazer-audio/tests/aaudio -B build/aaudio-contract -DCMAKE_BUILD_TYPE=Release
           cmake --build build/aaudio-contract --parallel 2
           ctest --test-dir build/aaudio-contract --output-on-failure
+          # The iOS backend is plain C++ against the AudioUnit C API, so it runs
+          # here against a fake AudioUnit; only the route needs a device.
+          cmake -S native/lazer-audio/tests/remoteio -B build/remoteio-contract -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/remoteio-contract --parallel 2
+          ctest --test-dir build/remoteio-contract --output-on-failure
 
   windows:
     name: Windows EXE (x86_64)
@@ -101,12 +111,28 @@ jobs:
         shell: pwsh
         run: |
           dart run tool/build_native_audio.dart --ffmpeg-root "$env:LAZER_FFMPEG_ROOT"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not stage the native audio engine' }
           $release = 'build/windows/x64/runner/Release'
           Get-ChildItem -LiteralPath 'build/native-audio' -Filter '*.dll' -File |
             Copy-Item -Destination $release -Force
           $license = Join-Path $release 'licenses/lazer-ffmpeg'
           New-Item -ItemType Directory -Path $license -Force | Out-Null
           Copy-Item -Path "$env:LAZER_FFMPEG_ROOT/share/lazer-ffmpeg/*" -Destination $license -Force
+          # Staging that copies nothing must not look like success.
+          foreach ($pair in @(
+            @('lazer-audio.dll', 'liblazer-audio.dll'),
+            @('lazer-audio-bridge.dll', 'liblazer-audio-bridge.dll')
+          )) {
+            $staged = $pair |
+              Where-Object { Test-Path -LiteralPath (Join-Path $release $_) } |
+              Select-Object -First 1
+            if (-not $staged) { throw "The bundle has no $($pair[0])" }
+          }
+          foreach ($component in 'avcodec', 'avformat', 'avutil', 'swresample') {
+            if (-not (Get-ChildItem -LiteralPath $release -Filter "$component-*.dll" -File)) {
+              throw "The bundle has no $component runtime DLL"
+            }
+          }
       - name: Package EXE, DLLs, resources and Visual C++ runtime
         shell: pwsh
         run: ./ci/package-windows.ps1
@@ -283,7 +309,8 @@ jobs:
           test -f "$runtime/liblazer-audio.dylib"
           test -f "$runtime/liblazer-audio-bridge.dylib"
           for component in avcodec avformat avutil swresample; do
-            compgen -G "$runtime/lib${component}*.dylib" > /dev/null
+            compgen -G "$runtime/lib${component}*.dylib" > /dev/null \
+              || { echo "::error::the app has no $component runtime library"; exit 1; }
           done
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" dist/Lazer-macOS-${{ matrix.arch }}.zip
@@ -363,6 +390,15 @@ jobs:
           mkdir -p "$bundle/lib/licenses/lazer-ffmpeg"
           cp "$LAZER_FFMPEG_ROOT/share/lazer-ffmpeg/"* \
             "$bundle/lib/licenses/lazer-ffmpeg/"
+          # The engine resolves its FFmpeg neighbours through $ORIGIN, so a
+          # bundle that carries one without the others does not load at all.
+          for name in liblazer-audio.so liblazer-audio-bridge.so; do
+            test -f "$bundle/lib/$name" || { echo "::error::$name is missing from the bundle"; exit 1; }
+          done
+          for component in avcodec avformat avutil swresample; do
+            compgen -G "$bundle/lib/lib${component}*.so*" > /dev/null \
+              || { echo "::error::the bundle has no $component runtime library"; exit 1; }
+          done
       - name: Bundle GTK, libmpv and Flutter into AppImage
         run: bash ci/package-appimage.sh ${{ matrix.arch }}
       - name: Check AppImage starts with a display and session bus
@@ -450,6 +486,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The engine was staged into jniLibs above; this makes Gradle refuse to
+          # package an APK without it.
+          export ORG_GRADLE_PROJECT_lazerRequireNativeAudio=true
           # A tag build must never fall back to the debug key if the keystore step
           # silently produced nothing.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -496,9 +535,71 @@ jobs:
           compression-level: 0
           retention-days: 30
 
+  ios-native:
+    name: iOS native audio (arm64)
+    needs: check
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: xcodebuild -version
+      - name: Build the iOS FFmpeg SDK and the engine archives
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: bash ci/build-ios-audio.sh device
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: native-deps-ios-arm64
+          path: build/ios-audio/device/stage/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  ios-simulator:
+    name: iOS simulator runtime selection
+    needs: check
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Build the engine for the simulator
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: bash ci/build-ios-audio.sh simulator
+      - name: Link it into the app
+        run: |
+          set -euo pipefail
+          python3 ci/verify-ios-audio.py --archive build/ios-audio/simulator/stage/lib
+          bash ci/ios-audio-xcconfig.sh build/ios-audio/simulator/stage/lib
+      - name: Boot an iPhone simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available |
+            sed -nE 's/^ *iPhone [^(]*\(([0-9A-Fa-f-]{36})\).*/\1/p' | head -n 1)"
+          if [ -z "$udid" ]; then
+            echo "::error::no iPhone simulator is available on this runner"
+            exit 1
+          fi
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl bootstatus "$udid" -b
+          flutter devices
+      - name: Prove the running app selects the linked engine
+        run: flutter test integration_test/ios_native_engine_test.dart -d "${{ steps.simulator.outputs.udid }}"
+
   ios:
     name: iOS unsigned IPA (arm64)
-    needs: check
+    needs: [check, ios-native]
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -512,7 +613,18 @@ jobs:
           cache: true
       - run: xcodebuild -version
       - run: flutter pub get --enforce-lockfile
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: native-deps-ios-arm64
+          path: build/native-deps-ios
+      - name: Link the native audio engine into the app
+        run: |
+          set -euo pipefail
+          python3 ci/verify-ios-audio.py --archive build/native-deps-ios/lib
+          bash ci/ios-audio-xcconfig.sh build/native-deps-ios/lib
       - run: flutter build ios --release --no-codesign --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Verify the app exports the native engine ABI
+        run: python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
       - name: Create unsigned IPA with the required Payload directory
         shell: bash
         run: |
@@ -552,6 +664,26 @@ jobs:
         run: |
           gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" \
             --pattern 'Lazer-*' --dir release-assets
+      - name: Verify the desktop archives carry the native engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # The per-platform jobs already gate on the engine; this reads the
+          # uploaded archive itself, so a package step that dropped it between
+          # the build tree and the artifact cannot reach a release.
+          zips=(release-assets/Lazer-Windows-*/*.zip release-assets/Lazer-macOS-*/*.zip)
+          test "${#zips[@]}" -gt 0 || { echo "::error::no desktop archives were uploaded"; exit 1; }
+          for zip in "${zips[@]}"; do
+            listing="$(unzip -l "$zip")"
+            for component in lazer-audio lazer-audio-bridge avcodec avformat avutil swresample; do
+              if ! grep -q "$component" <<< "$listing"; then
+                echo "::error::$zip carries no $component"
+                exit 1
+              fi
+            done
+            echo "$zip carries the native engine"
+          done
       - name: Publish tag as a GitHub Release
         shell: bash
         env:

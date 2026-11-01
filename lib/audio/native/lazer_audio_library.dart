@@ -595,9 +595,15 @@ abstract final class LazerAudioLoader {
 
   /// Whether the host platform has an engine backend at all.
   ///
-  /// Windows (WASAPI), Linux (ALSA), macOS (CoreAudio) and 64-bit Android
-  /// (AAudio) share this ABI. Other hosts keep the system engine.
-  static bool get isSupportedHost => _engineFileNames.isNotEmpty;
+  /// Windows (WASAPI), Linux (ALSA), macOS (CoreAudio), 64-bit Android (AAudio)
+  /// and iOS (RemoteIO) share this ABI. Other hosts keep the system engine.
+  static bool get isSupportedHost => Platform.isIOS || _engineFileNames.isNotEmpty;
+
+  /// Whether the engine is linked into this process instead of loaded from a
+  /// file. iOS refuses `dlopen` for an image the app was not shipped with, so
+  /// the engine, its bridge and FFmpeg are static archives linked into the app
+  /// and reached through `DynamicLibrary.process()`.
+  static bool get _isInProcess => Platform.isIOS;
 
   /// File names to try, most specific first.
   ///
@@ -638,7 +644,9 @@ abstract final class LazerAudioLoader {
   }
 
   static LazerAudioAvailability _load({String? engineOverride}) {
-    if (!Platform.isWindows &&
+    final bool inProcess = _isInProcess;
+    if (!inProcess &&
+        !Platform.isWindows &&
         !Platform.isLinux &&
         !Platform.isMacOS &&
         !Platform.isAndroid) {
@@ -648,23 +656,27 @@ abstract final class LazerAudioLoader {
     }
     final List<String> engineFileNames = _engineFileNames;
     final List<String> bridgeFileNames = _bridgeFileNames;
-    if (engineFileNames.isEmpty || bridgeFileNames.isEmpty) {
+    if (!inProcess && (engineFileNames.isEmpty || bridgeFileNames.isEmpty)) {
       return LazerAudioAvailability.unavailable(
         'unsupported architecture ${Abi.current()}',
       );
     }
-    final Uri? enginePath = _resolve(
-      fileNames: engineFileNames,
-      environmentVariable: libraryOverrideVariable,
-      explicitPath: engineOverride ?? importedLibraryPath,
-    );
-    if (enginePath == null) {
+    final Uri? enginePath = inProcess
+        ? null
+        : _resolve(
+            fileNames: engineFileNames,
+            environmentVariable: libraryOverrideVariable,
+            explicitPath: engineOverride ?? importedLibraryPath,
+          );
+    if (!inProcess && enginePath == null) {
       return LazerAudioAvailability.unavailable(
         '${engineFileNames.first} was not found in the app bundle, configured '
         'override, or development checkout',
       );
     }
-    final String engineFileName = enginePath.pathSegments.last;
+    final String engineFileName = inProcess
+        ? 'the linked lazer-audio image'
+        : enginePath!.pathSegments.last;
     // Windows resolves a native library's own dependencies through the *process*
     // search path, not the directory the library was opened from, so a build tree
     // that keeps FFmpeg's DLLs beside the engine still fails with "module could
@@ -672,15 +684,18 @@ abstract final class LazerAudioLoader {
     // is what makes both a staged `build/native-audio` and a `flutter run` from the
     // repository root work. A packaged bundle has them next to the executable
     // already, and the attempt is harmless there.
-    _preloadDependencies(enginePath);
-    final LazerAudioApi api;
+    if (!inProcess) _preloadDependencies(enginePath!);
+    final DynamicLibrary library;
     try {
-      api = LazerAudioApi(DynamicLibrary.open(enginePath.toFilePath()));
+      library = inProcess
+          ? DynamicLibrary.process()
+          : DynamicLibrary.open(enginePath!.toFilePath());
     } catch (error) {
       return LazerAudioAvailability.unavailable(
         'loading $engineFileName failed: $error',
       );
     }
+    final LazerAudioApi api = LazerAudioApi(library);
     final int version;
     try {
       version = api.abiVersion();
@@ -724,18 +739,26 @@ abstract final class LazerAudioLoader {
     // it just cannot stream. A load failure is reported through
     // `supportsStreaming` rather than downgrading the whole engine.
     LazerAudioBridgeApi? bridge;
-    final Uri? bridgePath = _resolve(
-      fileNames: bridgeFileNames,
-      environmentVariable: bridgeOverrideVariable,
-      siblingDirectory: File(enginePath.toFilePath()).parent.path,
-    );
-    if (bridgePath != null) {
+    if (inProcess) {
       try {
-        bridge = LazerAudioBridgeApi(
-          DynamicLibrary.open(bridgePath.toFilePath()),
-        );
+        bridge = LazerAudioBridgeApi(library);
       } catch (error) {
         developer.log('bridge load failed: $error', name: 'lazer-audio');
+      }
+    } else {
+      final Uri? bridgePath = _resolve(
+        fileNames: bridgeFileNames,
+        environmentVariable: bridgeOverrideVariable,
+        siblingDirectory: File(enginePath!.toFilePath()).parent.path,
+      );
+      if (bridgePath != null) {
+        try {
+          bridge = LazerAudioBridgeApi(
+            DynamicLibrary.open(bridgePath.toFilePath()),
+          );
+        } catch (error) {
+          developer.log('bridge load failed: $error', name: 'lazer-audio');
+        }
       }
     }
     return LazerAudioAvailability.available(api, bridge);

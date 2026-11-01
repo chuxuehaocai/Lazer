@@ -32,9 +32,37 @@ DSD/DoP, gapless, EQ/limiter) is built into all Windows, macOS and Linux cloud
 artifacts together with the matching DSD-capable FFmpeg runtime and its LGPL
 notice. Packaging checks fail if any required engine, bridge or FFmpeg library is
 missing. Android packages the native AAudio engine for armeabi-v7a, arm64-v8a and x86_64;
-iOS uses `just_audio`. On Windows the engine and FFmpeg are built with MSVC so
+iOS links the engine as static archives (see below). On Windows the engine and FFmpeg are built with MSVC so
 their import libraries match the app toolchain. See
 [audio-engine.md](audio-engine.md) for local build variables and the settings page.
+
+Every packaging path is required to ship the engine, and each one now fails
+loudly instead of producing a bundle that quietly falls back to `just_audio`:
+
+- `LAZER_AUDIO_REQUIRE_ENGINE=ON` (set for every CI job, or
+  `-DLAZER_AUDIO_REQUIRE_ENGINE=ON` for CMake) turns a missing or unusable
+  FFmpeg SDK into a configure error at `flutter build windows` / `linux` /
+  `ci/build-android-audio.sh` time. Plain developer builds leave it unset and
+  keep the just_audio fallback.
+- `tool/build_native_audio.dart` fails when any of `avcodec`, `avformat`,
+  `avutil` or `swresample` was not staged next to the engine, and the Windows
+  and Linux jobs assert the same files in the finished bundle before packaging.
+- Android package builds run Gradle with `-PlazerRequireNativeAudio=true`, which
+  refuses to build an APK whose `jniLibs/<abi>` is missing the engine or the
+  bridge; `ci/verify-android-audio.py` then re-checks the APK itself.
+- The release job reads the uploaded desktop archives and refuses to publish one
+  that does not contain the engine, the bridge and all four FFmpeg libraries.
+- iOS links `liblazer-audio.a`, `liblazer-audio-bridge.a` and the four FFmpeg
+  archives into the Runner binary through `ios/Flutter/LazerAudio.xcconfig`,
+  which `ci/ios-audio-xcconfig.sh` generates (the file is git-ignored and pulled
+  in with `#include?`, so a checkout without a built engine still builds and
+  runs on `just_audio`). The `ios-native` job builds those archives for arm64;
+  the IPA job verifies the built executable's dynamic export trie and refuses to
+  package when the engine ABI is not in it. Verified end to end on `macos-15`:
+  six arm64 archives, the engine's 18 ABI symbols and the bridge's five exports
+  present in the built `Runner`'s export trie (`dyld_info -exports` reads the
+  trie the dynamic loader uses, not the stripped symbol table), and no FFmpeg
+  dylib inside the bundle.
 
 ## Android release signing
 

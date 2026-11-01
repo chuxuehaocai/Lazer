@@ -199,6 +199,26 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/output_alsa.cpp
         src/device_catalog_alsa.cpp)
     list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES PkgConfig::ALSA)
+elseif(IOS)
+    # iOS has no CoreAudio HAL: the route is chosen by the system, there is no
+    # exclusive access, and output goes through the RemoteIO AudioUnit. The
+    # backend is plain C++ against the AudioUnit C API; only AVAudioSession is
+    # Objective-C, behind src/ios_audio_session.h.
+    find_library(AUDIOTOOLBOX_FRAMEWORK AudioToolbox REQUIRED)
+    find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
+    find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+    find_library(AVFAUDIO_FRAMEWORK AVFAudio)
+    if(NOT AVFAUDIO_FRAMEWORK)
+        find_library(AVFAUDIO_FRAMEWORK AVFoundation REQUIRED)
+    endif()
+    list(APPEND LAZER_AUDIO_PLATFORM_SOURCES
+        src/output_remoteio.cpp
+        src/ios_audio_session.mm)
+    list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES
+        ${AUDIOTOOLBOX_FRAMEWORK}
+        ${AVFAUDIO_FRAMEWORK}
+        ${COREAUDIO_FRAMEWORK}
+        ${COREFOUNDATION_FRAMEWORK})
 elseif(APPLE)
     find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
     find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
@@ -215,7 +235,17 @@ else()
     message(FATAL_ERROR "No local audio output backend is implemented for ${CMAKE_SYSTEM_NAME}")
 endif()
 
-add_library(lazer-audio SHARED
+# iOS does not let an app dlopen an arbitrary image it was not born with: the
+# engine is linked into the app binary and reached through
+# DynamicLibrary.process(). So the iOS build produces a static archive where
+# the desktop builds produce a shared library.
+if(IOS)
+    set(LAZER_AUDIO_LIBRARY_TYPE STATIC)
+else()
+    set(LAZER_AUDIO_LIBRARY_TYPE SHARED)
+endif()
+
+add_library(lazer-audio ${LAZER_AUDIO_LIBRARY_TYPE}
     src/common.cpp
     src/dff_dsf_reader.cpp
     src/engine.cpp
@@ -254,9 +284,9 @@ if(MSVC)
     target_link_options(lazer-audio PRIVATE "/EXPORT:lazer_audio_abi_version")
 endif()
 set_target_properties(lazer-audio PROPERTIES CXX_EXTENSIONS OFF)
-if(APPLE)
+if(APPLE AND NOT IOS)
     set_target_properties(lazer-audio PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
-elseif(UNIX)
+elseif(UNIX AND NOT APPLE)
     set_target_properties(lazer-audio PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN")
 endif()
 
@@ -682,6 +712,29 @@ if(LAZER_AUDIO_BUILD_PROBE)
     endif()
     add_test(NAME lazer-audio-dsp-order
         COMMAND $<TARGET_FILE:lazer-audio-dsp-order-probe>)
+
+    # FIR convolution as a chain stage (ABI v29). Nothing in the app enables it; this is what makes
+    # the stage contract provable before anything ships on top of it.
+    add_executable(lazer-audio-convolver-probe
+        tools/lazer_audio_convolver_probe.cpp
+        src/dsp_chain.cpp
+        src/pcm_output.cpp)
+    target_include_directories(lazer-audio-convolver-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${LAZER_FFMPEG_INCLUDE_DIR}")
+    target_compile_features(lazer-audio-convolver-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-convolver-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-convolver-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-convolver-probe PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    add_test(NAME lazer-audio-convolver
+        COMMAND $<TARGET_FILE:lazer-audio-convolver-probe>)
 
     # Crossfeed mixes the channels, so its properties (leakage, delay, strength,
     # transparency when off) are measurable on synthetic signals without a device.

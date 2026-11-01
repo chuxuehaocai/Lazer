@@ -13,7 +13,8 @@ library;
 
 /// Which playback path a launch runs on.
 enum AudioEnginePath {
-  /// The native HiFi engine (FFmpeg decode + WASAPI/ALSA/CoreAudio output).
+  /// The native HiFi engine (FFmpeg decode + WASAPI/ALSA/CoreAudio/AAudio/
+  /// RemoteIO output).
   native,
 
   /// `just_audio`/media_kit: the explicit, always-reported fallback.
@@ -25,7 +26,8 @@ enum AudioPathFallback {
   /// The user picked 系统音频引擎 in the settings.
   userSelectedSystemEngine,
 
-  /// This host has no native backend at all (iOS, 32-bit ARM Android, ...).
+  /// This host has no native backend at all (32-bit ARM Android, a desktop
+  /// build without a usable device backend, ...).
   unsupportedHost,
 
   /// The shared library is missing, fails to load, or reports another ABI.

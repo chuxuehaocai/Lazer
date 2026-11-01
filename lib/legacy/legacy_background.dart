@@ -92,6 +92,13 @@ List<Color> albumFlowColors(Color seed) {
 /// The seed the legacy app starts from before any artwork is decoded.
 const Color kAlbumDefaultSeed = LegacyTokens.lakeBlue;
 
+/// Stable fallback while the current track's artwork is still loading.
+Color albumFallbackSeedForTrack(Track? track) {
+  final int seed = track?.coverSeed ?? 0;
+  if (seed == 0) return kAlbumDefaultSeed;
+  return HSLColor.fromAHSL(1, (seed % 360).toDouble(), .46, .44).toColor();
+}
+
 /// `normalizeFlowPalette`: always five colours.
 List<Color> normalizeFlowPalette(List<Color> colors) {
   if (colors.isEmpty) return albumFlowColors(kAlbumDefaultSeed);
@@ -202,13 +209,27 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   /// Palette changes share the mesh's selected cadence.
   final Stopwatch _paletteClock = Stopwatch()..start();
   int _lastPaletteFrameUs = 0;
+  Timer? _paletteTrailing;
 
   void _onPaletteFrame() {
     final int now = _paletteClock.elapsedMicroseconds;
-    if (now - _lastPaletteFrameUs < _frameInterval.inMicroseconds) {
+    final int since = now - _lastPaletteFrameUs;
+    final int interval = _frameInterval.inMicroseconds;
+    if (since < interval) {
+      _paletteTrailing ??= Timer(
+        Duration(microseconds: interval - since),
+        _invalidatePaletteFrame,
+      );
       return;
     }
-    _lastPaletteFrameUs = now;
+    _invalidatePaletteFrame();
+  }
+
+  void _invalidatePaletteFrame() {
+    _paletteTrailing?.cancel();
+    _paletteTrailing = null;
+    if (!mounted) return;
+    _lastPaletteFrameUs = _paletteClock.elapsedMicroseconds;
     _frames.value++;
   }
 
@@ -254,7 +275,12 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     if (!_samePalette(next, _to)) {
       _from = _rawPalette();
       _to = next;
-      if (_reduceMotion || !widget.animated || widget.solid) {
+      if (_reduceMotion ||
+          !widget.animated ||
+          widget.solid ||
+          widget.preview ||
+          !_tickerAllowed ||
+          !_appActive) {
         _palette.value = 1;
       } else {
         _palette.forward(from: 0);
@@ -281,6 +307,8 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _paletteTrailing?.cancel();
+    _paletteTrailing = null;
     if (_flowClockAttached) albumFlowClock.removeListener(_advance);
     _cachedPainter?.releaseResources();
     _palette
@@ -301,8 +329,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
       _appActive;
 
   void _syncPlayback() {
-    if ((!widget.animated || widget.solid || widget.preview || _reduceMotion) &&
-        (_palette.isAnimating || _palette.value != 1)) {
+    if (!_runs && (_palette.isAnimating || _palette.value != 1)) {
       _palette.stop();
       _palette.value = 1;
     }
@@ -337,7 +364,9 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   /// The palette before the per-colour vibrancy treatment, used as the
   /// crossfade origin so the adjustment is never applied twice.
   List<Color> _rawPalette() {
-    final double t = _fluidEase(_palette.value);
+    final double t = _palette.value == 0 && !_palette.isAnimating
+        ? 1
+        : _fluidEase(_palette.value);
     return List<Color>.generate(
       5,
       (int i) => Color.lerp(_from[i], _to[i], t) ?? _to[i],
@@ -1065,17 +1094,20 @@ double _colorDistance(Color a, Color b) {
 /// Seed and mesh colours are published together, so the accent and every
 /// backdrop consume one immutable result from one decode.
 @immutable
-class AlbumArtworkPalette {
-  AlbumArtworkPalette({required this.seed, required List<Color> colors})
-    : colors = List.unmodifiable(colors);
+class AlbumCoverPalette {
+  AlbumCoverPalette({required this.seed, required List<Color> mesh})
+    : mesh = List.unmodifiable(mesh);
   final Color seed;
-  final List<Color> colors;
+  final List<Color> mesh;
 }
 
-final Map<String, AlbumArtworkPalette> _artworkPalettes = {};
-final Map<String, Future<AlbumArtworkPalette?>> _paletteRequests = {};
+typedef AlbumPaletteLoader =
+    Future<AlbumCoverPalette?> Function(String? coverUrl);
 
-Future<AlbumArtworkPalette?> albumPaletteForCover(String? coverUrl) {
+final Map<String, AlbumCoverPalette> _artworkPalettes = {};
+final Map<String, Future<AlbumCoverPalette?>> _paletteRequests = {};
+
+Future<AlbumCoverPalette?> albumPaletteForCover(String? coverUrl) {
   final url = albumPaletteArtworkUrl(coverUrl);
   if (url == null) return Future.value(null);
   final cached = _artworkPalettes.remove(url);
@@ -1083,17 +1115,58 @@ Future<AlbumArtworkPalette?> albumPaletteForCover(String? coverUrl) {
     _artworkPalettes[url] = cached;
     return Future.value(cached);
   }
+  final normalized = normalizedArtworkUrl(coverUrl);
+  if (normalized != null && normalized != url) {
+    final fallbackCached = _artworkPalettes.remove(normalized);
+    if (fallbackCached != null) {
+      _artworkPalettes[normalized] = fallbackCached;
+      return Future.value(fallbackCached);
+    }
+  }
+  final candidates = <String>[url];
+  if (normalized != null && normalized != url) candidates.add(normalized);
   return _paletteRequests.putIfAbsent(
     url,
-    () =>
-        _readCoverPalette(url).whenComplete(() => _paletteRequests.remove(url)),
+    () => _readCoverPalette(
+      candidates,
+    ).whenComplete(() => _paletteRequests.remove(url)),
   );
 }
 
-Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async =>
-    (await albumPaletteForCover(coverUrl))?.colors;
+Future<AlbumCoverPalette?> albumPaletteForCoverWhenReady(
+  AlbumPaletteLoader loader,
+  String? coverUrl, {
+  int attempts = 5,
+  Duration delay = const Duration(milliseconds: 160),
+}) async {
+  if ((coverUrl ?? '').trim().isEmpty) return null;
+  for (int attempt = 0; attempt < attempts; attempt++) {
+    AlbumCoverPalette? palette;
+    try {
+      palette = await loader(coverUrl);
+    } catch (error) {
+      debugPrint('Album palette unavailable for $coverUrl: $error');
+    }
+    if (palette != null) return palette;
+    if (attempt < attempts - 1) {
+      await Future<void>.delayed(delay * (attempt + 1));
+    }
+  }
+  return null;
+}
 
-Future<AlbumArtworkPalette?> _readCoverPalette(String url) async {
+Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async =>
+    (await albumPaletteForCover(coverUrl))?.mesh;
+
+Future<AlbumCoverPalette?> _readCoverPalette(List<String> candidates) async {
+  for (final candidate in candidates) {
+    final palette = await _readOneCoverPalette(candidate);
+    if (palette != null) return palette;
+  }
+  return null;
+}
+
+Future<AlbumCoverPalette?> _readOneCoverPalette(String url) async {
   final ui.Image? image = await _decode(ArtworkImage(url));
   if (image == null) return null;
   try {
@@ -1105,9 +1178,9 @@ Future<AlbumArtworkPalette?> _readCoverPalette(String url) async {
       pixels.offsetInBytes,
       pixels.lengthInBytes,
     );
-    final palette = AlbumArtworkPalette(
+    final palette = AlbumCoverPalette(
       seed: albumSeedFromPixels(rgba, image.width, image.height),
-      colors: albumMeshColorsFromPixels(rgba, image.width, image.height),
+      mesh: albumMeshColorsFromPixels(rgba, image.width, image.height),
     );
     if (_artworkPalettes.length >= albumFlowConfiguration.paletteCacheEntries) {
       _artworkPalettes.remove(_artworkPalettes.keys.first);
@@ -1161,6 +1234,7 @@ class LegacyAlbumBackdrop extends StatefulWidget {
     this.onSeed,
     this.frameRate = 30,
     this.solidColor,
+    this.paletteLoader = albumPaletteForCover,
   });
 
   final Track? track;
@@ -1189,6 +1263,7 @@ class LegacyAlbumBackdrop extends StatefulWidget {
   final ValueChanged<Color>? onSeed;
   final double? frameRate;
   final Color? solidColor;
+  final AlbumPaletteLoader paletteLoader;
 
   @override
   State<LegacyAlbumBackdrop> createState() => _LegacyAlbumBackdropState();
@@ -1216,14 +1291,14 @@ class _LegacyAlbumBackdropState extends State<LegacyAlbumBackdrop> {
   Future<void> _load() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
-    final palette = await albumPaletteForCover(coverUrl);
-    final Color? seed = palette?.seed;
-    if (!mounted || generation != _generation) return;
-    setState(
-      () => _colors =
-          palette?.colors ?? albumFlowColors(seed ?? kAlbumDefaultSeed),
+    _colors = albumFlowColors(albumFallbackSeedForTrack(widget.track));
+    final palette = await albumPaletteForCoverWhenReady(
+      widget.paletteLoader,
+      coverUrl,
     );
-    widget.onSeed?.call(seed ?? kAlbumDefaultSeed);
+    if (!mounted || generation != _generation) return;
+    if (palette != null) setState(() => _colors = palette.mesh);
+    widget.onSeed?.call(palette?.seed ?? kAlbumDefaultSeed);
   }
 
   @override

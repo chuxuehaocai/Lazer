@@ -632,6 +632,14 @@ class _SettingsOverview extends StatelessWidget {
                     onChanged: (bool value) =>
                         unawaited(state.setLyricBlurEnabled(value)),
                   ),
+                  _LegacySwitchRow(
+                    key: const ValueKey('system-media-lyrics-switch'),
+                    label: '系统媒体控件显示歌词',
+                    subtitle: '通知、锁屏和灵动岛显示当前这一句，关闭后显示歌手',
+                    value: state.systemMediaLyrics,
+                    onChanged: (bool value) =>
+                        unawaited(state.setSystemMediaLyrics(value)),
+                  ),
                   _LegacySliderRow(
                     label: '手动浏览后恢复跟随',
                     valueText:

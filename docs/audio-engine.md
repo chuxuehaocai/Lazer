@@ -261,7 +261,7 @@ Status of this port:
 | ReplayGain | Supported per source by the ABI; the app does not compute or pass it yet. |
 | Linux/macOS playback | Not run. The code is the master branch's, unchanged, but ALSA/CoreAudio device behaviour is unverified here. |
 | Android | Wired at the build and load layers: CI builds the engine for `arm64-v8a`, `armeabi-v7a` and `x86_64`, stages them into `jniLibs` and verifies the APK, and `LazerAudioLoader` resolves `liblazer-audio.so` on `androidArm64`/`androidX64`. See `docs/android-audio.md`. **`armeabi-v7a` is not in the loader's candidate list**, so a 32-bit ARM build ships the engine without ever selecting it; Android has no exclusive/bit-perfect/DSD path (AAudio shared PCM only). |
-| iOS | Not wired. The app keeps `just_audio` there. |
+| iOS | Wired at the build and link layers: `ci/build-ios-audio.sh` builds a static arm64 FFmpeg SDK and both engine archives, the Runner target links them through the generated `ios/Flutter/LazerAudio.xcconfig`, and the loader reaches them through `DynamicLibrary.process()`. The backend is RemoteIO (`src/output_remoteio.cpp`), its state machine is covered by `tests/remoteio` on every host, and the iOS job asserts the shipped executable's dynamic export trie. iOS is always a shared mix: no exclusive mode, no bit-perfect, no direct DSD. **Nothing has been played on an iOS device yet** — see `docs/audio-engine-hardware-verification.md` section 11. |
 
 Nothing here is evidence that a DAC received the source bits unaltered: the engine
 reports what the platform endpoint accepted, which is necessary but not sufficient, and

@@ -714,5 +714,7 @@
   "请输入有效的24小时制时间，例如23:30": "Enter a valid 24-hour time, e.g. 23:30",
   "开始时间和结束时间不能相同": "Start and end times must differ",
   "结束时间早于开始时间时，时段会延续到次日。": "An end time before the start continues into the next day.",
-  "编辑": "Edit"
+  "编辑": "Edit",
+  "系统媒体控件显示歌词": "Show lyrics in system media controls",
+  "通知、锁屏和灵动岛显示当前这一句，关闭后显示歌手": "The notification, lock screen and Dynamic Island show the current line; off keeps the artist"
 }

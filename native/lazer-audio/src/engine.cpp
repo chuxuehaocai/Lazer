@@ -660,10 +660,18 @@ int32_t Engine::configurePipeline() {
     replayGainCurrentLinear_ = source_->replayGainLinear;
     replayGainTargetLinear_ = source_->replayGainLinear;
     replayGainRampRemainingFrames_ = 0;
-    /* DoP and Native DSD carry a bitstream whose bit-perfect meaning is defined separately (the
-     * carrier or the DSD word layout, not the PCM triple), so they never claim a PCM format match. */
-    formatMatchesSource_ = exactPcmFormat && !outputSession_.doP && !outputSession_.nativeDsd;
-    bitPerfectActive_.store(dspBypassed_, std::memory_order_release);
+    /* Bit-perfect has a second definition for DSD. A DoP session carries the decoded DSD bitstream
+     * unchanged inside a 24-bit carrier, and a Native DSD session inside the endpoint's own DSD word
+     * format; either way `configurePipeline` above already refused to open any session whose carrier
+     * does not match the source exactly (rate, channels, depth, exclusivity). So reaching this point
+     * with a DoP/Native DSD session *is* the carrier contract holding — `output_format_matches_source`
+     * means "the DSD stream is carried exactly", not "the PCM triple is identical". The DSP is out of
+     * the path on both (`dspInPath()` returns false), and `setDsp` refuses processing requests while
+     * they are active, so the three conditions on the PCM rule hold by construction. */
+    const bool dsdCarrierExact = outputSession_.doP || outputSession_.nativeDsd;
+    formatMatchesSource_ = dsdCarrierExact ? true : exactPcmFormat;
+    bitPerfectActive_.store(dsdCarrierExact ? outputSession_.exclusive : dspBypassed_,
+        std::memory_order_release);
     return LazerAudioOk;
 }
 

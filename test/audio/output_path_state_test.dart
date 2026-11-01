@@ -101,17 +101,30 @@ void main() {
       expect(state.failingConditions, contains('没有已初始化的输出会话'));
     });
 
-    test('a DSD path reports that its bit-perfect meaning is undefined', () {
+    test('a DSD path is bit-perfect through its carrier contract', () {
       final OutputPathState state = info(
         outputFormatKind: lazerAudioOutputFormatDoP,
-        engineReportsBitPerfect: false,
+        formatMatchesSource: true,
+        engineReportsBitPerfect: true,
       ).outputPath;
 
       expect(state.isDsdPath, isTrue);
+      expect(state.bitPerfect, isTrue);
+      expect(state.agreesWithEngine, isTrue);
+      expect(state.bitPerfectMeaning, contains('DoP'));
+    });
+
+    test('a DSD path whose carrier does not match the source is not', () {
+      final OutputPathState state = info(
+        outputFormatKind: lazerAudioOutputFormatNativeDsd,
+        formatMatchesSource: false,
+        engineReportsBitPerfect: false,
+      ).outputPath;
+
       expect(state.bitPerfect, isFalse);
       expect(
         state.failingConditions,
-        contains('DSD 路径的 bit-perfect 语义尚未定义'),
+        contains('DoP 载波 / 原生 DSD 字格式与源不一致'),
       );
     });
 
