@@ -557,6 +557,46 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+  ios-simulator:
+    name: iOS simulator runtime selection
+    needs: check
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Build the engine for the simulator
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: bash ci/build-ios-audio.sh simulator
+      - name: Link it into the app
+        run: |
+          set -euo pipefail
+          python3 ci/verify-ios-audio.py --archive build/ios-audio/simulator/stage/lib
+          bash ci/ios-audio-xcconfig.sh build/ios-audio/simulator/stage/lib
+      - name: Boot an iPhone simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          udid="$(xcrun simctl list devices available |
+            sed -nE 's/^ *iPhone [^(]*\(([0-9A-Fa-f-]{36})\).*/\1/p' | head -n 1)"
+          if [ -z "$udid" ]; then
+            echo "::error::no iPhone simulator is available on this runner"
+            exit 1
+          fi
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl bootstatus "$udid" -b
+          flutter devices
+      - name: Prove the running app selects the linked engine
+        run: flutter test integration_test/ios_native_engine_test.dart -d "${{ steps.simulator.outputs.udid }}"
+
   ios:
     name: iOS unsigned IPA (arm64)
     needs: [check, ios-native]
