@@ -258,7 +258,7 @@ class LazerMediaHandler extends BaseAudioHandler {
             if (_acceptCommands &&
                 generation == _artGeneration &&
                 uri != null) {
-              _published = item!.copyWith(artUri: uri);
+              _published = _published!.copyWith(artUri: uri);
               mediaItem.add(_published);
             }
           }),

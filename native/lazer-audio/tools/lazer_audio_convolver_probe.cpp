@@ -192,5 +192,33 @@ int main() {
         }
     }
 
+    /* 7. Removing an IR from an active chain must not leave the old taps running. */
+    {
+        DspChain chain;
+        chain.configureFormat(PcmFormat{kSampleRate, kChannels});
+        LazerAudioDspConfig config{};
+        config.stage_count = 1;
+        config.stage_order[0] = LazerAudioDspStageConvolver;
+        const std::vector<float> echo = stereoEcho();
+        config.impulse_response = echo.data();
+        config.impulse_response_frames = 2;
+        config.impulse_response_channels = kChannels;
+        chain.requestConfig(config);
+        std::vector<float> first = makeSignal();
+        chain.process(first.data(), kFrames);
+        config.impulse_response = nullptr;
+        config.impulse_response_frames = 0;
+        config.impulse_response_channels = 0;
+        chain.requestConfig(config);
+        std::vector<float> afterRemoval = makeSignal();
+        chain.process(afterRemoval.data(), kFrames);
+        if (!nearlyEqual(afterRemoval, signal) || chain.convolverActive()) {
+            std::cerr << "FAIL: removing an IR left the old convolution active\n";
+            ok = false;
+        } else {
+            std::cout << "PASS: removing an IR disables the previous convolution\n";
+        }
+    }
+
     return ok ? 0 : 1;
 }

@@ -159,6 +159,7 @@ public:
      * (no taps, more than kMaxTaps, a channel count of zero) and leaves any previous IR in place. */
     bool configure(const float *taps, int32_t channels, size_t frames);
 
+    void clear() noexcept;
     void reset() noexcept;
     [[nodiscard]] bool active() const noexcept { return tapFrames_ > 0 && channels_ > 0; }
     /* True when the configured IR belongs to a session with this channel count. */

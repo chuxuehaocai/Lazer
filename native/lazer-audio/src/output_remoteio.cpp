@@ -183,6 +183,19 @@ public:
         if (AudioUnitGetProperty(unit_, kAudioUnitProperty_StreamFormat,
                 kAudioUnitScope_Input, kOutputBus, &granted, &grantedSize) == noErr &&
             granted.mSampleRate > 0 && granted.mChannelsPerFrame > 0) {
+            // The queue was allocated for interleaved Float32 at the requested
+            // channel count. A unit that changes that layout would make the
+            // callback read frames with the wrong stride.
+            if (granted.mChannelsPerFrame != static_cast<UInt32>(channels) ||
+                granted.mFormatID != kAudioFormatLinearPCM ||
+                (granted.mFormatFlags & (kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked)) !=
+                    (kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked) ||
+                granted.mBitsPerChannel != 32 ||
+                granted.mBytesPerFrame != static_cast<UInt32>(sizeof(float) * channels)) {
+                error = "RemoteIO changed the requested interleaved Float32 layout";
+                close();
+                return LazerAudioErrorDevice;
+            }
             target_.sampleRate = static_cast<int32_t>(granted.mSampleRate);
             target_.channels = static_cast<int32_t>(granted.mChannelsPerFrame);
         }

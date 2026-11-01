@@ -312,6 +312,14 @@ bool Convolver::configure(const float *taps, int32_t channels, size_t frames) {
     return true;
 }
 
+void Convolver::clear() noexcept {
+    taps_.clear();
+    history_.clear();
+    tapFrames_ = 0;
+    channels_ = 0;
+    cursor_ = 0;
+}
+
 void Convolver::reset() noexcept {
     std::fill(history_.begin(), history_.end(), 0.0f);
     cursor_ = 0;
@@ -495,13 +503,11 @@ void DspChain::applyPendingConfig() {
     crossfeed_.configure(crossfeed, format_.sampleRate, format_.channels);
     limiter_.configure(format_.sampleRate, limiterThresholdDb, limiterEnabled);
     limiter_.reset();
-    if (tapFrames > 0 && static_cast<int32_t>(tapChannels) == format_.channels) {
+    if (tapFrames > 0 && tapChannels == format_.channels) {
         convolver_.configure(taps.data(), tapChannels, tapFrames);
-    } else if (!taps.empty()) {
-        /* An IR whose channel count does not match the session would silently mix channels; drop it
-         * and leave the stage inert instead. */
-        convolver_.reset();
-        convolver_.configure(nullptr, 0, 0);
+    } else {
+        /* Zero frames and invalid or mismatched IRs disable a previously active stage too. */
+        convolver_.clear();
     }
     applyOrder(pendingOrder_);
 }

@@ -68,6 +68,7 @@ struct FakeUnitState {
 
 FakeUnitState g_unit;
 bool g_componentAvailable = true;
+bool g_changeGrantedChannels = false;
 
 /* Pulls `frames` from the backend's callback exactly as the device would. */
 std::vector<float> pullAudio(int32_t frames, int32_t channels) {
@@ -156,6 +157,9 @@ OSStatus AudioUnitGetProperty(AudioUnit unit, AudioUnitPropertyID id, AudioUnitS
         return -1;
     }
     std::memcpy(outData, &g_unit.format, sizeof(g_unit.format));
+    if (g_changeGrantedChannels) {
+        static_cast<AudioStreamBasicDescription *>(outData)->mChannelsPerFrame = 1;
+    }
     *ioDataSize = sizeof(g_unit.format);
     return noErr;
 }
@@ -447,6 +451,19 @@ void testMissingUnitAndSessionFailureAreReported() {
     checkEqual(output->reset(error), LazerAudioOk, "resetting a closed output is harmless");
 }
 
+void testRejectsChangedCallbackLayout() {
+    g_session = FakeSession{};
+    g_changeGrantedChannels = true;
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    const int32_t status = output->open(request(), source(), session, error, nullptr);
+    checkEqual(status, LazerAudioErrorDevice, "rejects a changed callback channel layout");
+    check(!error.empty(), "explains the incompatible callback layout");
+    checkEqual(g_unit.disposeCalls, 1, "disposes a unit with incompatible layout");
+    g_changeGrantedChannels = false;
+}
+
 }  // namespace
 
 int main() {
@@ -455,6 +472,7 @@ int main() {
     testQueuesAndDeliversFrames();
     testWaitForReadySeesTheDeviceDrain();
     testMissingUnitAndSessionFailureAreReported();
+    testRejectsChangedCallbackLayout();
     if (failures != 0) {
         std::printf("%d RemoteIO contract check(s) failed\n", failures);
         return 1;

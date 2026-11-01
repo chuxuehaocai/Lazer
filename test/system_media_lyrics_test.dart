@@ -77,13 +77,17 @@ void main() {
   Future<(AppState, _Engine, LazerMediaHandler)> playing(
     WidgetTester tester, {
     bool withLyrics = true,
+    MediaArtworkResolver? artwork,
   }) async {
     final engine = _Engine();
     final state = AppState(
       catalog: _Catalog(withLyrics: withLyrics),
       audioEngine: engine,
     );
-    final handler = LazerMediaHandler(state, artwork: (_) async => null);
+    final handler = LazerMediaHandler(
+      state,
+      artwork: artwork ?? (_) async => null,
+    );
     state.playQueue(<Track>[_track]);
     await tester.pump();
     // The lyric request is a real future: let it land before the first beat.
@@ -124,6 +128,28 @@ void main() {
     engine.position = const Duration(seconds: 2);
     await beat(tester);
     expect(handler.mediaItem.value?.artist, 'first line');
+
+    stop(state, engine, handler);
+  });
+
+  testWidgets('late artwork keeps the lyric currently on the controls', (
+    tester,
+  ) async {
+    final artwork = Completer<Uri?>();
+    final (state, engine, handler) = await playing(
+      tester,
+      artwork: (_) => artwork.future,
+    );
+    engine.position = const Duration(seconds: 4);
+    await beat(tester);
+    expect(handler.mediaItem.value?.artist, 'second line');
+
+    final uri = Uri.parse('file:///cover.png');
+    artwork.complete(uri);
+    await tester.pump();
+    expect(handler.mediaItem.value?.artUri, uri);
+    expect(handler.mediaItem.value?.artist, 'second line');
+    expect(handler.mediaItem.value?.displaySubtitle, 'second line');
 
     stop(state, engine, handler);
   });
