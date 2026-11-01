@@ -39,6 +39,16 @@ ABI_SYMBOLS = [
     "lazer_audio_build_information",
 ]
 
+# The reader bridge is what makes network sources playable; it is linked with
+# the engine, so its absence would silently downgrade streaming.
+BRIDGE_SYMBOLS = [
+    "lazer_bridge_reader_create",
+    "lazer_bridge_reader_notify",
+    "lazer_bridge_reader_finish",
+    "lazer_bridge_reader_read",
+    "lazer_bridge_reader_destroy",
+]
+
 
 def run(*command: str) -> str:
     result = subprocess.run(command, capture_output=True, text=True)
@@ -94,11 +104,19 @@ def verify_executable(binary: Path) -> int:
         symbols = defined_symbols(binary)
         source = "the symbol table (dyld_info unavailable)"
     missing = [name for name in ABI_SYMBOLS if name not in symbols]
-    if missing:
-        print(
-            f"missing symbols in {binary.name} ({source}): {', '.join(missing)}",
-            file=sys.stderr,
-        )
+    missing_bridge = [name for name in BRIDGE_SYMBOLS if name not in symbols]
+    if missing or missing_bridge:
+        if missing:
+            print(
+                f"missing engine symbols in {binary.name} ({source}): {', '.join(missing)}",
+                file=sys.stderr,
+            )
+        if missing_bridge:
+            print(
+                f"missing bridge symbols in {binary.name} ({source}): "
+                f"{', '.join(missing_bridge)}",
+                file=sys.stderr,
+            )
         return 1
 
     linked = run("otool", "-L", str(binary))
@@ -115,7 +133,10 @@ def verify_executable(binary: Path) -> int:
                 f"{binary.name} still links {forbidden} as a shared library; "
                 "the engine must be linked statically on iOS"
             )
-    print(f"{binary.name}: arm64, {len(ABI_SYMBOLS)} engine symbols exported, no stray dylibs")
+    print(
+        f"{binary.name}: arm64, {len(ABI_SYMBOLS)} engine + {len(BRIDGE_SYMBOLS)} bridge "
+        "symbols exported, no stray dylibs"
+    )
     return 0
 
 
@@ -142,10 +163,16 @@ def verify_archive(directory: Path) -> int:
         print(f"missing symbols in liblazer-audio.a: {', '.join(missing)}", file=sys.stderr)
         return 1
     bridge = defined_symbols(directory / "liblazer-audio-bridge.a")
-    if not any(name.startswith("lazer_audio_bridge") for name in bridge):
-        print("liblazer-audio-bridge.a exports no bridge symbols", file=sys.stderr)
+    missing_bridge = [name for name in BRIDGE_SYMBOLS if name not in bridge]
+    if missing_bridge:
+        print(
+            f"missing symbols in liblazer-audio-bridge.a: {', '.join(missing_bridge)}",
+            file=sys.stderr,
+        )
         return 1
-    print(f"{directory}: {len(required)} arm64 archives, engine ABI complete")
+    print(
+        f"{directory}: {len(required)} arm64 archives, engine ABI and bridge exports complete"
+    )
     return 0
 
 

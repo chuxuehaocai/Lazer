@@ -99,8 +99,16 @@ fi
 
 bridge_symbols="$(nm -g --defined-only "$stage/lib/liblazer-audio-bridge.a" |
     awk '{print $NF}' | sed 's/^_//' | sort -u)"
-if ! grep -q '^lazer_audio_bridge' <<<"$bridge_symbols"; then
-    echo "::error::the iOS reader bridge exports no lazer_audio_bridge symbols" >&2
+missing=0
+for symbol in lazer_bridge_reader_create lazer_bridge_reader_read \
+    lazer_bridge_reader_notify lazer_bridge_reader_finish \
+    lazer_bridge_reader_destroy; do
+    if ! grep -qx "$symbol" <<<"$bridge_symbols"; then
+        echo "::error::$symbol is missing from the iOS reader bridge archive" >&2
+        missing=1
+    fi
+done
+if [[ "$missing" -ne 0 ]]; then
     exit 1
 fi
 
