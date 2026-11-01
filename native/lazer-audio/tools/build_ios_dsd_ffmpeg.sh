@@ -91,14 +91,18 @@ target_triple="arm64-apple-ios${IOS_MIN_VERSION}"
 if [[ "$platform" == "simulator" ]]; then
     target_triple="arm64-apple-ios${IOS_MIN_VERSION}-simulator"
 fi
-cc="$clang -target $target_triple -isysroot $sdk_path"
+# One flag array is the single source of truth: FFmpeg gets it as a --cc string
+# (`$cc` unquoted), while this script's own probe must not quote it as one word.
+cc_flags=(-target "$target_triple" -isysroot "$sdk_path")
+cc="$clang ${cc_flags[*]}"
 
 # Fail before configure's first opaque "C compiler test failed" with the
 # compiler's own stderr.
 probe_root="$work_root/probe"
 rm -rf "$probe_root" && mkdir -p "$probe_root"
 printf 'int main(void) { return 0; }\n' > "$probe_root/probe.c"
-if ! "$cc" -o "$probe_root/probe" "$probe_root/probe.c" 2> "$probe_root/probe.err"; then
+if ! "$clang" "${cc_flags[@]}" -o "$probe_root/probe" "$probe_root/probe.c" \
+    2> "$probe_root/probe.err"; then
     cat "$probe_root/probe.err" >&2
     echo "The iOS clang toolchain cannot link a test binary for $platform." >&2
     exit 1
