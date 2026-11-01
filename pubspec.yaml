@@ -61,14 +61,13 @@ dependencies:
   gal: ^2.3.3
   file_selector: ^1.1.0
   image_picker: ^1.2.4
+  # The iOS runtime probe uses this plugin. Flutter's Android release
+  # registrant also references it, so it must be on the release classpath.
+  integration_test:
+    sdk: flutter
 
 dev_dependencies:
   flutter_test:
-    sdk: flutter
-
-  # Drives the iOS-only runtime check (integration_test/ios_native_engine_test.dart)
-  # that proves the linked engine is reachable in a running iOS process.
-  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
