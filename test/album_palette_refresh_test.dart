@@ -90,8 +90,14 @@ void main() {
       expect(_paintedMesh(tester), albumFlowColors(_green));
 
       await tester.pumpWidget(page(_track('b', cover: 'https://cover.test/b')));
+      // The palette reader retries while the cover may still be downloading, so
+      // the fallback only lands once that wait is over.
       await tester.pump();
-      expect(_paintedMesh(tester), albumFlowColors(kAlbumDefaultSeed));
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        _paintedMesh(tester),
+        albumFlowColors(albumFallbackSeedForTrack(_track('b'))),
+      );
       expect(tester.takeException(), isNull);
 
       await tester.pumpWidget(const SizedBox.shrink());
@@ -141,7 +147,11 @@ void main() {
 
     await tester.pumpWidget(page(_track('b', cover: 'https://cover.test/b')));
     await tester.pump();
-    expect(_paintedMesh(tester), albumFlowColors(kAlbumDefaultSeed));
+    await tester.pump(const Duration(seconds: 2));
+    // The canvas follows this track's own seed; the browse accent keeps its
+    // previous contract and reports the shared default.
+    final Color fallback = albumFallbackSeedForTrack(_track('b'));
+    expect(_paintedMesh(tester), albumFlowColors(fallback));
     expect(seeds.last, kAlbumDefaultSeed);
   });
 

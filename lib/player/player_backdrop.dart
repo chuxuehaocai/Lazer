@@ -75,20 +75,20 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
   Future<void> _updatePalette() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
-    AlbumCoverPalette? palette;
-    try {
-      palette = await widget.paletteLoader(coverUrl);
-    } catch (error) {
-      // The new track's cover could not be read. The canvas must still leave
-      // the previous song's colours behind: fall back to the default seed.
-      debugPrint('Album palette unavailable for $coverUrl: $error');
-      palette = null;
-    }
+    // Waits for the artwork: the cover is being downloaded while this asks for
+    // its colours, and switching on the first miss is what left the canvas on
+    // the previous song's cover.
+    final AlbumCoverPalette? palette = await albumPaletteForCoverWhenReady(
+      widget.paletteLoader,
+      coverUrl,
+    );
     if (!mounted || generation != _generation) return;
+    // A cover that never turns up still gets *this* track's seed, so the canvas
+    // moves with the song instead of freezing on one colour.
+    final Color fallback = albumFallbackSeedForTrack(widget.track);
     widget.onSeed?.call(palette?.seed);
     setState(
-      () => _colors =
-          palette?.mesh ?? albumFlowColors(palette?.seed ?? kAlbumDefaultSeed),
+      () => _colors = palette?.mesh ?? albumFlowColors(palette?.seed ?? fallback),
     );
   }
 

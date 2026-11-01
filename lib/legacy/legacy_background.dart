@@ -48,6 +48,17 @@ List<Color> albumFlowColors(Color seed) {
 /// The seed the legacy app starts from before any artwork is decoded.
 const Color kAlbumDefaultSeed = LegacyTokens.lakeBlue;
 
+/// A stable colour for a track whose artwork could not be sampled at all.
+///
+/// The hue comes from the track's own seed rather than the shared default, so a
+/// cover the palette reader never reaches still leaves the canvas following the
+/// song instead of sitting on one colour for the whole session.
+Color albumFallbackSeedForTrack(Track? track) {
+  final int seed = track?.coverSeed ?? 0;
+  if (seed == 0) return kAlbumDefaultSeed;
+  return HSLColor.fromAHSL(1, (seed % 360).toDouble(), .46, .44).toColor();
+}
+
 /// `normalizeFlowPalette`: always five colours.
 List<Color> normalizeFlowPalette(List<Color> colors) {
   if (colors.isEmpty) return albumFlowColors(kAlbumDefaultSeed);
@@ -1004,18 +1015,64 @@ Future<AlbumCoverPalette?> albumPaletteForCover(String? coverUrl) {
   if (url == null) return Future<AlbumCoverPalette?>.value();
   final AlbumCoverPalette? cached = _paletteCache[url];
   if (cached != null) return Future<AlbumCoverPalette?>.value(cached);
+  // The 96 px rendition is the cheapest thing to sample, but a CDN may not
+  // serve it, and the cover on screen is busy fetching a *different* rendition.
+  // Trying the URL the cover widgets use means the palette can still be read out
+  // of the cache they already filled instead of failing outright.
+  final List<String> candidates = <String>[url];
+  final String? normalized = normalizedArtworkUrl(coverUrl);
+  if (normalized != null && normalized != url) candidates.add(normalized);
   return _paletteRequests.putIfAbsent(
     url,
     () =>
-        _readCoverPalette(url).whenComplete(() => _paletteRequests.remove(url)),
+        _readCoverPalette(candidates).whenComplete(() => _paletteRequests.remove(url)),
   );
+}
+
+/// Reads a cover's palette, giving the artwork time to arrive.
+///
+/// The cover the listener is looking at is being downloaded while the canvas
+/// asks for its colours, so a first miss usually means "not cached yet" rather
+/// than "unreadable". Waiting is what makes the canvas follow the song being
+/// played instead of the one before it; [attempts] bounds the wait, and a null
+/// answer afterwards is a real answer the caller must handle.
+Future<AlbumCoverPalette?> albumPaletteForCoverWhenReady(
+  AlbumPaletteLoader loader,
+  String? coverUrl, {
+  int attempts = 5,
+  Duration delay = const Duration(milliseconds: 160),
+}) async {
+  // Nothing to wait for: a track without artwork has no cover in flight, and
+  // scheduling retries for it would leave timers pending behind every page.
+  if ((coverUrl ?? '').trim().isEmpty) return null;
+  for (int attempt = 0; attempt < attempts; attempt++) {
+    AlbumCoverPalette? palette;
+    try {
+      palette = await loader(coverUrl);
+    } catch (error) {
+      debugPrint('Album palette unavailable for $coverUrl: $error');
+      palette = null;
+    }
+    if (palette != null) return palette;
+    if (attempt == attempts - 1) break;
+    await Future<void>.delayed(delay * (attempt + 1));
+  }
+  return null;
 }
 
 /// The five-colour mesh of [coverUrl], or null when the artwork cannot be read.
 Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async =>
     (await albumPaletteForCover(coverUrl))?.mesh;
 
-Future<AlbumCoverPalette?> _readCoverPalette(String url) async {
+Future<AlbumCoverPalette?> _readCoverPalette(List<String> candidates) async {
+  for (final String candidate in candidates) {
+    final AlbumCoverPalette? palette = await _readOneCoverPalette(candidate);
+    if (palette != null) return palette;
+  }
+  return null;
+}
+
+Future<AlbumCoverPalette?> _readOneCoverPalette(String url) async {
   final ui.Image? image = await _decode(ArtworkImage(url));
   if (image == null) return null;
   try {
@@ -1152,21 +1209,22 @@ class _LegacyAlbumBackdropState extends State<LegacyAlbumBackdrop> {
   Future<void> _load() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
-    AlbumCoverPalette? palette;
-    try {
-      palette = await widget.paletteLoader(coverUrl);
-    } catch (error) {
-      // A cover we cannot read is still *this* track's cover: fall back to the
-      // default seed rather than leaving the previous song's colours on the
-      // canvas until the next track happens to load.
-      debugPrint('Album palette unavailable for $coverUrl: $error');
-      palette = null;
-    }
-    if (!mounted || generation != _generation) return;
-    setState(
-      () => _colors =
-          palette?.mesh ?? albumFlowColors(palette?.seed ?? kAlbumDefaultSeed),
+    final AlbumCoverPalette? palette = await albumPaletteForCoverWhenReady(
+      widget.paletteLoader,
+      coverUrl,
     );
+    if (!mounted || generation != _generation) return;
+    // Sampling waits for the cover; switching does not wait forever. With no
+    // palette at all the canvas still moves to this track's own seed, so a
+    // cover that never arrives cannot leave the previous song's colours up.
+    final Color fallback = albumFallbackSeedForTrack(widget.track);
+    setState(
+      () => _colors = palette?.mesh ?? albumFlowColors(palette?.seed ?? fallback),
+    );
+    // The browse pages' accent keeps its previous contract: a palette that was
+    // read, or the shared default. Only the canvas follows the per-track seed,
+    // so a cover that cannot be read never leaves the *previous* song's colours
+    // on screen.
     widget.onSeed?.call(palette?.seed ?? kAlbumDefaultSeed);
   }
 

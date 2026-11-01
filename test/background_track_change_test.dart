@@ -23,13 +23,13 @@ import 'package:lazer_nextgen/state/ui_preferences.dart';
 const Color _green = Color(0xFF2E7D32);
 const Color _red = Color(0xFFB71C1C);
 
-Track _track(String id, String cover) => Track(
+Track _track(String id, String cover, {int seed = 1}) => Track(
   id: id,
   title: id,
   artist: 'Artist',
   album: 'Album',
   duration: const Duration(minutes: 3),
-  coverSeed: 1,
+  coverSeed: seed,
   coverUrl: cover,
 );
 
@@ -138,6 +138,71 @@ void main() {
     await tester.pump(const Duration(milliseconds: 900));
     final Color second = await _bottomPixel(tester, boundary, '2b-crossfade');
     expect(second.g, greaterThan(second.r));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a cover that arrives late still moves the canvas', (tester) async {
+    // Exactly what a slow cover cache looks like: the first reads miss while the
+    // artwork is still downloading, and the palette must win once it lands.
+    int misses = 0;
+    final GlobalKey boundary = GlobalKey();
+    Widget page(Track track) => MaterialApp(
+      home: AlbumBlurFlow(
+        boundaryKey: boundary,
+        track: track,
+        mode: LegacyBackgroundMode.nowPlayingStatic,
+        pageColor: Colors.black,
+        preview: true,
+        paletteLoader: (String? url) async {
+          if (!url!.endsWith('/b')) return _palette(_red);
+          misses++;
+          return misses <= 2 ? null : _palette(_green);
+        },
+      ),
+    );
+
+    await tester.pumpWidget(page(_track('a', 'https://cover.test/a')));
+    await tester.pump();
+    final Color first = await _bottomPixel(tester, boundary, '3a-late-cover');
+    expect(first.r, greaterThan(first.g));
+
+    await tester.pumpWidget(page(_track('b', 'https://cover.test/b')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+    expect(misses, greaterThan(2), reason: 'the reader retried while waiting');
+    final Color second = await _bottomPixel(tester, boundary, '3b-late-cover');
+    expect(second.g, greaterThan(second.r));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a cover that never arrives still changes with the song', (
+    tester,
+  ) async {
+    // No palette at all: the canvas must fall back to each track's own seed
+    // instead of freezing on the shared default for the whole session.
+    final List<List<Color>> painted = <List<Color>>[];
+    Widget page(Track track) => MaterialApp(
+      home: AlbumBlurFlow(
+        track: track,
+        mode: LegacyBackgroundMode.nowPlayingStatic,
+        pageColor: Colors.black,
+        preview: true,
+        paletteLoader: (String? url) async => null,
+      ),
+    );
+
+    for (final Track track in <Track>[
+      _track('a', 'https://cover.test/a', seed: 40),
+      _track('b', 'https://cover.test/b', seed: 200),
+    ]) {
+      await tester.pumpWidget(page(track));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      painted.add(
+        tester.widget<AlbumFlowBackground>(find.byType(AlbumFlowBackground)).colors,
+      );
+    }
+    expect(painted[0], isNot(equals(painted[1])));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }
