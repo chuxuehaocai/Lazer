@@ -34,7 +34,7 @@ cat > "$out" <<'EOF'
 // the executable's export trie so dlsym(RTLD_DEFAULT) finds them.
 LAZER_AUDIO_LIB_DIR = @LIB_DIR@
 LIBRARY_SEARCH_PATHS = $(inherited) "$(LAZER_AUDIO_LIB_DIR)"
-OTHER_LDFLAGS = $(inherited) -Wl,-force_load,"$(LAZER_AUDIO_LIB_DIR)/liblazer-audio.a" -Wl,-force_load,"$(LAZER_AUDIO_LIB_DIR)/liblazer-audio-bridge.a" -lavformat -lavcodec -lavutil -lswresample -framework AudioToolbox -framework AVFAudio -framework CoreAudio -framework CoreFoundation -lc++ -Wl,-export_dynamic
+OTHER_LDFLAGS = $(inherited) -Wl,-force_load,"$(LAZER_AUDIO_LIB_DIR)/liblazer-audio.a" -Wl,-force_load,"$(LAZER_AUDIO_LIB_DIR)/liblazer-audio-bridge.a" -lavformat -lavcodec -lswresample -lavutil -framework AudioToolbox -framework AVFAudio -framework CoreAudio -framework CoreFoundation -lc++ -Wl,-export_dynamic
 EOF
 # The path has no spaces in practice, but sed with | keeps it safe anyway.
 sed -i.bak "s|@LIB_DIR@|$lib_dir|g" "$out"

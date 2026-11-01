@@ -17,6 +17,7 @@
 #include "ios_audio_session.h"
 
 #include <AudioToolbox/AudioToolbox.h>
+#include <AudioUnit/AudioUnit.h>
 
 #include <algorithm>
 #include <atomic>

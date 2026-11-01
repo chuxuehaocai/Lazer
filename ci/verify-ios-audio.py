@@ -59,6 +59,28 @@ def defined_symbols(path: Path) -> set[str]:
     return symbols
 
 
+def exported_symbols(binary: Path) -> set[str]:
+    """The dynamic export trie, which is what dlsym(RTLD_DEFAULT) reads.
+
+    A release build strips the ordinary symbol table, so `nm` alone cannot prove
+    that `DynamicLibrary.process()` would find the engine. `dyld_info -exports`
+    reads the trie the dynamic loader actually uses.
+    """
+    try:
+        output = run("dyld_info", "-exports", str(binary))
+    except SystemExit:
+        return set()
+    symbols = set()
+    for line in output.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        token = parts[-1]
+        if token.startswith("_"):
+            symbols.add(token.lstrip("_"))
+    return symbols
+
+
 def verify_executable(binary: Path) -> int:
     if not binary.is_file():
         raise SystemExit(f"missing executable: {binary}")
@@ -66,10 +88,17 @@ def verify_executable(binary: Path) -> int:
     if "arm64" not in arch:
         raise SystemExit(f"{binary.name} is not an arm64 executable: {arch.strip()}")
 
-    symbols = defined_symbols(binary)
+    symbols = exported_symbols(binary)
+    source = "the dynamic export trie"
+    if not symbols:
+        symbols = defined_symbols(binary)
+        source = "the symbol table (dyld_info unavailable)"
     missing = [name for name in ABI_SYMBOLS if name not in symbols]
     if missing:
-        print(f"missing symbols in {binary.name}: {', '.join(missing)}", file=sys.stderr)
+        print(
+            f"missing symbols in {binary.name} ({source}): {', '.join(missing)}",
+            file=sys.stderr,
+        )
         return 1
 
     linked = run("otool", "-L", str(binary))
