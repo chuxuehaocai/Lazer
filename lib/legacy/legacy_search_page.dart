@@ -89,6 +89,19 @@ class _LegacySearchPageState extends State<LegacySearchPage> {
     });
   }
 
+  /// Whether the field takes focus as the page opens.
+  ///
+  /// A phone or tablet answers a focused text field by raising its on-screen
+  /// keyboard, which covers the results the listener came to look at before
+  /// they have typed anything. Desktops keep the focus: with a physical
+  /// keyboard in front of it, arriving in a ready-to-type field is a comfort
+  /// rather than an interruption. The platform is read from the theme so a
+  /// layout that forces a desktop or mobile shape keeps the matching input.
+  bool get _autoFocusField {
+    final TargetPlatform platform = Theme.of(context).platform;
+    return platform != TargetPlatform.android && platform != TargetPlatform.iOS;
+  }
+
   Future<void> _run(String query) async {
     if (query.isNotEmpty && _loading && query == _query) return;
     final int generation = ++_generation;
@@ -135,7 +148,7 @@ class _LegacySearchPageState extends State<LegacySearchPage> {
               padding: EdgeInsets.fromLTRB(inset, 14, inset, 12),
               child: AppleSearchField(
                 controller: _search,
-                autofocus: true,
+                autofocus: _autoFocusField,
                 onChanged: _onChanged,
                 onSubmitted: _submit,
                 onClear: _clear,

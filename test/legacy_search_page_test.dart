@@ -227,4 +227,54 @@ void main() {
     expect(find.text('Song 2'), findsOneWidget);
     expect(find.text('Song 1'), findsNothing);
   });
+
+  testWidgets('a phone opens search without raising the keyboard', (
+    tester,
+  ) async {
+    // `flutter_test` reports Android unless a test overrides the platform,
+    // which is exactly the case that used to pop the IME open on arrival.
+    final catalog = SearchCatalog();
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LegacySearchPage(state: state, onOpenPlaylist: (_) {}),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isFalse);
+    expect(tester.widget<SearchBar>(find.byType(SearchBar)).autoFocus, isFalse);
+    // Typing still reaches the field: the page only gives up the *automatic*
+    // focus, not the field itself.
+    await tester.enterText(find.byType(TextField), 'phone');
+    expect(find.text('phone'), findsOneWidget);
+  });
+
+  testWidgets('a desktop still arrives in a focused search field', (
+    tester,
+  ) async {
+    final catalog = SearchCatalog();
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.macOS),
+        home: Scaffold(
+          body: LegacySearchPage(state: state, onOpenPlaylist: (_) {}),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(tester.widget<SearchBar>(find.byType(SearchBar)).autoFocus, isTrue);
+    expect(
+      tester
+          .state<EditableTextState>(find.byType(EditableText))
+          .widget
+          .focusNode
+          .hasFocus,
+      isTrue,
+    );
+  });
 }
