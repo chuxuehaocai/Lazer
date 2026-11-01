@@ -232,7 +232,16 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     if (!_samePalette(next, _to)) {
       _from = _rawPalette();
       _to = next;
-      if (_reduceMotion || !widget.animated || widget.solid) {
+      // Only start a fade the frames will actually advance. A muted ticker — a
+      // paused canvas, an inactive route, `TickerMode(enabled: false)` — turns
+      // `forward()` into a no-op, and `_rawPalette()` would then keep painting
+      // `_from`: the previous song's cover colours, for as long as the page
+      // lives. That is the reported "backdrop follows the song before this one".
+      if (_reduceMotion ||
+          !widget.animated ||
+          widget.solid ||
+          widget.preview ||
+          !_tickerAllowed) {
         _palette.value = 1;
       } else {
         _palette.forward(from: 0);
@@ -314,7 +323,14 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   /// The palette before the per-colour vibrancy treatment, used as the
   /// crossfade origin so the adjustment is never applied twice.
   List<Color> _rawPalette() {
-    final double t = _fluidEase(_palette.value);
+    // A crossfade parked at its origin with no frames coming is not a state to
+    // paint: it means the canvas would show the previous song's cover colours
+    // indefinitely. Painting the destination instead is always the better
+    // answer, and it is what makes the canvas correct even if a fade is cut
+    // short before it ever ticks.
+    final double t = _palette.value == 0 && !_palette.isAnimating
+        ? 1
+        : _fluidEase(_palette.value);
     return List<Color>.generate(
       5,
       (int i) => Color.lerp(_from[i], _to[i], t) ?? _to[i],
