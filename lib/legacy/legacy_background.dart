@@ -157,13 +157,36 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   /// Palette changes share the mesh's selected cadence.
   final Stopwatch _paletteClock = Stopwatch()..start();
   int _lastPaletteFrameUs = 0;
+  Timer? _paletteTrailing;
 
+  /// Repaints for a palette change, at most once per selected cadence.
+  ///
+  /// The throttle is what keeps a 60 fps palette crossfade from repainting the
+  /// mesh more often than the background's own frame rate; the trailing timer
+  /// is what keeps it honest. Without it, a notification that arrived a
+  /// millisecond too early was dropped outright, and a canvas with no other
+  /// reason to repaint — a static or paused background — could keep painting
+  /// the previous track's colours until something unrelated dirtied it.
   void _onPaletteFrame() {
     final int now = _paletteClock.elapsedMicroseconds;
-    if (now - _lastPaletteFrameUs < _frameInterval.inMicroseconds) {
+    final int interval = _frameInterval.inMicroseconds;
+    final int since = now - _lastPaletteFrameUs;
+    if (since < interval) {
+      _paletteTrailing ??= Timer(
+        Duration(microseconds: interval - since),
+        _invalidatePaletteFrame,
+      );
       return;
     }
-    _lastPaletteFrameUs = now;
+    _invalidatePaletteFrame();
+  }
+
+  /// Paints the palette now, whatever the cadence says.
+  void _invalidatePaletteFrame() {
+    _paletteTrailing?.cancel();
+    _paletteTrailing = null;
+    if (!mounted) return;
+    _lastPaletteFrameUs = _paletteClock.elapsedMicroseconds;
     _frames.value++;
   }
 
@@ -236,6 +259,8 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _paletteTrailing?.cancel();
+    _paletteTrailing = null;
     _flowTicker.dispose();
     _cachedPainter?.releaseResources();
     _palette
@@ -750,8 +775,6 @@ bool _samePalette(List<Color> a, List<Color> b) {
 // Artwork seed extraction (LazerBackgrounds.kt)
 // ---------------------------------------------------------------------------
 
-final Map<String, Color> _seedCache = <String, Color>{};
-
 /// Samples the artwork down to 48×48 and picks the dominant *vibrant* hue,
 /// boosting its saturation — the legacy `seedFromArtwork`.
 Color albumSeedFromPixels(Uint8List rgba, int width, int height) {
@@ -932,14 +955,39 @@ double _colorDistance(Color a, Color b) {
   return math.sqrt(dr * dr + dg * dg + db * db);
 }
 
-final Map<String, List<Color>> _meshPaletteCache = <String, List<Color>>{};
-final Map<String, Future<List<Color>?>> _paletteRequests = {};
+/// Everything one cover yields: the single seed the theme follows and the
+/// five-colour mesh the background canvas paints.
+///
+/// The two live in one record, behind one cache entry, on purpose. Cached in
+/// two maps, an eviction could keep the mesh and drop the seed, and the two
+/// consumers — the shell's accent and the flow canvas — then disagreed about
+/// what the cover looked like. A record makes "this cover's palette is known"
+/// a single fact, so the colour on the page and the colour of the background
+/// can never come from two different songs.
+@immutable
+class AlbumCoverPalette {
+  const AlbumCoverPalette({required this.seed, required this.mesh});
+  final Color seed;
+  final List<Color> mesh;
+}
 
-Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async {
+/// Reads a cover's palette; injectable so the widgets can be tested without a
+/// network and without the shared cache.
+typedef AlbumPaletteLoader =
+    Future<AlbumCoverPalette?> Function(String? coverUrl);
+
+const int _paletteCacheLimit = 24;
+final Map<String, AlbumCoverPalette> _paletteCache =
+    <String, AlbumCoverPalette>{};
+final Map<String, Future<AlbumCoverPalette?>> _paletteRequests =
+    <String, Future<AlbumCoverPalette?>>{};
+
+/// The palette of [coverUrl], or null when the artwork cannot be read.
+Future<AlbumCoverPalette?> albumPaletteForCover(String? coverUrl) {
   final String? url = albumPaletteArtworkUrl(coverUrl);
-  if (url == null) return null;
-  final List<Color>? cached = _meshPaletteCache[url];
-  if (cached != null) return cached;
+  if (url == null) return Future<AlbumCoverPalette?>.value();
+  final AlbumCoverPalette? cached = _paletteCache[url];
+  if (cached != null) return Future<AlbumCoverPalette?>.value(cached);
   return _paletteRequests.putIfAbsent(
     url,
     () =>
@@ -947,7 +995,11 @@ Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async {
   );
 }
 
-Future<List<Color>?> _readCoverPalette(String url) async {
+/// The five-colour mesh of [coverUrl], or null when the artwork cannot be read.
+Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async =>
+    (await albumPaletteForCover(coverUrl))?.mesh;
+
+Future<AlbumCoverPalette?> _readCoverPalette(String url) async {
   final ui.Image? image = await _decode(ArtworkImage(url));
   if (image == null) return null;
   try {
@@ -955,22 +1007,16 @@ Future<List<Color>?> _readCoverPalette(String url) async {
       format: ui.ImageByteFormat.rawRgba,
     );
     if (pixels == null) return null;
-    final List<Color> colors = albumMeshColorsFromPixels(
-      pixels.buffer.asUint8List(),
-      image.width,
-      image.height,
+    final Uint8List rgba = pixels.buffer.asUint8List();
+    final AlbumCoverPalette palette = AlbumCoverPalette(
+      seed: albumSeedFromPixels(rgba, image.width, image.height),
+      mesh: albumMeshColorsFromPixels(rgba, image.width, image.height),
     );
-    if (_meshPaletteCache.length >= 24) {
-      _meshPaletteCache.remove(_meshPaletteCache.keys.first);
+    if (_paletteCache.length >= _paletteCacheLimit) {
+      _paletteCache.remove(_paletteCache.keys.first);
     }
-    _meshPaletteCache[url] = colors;
-    if (_seedCache.length >= 24) _seedCache.remove(_seedCache.keys.first);
-    _seedCache[url] = albumSeedFromPixels(
-      pixels.buffer.asUint8List(),
-      image.width,
-      image.height,
-    );
-    return colors;
+    _paletteCache[url] = palette;
+    return palette;
   } finally {
     image.dispose();
   }
@@ -993,14 +1039,8 @@ String? albumPaletteArtworkUrl(String? raw) {
 
 /// Extracts (and caches) the seed colour for a cover, or null when the artwork
 /// cannot be decoded.
-Future<Color?> albumSeedForCover(String? coverUrl) async {
-  final String? url = albumPaletteArtworkUrl(coverUrl);
-  if (url == null) return null;
-  final Color? cached = _seedCache[url];
-  if (cached != null) return cached;
-  await albumMeshColorsForCover(coverUrl);
-  return _seedCache[url];
-}
+Future<Color?> albumSeedForCover(String? coverUrl) async =>
+    (await albumPaletteForCover(coverUrl))?.seed;
 
 Future<ui.Image?> _decode(ImageProvider provider) {
   final Completer<ui.Image?> completer = Completer<ui.Image?>();
@@ -1036,6 +1076,7 @@ class LegacyAlbumBackdrop extends StatefulWidget {
     this.onSeed,
     this.frameRate = 30,
     this.solidColor,
+    this.paletteLoader = albumPaletteForCover,
   });
 
   final Track? track;
@@ -1065,6 +1106,10 @@ class LegacyAlbumBackdrop extends StatefulWidget {
   final double? frameRate;
   final Color? solidColor;
 
+  /// Where this backdrop reads the cover's colours from. The default is the
+  /// shared extractor; tests hand in their own to drive a colour switch.
+  final AlbumPaletteLoader paletteLoader;
+
   @override
   State<LegacyAlbumBackdrop> createState() => _LegacyAlbumBackdropState();
 }
@@ -1091,13 +1136,22 @@ class _LegacyAlbumBackdropState extends State<LegacyAlbumBackdrop> {
   Future<void> _load() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
-    final List<Color>? mesh = await albumMeshColorsForCover(coverUrl);
-    final Color? seed = await albumSeedForCover(coverUrl);
+    AlbumCoverPalette? palette;
+    try {
+      palette = await widget.paletteLoader(coverUrl);
+    } catch (error) {
+      // A cover we cannot read is still *this* track's cover: fall back to the
+      // default seed rather than leaving the previous song's colours on the
+      // canvas until the next track happens to load.
+      debugPrint('Album palette unavailable for $coverUrl: $error');
+      palette = null;
+    }
     if (!mounted || generation != _generation) return;
     setState(
-      () => _colors = mesh ?? albumFlowColors(seed ?? kAlbumDefaultSeed),
+      () => _colors =
+          palette?.mesh ?? albumFlowColors(palette?.seed ?? kAlbumDefaultSeed),
     );
-    widget.onSeed?.call(seed ?? kAlbumDefaultSeed);
+    widget.onSeed?.call(palette?.seed ?? kAlbumDefaultSeed);
   }
 
   @override

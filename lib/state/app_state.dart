@@ -885,22 +885,43 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   int _paletteGeneration = 0;
   (String?, String?)? _paletteIdentity;
 
+  /// Whether the current identity already spent its one retry.
+  bool _paletteRetried = false;
+
   Future<void> refreshArtworkSeed() async {
     final Track? track = current;
     final identity = (track?.id, track?.coverUrl);
     if (_paletteIdentity == identity) return;
     _paletteIdentity = identity;
+    _paletteRetried = false;
     final int generation = ++_paletteGeneration;
     try {
       final seed = await artworkSeedLoader(track?.coverUrl);
-      if (generation == _paletteGeneration &&
-          current?.id == track?.id &&
-          current?.coverUrl == track?.coverUrl) {
+      if (generation != _paletteGeneration) return;
+      if (current?.id == track?.id && current?.coverUrl == track?.coverUrl) {
         setLegacySeed(seed);
       }
+      // A cover that yielded no seed — a rejected CDN node, artwork not in the
+      // cache yet — is worth exactly one more attempt on the next report.
+      // Latching the identity here would strand the accent on the previous
+      // song's colour even though the artwork becomes readable a moment later.
+      if (seed == null) _retryArtworkSeed(identity, track);
     } catch (_) {
-      if (generation == _paletteGeneration) setLegacySeed(null);
+      if (generation != _paletteGeneration) return;
+      setLegacySeed(null);
+      _retryArtworkSeed(identity, track);
     }
+  }
+
+  /// Reopens the identity once so a failed extraction can be attempted again.
+  ///
+  /// Bounded on purpose: the state reports about ten times a second, and an
+  /// artwork that is genuinely unreadable must not turn into a request storm.
+  void _retryArtworkSeed((String?, String?)? identity, Track? track) {
+    if (_paletteRetried || track?.coverUrl == null) return;
+    if (_paletteIdentity != identity) return;
+    _paletteRetried = true;
+    _paletteIdentity = null;
   }
 
   bool showArtworkWithLyrics = false;

@@ -23,6 +23,7 @@ class AlbumBlurFlow extends StatefulWidget {
     this.frameRate,
     this.solidColor,
     this.imagePath,
+    this.paletteLoader = albumPaletteForCover,
   });
 
   final Track? track;
@@ -44,6 +45,9 @@ class AlbumBlurFlow extends StatefulWidget {
   /// Lets the player capture the currently painted backdrop frame, e.g. for
   /// the exported lyric image.
   final Key? boundaryKey;
+
+  /// Where this canvas reads the cover's colours from; tests hand in their own.
+  final AlbumPaletteLoader paletteLoader;
 
   @override
   State<AlbumBlurFlow> createState() => _AlbumBlurFlowState();
@@ -71,12 +75,20 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
   Future<void> _updatePalette() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
-    final List<Color>? mesh = await albumMeshColorsForCover(coverUrl);
-    final Color? seed = await albumSeedForCover(coverUrl);
+    AlbumCoverPalette? palette;
+    try {
+      palette = await widget.paletteLoader(coverUrl);
+    } catch (error) {
+      // The new track's cover could not be read. The canvas must still leave
+      // the previous song's colours behind: fall back to the default seed.
+      debugPrint('Album palette unavailable for $coverUrl: $error');
+      palette = null;
+    }
     if (!mounted || generation != _generation) return;
-    widget.onSeed?.call(seed);
+    widget.onSeed?.call(palette?.seed);
     setState(
-      () => _colors = mesh ?? albumFlowColors(seed ?? kAlbumDefaultSeed),
+      () => _colors =
+          palette?.mesh ?? albumFlowColors(palette?.seed ?? kAlbumDefaultSeed),
     );
   }
 
