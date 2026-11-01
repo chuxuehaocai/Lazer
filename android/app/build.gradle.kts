@@ -30,6 +30,32 @@ if (requireReleaseSigning && !hasReleaseSigning) {
     )
 }
 
+// Packaging builds set this so an APK that lost its native engine fails here
+// instead of shipping a bundle that quietly runs on just_audio. The staged
+// libraries come from `ci/build-android-audio.sh`, which writes
+// `android/app/src/main/jniLibs/<abi>/`.
+val requireNativeAudio =
+    (findProperty("lazerRequireNativeAudio") as String?)?.toBoolean() ?: false
+
+if (requireNativeAudio) {
+    val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+    val missing = mutableListOf<String>()
+    for (abi in abis) {
+        for (library in listOf("liblazer-audio.so", "liblazer-audio-bridge.so")) {
+            if (!file("src/main/jniLibs/$abi/$library").isFile) {
+                missing.add("$abi/$library")
+            }
+        }
+    }
+    if (missing.isNotEmpty()) {
+        throw GradleException(
+            "Native audio engine requested but missing from android/app/src/main/jniLibs: " +
+                "${missing.joinToString(", ")}. Run ci/build-android-audio.sh first, or unset " +
+                "-PlazerRequireNativeAudio.",
+        )
+    }
+}
+
 android {
     namespace = "dev.naominet.lazer"
     compileSdk = flutter.compileSdkVersion

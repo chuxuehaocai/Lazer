@@ -24,6 +24,27 @@ option(LAZER_AUDIO_NATIVE_ENGINE
     "Build the native HiFi audio engine into the app bundle" ON)
 option(LAZER_AUDIO_NATIVE_PROBES
     "Also build the engine's offline CTest probes" OFF)
+# Packaging builds set this: a bundle that ships without the engine is not a
+# smaller build, it is a broken one — the app falls back to just_audio and the
+# listener only finds out from the play path badge. With this on, a missing or
+# unusable FFmpeg SDK stops the build at configure time instead.
+#
+#   LAZER_AUDIO_REQUIRE_ENGINE=ON flutter build windows --release
+#
+# Left OFF for plain developer runs, so a checkout without an FFmpeg SDK still
+# builds and still plays through just_audio.
+option(LAZER_AUDIO_REQUIRE_ENGINE
+    "Fail the configure step when the native engine cannot be built" OFF)
+if(NOT LAZER_AUDIO_REQUIRE_ENGINE AND DEFINED ENV{LAZER_AUDIO_REQUIRE_ENGINE})
+    set(_lazer_require_env "$ENV{LAZER_AUDIO_REQUIRE_ENGINE}")
+    if(NOT _lazer_require_env STREQUAL "" AND
+       NOT _lazer_require_env STREQUAL "0" AND
+       NOT _lazer_require_env STREQUAL "OFF" AND
+       NOT _lazer_require_env STREQUAL "false" AND
+       NOT _lazer_require_env STREQUAL "FALSE")
+        set(LAZER_AUDIO_REQUIRE_ENGINE ON)
+    endif()
+endif()
 
 # The engine registers its probes with `add_test` inside its own directory, so the
 # top level has to enable testing as well for `ctest` to see them.
@@ -74,10 +95,21 @@ set(LAZER_AUDIO_ENGINE_ENABLED FALSE)
 
 if(LAZER_AUDIO_NATIVE_ENGINE)
     if(NOT LAZER_FFMPEG_ROOT)
+        if(LAZER_AUDIO_REQUIRE_ENGINE)
+            message(FATAL_ERROR
+                "lazer-audio: this build requires the native engine, but no DSD-capable "
+                "FFmpeg SDK was found. Set LAZER_FFMPEG_ROOT (or place the SDK at "
+                "third_party/ffmpeg), or build without LAZER_AUDIO_REQUIRE_ENGINE.")
+        endif()
         message(STATUS
             "lazer-audio: no DSD-capable FFmpeg found (set LAZER_FFMPEG_ROOT), so the "
             "native engine is not built. The app will use just_audio.")
     elseif(NOT EXISTS "${LAZER_FFMPEG_ROOT}/include/libavformat/avformat.h")
+        if(LAZER_AUDIO_REQUIRE_ENGINE)
+            message(FATAL_ERROR
+                "lazer-audio: '${LAZER_FFMPEG_ROOT}' has no "
+                "include/libavformat/avformat.h, and this build requires the native engine.")
+        endif()
         message(WARNING
             "lazer-audio: '${LAZER_FFMPEG_ROOT}' has no include/libavformat/avformat.h; "
             "the native engine is not built.")
@@ -107,10 +139,32 @@ if(LAZER_AUDIO_NATIVE_ENGINE)
                     -P "${CMAKE_CURRENT_LIST_DIR}/stage_development.cmake"
                 DEPENDS lazer-audio lazer-audio-bridge
                 VERBATIM)
+        elseif(ANDROID)
+            # Android stages its jniLibs through ci/build-android-audio.sh; the
+            # install helper below is not called from that toolchain, and the
+            # SDK's own .so files must not be bundled.
+        elseif(APPLE)
+            # The engine's @loader_path resolves beside itself, and the linker
+            # records the FFmpeg install names, so the libraries have to be
+            # copied into the same directory as the engine.
+            file(GLOB LAZER_AUDIO_NATIVE_RUNTIME_FILES
+                "${LAZER_FFMPEG_ROOT}/lib/libav*.dylib"
+                "${LAZER_FFMPEG_ROOT}/lib/libswresample*.dylib")
+        else()
+            # Same contract on Linux: $ORIGIN means the engine's directory.
+            file(GLOB LAZER_AUDIO_NATIVE_RUNTIME_FILES
+                "${LAZER_FFMPEG_ROOT}/lib/libav*.so*"
+                "${LAZER_FFMPEG_ROOT}/lib/libswresample*.so*")
         endif()
         message(STATUS
             "lazer-audio: building the native engine against FFmpeg at ${LAZER_FFMPEG_ROOT}")
     endif()
+endif()
+
+if(LAZER_AUDIO_REQUIRE_ENGINE AND NOT LAZER_AUDIO_ENGINE_ENABLED)
+    message(FATAL_ERROR
+        "lazer-audio: this build requires the native engine but it was not enabled. "
+        "Check LAZER_AUDIO_NATIVE_ENGINE and the FFmpeg SDK.")
 endif()
 
 # The install helper is called from the parent platform directory. Preserve the

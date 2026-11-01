@@ -139,6 +139,7 @@ Future<int> _stage(
     ] else ...<String>['liblazer-audio.so', 'liblazer-audio-bridge.so'],
   ];
   final Set<String> staged = <String>{};
+  final List<String> ffmpegStaged = <String>[];
   // Visual Studio writes a release build under `Release/`; Ninja and Makefiles put
   // it next to the sources. A recursive walk covers both.
   await for (final FileSystemEntity entity in Directory(
@@ -184,6 +185,7 @@ Future<int> _stage(
         }
         final String name = entity.uri.pathSegments.last;
         await entity.copy('${target.path}${Platform.pathSeparator}$name');
+        ffmpegStaged.add(name);
       }
     }
   } else if (Platform.isMacOS || Platform.isLinux) {
@@ -200,8 +202,34 @@ Future<int> _stage(
         await File(
           entity.path,
         ).copy('${target.path}${Platform.pathSeparator}$name');
+        ffmpegStaged.add(name);
       }
     }
+  }
+  // The engine links against FFmpeg and loads the shared libraries from its own
+  // directory. Staging the engine without them produces a bundle that dies at
+  // load time and silently falls back to just_audio — exactly the build this
+  // script exists to prevent. Demand every component the engine needs.
+  const List<String> components = <String>[
+    'avcodec',
+    'avformat',
+    'avutil',
+    'swresample',
+  ];
+  final List<String> missing = <String>[
+    for (final String component in components)
+      if (!ffmpegStaged.any(
+        (String name) => name.toLowerCase().contains(component),
+      ))
+        component,
+  ];
+  if (missing.isNotEmpty) {
+    stderr.writeln(
+      'The FFmpeg runtime next to $ffmpegRoot covered ${ffmpegStaged.length} '
+      'libraries but is missing ${missing.join(', ')}; the engine cannot load '
+      'without them.',
+    );
+    return 1;
   }
   return 0;
 }

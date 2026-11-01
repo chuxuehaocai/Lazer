@@ -22,6 +22,11 @@ env:
   # branch builds stamp the branch name, which BuildInfo rejects in favour of
   # its pubspec fallback.
   LAZER_VERSION: ${{ github.ref_name }}
+  # Packaging always ships the native audio engine. Every job below builds its
+  # own FFmpeg SDK first, so the engine must be buildable; if it is not, the
+  # configure step fails here instead of producing a bundle that quietly falls
+  # back to just_audio. Local developer builds leave this unset.
+  LAZER_AUDIO_REQUIRE_ENGINE: 'ON'
 
 jobs:
   check:
@@ -101,12 +106,28 @@ jobs:
         shell: pwsh
         run: |
           dart run tool/build_native_audio.dart --ffmpeg-root "$env:LAZER_FFMPEG_ROOT"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not stage the native audio engine' }
           $release = 'build/windows/x64/runner/Release'
           Get-ChildItem -LiteralPath 'build/native-audio' -Filter '*.dll' -File |
             Copy-Item -Destination $release -Force
           $license = Join-Path $release 'licenses/lazer-ffmpeg'
           New-Item -ItemType Directory -Path $license -Force | Out-Null
           Copy-Item -Path "$env:LAZER_FFMPEG_ROOT/share/lazer-ffmpeg/*" -Destination $license -Force
+          # Staging that copies nothing must not look like success.
+          foreach ($pair in @(
+            @('lazer-audio.dll', 'liblazer-audio.dll'),
+            @('lazer-audio-bridge.dll', 'liblazer-audio-bridge.dll')
+          )) {
+            $staged = $pair |
+              Where-Object { Test-Path -LiteralPath (Join-Path $release $_) } |
+              Select-Object -First 1
+            if (-not $staged) { throw "The bundle has no $($pair[0])" }
+          }
+          foreach ($component in 'avcodec', 'avformat', 'avutil', 'swresample') {
+            if (-not (Get-ChildItem -LiteralPath $release -Filter "$component-*.dll" -File)) {
+              throw "The bundle has no $component runtime DLL"
+            }
+          }
       - name: Package EXE, DLLs, resources and Visual C++ runtime
         shell: pwsh
         run: ./ci/package-windows.ps1
@@ -283,7 +304,8 @@ jobs:
           test -f "$runtime/liblazer-audio.dylib"
           test -f "$runtime/liblazer-audio-bridge.dylib"
           for component in avcodec avformat avutil swresample; do
-            compgen -G "$runtime/lib${component}*.dylib" > /dev/null
+            compgen -G "$runtime/lib${component}*.dylib" > /dev/null \
+              || { echo "::error::the app has no $component runtime library"; exit 1; }
           done
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" dist/Lazer-macOS-${{ matrix.arch }}.zip
@@ -363,6 +385,15 @@ jobs:
           mkdir -p "$bundle/lib/licenses/lazer-ffmpeg"
           cp "$LAZER_FFMPEG_ROOT/share/lazer-ffmpeg/"* \
             "$bundle/lib/licenses/lazer-ffmpeg/"
+          # The engine resolves its FFmpeg neighbours through $ORIGIN, so a
+          # bundle that carries one without the others does not load at all.
+          for name in liblazer-audio.so liblazer-audio-bridge.so; do
+            test -f "$bundle/lib/$name" || { echo "::error::$name is missing from the bundle"; exit 1; }
+          done
+          for component in avcodec avformat avutil swresample; do
+            compgen -G "$bundle/lib/lib${component}*.so*" > /dev/null \
+              || { echo "::error::the bundle has no $component runtime library"; exit 1; }
+          done
       - name: Bundle GTK, libmpv and Flutter into AppImage
         run: bash ci/package-appimage.sh ${{ matrix.arch }}
       - name: Check AppImage starts with a display and session bus
@@ -450,6 +481,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The engine was staged into jniLibs above; this makes Gradle refuse to
+          # package an APK without it.
+          export ORG_GRADLE_PROJECT_lazerRequireNativeAudio=true
           # A tag build must never fall back to the debug key if the keystore step
           # silently produced nothing.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -552,6 +586,26 @@ jobs:
         run: |
           gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" \
             --pattern 'Lazer-*' --dir release-assets
+      - name: Verify the desktop archives carry the native engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # The per-platform jobs already gate on the engine; this reads the
+          # uploaded archive itself, so a package step that dropped it between
+          # the build tree and the artifact cannot reach a release.
+          zips=(release-assets/Lazer-Windows-*/*.zip release-assets/Lazer-macOS-*/*.zip)
+          test "${#zips[@]}" -gt 0 || { echo "::error::no desktop archives were uploaded"; exit 1; }
+          for zip in "${zips[@]}"; do
+            listing="$(unzip -l "$zip")"
+            for component in lazer-audio lazer-audio-bridge avcodec avformat avutil swresample; do
+              if ! grep -q "$component" <<< "$listing"; then
+                echo "::error::$zip carries no $component"
+                exit 1
+              fi
+            done
+            echo "$zip carries the native engine"
+          done
       - name: Publish tag as a GitHub Release
         shell: bash
         env:
