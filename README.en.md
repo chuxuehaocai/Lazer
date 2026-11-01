@@ -54,6 +54,7 @@
 **The fussy part**
 
 - Adjustable scroll inertia and acceleration; haptic detents on the seek bar.
+- An uncached song gathers ten seconds of stream before it starts, so the opening bars no longer stutter; downloaded and cached tracks still start instantly.
 - Every interface animation is planned against a 10 ms (100 fps) frame budget, the flowing backdrop updates at the precision chosen in Settings (about 21 times a second by default), and Settings can show a live frame-time overlay.
 - The now-playing page brings an AMLL mesh backdrop, cover/lyrics switching, queue and comment panels, and the M / L / Q / C / F shortcuts.
 

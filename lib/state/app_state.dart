@@ -145,6 +145,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.hifi,
     this.hifiPathNotice,
     this.artworkSeedLoader = albumSeedForCover,
+    this.startupBufferTarget = startupBuffer,
+    this.startupBufferDeadline = startupBufferTimeout,
     this.navidromeFactory,
     this.scheduledPauseClock = DateTime.now,
   }) : catalog = catalog ?? Catalog(),
@@ -2091,7 +2093,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   bool get playing => _playing;
-  bool get audioReady => _realActive && (audioEngine?.active ?? false);
+
+  /// Whether the engine is ready to make sound for the current track.
+  ///
+  /// A track still filling its startup buffer is not ready: the system media
+  /// controls read this to report `loading` instead of a track that looks
+  /// playing while the playhead stands at zero.
+  bool get audioReady =>
+      _realActive && !startupBuffering && (audioEngine?.active ?? false);
   int get queueIndex => _queueIndex;
   bool get shuffle => _shuffle;
   LoopMode get repeat => _repeat;
@@ -2618,9 +2627,116 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _realActive = true;
     unawaited(_recordCurrentLocally());
     unawaited(_ensureStationBuffer());
-    if (_playing) unawaited(_resumeAudio());
+    if (_playing) unawaited(_startWhenBuffered(generation, url));
     unawaited(_prefetchNext());
     notifyListeners();
+  }
+
+  /// How much of an uncached track is buffered before it starts playing.
+  ///
+  /// A cached or downloaded track opens from a local file and starts at once.
+  /// A track still coming off the CDN is a different animal: the decoder
+  /// reaches the end of what has arrived within the first seconds and the song
+  /// stutters while it waits for more. Ten seconds of lead time covers the
+  /// startup burst, and the wait is what a listener reads as "loading".
+  static const Duration startupBuffer = Duration(seconds: 10);
+
+  /// Wall-clock ceiling on that wait. A CDN that cannot fill the buffer must
+  /// not hold the track hostage: after this the engine is started regardless
+  /// and the ordinary streaming path takes over.
+  static const Duration startupBufferTimeout = Duration(seconds: 25);
+
+  /// How often the startup buffer is polled while waiting for it.
+  static const Duration _startupBufferPoll = Duration(milliseconds: 120);
+
+  /// Overridable in tests, which cannot wait out the shipped ten seconds.
+  final Duration startupBufferTarget;
+  final Duration startupBufferDeadline;
+
+  /// The load whose opening seconds are still being downloaded, if any.
+  ///
+  /// Keyed by generation on purpose: a newer load that supersedes the wait
+  /// clears it implicitly instead of racing the older wait's cleanup.
+  int? _bufferingGeneration;
+
+  /// Whether the current track is held back while its opening seconds arrive.
+  bool get startupBuffering =>
+      _bufferingGeneration != null && _bufferingGeneration == _generation;
+
+  /// Whether [url] is a stream this launch has not cached yet.
+  ///
+  /// Downloaded and cached tracks are handed to the engine as `file:` URIs, so
+  /// the scheme is the answer; nothing here needs to poll the cache again.
+  static bool _isNetworkStream(String url) {
+    final String scheme = Uri.tryParse(url)?.scheme.toLowerCase() ?? '';
+    return scheme == 'http' || scheme == 'https';
+  }
+
+  /// Starts [generation] once enough of an uncached stream has arrived.
+  ///
+  /// Writes into `_position` are deliberately left to the engine: the loading
+  /// state is visible through [audioReady] and [startupBuffering], and the
+  /// media controls report `loading` for it.
+  Future<void> _startWhenBuffered(int generation, String url) async {
+    final AudioEngine? engine = audioEngine;
+    if (engine == null || !_isNetworkStream(url)) {
+      await _resumeAudio();
+      return;
+    }
+    // The buffer capability is a separate interface on purpose, so the test
+    // doubles that only implement transport keep working: ask, do not assume.
+    final BufferedAudioEngine? buffer = engine is BufferedAudioEngine
+        ? engine as BufferedAudioEngine
+        : null;
+    if (buffer == null) {
+      await _resumeAudio();
+      return;
+    }
+    final Duration? reported = _bufferedAhead(buffer);
+    if (reported == null || reported >= startupBufferTarget) {
+      await _resumeAudio();
+      return;
+    }
+    _bufferingGeneration = generation;
+    notifyListeners();
+    final Stopwatch clock = Stopwatch()..start();
+    try {
+      while (true) {
+        if (_presentationDisposed || generation != _generation) return;
+        // A pause during the wait is a decision, not a hiccup: park the track
+        // where it is and let play resume it when the listener asks again.
+        if (!_playing || scheduledPauseActive) return;
+        final Duration? buffered = _bufferedAhead(buffer);
+        // A backend that cannot answer is started at once: waiting on silence
+        // is worse than the stutter this lead time exists to avoid.
+        if (buffered == null) break;
+        final Duration? total = engine.duration ?? current?.duration;
+        if (buffered >= startupBufferTarget ||
+            (total != null && total > Duration.zero && buffered >= total) ||
+            clock.elapsed >= startupBufferDeadline) {
+          break;
+        }
+        await Future<void>.delayed(_startupBufferPoll);
+      }
+    } finally {
+      if (_bufferingGeneration == generation) {
+        _bufferingGeneration = null;
+        if (!_presentationDisposed) notifyListeners();
+      }
+    }
+    if (_presentationDisposed || generation != _generation) return;
+    if (_playing) await _resumeAudio();
+  }
+
+  /// How much [engine] has buffered ahead of the playhead, or null when it
+  /// cannot say — including the small injected players that answer transport
+  /// calls through [NoSuchMethodError].
+  static Duration? _bufferedAhead(BufferedAudioEngine engine) {
+    try {
+      return engine.bufferedPosition;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Hands the track that follows the current one to the engine, so the
