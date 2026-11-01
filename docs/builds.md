@@ -58,7 +58,11 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   in with `#include?`, so a checkout without a built engine still builds and
   runs on `just_audio`). The `ios-native` job builds those archives for arm64;
   the IPA job verifies the built executable's dynamic export trie and refuses to
-  package when the engine ABI is not in it.
+  package when the engine ABI is not in it. Verified end to end on `macos-15`:
+  six arm64 archives, the engine's 18 ABI symbols and the bridge's five exports
+  present in the built `Runner`'s export trie (`dyld_info -exports` reads the
+  trie the dynamic loader uses, not the stripped symbol table), and no FFmpeg
+  dylib inside the bundle.
 
 ## Android release signing
 
