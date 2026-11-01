@@ -158,6 +158,8 @@ class LazerMediaHandler extends BaseAudioHandler {
     if (_closed || _enabled == enabled) return;
     _enabled = enabled;
     ++_artGeneration;
+    _published = null;
+    _lyricLine = null;
     if (!enabled) {
       _clock?.cancel();
       playbackState.add(
@@ -181,13 +183,51 @@ class LazerMediaHandler extends BaseAudioHandler {
   int _artGeneration = 0;
   bool _closed = false;
   bool _stopped = false;
-  static MediaItem _item(Track track) => MediaItem(
+
+  /// The item the platform currently holds, kept so the lyric line and the
+  /// artwork can update one field without rebuilding the others.
+  MediaItem? _published;
+
+  /// The lyric line the published item carries, so the once-a-second clock
+  /// only touches the platform channel when the line actually changed.
+  String? _lyricLine;
+
+  /// The current track as a system media item.
+  ///
+  /// [lyric] is the line being sung. Neither Android's MediaMetadata nor iOS's
+  /// MPNowPlayingInfoCenter has a lyrics key — the media notification, the
+  /// lock screen and the Dynamic Island all draw their second line from the
+  /// *artist* slot — so that is where the line has to travel. The
+  /// `display*` trio is set alongside it because Android 12 and older render
+  /// the notification the app itself posts, which reads those fields, and a
+  /// subtitle without a display title is ignored there.
+  static MediaItem _item(Track track, {String? lyric}) => MediaItem(
     id: track.id,
     title: track.title,
-    artist: track.artist,
+    artist: lyric ?? track.artist,
     album: track.album,
     duration: track.duration,
+    displayTitle: lyric == null ? null : track.title,
+    displaySubtitle: lyric,
+    displayDescription: lyric == null ? null : track.artist,
   );
+
+  /// The lyric line the controls should show, or null to keep the artist.
+  ///
+  /// Mobile only. On a phone the notification and the lock screen are the
+  /// primary surface for the song, which is what makes a lyric worth putting
+  /// there. The desktop controls are read by other applications too — MPRIS
+  /// feeds media applets and chat presences — and their flyouts sit next to an
+  /// app that can show the whole lyric sheet anyway, so they keep the artist.
+  String? _currentLyric() {
+    if (!state.systemMediaLyrics) return null;
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return null;
+    }
+    final String? line = state.currentLyricLine?.text.trim();
+    return line == null || line.isEmpty ? null : line;
+  }
 
   void _stateChanged() {
     if (_closed) return;
@@ -200,13 +240,17 @@ class LazerMediaHandler extends BaseAudioHandler {
     if (_lastQueueRevision != state.queueRevision) {
       final tracks = state.queue;
       _lastQueueRevision = state.queueRevision;
+      // Queue entries keep the plain artist: a controller listing the queue —
+      // Android Auto, CarPlay — wants the songs, not the line being sung.
       queue.add(tracks.map(_item).toList());
     }
     final current = state.current;
     if (!identical(current, _track)) {
       _track = current;
       final generation = ++_artGeneration;
-      final item = current == null ? null : _item(current);
+      _lyricLine = _currentLyric();
+      final item = current == null ? null : _item(current, lyric: _lyricLine);
+      _published = item;
       mediaItem.add(item);
       if (current != null) {
         unawaited(
@@ -214,7 +258,8 @@ class LazerMediaHandler extends BaseAudioHandler {
             if (_acceptCommands &&
                 generation == _artGeneration &&
                 uri != null) {
-              mediaItem.add(item!.copyWith(artUri: uri));
+              _published = item!.copyWith(artUri: uri);
+              mediaItem.add(_published);
             }
           }),
         );
@@ -223,8 +268,32 @@ class LazerMediaHandler extends BaseAudioHandler {
     _publishPlayback();
   }
 
+  /// Moves the second line on as the song does.
+  ///
+  /// Driven by the playback clock rather than by state reports: the app's
+  /// playback ticks travel on their own notifier, so a line change is only
+  /// visible here once a second. A lyric line lasts several seconds, and the
+  /// platform is called at most once per line.
+  void _publishLyricLine() {
+    if (!_acceptCommands) return;
+    final MediaItem? item = _published;
+    final Track? track = state.current;
+    if (item == null || track == null || !identical(track, _track)) return;
+    final String? line = _currentLyric();
+    if (line == _lyricLine) return;
+    _lyricLine = line;
+    _published = item.copyWith(
+      artist: line ?? track.artist,
+      displayTitle: line == null ? null : track.title,
+      displaySubtitle: line,
+      displayDescription: line == null ? null : track.artist,
+    );
+    mediaItem.add(_published);
+  }
+
   void _publishPlayback() {
     if (!_acceptCommands) return;
+    _publishLyricLine();
     final track = state.current;
     final active = track != null && !_stopped;
     playbackState.add(

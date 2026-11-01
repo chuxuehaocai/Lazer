@@ -34,11 +34,40 @@ duration and position. Catalogue durations and estimated clocks never advance an
 unavailable or buffering song. A source generation guard discards errors from
 superseded play requests.
 
+## Lyrics on the phone controls
+
+Neither Android's `MediaMetadata` nor iOS's `MPNowPlayingInfoCenter` has a lyrics
+key, and Apple renders the now-playing card — lock screen, Control Center and the
+Dynamic Island — from exactly the documented `MPMediaItem` subset, which does not
+include lyrics. What both platforms do render as the control's second line is the
+item's **artist**, so that is where the line being sung goes:
+
+- `LazerMediaHandler` publishes `MediaItem.artist` (plus `displayTitle` /
+  `displaySubtitle` / `displayDescription`, which Android 12 and older read from
+  the notification the app posts itself) as the current lyric line.
+- The line is read from `AppState.currentLyricLine`, which uses the same binary
+  search as the lyric viewport and falls back to the last line with words when a
+  line is instrumental.
+- It is refreshed by the handler's one-second clock and only pushed to the
+  platform when the line actually changed.
+- Queue entries keep the plain artist, so a controller listing the queue —
+  Android Auto, CarPlay — shows songs rather than lyrics.
+- The desktop controls (SMTC, MPRIS) keep the artist: MPRIS is read by other
+  applications, and their flyouts sit next to an app that shows the whole sheet.
+- **Settings → 歌词 → 系统媒体控件显示歌词** turns it off; `AppState.systemMediaLyrics`
+  persists the choice as `lazer_system_media_lyrics` (default on).
+
+Apple reserves richer lyrics presentation (styled text in the Dynamic Island) for
+a Live Activity, which needs a widget extension in the Xcode project; that is not
+part of this integration.
+
 ## Verification
 
 `test/system_media_test.dart` covers completion, the fallback, repeat-one,
 interrupted requests, media commands, position cadence, stale artwork and the
-Windows channel contract. Responsive and accessibility tests cover the visible
+Windows channel contract. `test/system_media_lyrics_test.dart` covers the lyric
+line following playback, its fallback across instrumental lines, the setting and
+the desktop exception. Responsive and accessibility tests cover the visible
 controls and route changes. Apple and Linux native builds require their own OS
 toolchains; they cannot be compiled or exercised by the Windows build host.
 

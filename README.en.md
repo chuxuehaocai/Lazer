@@ -35,7 +35,7 @@
 - A real catalogue, search, recommended playlists, personal radar, accounts and favourites.
 - Artist pages with popular tracks and paged albums; album pages carry the description and the full track list — tap a name and you are there.
 - Popular and latest comments with pagination, likes and unlikes. Guests can read; sign in to react.
-- System media controls on Windows, macOS, Linux, Android and iOS.
+- System media controls on Windows, macOS, Linux, Android and iOS; the notification, lock screen and Dynamic Island carry the line being sung.
 
 **The lyric part**
 

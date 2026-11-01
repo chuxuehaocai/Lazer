@@ -906,6 +906,25 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool showArtworkWithLyrics = false;
   String? importedEnginePath;
 
+  /// Whether the mobile system media controls carry the current lyric line.
+  ///
+  /// Android's media notification and iOS's lock screen — including the
+  /// Dynamic Island's now-playing card — both render their second line from
+  /// the item's *artist* slot, and neither platform exposes a lyrics key. On,
+  /// that slot follows the song on Android and iOS; off — and on the desktop
+  /// controls, which other applications read — it keeps the artist name.
+  bool systemMediaLyrics = true;
+
+  Future<void> setSystemMediaLyrics(bool value) async {
+    if (systemMediaLyrics == value) return;
+    systemMediaLyrics = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      'lazer_system_media_lyrics',
+      value,
+    );
+  }
+
   Future<void> setImportedEnginePath(String? path) async {
     importedEnginePath = path;
     notifyListeners();
@@ -1450,6 +1469,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       importedEnginePath = prefs.getString('lazer_native_engine_path');
       showArtworkWithLyrics =
           prefs.getBool('lazer_show_artwork_with_lyrics') ?? false;
+      systemMediaLyrics = prefs.getBool('lazer_system_media_lyrics') ?? true;
       legacyPalette = LegacyPaletteModeLabels.parse(
         prefs.getString('lazer_legacy_palette'),
       );
@@ -2072,6 +2092,32 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       0,
       1,
     );
+  }
+
+  /// The lyric being sung at [precisePosition], or null when there is none.
+  ///
+  /// The same binary search the lyric viewport uses, with two differences the
+  /// system media controls need: an instrumental or blank line falls back to
+  /// the last line that had words, and a sheet that has not started yet yields
+  /// nothing rather than its first line.
+  LyricLine? get currentLyricLine {
+    final List<LyricLine> lines = lyrics;
+    if (lines.isEmpty) return null;
+    final Duration position = precisePosition;
+    var low = 0;
+    var high = lines.length;
+    while (low < high) {
+      final int middle = (low + high) ~/ 2;
+      if (lines[middle].time <= position) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    for (var index = low - 1; index >= 0; index--) {
+      if (lines[index].text.trim().isNotEmpty) return lines[index];
+    }
+    return null;
   }
 
   /// How much of the current track the engine has buffered, 0…1.
