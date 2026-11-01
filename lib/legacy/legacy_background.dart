@@ -252,7 +252,8 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
           !widget.animated ||
           widget.solid ||
           widget.preview ||
-          !_tickerAllowed) {
+          !_tickerAllowed ||
+          !_appActive) {
         _palette.value = 1;
       } else {
         _palette.forward(from: 0);
@@ -300,7 +301,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
       _appActive;
 
   void _syncPlayback() {
-    if ((!widget.animated || widget.solid || widget.preview || _reduceMotion) &&
+    if (!_runs &&
         (_palette.isAnimating || _palette.value != 1)) {
       _palette.stop();
       _palette.value = 1;
@@ -1015,17 +1016,26 @@ Future<AlbumCoverPalette?> albumPaletteForCover(String? coverUrl) {
   if (url == null) return Future<AlbumCoverPalette?>.value();
   final AlbumCoverPalette? cached = _paletteCache[url];
   if (cached != null) return Future<AlbumCoverPalette?>.value(cached);
+  final String? normalized = normalizedArtworkUrl(coverUrl);
+  // A failed 96 px request may have succeeded via the cover widget's URL.
+  // Reuse that palette instead of downloading the rejected rendition again.
+  if (normalized != null && normalized != url) {
+    final AlbumCoverPalette? fallbackCached = _paletteCache[normalized];
+    if (fallbackCached != null) {
+      return Future<AlbumCoverPalette?>.value(fallbackCached);
+    }
+  }
   // The 96 px rendition is the cheapest thing to sample, but a CDN may not
   // serve it, and the cover on screen is busy fetching a *different* rendition.
   // Trying the URL the cover widgets use means the palette can still be read out
   // of the cache they already filled instead of failing outright.
   final List<String> candidates = <String>[url];
-  final String? normalized = normalizedArtworkUrl(coverUrl);
   if (normalized != null && normalized != url) candidates.add(normalized);
   return _paletteRequests.putIfAbsent(
     url,
-    () =>
-        _readCoverPalette(candidates).whenComplete(() => _paletteRequests.remove(url)),
+    () => _readCoverPalette(
+      candidates,
+    ).whenComplete(() => _paletteRequests.remove(url)),
   );
 }
 
@@ -1095,20 +1105,10 @@ Future<AlbumCoverPalette?> _readOneCoverPalette(String url) async {
   }
 }
 
-/// A 96 px rendition of the cover — enough for a palette, cheap to fetch.
-String? albumPaletteArtworkUrl(String? raw) {
-  final String? normalized = normalizedArtworkUrl(raw);
-  if (normalized == null) return null;
-  final RegExp param = RegExp(r'([?&]param=)\d+y\d+', caseSensitive: false);
-  if (param.hasMatch(normalized)) {
-    return normalized.replaceAllMapped(
-      param,
-      (Match match) => '${match.group(1)}96y96',
-    );
-  }
-  return normalized +
-      (normalized.contains('?') ? '&param=96y96' : '?param=96y96');
-}
+/// Use the cover widgets' URL rules: only NetEase artwork needs a 96 px
+/// rendition; other hosts and local files keep their original address.
+String? albumPaletteArtworkUrl(String? raw) =>
+    enlargedArtworkUrl(raw, sizePx: 96);
 
 /// Extracts (and caches) the seed colour for a cover, or null when the artwork
 /// cannot be decoded.
@@ -1209,18 +1209,15 @@ class _LegacyAlbumBackdropState extends State<LegacyAlbumBackdrop> {
   Future<void> _load() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
+    // The current song must be represented in the first build after a track
+    // change, even when its cover remains unavailable for all retries.
+    _colors = albumFlowColors(albumFallbackSeedForTrack(widget.track));
     final AlbumCoverPalette? palette = await albumPaletteForCoverWhenReady(
       widget.paletteLoader,
       coverUrl,
     );
     if (!mounted || generation != _generation) return;
-    // Sampling waits for the cover; switching does not wait forever. With no
-    // palette at all the canvas still moves to this track's own seed, so a
-    // cover that never arrives cannot leave the previous song's colours up.
-    final Color fallback = albumFallbackSeedForTrack(widget.track);
-    setState(
-      () => _colors = palette?.mesh ?? albumFlowColors(palette?.seed ?? fallback),
-    );
+    if (palette != null) setState(() => _colors = palette.mesh);
     // The browse pages' accent keeps its previous contract: a palette that was
     // read, or the shared default. Only the canvas follows the per-track seed,
     // so a cover that cannot be read never leaves the *previous* song's colours

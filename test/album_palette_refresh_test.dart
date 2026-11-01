@@ -146,6 +146,13 @@ void main() {
     expect(_paintedMesh(tester), albumFlowColors(_green));
 
     await tester.pumpWidget(page(_track('b', cover: 'https://cover.test/b')));
+    expect(
+      _paintedMesh(tester),
+      albumFlowColors(
+        albumFallbackSeedForTrack(_track('b', cover: 'https://cover.test/b')),
+      ),
+      reason: 'the browse canvas switches tracks before palette retries finish',
+    );
     await tester.pump();
     await tester.pump(const Duration(seconds: 2));
     // The canvas follows this track's own seed; the browse accent keeps its

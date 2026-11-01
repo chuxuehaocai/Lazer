@@ -36,16 +36,18 @@ Track _track(String id, String cover, {int seed = 1}) => Track(
 AlbumCoverPalette _palette(Color seed) =>
     AlbumCoverPalette(seed: seed, mesh: albumFlowColors(seed));
 
-Future<AlbumCoverPalette?> _loader(String? url) async => url!.endsWith('/a')
-    ? _palette(_red)
-    : _palette(_green);
+Future<AlbumCoverPalette?> _loader(String? url) async =>
+    url!.endsWith('/a') ? _palette(_red) : _palette(_green);
 
 /// Bottom-centre pixel of the canvas: the cheap preview ramp ends in the
 /// palette's last colour, so it is a stable read of "which song is painted".
-Future<Color> _bottomPixel(WidgetTester tester, Key boundary, String shot) async {
-  final RenderRepaintBoundary render = tester.renderObject<RenderRepaintBoundary>(
-    find.byKey(boundary),
-  );
+Future<Color> _bottomPixel(
+  WidgetTester tester,
+  Key boundary,
+  String shot,
+) async {
+  final RenderRepaintBoundary render = tester
+      .renderObject<RenderRepaintBoundary>(find.byKey(boundary));
   late final ui.Image image;
   late final ByteData? bytes;
   await tester.runAsync(() async {
@@ -75,43 +77,48 @@ Future<Color> _bottomPixel(WidgetTester tester, Key boundary, String shot) async
 }
 
 void main() {
-  testWidgets('the canvas follows the new cover when no frames advance the fade', (
-    tester,
-  ) async {
-    // A muted ticker is what a paused canvas, an inactive route or a
-    // `TickerMode(enabled: false)` subtree produces: `forward()` starts a
-    // controller whose ticker never ticks.
-    final GlobalKey boundary = GlobalKey();
-    Widget page(Track track) => MaterialApp(
-      home: TickerMode(
-        enabled: false,
-        child: AlbumBlurFlow(
-          boundaryKey: boundary,
-          track: track,
-          mode: LegacyBackgroundMode.nowPlayingDynamic,
-          animationsEnabled: true,
-          preview: true,
-          pageColor: Colors.black,
-          paletteLoader: _loader,
+  testWidgets(
+    'the canvas follows the new cover when no frames advance the fade',
+    (tester) async {
+      // A muted ticker is what a paused canvas, an inactive route or a
+      // `TickerMode(enabled: false)` subtree produces: `forward()` starts a
+      // controller whose ticker never ticks.
+      final GlobalKey boundary = GlobalKey();
+      Widget page(Track track) => MaterialApp(
+        home: TickerMode(
+          enabled: false,
+          child: AlbumBlurFlow(
+            boundaryKey: boundary,
+            track: track,
+            mode: LegacyBackgroundMode.nowPlayingDynamic,
+            animationsEnabled: true,
+            preview: true,
+            pageColor: Colors.black,
+            paletteLoader: _loader,
+          ),
         ),
-      ),
-    );
+      );
 
-    await tester.pumpWidget(page(_track('a', 'https://cover.test/a')));
-    await tester.pump();
-    final Color first = await _bottomPixel(tester, boundary, '1a-stuck-fade');
-    expect(first.r, greaterThan(first.g), reason: 'track a is the red cover');
+      await tester.pumpWidget(page(_track('a', 'https://cover.test/a')));
+      await tester.pump();
+      final Color first = await _bottomPixel(tester, boundary, '1a-stuck-fade');
+      expect(first.r, greaterThan(first.g), reason: 'track a is the red cover');
 
-    await tester.pumpWidget(page(_track('b', 'https://cover.test/b')));
-    await tester.pump();
-    final Color second = await _bottomPixel(tester, boundary, '1b-stuck-fade');
-    expect(
-      second.g,
-      greaterThan(second.r),
-      reason: 'the canvas still paints the previous cover\'s colours',
-    );
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+      await tester.pumpWidget(page(_track('b', 'https://cover.test/b')));
+      await tester.pump();
+      final Color second = await _bottomPixel(
+        tester,
+        boundary,
+        '1b-stuck-fade',
+      );
+      expect(
+        second.g,
+        greaterThan(second.r),
+        reason: 'the canvas still paints the previous cover\'s colours',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('the crossfade lands on the new cover when frames do arrive', (
     tester,
@@ -141,7 +148,9 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('a cover that arrives late still moves the canvas', (tester) async {
+  testWidgets('a cover that arrives late still moves the canvas', (
+    tester,
+  ) async {
     // Exactly what a slow cover cache looks like: the first reads miss while the
     // artwork is still downloading, and the palette must win once it lands.
     int misses = 0;
@@ -167,6 +176,15 @@ void main() {
     expect(first.r, greaterThan(first.g));
 
     await tester.pumpWidget(page(_track('b', 'https://cover.test/b')));
+    expect(
+      tester
+          .widget<AlbumFlowBackground>(find.byType(AlbumFlowBackground))
+          .colors,
+      albumFlowColors(
+        albumFallbackSeedForTrack(_track('b', 'https://cover.test/b')),
+      ),
+      reason: 'the old cover must be cleared before the artwork retries finish',
+    );
     await tester.pump();
     await tester.pump(const Duration(seconds: 2));
     expect(misses, greaterThan(2), reason: 'the reader retried while waiting');
@@ -199,7 +217,9 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 2));
       painted.add(
-        tester.widget<AlbumFlowBackground>(find.byType(AlbumFlowBackground)).colors,
+        tester
+            .widget<AlbumFlowBackground>(find.byType(AlbumFlowBackground))
+            .colors,
       );
     }
     expect(painted[0], isNot(equals(painted[1])));

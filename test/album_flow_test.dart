@@ -123,6 +123,11 @@ void main() {
     );
     expect(albumPaletteArtworkUrl(''), isNull);
     expect(albumPaletteArtworkUrl(null), isNull);
+    expect(albumPaletteArtworkUrl('file:///tmp/cover.png'), 'file:///tmp/cover.png');
+    expect(
+      albumPaletteArtworkUrl('https://covers.example/cover.png'),
+      'https://covers.example/cover.png',
+    );
   });
 
   test('the seed extractor prefers the dominant vibrant colour', () {
