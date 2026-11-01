@@ -15,7 +15,6 @@ import 'package:lazer_nextgen/widgets/player_seek_bar.dart';
 class _PlayerState extends AppState {
   _PlayerState({required bool largeText}) {
     uiMode = AppUiMode.mobile;
-    showArtworkWithLyrics = true;
     lyricControlsSeconds = 2;
     lyrics = parseLrc(
       '[00:00.00]First lyric line\n[00:04.00]Second lyric line\n'

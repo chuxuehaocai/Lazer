@@ -100,6 +100,10 @@ Future<void> downloadTracks(
       .where((Track track) => track.isServiceTrack)
       .toList();
   if (downloadable.isEmpty) return;
+  // The row or menu that started this download may disappear before the user
+  // presses the notification action. The root navigator remains available.
+  final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
+  final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(context);
   final DownloadRequest? request = await showDownloadDialog(
     context,
     state,
@@ -113,8 +117,11 @@ Future<void> downloadTracks(
     directory: request.directory,
     folderName: request.folderName,
   );
-  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+  messenger?.hideCurrentSnackBar();
+  messenger?.showSnackBar(
     SnackBar(
+      persist: false,
+      duration: const Duration(seconds: 4),
       content: Text(
         context.tr(
           downloadable.length == 1
@@ -124,7 +131,12 @@ Future<void> downloadTracks(
       ),
       action: SnackBarAction(
         label: context.tr('查看'),
-        onPressed: () => showDownloadQueueSheet(context, state),
+        onPressed: () {
+          messenger.hideCurrentSnackBar();
+          if (navigator.mounted) {
+            showDownloadQueueSheet(navigator.context, state);
+          }
+        },
       ),
     ),
   );

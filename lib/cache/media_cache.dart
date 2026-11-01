@@ -137,6 +137,52 @@ class AudioCache {
   static String cacheKey(String trackId, AudioQuality quality) =>
       '$trackId:${quality.name}';
 
+  /// Waits for an already running download without starting a second request.
+  /// The library uses this to publish only complete, playable cache files.
+  Future<({File file, AudioQuality quality})?> completedFor(
+    String trackId, {
+    AudioQuality preferred = AudioQuality.exhigh,
+  }) async {
+    final List<AudioQuality> qualities = <AudioQuality>[
+      preferred,
+      ...AudioQuality.values.reversed.where((quality) => quality != preferred),
+    ];
+    for (final AudioQuality quality in qualities) {
+      final Future<File?>? pending = _pending[cacheKey(trackId, quality)];
+      if (pending != null) {
+        final File? file = await pending;
+        if (file != null) return (file: file, quality: quality);
+      }
+      final File? file = await find(trackId, quality: quality);
+      if (file != null) return (file: file, quality: quality);
+    }
+    return null;
+  }
+
+  /// Removes every rendition of one song, including the legacy cache key.
+  Future<void> removeTrack(String trackId, {File? exceptFile}) async {
+    for (final String key in <String>[
+      trackId,
+      for (final AudioQuality quality in AudioQuality.values)
+        cacheKey(trackId, quality),
+    ]) {
+      for (final String extension in _formats) {
+        if (exceptFile != null) {
+          final File? candidate = await disk.find(
+            CacheBucket.audio,
+            key,
+            extension: extension,
+          );
+          if (candidate?.uri.normalizePath() ==
+              exceptFile.uri.normalizePath()) {
+            continue;
+          }
+        }
+        await disk.remove(CacheBucket.audio, key, extension: extension);
+      }
+    }
+  }
+
   Future<File?> find(
     String trackId, {
     AudioQuality quality = AudioQuality.exhigh,

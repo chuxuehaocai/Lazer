@@ -16,9 +16,11 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import '../data/catalog.dart';
 import '../data/catalog_details.dart';
 import '../data/models.dart';
+import '../downloads/download_dialog.dart';
 import '../l10n/app_localizations.dart';
 import '../legacy/legacy_login.dart';
 import '../legacy/legacy_pages.dart';
+import '../legacy/legacy_home_pages.dart' show dailyRecommendationsPlaylist;
 import '../local/local_music_page.dart';
 import '../state/app_state.dart';
 import '../state/detail_requests.dart';
@@ -26,6 +28,8 @@ import '../state/song_comments_controller.dart';
 import '../theme/apple_design.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/interaction_feedback.dart';
+import '../widgets/cover_transition.dart';
+import '../widgets/track_batch_bar.dart';
 import '../widgets/song_comments_view.dart';
 import 'large_screen_widgets.dart';
 
@@ -230,6 +234,9 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
           title: title,
           subtitle: subtitle,
           imageUrl: imageUrl,
+          transitionIdentity: key
+              .replaceFirst('album-', 'playlist:')
+              .replaceFirst('playlist-', 'playlist:'),
           onTap: onTap,
           icon: icon,
         ),
@@ -311,9 +318,14 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
               large: true,
               onDaily: !_state.signedIn
                   ? () => unawaited(showLegacyLoginDialog(context, _state))
-                  : feed.quick.isEmpty
+                  : feed.quick.isEmpty && feed.daily.isEmpty
                   ? null
-                  : () => _state.playQueue(feed.quick),
+                  : () => widget.actions.onOpenPlaylist(
+                      dailyRecommendationsPlaylist(
+                        feed,
+                        serverLibrary: _state.isNavidrome,
+                      ),
+                    ),
               onFm: _state.signedIn
                   ? () => _playStation(_state.catalog.personalFmTracks)
                   : () => unawaited(showLegacyLoginDialog(context, _state)),
@@ -344,6 +356,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
               imageUrl: feature.imageUrl,
               icon: feature.icon,
               onTap: feature.onTap,
+              coverTransitionIdentity: feature.transitionIdentity,
             );
           },
         ),
@@ -385,6 +398,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
               title: album.title,
               subtitle: album.artist,
               imageUrl: album.coverUrl,
+              coverTransitionIdentity: 'playlist:${album.id}',
               icon: Icons.album_rounded,
               onTap: () => widget.actions.onOpenAlbum(album),
             );
@@ -442,6 +456,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
                   ? _countSongs(context, playlist.trackCount)
                   : playlist.description,
               imageUrl: playlist.coverUrl,
+              coverTransitionIdentity: 'playlist:${playlist.id}',
               icon: Icons.queue_music_rounded,
               onTap: () => widget.actions.onOpenPlaylist(playlist),
             );
@@ -463,6 +478,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
               title: playlist.name,
               subtitle: playlist.description,
               imageUrl: playlist.coverUrl,
+              coverTransitionIdentity: 'playlist:${playlist.id}',
               icon: Icons.auto_awesome_rounded,
               onTap: () => widget.actions.onOpenPlaylist(playlist),
             );
@@ -492,12 +508,14 @@ class _FeatureEntry {
     required this.imageUrl,
     required this.onTap,
     required this.icon,
+    required this.transitionIdentity,
   });
 
   final String title;
   final String? subtitle;
   final String? imageUrl;
   final VoidCallback onTap;
+  final String transitionIdentity;
   final IconData icon;
 }
 
@@ -936,6 +954,7 @@ class _LibraryPane extends StatelessWidget {
                   ? _countSongs(context, playlist.trackCount)
                   : playlist.description,
               imageUrl: playlist.coverUrl,
+              coverTransitionIdentity: 'playlist:${playlist.id}',
               icon: Icons.queue_music_rounded,
               centerCaption: true,
               onTap: () => actions.onOpenPlaylist(playlist),
@@ -993,6 +1012,88 @@ class _ArtworkGrid extends StatelessWidget {
 // 歌单 / 专辑
 // ---------------------------------------------------------------------------
 
+/// Shared by playlist, album and chart details so all catalogue collections
+/// keep the same artwork, type and action layout on a television.
+class LargeScreenCollectionHeader extends StatelessWidget {
+  const LargeScreenCollectionHeader({
+    super.key,
+    required this.title,
+    required this.metadata,
+    required this.transitionIdentity,
+    required this.actions,
+    this.coverUrl,
+    this.note,
+    this.icon = Icons.queue_music_rounded,
+  });
+
+  final String title;
+  final String metadata;
+  final String transitionIdentity;
+  final String? coverUrl;
+  final String? note;
+  final IconData icon;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool narrow = MediaQuery.sizeOf(context).width < 860;
+    final double coverSize = narrow ? 200 : 256;
+    final Widget artwork = CoverTransitionTarget(
+      identity: transitionIdentity,
+      size: coverSize,
+      radius: 20,
+      child: LargeScreenArtwork(
+        url: coverUrl,
+        size: coverSize,
+        radius: 20,
+        icon: icon,
+        iconScale: .18,
+      ),
+    );
+    final Widget info = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: LargeScreenType.display(context),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          metadata,
+          style: LargeScreenType.cardMeta(context).copyWith(fontSize: 18),
+        ),
+        if ((note ?? '').trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
+          Text(
+            note!.trim(),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: LargeScreenType.cardMeta(context),
+          ),
+        ],
+        const SizedBox(height: 22),
+        Wrap(spacing: 12, runSpacing: 10, children: actions),
+      ],
+    );
+    return narrow
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[artwork, const SizedBox(height: 18), info],
+          )
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              artwork,
+              const SizedBox(width: 34),
+              Expanded(child: info),
+            ],
+          );
+  }
+}
+
 /// A playlist or album detail page with the large hero and track list.
 class LargeScreenCollectionPage extends StatefulWidget {
   const LargeScreenCollectionPage({
@@ -1015,6 +1116,9 @@ class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage> {
   List<Track>? _tracks;
   String? _note;
   String? _error;
+  bool _selecting = false;
+  final Set<String> _selected = <String>{};
+  int _loadSerial = 0;
 
   @override
   void initState() {
@@ -1025,15 +1129,19 @@ class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage> {
   @override
   void didUpdateWidget(covariant LargeScreenCollectionPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.playlist.id != widget.playlist.id ||
+    if (oldWidget.state != widget.state ||
+        oldWidget.playlist.id != widget.playlist.id ||
         oldWidget.album?.id != widget.album?.id) {
       _tracks = null;
+      _selecting = false;
+      _selected.clear();
       _note = null;
       unawaited(_load());
     }
   }
 
   Future<void> _load() async {
+    final serial = ++_loadSerial;
     if (mounted) setState(() => _error = null);
     try {
       final Album? album = widget.album;
@@ -1048,13 +1156,13 @@ class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage> {
       } else {
         tracks = await widget.state.catalog.playlistTracks(widget.playlist.id);
       }
-      if (!mounted) return;
+      if (!mounted || serial != _loadSerial) return;
       setState(() {
         _tracks = tracks;
         _note = note;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || serial != _loadSerial) return;
       setState(() => _error = '歌单读取失败，请重试。');
     }
   }
@@ -1089,139 +1197,164 @@ class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage> {
                     : 0),
           );
     final String? note = _note ?? widget.album?.note;
-    final bool narrow = MediaQuery.sizeOf(context).width < 860;
-    final Widget artwork = LargeScreenArtwork(
-      url: widget.playlist.coverUrl,
-      size: narrow ? 200 : 256,
-      radius: 20,
+    final Widget header = LargeScreenCollectionHeader(
+      title: title,
+      metadata: meta,
+      transitionIdentity: 'playlist:${widget.playlist.id}',
+      coverUrl: widget.playlist.coverUrl,
+      note: note,
       icon: widget.album != null
           ? Icons.album_rounded
           : Icons.queue_music_rounded,
-      iconScale: .18,
-    );
-    final Widget info = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Text(
-          title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: LargeScreenType.display(context),
+      actions: <Widget>[
+        LargeScreenPrimaryButton(
+          label: '播放全部',
+          icon: Icons.play_arrow_rounded,
+          onTap: tracks == null || tracks.isEmpty
+              ? null
+              : () => _play(shuffle: false),
         ),
-        const SizedBox(height: 8),
-        Text(
-          meta,
-          style: LargeScreenType.cardMeta(context).copyWith(fontSize: 18),
+        LargeScreenSecondaryButton(
+          label: '随机播放',
+          icon: Icons.shuffle_rounded,
+          onTap: tracks == null || tracks.isEmpty
+              ? null
+              : () => _play(shuffle: true),
         ),
-        if ((note ?? '').trim().isNotEmpty) ...<Widget>[
-          const SizedBox(height: 10),
-          Text(
-            note!.trim(),
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: LargeScreenType.cardMeta(context),
-          ),
-        ],
-        const SizedBox(height: 22),
-        Wrap(
-          spacing: 12,
-          runSpacing: 10,
-          children: <Widget>[
-            LargeScreenPrimaryButton(
-              label: '播放全部',
-              icon: Icons.play_arrow_rounded,
-              onTap: tracks == null || tracks.isEmpty
-                  ? null
-                  : () => _play(shuffle: false),
-            ),
-            LargeScreenSecondaryButton(
-              label: '随机播放',
-              icon: Icons.shuffle_rounded,
-              onTap: tracks == null || tracks.isEmpty
-                  ? null
-                  : () => _play(shuffle: true),
-            ),
-          ],
+        LargeScreenSecondaryButton(
+          label: '下载',
+          icon: Icons.download_rounded,
+          onTap: tracks == null || tracks.isEmpty
+              ? null
+              : () => unawaited(
+                  downloadTracks(
+                    context,
+                    widget.state,
+                    tracks,
+                    folderName: title,
+                  ),
+                ),
         ),
       ],
     );
-    return CustomScrollView(
-      key: PageStorageKey<String>(
-        'large-screen-collection-${widget.playlist.id}',
-      ),
-      slivers: <Widget>[
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(inset, 20, inset, 12),
-            child: narrow
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      artwork,
-                      const SizedBox(height: 18),
-                      info,
-                    ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: <Widget>[
-                      artwork,
-                      const SizedBox(width: 34),
-                      Expanded(child: info),
-                    ],
-                  ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CustomScrollView(
+          key: PageStorageKey<String>(
+            'large-screen-collection-${widget.playlist.id}',
           ),
+          slivers: <Widget>[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(inset, 20, inset, 12),
+                child: header,
+              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(inset, 12, inset, 6),
+              sliver: SliverToBoxAdapter(
+                child: _error != null
+                    ? LargeScreenNotice(
+                        message: _error!,
+                        action: LargeScreenPrimaryButton(
+                          label: '重试',
+                          icon: Icons.refresh_rounded,
+                          onTap: () => unawaited(_load()),
+                        ),
+                      )
+                    : tracks == null
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    : tracks.isEmpty
+                    ? const LargeScreenNotice(message: '这个歌单还没有可播放的曲目。')
+                    : LargeScreenSectionHeader(
+                        title: '歌曲',
+                        subtitle: _countSongs(context, tracks.length),
+                      ),
+              ),
+            ),
+            if (tracks != null && tracks.isNotEmpty)
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: inset),
+                sliver: SliverList.builder(
+                  itemCount: tracks.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final Track track = tracks[index];
+                    return LargeScreenTrackRow(
+                      index: index,
+                      title: track.title,
+                      artist: track.artist,
+                      imageUrl: track.coverUrl,
+                      duration: track.duration,
+                      current: widget.state.current?.id == track.id,
+                      playing: widget.state.playing,
+                      selectionMode: _selecting,
+                      selected: _selected.contains(track.id),
+                      onLongPress: () => setState(() {
+                        _selecting = true;
+                        _selected.add(track.id);
+                      }),
+                      onTap: () {
+                        if (_selecting) {
+                          setState(() {
+                            if (!_selected.add(track.id)) {
+                              _selected.remove(track.id);
+                            }
+                          });
+                        } else {
+                          widget.state.playQueue(tracks, startIndex: index);
+                        }
+                      },
+                    );
+                  },
+                ),
+              ),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: LargeScreenMetrics.floatingBarInset),
+            ),
+          ],
         ),
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(inset, 12, inset, 6),
-          sliver: SliverToBoxAdapter(
-            child: _error != null
-                ? LargeScreenNotice(
-                    message: _error!,
-                    action: LargeScreenPrimaryButton(
-                      label: '重试',
-                      icon: Icons.refresh_rounded,
-                      onTap: () => unawaited(_load()),
-                    ),
+        if (_selecting && tracks != null)
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 18,
+            child: TrackBatchBar(
+              selectedCount: _selected.length,
+              totalCount: tracks.map((track) => track.id).toSet().length,
+              onSelectAll: () => setState(() {
+                if (_selected.length ==
+                    tracks.map((track) => track.id).toSet().length) {
+                  _selected.clear();
+                } else {
+                  _selected.addAll(tracks.map((track) => track.id));
+                }
+              }),
+              onDownload:
+                  tracks.any(
+                    (track) =>
+                        _selected.contains(track.id) && track.isServiceTrack,
                   )
-                : tracks == null
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                : tracks.isEmpty
-                ? const LargeScreenNotice(message: '这个歌单还没有可播放的曲目。')
-                : LargeScreenSectionHeader(
-                    title: '歌曲',
-                    subtitle: _countSongs(context, tracks.length),
-                  ),
-          ),
-        ),
-        if (tracks != null && tracks.isNotEmpty)
-          SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: inset),
-            sliver: SliverList.builder(
-              itemCount: tracks.length,
-              itemBuilder: (BuildContext context, int index) {
-                final Track track = tracks[index];
-                return LargeScreenTrackRow(
-                  index: index,
-                  title: track.title,
-                  artist: track.artist,
-                  imageUrl: track.coverUrl,
-                  duration: track.duration,
-                  current: widget.state.current?.id == track.id,
-                  playing: widget.state.playing,
-                  onTap: () =>
-                      widget.state.playQueue(tracks, startIndex: index),
-                );
-              },
+                  ? () => unawaited(
+                      downloadTracks(
+                        context,
+                        widget.state,
+                        tracks
+                            .where((track) => _selected.contains(track.id))
+                            .toList(),
+                        folderName: title,
+                      ),
+                    )
+                  : null,
+              onClose: () => setState(() {
+                _selecting = false;
+                _selected.clear();
+              }),
             ),
           ),
-        const SliverToBoxAdapter(
-          child: SizedBox(height: LargeScreenMetrics.floatingBarInset),
-        ),
       ],
     );
   }
@@ -1442,6 +1575,7 @@ class _LargeScreenArtistPageState extends State<LargeScreenArtistPage> {
                         title: album.title,
                         subtitle: album.artist,
                         imageUrl: album.coverUrl,
+                        coverTransitionIdentity: 'playlist:${album.id}',
                         icon: Icons.album_rounded,
                         onTap: () => _openAlbum(album),
                       ),
@@ -1496,10 +1630,28 @@ class _LargeScreenChartPageState extends State<LargeScreenChartPage> {
   late MusicChart _chart = widget.chart;
   bool _matching = false;
   int _serial = 0;
+  bool _selecting = false;
+  final Set<String> _selected = <String>{};
 
   @override
   void initState() {
     super.initState();
+    _resetChart();
+  }
+
+  @override
+  void didUpdateWidget(covariant LargeScreenChartPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state || oldWidget.chart != widget.chart) {
+      _resetChart();
+    }
+  }
+
+  void _resetChart() {
+    _serial++;
+    _chart = widget.chart;
+    _selecting = false;
+    _selected.clear();
     _matching = _chart.entries.any((ChartEntry entry) => entry.track == null);
     unawaited(_match());
   }
@@ -1526,132 +1678,176 @@ class _LargeScreenChartPageState extends State<LargeScreenChartPage> {
     final double inset = LargeScreenMetrics.pageInset(
       MediaQuery.sizeOf(context).width,
     );
-    final Color accent = Color(_chart.accent);
     final List<Track> playable = <Track>[
       for (final ChartEntry entry in _chart.entries)
         if (entry.track != null) entry.track!,
     ];
-    return CustomScrollView(
-      key: PageStorageKey<String>('large-screen-chart-${_chart.id}'),
-      slivers: <Widget>[
-        SliverToBoxAdapter(
-          child: Container(
-            margin: EdgeInsets.fromLTRB(inset, 20, inset, 24),
-            padding: const EdgeInsets.fromLTRB(34, 30, 34, 30),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: <Color>[accent, Color.lerp(accent, Colors.black, .62)!],
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        CustomScrollView(
+          key: PageStorageKey<String>('large-screen-chart-${_chart.id}'),
+          slivers: <Widget>[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(inset, 20, inset, 12),
+                child: LargeScreenCollectionHeader(
+                  title: _chart.title,
+                  metadata: <String>[
+                    _chart.source,
+                    _chart.issueLabel,
+                    _countSongs(context, _chart.entries.length),
+                  ].where((value) => value.isNotEmpty).join(' · '),
+                  transitionIdentity: 'chart:${_chart.id}',
+                  coverUrl:
+                      _chart.entries.firstOrNull?.coverUrl ??
+                      _chart.entries.firstOrNull?.track?.coverUrl ??
+                      _chart.logoUrl,
+                  icon: Icons.leaderboard_rounded,
+                  actions: <Widget>[
+                    LargeScreenPrimaryButton(
+                      label: '播放全部',
+                      icon: Icons.play_arrow_rounded,
+                      onTap: playable.isEmpty
+                          ? null
+                          : () => widget.state.playQueue(playable),
+                    ),
+                    LargeScreenSecondaryButton(
+                      label: '下载',
+                      icon: Icons.download_rounded,
+                      onTap: playable.any((track) => track.isServiceTrack)
+                          ? () => unawaited(
+                              downloadTracks(
+                                context,
+                                widget.state,
+                                playable,
+                                folderName: _chart.title,
+                              ),
+                            )
+                          : null,
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Text(
-                        _chart.source,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.1,
-                          color: Color(0xCCFFFFFF),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _chart.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 36,
-                          height: 1.14,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _chart.issueLabel,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Color(0xCCFFFFFF),
-                        ),
-                      ),
-                    ],
-                  ),
+            if (_matching)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(inset, 8, inset, 12),
+                  child: TrText('正在载入排行榜…'),
                 ),
-                const SizedBox(width: 24),
-                if (_matching)
-                  Text(
-                    context.tr('正在载入排行榜…'),
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xCCFFFFFF),
-                    ),
+              ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(inset, 12, inset, 6),
+              sliver: SliverToBoxAdapter(
+                child: _chart.entries.isEmpty
+                    ? const LargeScreenNotice(message: '暂无榜单数据')
+                    : LargeScreenSectionHeader(
+                        title: '歌曲',
+                        subtitle: _countSongs(context, _chart.entries.length),
+                      ),
+              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: inset),
+              sliver: SliverList.builder(
+                itemCount: _chart.entries.length,
+                itemBuilder: (BuildContext context, int index) {
+                  final ChartEntry entry = _chart.entries[index];
+                  final Track? track = entry.track;
+                  final String trend = entry.changeLabel ?? '';
+                  return LargeScreenTrackRow(
+                    index: entry.rank > 0 ? entry.rank - 1 : index,
+                    title: entry.title,
+                    artist: entry.artist,
+                    imageUrl: entry.coverUrl ?? track?.coverUrl,
+                    current:
+                        track != null && widget.state.current?.id == track.id,
+                    playing: widget.state.playing,
+                    selectionMode: _selecting,
+                    selected: track != null && _selected.contains(track.id),
+                    onLongPress: track == null
+                        ? null
+                        : () => setState(() {
+                            _selecting = true;
+                            _selected.add(track.id);
+                          }),
+                    trailing: trend.isEmpty
+                        ? null
+                        : Text(
+                            trend,
+                            style: LargeScreenType.rowMeta(context).copyWith(
+                              fontSize: 14,
+                              color: trend.startsWith('+')
+                                  ? AppleColors.systemGreen
+                                  : trend.startsWith('-')
+                                  ? AppleColors.systemRed
+                                  : null,
+                            ),
+                          ),
+                    onTap: track == null
+                        ? null
+                        : () {
+                            if (_selecting) {
+                              setState(() {
+                                if (!_selected.add(track.id)) {
+                                  _selected.remove(track.id);
+                                }
+                              });
+                            } else {
+                              widget.state.playQueue(
+                                playable,
+                                startIndex: playable.indexOf(track),
+                              );
+                            }
+                          },
+                  );
+                },
+              ),
+            ),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: LargeScreenMetrics.floatingBarInset),
+            ),
+          ],
+        ),
+        if (_selecting)
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 18,
+            child: TrackBatchBar(
+              selectedCount: _selected.length,
+              totalCount: playable.map((track) => track.id).toSet().length,
+              onSelectAll: () => setState(() {
+                if (_selected.length ==
+                    playable.map((track) => track.id).toSet().length) {
+                  _selected.clear();
+                } else {
+                  _selected.addAll(playable.map((track) => track.id));
+                }
+              }),
+              onDownload:
+                  playable.any(
+                    (track) =>
+                        _selected.contains(track.id) && track.isServiceTrack,
                   )
-                else if (playable.isNotEmpty)
-                  LargeScreenPrimaryButton(
-                    label: '播放全部',
-                    icon: Icons.play_arrow_rounded,
-                    onTap: () => widget.state.playQueue(playable),
-                  ),
-              ],
+                  ? () => unawaited(
+                      downloadTracks(
+                        context,
+                        widget.state,
+                        playable
+                            .where((track) => _selected.contains(track.id))
+                            .toList(),
+                        folderName: _chart.title,
+                      ),
+                    )
+                  : null,
+              onClose: () => setState(() {
+                _selecting = false;
+                _selected.clear();
+              }),
             ),
           ),
-        ),
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(inset, 0, inset, 8),
-          sliver: SliverToBoxAdapter(
-            child: _chart.entries.isEmpty
-                ? const LargeScreenNotice(message: '暂无榜单数据')
-                : const LargeScreenSectionHeader(title: '本期上榜'),
-          ),
-        ),
-        SliverPadding(
-          padding: EdgeInsets.symmetric(horizontal: inset),
-          sliver: SliverList.builder(
-            itemCount: _chart.entries.length,
-            itemBuilder: (BuildContext context, int index) {
-              final ChartEntry entry = _chart.entries[index];
-              final Track? track = entry.track;
-              final String trend = entry.changeLabel ?? '';
-              return LargeScreenTrackRow(
-                index: entry.rank > 0 ? entry.rank - 1 : index,
-                title: entry.title,
-                artist: entry.artist,
-                imageUrl: entry.coverUrl,
-                trailing: trend.isEmpty
-                    ? null
-                    : Text(
-                        trend,
-                        style: LargeScreenType.rowMeta(context).copyWith(
-                          fontSize: 14,
-                          color: trend.startsWith('+')
-                              ? AppleColors.systemGreen
-                              : trend.startsWith('-')
-                              ? AppleColors.systemRed
-                              : null,
-                        ),
-                      ),
-                onTap: track == null
-                    ? null
-                    : () => widget.state.playQueue(
-                        playable,
-                        startIndex: playable.indexOf(track),
-                      ),
-              );
-            },
-          ),
-        ),
-        const SliverToBoxAdapter(
-          child: SizedBox(height: LargeScreenMetrics.floatingBarInset),
-        ),
       ],
     );
   }
@@ -1855,6 +2051,7 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage> {
               title: album.title,
               subtitle: album.artist,
               imageUrl: album.coverUrl,
+              coverTransitionIdentity: 'playlist:${album.id}',
               icon: Icons.album_rounded,
               centerCaption: true,
               onTap: () => widget.actions.onOpenAlbum(album),
@@ -1898,6 +2095,7 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage> {
                   ? _countSongs(context, playlist.trackCount)
                   : playlist.description,
               imageUrl: playlist.coverUrl,
+              coverTransitionIdentity: 'playlist:${playlist.id}',
               icon: Icons.queue_music_rounded,
               centerCaption: true,
               onTap: () => widget.actions.onOpenPlaylist(playlist),

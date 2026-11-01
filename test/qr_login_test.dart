@@ -8,6 +8,7 @@ import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/legacy/legacy_login.dart';
 import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/font_preferences.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 const String _scanUrl = 'https://music.163.com/login?codekey=fixture-key';
@@ -88,6 +89,41 @@ Future<void> _flush() => Future<void>.delayed(Duration.zero);
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('cookie input uses the selected system font', (tester) async {
+    final state = _state(_QrGateway(codes: [801]));
+    addTearDown(() async {
+      await _flush();
+      state.dispose();
+    });
+    await state.setFontFamily(
+      const FontFamilyPreference(source: FontSource.system),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => showLegacyLoginDialog(context, state),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('使用 Cookie 登录'));
+    await tester.pump();
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).style!.fontFamily,
+      state.fontPreferences.family.resolvedFamily,
+    );
+    await tester.tap(find.byTooltip('取消'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 
   test('a waiting key keeps the poll at 801 and never signs in', () async {
     final gateway = _QrGateway(codes: <int>[801]);

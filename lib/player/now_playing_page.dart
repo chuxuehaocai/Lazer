@@ -427,22 +427,19 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   }
 
   /// 移动端整屏歌词：标题固定，正文占满剩余高度。
-  Widget _mobileLyrics({bool withArtwork = false}) => LayoutBuilder(
+  Widget _mobileLyrics() => LayoutBuilder(
+    key: const ValueKey('mobile-lyrics'),
     builder: (context, box) => Padding(
       padding: EdgeInsets.symmetric(
         horizontal: 4,
-        vertical: !withArtwork
-            ? 16
-            : box.maxHeight < 240
-            ? 4
-            : 12,
+        vertical: box.maxHeight < 240 ? 4 : 12,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!withArtwork || box.maxHeight >= 240) ...[
+          if (box.maxHeight >= 240) ...[
             const InlineLabel('歌词'),
-            SizedBox(height: withArtwork ? 12 : AppSpacing.md),
+            const SizedBox(height: 12),
           ],
           Expanded(
             child: _settledGate(
@@ -546,8 +543,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             boxShadow:
-                widget.state.showArtworkWithLyrics &&
-                    _lyricsMode &&
+                _lyricsMode &&
                     useCompactLayout(
                       widget.state.uiMode,
                       MediaQuery.sizeOf(context).width,
@@ -582,18 +578,6 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   /// Everything the player can do with the song sits behind [更多] now. Five
   /// icons used to crowd this row and cover the cover with chrome; the back
   /// arrow stays, because leaving the page is not something done to the song.
-  Widget _header(bool compact) => IgnorePointer(
-    ignoring: compact && !_controlsVisible,
-    child: AnimatedOpacity(
-      opacity: compact && !_controlsVisible ? 0 : 1,
-      curve: Curves.easeOutCubic,
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 360),
-      child: _headerControls(),
-    ),
-  );
-
   Widget _headerControls() => Padding(
     padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
     child: Row(
@@ -634,7 +618,10 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       backgroundColor: context.colors.ivoryLight,
       showDragHandle: true,
       builder: (BuildContext sheetContext) => AnimatedBuilder(
-        animation: widget.state,
+        animation: Listenable.merge([
+          widget.state,
+          widget.state.listenTogether,
+        ]),
         builder: (BuildContext context, Widget? child) {
           final Track? track = widget.state.current;
           if (track == null) {
@@ -662,6 +649,10 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
             onLyrics: () {
               Navigator.of(sheetContext).pop();
               _toggleLyrics();
+            },
+            onTogether: () {
+              Navigator.of(sheetContext).pop();
+              unawaited(showListenTogetherDialog(this.context, widget.state));
             },
             onSaveArtwork: () {
               Navigator.of(sheetContext).pop();
@@ -822,16 +813,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                             onTap: compact && _lyricsMode
                                 ? _stepBackFromLyrics
                                 : null,
-                            child: SafeArea(
-                              child: widget.state.showArtworkWithLyrics
-                                  ? _mobile(track)
-                                  : Column(
-                                      children: [
-                                        _header(compact),
-                                        Expanded(child: _mobile(track)),
-                                      ],
-                                    ),
-                            ),
+                            child: SafeArea(child: _mobile(track)),
                           ),
                           ?_pullDownLayer(box),
                         ],
@@ -868,155 +850,31 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     );
   }
 
-  Widget _readingPane(Track track) => RepaintBoundary(
-    child: AnimatedSwitcher(
-      duration: const Duration(milliseconds: 280),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: ScaleTransition(
-          scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
-          child: RepaintBoundary(child: child),
-        ),
+  Widget _mobile(Track track) => ArtworkLyricsLayout(
+    lyricsVisible: _lyricsMode,
+    controlsVisible: !_lyricsMode || _controlsVisible,
+    header: _headerControls(),
+    summary: Padding(
+      padding: const EdgeInsets.fromLTRB(24, 18, 24, 6),
+      child: PlayerTrackSummary(
+        key: const ValueKey('compact-player-summary'),
+        track: track,
+        onTap: _controlsActivity,
       ),
-      layoutBuilder: (current, previous) => Stack(
-        fit: StackFit.expand,
-        children: [
-          for (final old in previous)
-            ExcludeSemantics(child: IgnorePointer(child: old)),
-          ?current,
-        ],
+    ),
+    artwork: _cover(track),
+    lyrics: _mobileLyrics(),
+    details: SingleChildScrollView(
+      child: _ArtworkTrackDetails(track: track, state: widget.state),
+    ),
+    transport: SingleChildScrollView(
+      child: _PlaybackTransport(
+        track: track,
+        state: widget.state,
+        edgeToEdge: true,
       ),
-      child: _lyricsMode
-          ? KeyedSubtree(
-              key: const ValueKey('mobile-lyrics'),
-              child: _mobileLyrics(),
-            )
-          : LayoutBuilder(
-              key: const ValueKey('mobile-cover'),
-              builder: (context, box) => Center(
-                child: SizedBox.square(
-                  dimension: (box.maxHeight - 16).clamp(
-                    0,
-                    box.maxWidth.clamp(0, 380),
-                  ),
-                  child: _cover(track),
-                ),
-              ),
-            ),
     ),
   );
-
-  Widget _mobile(Track track) {
-    final size = MediaQuery.sizeOf(context);
-    final visible = !_lyricsMode || _controlsVisible;
-    if (widget.state.showArtworkWithLyrics) {
-      return ArtworkLyricsLayout(
-        lyricsVisible: _lyricsMode,
-        controlsVisible: visible,
-        header: _headerControls(),
-        summary: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 18, 24, 6),
-          child: PlayerTrackSummary(
-            key: const ValueKey('compact-player-summary'),
-            track: track,
-            onTap: _controlsActivity,
-          ),
-        ),
-        artwork: _cover(track),
-        lyrics: _mobileLyrics(withArtwork: true),
-        details: SingleChildScrollView(
-          child: _ArtworkTrackDetails(track: track, state: widget.state),
-        ),
-        transport: SingleChildScrollView(
-          child: _PlaybackTransport(
-            track: track,
-            state: widget.state,
-            edgeToEdge: true,
-          ),
-        ),
-      );
-    }
-    if (size.height < 500 && size.width > size.height) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        child: LayoutBuilder(
-          builder: (context, box) => Row(
-            children: [
-              Expanded(child: _readingPane(track)),
-              IgnorePointer(
-                ignoring: !visible,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 360),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
-                  transitionBuilder: (child, animation) => SizeTransition(
-                    axis: Axis.horizontal,
-                    sizeFactor: animation,
-                    child: FadeTransition(opacity: animation, child: child),
-                  ),
-                  child: !visible
-                      ? const SizedBox.shrink(key: ValueKey('hidden'))
-                      : SizedBox(
-                          key: const ValueKey('controls'),
-                          width: (box.maxWidth * 0.6).clamp(280, 400),
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 20),
-                            child: Column(
-                              children: [
-                                Expanded(
-                                  child: SingleChildScrollView(
-                                    child: _TrackDetails(
-                                      track: track,
-                                      state: widget.state,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                _PlaybackTransport(
-                                  track: track,
-                                  state: widget.state,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 4, 24, 20),
-      child: Column(
-        children: [
-          Expanded(child: _readingPane(track)),
-          IgnorePointer(
-            ignoring: !visible,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 360),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) => SizeTransition(
-                sizeFactor: animation,
-                child: FadeTransition(opacity: animation, child: child),
-              ),
-              child: visible
-                  ? Padding(
-                      key: const ValueKey('controls'),
-                      padding: const EdgeInsets.only(top: 16),
-                      child: _TrackInfo(track: track, state: widget.state),
-                    )
-                  : const SizedBox.shrink(key: ValueKey('hidden')),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 /// A compact metadata row leaves the whole text column aligned with the cover.
@@ -1045,7 +903,6 @@ class _ArtworkTrackDetails extends StatelessWidget {
                 style: context.fonts.apply(
                   FontCategory.playerTitle,
                   const TextStyle(
-                    fontFamily: AppFonts.sans,
                     fontSize: 21,
                     height: 1.2,
                     fontWeight: FontWeight.w600,
@@ -1063,7 +920,6 @@ class _ArtworkTrackDetails extends StatelessWidget {
               style: context.fonts.apply(
                 FontCategory.playerArtist,
                 const TextStyle(
-                  fontFamily: AppFonts.sans,
                   fontSize: 16,
                   height: 1.2,
                   color: Color(0xCCFFFFFF),
@@ -1097,128 +953,6 @@ class _ArtworkTrackDetails extends StatelessWidget {
               : context.colors.cloudDark,
         ),
       ),
-    ],
-  );
-}
-
-class _TrackInfo extends StatelessWidget {
-  const _TrackInfo({required this.track, required this.state});
-  final Track track;
-  final AppState state;
-  @override
-  Widget build(BuildContext context) => Column(
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      _TrackDetails(track: track, state: state),
-      const SizedBox(height: 16),
-      _PlaybackTransport(track: track, state: state),
-    ],
-  );
-}
-
-class _TrackDetails extends StatelessWidget {
-  const _TrackDetails({required this.track, required this.state});
-  final Track track;
-  final AppState state;
-  @override
-  Widget build(BuildContext context) => Column(
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Row(
-        children: [
-          Expanded(
-            child: CopyableSongTitle(
-              title: track.title,
-              child: Text(
-                track.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.fonts.apply(
-                  FontCategory.playerTitle,
-                  const TextStyle(
-                    fontFamily: AppFonts.sans,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          if (!state.isNavidrome)
-            AccessibleIconButton(
-              tooltip: '一起听',
-              onPressed: () =>
-                  unawaited(showListenTogetherDialog(context, state)),
-              icon: const Icon(Icons.group_rounded),
-            ),
-          AccessibleIconButton(
-            tooltip: state.signedIn ? '收藏歌曲' : '登录后收藏',
-            onPressed: state.signedIn
-                ? () => unawaited(state.toggleLikeCurrent())
-                : null,
-            icon: Icon(
-              state.currentLiked
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
-              color: state.currentLiked
-                  ? context.colors.clayDeep
-                  : context.colors.cloudDark,
-            ),
-          ),
-        ],
-      ),
-      if (track.translatedTitle?.isNotEmpty ?? false) ...[
-        const SizedBox(height: 4),
-        Text(
-          track.translatedTitle!,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: context.type.bodySm.copyWith(
-            fontSize: 15,
-            color: context.colors.cloudDark,
-          ),
-        ),
-      ],
-      const SizedBox(height: 4),
-      DefaultTextStyle(
-        style: context.fonts.apply(
-          FontCategory.playerArtist,
-          TextStyle(
-            fontFamily: AppFonts.sans,
-            fontSize: 17,
-            color: context.colors.cloudDark,
-          ),
-        ),
-        child: Row(
-          children: [
-            Flexible(
-              child: ArtistNameLink(
-                state: state,
-                artists: track.artists,
-                fallback: track.artist,
-              ),
-            ),
-            if (track.album.isNotEmpty) ...[
-              const Text(' · '),
-              Flexible(
-                child: AlbumNameLink(state: state, track: track),
-              ),
-            ],
-          ],
-        ),
-      ),
-      if (state.likeError != null) ...[
-        const SizedBox(height: AppSpacing.sm),
-        TrText(
-          state.likeError!,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: context.type.caption.copyWith(color: context.colors.clayDeep),
-        ),
-      ],
     ],
   );
 }
@@ -1416,6 +1150,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
     required this.track,
     required this.lyricsOpen,
     required this.onLyrics,
+    required this.onTogether,
     required this.onSaveArtwork,
     required this.onSearchOsu,
     required this.onAddToPlaylist,
@@ -1428,6 +1163,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
   final Track track;
   final bool lyricsOpen;
   final VoidCallback onLyrics;
+  final VoidCallback onTogether;
   final VoidCallback onSaveArtwork;
   final VoidCallback onSearchOsu;
   final VoidCallback onAddToPlaylist;
@@ -1536,12 +1272,13 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 selected: lyricsOpen,
                 onTap: onLyrics,
               ),
-              if (state.showArtworkWithLyrics && !state.isNavidrome)
+              if (!state.isNavidrome)
                 _MoreAction(
                   icon: Icons.group_rounded,
-                  label: context.tr('一起听'),
-                  onTap: () =>
-                      unawaited(showListenTogetherDialog(context, state)),
+                  label: context.tr(
+                    state.listenTogether.ready ? '查看一起听房间状态' : '创建一起听',
+                  ),
+                  onTap: onTogether,
                 ),
               _MoreAction(
                 icon: Icons.save_alt_rounded,

@@ -12,7 +12,7 @@ import '../state/build_safe_notifier.dart';
 import 'coalescing_writer.dart';
 
 /// Where a file in the local library came from.
-enum LocalTrackSource { download, scan }
+enum LocalTrackSource { download, scan, cache }
 
 /// Stable identifier for a file the service does not know about. Keeping local
 /// ids away from numeric NetEase ids stops artwork and lyric lookups from
@@ -49,6 +49,7 @@ class LocalTrack {
   bool missing;
 
   bool get isDownload => source == LocalTrackSource.download;
+  bool get isCache => source == LocalTrackSource.cache;
 
   String get id => track.id;
 
@@ -65,9 +66,11 @@ class LocalTrack {
   factory LocalTrack.fromJson(Map<String, dynamic> json) => LocalTrack(
     track: Track.fromJson((json['track'] as Map<String, dynamic>?) ?? const {}),
     path: json['path'] as String? ?? '',
-    source: json['source'] == 'download'
-        ? LocalTrackSource.download
-        : LocalTrackSource.scan,
+    source: switch (json['source']) {
+      'download' => LocalTrackSource.download,
+      'cache' => LocalTrackSource.cache,
+      _ => LocalTrackSource.scan,
+    },
     quality: json['quality'] == null
         ? null
         : AudioQualityInfo.parse(json['quality'] as String),
@@ -395,7 +398,7 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
     _tracks.removeAt(index);
     _pathIndexes = null;
     _tracksRevision++;
-    if (deleteFile && entry.source == LocalTrackSource.download) {
+    if (deleteFile && entry.source != LocalTrackSource.scan) {
       try {
         final File file = File(entry.path);
         if (await file.exists()) await file.delete();

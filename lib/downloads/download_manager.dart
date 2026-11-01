@@ -256,11 +256,13 @@ class DownloadManager extends ChangeNotifier with BuildSafeNotifier {
     final String extension = audioExtensionFor(source);
     final File target = File(_targetPath(task, extension));
     if (await target.exists()) {
-      task.status = DownloadStatus.existing;
       task.path = target.path;
       task.total = await target.length();
       task.received = task.total;
       await _record(task, target);
+      if (task.status != DownloadStatus.canceled) {
+        task.status = DownloadStatus.existing;
+      }
       _finishRun();
       return;
     }

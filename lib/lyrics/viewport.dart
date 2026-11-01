@@ -67,6 +67,7 @@ class _LyricViewportState extends State<LyricViewport>
   TextScaler? _textScaler;
   double? _fontSize;
   int? _fontWeight;
+  (TextStyle, TextStyle)? _typography;
   int _active = -1;
   bool _playing = false;
   bool _manual = false;
@@ -466,9 +467,11 @@ class _LyricViewportState extends State<LyricViewport>
 
   void _layout(Size size, TextScaler scaler) {
     final replaced = !identical(_lines, widget.state.lyrics);
+    final typography = (_originalStyle, _translationStyle);
     final typographyChanged =
         _fontSize != widget.state.lyricFontSize ||
-        _fontWeight != widget.state.lyricFontWeight;
+        _fontWeight != widget.state.lyricFontWeight ||
+        _typography != typography;
     if (!replaced &&
         !typographyChanged &&
         size == _size &&
@@ -484,6 +487,7 @@ class _LyricViewportState extends State<LyricViewport>
     _textScaler = scaler;
     _fontSize = widget.state.lyricFontSize;
     _fontWeight = widget.state.lyricFontWeight;
+    _typography = typography;
     _lines = widget.state.lyrics;
     _hasWordTimings = _lines.any((line) => line.words.isNotEmpty);
     _active = _activeAt(widget.state.precisePosition);

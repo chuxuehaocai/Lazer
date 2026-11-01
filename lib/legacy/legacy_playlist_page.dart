@@ -10,6 +10,8 @@ import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/catalog_links.dart';
+import '../widgets/cover_transition.dart';
+import '../widgets/track_batch_bar.dart';
 import 'legacy_login.dart';
 import 'legacy_widgets.dart';
 
@@ -78,6 +80,8 @@ class _LegacyPlaylistPageState extends State<LegacyPlaylistPage> {
   String? _rowIndexTrackId;
   int _rowIndexCache = -1;
   int _requestSerial = 0;
+  bool _selecting = false;
+  final Set<String> _selected = <String>{};
 
   @override
   void initState() {
@@ -105,6 +109,8 @@ class _LegacyPlaylistPageState extends State<LegacyPlaylistPage> {
         oldWidget.playlist.id != widget.playlist.id ||
         oldWidget.album?.id != widget.album?.id) {
       _tracks = null;
+      _selecting = false;
+      _selected.clear();
       _note = null;
       _rowTops = null;
       _rowHeights = null;
@@ -316,6 +322,30 @@ class _LegacyPlaylistPageState extends State<LegacyPlaylistPage> {
     );
   }
 
+  void _selectTrack(Track track, {bool enter = false}) {
+    setState(() {
+      _selecting = true;
+      if (enter || !_selected.contains(track.id)) {
+        _selected.add(track.id);
+      } else {
+        _selected.remove(track.id);
+      }
+    });
+  }
+
+  void _closeSelection() => setState(() {
+    _selecting = false;
+    _selected.clear();
+  });
+
+  void _selectAll(List<Track> tracks) => setState(() {
+    if (_selected.length == tracks.map((track) => track.id).toSet().length) {
+      _selected.clear();
+    } else {
+      _selected.addAll(tracks.map((track) => track.id));
+    }
+  });
+
   @override
   Widget build(BuildContext context) {
     final List<Track>? tracks = _tracks;
@@ -337,7 +367,7 @@ class _LegacyPlaylistPageState extends State<LegacyPlaylistPage> {
                       key: _headerKey,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
-                        _PlaylistHeader(
+                        LegacyPlaylistHeader(
                           playlist: widget.playlist,
                           compact: compact,
                           artist: widget.album?.artist,
@@ -400,8 +430,13 @@ class _LegacyPlaylistPageState extends State<LegacyPlaylistPage> {
                             index: i,
                             current: widget.state.current?.id == tracks[i].id,
                             playing: widget.state.playing,
-                            onTap: () =>
-                                widget.state.playQueue(tracks, startIndex: i),
+                            selectionMode: _selecting,
+                            selected: _selected.contains(tracks[i].id),
+                            onLongPress: () =>
+                                _selectTrack(tracks[i], enter: true),
+                            onTap: () => _selecting
+                                ? _selectTrack(tracks[i])
+                                : widget.state.playQueue(tracks, startIndex: i),
                             onMenuRequested: (Offset position) =>
                                 showTrackActions(
                                   context,
@@ -417,13 +452,42 @@ class _LegacyPlaylistPageState extends State<LegacyPlaylistPage> {
                 const SliverToBoxAdapter(child: SizedBox(height: 88)),
               ],
             ),
+            if (_selecting && tracks != null)
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 18,
+                child: TrackBatchBar(
+                  selectedCount: _selected.length,
+                  totalCount: tracks.map((track) => track.id).toSet().length,
+                  onSelectAll: () => _selectAll(tracks),
+                  onDownload:
+                      tracks.any(
+                        (track) =>
+                            _selected.contains(track.id) &&
+                            track.isServiceTrack,
+                      )
+                      ? () => unawaited(
+                          downloadTracks(
+                            context,
+                            widget.state,
+                            tracks
+                                .where((track) => _selected.contains(track.id))
+                                .toList(),
+                            folderName: widget.playlist.name,
+                          ),
+                        )
+                      : null,
+                  onClose: _closeSelection,
+                ),
+              ),
             Positioned(
               right: 18,
               bottom: 18,
               child: ValueListenableBuilder<bool>(
                 valueListenable: _showLocate,
                 builder: (BuildContext context, bool show, Widget? _) {
-                  if (!show) return const SizedBox.shrink();
+                  if (!show || _selecting) return const SizedBox.shrink();
                   return FloatingActionButton.small(
                     key: const ValueKey<String>('playlist-locate'),
                     heroTag: null,
@@ -443,8 +507,9 @@ class _LegacyPlaylistPageState extends State<LegacyPlaylistPage> {
   }
 }
 
-class _PlaylistHeader extends StatelessWidget {
-  const _PlaylistHeader({
+class LegacyPlaylistHeader extends StatelessWidget {
+  const LegacyPlaylistHeader({
+    super.key,
     required this.playlist,
     required this.compact,
     required this.onPlay,
@@ -453,12 +518,20 @@ class _PlaylistHeader extends StatelessWidget {
     this.artistWidget,
     this.note,
     this.noteIsData = false,
+    this.metadata,
+    this.cover,
+    this.transitionIdentity,
+    this.showShuffle = true,
   });
 
   final Playlist playlist;
   final bool compact;
   final VoidCallback? onPlay;
   final VoidCallback? onDownload;
+  final Widget? metadata;
+  final Widget? cover;
+  final String? transitionIdentity;
+  final bool showShuffle;
 
   /// Album-only extras. A playlist leaves both null and renders as before.
   final String? artist;
@@ -498,12 +571,14 @@ class _PlaylistHeader extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final double coverSize = compact ? 168 : 190;
-    final Widget stillCover = LegacyCover(
-      url: playlist.coverUrl,
+    final Widget stillCover =
+        cover ??
+        LegacyCover(url: playlist.coverUrl, size: coverSize, radius: 14);
+    final Widget artwork = CoverTransitionTarget(
+      identity: transitionIdentity ?? 'playlist:${playlist.id}',
       size: coverSize,
-      radius: 14,
+      child: RepaintBoundary(child: stillCover),
     );
-    final Widget cover = RepaintBoundary(child: stillCover);
     final Widget? summary = note == null || note!.trim().isEmpty
         ? null
         : TvTapTarget(
@@ -565,7 +640,10 @@ class _PlaylistHeader extends StatelessWidget {
         ],
         // Albums drop the count line: it only forced a blank row between the
         // artist and the summary.
-        if (artist == null) ...[
+        if (metadata != null) ...[
+          const SizedBox(height: 7),
+          metadata!,
+        ] else if (artist == null) ...[
           const SizedBox(height: 7),
           Text(
             <String>[
@@ -590,8 +668,11 @@ class _PlaylistHeader extends StatelessWidget {
         // smudged block. The desktop column anchors the row to the cover's
         // bottom edge either way, so this only opens space above it.
         const SizedBox(height: 16),
-        Row(
-          mainAxisSize: MainAxisSize.min,
+        Wrap(
+          alignment: compact ? WrapAlignment.center : WrapAlignment.start,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 10,
+          runSpacing: 8,
           children: <Widget>[
             FilledButton.icon(
               onPressed: onPlay,
@@ -599,7 +680,6 @@ class _PlaylistHeader extends StatelessWidget {
               label: const TrText('播放全部'),
             ),
             if (onDownload != null) ...<Widget>[
-              const SizedBox(width: 10),
               OutlinedButton.icon(
                 key: const ValueKey<String>('download-all'),
                 onPressed: onDownload,
@@ -607,33 +687,33 @@ class _PlaylistHeader extends StatelessWidget {
                 label: const TrText('下载'),
               ),
             ],
-            const SizedBox(width: 10),
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: apple.fill,
-                shape: BoxShape.circle,
+            if (showShuffle)
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: apple.fill,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.shuffle_rounded,
+                  size: 19,
+                  color: onPlay == null ? apple.tertiaryLabel : apple.accent,
+                ),
               ),
-              child: Icon(
-                Icons.shuffle_rounded,
-                size: 19,
-                color: onPlay == null ? apple.tertiaryLabel : apple.accent,
-              ),
-            ),
           ],
         ),
       ],
     );
     if (compact) {
       return Column(
-        children: <Widget>[cover, const SizedBox(height: 18), info],
+        children: <Widget>[artwork, const SizedBox(height: 18), info],
       );
     }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        cover,
+        artwork,
         const SizedBox(width: 24),
         Expanded(
           child: SizedBox(height: coverSize, child: info),

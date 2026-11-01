@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../audio/audio_engine.dart';
 import '../audio/hifi_controller.dart';
+import '../cache/playback_cache.dart';
 import '../diagnostics/build_info.dart';
 import '../downloads/download_manager.dart';
 import '../interaction/app_haptics.dart';
@@ -36,6 +37,7 @@ import 'hifi_settings.dart';
 import 'ui_preferences.dart';
 import 'scheduled_pause.dart';
 import '../theme/font_preferences.dart';
+import '../theme/imported_font.dart';
 
 part 'music_platform_state.dart';
 
@@ -141,6 +143,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this._independentPlayback = false,
     this.enableExternalCharts = false,
     this.deviceIsTelevision = false,
+    this.deviceIsWatch = false,
+    this.deviceIsRoundWatch = false,
     this.hifiSettings = const HifiSettings(),
     this.hifi,
     this.hifiPathNotice,
@@ -153,11 +157,19 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        localLibrary = localLibrary ?? LocalLibrary(),
        _queueStore = queueStore ?? PlaybackQueueStore(),
        updateChecker = updateChecker ?? UpdateChecker() {
+    if (deviceIsWatch) {
+      legacyBackground = LegacyBackgroundMode.nowPlayingStatic;
+      playerBackground = LegacyBackgroundMode.nowPlayingStatic;
+    }
     this.importedLyrics = importedLyrics ?? ImportedLyricsStore();
     this.downloadManager =
         downloadManager ??
         DownloadManager(catalog: this.catalog, library: this.localLibrary);
     _ownsDownloadManager = downloadManager == null;
+    playbackCache = PlaybackCacheController(
+      audioCache: this.catalog.audioCache,
+      library: this.localLibrary,
+    );
     _completionSubscription = audioEngine?.completed.listen(
       (_) => _onEngineCompleted(),
     );
@@ -270,6 +282,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// TELEVISION` / no touch screen). It selects the television profile in
   /// automatic mode and turns every tap target into a D-pad focus stop.
   final bool deviceIsTelevision;
+  final bool deviceIsWatch;
+  final bool deviceIsRoundWatch;
 
   /// Finds newer GitHub releases for this build.
   final UpdateChecker updateChecker;
@@ -364,6 +378,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Download queue. Owned by this state unless a test injects one.
   late final DownloadManager downloadManager;
   late final bool _ownsDownloadManager;
+
+  /// Bounded playback downloads, also exposed in the local music library.
+  late final PlaybackCacheController playbackCache;
 
   /// Imported `.lrc` files, which take priority over cloud lyrics.
   late final ImportedLyricsStore importedLyrics;
@@ -860,6 +877,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double lyricFontSize = 22;
   int lyricFontWeight = 600;
   FontPreferences fontPreferences = const FontPreferences();
+  int _fontGeneration = 0;
   final ValueNotifier<bool> playerPresented = ValueNotifier(false);
   final ValueNotifier<bool> browseTransitionActive = ValueNotifier(false);
   int _playerPresentations = 0;
@@ -926,7 +944,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _paletteIdentity = null;
   }
 
-  bool showArtworkWithLyrics = false;
   String? importedEnginePath;
 
   /// Whether the mobile system media controls carry the current lyric line.
@@ -984,6 +1001,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> resetFonts() async {
+    _fontGeneration++;
     fontPreferences = const FontPreferences();
     lyricFontSize = 22;
     lyricFontWeight = 600;
@@ -994,14 +1012,23 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await prefs.remove('lazer_lyric_font_weight');
   }
 
-  Future<void> setShowArtworkWithLyrics(bool value) async {
-    if (showArtworkWithLyrics == value) return;
-    showArtworkWithLyrics = value;
+  Future<void> setFontFamily(FontFamilyPreference value) async {
+    final generation = ++_fontGeneration;
+    await ImportedFont.load(value);
+    if (generation != _fontGeneration) return;
+    fontPreferences = fontPreferences.withFamily(value);
     notifyListeners();
-    await (await SharedPreferences.getInstance()).setBool(
-      'lazer_show_artwork_with_lyrics',
-      value,
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_font_preferences',
+      fontPreferences.encode(),
     );
+  }
+
+  Future<void> importFont(Uint8List bytes, String name) async {
+    final generation = ++_fontGeneration;
+    final preference = await ImportedFont.importFile(bytes, name);
+    if (generation != _fontGeneration) return;
+    await setFontFamily(preference);
   }
 
   static int normalizeLyricWeight(int value) =>
@@ -1371,10 +1398,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       language = AppLanguage.parse(prefs.getString('lazer_language'));
       legacyBackground = LegacyBackgroundModeLabels.parse(
-        prefs.getString('lazer_legacy_background'),
+        prefs.getString('lazer_legacy_background') ??
+            (deviceIsWatch ? LegacyBackgroundMode.nowPlayingStatic.name : null),
       );
       playerBackground = LegacyBackgroundModeLabels.parse(
-        prefs.getString('lazer_player_background'),
+        prefs.getString('lazer_player_background') ??
+            (deviceIsWatch ? LegacyBackgroundMode.nowPlayingStatic.name : null),
       );
       final browseFps = prefs.getDouble('lazer_browse_background_fps') ?? 30;
       browseBackgroundFps = browseFps.isFinite ? browseFps.clamp(10, 1000) : 30;
@@ -1489,10 +1518,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       fontPreferences = FontPreferences.decode(
         prefs.getString('lazer_font_preferences'),
       );
+      try {
+        await ImportedFont.load(fontPreferences.family);
+      } catch (_) {
+        fontPreferences = fontPreferences.withFamily(
+          const FontFamilyPreference(),
+        );
+      }
       importedEnginePath = prefs.getString('lazer_native_engine_path');
-      showArtworkWithLyrics =
-          prefs.getBool('lazer_show_artwork_with_lyrics') ?? false;
       systemMediaLyrics = prefs.getBool('lazer_system_media_lyrics') ?? true;
+      await prefs.remove('lazer_show_artwork_with_lyrics');
       legacyPalette = LegacyPaletteModeLabels.parse(
         prefs.getString('lazer_legacy_palette'),
       );
@@ -1518,6 +1553,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // Apply interaction preferences before session and catalogue requests.
     notifyListeners();
     await localLibrary.load();
+    await playbackCache.load();
     await audioEngine?.setVolume(_volume);
     await _restoreRecentTracks();
     await _restoreQueue(initialQueueActivity);
@@ -2927,6 +2963,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<void> _recordCurrentLocally() async {
     final Track? track = current;
     if (track == null || track.id.isEmpty) return;
+    unawaited(playbackCache.recordPlayed(track, quality: playbackQuality));
     _recentTracks = <Track>[
       track,
       ..._recentTracks.where((entry) => entry.id != track.id),
@@ -3160,6 +3197,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queuedNextIndex = null;
     final AudioEngine engine = audioEngine!;
     if (_repeat == LoopMode.one) {
+      final Track? track = current;
+      if (track != null) {
+        unawaited(playbackCache.recordPlayed(track, quality: playbackQuality));
+      }
       _position = Duration.zero;
       final generation = _generation;
       unawaited(() async {
@@ -3513,6 +3554,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     playerPresented.dispose();
     browseTransitionActive.dispose();
     _paletteGeneration++;
+    _fontGeneration++;
     _queueActivity++;
     ++_generation;
     ++_lyricGeneration;
@@ -3527,6 +3569,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _ticker?.cancel();
     _tickNotifier.dispose();
     if (_ownsDownloadManager) downloadManager.dispose();
+    playbackCache.dispose();
     super.dispose();
   }
 }

@@ -77,6 +77,10 @@ class MainActivity : AudioServiceActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "isTelevision" -> result.success(isTelevision())
+                    "watchShape" -> result.success(mapOf(
+                        "watch" to isWatch(),
+                        "round" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && resources.configuration.isScreenRound)
+                    ))
                     else -> result.notImplemented()
                 }
             }
@@ -149,6 +153,7 @@ class MainActivity : AudioServiceActivity() {
     /// without the feature flag while still having a television UI mode or no
     /// touch screen at all; all three shapes are recognised.
     private fun isTelevision(): Boolean {
+        if (isWatch()) return false
         val uiMode =
             (getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType
         if (uiMode == Configuration.UI_MODE_TYPE_TELEVISION) return true
@@ -162,6 +167,23 @@ class MainActivity : AudioServiceActivity() {
         // No touch input means the only way through the app is a D-pad.
         return !manager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) &&
             !manager.hasSystemFeature(PackageManager.FEATURE_FAKETOUCH)
+    }
+
+    private fun isWatch(): Boolean {
+        if (packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH) ||
+            ((getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType ==
+                Configuration.UI_MODE_TYPE_WATCH)) return true
+        // Full Android watches often identify as phones. A tiny, nearly square
+        // built-in display still needs the compact watch surface. Do not apply
+        // this heuristic to a phone's split-screen window.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode) return false
+        val metrics = resources.displayMetrics
+        val density = metrics.density.coerceAtLeast(1f)
+        val width = metrics.widthPixels / density
+        val height = metrics.heightPixels / density
+        val shortEdge = minOf(width, height)
+        val longEdge = maxOf(width, height)
+        return shortEdge > 0f && longEdge <= 320f && shortEdge / longEdge >= .85f
     }
 
     /// `READ_MEDIA_AUDIO` replaced `READ_EXTERNAL_STORAGE` on Android 13.

@@ -25,6 +25,8 @@ import 'theme/font_preferences.dart';
 import 'accessibility/lazer_binding.dart';
 import 'state/hifi_settings.dart';
 import 'tv/tv_mode.dart';
+import 'tv/lan_remote.dart';
+import 'watch/watch_shell.dart';
 import 'widgets/window_frame.dart';
 import 'widgets/media_shortcut_listener.dart';
 import 'widgets/interaction_feedback.dart';
@@ -104,6 +106,7 @@ Future<void> main() async {
       final Future<SharedPreferences> prefsFuture =
           SharedPreferences.getInstance();
       final Future<bool> televisionFuture = detectTelevision();
+      final watchFuture = detectWatch();
       final prefs = await prefsFuture;
       LazerAudioLoader.importedLibraryPath = prefs.getString(
         'lazer_native_engine_path',
@@ -112,6 +115,7 @@ Future<void> main() async {
         preferNative: prefs.getBool('hifi_native_engine') ?? true,
       );
       final bool television = await televisionFuture;
+      final watch = await watchFuture;
       final AudioEngineSelection selection = await selectionFuture;
       final AudioEngine audio = selection.engine;
       debugPrint('Audio engine: ${selection.description}');
@@ -156,6 +160,8 @@ Future<void> main() async {
         audioEngine: audio,
         enableExternalCharts: true,
         deviceIsTelevision: television,
+        deviceIsWatch: watch.watch,
+        deviceIsRoundWatch: watch.round,
         independentPlayback:
             prefs.getBool('lazer_independent_playback') ?? false,
         hifiSettings: hifi.settings,
@@ -221,6 +227,7 @@ class _LazerAppState extends State<LazerApp> {
   late _RootUiSignature _rootUi;
   final BrowseNavigationObserver _browseNavigation = BrowseNavigationObserver();
   late final AppLifecycleListener _playbackLifecycle;
+  late final LanRemoteController _remote;
 
   _RootUiSignature get _rootUiSignature => (
     _state.legacyAccentSeed,
@@ -245,6 +252,8 @@ class _LazerAppState extends State<LazerApp> {
       onResume: _state.synchronizePlaybackAfterResume,
     );
     _state.bootstrap();
+    _remote = LanRemoteController(_state);
+    unawaited(_remote.initialize());
   }
 
   void _onRootUiChanged() {
@@ -273,6 +282,7 @@ class _LazerAppState extends State<LazerApp> {
   @override
   void dispose() {
     _playbackLifecycle.dispose();
+    _remote.dispose();
     _browseNavigation.dispose();
     _state.removeListener(_onRootUiChanged);
     widget.media.close();
@@ -287,83 +297,88 @@ class _LazerAppState extends State<LazerApp> {
     // The 配色 setting can seed the whole scheme from the current cover or a
     // colour the listener picked.
     final Color? seed = _state.legacyAccentSeed;
-    return InteractionFeedback(
-      state: _state,
-      child: MaterialApp(
-        title: 'Lazer · Field Player',
-        debugShowCheckedModeBanner: false,
-        navigatorObservers: [_browseNavigation],
-        themeAnimationCurve: Curves.easeOutCubic,
-        // One Apple surface theme drives the custom window frame, root
-        // dialogs and the adaptive shell. Pages refine their local player
-        // theme where Apple Music intentionally switches to a dark canvas.
-        theme: buildAppleTheme(
-          brightness: Brightness.light,
-          seedAccent: seed,
-          fonts: _state.fontPreferences,
-        ),
-        darkTheme: buildAppleTheme(
-          brightness: Brightness.dark,
-          seedAccent: seed,
-          fonts: _state.fontPreferences,
-        ),
-        themeMode: _state.themeMode,
-        locale: _state.language.locale,
-        supportedLocales: AppLocalizations.supportedLocales,
-        localizationsDelegates: const [
-          AppLocalizations.delegate,
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        localeListResolutionCallback: (locales, _) =>
-            AppLocalizations.resolveLocales(locales),
-        scrollBehavior: AppScrollBehavior(
-          retention: _state.scrollRetention,
-          acceleration: _state.scrollAcceleration,
-        ),
-        // The whole interface — custom title bar included — is drawn at the
-        // resolved DPI scale, so the window frame and the pages agree. The car
-        // profile additionally rooms out the framework's own tap targets.
-        // WindowFrame is a pass-through off desktop: the system frame (and the
-        // plain MaterialApp) stays as it was there.
-        builder: (context, child) => Stack(
-          fit: StackFit.expand,
-          children: <Widget>[
-            UiScaling(
-              state: _state,
-              child: CarMetrics(
-                child: WindowFrame(
-                  child: Builder(
-                    builder: (context) => Theme(
-                      data: Theme.of(
-                        context,
-                      ).copyWith(scaffoldBackgroundColor: Colors.transparent),
-                      child: SharedBrowseBackground(
-                        state: _state,
-                        navigation: _browseNavigation,
-                        child: child!,
+    return LanRemoteScope(
+      controller: _remote,
+      child: InteractionFeedback(
+        state: _state,
+        child: MaterialApp(
+          title: 'Lazer · Field Player',
+          debugShowCheckedModeBanner: false,
+          navigatorObservers: [_browseNavigation],
+          themeAnimationCurve: Curves.easeOutCubic,
+          // One Apple surface theme drives the custom window frame, root
+          // dialogs and the adaptive shell. Pages refine their local player
+          // theme where Apple Music intentionally switches to a dark canvas.
+          theme: buildAppleTheme(
+            brightness: Brightness.light,
+            seedAccent: seed,
+            fonts: _state.fontPreferences,
+          ),
+          darkTheme: buildAppleTheme(
+            brightness: Brightness.dark,
+            seedAccent: seed,
+            fonts: _state.fontPreferences,
+          ),
+          themeMode: _state.themeMode,
+          locale: _state.language.locale,
+          supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          localeListResolutionCallback: (locales, _) =>
+              AppLocalizations.resolveLocales(locales),
+          scrollBehavior: AppScrollBehavior(
+            retention: _state.scrollRetention,
+            acceleration: _state.scrollAcceleration,
+          ),
+          // The whole interface — custom title bar included — is drawn at the
+          // resolved DPI scale, so the window frame and the pages agree. The car
+          // profile additionally rooms out the framework's own tap targets.
+          // WindowFrame is a pass-through off desktop: the system frame (and the
+          // plain MaterialApp) stays as it was there.
+          builder: (context, child) => Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              UiScaling(
+                state: _state,
+                child: CarMetrics(
+                  child: WindowFrame(
+                    child: Builder(
+                      builder: (context) => Theme(
+                        data: Theme.of(
+                          context,
+                        ).copyWith(scaffoldBackgroundColor: Colors.transparent),
+                        child: SharedBrowseBackground(
+                          state: _state,
+                          navigation: _browseNavigation,
+                          child: child!,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-            if (_state.showFrameStats) const FrameStatsOverlay(),
-          ],
-        ),
-        // Keep exactly one root subtree during auth changes. AnimatedSwitcher
-        // temporarily keeps both pages alive; with Windows UIA enabled that
-        // overlap can leave AX nodes pending after the old page is detached.
-        // The shell is always home: the guest session boots straight into
-        // it, and sign-in happens in a popup card that closes over this —
-        // no gate, no home swap to churn the accessibility tree.
-        home: MediaShortcutListener(
-          state: _state,
-          child: LegacyShell(
-            key: const ValueKey('legacy'),
+              if (_state.showFrameStats) const FrameStatsOverlay(),
+            ],
+          ),
+          // Keep exactly one root subtree during auth changes. AnimatedSwitcher
+          // temporarily keeps both pages alive; with Windows UIA enabled that
+          // overlap can leave AX nodes pending after the old page is detached.
+          // The shell is always home: the guest session boots straight into
+          // it, and sign-in happens in a popup card that closes over this —
+          // no gate, no home swap to churn the accessibility tree.
+          home: MediaShortcutListener(
             state: _state,
-            autoCheckUpdates: true,
+            child: _state.deviceIsWatch
+                ? WatchShell(state: _state, round: _state.deviceIsRoundWatch)
+                : LegacyShell(
+                    key: const ValueKey('legacy'),
+                    state: _state,
+                    autoCheckUpdates: true,
+                  ),
           ),
         ),
       ),

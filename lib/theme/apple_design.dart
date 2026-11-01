@@ -356,7 +356,7 @@ ThemeData buildAppleTheme({
     shadow: Colors.black,
     scrim: Colors.black,
   );
-  const String uiFont = AppFonts.sans;
+  final String uiFont = fonts.family.resolvedFamily;
   final TextTheme text = fonts.applyTo(
     appleTextTheme(color: apple.label, fontFamily: uiFont),
   );
@@ -371,7 +371,7 @@ ThemeData buildAppleTheme({
     textTheme: text,
     primaryTextTheme: text,
     fontFamily: uiFont,
-    fontFamilyFallback: appleFontFallback,
+    fontFamilyFallback: fonts.family.fallbackFor(appleFontFallback),
     scaffoldBackgroundColor: apple.background,
     canvasColor: apple.background,
     cardColor: apple.secondaryGroupedBackground,

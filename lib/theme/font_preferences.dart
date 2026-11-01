@@ -1,6 +1,73 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+
+enum FontSource { miSans, system, imported }
+
+@immutable
+class FontFamilyPreference {
+  const FontFamilyPreference({
+    this.source = FontSource.miSans,
+    this.name,
+    this.path,
+    this.family,
+  });
+
+  final FontSource source;
+  final String? name, path, family;
+
+  FontFamilyPreference withSource(FontSource value) => FontFamilyPreference(
+    source: value,
+    name: name,
+    path: path,
+    family: family,
+  );
+
+  String get resolvedFamily => switch (source) {
+    FontSource.miSans => 'MiSans',
+    FontSource.imported => family ?? 'MiSans',
+    FontSource.system => switch (defaultTargetPlatform) {
+      TargetPlatform.windows => 'Segoe UI',
+      TargetPlatform.iOS || TargetPlatform.macOS => '.AppleSystemUIFont',
+      TargetPlatform.android || TargetPlatform.fuchsia => 'sans-serif',
+      TargetPlatform.linux => 'sans-serif',
+    },
+  };
+
+  List<String> fallbackFor(List<String> defaults) =>
+      source == FontSource.system ? const [] : defaults;
+
+  String get label => switch (source) {
+    FontSource.miSans => 'MiSans（自带）',
+    FontSource.system => '系统字体',
+    FontSource.imported => name ?? '导入字体',
+  };
+
+  Map<String, Object?> toMap() => {
+    'source': source.name,
+    'name': name,
+    'path': path,
+    'family': family,
+  };
+
+  factory FontFamilyPreference.fromMap(Map<String, dynamic> value) {
+    final source = FontSource.values
+        .where((source) => source.name == value['source'])
+        .firstOrNull;
+    if (source == null ||
+        (source == FontSource.imported &&
+            (value['path'] is! String || value['family'] is! String))) {
+      return const FontFamilyPreference();
+    }
+    return FontFamilyPreference(
+      source: source,
+      name: value['name'] as String?,
+      path: value['path'] as String?,
+      family: value['family'] as String?,
+    );
+  }
+}
 
 enum FontCategory {
   pageTitle,
@@ -80,15 +147,26 @@ class FontCustomization {
 class FontPreferences extends ThemeExtension<FontPreferences> {
   const FontPreferences([
     this._values = const <FontCategory, FontCustomization>{},
+    this.family = const FontFamilyPreference(),
   ]);
 
   final Map<FontCategory, FontCustomization> _values;
+  final FontFamilyPreference family;
+
+  FontPreferences withFamily(FontFamilyPreference value) =>
+      FontPreferences(_values, value);
 
   FontCustomization operator [](FontCategory category) =>
       _values[category] ?? const FontCustomization();
 
-  TextStyle apply(FontCategory category, TextStyle style) =>
-      this[category].apply(style);
+  TextStyle apply(FontCategory category, TextStyle style) => this[category]
+      .apply(style)
+      .copyWith(
+        fontFamily: family.resolvedFamily,
+        fontFamilyFallback: family.fallbackFor(
+          style.fontFamilyFallback ?? const [],
+        ),
+      );
 
   FontWeight weightFor(FontCategory category, FontWeight fallback) =>
       this[category].weight == null
@@ -102,7 +180,7 @@ class FontPreferences extends ThemeExtension<FontPreferences> {
     } else {
       values[category] = value;
     }
-    return FontPreferences(Map.unmodifiable(values));
+    return FontPreferences(Map.unmodifiable(values), family);
   }
 
   TextTheme applyTo(TextTheme text) {
@@ -128,6 +206,7 @@ class FontPreferences extends ThemeExtension<FontPreferences> {
   }
 
   String encode() => jsonEncode(<String, Object?>{
+    '_family': family.toMap(),
     for (final entry in _values.entries) entry.key.name: entry.value.toMap(),
   });
 
@@ -143,14 +222,20 @@ class FontPreferences extends ThemeExtension<FontPreferences> {
           values[category] = FontCustomization.fromMap(value);
         }
       }
-      return FontPreferences(Map.unmodifiable(values));
+      final family = decoded['_family'];
+      return FontPreferences(
+        Map.unmodifiable(values),
+        family is Map<String, dynamic>
+            ? FontFamilyPreference.fromMap(family)
+            : const FontFamilyPreference(),
+      );
     } catch (_) {
       return const FontPreferences();
     }
   }
 
   @override
-  FontPreferences copyWith() => FontPreferences(_values);
+  FontPreferences copyWith() => FontPreferences(_values, family);
 
   @override
   FontPreferences lerp(covariant FontPreferences? other, double t) =>

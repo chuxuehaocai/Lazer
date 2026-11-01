@@ -106,6 +106,7 @@ void main() {
 
     for (final String action in <String>[
       '歌词',
+      '创建一起听',
       '保存封面',
       '在 osu! 中搜索',
       '添加到歌单',
@@ -120,6 +121,26 @@ void main() {
       );
     }
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the together action opens creation and shows an existing room', (
+    tester,
+  ) async {
+    final state = await _pumpPlayer(tester);
+    await _openMore(tester);
+    await tester.tap(_inSheet(find.text('创建一起听')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(find.text('登录后可以和朋友一起听歌'), findsOneWidget);
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    state.listenTogether
+      ..active = true
+      ..roomId = 'room-fixture';
+    await _openMore(tester);
+    expect(_inSheet(find.text('查看一起听房间状态')), findsOneWidget);
   });
 
   testWidgets(

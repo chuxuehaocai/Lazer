@@ -1,5 +1,16 @@
 ﻿# 大屏幕模式 (Large screen mode, Android TV)
 
+## 局域网遥控与界面大小
+
+在 `设置 → 界面 → 局域网遥控器` 开启网页遥控器，默认关闭。
+服务仅在大屏幕模式下运行；用同一局域网的电脑或手机浏览器打开设置中
+显示的完整地址即可连接。地址带本次启动生成的连接令牌，关闭服务后失效。
+网页提供方向键、确定、返回、播放暂停、切歌和音量；大屏上的输入框获得焦点时，
+网页会显示文字输入区域，发送文字后可点“确认输入”提交。
+
+大屏界面以原来大小的 70% 显示，仍可通过 DPI 缩放自行调整。
+设置中的数值条用左右键调整数值，上下键移动到相邻控件。
+
 The television presentation is called **大屏幕模式** in the interface. The same
 APK runs on phones, tablets, car head units and Android TV; a Leanback or
 touch-less Android device selects 大屏幕模式 by itself, and

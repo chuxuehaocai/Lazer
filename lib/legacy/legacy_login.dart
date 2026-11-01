@@ -7,7 +7,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
-import '../theme/tokens.dart' show AppFonts;
 import '../animation/view_transitions.dart';
 import '../widgets/music_provider_badge.dart';
 import '../gateway/gateway.dart';
@@ -550,10 +549,7 @@ class _LegacyLoginDialogState extends State<_LegacyLoginDialog> {
         minLines: 3,
         maxLines: 5,
         autofocus: true,
-        style: theme.textTheme.bodySmall?.copyWith(
-          fontFamily: AppFonts.mono,
-          height: 1.5,
-        ),
+        style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
         decoration: const InputDecoration(hintText: 'MUSIC_U=…  __csrf=…'),
       ),
       if (_error != null) ...<Widget>[

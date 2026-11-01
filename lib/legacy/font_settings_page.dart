@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
@@ -127,6 +128,8 @@ class FontSettingsView extends StatelessWidget {
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
                         children: [
+                          _FontFamilyCard(state: state),
+                          const SizedBox(height: 16),
                           const Padding(
                             padding: EdgeInsets.only(bottom: 16),
                             child: TrText('按文字用途调节大小和粗细，修改即时生效。'),
@@ -178,6 +181,120 @@ class FontSettingsView extends StatelessWidget {
       _ => FontWeight.w400,
     },
   );
+}
+
+class _FontFamilyCard extends StatefulWidget {
+  const _FontFamilyCard({required this.state});
+  final AppState state;
+
+  @override
+  State<_FontFamilyCard> createState() => _FontFamilyCardState();
+}
+
+class _FontFamilyCardState extends State<_FontFamilyCard> {
+  bool _busy = false;
+
+  void _showImportError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.tr('字体导入失败，请选择有效的 OTF 或 TTF 字体文件'))),
+    );
+  }
+
+  Future<void> _select(FontFamilyPreference family) async {
+    setState(() => _busy = true);
+    try {
+      await widget.state.setFontFamily(family);
+    } catch (_) {
+      _showImportError();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _import() async {
+    setState(() => _busy = true);
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'OTF / TTF',
+            extensions: ['otf', 'ttf'],
+            mimeTypes: [
+              'font/ttf',
+              'font/otf',
+              'application/x-font-ttf',
+              'application/x-font-opentype',
+              'application/vnd.ms-opentype',
+            ],
+            uniformTypeIdentifiers: ['public.font'],
+          ),
+        ],
+      );
+      if (file == null) return;
+      await widget.state.importFont(await file.readAsBytes(), file.name);
+    } catch (_) {
+      _showImportError();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final family = widget.state.fontPreferences.family;
+    return AppleGroupedCard(
+      key: const ValueKey('font-family-card'),
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TrText('字体', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            const TrText('选择自带字体、系统字体，或导入自己的字体文件。'),
+            const SizedBox(height: 8),
+            DropdownButton<FontSource>(
+              key: const ValueKey('font-family-selector'),
+              isExpanded: true,
+              value: family.source,
+              items: [
+                const DropdownMenuItem(
+                  value: FontSource.miSans,
+                  child: TrText('MiSans（自带）'),
+                ),
+                const DropdownMenuItem(
+                  value: FontSource.system,
+                  child: TrText('系统字体'),
+                ),
+                if (family.path != null)
+                  DropdownMenuItem(
+                    value: FontSource.imported,
+                    child: Text(
+                      family.name ?? context.tr('导入字体'),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: _busy
+                  ? null
+                  : (source) {
+                      if (source == null) return;
+                      unawaited(_select(family.withSource(source)));
+                    },
+            ),
+            TextButton.icon(
+              key: const ValueKey('import-custom-font'),
+              onPressed: _busy ? null : _import,
+              icon: const Icon(Icons.font_download_outlined),
+              label: TrText(_busy ? '正在导入字体…' : '导入 OTF / TTF 字体'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _FontCard extends StatelessWidget {

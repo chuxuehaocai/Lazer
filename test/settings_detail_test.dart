@@ -130,10 +130,10 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('open-font-settings')));
       await tester.pumpAndSettle();
       final card = find.byKey(const ValueKey('font-card-pageTitle'));
-      await tester.drag(
-        find.descendant(of: card, matching: find.byType(Slider)),
-        const Offset(60, 0),
-      );
+      final slider = find.descendant(of: card, matching: find.byType(Slider));
+      await tester.ensureVisible(slider);
+      await tester.pumpAndSettle();
+      await tester.drag(slider, const Offset(60, 0));
       await tester.pumpAndSettle();
       expect(
         state.fontPreferences[FontCategory.pageTitle].scale,

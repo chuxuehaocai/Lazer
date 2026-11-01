@@ -16,6 +16,9 @@ import 'catalog_details.dart';
 
 part 'platform_catalog.dart';
 
+/// A local playlist identity for the complete daily recommendation response.
+const String dailyRecommendationsPlaylistId = 'daily-recommendations';
+
 /// Music returned by the gateway.
 class HomeFeed {
   const HomeFeed({
@@ -23,6 +26,7 @@ class HomeFeed {
     this.recommended = const [],
     required this.featuredTracks,
     required this.quick,
+    this.daily = const <Track>[],
     required this.playlists,
     required this.albums,
     this.editorialPlaylists = const <Playlist>[],
@@ -32,6 +36,7 @@ class HomeFeed {
   final List<Playlist> recommended;
   final List<Track> featuredTracks;
   final List<Track> quick;
+  final List<Track> daily;
   final List<Playlist> playlists;
   final List<Album> albums;
   final List<Playlist> editorialPlaylists;
@@ -40,6 +45,7 @@ class HomeFeed {
       recommended.isEmpty &&
       featured == null &&
       quick.isEmpty &&
+      daily.isEmpty &&
       playlists.isEmpty &&
       albums.isEmpty &&
       editorialPlaylists.isEmpty;
@@ -296,6 +302,11 @@ class Catalog {
   /// The last stored track list for [playlistId], stale or not, or null when
   /// this playlist has never been opened in the current session scope.
   Future<List<Track>?> cachedPlaylistTracks(String playlistId) {
+    if (playlistId == dailyRecommendationsPlaylistId) {
+      return Future.value(
+        _home?.daily.isNotEmpty == true ? _home!.daily : _home?.quick,
+      );
+    }
     if (MusicId.tryParse(playlistId) != null) {
       return Future.value(null);
     }
@@ -499,6 +510,7 @@ class Catalog {
           .map(trackFromSong)
           .toList(),
       quick: quick,
+      daily: dailySongs.map(trackFromSong).toList(),
       playlists: uniquePlaylists.values
           .take(12)
           .map(playlistFromGateway)
@@ -1090,7 +1102,13 @@ class Catalog {
 
   /// Reuses recent snapshots; expired snapshots remain available offline.
   Future<List<Track>> playlistTracks(String playlistId) =>
-      MusicId.tryParse(playlistId) != null
+      playlistId == dailyRecommendationsPlaylistId
+      ? Future.value(
+          _home?.daily.isNotEmpty == true
+              ? _home!.daily
+              : _home?.quick ?? const <Track>[],
+        )
+      : MusicId.tryParse(playlistId) != null
       ? _platform.playlistTracks(playlistId)
       : _cached(
           'playlist-v2:$_scope:$playlistId',
@@ -1652,6 +1670,7 @@ class Catalog {
     recommended: _decodePlaylists(json['recommended']),
     featuredTracks: _decodeTracks(json['featuredTracks']),
     quick: _decodeTracks(json['quick']),
+    daily: _decodeTracks(json['daily']),
     playlists: _decodePlaylists(json['playlists']),
     albums: (json['albums'] as List? ?? const [])
         .map((a) => Album.fromJson(a as Map<String, dynamic>))
@@ -1663,6 +1682,7 @@ class Catalog {
     'recommended': value.recommended.map((p) => p.toJson()).toList(),
     'featuredTracks': value.featuredTracks.map((t) => t.toJson()).toList(),
     'quick': value.quick.map((t) => t.toJson()).toList(),
+    'daily': value.daily.map((t) => t.toJson()).toList(),
     'playlists': value.playlists.map((p) => p.toJson()).toList(),
     'albums': value.albums.map((a) => a.toJson()).toList(),
     'editorialPlaylists': value.editorialPlaylists

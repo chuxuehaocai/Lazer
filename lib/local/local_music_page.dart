@@ -301,8 +301,11 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       items: <PopupMenuEntry<String>>[
         PopupMenuItem<String>(value: 'play', child: TrText('播放')),
-        if (playable[index].isDownload)
-          PopupMenuItem<String>(value: 'delete-file', child: TrText('删除下载文件')),
+        if (playable[index].isDownload || playable[index].isCache)
+          PopupMenuItem<String>(
+            value: 'delete-file',
+            child: TrText(playable[index].isCache ? '删除缓存文件' : '删除下载文件'),
+          ),
         PopupMenuItem<String>(value: 'remove', child: TrText('从资料库移除')),
       ],
     );
@@ -318,7 +321,7 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
       final bool? confirmed = await showDialog<bool>(
         context: context,
         builder: (BuildContext context) => AlertDialog(
-          title: TrText('删除下载文件？'),
+          title: TrText(entry.isCache ? '删除缓存文件？' : '删除下载文件？'),
           content: Text(context.tr('「${entry.track.title}」的文件会从磁盘删除，无法恢复。')),
           actions: <Widget>[
             TextButton(
@@ -335,7 +338,7 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
       if (confirmed != true || !mounted) return;
       await state.localLibrary.remove(entry, deleteFile: true);
       if (!mounted) return;
-      _showLocalMessage(context, '已删除下载文件');
+      _showLocalMessage(context, entry.isCache ? '已删除缓存文件' : '已删除下载文件');
       return;
     }
     await state.localLibrary.remove(entry);

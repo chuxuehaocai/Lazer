@@ -11,6 +11,7 @@ import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../widgets/app_scroll_behavior.dart';
 import '../widgets/catalog_links.dart';
+import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/ui_scaling.dart';
@@ -18,6 +19,23 @@ import 'legacy_widgets.dart';
 
 import 'legacy_page_utils.dart';
 import 'legacy_login.dart';
+
+/// Daily recommendations use the same independent detail page as playlists.
+Playlist dailyRecommendationsPlaylist(
+  HomeFeed feed, {
+  bool serverLibrary = false,
+}) {
+  final tracks = feed.daily.isEmpty ? feed.quick : feed.daily;
+  return Playlist(
+    id: dailyRecommendationsPlaylistId,
+    name: serverLibrary ? '随机发现' : '每日推荐',
+    trackIds: tracks.map((track) => track.id).toList(),
+    coverSeed: tracks.firstOrNull?.coverSeed ?? 0,
+    coverUrl: tracks.firstOrNull?.coverUrl,
+    trackCount: tracks.length,
+    description: serverLibrary ? '探索服务器里的音乐' : '今日限定好歌',
+  );
+}
 
 /// Apple-style browse page: a large title, one featured card, a horizontal
 /// recommendation shelf and the quick-pick track list.
@@ -137,9 +155,16 @@ class _LegacyHomePageState extends State<LegacyHomePage> {
                       ...feed.quick.map((track) => track.coverUrl),
                       ...feed.albums.map((album) => album.coverUrl),
                     ],
-                    onDaily: !widget.state.signedIn || feed.quick.isEmpty
+                    onDaily:
+                        !widget.state.signedIn ||
+                            (feed.quick.isEmpty && feed.daily.isEmpty)
                         ? null
-                        : () => widget.state.playQueue(feed.quick),
+                        : () => widget.onOpenPlaylist(
+                            dailyRecommendationsPlaylist(
+                              feed,
+                              serverLibrary: widget.state.isNavidrome,
+                            ),
+                          ),
                     onFm: widget.state.signedIn
                         ? () => _playStation(
                             widget.state.catalog.personalFmTracks,
@@ -337,7 +362,9 @@ class HomeActionShelf extends StatelessWidget {
           itemCount: items.length,
           itemBuilder: (context, index) {
             final item = items[index];
+            final coverKey = GlobalKey();
             return FilledCoverCard(
+              key: coverKey,
               width: cardWidth,
               height: tileHeight,
               large: large,
@@ -350,7 +377,17 @@ class HomeActionShelf extends StatelessWidget {
                       for (var offset = 0; offset < covers.length; offset++)
                         covers[(index * 2 + offset) % covers.length],
                     ],
-              onTap: busy ? null : item.tap,
+              onTap: busy || item.tap == null
+                  ? null
+                  : () {
+                      if (index == 0) {
+                        rememberCoverTransition(
+                          'playlist:$dailyRecommendationsPlaylistId',
+                          coverKey,
+                        );
+                      }
+                      item.tap!();
+                    },
             );
           },
         );
@@ -749,19 +786,25 @@ class _HomeReleaseShelf extends StatelessWidget {
     gap: 16,
     itemBuilder: (context, index) {
       final album = albums[index];
+      final coverKey = GlobalKey();
       final double size = compact ? 146 : 168;
       return SizedBox(
         width: size,
         child: InkWell(
           borderRadius: BorderRadius.circular(11),
-          onTap: feedbackAction(
-            context,
-            () => unawaited(openAlbumDetails(context, state, album)),
-          ),
+          onTap: feedbackAction(context, () {
+            rememberCoverTransition('playlist:${album.id}', coverKey);
+            unawaited(openAlbumDetails(context, state, album));
+          }),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              LegacyCover(url: album.coverUrl, size: size, radius: 11),
+              LegacyCover(
+                key: coverKey,
+                url: album.coverUrl,
+                size: size,
+                radius: 11,
+              ),
               const SizedBox(height: 8),
               Text(
                 album.title,
@@ -805,17 +848,22 @@ class _EditorialPlaylistShelf extends StatelessWidget {
     gap: 16,
     itemBuilder: (context, index) {
       final playlist = playlists[index];
+      final coverKey = GlobalKey();
       return SizedBox(
         width: compact ? 270 : 330,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: feedbackAction(context, () => onOpen(playlist)),
+          onTap: feedbackAction(context, () {
+            rememberCoverTransition('playlist:${playlist.id}', coverKey);
+            onOpen(playlist);
+          }),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
             child: Stack(
               fit: StackFit.expand,
               children: <Widget>[
                 LegacyCover(
+                  key: coverKey,
                   url: playlist.coverUrl,
                   size: compact ? 270 : 330,
                   radius: 0,
@@ -894,6 +942,7 @@ class ChartShelf extends StatelessWidget {
     showArrows: !large,
     itemBuilder: (context, index) {
       final chart = charts[index];
+      final coverKey = GlobalKey();
       return SizedBox(
         width: large ? 336 : (compact ? 246 : 278),
         child: Material(
@@ -901,8 +950,12 @@ class ChartShelf extends StatelessWidget {
           borderRadius: BorderRadius.circular(18),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: feedbackAction(context, () => onOpen(chart)),
+            onTap: feedbackAction(context, () {
+              rememberCoverTransition('chart:${chart.id}', coverKey);
+              onOpen(chart);
+            }),
             child: Stack(
+              key: coverKey,
               fit: StackFit.expand,
               children: <Widget>[
                 Transform.scale(

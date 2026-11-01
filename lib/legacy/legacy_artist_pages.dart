@@ -11,6 +11,7 @@ import '../theme/apple_design.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/app_scroll_behavior.dart';
 import '../widgets/catalog_links.dart';
+import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
 import 'legacy_widgets.dart';
 
@@ -338,18 +339,24 @@ class _ArtistReleaseShelf extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(width: 16),
         itemBuilder: (BuildContext context, int index) {
           final Album album = albums[index];
+          final coverKey = GlobalKey();
           return SizedBox(
             width: 160,
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
-              onTap: feedbackAction(
-                context,
-                () => unawaited(openAlbumDetails(context, state, album)),
-              ),
+              onTap: feedbackAction(context, () {
+                rememberCoverTransition('playlist:${album.id}', coverKey);
+                unawaited(openAlbumDetails(context, state, album));
+              }),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  LegacyCover(url: album.coverUrl, size: 160, radius: 9),
+                  LegacyCover(
+                    key: coverKey,
+                    url: album.coverUrl,
+                    size: 160,
+                    radius: 9,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     album.title,
@@ -522,6 +529,7 @@ class _LegacyArtistReleasesPageState extends State<LegacyArtistReleasesPage> {
                       Divider(height: 1, indent: 80, color: apple.separator),
                   itemBuilder: (BuildContext context, int index) {
                     final Album album = albums[index];
+                    final coverKey = GlobalKey();
                     final String detail = <String>[
                       if (album.year.isNotEmpty) album.year,
                       if (album.releaseType.isNotEmpty) album.releaseType,
@@ -532,12 +540,15 @@ class _LegacyArtistReleasesPageState extends State<LegacyArtistReleasesPage> {
                       color: Colors.transparent,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(10),
-                        onTap: feedbackAction(
-                          context,
-                          () => unawaited(
+                        onTap: feedbackAction(context, () {
+                          rememberCoverTransition(
+                            'playlist:${album.id}',
+                            coverKey,
+                          );
+                          unawaited(
                             openAlbumDetails(context, widget.state, album),
-                          ),
-                        ),
+                          );
+                        }),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
@@ -546,6 +557,7 @@ class _LegacyArtistReleasesPageState extends State<LegacyArtistReleasesPage> {
                           child: Row(
                             children: <Widget>[
                               LegacyCover(
+                                key: coverKey,
                                 url: album.coverUrl,
                                 size: 62,
                                 radius: 7,
