@@ -52,7 +52,8 @@ class NativeAudioEngine
         SeekBoundaryReportingAudioEngine,
         QueueAudioEngine,
         FailureReportingAudioEngine,
-        FocusAwareAudioEngine {
+        FocusAwareAudioEngine,
+        SessionPreparingAudioEngine {
   NativeAudioEngine._(
     this._api,
     this._bridge,
@@ -214,6 +215,9 @@ class NativeAudioEngine
   /// Installed by `PlaybackSession`; see [FocusAwareAudioEngine].
   @override
   Future<bool> Function()? activateSession;
+
+  @override
+  Future<void> Function()? prepareSession;
 
   @override
   Stream<String> get failures => _failures.stream;
@@ -590,6 +594,13 @@ class NativeAudioEngine
   /// Opens [url] as the audible source; [generation] rejects superseded opens.
   Future<void> _openSource(String url, int generation) async {
     if (generation != _generation || _disposed) return;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      // RemoteIO's open reads the session's actual route and sample clock.
+      // Configure its category before that open, while leaving focus activation
+      // to play(). Preloading must not acquire focus or reject an existing source.
+      await prepareSession?.call();
+      if (generation != _generation || _disposed) return;
+    }
     final AudioStreamEntry? entry = await _cacheEntryFor(url);
     if (generation != _generation || _disposed) return;
     NativeStreamReader? reader;

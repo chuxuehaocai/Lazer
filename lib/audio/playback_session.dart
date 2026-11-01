@@ -17,6 +17,9 @@ class PlaybackSession {
     if (engine is FocusAwareAudioEngine) {
       (engine as FocusAwareAudioEngine).activateSession = _activate;
     }
+    if (engine is SessionPreparingAudioEngine) {
+      (engine as SessionPreparingAudioEngine).prepareSession = _prepare;
+    }
     state.addListener(_changed);
   }
 
@@ -97,6 +100,13 @@ class PlaybackSession {
     return session;
   }
 
+  Future<void> _prepare() => _serialize(() async {
+    if (_closed) throw StateError('Audio session is closed');
+    if (state.independentPlayback) return;
+    if (_session == null) await _configure();
+    if (_closed) throw StateError('Audio session is closed');
+  });
+
   Future<bool> _activate() async {
     if (_closed) return false;
     if (state.independentPlayback) return true;
@@ -140,7 +150,11 @@ class PlaybackSession {
     if (_closed || state.independentPlayback) return;
     if (event.begin) {
       if (event.type == AudioInterruptionType.duck) return;
-      _resume = state.playing;
+      // iOS can report another begin while Siri/call audio is already holding
+      // the session. The pause caused by the first event must not erase the
+      // original intent to resume this same track.
+      _resume =
+          state.playing || (_resume && _interruptedTrack == state.current?.id);
       _interruptedTrack = state.current?.id;
       state.pause();
     } else {
@@ -159,6 +173,11 @@ class PlaybackSession {
     state.removeListener(_changed);
     if (engine is FocusAwareAudioEngine) {
       (engine as FocusAwareAudioEngine).activateSession = () async => false;
+    }
+    if (engine is SessionPreparingAudioEngine) {
+      (engine as SessionPreparingAudioEngine).prepareSession = () async {
+        throw StateError('Audio session is closed');
+      };
     }
     unawaited(_interruptions?.cancel());
     unawaited(_noisy?.cancel());

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
+import '../widgets/settings_row.dart';
 import 'tv_mode.dart';
 
 /// An opt-in remote, running only while the large-screen surface is active.
@@ -326,11 +327,17 @@ class LanRemoteSettings extends StatelessWidget {
       builder: (context, _) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SwitchListTile(
-            title: const Text('局域网遥控器'),
-            subtitle: const Text('在大屏幕模式下开启，用同一网络的手机或电脑控制并输入文字'),
-            value: remote.enabled,
-            onChanged: (value) => unawaited(remote.setEnabled(value)),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => unawaited(remote.setEnabled(!remote.enabled)),
+            child: SettingsRow(
+              label: '局域网遥控器',
+              subtitle: '在大屏幕模式下开启，用同一网络的手机或电脑控制并输入文字',
+              trailing: Switch(
+                value: remote.enabled,
+                onChanged: (value) => unawaited(remote.setEnabled(value)),
+              ),
+            ),
           ),
           if (remote.enabled)
             Padding(

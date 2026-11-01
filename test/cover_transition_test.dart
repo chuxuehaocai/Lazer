@@ -161,7 +161,7 @@ void main() {
     expect(middle.left, greaterThan(sourceRect.left));
     expect(middle.left, lessThan(tester.getRect(destination).left));
     state.moveDestination();
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 160));
     // The target's new layout is available to the overlay on the next frame.
     await tester.pump(const Duration(milliseconds: 1));
     final nearEnd = tester.getRect(flight);

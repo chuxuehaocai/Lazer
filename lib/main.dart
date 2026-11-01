@@ -97,7 +97,10 @@ Future<void> main() async {
       // Desktop replaces the system title bar with the app's own parchment
       // frame; must run before the first frame, which is also when the
       // runner decides to show the window.
-      await initWindowFrame();
+      // Window chrome, preferences and device detection do not depend on one
+      // another. Start them together so a platform round trip does not postpone
+      // opening the audio engine and restoring the usable application.
+      final Future<void> windowReady = initWindowFrame();
       // The television input model (D-pad focus) needs this before the first
       // frame: a television with no pointer would otherwise boot into a screen
       // where nothing can be operated.
@@ -117,6 +120,7 @@ Future<void> main() async {
       final bool television = await televisionFuture;
       final watch = await watchFuture;
       final AudioEngineSelection selection = await selectionFuture;
+      await windowReady;
       final AudioEngine audio = selection.engine;
       debugPrint('Audio engine: ${selection.description}');
       // The HiFi page needs one owner for "apply these settings to whatever engine

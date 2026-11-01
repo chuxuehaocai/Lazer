@@ -170,8 +170,9 @@ class _LegacyPlaylistCardState extends State<LegacyPlaylistCard> {
                   curve: Curves.easeOutCubic,
                   child: Stack(
                     children: <Widget>[
-                      RepaintBoundary(
+                      CoverTransitionSource(
                         key: _coverKey,
+                        identity: 'playlist:${widget.playlist.id}',
                         child: LegacyCover(
                           url: widget.playlist.coverUrl,
                           size: widget.width,

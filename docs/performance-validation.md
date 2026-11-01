@@ -30,8 +30,9 @@ that arrive during an active scan. Its capacity and concurrent-write behavior
 are covered by `test/cache_maintenance_performance_test.dart` and
 `test/disk_cache_test.dart`.
 
-Page transitions retain at most one outgoing page, pause covered animation work
-and release temporary snapshots after motion. Background density and cadence are
+Page transitions keep the active navigation ancestors (at most eight), pause
+hidden animation work, exclude hidden focus/semantics, and release snapshots
+after motion. Returning reuses the shelf's state and scroll position. Background density and cadence are
 independent. Browsing defaults to 30 fps; the player follows display vsync unless
 a manual rate is selected. Static and hidden backgrounds do not keep the flow
 ticker running.
@@ -40,6 +41,25 @@ The shared page switcher also reuses the animation owned by `AnimatedSwitcher`.
 Previously, rebuilding its transition ten times left ten additional status
 listeners attached after the widgets were removed. The lifecycle regression in
 `test/page_switch_motion_test.dart` now verifies that no listeners remain.
+
+Cover flights use an independent overlay ticker and a paint transform. The
+incoming page's paused tickers therefore cannot freeze the flight. Forward and
+return flights use the same 420 ms curve, `Cubic(.22, 1, .36, 1)`, which moves
+most of the distance early and slows on arrival. Regression tests check actual
+transformed bounds, moving return targets, rapid cancellation and re-entry, and
+that intermediate frames do not rebuild or lay out the artwork.
+
+Startup restores the local library, bounded playback cache, audio volume,
+saved playback queue, and account/home data in parallel where they are
+independent. Account restoration still precedes an authenticated home request;
+bootstrap completion still waits for every lane. Window setup overlaps
+preferences, device detection and audio initialization.
+
+A controlled five-run benchmark injected a 400 ms local-library delay. Before
+the change, the home request started at 403–471 ms and the saved queue was ready
+at 402–412 ms. Afterwards, those values were 2–3 ms and 1 ms respectively; full
+bootstrap still completed around 400–402 ms. This measures removal of a known
+serialization bottleneck, not a promise about total cold-start time on a device.
 
 Run focused regression checks with:
 

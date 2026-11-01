@@ -340,8 +340,9 @@ class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              RepaintBoundary(
+              CoverTransitionSource(
                 key: _coverKey,
+                identity: widget.coverTransitionIdentity,
                 child: LargeScreenArtwork(
                   url: widget.imageUrl,
                   size: widget.width,
@@ -471,8 +472,9 @@ class _LargeScreenMediaCardState extends State<LargeScreenMediaCard> {
                     ),
                 ],
               ),
-              child: RepaintBoundary(
+              child: CoverTransitionSource(
                 key: _coverKey,
+                identity: widget.coverTransitionIdentity,
                 child: LargeScreenArtwork(
                   url: widget.imageUrl,
                   size: widget.width,

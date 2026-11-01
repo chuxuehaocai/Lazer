@@ -34,6 +34,22 @@ struct IosSessionInfo {
     std::string route;
 };
 
+/* A notification snapshot; reading it never calls Objective-C or the audio unit.
+ * A backend consumes changes on its control/render-producer thread, never from
+ * the real-time AudioUnit callback. */
+struct IosSessionState {
+    uint64_t revision = 0;
+    bool interrupted = false;
+    bool mediaServicesAvailable = true;
+    bool mayResume = true;
+};
+
+IosSessionState iosSessionState() noexcept;
+
+/* An explicit play request may resume after a removed headset or an interruption
+ * that did not grant automatic resumption. Recovery must never call this. */
+void iosSessionRequestResume() noexcept;
+
 /* Activates the shared audio session for playback. Safe to call repeatedly.
  *
  * Returns `LazerAudioOk`, or a `LazerAudioError*` code with `error` filled. */

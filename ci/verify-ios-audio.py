@@ -45,7 +45,12 @@ BRIDGE_SYMBOLS = [
     "lazer_bridge_reader_create",
     "lazer_bridge_reader_notify",
     "lazer_bridge_reader_finish",
+    "lazer_bridge_reader_bytes_available",
     "lazer_bridge_reader_read",
+    "lazer_bridge_reader_seek",
+    "lazer_bridge_reader_length",
+    "lazer_bridge_reader_close",
+    "lazer_bridge_reader_cancel",
     "lazer_bridge_reader_destroy",
 ]
 

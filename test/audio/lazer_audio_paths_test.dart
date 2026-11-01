@@ -53,6 +53,29 @@ void main() {
       ],
     );
   });
+  test('development prefers staged output over a stale root artifact', () {
+    final rootLibrary = library(checkout);
+    final staged = library(Directory('${checkout.path}/build/native-audio'));
+    final installed = library(bundle);
+    expect(resolve(paths()), staged.absolute.uri);
+    expect(paths().candidates(fileNames: ['lazer-audio.dll']), [
+      staged.absolute.uri,
+      rootLibrary.absolute.uri,
+      installed.absolute.uri,
+    ]);
+  });
+  test('discovery includes alternate names without duplicate candidates', () {
+    final staged = Directory('${checkout.path}/build/native-audio');
+    final primary = library(staged);
+    final alternate = library(staged, 'liblazer-audio.dll');
+    expect(
+      paths().candidates(
+        fileNames: ['lazer-audio.dll', 'liblazer-audio.dll'],
+        siblingDirectory: staged.path,
+      ),
+      [primary.absolute.uri, alternate.absolute.uri],
+    );
+  });
   test('release uses bundled engine and ignores checkout artifacts', () {
     library(checkout);
     library(Directory('${checkout.path}/build/native-audio'));
@@ -91,6 +114,45 @@ void main() {
       isNull,
     );
     expect(paths().dependencyDirectories(imported.absolute.uri), hasLength(1));
+    expect(
+      paths().candidates(
+        fileNames: ['lazer-audio.dll'],
+        explicitPath: imported.path,
+      ),
+      [imported.absolute.uri],
+    );
+    expect(
+      paths().candidates(
+        fileNames: ['lazer-audio.dll'],
+        environmentOverride: imported.path,
+      ),
+      [imported.absolute.uri],
+    );
+  });
+  test('missing explicit environment choice never loads another engine', () {
+    library(checkout);
+    expect(
+      paths().resolve(
+        fileNames: ['lazer-audio.dll'],
+        environmentOverride: '${root.path}/missing.dll',
+      ),
+      isNull,
+    );
+  });
+  test('explicit bridge override takes precedence over an engine sibling', () {
+    final imported = library(
+      Directory('${root.path}/imported'),
+      'lazer-audio-bridge.dll',
+    );
+    library(checkout, 'lazer-audio-bridge.dll');
+    expect(
+      paths().resolve(
+        fileNames: ['lazer-audio-bridge.dll'],
+        environmentOverride: imported.path,
+        siblingDirectory: checkout.path,
+      ),
+      imported.absolute.uri,
+    );
   });
   test('bridge beside selected engine precedes other bridges', () {
     final imported = library(

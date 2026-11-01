@@ -1127,9 +1127,11 @@ Future<AlbumCoverPalette?> albumPaletteForCover(String? coverUrl) {
   if (normalized != null && normalized != url) candidates.add(normalized);
   return _paletteRequests.putIfAbsent(
     url,
-    () => _readCoverPalette(
-      candidates,
-    ).whenComplete(() => _paletteRequests.remove(url)),
+    () => _readCoverPalette(candidates).whenComplete(() {
+      // Map.remove returns the very Future stored by putIfAbsent. Returning
+      // it from whenComplete would make that Future wait for itself forever.
+      _paletteRequests.remove(url);
+    }),
   );
 }
 

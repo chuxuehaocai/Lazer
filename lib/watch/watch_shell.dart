@@ -9,7 +9,6 @@ import '../local/local_music_page.dart' show runLocalImport;
 import '../state/app_state.dart';
 import '../widgets/plate_art.dart';
 import '../widgets/accessible_controls.dart';
-import '../widgets/audio_path_badge.dart';
 
 /// A compact touch surface for regular Android watches, square or round.
 /// All playback, downloads and accounts use the existing Android application.
@@ -323,7 +322,6 @@ class _WatchShellState extends State<WatchShell> {
           value: state.progress.clamp(0, 1),
           onChanged: state.seek,
         ),
-        AudioPathBadge(state: state),
         if (state.playbackError != null)
           Text(
             state.playbackError!,

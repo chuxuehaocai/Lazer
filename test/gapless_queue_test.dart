@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart' show Colors;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
@@ -7,6 +8,7 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Engine with both transport and the queue capability.
@@ -235,6 +237,37 @@ void main() {
     expect(engine.loads, <String>['url-1']);
 
     state.dispose();
+  });
+
+  testWidgets('manual gapless next updates the artwork accent', (tester) async {
+    final engine = _QueueEngine();
+    final requested = <String?>[];
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      artworkSeedLoader: (url) async {
+        requested.add(url);
+        return url!.endsWith('/1') ? Colors.red : Colors.blue;
+      },
+    );
+    addTearDown(state.dispose);
+    state.legacyPalette = LegacyPaletteMode.nowPlaying;
+    state.playQueue([
+      _track('1').copyWith(coverUrl: 'https://cover.test/1'),
+      _track('2').copyWith(coverUrl: 'https://cover.test/2'),
+    ]);
+    await tester.pump();
+    expect(state.legacyAccentSeed, Colors.red);
+
+    state.next();
+    await tester.pump();
+
+    expect(state.playing, isTrue);
+    expect(engine.jumps, 1);
+    expect(engine.loads, ['url-1']);
+    expect(state.legacyAccentSeed, Colors.blue);
+    expect(requested, ['https://cover.test/1', 'https://cover.test/2']);
+    state.pause();
   });
 
   testWidgets('a failed resume after a queue jump is reported to the user', (

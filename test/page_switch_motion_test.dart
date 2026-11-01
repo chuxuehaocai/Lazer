@@ -11,6 +11,7 @@ import 'package:lazer_nextgen/legacy/legacy_pages.dart';
 import 'package:lazer_nextgen/legacy/legacy_shell.dart';
 import 'package:lazer_nextgen/legacy/legacy_theme.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/animation/motion_snapshot.dart';
 
 const Track _track = Track(
   id: 'switch-a',
@@ -119,21 +120,12 @@ void main() {
   testWidgets('rebuilding a page transition releases its animation listeners', (
     tester,
   ) async {
-    await _phoneShell(tester);
-    final switcher = tester.widget<AnimatedSwitcher>(
-      find
-          .ancestor(
-            of: find.byType(LegacyHomePage),
-            matching: find.byType(AnimatedSwitcher),
-          )
-          .first,
-    );
-    final buildTransition = switcher.transitionBuilder;
-    await tester.pumpWidget(const SizedBox.shrink());
     final animation = _StatusTrackedAnimation();
     for (var rebuild = 0; rebuild < 10; rebuild++) {
       await tester.pumpWidget(
-        _app(buildTransition(Text('Page $rebuild'), animation)),
+        _app(
+          MotionSnapshot(animation: animation, child: Text('Page $rebuild')),
+        ),
       );
     }
     await tester.pumpWidget(const SizedBox.shrink());

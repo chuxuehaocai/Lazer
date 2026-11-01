@@ -18,6 +18,8 @@ class _Session implements AudioSession {
   final activations = <bool>[];
   int configurations = 0;
   Completer<bool>? pendingActivation;
+  Completer<void>? pendingConfiguration;
+  bool activationAccepted = true;
 
   @override
   Stream<AudioInterruptionEvent> get interruptionEventStream =>
@@ -29,6 +31,7 @@ class _Session implements AudioSession {
   @override
   Future<void> configure(AudioSessionConfiguration configuration) async {
     configurations++;
+    await pendingConfiguration?.future;
   }
 
   @override
@@ -38,11 +41,12 @@ class _Session implements AudioSession {
     AndroidAudioFocusGainType? androidAudioFocusGainType,
     AndroidAudioAttributes? androidAudioAttributes,
     bool? androidWillPauseWhenDucked,
-    AudioSessionConfiguration fallbackConfiguration = const AudioSessionConfiguration.music(),
+    AudioSessionConfiguration fallbackConfiguration =
+        const AudioSessionConfiguration.music(),
   }) async {
     activations.add(active);
     if (active && pendingActivation != null) return pendingActivation!.future;
-    return true;
+    return activationAccepted;
   }
 
   @override
@@ -51,6 +55,23 @@ class _Session implements AudioSession {
   Future<void> close() async {
     await interruptions.close();
     await noisy.close();
+  }
+}
+
+class _PreparingEngine extends JustAudioEngine
+    implements SessionPreparingAudioEngine {
+  _PreparingEngine({required super.player});
+
+  @override
+  Future<void> Function()? prepareSession;
+
+  bool outputOpened = false;
+
+  @override
+  Future<void> setUrl(String url) async {
+    await prepareSession?.call();
+    outputOpened = true;
+    await super.setUrl(url);
   }
 }
 
@@ -102,7 +123,10 @@ class _Gateway extends NeteaseGateway {
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => 'https://audio.test/track';
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => 'https://audio.test/track';
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();
 }
@@ -155,6 +179,11 @@ void main() {
       await tester.pump();
       expect(state.playing, false);
       session.interruptions.add(
+        AudioInterruptionEvent(true, AudioInterruptionType.unknown),
+      );
+      await tester.pump();
+      expect(state.playing, false);
+      session.interruptions.add(
         AudioInterruptionEvent(false, AudioInterruptionType.pause),
       );
       await tester.pump();
@@ -181,6 +210,147 @@ void main() {
       await tester.pump();
     },
   );
+
+  testWidgets(
+    'output opening waits for one configuration without taking focus',
+    (tester) async {
+      final player = _Player();
+      final engine = _PreparingEngine(player: player);
+      final state = AppState(catalog: _Catalog(), audioEngine: engine);
+      final configuration = Completer<void>();
+      final session = _Session()
+        ..pendingConfiguration = configuration
+        ..activationAccepted = false;
+      final policy = PlaybackSession(
+        state,
+        engine,
+        sessionFactory: () async => session,
+      );
+      final opening = engine.setUrl('https://audio.test/first');
+      await tester.pump();
+      expect(session.configurations, 1);
+      expect(engine.outputOpened, isFalse);
+      expect(session.activations, isEmpty);
+      configuration.complete();
+      await opening;
+      expect(engine.outputOpened, isTrue);
+      expect(engine.active, isTrue);
+      expect(session.activations, isEmpty);
+      await engine.setUrl('https://audio.test/second');
+      expect(session.configurations, 1);
+      expect(session.activations, isEmpty);
+      expect(await engine.activateSession!(), isFalse);
+      expect(engine.active, isTrue);
+      expect(player.plays, 0);
+      policy.close();
+      await policy.settled;
+      state.dispose();
+      engine.dispose();
+      await session.close();
+      await tester.pump();
+    },
+  );
+
+  testWidgets('independent preload skips OS configuration and activation', (
+    tester,
+  ) async {
+    final player = _Player();
+    final engine = _PreparingEngine(player: player);
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      independentPlayback: true,
+    );
+    var requests = 0;
+    final policy = PlaybackSession(
+      state,
+      engine,
+      sessionFactory: () async {
+        requests++;
+        throw StateError('An independent preload must not open a session');
+      },
+    );
+    await engine.setUrl('https://audio.test/first');
+    expect(engine.outputOpened, isTrue);
+    expect(requests, 0);
+    policy.close();
+    await policy.settled;
+    state.dispose();
+    engine.dispose();
+    await tester.pump();
+  });
+
+  testWidgets('closing during configuration prevents a late output open', (
+    tester,
+  ) async {
+    final player = _Player();
+    final engine = _PreparingEngine(player: player);
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    final configuration = Completer<void>();
+    final session = _Session()..pendingConfiguration = configuration;
+    final policy = PlaybackSession(
+      state,
+      engine,
+      sessionFactory: () async => session,
+    );
+    final opening = engine.setUrl('https://audio.test/first');
+    final rejected = expectLater(opening, throwsStateError);
+    await tester.pump();
+    policy.close();
+    configuration.complete();
+    await rejected;
+    await policy.settled;
+    expect(engine.outputOpened, isFalse);
+    expect(session.activations, isEmpty);
+    state.dispose();
+    engine.dispose();
+    await session.close();
+    await tester.pump();
+  });
+
+  testWidgets('interruption end never resumes a replacement paused track', (
+    tester,
+  ) async {
+    final player = _Player();
+    final engine = JustAudioEngine(player: player);
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    final session = _Session();
+    final policy = PlaybackSession(
+      state,
+      engine,
+      sessionFactory: () async => session,
+    );
+    state.playQueue([_track]);
+    await tester.pump();
+    session.interruptions.add(
+      AudioInterruptionEvent(true, AudioInterruptionType.unknown),
+    );
+    await tester.pump();
+    state.playQueue([
+      const Track(
+        id: '2',
+        title: 'Replacement',
+        artist: 'Artist',
+        album: 'Album',
+        duration: Duration(seconds: 30),
+        coverSeed: 2,
+      ),
+    ]);
+    state.pause();
+    await tester.pump();
+    session.interruptions.add(
+      AudioInterruptionEvent(false, AudioInterruptionType.pause),
+    );
+    await tester.pump();
+    expect(state.current?.id, '2');
+    expect(state.playing, isFalse);
+    policy.close();
+    await policy.settled;
+    state.dispose();
+    engine.dispose();
+    await session.close();
+    await tester.pump();
+  });
 
   testWidgets('pause cancels an engine play waiting for focus', (tester) async {
     final player = _Player();

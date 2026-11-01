@@ -4,6 +4,7 @@
 //   dart run tool/build_native_audio.dart --ffmpeg-root /path/to/ffmpeg
 //   LAZER_FFMPEG_ROOT=/path/to/ffmpeg dart run tool/build_native_audio.dart
 //   dart run tool/build_native_audio.dart --project-root
+//   dart run tool/build_native_audio.dart --output-directory /path/to/bundle
 //
 // What it does:
 //   1. configures CMake over `native/` into `build/native-audio/cmake`,
@@ -22,10 +23,31 @@
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
+import 'package:lazer_nextgen/audio/native/lazer_audio_library.dart';
+
 const String _outputDirectory = 'build/native-audio';
 
 Future<void> main(List<String> arguments) async {
-  exitCode = await _build(arguments);
+  final inspectPath = _optionValue(arguments, '--inspect-library');
+  if (inspectPath != null) {
+    final report = LazerAudioLoader.inspect(inspectPath);
+    if (!report.supportsStreaming) {
+      stderr.writeln(report.reason ?? 'Built native reader bridge is missing');
+      exitCode = 1;
+    } else {
+      stdout.writeln('validated native audio ABI ${report.api!.abiVersion()}');
+    }
+    return;
+  }
+  try {
+    exitCode = await _build(arguments);
+  } on FileSystemException catch (error) {
+    stderr.writeln(
+      'Unable to stage native audio libraries: $error\n'
+      'Close running Lazer instances before replacing a library they have loaded.',
+    );
+    exitCode = 1;
+  }
 }
 
 Future<int> _build(List<String> arguments) async {
@@ -98,19 +120,18 @@ Future<int> _build(List<String> arguments) async {
     return built;
   }
 
-  final Directory target = Directory(_outputDirectory);
+  final Directory target = Directory(
+    _optionValue(arguments, '--output-directory') ?? _outputDirectory,
+  );
   await target.create(recursive: true);
   final int staged = await _stage(
     cmakeDirectory,
     target,
     ffmpegPrefix,
     configuration,
+    projectRoot: arguments.contains('--project-root'),
   );
   if (staged == 0) {
-    if (arguments.contains('--project-root')) {
-      await File('${target.path}/lazer-audio.dll').copy('lazer-audio.dll');
-      stdout.writeln('staged lazer-audio.dll at the project root (local only)');
-    }
     stdout.writeln('\nStaged native audio libraries in ${target.path}');
     stdout.writeln(
       'Playback now uses the native engine when the app runs from the '
@@ -125,8 +146,9 @@ Future<int> _stage(
   String cmakeDirectory,
   Directory target,
   String ffmpegRoot,
-  String configuration,
-) async {
+  String configuration, {
+  bool projectRoot = false,
+}) async {
   final List<String> wanted = <String>[
     if (Platform.isWindows) ...<String>[
       'lazer-audio.dll',
@@ -139,33 +161,23 @@ Future<int> _stage(
     ] else ...<String>['liblazer-audio.so', 'liblazer-audio-bridge.so'],
   ];
   final Set<String> staged = <String>{};
-  final List<String> ffmpegStaged = <String>[];
-  // Visual Studio writes a release build under `Release/`; Ninja and Makefiles put
-  // it next to the sources. A recursive walk covers both.
-  await for (final FileSystemEntity entity in Directory(
-    cmakeDirectory,
-  ).list(recursive: true, followLinks: false)) {
-    if (entity is! File) continue;
-    final String name = entity.uri.pathSegments.last;
-    if (!wanted.contains(name)) continue;
-    if (entity.uri.pathSegments.any(
-      (part) =>
-          const [
-            'Debug',
-            'Profile',
-            'Release',
-            'RelWithDebInfo',
-            'MinSizeRel',
-          ].contains(part) &&
-          part != configuration,
-    )) {
-      continue;
-    }
-    final File destination = File(
-      '${target.path}${Platform.pathSeparator}$name',
-    );
-    await entity.copy(destination.path);
-    stdout.writeln('staged ${destination.path}');
+  final ffmpegStaged = <String>[];
+  final sourcesByName = <String, File>{};
+  // Use the target's configured output, never the first same-named library in a
+  // recursive walk: another configuration or old nested build may be obsolete.
+  for (final name in wanted) {
+    final targetName = name.contains('bridge')
+        ? 'lazer-audio-bridge'
+        : 'lazer-audio';
+    final sources = [
+      File('$cmakeDirectory/$targetName/$configuration/$name'),
+      File('$cmakeDirectory/$targetName/$name'),
+      File('$cmakeDirectory/$configuration/$name'),
+      File('$cmakeDirectory/$name'),
+    ];
+    final source = sources.where((file) => file.existsSync()).firstOrNull;
+    if (source == null) continue;
+    sourcesByName[name] = source;
     staged.add(name);
   }
   if (!staged.any((name) => !name.contains('bridge')) ||
@@ -184,7 +196,7 @@ Future<int> _stage(
           continue;
         }
         final String name = entity.uri.pathSegments.last;
-        await entity.copy('${target.path}${Platform.pathSeparator}$name');
+        sourcesByName[name] = entity;
         ffmpegStaged.add(name);
       }
     }
@@ -199,30 +211,13 @@ Future<int> _stage(
         if ((entity is! File && entity is! Link) || !isRuntimeLibrary) {
           continue;
         }
-        await File(
-          entity.path,
-        ).copy('${target.path}${Platform.pathSeparator}$name');
+        sourcesByName[name] = File(entity.path);
         ffmpegStaged.add(name);
       }
     }
   }
-  // The engine links against FFmpeg and loads the shared libraries from its own
-  // directory. Staging the engine without them produces a bundle that dies at
-  // load time and silently falls back to just_audio — exactly the build this
-  // script exists to prevent. Demand every component the engine needs.
-  const List<String> components = <String>[
-    'avcodec',
-    'avformat',
-    'avutil',
-    'swresample',
-  ];
-  final List<String> missing = <String>[
-    for (final String component in components)
-      if (!ffmpegStaged.any(
-        (String name) => name.toLowerCase().contains(component),
-      ))
-        component,
-  ];
+  // Demand each shared FFmpeg dependency before touching an existing bundle.
+  final missing = missingNativeFfmpegComponents(ffmpegStaged);
   if (missing.isNotEmpty) {
     stderr.writeln(
       'The FFmpeg runtime next to $ffmpegRoot covered ${ffmpegStaged.length} '
@@ -231,7 +226,114 @@ Future<int> _stage(
     );
     return 1;
   }
-  return 0;
+  // Validate a complete isolated staging directory before modifying any live
+  // runtime file. The validation runs in a subprocess so Windows releases the
+  // mapped DLLs before they are published or the staging directory is removed.
+  final temporary = await target.createTemp('.stage-');
+  try {
+    for (final entry in sourcesByName.entries) {
+      await entry.value.copy('${temporary.path}/${entry.key}');
+    }
+    final engineName = staged.firstWhere((name) => !name.contains('bridge'));
+    final validated = await _run([
+      Platform.resolvedExecutable,
+      File.fromUri(Platform.script).absolute.path,
+      '--inspect-library',
+      File('${temporary.path}/$engineName').absolute.path,
+    ]);
+    if (validated != 0) return validated;
+    final destinations = <({File source, File target})>[
+      for (final name in sourcesByName.keys)
+        (
+          source: File('${temporary.path}/$name'),
+          target: File('${target.path}/$name'),
+        ),
+      if (projectRoot)
+        (
+          source: File('${temporary.path}/$engineName'),
+          target: File('lazer-audio.dll'),
+        ),
+    ];
+    await publishNativeAudioFiles(destinations, temporary);
+    for (final entry in destinations) {
+      stdout.writeln('staged ${entry.target.path}');
+    }
+    return 0;
+  } finally {
+    await temporary.delete(recursive: true);
+  }
+}
+
+List<String> missingNativeFfmpegComponents(Iterable<String> libraryNames) => [
+  for (final component in const ['avcodec', 'avformat', 'avutil', 'swresample'])
+    if (!libraryNames.any((name) => name.toLowerCase().contains(component)))
+      component,
+];
+
+/// Checks all locked destinations before updating an engine or its companions.
+/// Backups also restore the previous complete runtime if copying later fails.
+Future<void> publishNativeAudioFiles(
+  List<({File source, File target})> files,
+  Directory temporary,
+) async {
+  final changed = <({File source, File target, File? backup})>[];
+  for (final entry in files) {
+    if (await _filesEqual(entry.source, entry.target)) continue;
+    File? backup;
+    if (await entry.target.exists()) {
+      final handle = await entry.target.open(mode: FileMode.append);
+      await handle.close();
+      backup = File('${temporary.path}/previous-${changed.length}');
+      await entry.target.copy(backup.path);
+    }
+    changed.add((source: entry.source, target: entry.target, backup: backup));
+  }
+  final replaced = <({File target, File? backup})>[];
+  try {
+    for (final entry in changed) {
+      replaced.add((target: entry.target, backup: entry.backup));
+      await entry.source.copy(entry.target.path);
+    }
+  } catch (_) {
+    for (final entry in replaced.reversed) {
+      if (entry.backup case final backup?) {
+        await backup.copy(entry.target.path);
+      } else if (await entry.target.exists()) {
+        await entry.target.delete();
+      }
+    }
+    rethrow;
+  }
+}
+
+Future<bool> _filesEqual(File source, File destination) async {
+  if (await destination.exists() &&
+      await source.length() == await destination.length()) {
+    final left = await source.open();
+    final right = await destination.open();
+    try {
+      bool equal = true;
+      while (equal) {
+        final bytes = await left.read(65536);
+        final existing = await right.read(65536);
+        if (bytes.length != existing.length) {
+          equal = false;
+          break;
+        }
+        if (bytes.isEmpty) return true;
+        for (var index = 0; index < bytes.length; index++) {
+          if (bytes[index] != existing[index]) {
+            equal = false;
+            break;
+          }
+        }
+      }
+    } finally {
+      await left.close();
+      await right.close();
+    }
+  }
+  return false;
 }
 
 String? _cachedFfmpegRoot() {

@@ -567,6 +567,10 @@ void main() {
 
     await tester.tap(find.byTooltip('\u8fd4\u56de'));
     await tester.pumpAndSettle();
+    // Returning now preserves the artist overview's scroll position. Move
+    // back to the songs header before opening its all-songs subpage.
+    await tester.drag(find.byType(ListView).at(1), const Offset(0, 520));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey<String>('artist-all-songs')));
     await tester.pumpAndSettle();
     expect(find.text('\u5168\u90e8\u6b4c\u66f2'), findsWidgets);

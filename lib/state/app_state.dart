@@ -1552,15 +1552,33 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {}
     // Apply interaction preferences before session and catalogue requests.
     notifyListeners();
-    await localLibrary.load();
-    await playbackCache.load();
-    await audioEngine?.setVolume(_volume);
+    // These are independent startup lanes. A large local manifest, cache
+    // eviction on an external drive or an audio-device round trip must not
+    // postpone the home request or the restored queue. The cache itself joins
+    // LocalLibrary.load(), so concurrent loading still reads its index once.
+    // Keep bootstrap's completion contract: callers can await every lane.
+    await Future.wait<void>(<Future<void>>[
+      localLibrary.load(),
+      playbackCache.load(),
+      audioEngine?.setVolume(_volume) ?? Future<void>.value(),
+      _restorePlaybackSnapshot(initialQueueActivity),
+      _restoreCatalogSession(),
+    ]);
+  }
+
+  Future<void> _restorePlaybackSnapshot(int initialQueueActivity) async {
     await _restoreRecentTracks();
     await _restoreQueue(initialQueueActivity);
+    if (_presentationDisposed) return;
     unawaited(_loadCurrentArtwork());
     unawaited(ensureCurrentLyrics());
+  }
+
+  Future<void> _restoreCatalogSession() async {
     await _restoreSession();
+    if (_presentationDisposed) return;
     await _musicPlatforms.restore();
+    if (_presentationDisposed) return;
     if (signedIn) unawaited(_flushPlayUploads());
     await refreshHome();
   }
@@ -2397,6 +2415,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     unawaited(_saveQueue());
     _position = Duration.zero;
     unawaited(_loadLyrics());
+    // Artwork follows the selection even while paused or when the engine
+    // crosses directly into its prepared source without calling _startAudio.
+    unawaited(_loadCurrentArtwork());
     if (_playing) {
       if (gapless && audioEngine?.active == true) {
         unawaited(_crossIntoQueuedTrack());

@@ -165,10 +165,15 @@ void main() {
           ),
         ),
       );
+      final section = find.text('动态背景');
+      await tester.scrollUntilVisible(section, 200);
+      await tester.pumpAndSettle();
+      expect(section.hitTestable(), findsOneWidget);
+      expect(find.text('正在播放背景'), findsNothing);
       final mode = find.byKey(const ValueKey('player-background-mode'));
       await tester.scrollUntilVisible(mode, 200);
-      expect(find.text('正在播放背景'), findsNothing);
-      expect(find.text('动态背景'), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(mode.hitTestable(), findsOneWidget);
       expect(tester.widget(mode), isA<SettingsChoice<LegacyBackgroundMode>>());
       await tester.tap(mode);
       await tester.pumpAndSettle();
@@ -179,6 +184,7 @@ void main() {
         const ValueKey('player-background-follow-display'),
       );
       await tester.ensureVisible(follow);
+      await tester.pumpAndSettle();
       expect(
         tester
             .widget<Switch>(
@@ -189,6 +195,7 @@ void main() {
       );
       final fps = find.byKey(const ValueKey('player-background-fps'));
       await tester.ensureVisible(fps);
+      await tester.pumpAndSettle();
       final slider = find.descendant(of: fps, matching: find.byType(Slider));
       expect(tester.widget<Slider>(slider).onChanged, isNull);
       expect(

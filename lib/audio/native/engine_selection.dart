@@ -5,10 +5,8 @@
 // and `flutter test` can then assert the decision — and the reason a launch is
 // *not* on the native HiFi engine — without a running app.
 //
-// The reason is the whole point. A downgrade that only reaches the log is
-// indistinguishable from a native session for the person listening, so every
-// fallback carries a `fallback` kind plus the underlying detail text, and the
-// player shows it (see `AudioPathBadge`).
+// Every fallback keeps its kind and underlying detail in diagnostics. Playback
+// controls stay free of standing path notices; engine settings show capability.
 library;
 
 /// Which playback path a launch runs on.
@@ -48,8 +46,10 @@ class AudioEnginePathDecision {
     : this._(AudioEnginePath.native, null, null);
 
   /// The system engine drives playback, for [fallback] and [detail].
-  const AudioEnginePathDecision.fallback(AudioPathFallback fallback, [String? detail])
-    : this._(AudioEnginePath.system, fallback, detail);
+  const AudioEnginePathDecision.fallback(
+    AudioPathFallback fallback, [
+    String? detail,
+  ]) : this._(AudioEnginePath.system, fallback, detail);
 
   final AudioEnginePath path;
 
@@ -126,7 +126,10 @@ AudioEnginePathDecision planAudioEnginePath({
 /// line: `audio.path event=format source=44100/16/2 ...`. Fields are emitted in
 /// insertion order, `-` stands for an absent value, and values containing spaces
 /// are quoted, so the records stay greppable in a CI log.
-String formatAudioPathRecord(String event, [Map<String, Object?> fields = const {}]) {
+String formatAudioPathRecord(
+  String event, [
+  Map<String, Object?> fields = const {},
+]) {
   final StringBuffer buffer = StringBuffer('audio.path event=$event');
   for (final MapEntry<String, Object?> field in fields.entries) {
     final Object? value = field.value;

@@ -363,31 +363,36 @@ class HomeActionShelf extends StatelessWidget {
           itemBuilder: (context, index) {
             final item = items[index];
             final coverKey = GlobalKey();
-            return FilledCoverCard(
+            return CoverTransitionSource(
               key: coverKey,
-              width: cardWidth,
-              height: tileHeight,
-              large: large,
-              title: item.title,
-              detail: item.subtitle,
-              icon: item.icon,
-              covers: covers.isEmpty
-                  ? const <String?>[]
-                  : <String?>[
-                      for (var offset = 0; offset < covers.length; offset++)
-                        covers[(index * 2 + offset) % covers.length],
-                    ],
-              onTap: busy || item.tap == null
-                  ? null
-                  : () {
-                      if (index == 0) {
-                        rememberCoverTransition(
-                          'playlist:$dailyRecommendationsPlaylistId',
-                          coverKey,
-                        );
-                      }
-                      item.tap!();
-                    },
+              identity: index == 0
+                  ? 'playlist:$dailyRecommendationsPlaylistId'
+                  : null,
+              child: FilledCoverCard(
+                width: cardWidth,
+                height: tileHeight,
+                large: large,
+                title: item.title,
+                detail: item.subtitle,
+                icon: item.icon,
+                covers: covers.isEmpty
+                    ? const <String?>[]
+                    : <String?>[
+                        for (var offset = 0; offset < covers.length; offset++)
+                          covers[(index * 2 + offset) % covers.length],
+                      ],
+                onTap: busy || item.tap == null
+                    ? null
+                    : () {
+                        if (index == 0) {
+                          rememberCoverTransition(
+                            'playlist:$dailyRecommendationsPlaylistId',
+                            coverKey,
+                          );
+                        }
+                        item.tap!();
+                      },
+              ),
             );
           },
         );
@@ -799,11 +804,10 @@ class _HomeReleaseShelf extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              LegacyCover(
+              CoverTransitionSource(
                 key: coverKey,
-                url: album.coverUrl,
-                size: size,
-                radius: 11,
+                identity: 'playlist:${album.id}',
+                child: LegacyCover(url: album.coverUrl, size: size, radius: 11),
               ),
               const SizedBox(height: 8),
               Text(
@@ -862,11 +866,14 @@ class _EditorialPlaylistShelf extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: <Widget>[
-                LegacyCover(
+                CoverTransitionSource(
                   key: coverKey,
-                  url: playlist.coverUrl,
-                  size: compact ? 270 : 330,
-                  radius: 0,
+                  identity: 'playlist:${playlist.id}',
+                  child: LegacyCover(
+                    url: playlist.coverUrl,
+                    size: compact ? 270 : 330,
+                    radius: 0,
+                  ),
                 ),
                 const DecoratedBox(
                   decoration: BoxDecoration(
@@ -954,101 +961,105 @@ class ChartShelf extends StatelessWidget {
               rememberCoverTransition('chart:${chart.id}', coverKey);
               onOpen(chart);
             }),
-            child: Stack(
+            child: CoverTransitionSource(
               key: coverKey,
-              fit: StackFit.expand,
-              children: <Widget>[
-                Transform.scale(
-                  scale: 1.32,
-                  child: _MovingCoverMosaic(
-                    covers: chart.entries
-                        .map(chartEntryCover)
-                        .toList(growable: false),
-                    angle: -.11,
-                    reverse: true,
-                    rows: 4,
-                    tile: 82,
-                    diagonal: -.55,
-                  ),
-                ),
-                ColoredBox(color: Colors.black.withValues(alpha: .68)),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: <Color>[Color(0x12000000), Color(0xF2000000)],
-                      stops: <double>[.22, 1],
+              identity: 'chart:${chart.id}',
+              child: Stack(
+                fit: StackFit.expand,
+                children: <Widget>[
+                  Transform.scale(
+                    scale: 1.32,
+                    child: _MovingCoverMosaic(
+                      covers: chart.entries
+                          .map(chartEntryCover)
+                          .toList(growable: false),
+                      angle: -.11,
+                      reverse: true,
+                      rows: 4,
+                      tile: 82,
+                      diagonal: -.55,
                     ),
                   ),
-                ),
-                Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    large ? 22 : 18,
-                    large ? 22 : 18,
-                    large ? 22 : 18,
-                    large ? 20 : 16,
+                  ColoredBox(color: Colors.black.withValues(alpha: .68)),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: <Color>[Color(0x12000000), Color(0xF2000000)],
+                        stops: <double>[.22, 1],
+                      ),
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      ChartLogo(chart: chart, large: large),
-                      const Spacer(),
-                      Text(
-                        chart.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(
-                              fontSize: large ? 27 : null,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -.6,
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      large ? 22 : 18,
+                      large ? 22 : 18,
+                      large ? 22 : 18,
+                      large ? 20 : 16,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        ChartLogo(chart: chart, large: large),
+                        const Spacer(),
+                        Text(
+                          chart.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(
+                                fontSize: large ? 27 : null,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -.6,
+                              ),
+                        ),
+                        TrText(
+                          chart.issueLabel,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                fontSize: large ? 16 : null,
+                                color: Colors.white70,
+                              ),
+                        ),
+                        SizedBox(height: large ? 12 : 9),
+                        for (final entry in chart.entries.take(3))
+                          Padding(
+                            padding: EdgeInsets.only(top: large ? 7 : 5),
+                            child: Row(
+                              children: <Widget>[
+                                SizedBox(
+                                  width: large ? 32 : 24,
+                                  child: Text(
+                                    '${entry.rank}',
+                                    style: TextStyle(
+                                      fontSize: large ? 17 : null,
+                                      color: Colors.white60,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Text(
+                                    entry.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: large ? 17 : null,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                      ),
-                      TrText(
-                        chart.issueLabel,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontSize: large ? 16 : null,
-                          color: Colors.white70,
-                        ),
-                      ),
-                      SizedBox(height: large ? 12 : 9),
-                      for (final entry in chart.entries.take(3))
-                        Padding(
-                          padding: EdgeInsets.only(top: large ? 7 : 5),
-                          child: Row(
-                            children: <Widget>[
-                              SizedBox(
-                                width: large ? 32 : 24,
-                                child: Text(
-                                  '${entry.rank}',
-                                  style: TextStyle(
-                                    fontSize: large ? 17 : null,
-                                    color: Colors.white60,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  entry.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: large ? 17 : null,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ],
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

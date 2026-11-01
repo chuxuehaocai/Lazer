@@ -21,12 +21,12 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/hifi_settings.dart';
 import '../theme/apple_design.dart';
-import '../tv/tv_mode.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
 import 'ui_scaling.dart';
 import 'audio_engine_settings.dart';
 import 'settings_detail.dart';
+import 'settings_row.dart';
 
 /// Renders the 高保真播放 group: engine status, output device, exclusive/bit-perfect
 /// policy, DSD mode, buffer, equaliser and the live format readout.
@@ -472,75 +472,12 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
 }
 
 /// One row in the grouped card, matching the settings page's own rows.
-class _SettingRow extends StatelessWidget {
+class _SettingRow extends SettingsRow {
   const _SettingRow({
-    required this.label,
-    required this.subtitle,
-    required this.trailing,
-  });
-
-  final String label;
-  final String subtitle;
-  final Widget trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final AppleSemanticColors apple = AppleSemanticColors.of(context);
-    final bool stacked = MediaQuery.sizeOf(context).width < 360;
-    final Widget heading = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          context.tr(label),
-          style: theme.textTheme.bodyLarge?.copyWith(color: apple.label),
-        ),
-        if (subtitle.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 2),
-          Text(
-            context.tr(subtitle),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: apple.secondaryLabel,
-            ),
-          ),
-        ],
-      ],
-    );
-    return TvFocusHighlight(
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: apple.separator, width: .5)),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        child: stacked
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  heading,
-                  const SizedBox(height: 8),
-                  Align(alignment: Alignment.centerLeft, child: trailing),
-                ],
-              )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  Expanded(flex: 4, child: heading),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    flex: 6,
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: trailing,
-                    ),
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
+    required super.label,
+    required super.subtitle,
+    required super.trailing,
+  }) : super(controlFlex: 6);
 }
 
 class _SwitchRow extends StatelessWidget {
@@ -675,8 +612,10 @@ class EqualizerSettingsEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AppleGroupedCard(
-    margin: const EdgeInsets.only(bottom: 16),
+    margin: const EdgeInsets.only(bottom: SettingsSpacing.groupGap),
     child: AppleListTile(
+      padding: SettingsSpacing.rowPadding,
+      minHeight: SettingsSpacing.rowMinHeight,
       key: const ValueKey('open-equalizer-settings'),
       title: context.tr('均衡器'),
       subtitle: context.tr(state.hifiSettings.eqActive ? '已启用' : '已关闭'),
@@ -985,7 +924,9 @@ List<SignalPathReadout> signalPathReadouts({
     ),
     SignalPathReadout(
       '格式选择',
-      info == null ? '—' : _FormatCard.selectionLabel(info.outputFormatSelection),
+      info == null
+          ? '—'
+          : _FormatCard.selectionLabel(info.outputFormatSelection),
     ),
     SignalPathReadout(
       'Bit-perfect',

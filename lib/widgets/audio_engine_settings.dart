@@ -6,6 +6,7 @@ import '../audio/native/imported_engine.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import 'apple_ui.dart';
+import 'settings_row.dart';
 
 class AudioEngineSettings extends StatefulWidget {
   const AudioEngineSettings({super.key, required this.state});
@@ -41,10 +42,12 @@ class _AudioEngineSettingsState extends State<AudioEngineSettings> {
 
   @override
   Widget build(BuildContext context) => AppleGroupedCard(
-    margin: const EdgeInsets.only(bottom: 16),
+    margin: const EdgeInsets.only(bottom: SettingsSpacing.groupGap),
     child: Column(
       children: [
         AppleListTile(
+          padding: SettingsSpacing.rowPadding,
+          minHeight: SettingsSpacing.rowMinHeight,
           title: context.tr('音频引擎'),
           subtitle: context.tr('切换引擎或导入后，下次启动应用时生效'),
           trailing: DropdownButton<bool>(
@@ -69,6 +72,8 @@ class _AudioEngineSettingsState extends State<AudioEngineSettings> {
           ),
         ),
         AppleListTile(
+          padding: SettingsSpacing.rowPadding,
+          minHeight: SettingsSpacing.rowMinHeight,
           title: context.tr('导入 Audio Engine'),
           subtitle: context.tr(
             widget.state.importedEnginePath == null
@@ -83,6 +88,8 @@ class _AudioEngineSettingsState extends State<AudioEngineSettings> {
         ),
         if (widget.state.importedEnginePath != null)
           AppleListTile(
+            padding: SettingsSpacing.rowPadding,
+            minHeight: SettingsSpacing.rowMinHeight,
             title: context.tr('恢复内置引擎'),
             onTap: () => unawaited(widget.state.setImportedEnginePath(null)),
             trailing: const Icon(Icons.chevron_right_rounded),

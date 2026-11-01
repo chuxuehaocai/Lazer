@@ -1,8 +1,7 @@
 // Phase 1: the launch must be able to say which playback path it is on, and why.
 //
 // The decision is a pure function so it can be asserted here; the rest of the
-// file wires that decision through the engine contract, `AppState` and the badge
-// the player renders.
+// file wires that decision through the engine contract and `AppState` diagnostics.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,15 +9,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart' as audio;
 import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/audio/native/engine_selection.dart';
+import 'package:lazer_nextgen/data/models.dart';
+import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
-import 'package:lazer_nextgen/widgets/audio_path_badge.dart';
 
 /// A player that answers only what [JustAudioEngine] touches on construction.
 class _IdlePlayer implements audio.AudioPlayer {
   final StreamController<audio.ProcessingState> _states =
       StreamController<audio.ProcessingState>.broadcast();
-  final StreamController<int?> _indexes =
-      StreamController<int?>.broadcast();
+  final StreamController<int?> _indexes = StreamController<int?>.broadcast();
 
   @override
   Stream<audio.ProcessingState> get processingStateStream => _states.stream;
@@ -33,8 +32,22 @@ class _IdlePlayer implements audio.AudioPlayer {
   }
 
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      super.noSuchMethod(invocation);
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _PlayerState extends AppState {
+  _PlayerState() : super(hifiPathNotice: '原生引擎不可用：ABI mismatch');
+  @override
+  Track get current => const Track(
+    id: 'path-test',
+    title: 'Song',
+    artist: 'Artist',
+    album: 'Album',
+    duration: Duration(minutes: 2),
+    coverSeed: 1,
+  );
+  @override
+  Future<void> ensureCurrentLyrics({bool force = false}) async {}
 }
 
 void main() {
@@ -95,7 +108,10 @@ void main() {
         'kind': 'windows endpoints',
       });
 
-      expect(record, 'audio.path event=format exclusive=1 detail=- kind="windows endpoints"');
+      expect(
+        record,
+        'audio.path event=format exclusive=1 detail=- kind="windows endpoints"',
+      );
     });
 
     test('an event with no fields is still one line', () {
@@ -111,10 +127,7 @@ void main() {
       );
       addTearDown(engine.dispose);
 
-      expect(
-        engine.pendingFailure,
-        '原生 HiFi 引擎初始化失败：no audio device',
-      );
+      expect(engine.pendingFailure, '原生 HiFi 引擎初始化失败：no audio device');
     });
 
     test('a native session has no pending failure to report', () {
@@ -125,21 +138,24 @@ void main() {
       expect(engine, isA<FailureReportingAudioEngine>());
     });
 
-    test('reportFailure reaches subscribers, and stops after dispose', () async {
-      final JustAudioEngine engine = JustAudioEngine(player: _IdlePlayer());
-      final List<String> reported = <String>[];
-      final StreamSubscription<String> subscription = engine.failures.listen(
-        reported.add,
-      );
-      addTearDown(subscription.cancel);
+    test(
+      'reportFailure reaches subscribers, and stops after dispose',
+      () async {
+        final JustAudioEngine engine = JustAudioEngine(player: _IdlePlayer());
+        final List<String> reported = <String>[];
+        final StreamSubscription<String> subscription = engine.failures.listen(
+          reported.add,
+        );
+        addTearDown(subscription.cancel);
 
-      expect(engine.reportFailure('device lost'), isTrue);
-      await Future<void>.delayed(Duration.zero);
-      expect(reported, <String>['device lost']);
+        expect(engine.reportFailure('device lost'), isTrue);
+        await Future<void>.delayed(Duration.zero);
+        expect(reported, <String>['device lost']);
 
-      engine.dispose();
-      expect(engine.reportFailure('too late'), isFalse);
-    });
+        engine.dispose();
+        expect(engine.reportFailure('too late'), isFalse);
+      },
+    );
   });
 
   group('AppState surfaces the path', () {
@@ -172,31 +188,25 @@ void main() {
     });
   });
 
-  group('AudioPathBadge', () {
-    Future<void> pump(WidgetTester tester, String? notice) async {
-      final AppState state = AppState(
-        audioEngine: JustAudioEngine(player: _IdlePlayer()),
-        hifiPathNotice: notice,
-      );
+  for (final size in [const Size(390, 844), const Size(1280, 800)]) {
+    testWidgets('player at $size omits the standing engine path notice', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final state = _PlayerState();
       addTearDown(state.dispose);
-      await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: AudioPathBadge(state: state))),
-      );
-    }
-
-    testWidgets('renders nothing on the native path', (tester) async {
-      await pump(tester, null);
-
-      expect(find.byKey(const ValueKey('hifi-path-native')), findsOneWidget);
+      await tester.pumpWidget(MaterialApp(home: NowPlayingPage(state: state)));
+      await tester.pump();
       expect(find.textContaining('非 HiFi 路径'), findsNothing);
+      expect(find.textContaining('ABI mismatch'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('now-playing-transport')),
+        findsOneWidget,
+      );
+      expect(state.hifiPathNotice, contains('ABI mismatch'));
+      expect(tester.takeException(), isNull);
     });
-
-    testWidgets('names the path and the reason on a fallback', (tester) async {
-      await pump(tester, '原生 HiFi 引擎不可用：lazer-audio.dll was not found');
-
-      expect(find.byKey(const ValueKey('hifi-path-fallback')), findsOneWidget);
-      expect(find.textContaining('非 HiFi 路径'), findsOneWidget);
-      expect(find.textContaining('lazer-audio.dll was not found'), findsOneWidget);
-    });
-  });
+  }
 }

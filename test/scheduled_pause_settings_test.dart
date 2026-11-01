@@ -113,6 +113,11 @@ void main() {
           find.byKey(const ValueKey('open-scheduled-pause')),
           300,
         );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('open-scheduled-pause')).hitTestable(),
+          findsOneWidget,
+        );
         await tester.tap(find.byKey(const ValueKey('open-scheduled-pause')));
         await tester.pumpAndSettle();
         expect(find.byType(ScheduledPauseSettingsPage), findsOneWidget);

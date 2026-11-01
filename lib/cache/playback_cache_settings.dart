@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../widgets/apple_ui.dart';
+import '../widgets/settings_row.dart';
 import 'playback_cache.dart';
 
 /// Standalone settings group for the shared settings page.
@@ -19,10 +20,11 @@ class PlaybackCacheSettings extends StatelessWidget {
       builder: (BuildContext context, Widget? child) => AppleGroupedCard(
         margin: EdgeInsets.zero,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            ListTile(
-              title: Text(context.tr('边听边缓存')),
-              subtitle: Text(context.tr('完整缓存可在本地音乐中离线播放')),
+            SettingsRow(
+              label: '边听边缓存',
+              subtitle: '完整缓存可在本地音乐中离线播放',
               trailing: DropdownButtonHideUnderline(
                 child: DropdownButton<PlaybackCacheMode>(
                   key: const ValueKey<String>('playback-cache-mode'),
@@ -44,7 +46,7 @@ class PlaybackCacheSettings extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: SettingsSpacing.rowPadding,
               child: Text(
                 context.tr(
                   controller.mode == PlaybackCacheMode.recent
@@ -54,9 +56,9 @@ class PlaybackCacheSettings extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
-            ListTile(
-              title: Text(context.tr('缓存歌曲上限')),
-              subtitle: Text(context.tr('当前已缓存 ${controller.cachedCount} 首')),
+            SettingsRow(
+              label: '缓存歌曲上限',
+              subtitle: '当前已缓存 ${controller.cachedCount} 首',
               trailing: DropdownButtonHideUnderline(
                 child: DropdownButton<int>(
                   key: const ValueKey<String>('playback-cache-limit'),
@@ -84,9 +86,11 @@ class PlaybackCacheSettings extends StatelessWidget {
                 ),
               ),
             ),
-            ListTile(
-              title: Text(context.tr('清空播放缓存')),
-              subtitle: Text(context.tr('手动下载和导入的文件会保留')),
+            AppleListTile(
+              padding: SettingsSpacing.rowPadding,
+              minHeight: SettingsSpacing.rowMinHeight,
+              title: context.tr('清空播放缓存'),
+              subtitle: context.tr('手动下载和导入的文件会保留'),
               trailing: const Icon(Icons.delete_outline_rounded),
               onTap: controller.cachedCount == 0
                   ? null

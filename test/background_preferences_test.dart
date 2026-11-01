@@ -13,6 +13,8 @@ import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/diagnostics/app_log.dart';
 
 class _Catalog extends Catalog {
+  _Catalog({super.gateway});
+
   @override
   Future<HomeFeed?> loadHome({int? userId}) async => null;
   @override
@@ -22,6 +24,14 @@ class _Catalog extends Catalog {
   }) async => null;
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => null;
+}
+
+class _ArtworkGateway extends NeteaseGateway {
+  final details = Completer<List<GatewaySong>>();
+
+  @override
+  Future<List<GatewaySong>> songDetails(List<int> ids) =>
+      ids.single == 2 ? details.future : Future.value([]);
 }
 
 Track _track(String id) => Track(
@@ -95,6 +105,107 @@ void main() {
       expect(state.legacyAccentSeed, Colors.blue);
     },
   );
+
+  test('paused next and previous refresh the artwork accent', () async {
+    final requested = <String?>[];
+    final state = AppState(
+      catalog: _Catalog(),
+      artworkSeedLoader: (url) async {
+        requested.add(url);
+        return url!.endsWith('/a') ? Colors.red : Colors.blue;
+      },
+    );
+    addTearDown(state.dispose);
+    state.legacyPalette = LegacyPaletteMode.nowPlaying;
+    state.playQueue([_track('a'), _track('b')]);
+    await Future<void>.delayed(Duration.zero);
+    state.pause();
+    expect(state.legacyAccentSeed, Colors.red);
+
+    state.next();
+    await Future<void>.delayed(Duration.zero);
+    expect(state.playing, isFalse);
+    expect(state.legacyAccentSeed, Colors.blue);
+
+    state.previous();
+    await Future<void>.delayed(Duration.zero);
+    expect(state.playing, isFalse);
+    expect(state.legacyAccentSeed, Colors.red);
+    expect(requested, [
+      'https://cover.test/a',
+      'https://cover.test/b',
+      'https://cover.test/a',
+    ]);
+  });
+
+  test('a slow palette cannot overwrite a newer paused selection', () async {
+    final old = Completer<Color?>();
+    final requested = <String?>[];
+    final state = AppState(
+      catalog: _Catalog(),
+      artworkSeedLoader: (url) {
+        requested.add(url);
+        if (url!.endsWith('/b')) return old.future;
+        return Future.value(url.endsWith('/a') ? Colors.red : Colors.blue);
+      },
+    );
+    addTearDown(state.dispose);
+    state.legacyPalette = LegacyPaletteMode.nowPlaying;
+    state.playQueue([_track('a'), _track('b'), _track('c')]);
+    await Future<void>.delayed(Duration.zero);
+    state.pause();
+    state.next();
+    state.next();
+    await Future<void>.delayed(Duration.zero);
+    expect(state.current?.id, 'c');
+    expect(state.legacyAccentSeed, Colors.blue);
+    old.complete(Colors.green);
+    await Future<void>.delayed(Duration.zero);
+    expect(state.legacyAccentSeed, Colors.blue);
+    expect(requested, [
+      'https://cover.test/a',
+      'https://cover.test/b',
+      'https://cover.test/c',
+    ]);
+  });
+
+  test('paused track hydration refreshes the changed artwork URL', () async {
+    final gateway = _ArtworkGateway();
+    final requested = <String?>[];
+    final state = AppState(
+      catalog: _Catalog(gateway: gateway),
+      artworkSeedLoader: (url) async {
+        requested.add(url);
+        return url!.endsWith('/hydrated') ? Colors.green : Colors.red;
+      },
+    );
+    addTearDown(state.dispose);
+    state.legacyPalette = LegacyPaletteMode.nowPlaying;
+    state.playQueue([_track('1'), _track('2')]);
+    await Future<void>.delayed(Duration.zero);
+    state.pause();
+    state.next();
+    await Future<void>.delayed(Duration.zero);
+    gateway.details.complete([
+      const GatewaySong(
+        id: 2,
+        title: '2',
+        artists: ['Artist'],
+        albumName: 'Album',
+        duration: Duration(minutes: 3),
+        coverUrl: 'https://cover.test/hydrated',
+      ),
+    ]);
+    await Future<void>.delayed(Duration.zero);
+    expect(state.playing, isFalse);
+    expect(state.current?.coverUrl, 'https://cover.test/hydrated');
+    expect(state.legacyAccentSeed, Colors.green);
+    expect(requested, [
+      'https://cover.test/1',
+      'https://cover.test/2',
+      'https://cover.test/hydrated',
+    ]);
+  });
 
   for (final rate in [30.0, 10.0, null]) {
     testWidgets('background cadence is independent of mesh quality at $rate', (

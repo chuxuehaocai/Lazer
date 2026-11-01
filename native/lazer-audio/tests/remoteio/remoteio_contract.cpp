@@ -69,6 +69,9 @@ struct FakeUnitState {
 FakeUnitState g_unit;
 bool g_componentAvailable = true;
 bool g_changeGrantedChannels = false;
+int g_instancesCreated = 0;
+int g_instancesDisposed = 0;
+bool g_inRenderCallback = false;
 
 /* Pulls `frames` from the backend's callback exactly as the device would. */
 std::vector<float> pullAudio(int32_t frames, int32_t channels) {
@@ -79,8 +82,10 @@ std::vector<float> pullAudio(int32_t frames, int32_t channels) {
     list.mBuffers[0].mDataByteSize = static_cast<UInt32>(samples.size() * sizeof(float));
     list.mBuffers[0].mData = samples.data();
     AudioUnitRenderActionFlags flags = 0;
+    g_inRenderCallback = true;
     const OSStatus status = g_unit.callback.inputProc(g_unit.callback.inputProcRefCon, &flags,
         nullptr, 0, static_cast<UInt32>(frames), &list);
+    g_inRenderCallback = false;
     checkEqual(status, noErr, "render callback returns noErr");
     return samples;
 }
@@ -98,14 +103,18 @@ AudioComponent AudioComponentFindNext(AudioComponent, const AudioComponentDescri
 }
 
 OSStatus AudioComponentInstanceNew(AudioComponent component, AudioUnit *outInstance) {
+    check(!g_inRenderCallback, "the callback never creates an AudioUnit");
     if (component == nullptr || outInstance == nullptr) return -1;
+    ++g_instancesCreated;
     g_unit = FakeUnitState{};
     *outInstance = reinterpret_cast<AudioUnit>(&g_unit);
     return noErr;
 }
 
 OSStatus AudioComponentInstanceDispose(AudioUnit unit) {
+    check(!g_inRenderCallback, "the callback never disposes an AudioUnit");
     if (unit == nullptr) return -1;
+    ++g_instancesDisposed;
     ++g_unit.disposeCalls;
     // The backend must not dispose a running unit.
     check(!g_unit.running, "disposes the unit only after stopping it");
@@ -218,6 +227,9 @@ struct FakeSession {
     int32_t requestedSampleRate = 0;
     int32_t requestedBufferMillis = 0;
     bool failActivation = false;
+    bool notifyDuringActivation = false;
+    int stateReads = 0;
+    lazer::audio::IosSessionState state{};
 };
 
 FakeSession g_session;
@@ -226,9 +238,22 @@ FakeSession g_session;
 
 namespace lazer::audio {
 
+IosSessionState iosSessionState() noexcept {
+    check(!g_inRenderCallback, "the callback never polls the session lifecycle");
+    ++g_session.stateReads;
+    return g_session.state;
+}
+
+void iosSessionRequestResume() noexcept {
+    check(!g_inRenderCallback, "the callback never requests session resumption");
+    g_session.state.mayResume = true;
+}
+
 int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
     IosSessionInfo &info, std::string &error) {
+    check(!g_inRenderCallback, "the callback never activates the session");
     ++g_session.activateCalls;
+    if (g_session.notifyDuringActivation) ++g_session.state.revision;
     g_session.requestedSampleRate = preferredSampleRate;
     g_session.requestedBufferMillis = bufferMillis;
     if (g_session.failActivation) {
@@ -464,6 +489,198 @@ void testRejectsChangedCallbackLayout() {
     g_changeGrantedChannels = false;
 }
 
+
+void testRouteChangesKeepTheClientClockAndQueuedPcm() {
+    g_session = FakeSession{};
+    g_session.sampleRate = 44100;
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    checkEqual(output->start(error), LazerAudioOk, "starts before a route change");
+    const int initialInstances = g_instancesCreated;
+    const float frames[] = {0.125f, -0.125f, 0.5f, -0.5f};
+    for (int pass = 0; pass < 2; ++pass) {
+        checkEqual(output->write(reinterpret_cast<const uint8_t *>(frames), 2, error), 2,
+            "queues source PCM before changing the route");
+        g_session.sampleRate = pass == 0 ? 48000 : 44100;
+        g_session.ioBufferFrames = pass == 0 ? 960 : 512;
+        g_session.route = pass == 0 ? "BluetoothA2DP" : "Speaker";
+        ++g_session.state.revision;
+        g_unit.running = false; // The OS may stop it without changing running_.
+        check(output->writableFrames(error) > 0, "producer poll recovers the changed route");
+        check(error.empty(), "a recoverable route change is not a file error");
+        checkEqual(g_instancesCreated, initialInstances + pass + 1,
+            "creates exactly one replacement AudioUnit per route change");
+        check(g_unit.running, "restarts after an OS stop even if the old running flag was true");
+        checkNear(g_unit.format.mSampleRate, 44100, 0.5,
+            "44.1/48 kHz hardware changes preserve the original client clock");
+        checkEqual(session.engineFormat.sampleRate, 44100,
+            "the engine's published clock stays valid after a route change");
+        checkEqual(g_session.requestedSampleRate, 0,
+            "recovery lets the system choose its hardware clock");
+        checkEqual(output->queuedFrames(error), 2, "route recreation preserves queued PCM frames");
+        const auto samples = pullAudio(2, 2);
+        check(std::memcmp(samples.data(), frames, sizeof(frames)) == 0,
+            "queued samples survive recreation bit-for-bit and in order");
+    }
+}
+
+void testInterruptionBackPressureAndResume() {
+    g_session = FakeSession{};
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    output->start(error);
+    const float first[] = {0.25f, -0.25f};
+    const float inFlight[] = {0.75f, -0.75f};
+    output->write(reinterpret_cast<const uint8_t *>(first), 1, error);
+    const int instances = g_instancesCreated;
+    g_session.state.interrupted = true;
+    ++g_session.state.revision;
+    checkEqual(output->writableFrames(error), 0, "interruption applies producer back-pressure");
+    check(error.empty(), "interruption does not turn into a device/file error");
+    check(output->isOpen(), "an interrupted output remains logically open");
+    check(!g_unit.running, "an interruption stops the old unit");
+    checkEqual(output->write(reinterpret_cast<const uint8_t *>(inFlight), 1, error), 1,
+        "retains the block granted capacity immediately before interruption");
+    checkEqual(output->queuedFrames(error), 2, "interruption retains both queued and in-flight PCM");
+    checkEqual(static_cast<int64_t>(output->waitForReady(2, error)),
+        static_cast<int64_t>(OutputWaitResult::Timeout), "wait times out while interrupted");
+    check(error.empty(), "waiting during an interruption is not an error");
+    checkEqual(g_instancesCreated, instances, "does not recreate units during an interruption");
+    g_session.state.interrupted = false;
+    ++g_session.state.revision;
+    checkEqual(output->queuedFrames(error), 2, "queue observation performs interruption recovery");
+    check(g_unit.running, "ShouldResume resumes a previously playing output");
+    checkEqual(g_instancesCreated, instances + 1, "interruption end recreates the unit once");
+    const auto samples = pullAudio(2, 2);
+    checkNear(samples[0], first[0], 1e-6, "resumed playback keeps the first block");
+    checkNear(samples[2], inFlight[0], 1e-6, "resumed playback keeps the in-flight block");
+}
+
+void testNoResumeAndPausedOutputsStayStopped() {
+    g_session = FakeSession{};
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    output->start(error);
+    g_session.state.interrupted = true;
+    ++g_session.state.revision;
+    output->writableFrames(error);
+    output->stop(error); // User paused while the system interruption was active.
+    g_session.state.interrupted = false;
+    ++g_session.state.revision;
+    output->writableFrames(error);
+    check(!g_unit.running, "ending an interruption never overrides an explicit pause");
+    checkEqual(g_unit.startCalls, 0, "a paused output's replacement unit stays stopped");
+    output->start(error);
+    g_session.state.interrupted = true;
+    ++g_session.state.revision;
+    output->writableFrames(error);
+    g_session.state.interrupted = false;
+    g_session.state.mayResume = false; // Interruption ended without ShouldResume.
+    ++g_session.state.revision;
+    checkEqual(output->writableFrames(error), 0, "ShouldResume=false keeps back-pressure");
+    check(!g_unit.running, "ShouldResume=false prevents automatic playback");
+    checkEqual(output->start(error), LazerAudioOk, "an explicit play request can resume later");
+    check(g_unit.running, "explicit play starts after a no-resume interruption");
+    g_session.state.mayResume = false; // OldDeviceUnavailable (headset removed).
+    ++g_session.state.revision;
+    output->queuedFrames(error);
+    check(!g_unit.running, "removing headphones never resumes on the speaker automatically");
+    checkEqual(output->writableFrames(error), 0, "removed headphones retain back-pressure");
+    checkEqual(output->start(error), LazerAudioOk, "explicit play acknowledges headphone removal");
+    check(g_unit.running, "explicit play can intentionally use the new speaker route");
+    ++g_session.state.revision;
+    output->writableFrames(error);
+    check(g_unit.running, "later route notifications do not reinstate stale no-resume state");
+    output->stop(error);
+    ++g_session.state.revision;
+    output->writableFrames(error);
+    check(!g_unit.running, "a route change keeps a manually paused output stopped");
+    output->close();
+    const int activations = g_session.activateCalls;
+    ++g_session.state.revision;
+    checkEqual(output->start(error), LazerAudioErrorInvalidArgument,
+        "closed output cannot resume because of a notification");
+    checkEqual(g_session.activateCalls, activations, "a closed output never reactivates the session");
+}
+
+void testMediaServicesLossResetAndActivationEpoch() {
+    g_session = FakeSession{};
+    g_session.notifyDuringActivation = true;
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    output->start(error);
+    const float frame[] = {0.125f, -0.375f};
+    output->write(reinterpret_cast<const uint8_t *>(frame), 1, error);
+    const int instances = g_instancesCreated;
+    g_session.state.mediaServicesAvailable = false;
+    ++g_session.state.revision;
+    checkEqual(output->writableFrames(error), 0, "lost media services block producer writes");
+    checkEqual(output->queuedFrames(error), 1, "lost media services preserve queued PCM");
+    checkEqual(static_cast<int64_t>(output->waitForReady(1, error)),
+        static_cast<int64_t>(OutputWaitResult::Timeout), "media services loss remains a temporary wait");
+    check(error.empty(), "media services loss is not a terminal song error");
+    checkEqual(g_instancesCreated, instances, "does not create units while media services are lost");
+    g_session.state.mediaServicesAvailable = true;
+    ++g_session.state.revision;
+    // write() also consumes lifecycle changes without depending on a query first.
+    checkEqual(output->write(reinterpret_cast<const uint8_t *>(frame), 1, error), 1,
+        "reset recovery accepts more source PCM");
+    checkEqual(g_instancesCreated, instances + 1, "services reset recreates the invalid AudioUnit");
+    check(g_unit.running, "reset restarts playback that was running before media loss");
+    const int activations = g_session.activateCalls;
+    const int recreated = g_instancesCreated;
+    for (int repeat = 0; repeat < 20; ++repeat) {
+        output->queuedFrames(error);
+        output->writableFrames(error);
+    }
+    checkEqual(g_session.activateCalls, activations,
+        "activation-generated notifications do not trigger an activation loop");
+    checkEqual(g_instancesCreated, recreated,
+        "activation-generated notifications do not cause repeated AudioUnit rebuilding");
+    checkEqual(output->queuedFrames(error), 2, "services reset keeps old and new PCM in one queue");
+    const auto samples = pullAudio(2, 2);
+    checkNear(samples[0], frame[0], 1e-6, "services reset preserves the old queued sample");
+    checkNear(samples[2], frame[0], 1e-6, "services reset appends the new queued sample");
+}
+
+void testRecoveryFailureIsTemporaryAndCallbackDoesNoRecovery() {
+    g_session = FakeSession{};
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    output->start(error);
+    const float frame[] = {0.375f, -0.375f};
+    output->write(reinterpret_cast<const uint8_t *>(frame), 1, error);
+    ++g_session.state.revision;
+    const int reads = g_session.stateReads;
+    const int instances = g_instancesCreated;
+    const int activations = g_session.activateCalls;
+    const auto samples = pullAudio(1, 2);
+    checkNear(samples[0], frame[0], 1e-6, "callback continues copying queued PCM with a pending event");
+    checkEqual(g_session.stateReads, reads, "callback never polls session notifications");
+    checkEqual(g_instancesCreated, instances, "callback never recreates an AudioUnit");
+    checkEqual(g_session.activateCalls, activations, "callback never activates an audio session");
+    g_session.failActivation = true;
+    checkEqual(output->writableFrames(error), 0, "temporary reactivation failure applies back-pressure");
+    check(error.empty(), "temporary reactivation failure does not poison the playing song");
+    check(output->isOpen(), "reactivation failure keeps the output logically open");
+    checkEqual(static_cast<int64_t>(output->waitForReady(1, error)),
+        static_cast<int64_t>(OutputWaitResult::Timeout), "failed recovery is a wait, not a file error");
+    g_session.failActivation = false;
+    ++g_session.state.revision;
+    check(output->writableFrames(error) > 0, "later session notification retries a failed recovery");
+    check(g_unit.running, "successful retry restarts previously running playback");
+}
+
 }  // namespace
 
 int main() {
@@ -473,6 +690,11 @@ int main() {
     testWaitForReadySeesTheDeviceDrain();
     testMissingUnitAndSessionFailureAreReported();
     testRejectsChangedCallbackLayout();
+    testRouteChangesKeepTheClientClockAndQueuedPcm();
+    testInterruptionBackPressureAndResume();
+    testNoResumeAndPausedOutputsStayStopped();
+    testMediaServicesLossResetAndActivationEpoch();
+    testRecoveryFailureIsTemporaryAndCallbackDoesNoRecovery();
     if (failures != 0) {
         std::printf("%d RemoteIO contract check(s) failed\n", failures);
         return 1;

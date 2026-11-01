@@ -22,6 +22,7 @@ import '../widgets/hifi_settings_section.dart';
 import '../widgets/listen_together_dialog.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/settings_choice.dart';
+import '../widgets/settings_row.dart';
 import '../tv/tv_mode.dart';
 import '../tv/lan_remote.dart';
 import '../updates/update_dialog.dart';
@@ -103,6 +104,8 @@ class _SettingsOverview extends StatelessWidget {
               child: Column(
                 children: <Widget>[
                   AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
                     key: const ValueKey('open-font-settings'),
                     title: context.tr('字体自定义'),
                     subtitle: context.tr('选择 MiSans、系统或导入字体，调节文字与歌词大小和粗细'),
@@ -468,6 +471,8 @@ class _SettingsOverview extends StatelessWidget {
                         unawaited(state.setIndependentPlayback(value)),
                   ),
                   AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
                     key: const ValueKey('open-scheduled-pause'),
                     title: context.tr('定时关闭'),
                     subtitle: context.tr(
@@ -486,6 +491,7 @@ class _SettingsOverview extends StatelessWidget {
             HifiSettingsSection(state: state),
             const _LegacySectionLabel('下载'),
             PlaybackCacheSettings(controller: state.playbackCache),
+            const SizedBox(height: SettingsSpacing.groupGap),
             AppleGroupedCard(
               margin: EdgeInsets.zero,
               child: Column(
@@ -609,6 +615,8 @@ class _SettingsOverview extends StatelessWidget {
             AppleGroupedCard(
               margin: EdgeInsets.zero,
               child: AppleListTile(
+                padding: SettingsSpacing.rowPadding,
+                minHeight: SettingsSpacing.rowMinHeight,
                 key: const ValueKey('open-shortcut-settings'),
                 title: context.tr('快捷键设置'),
                 subtitle: context.tr('自定义播放控制的键盘快捷键'),
@@ -753,6 +761,8 @@ class _SettingsOverview extends StatelessWidget {
               child: Column(
                 children: <Widget>[
                   AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
                     key: const ValueKey('music-platform-settings'),
                     title: context.tr('音乐平台'),
                     subtitle: state.isNavidrome
@@ -816,6 +826,8 @@ class _SettingsOverview extends StatelessWidget {
                 children: <Widget>[
                   _VersionSecretTile(state: state),
                   AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
                     key: const ValueKey('export-logs'),
                     title: context.tr('导出日志'),
                     subtitle: context.tr('保存运行日志与播放诊断信息'),
@@ -877,75 +889,12 @@ class _LegacySectionLabel extends StatelessWidget {
   }
 }
 
-class _LegacySettingRow extends StatelessWidget {
+class _LegacySettingRow extends SettingsRow {
   const _LegacySettingRow({
-    required this.label,
-    required this.subtitle,
-    required this.trailing,
+    required super.label,
+    required super.subtitle,
+    required super.trailing,
   });
-
-  final String label;
-  final String subtitle;
-  final Widget trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final AppleSemanticColors apple = AppleSemanticColors.of(context);
-    final bool stacked = MediaQuery.sizeOf(context).width < 360;
-    final Widget heading = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          context.tr(label),
-          style: theme.textTheme.bodyLarge?.copyWith(color: apple.label),
-        ),
-        if (subtitle.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 2),
-          Text(
-            context.tr(subtitle),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: apple.secondaryLabel,
-            ),
-          ),
-        ],
-      ],
-    );
-    return TvFocusHighlight(
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: apple.separator, width: .5)),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        child: stacked
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  heading,
-                  const SizedBox(height: 8),
-                  Align(alignment: Alignment.centerLeft, child: trailing),
-                ],
-              )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  Expanded(flex: 4, child: heading),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    flex: 9,
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: trailing,
-                    ),
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
 }
 
 class _LegacySwitchRow extends StatelessWidget {
@@ -1016,6 +965,8 @@ class _VersionSecretTileState extends State<_VersionSecretTile> {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return AppleListTile(
+      padding: SettingsSpacing.rowPadding,
+      minHeight: SettingsSpacing.rowMinHeight,
       title: 'Lazer',
       subtitle: context.tr('提交 ${BuildInfo.shortCommit}'),
       onTap: _tap,

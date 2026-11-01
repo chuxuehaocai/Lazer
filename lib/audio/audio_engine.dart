@@ -94,6 +94,14 @@ abstract interface class FocusAwareAudioEngine {
   Future<bool> Function()? activateSession;
 }
 
+/// A backend that must know the OS session category before opening output.
+///
+/// Preparing a paused source must not request audio focus. In particular,
+/// iOS RemoteIO chooses its route during open, before the first play call.
+abstract interface class SessionPreparingAudioEngine {
+  Future<void> Function()? prepareSession;
+}
+
 /// Playback surface used for stream URLs returned by the gateway.
 abstract class AudioEngine {
   /// Whether a source is currently loaded.
@@ -156,7 +164,8 @@ class JustAudioEngine
   /// [reportFailure] and reaches the app through [failures].
   final String? fallbackNotice;
 
-  final StreamController<String> _failures = StreamController<String>.broadcast();
+  final StreamController<String> _failures =
+      StreamController<String>.broadcast();
 
   @override
   Stream<String> get failures => _failures.stream;

@@ -26,7 +26,9 @@ import '../updates/update_dialog.dart';
 import '../utils/artwork.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/artwork_image.dart';
+import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
+import '../widgets/retained_content_switcher.dart';
 import '../widgets/song_comments_view.dart';
 import 'legacy_background.dart';
 import 'legacy_login.dart';
@@ -64,9 +66,32 @@ class LegacyShell extends StatefulWidget {
 
 enum _LegacySection { home, search, library, likes, settings }
 
+class _BrowseLocation {
+  const _BrowseLocation({
+    required this.key,
+    required this.section,
+    this.playlist,
+    this.album,
+    this.artist,
+    this.chart,
+    this.artistSongs = false,
+    this.artistReleases,
+  });
+
+  final String key;
+  final _LegacySection section;
+  final Playlist? playlist;
+  final Album? album;
+  final ArtistRef? artist;
+  final MusicChart? chart;
+  final bool artistSongs;
+  final AlbumReleaseGroup? artistReleases;
+}
+
 class _LegacyShellState extends State<LegacyShell>
     with TickerProviderStateMixin {
   _LegacySection _section = _LegacySection.home;
+  final List<_BrowseLocation> _browseHistory = <_BrowseLocation>[];
   Object? _railCollectionsSource;
   List<Playlist> _railPlaylistCache = const <Playlist>[];
   Playlist? _playlist;
@@ -221,6 +246,8 @@ class _LegacyShellState extends State<LegacyShell>
   void _onAppStateChanged() {
     if (!mounted) return;
     if (_connectionKey != state.activeConnectionKey) {
+      _browseHistory.clear();
+      cancelCoverTransitions();
       _connectionKey = state.activeConnectionKey;
       _playlist = null;
       _album = null;
@@ -312,6 +339,8 @@ class _LegacyShellState extends State<LegacyShell>
   void didUpdateWidget(covariant LegacyShell oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.state != widget.state) {
+      _browseHistory.clear();
+      cancelCoverTransitions();
       oldWidget.state.removeListener(_onAppStateChanged);
       widget.state.addListener(_onAppStateChanged);
       _playerPage = null;
@@ -320,6 +349,7 @@ class _LegacyShellState extends State<LegacyShell>
 
   @override
   void dispose() {
+    cancelCoverTransitions();
     _updateTimer?.cancel();
     state.removeListener(_onAppStateChanged);
     _playerSettled.dispose();
@@ -338,6 +368,8 @@ class _LegacyShellState extends State<LegacyShell>
   }
 
   void _select(_LegacySection section) {
+    _browseHistory.clear();
+    cancelCoverTransitions();
     setState(() {
       _section = section;
       _playlist = null;
@@ -351,6 +383,8 @@ class _LegacyShellState extends State<LegacyShell>
   }
 
   void _openPlaylist(Playlist playlist) {
+    if (_playlist?.id == playlist.id && _album == null && !_comments) return;
+    _rememberBrowseLocation();
     setState(() {
       _playlist = playlist;
       _album = null;
@@ -366,6 +400,8 @@ class _LegacyShellState extends State<LegacyShell>
   /// 音乐库 → 本地音乐. It keeps the library section selected so the rail still
   /// reads as the current place, while the content pane swaps to the page.
   void _openLocalMusic() {
+    _browseHistory.clear();
+    cancelCoverTransitions();
     setState(() {
       _section = _LegacySection.library;
       _localMusic = true;
@@ -395,6 +431,8 @@ class _LegacyShellState extends State<LegacyShell>
   /// and track list), so an album is a playlist with its own metadata rather
   /// than a second page type.
   void _openAlbum(Album album) {
+    if (_album?.id == album.id && !_comments) return;
+    _rememberBrowseLocation();
     _closeNowPlaying();
     setState(() {
       _album = album;
@@ -421,6 +459,7 @@ class _LegacyShellState extends State<LegacyShell>
     artistDetailRequest.value = null;
     if (!mounted) return;
     _closeNowPlaying();
+    _rememberBrowseLocation();
     setState(() {
       _artist = artist;
       _chart = null;
@@ -433,23 +472,71 @@ class _LegacyShellState extends State<LegacyShell>
     });
   }
 
-  void _openArtistSongs() => setState(() => _artistSongs = true);
+  void _openArtistSongs() {
+    _rememberBrowseLocation();
+    setState(() => _artistSongs = true);
+  }
 
-  void _openChart(MusicChart chart) => setState(() {
-    _chart = chart;
-    _playlist = null;
-    _album = null;
-    _artist = null;
-    _artistSongs = false;
-    _artistReleases = null;
-    _comments = false;
-    _localMusic = false;
-  });
+  void _openChart(MusicChart chart) {
+    if (_chart?.id == chart.id && !_comments) return;
+    _rememberBrowseLocation();
+    setState(() {
+      _chart = chart;
+      _playlist = null;
+      _album = null;
+      _artist = null;
+      _artistSongs = false;
+      _artistReleases = null;
+      _comments = false;
+      _localMusic = false;
+    });
+  }
 
-  void _openArtistReleases(AlbumReleaseGroup group) =>
-      setState(() => _artistReleases = group);
+  void _openArtistReleases(AlbumReleaseGroup group) {
+    _rememberBrowseLocation();
+    setState(() => _artistReleases = group);
+  }
+
+  void _rememberBrowseLocation() {
+    // Keep the actual return chain, never every page that has been visited.
+    // A bound also prevents artist/album links forming an unlimited cycle.
+    _browseHistory.add(
+      _BrowseLocation(
+        key: _contentKey,
+        section: _section,
+        playlist: _playlist,
+        album: _album,
+        artist: _artist,
+        chart: _chart,
+        artistSongs: _artistSongs,
+        artistReleases: _artistReleases,
+      ),
+    );
+    if (_browseHistory.length > 8) _browseHistory.removeAt(1);
+  }
 
   void _backToRoot() {
+    if (!_comments && !_localMusic && _browseHistory.isNotEmpty) {
+      final identity = _chart != null
+          ? 'chart:${_chart!.id}'
+          : _playlist != null
+          ? 'playlist:${_playlist!.id}'
+          : null;
+      if (identity != null) returnCoverTransition(identity);
+      final previous = _browseHistory.removeLast();
+      setState(() {
+        _section = previous.section;
+        _playlist = previous.playlist;
+        _album = previous.album;
+        _artist = previous.artist;
+        _chart = previous.chart;
+        _artistSongs = previous.artistSongs;
+        _artistReleases = previous.artistReleases;
+        _comments = false;
+        _localMusic = false;
+      });
+      return;
+    }
     setState(() {
       if (_artistSongs || _artistReleases != null) {
         _artistSongs = false;
@@ -1451,66 +1538,14 @@ class _LegacyShellState extends State<LegacyShell>
   // -- content --------------------------------------------------------------
 
   Widget _content() {
-    final Widget page = _contentPage();
     final bool motion = !MediaQuery.disableAnimationsOf(context);
     final bool largeScreen = largeScreenModeOf(context);
-    return AnimatedSwitcher(
-      // [_contentMotion] mirrors this duration: keep the two in step.
+    return RetainedContentSwitcher(
+      currentKey: _contentKey,
+      retainKeys: _browseHistory.map((location) => location.key).toSet(),
       duration: motion ? const Duration(milliseconds: 420) : Duration.zero,
-      switchInCurve: const Cubic(0.32, 0.72, 0, 1),
-      switchOutCurve: Curves.easeInCubic,
-      layoutBuilder: (Widget? current, List<Widget> previous) => Stack(
-        alignment: Alignment.topCenter,
-        children: <Widget>[
-          // The outgoing page is already fading out: stop its own animations
-          // (the moving cover mosaics, list flings, progress spinners) so the
-          // transition only pays for the fade, not two live pages. Each child
-          // is also its own layer, which lets the opacity and slide below be
-          // composited instead of re-rasterising both pages every frame.
-          if (previous.isNotEmpty)
-            TickerMode(
-              enabled: false,
-              child: IgnorePointer(
-                child: ExcludeSemantics(
-                  child: RepaintBoundary(child: previous.last),
-                ),
-              ),
-            ),
-          // Pause the incoming page's own tickers for the duration of the
-          // switch too: on a television the cover mosaics are the heaviest
-          // animation in the tree, and they can wait 420 ms for the page to
-          // land.
-          if (current != null)
-            TickerMode(
-              enabled: !_contentSwitching,
-              child: RepaintBoundary(child: current),
-            ),
-        ],
-      ),
-      transitionBuilder: (Widget child, Animation<double> animation) {
-        // AnimatedSwitcher owns the curved animation and its disposal. Reusing
-        // it avoids retaining another status listener on every state report.
-        // Fast first, slow on arrival. The slide is a few pixels of vertical
-        // travel (a compositor transform), not a layout change, and the fade
-        // keeps the outgoing page readable until the new one owns the frame.
-        return FadeTransition(
-          opacity: animation,
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: Offset(0, largeScreen ? .012 : .04),
-              end: Offset.zero,
-            ).animate(animation),
-            child: MotionSnapshot(animation: animation, child: child),
-          ),
-        );
-      },
-      child: KeyedSubtree(
-        key: ValueKey<String>(_contentKey),
-        // Each page gets its own focus region. Opening a section, a playlist
-        // or an album therefore puts the remote on that page's first control
-        // instead of leaving focus behind on the element that opened it.
-        child: TvFocusRegion(focusToken: _nowPlayingOpen, child: page),
-      ),
+      slideFraction: largeScreen ? .012 : .04,
+      page: TvFocusRegion(focusToken: _nowPlayingOpen, child: _contentPage()),
     );
   }
 

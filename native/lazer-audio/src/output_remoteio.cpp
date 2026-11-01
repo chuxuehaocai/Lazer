@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -79,78 +80,7 @@ public:
             return LazerAudioErrorDevice;
         }
 
-        AudioComponentDescription description{};
-        description.componentType = kAudioUnitType_Output;
-        description.componentSubType = kAudioUnitSubType_RemoteIO;
-        description.componentManufacturer = kAudioUnitManufacturer_Apple;
-        AudioComponent component = AudioComponentFindNext(nullptr, &description);
-        if (component == nullptr) {
-            error = "The iOS RemoteIO AudioUnit is unavailable on this system";
-            close();
-            return LazerAudioErrorDevice;
-        }
-        OSStatus status = AudioComponentInstanceNew(component, &unit_);
-        if (status != noErr || unit_ == nullptr) {
-            unit_ = nullptr;
-            error = statusText("AudioComponentInstanceNew", status);
-            close();
-            return LazerAudioErrorDevice;
-        }
-
-        // The output element is enabled by default; the input element is not
-        // wanted at all, and enabling it would put a microphone indicator on
-        // the status bar and demand a usage description for a music player.
-        UInt32 disabled = 0;
-        status = AudioUnitSetProperty(unit_, kAudioOutputUnitProperty_EnableIO,
-            kAudioUnitScope_Input, kInputBus, &disabled, sizeof(disabled));
-        if (status != noErr) {
-            error = statusText("RemoteIO input disable", status);
-            close();
-            return LazerAudioErrorDevice;
-        }
-
-        AudioStreamBasicDescription format{};
-        format.mSampleRate = static_cast<Float64>(info.sampleRate);
-        format.mFormatID = kAudioFormatLinearPCM;
-        format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-        format.mFramesPerPacket = 1;
-        format.mChannelsPerFrame = static_cast<UInt32>(channels);
-        format.mBitsPerChannel = 32;
-        format.mBytesPerFrame = static_cast<UInt32>(sizeof(float) * channels);
-        format.mBytesPerPacket = format.mBytesPerFrame;
-        status = AudioUnitSetProperty(unit_, kAudioUnitProperty_StreamFormat,
-            kAudioUnitScope_Input, kOutputBus, &format, sizeof(format));
-        if (status != noErr) {
-            error = statusText("RemoteIO stream format", status);
-            close();
-            return LazerAudioErrorDevice;
-        }
-
         const int32_t ioFrames = info.ioBufferFrames > 0 ? info.ioBufferFrames : 512;
-        // A slice smaller than what the device asks for would make the unit
-        // split callbacks; leaving headroom above it keeps one callback per IO
-        // period on every route we have seen (44.1 kHz through 192 kHz).
-        UInt32 sliceFrames = static_cast<UInt32>(
-            std::clamp<int64_t>(static_cast<int64_t>(ioFrames) * 2, 1024, 8192));
-        status = AudioUnitSetProperty(unit_, kAudioUnitProperty_MaximumFramesPerSlice,
-            kAudioUnitScope_Global, kOutputBus, &sliceFrames, sizeof(sliceFrames));
-        if (status != noErr) {
-            error = statusText("RemoteIO maximum frames", status);
-            close();
-            return LazerAudioErrorDevice;
-        }
-
-        AURenderCallbackStruct callback{};
-        callback.inputProc = &RemoteIOOutput::renderThunk;
-        callback.inputProcRefCon = this;
-        status = AudioUnitSetProperty(unit_, kAudioUnitProperty_SetRenderCallback,
-            kAudioUnitScope_Input, kOutputBus, &callback, sizeof(callback));
-        if (status != noErr) {
-            error = statusText("RemoteIO render callback", status);
-            close();
-            return LazerAudioErrorDevice;
-        }
-
         const int64_t requestedFrames = static_cast<int64_t>(info.sampleRate) *
             std::clamp(request.bufferMillis, 20, 1000) / 1000;
         const int64_t queueFrames = std::clamp<int64_t>(
@@ -170,36 +100,15 @@ public:
             return LazerAudioErrorDevice;
         }
 
-        status = AudioUnitInitialize(unit_);
-        if (status != noErr) {
-            error = statusText("AudioUnitInitialize", status);
+        if (createUnit(info, error) != LazerAudioOk) {
             close();
             return LazerAudioErrorDevice;
         }
-        initialized_ = true;
-        // Read back what the unit accepted instead of trusting the request.
-        AudioStreamBasicDescription granted{};
-        UInt32 grantedSize = sizeof(granted);
-        if (AudioUnitGetProperty(unit_, kAudioUnitProperty_StreamFormat,
-                kAudioUnitScope_Input, kOutputBus, &granted, &grantedSize) == noErr &&
-            granted.mSampleRate > 0 && granted.mChannelsPerFrame > 0) {
-            // The queue was allocated for interleaved Float32 at the requested
-            // channel count. A unit that changes that layout would make the
-            // callback read frames with the wrong stride.
-            if (granted.mChannelsPerFrame != static_cast<UInt32>(channels) ||
-                granted.mFormatID != kAudioFormatLinearPCM ||
-                (granted.mFormatFlags & (kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked)) !=
-                    (kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked) ||
-                granted.mBitsPerChannel != 32 ||
-                granted.mBytesPerFrame != static_cast<UInt32>(sizeof(float) * channels)) {
-                error = "RemoteIO changed the requested interleaved Float32 layout";
-                close();
-                return LazerAudioErrorDevice;
-            }
-            target_.sampleRate = static_cast<int32_t>(granted.mSampleRate);
-            target_.channels = static_cast<int32_t>(granted.mChannelsPerFrame);
-        }
-
+        opened_ = true;
+        bufferMillis_ = std::clamp(request.bufferMillis, 20, 1000);
+        // Activation and preference changes may emit their own notifications.
+        // Consume that epoch once, after setup, rather than rebuilding forever.
+        sessionRevision_ = iosSessionState().revision;
         frameBytes_.store(target_.frameBytes(), std::memory_order_release);
         session = AudioOutputSession{};
         session.target = target_;
@@ -221,18 +130,10 @@ public:
 
     void close() override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
-        if (unit_ != nullptr) {
-            if (running_) {
-                AudioOutputUnitStop(unit_);
-                running_ = false;
-            }
-            if (initialized_) {
-                AudioUnitUninitialize(unit_);
-                initialized_ = false;
-            }
-            AudioComponentInstanceDispose(unit_);
-            unit_ = nullptr;
-        }
+        requestedRunning_ = false;
+        opened_ = false;
+        rebuildRequired_ = false;
+        disposeUnit();
         queue_.reset();
         frameBytes_.store(0, std::memory_order_release);
         if (sessionActive_) {
@@ -245,7 +146,13 @@ public:
     int32_t start(std::string &error) override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
-        if (unit_ == nullptr || !initialized_) return LazerAudioErrorInvalidArgument;
+        if (!opened_) return LazerAudioErrorInvalidArgument;
+        iosSessionRequestResume();
+        requestedRunning_ = true;
+        nextRecoveryAttempt_ = {};
+        // An interrupted/unavailable device is temporary back-pressure, not a
+        // bad music file. A later producer poll performs the eventual restart.
+        if (!synchronizeSession(false)) return LazerAudioOk;
         if (running_) return LazerAudioOk;
         const OSStatus status = AudioOutputUnitStart(unit_);
         if (status != noErr) {
@@ -259,6 +166,7 @@ public:
     int32_t stop(std::string &error) override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
+        requestedRunning_ = false;
         if (unit_ == nullptr || !running_) return LazerAudioOk;
         const OSStatus status = AudioOutputUnitStop(unit_);
         running_ = false;
@@ -272,7 +180,8 @@ public:
     int32_t reset(std::string &error) override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
-        if (unit_ == nullptr) return LazerAudioOk;
+        requestedRunning_ = false;
+        if (!opened_) return LazerAudioOk;
         if (running_) {
             const int32_t stopped = stop(error);
             if (stopped != LazerAudioOk) return stopped;
@@ -280,6 +189,7 @@ public:
         // Dropping the queue is the point of a reset: what is left in it was
         // meant for a position the listener has already left.
         queue_.reset();
+        if (unit_ == nullptr) return LazerAudioOk;
         const OSStatus status = AudioUnitReset(unit_, kAudioUnitScope_Global, kOutputBus);
         if (status != noErr) {
             error = statusText("AudioUnitReset", status);
@@ -305,10 +215,11 @@ public:
     int32_t writableFrames(std::string &error) override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
-        if (unit_ == nullptr) {
+        if (!opened_) {
             error = "iOS audio output disconnected";
             return -1;
         }
+        if (!synchronizeSession()) return 0;
         return static_cast<int32_t>(std::min<size_t>(
             queue_.writableFrames(), static_cast<size_t>(std::numeric_limits<int32_t>::max())));
     }
@@ -316,10 +227,11 @@ public:
     int32_t queuedFrames(std::string &error) override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
-        if (unit_ == nullptr) {
+        if (!opened_) {
             error = "iOS audio output disconnected";
             return -1;
         }
+        synchronizeSession();
         return static_cast<int32_t>(std::min<size_t>(
             queue_.queuedFrames(), static_cast<size_t>(std::numeric_limits<int32_t>::max())));
     }
@@ -336,19 +248,198 @@ public:
     int32_t write(const uint8_t *bytes, int32_t frameCount, std::string &error) override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
-        if (unit_ == nullptr || bytes == nullptr || frameCount < 0) {
+        if (!opened_ || bytes == nullptr || frameCount < 0) {
             return LazerAudioErrorInvalidArgument;
         }
+        synchronizeSession();
         if (frameCount == 0) return 0;
+        // A notification can arrive after writableFrames() granted capacity.
+        // Retain that in-flight producer block even while the unit is stopped;
+        // subsequent writable queries apply back-pressure until recovery.
         return queue_.write(bytes, frameCount);
     }
 
     bool isOpen() const noexcept override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
-        return unit_ != nullptr;
+        return opened_;
     }
 
 private:
+    // Only control / render-producer callers enter these helpers. Stopping
+    // and disposing the unit synchronizes its callback before queue reset or
+    // destruction. A route rebuild deliberately leaves the SPSC PCM untouched.
+    void disposeUnit() {
+        if (unit_ == nullptr) return;
+        if (running_) AudioOutputUnitStop(unit_);
+        running_ = false;
+        if (initialized_) AudioUnitUninitialize(unit_);
+        initialized_ = false;
+        AudioComponentInstanceDispose(unit_);
+        unit_ = nullptr;
+    }
+
+    int32_t createUnit(const IosSessionInfo &info, std::string &error) {
+        const int32_t channels = target_.channels;
+        AudioComponentDescription description{};
+        description.componentType = kAudioUnitType_Output;
+        description.componentSubType = kAudioUnitSubType_RemoteIO;
+        description.componentManufacturer = kAudioUnitManufacturer_Apple;
+        AudioComponent component = AudioComponentFindNext(nullptr, &description);
+        if (component == nullptr) {
+            error = "The iOS RemoteIO AudioUnit is unavailable on this system";
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+        OSStatus status = AudioComponentInstanceNew(component, &unit_);
+        if (status != noErr || unit_ == nullptr) {
+            unit_ = nullptr;
+            error = statusText("AudioComponentInstanceNew", status);
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+
+        // The output element is enabled by default; the input element is not
+        // wanted at all, and enabling it would put a microphone indicator on
+        // the status bar and demand a usage description for a music player.
+        UInt32 disabled = 0;
+        status = AudioUnitSetProperty(unit_, kAudioOutputUnitProperty_EnableIO,
+            kAudioUnitScope_Input, kInputBus, &disabled, sizeof(disabled));
+        if (status != noErr) {
+            error = statusText("RemoteIO input disable", status);
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+
+        AudioStreamBasicDescription format{};
+        format.mSampleRate = static_cast<Float64>(target_.sampleRate);
+        format.mFormatID = kAudioFormatLinearPCM;
+        format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+        format.mFramesPerPacket = 1;
+        format.mChannelsPerFrame = static_cast<UInt32>(channels);
+        format.mBitsPerChannel = 32;
+        format.mBytesPerFrame = static_cast<UInt32>(sizeof(float) * channels);
+        format.mBytesPerPacket = format.mBytesPerFrame;
+        status = AudioUnitSetProperty(unit_, kAudioUnitProperty_StreamFormat,
+            kAudioUnitScope_Input, kOutputBus, &format, sizeof(format));
+        if (status != noErr) {
+            error = statusText("RemoteIO stream format", status);
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+
+        const int32_t ioFrames = info.ioBufferFrames > 0 ? info.ioBufferFrames : 512;
+        // A slice smaller than what the device asks for would make the unit
+        // split callbacks; leaving headroom above it keeps one callback per IO
+        // period on every route we have seen (44.1 kHz through 192 kHz).
+        UInt32 sliceFrames = static_cast<UInt32>(
+            std::clamp<int64_t>(static_cast<int64_t>(ioFrames) * 2, 1024, 8192));
+        status = AudioUnitSetProperty(unit_, kAudioUnitProperty_MaximumFramesPerSlice,
+            kAudioUnitScope_Global, kOutputBus, &sliceFrames, sizeof(sliceFrames));
+        if (status != noErr) {
+            error = statusText("RemoteIO maximum frames", status);
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+
+        AURenderCallbackStruct callback{};
+        callback.inputProc = &RemoteIOOutput::renderThunk;
+        callback.inputProcRefCon = this;
+        status = AudioUnitSetProperty(unit_, kAudioUnitProperty_SetRenderCallback,
+            kAudioUnitScope_Input, kOutputBus, &callback, sizeof(callback));
+        if (status != noErr) {
+            error = statusText("RemoteIO render callback", status);
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+
+        status = AudioUnitInitialize(unit_);
+        if (status != noErr) {
+            error = statusText("AudioUnitInitialize", status);
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+        initialized_ = true;
+        // Read back what the unit accepted instead of trusting the request.
+        AudioStreamBasicDescription granted{};
+        UInt32 grantedSize = sizeof(granted);
+        if (AudioUnitGetProperty(unit_, kAudioUnitProperty_StreamFormat,
+                kAudioUnitScope_Input, kOutputBus, &granted, &grantedSize) == noErr &&
+            granted.mSampleRate > 0 && granted.mChannelsPerFrame > 0) {
+            // The queue was allocated for interleaved Float32 at the requested
+            // channel count. A unit that changes that layout would make the
+            // callback read frames with the wrong stride.
+            if (std::abs(granted.mSampleRate - static_cast<double>(target_.sampleRate)) > 0.5 ||
+                granted.mChannelsPerFrame != static_cast<UInt32>(channels) ||
+                granted.mFormatID != kAudioFormatLinearPCM ||
+                (granted.mFormatFlags & (kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked)) !=
+                    (kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked) ||
+                granted.mBitsPerChannel != 32 ||
+                granted.mBytesPerFrame != static_cast<UInt32>(sizeof(float) * channels)) {
+                error = "RemoteIO changed the requested interleaved Float32 layout";
+                disposeUnit();
+                return LazerAudioErrorDevice;
+            }
+        } else {
+            error = "RemoteIO did not report its accepted client format";
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+
+        return LazerAudioOk;
+    }
+
+    bool synchronizeSession(bool resume = true) {
+        auto state = iosSessionState();
+        if (state.revision != sessionRevision_) {
+            sessionRevision_ = state.revision;
+            rebuildRequired_ = true;
+            nextRecoveryAttempt_ = {};
+            // Removed headphones and ShouldResume=false must never turn into
+            // an unsolicited speaker restart. Only start() grants permission.
+            if (!state.mayResume) requestedRunning_ = false;
+        }
+        if (state.interrupted || !state.mediaServicesAvailable || !state.mayResume) {
+            disposeUnit();
+            rebuildRequired_ = true;
+            return false;
+        }
+        if (rebuildRequired_) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now < nextRecoveryAttempt_) return false;
+            disposeUnit();
+            IosSessionInfo info;
+            std::string recoveryError;
+            // Keep the engine / queue clock fixed for this open session. The
+            // AudioUnit resamples its client format to a new 44.1/48 kHz route;
+            // retiming already queued PCM would otherwise change its pitch.
+            const int32_t activated = iosSessionActivate(0, bufferMillis_, info, recoveryError);
+            // setActive / preferred-buffer requests may notify synchronously.
+            state = iosSessionState();
+            sessionRevision_ = state.revision;
+            if (!state.mayResume) requestedRunning_ = false;
+            if (activated != LazerAudioOk || state.interrupted ||
+                !state.mediaServicesAvailable || !state.mayResume ||
+                createUnit(info, recoveryError) != LazerAudioOk) {
+                disposeUnit();
+                nextRecoveryAttempt_ = now + std::chrono::milliseconds(50);
+                return false;
+            }
+            rebuildRequired_ = false;
+        }
+        if (unit_ == nullptr || !initialized_) return false;
+        if (resume && requestedRunning_ && !running_) {
+            if (AudioOutputUnitStart(unit_) != noErr) {
+                disposeUnit();
+                rebuildRequired_ = true;
+                nextRecoveryAttempt_ = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(50);
+                return false;
+            }
+            running_ = true;
+        }
+        return true;
+    }
+
     /* The OS audio thread. No locks, no allocation, no logging: it only moves
      * bytes out of the SPSC queue and reports underruns it had to pad. */
     static OSStatus renderThunk(void *reference, AudioUnitRenderActionFlags *flags,
@@ -389,6 +480,12 @@ private:
     bool initialized_ = false;
     bool running_ = false;
     bool sessionActive_ = false;
+    bool opened_ = false;
+    bool requestedRunning_ = false;
+    bool rebuildRequired_ = false;
+    int32_t bufferMillis_ = 120;
+    uint64_t sessionRevision_ = 0;
+    std::chrono::steady_clock::time_point nextRecoveryAttempt_{};
     TargetFormat target_{};
     std::atomic<int32_t> frameBytes_{0};
     std::atomic<uint64_t> underrunFrames_{0};

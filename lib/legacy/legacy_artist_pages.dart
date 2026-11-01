@@ -351,11 +351,14 @@ class _ArtistReleaseShelf extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  LegacyCover(
+                  CoverTransitionSource(
                     key: coverKey,
-                    url: album.coverUrl,
-                    size: 160,
-                    radius: 9,
+                    identity: 'playlist:${album.id}',
+                    child: LegacyCover(
+                      url: album.coverUrl,
+                      size: 160,
+                      radius: 9,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -556,11 +559,14 @@ class _LegacyArtistReleasesPageState extends State<LegacyArtistReleasesPage> {
                           ),
                           child: Row(
                             children: <Widget>[
-                              LegacyCover(
+                              CoverTransitionSource(
                                 key: coverKey,
-                                url: album.coverUrl,
-                                size: 62,
-                                radius: 7,
+                                identity: 'playlist:${album.id}',
+                                child: LegacyCover(
+                                  url: album.coverUrl,
+                                  size: 62,
+                                  radius: 7,
+                                ),
                               ),
                               const SizedBox(width: 14),
                               Expanded(

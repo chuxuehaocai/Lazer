@@ -1,6 +1,6 @@
 // Loading and binding of the native `lazer-audio` engine and its reader bridge.
 //
-// The engine is a single C ABI shared library (`lazer_audio_api.h`, ABI v24);
+// The engine is a single C ABI shared library (`lazer_audio_api.h`, ABI v29);
 // the bridge is a tiny companion that implements the engine's reader callbacks
 // over a growing cache file, because Dart cannot service a blocking native
 // callback from an engine thread (see `lazer_audio_reader.dart`).
@@ -514,7 +514,26 @@ class LazerAudioApi {
 
 /// Typed bindings for `lazer-audio-bridge`, the growing-file reader.
 class LazerAudioBridgeApi {
-  LazerAudioBridgeApi(this._library);
+  LazerAudioBridgeApi(this._library) {
+    // Bindings are lazy, but availability must reflect a usable reader rather
+    // than merely a loadable image (including the linked image on iOS).
+    for (final symbol in const [
+      'lazer_bridge_reader_create',
+      'lazer_bridge_reader_notify',
+      'lazer_bridge_reader_finish',
+      'lazer_bridge_reader_destroy',
+      'lazer_bridge_reader_bytes_available',
+      'lazer_bridge_reader_read',
+      'lazer_bridge_reader_seek',
+      'lazer_bridge_reader_length',
+      'lazer_bridge_reader_close',
+      'lazer_bridge_reader_cancel',
+    ]) {
+      if (!_library.providesSymbol(symbol)) {
+        throw ArgumentError('reader bridge is missing $symbol');
+      }
+    }
+  }
 
   final DynamicLibrary _library;
 
@@ -597,7 +616,8 @@ abstract final class LazerAudioLoader {
   ///
   /// Windows (WASAPI), Linux (ALSA), macOS (CoreAudio), 64-bit Android (AAudio)
   /// and iOS (RemoteIO) share this ABI. Other hosts keep the system engine.
-  static bool get isSupportedHost => Platform.isIOS || _engineFileNames.isNotEmpty;
+  static bool get isSupportedHost =>
+      Platform.isIOS || _engineFileNames.isNotEmpty;
 
   /// Whether the engine is linked into this process instead of loaded from a
   /// file. iOS refuses `dlopen` for an image the app was not shipped with, so
@@ -661,22 +681,39 @@ abstract final class LazerAudioLoader {
         'unsupported architecture ${Abi.current()}',
       );
     }
-    final Uri? enginePath = inProcess
-        ? null
-        : _resolve(
-            fileNames: engineFileNames,
-            environmentVariable: libraryOverrideVariable,
-            explicitPath: engineOverride ?? importedLibraryPath,
-          );
-    if (!inProcess && enginePath == null) {
-      return LazerAudioAvailability.unavailable(
-        '${engineFileNames.first} was not found in the app bundle, configured '
-        'override, or development checkout',
-      );
+    if (inProcess) {
+      return _loadCandidate(null, bridgeFileNames, inProcess: true);
     }
+    final enginePaths = _paths.candidates(
+      fileNames: engineFileNames,
+      environmentOverride: Platform.environment[libraryOverrideVariable],
+      explicitPath: engineOverride ?? importedLibraryPath,
+    );
+    final failures = <String>[];
+    for (final enginePath in enginePaths) {
+      final availability = _loadCandidate(enginePath, bridgeFileNames);
+      if (availability.isAvailable) return availability;
+      final reason = availability.reason!;
+      failures.add(reason);
+      developer.log(reason, name: 'lazer-audio');
+    }
+    return LazerAudioAvailability.unavailable(
+      failures.isEmpty
+          ? '${engineOverride ?? importedLibraryPath ?? Platform.environment[libraryOverrideVariable] ?? engineFileNames.first} '
+                'was not found in the app bundle, configured override, or '
+                'development checkout'
+          : failures.join('\n'),
+    );
+  }
+
+  static LazerAudioAvailability _loadCandidate(
+    Uri? enginePath,
+    List<String> bridgeFileNames, {
+    bool inProcess = false,
+  }) {
     final String engineFileName = inProcess
         ? 'the linked lazer-audio image'
-        : enginePath!.pathSegments.last;
+        : enginePath!.toFilePath();
     // Windows resolves a native library's own dependencies through the *process*
     // search path, not the directory the library was opened from, so a build tree
     // that keeps FFmpeg's DLLs beside the engine still fails with "module could
@@ -707,7 +744,8 @@ abstract final class LazerAudioLoader {
     if (version != lazerAudioAbiVersion) {
       return LazerAudioAvailability.unavailable(
         '$engineFileName reports ABI $version; this build expects '
-        '$lazerAudioAbiVersion',
+        '$lazerAudioAbiVersion. Rebuild the engine from this checkout '
+        '(dart run tool/build_native_audio.dart) or import a matching engine.',
       );
     }
     for (final symbol in const [
@@ -819,7 +857,7 @@ abstract final class LazerAudioLoader {
   );
 
   /// Imports and environment overrides take precedence. Development checkouts
-  /// use the freshly built root engine; installed apps use their own bundle.
+  /// prefer the staged engine; installed apps use their own bundle.
   static Uri? _resolve({
     required List<String> fileNames,
     required String environmentVariable,

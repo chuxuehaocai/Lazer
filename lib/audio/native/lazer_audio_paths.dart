@@ -21,8 +21,8 @@ class NativeAudioLibraryPaths {
 
   Iterable<Directory> get directories sync* {
     if (developmentCheckout) {
-      yield workingDirectory;
       yield Directory('${workingDirectory.path}/build/native-audio');
+      yield workingDirectory;
     }
     yield executableDirectory;
     if (linux) yield Directory('${executableDirectory.path}/lib');
@@ -48,25 +48,47 @@ class NativeAudioLibraryPaths {
     String? explicitPath,
     String? environmentOverride,
     String? siblingDirectory,
-  }) {
+  }) => candidates(
+    fileNames: fileNames,
+    explicitPath: explicitPath,
+    environmentOverride: environmentOverride,
+    siblingDirectory: siblingDirectory,
+  ).firstOrNull;
+
+  /// Automatic discovery tries every existing artifact, so an obsolete local
+  /// build cannot hide a compatible engine later in the search. Explicit user
+  /// choices are authoritative, including missing or incompatible files.
+  Iterable<Uri> candidates({
+    required List<String> fileNames,
+    String? explicitPath,
+    String? environmentOverride,
+    String? siblingDirectory,
+  }) sync* {
     if (explicitPath != null) {
       final file = File(explicitPath);
-      return file.existsSync() ? file.absolute.uri : null;
-    }
-    if (siblingDirectory != null) {
-      final found = _inDirectory(Directory(siblingDirectory), fileNames);
-      if (found != null) return found;
+      if (file.existsSync()) yield file.absolute.uri;
+      return;
     }
     if (environmentOverride != null && environmentOverride.trim().isNotEmpty) {
       final file = File(environmentOverride.trim());
-      if (file.existsSync()) return file.absolute.uri;
+      if (file.existsSync()) yield file.absolute.uri;
+      return;
     }
-    if (android) return Uri.file(fileNames.first);
-    for (final directory in directories) {
-      final found = _inDirectory(directory, fileNames);
-      if (found != null) return found;
+    if (android) {
+      yield Uri.file(fileNames.first);
+      return;
     }
-    return null;
+    final seen = <Uri>{};
+    for (final directory in [
+      if (siblingDirectory != null) Directory(siblingDirectory),
+      ...directories,
+    ]) {
+      for (final name in fileNames) {
+        final file = File('${directory.path}${Platform.pathSeparator}$name');
+        final uri = file.absolute.uri;
+        if (seen.add(uri) && file.existsSync()) yield uri;
+      }
+    }
   }
 
   Iterable<Directory> dependencyDirectories(Uri enginePath) sync* {
@@ -76,13 +98,5 @@ class NativeAudioLibraryPaths {
         adjacent.absolute.uri == workingDirectory.absolute.uri) {
       yield Directory('${workingDirectory.path}/build/native-audio');
     }
-  }
-
-  Uri? _inDirectory(Directory directory, List<String> names) {
-    for (final name in names) {
-      final file = File('${directory.path}${Platform.pathSeparator}$name');
-      if (file.existsSync()) return file.absolute.uri;
-    }
-    return null;
   }
 }
