@@ -32,7 +32,7 @@ DSD/DoP, gapless, EQ/limiter) is built into all Windows, macOS and Linux cloud
 artifacts together with the matching DSD-capable FFmpeg runtime and its LGPL
 notice. Packaging checks fail if any required engine, bridge or FFmpeg library is
 missing. Android packages the native AAudio engine for armeabi-v7a, arm64-v8a and x86_64;
-iOS uses `just_audio`. On Windows the engine and FFmpeg are built with MSVC so
+iOS links the engine as static archives (see below). On Windows the engine and FFmpeg are built with MSVC so
 their import libraries match the app toolchain. See
 [audio-engine.md](audio-engine.md) for local build variables and the settings page.
 
@@ -52,6 +52,13 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   bridge; `ci/verify-android-audio.py` then re-checks the APK itself.
 - The release job reads the uploaded desktop archives and refuses to publish one
   that does not contain the engine, the bridge and all four FFmpeg libraries.
+- iOS links `liblazer-audio.a`, `liblazer-audio-bridge.a` and the four FFmpeg
+  archives into the Runner binary through `ios/Flutter/LazerAudio.xcconfig`,
+  which `ci/ios-audio-xcconfig.sh` generates (the file is git-ignored and pulled
+  in with `#include?`, so a checkout without a built engine still builds and
+  runs on `just_audio`). The `ios-native` job builds those archives for arm64;
+  the IPA job verifies the built executable's dynamic export trie and refuses to
+  package when the engine ABI is not in it.
 
 ## Android release signing
 
