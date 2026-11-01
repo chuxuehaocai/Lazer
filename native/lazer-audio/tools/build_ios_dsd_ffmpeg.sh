@@ -159,7 +159,13 @@ cd "$source_dir"
 printf 'FFmpeg revision: %s\nTarget: iOS %s, arm64, minimum %s\nSDK: %s\nConfigure options: %s\n' \
     "$FFMPEG_REVISION" "$platform" "$IOS_MIN_VERSION" "$sdk_path" \
     "${configure_args[*]}" | tee "$work_root/build-info.txt"
-./configure "${configure_args[@]}" 2>&1 | tee "$work_root/configure.log"
+# configure's own "C compiler test failed" names no reason; the actual failing
+# command and its stderr are in ffbuild/config.log.
+if ! ./configure "${configure_args[@]}" 2>&1 | tee "$work_root/configure.log"; then
+    echo '=== configure failed; tail of ffbuild/config.log ===' >&2
+    tail -120 ffbuild/config.log >&2 || true
+    exit 1
+fi
 
 # DSF has its own demuxer, while DFF (including DST-in-DFF) is handled by IFF.
 # Keep this explicit: the decoder can link successfully while DFF inputs remain
