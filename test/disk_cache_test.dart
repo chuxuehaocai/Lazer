@@ -154,6 +154,42 @@ void main() {
     expect(await file.exists(), isFalse);
   });
 
+  test('song-count retention is outside the disposable byte quota', () async {
+    cache = DiskCache(
+      directory: () async => directory,
+      limits: {CacheBucket.audio: 8},
+    );
+    final retained = (await cache.put(
+      CacheBucket.audio,
+      'retained',
+      () => Stream.value([1, 2, 3, 4]),
+    ))!;
+    cache.retainFile(retained);
+    final disposable = (await cache.put(
+      CacheBucket.audio,
+      'disposable',
+      () => Stream.value([5, 6, 7, 8]),
+    ))!;
+    await cache.put(
+      CacheBucket.audio,
+      'new',
+      () => Stream.value([9, 10, 11, 12]),
+    );
+    await cache.settle();
+    expect(await retained.exists(), isTrue);
+    expect(await disposable.exists(), isTrue);
+
+    cache.releaseFile(retained);
+    await retained.setLastModified(DateTime(2020));
+    await cache.put(
+      CacheBucket.audio,
+      'newer',
+      () => Stream.value([13, 14, 15, 16]),
+    );
+    await cache.settle();
+    expect(await retained.exists(), isFalse);
+  });
+
   test(
     'invalidation waits for an in-flight JSON write and survives restart',
     () async {

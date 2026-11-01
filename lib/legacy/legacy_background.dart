@@ -16,6 +16,50 @@ import '../theme/adaptive_contrast.dart';
 
 export '../player/player_backdrop.dart' show AlbumBlurFlow;
 
+/// Every flow surface uses these motion and palette constants.
+const albumFlowConfiguration = AlbumFlowConfiguration();
+
+class AlbumFlowConfiguration {
+  const AlbumFlowConfiguration();
+  Duration get paletteTransition => const Duration(milliseconds: 650);
+  int get paletteCacheEntries => 24;
+  int get meshCacheEntries => 4;
+  int get frameCacheEntries => 8;
+}
+
+/// One clock preserves the flow phase when switching between browsing and the
+/// player. Hidden, static and paused surfaces detach and consume no frames.
+final albumFlowClock = _AlbumFlowClock();
+
+class _AlbumFlowClock extends ChangeNotifier {
+  late final Ticker _ticker = Ticker(_advance, debugLabel: 'Shared album flow');
+  final Set<VoidCallback> _subscribers = {};
+  Duration _completed = Duration.zero;
+  Duration elapsed = Duration.zero;
+
+  void _advance(Duration value) {
+    elapsed = _completed + value;
+    notifyListeners();
+  }
+
+  @override
+  void addListener(VoidCallback listener) {
+    if (!_subscribers.add(listener)) return;
+    super.addListener(listener);
+    if (!_ticker.isActive) _ticker.start();
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    if (!_subscribers.remove(listener)) return;
+    super.removeListener(listener);
+    if (_subscribers.isEmpty) {
+      _completed = elapsed;
+      _ticker.stop();
+    }
+  }
+}
+
 /// Ported from the Lazer project:
 /// `shared/src/commonMain/.../AlbumFlowBackground.kt` (the flowing palette) and
 /// `.../LazerBackgrounds.kt` (the artwork-seed extractor).
@@ -108,8 +152,6 @@ class AlbumFlowBackground extends StatefulWidget {
 
 class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     with TickerProviderStateMixin, WidgetsBindingObserver {
-  static const Duration _paletteFade = Duration(milliseconds: 650);
-
   /// Mesh density and frame rate have separate controls, so lowering detail
   /// preserves the chosen background cadence.
   late DynamicBackgroundPrecision _precision = DynamicBackgroundPrecision.of(
@@ -120,12 +162,11 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   late List<Color> _to = _from;
   late final AnimationController _palette = AnimationController(
     vsync: this,
-    duration: _paletteFade,
+    duration: albumFlowConfiguration.paletteTransition,
     value: 1,
   );
   final ValueNotifier<int> _frames = ValueNotifier<int>(0);
-  late final Ticker _flowTicker = createTicker(_advance);
-  int _lastAdvanceUs = 0;
+  bool _flowClockAttached = false;
   double _nextFrameUs = 0;
   Duration _frameInterval = const Duration(microseconds: 33333);
   bool _paintEveryVsync = false;
@@ -139,6 +180,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   @override
   void initState() {
     super.initState();
+    albumFlowRenderer._retain();
     WidgetsBinding.instance.addObserver(this);
     _palette
       ..addListener(_onPaletteFrame)
@@ -153,6 +195,9 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     _appActive = active;
     _syncPlayback();
   }
+
+  @override
+  void didHaveMemoryPressure() => albumFlowRenderer._clear();
 
   /// Palette changes share the mesh's selected cadence.
   final Stopwatch _paletteClock = Stopwatch()..start();
@@ -236,13 +281,14 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _flowTicker.dispose();
+    if (_flowClockAttached) albumFlowClock.removeListener(_advance);
     _cachedPainter?.releaseResources();
     _palette
       ..removeListener(_onPaletteFrame)
       ..removeStatusListener(_onPaletteStatus)
       ..dispose();
     _frames.dispose();
+    albumFlowRenderer._release();
     super.dispose();
   }
 
@@ -261,28 +307,30 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
       _palette.value = 1;
     }
     if (_runs) {
-      if (!_flowTicker.isActive) {
-        _lastAdvanceUs = 0;
-        _nextFrameUs = _frameInterval.inMicroseconds.toDouble();
-        _flowTicker.start();
+      if (!_flowClockAttached) {
+        _nextFrameUs = 0;
+        _phase =
+            albumFlowClock.elapsed.inMicroseconds /
+            Duration.microsecondsPerSecond %
+            10000;
+        _flowClockAttached = true;
+        albumFlowClock.addListener(_advance);
       }
     } else {
-      _flowTicker.stop();
+      if (_flowClockAttached) albumFlowClock.removeListener(_advance);
+      _flowClockAttached = false;
     }
   }
 
-  void _advance(Duration elapsed) {
-    final int now = elapsed.inMicroseconds;
+  void _advance() {
+    final int now = albumFlowClock.elapsed.inMicroseconds;
     if (!_paintEveryVsync && now < _nextFrameUs) return;
-    final double delta =
-        (now - _lastAdvanceUs) / Duration.microsecondsPerSecond;
-    _lastAdvanceUs = now;
     final int interval = _frameInterval.inMicroseconds;
     _nextFrameUs +=
         interval * math.max(1, ((now - _nextFrameUs) / interval).floor() + 1);
     // Slowly rotating/breathing mesh: AMLL drives its WebGL mesh from a
     // 10-second time base, with a volume-responsive UV rotation.
-    _phase = (_phase + delta.clamp(0.0, .1)) % 10000;
+    _phase = (now / Duration.microsecondsPerSecond) % 10000;
     _frames.value++;
   }
 
@@ -350,7 +398,92 @@ Color _vivid(Color color) {
       .toColor();
 }
 
-/// Paints the AMLL-derived animated mesh in one pass.
+/// Shared renderer used by every flowing surface. A frame is recorded once in
+/// unit coordinates, then the same picture is scaled into each page's canvas.
+/// The cache is bounded even when pages request different precision or cadence.
+const albumFlowRenderer = AlbumFlowRenderer();
+
+typedef _AlbumFlowFrameKey = (
+  int,
+  int,
+  double,
+  Color,
+  Color,
+  Color,
+  Color,
+  Color,
+);
+
+class AlbumFlowRenderer {
+  const AlbumFlowRenderer();
+
+  static final Map<(int, int), _AlbumFlowMesh> _meshes = {};
+  static final Map<_AlbumFlowFrameKey, ui.Picture> _pictures = {};
+  static int _frameBuilds = 0;
+  static int _consumers = 0;
+
+  @visibleForTesting
+  int get debugFrameBuilds => _frameBuilds;
+
+  @visibleForTesting
+  List<ui.Picture> get debugCachedFrames => List.unmodifiable(_pictures.values);
+
+  void _retain() => _consumers++;
+
+  void _release() {
+    assert(_consumers > 0);
+    if (--_consumers == 0) _clear();
+  }
+
+  void _clear() {
+    for (final picture in _pictures.values) {
+      picture.dispose();
+    }
+    _pictures.clear();
+    _meshes.clear();
+  }
+
+  void paint(
+    Canvas canvas,
+    Size size,
+    List<Color> colors,
+    double phase,
+    int columns,
+    int rows,
+  ) {
+    final key = (
+      columns,
+      rows,
+      phase,
+      colors[0],
+      colors[1],
+      colors[2],
+      colors[3],
+      colors[4],
+    );
+    var picture = _pictures.remove(key);
+    if (picture == null) {
+      final meshKey = (columns, rows);
+      final mesh = _meshes.remove(meshKey) ?? _AlbumFlowMesh(columns, rows);
+      _meshes[meshKey] = mesh;
+      if (_meshes.length > albumFlowConfiguration.meshCacheEntries) {
+        _meshes.remove(_meshes.keys.first);
+      }
+      picture = mesh.record(colors, phase);
+      _frameBuilds++;
+    }
+    _pictures[key] = picture;
+    if (_pictures.length > albumFlowConfiguration.frameCacheEntries) {
+      _pictures.remove(_pictures.keys.first)!.dispose();
+    }
+    canvas.save();
+    canvas.scale(size.width, size.height);
+    canvas.drawPicture(picture);
+    canvas.restore();
+  }
+}
+
+/// A surface only composites the shared frame and its own opacity veil.
 class _FlowPainter extends CustomPainter {
   _FlowPainter({
     required this.palette,
@@ -366,12 +499,78 @@ class _FlowPainter extends CustomPainter {
   final List<Color> Function() palette;
   final double Function() phase;
   final Color veil;
-  final bool solid;
-  final bool preview;
+  final bool solid, preview;
+  final int columns, rows;
 
-  /// Mesh quads across and down; `动态背景渲染精度` scales them.
-  final int columns;
-  final int rows;
+  ui.Shader? _veilShader;
+  Size? _veilSize;
+  Color? _veilTint;
+
+  void releaseResources() {
+    _veilShader?.dispose();
+    _veilShader = null;
+  }
+
+  ui.Shader _veilShaderFor(Size size, Color veil) {
+    final double extent = size.shortestSide;
+    if (_veilShader == null || _veilSize != size || _veilTint != veil) {
+      _veilShader?.dispose();
+      _veilSize = size;
+      _veilTint = veil;
+      _veilShader = ui.Gradient.radial(
+        size.center(Offset.zero),
+        extent * 0.5,
+        <Color>[
+          veil.withValues(alpha: 0),
+          veil.withValues(alpha: veil.a * 0.28),
+          veil.withValues(alpha: veil.a * 0.72),
+        ],
+        const <double>[0, 0.5, 1],
+      );
+    }
+    return _veilShader!;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final colors = palette();
+    final bounds = Offset.zero & size;
+    if (preview && !solid) {
+      final shader = ui.Gradient.linear(
+        bounds.topCenter,
+        bounds.bottomCenter,
+        [colors[0], colors[2], colors[4]],
+        const [0, .55, 1],
+      );
+      canvas.drawRect(bounds, Paint()..shader = shader);
+      shader.dispose();
+    } else if (solid) {
+      canvas.drawRect(bounds, Paint()..color = colors[4]);
+    } else {
+      albumFlowRenderer.paint(canvas, size, colors, phase(), columns, rows);
+    }
+    if (veil.a > 0) {
+      canvas.drawRect(bounds, Paint()..shader = _veilShaderFor(size, veil));
+      canvas.drawRect(
+        bounds,
+        Paint()..color = veil.withValues(alpha: veil.a * 0.72),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _FlowPainter oldDelegate) =>
+      oldDelegate.solid != solid ||
+      oldDelegate.veil != veil ||
+      oldDelegate.preview != preview ||
+      oldDelegate.columns != columns ||
+      oldDelegate.rows != rows;
+}
+
+class _AlbumFlowMesh {
+  _AlbumFlowMesh(this.columns, this.rows);
+  final int columns, rows;
 
   Float32List? _positions;
   Int32List? _colors;
@@ -540,197 +739,130 @@ class _FlowPainter extends CustomPainter {
         _blendChannel(a.b, b.b, c.b, d.b, ta, tb, mix);
   }
 
-  ui.Shader? _veilShader;
-  double _veilExtent = -1;
-  Color? _veilTint;
+  ui.Picture record(List<Color> colors, double time) {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, 1, 1));
+    canvas.drawRect(
+      const Rect.fromLTWH(0, 0, 1, 1),
+      Paint()..color = colors[4],
+    );
+    _ensureMesh();
+    final Float32List positions = _positions!;
+    final Int32List vertexColors = _colors!;
+    final Float64List uEnvelope = _uEnvelope!;
+    final Float64List uSinOuter = _uSinOuter!;
+    final Float64List uCosOuter = _uCosOuter!;
+    final Float64List uSinNested = _uSinNested!;
+    final Float64List uCosNested = _uCosNested!;
+    final Float64List uSinWaveX = _uSinWaveX!;
+    final Float64List uCosWaveX = _uCosWaveX!;
+    final Float64List uSinWaveY = _uSinWaveY!;
+    final Float64List uCosWaveY = _uCosWaveY!;
+    final Float64List uSinMix = _uSinMix!;
+    final Float64List uCosMix = _uCosMix!;
+    final Float64List vEnvelope = _vEnvelope!;
+    final Float64List vSinNested = _vSinNested!;
+    final Float64List vCosNested = _vCosNested!;
+    final Float64List vSinOuter = _vSinOuter!;
+    final Float64List vCosOuter = _vCosOuter!;
+    final Float64List vSinWaveX = _vSinWaveX!;
+    final Float64List vCosWaveX = _vCosWaveX!;
+    final Float64List vSinWaveY = _vSinWaveY!;
+    final Float64List vCosWaveY = _vCosWaveY!;
+    final Float64List vSinMix = _vSinMix!;
+    final Float64List vCosMix = _vCosMix!;
+    final Float64List rowWaveX = _rowWaveX!;
+    final Float64List rowWaveY = _rowWaveY!;
+    final Float64List rowOffsetASin = _rowOffsetASin!;
+    final Float64List rowOffsetACos = _rowOffsetACos!;
+    final Float64List columnWaveX = _columnWaveX!;
+    final Float64List columnWaveY = _columnWaveY!;
+    final Float64List columnOffsetBSin = _columnOffsetBSin!;
+    final Float64List columnOffsetBCos = _columnOffsetBCos!;
 
-  void releaseResources() {
-    _veilShader?.dispose();
-    _veilShader = null;
-  }
+    final double sinWaveXRowShift = math.sin(time * .20 + 1.1);
+    final double cosWaveXRowShift = math.cos(time * .20 + 1.1);
+    final double sinWaveXColumnShift = math.sin(-time * .13 + .7);
+    final double cosWaveXColumnShift = math.cos(-time * .13 + .7);
+    final double sinWaveYColumnShift = math.sin(-time * .18 + 2.2);
+    final double cosWaveYColumnShift = math.cos(-time * .18 + 2.2);
+    final double sinWaveYRowShift = math.sin(time * .11);
+    final double cosWaveYRowShift = math.cos(time * .11);
+    final double sinNestedARowShift = math.sin(-time * .19);
+    final double cosNestedARowShift = math.cos(-time * .19);
+    final double sinNestedBColumnShift = math.sin(time * .17);
+    final double cosNestedBColumnShift = math.cos(time * .17);
+    final double sinMixShift = math.sin(time * .14);
+    final double cosMixShift = math.cos(time * .14);
 
-  ui.Shader _veilShaderFor(Size size, Color veil) {
-    final double extent = size.shortestSide;
-    if (_veilShader == null || _veilExtent != extent || _veilTint != veil) {
-      _veilShader?.dispose();
-      _veilExtent = extent;
-      _veilTint = veil;
-      _veilShader = ui.Gradient.radial(
-        size.center(Offset.zero),
-        extent * 0.5,
-        <Color>[
-          veil.withValues(alpha: 0),
-          veil.withValues(alpha: veil.a * 0.28),
-          veil.withValues(alpha: veil.a * 0.72),
-        ],
-        const <double>[0, 0.5, 1],
-      );
+    for (int row = 0; row <= rows; row++) {
+      rowWaveX[row] =
+          vSinWaveX[row] * cosWaveXRowShift + vCosWaveX[row] * sinWaveXRowShift;
+      rowWaveY[row] =
+          vCosWaveY[row] * cosWaveYRowShift - vSinWaveY[row] * sinWaveYRowShift;
+      final double nestedA =
+          vSinNested[row] * cosNestedARowShift +
+          vCosNested[row] * sinNestedARowShift;
+      final double rowOffsetA = nestedA * 1.15 + time * .21;
+      rowOffsetASin[row] = math.sin(rowOffsetA);
+      rowOffsetACos[row] = math.cos(rowOffsetA);
     }
-    return _veilShader!;
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.isEmpty) return;
-    final List<Color> colors = palette();
-    final Rect canvasRect = Offset.zero & size;
-    if (preview && !solid) {
-      // One ramp through the same palette, and nothing else: the expensive
-      // warped mesh is not painted at all while the page carrying it is
-      // still moving, so the frame costs a single full-screen fill.
-      canvas.drawRect(
-        canvasRect,
-        Paint()
-          ..shader = ui.Gradient.linear(
-            canvasRect.topCenter,
-            canvasRect.bottomCenter,
-            <Color>[colors[0], colors[2], colors[4]],
-            const <double>[0, .55, 1],
-          ),
-      );
-    } else {
-      canvas.drawRect(canvasRect, Paint()..color = colors[4]);
+    for (int column = 0; column <= columns; column++) {
+      columnWaveX[column] =
+          uSinWaveX[column] * cosWaveXColumnShift +
+          uCosWaveX[column] * sinWaveXColumnShift;
+      columnWaveY[column] =
+          uCosWaveY[column] * cosWaveYColumnShift -
+          uSinWaveY[column] * sinWaveYColumnShift;
+      final double nestedB =
+          uSinNested[column] * cosNestedBColumnShift +
+          uCosNested[column] * sinNestedBColumnShift;
+      final double columnOffsetB = nestedB * 1.05 - time * .16;
+      columnOffsetBSin[column] = math.sin(columnOffsetB);
+      columnOffsetBCos[column] = math.cos(columnOffsetB);
     }
-    if (!solid && !preview) {
-      _ensureMesh();
-      final Float32List positions = _positions!;
-      final Int32List vertexColors = _colors!;
-      final double time = phase();
-      final double width = size.width;
-      final double height = size.height;
-      final Float64List uEnvelope = _uEnvelope!;
-      final Float64List uSinOuter = _uSinOuter!;
-      final Float64List uCosOuter = _uCosOuter!;
-      final Float64List uSinNested = _uSinNested!;
-      final Float64List uCosNested = _uCosNested!;
-      final Float64List uSinWaveX = _uSinWaveX!;
-      final Float64List uCosWaveX = _uCosWaveX!;
-      final Float64List uSinWaveY = _uSinWaveY!;
-      final Float64List uCosWaveY = _uCosWaveY!;
-      final Float64List uSinMix = _uSinMix!;
-      final Float64List uCosMix = _uCosMix!;
-      final Float64List vEnvelope = _vEnvelope!;
-      final Float64List vSinNested = _vSinNested!;
-      final Float64List vCosNested = _vCosNested!;
-      final Float64List vSinOuter = _vSinOuter!;
-      final Float64List vCosOuter = _vCosOuter!;
-      final Float64List vSinWaveX = _vSinWaveX!;
-      final Float64List vCosWaveX = _vCosWaveX!;
-      final Float64List vSinWaveY = _vSinWaveY!;
-      final Float64List vCosWaveY = _vCosWaveY!;
-      final Float64List vSinMix = _vSinMix!;
-      final Float64List vCosMix = _vCosMix!;
-      final Float64List rowWaveX = _rowWaveX!;
-      final Float64List rowWaveY = _rowWaveY!;
-      final Float64List rowOffsetASin = _rowOffsetASin!;
-      final Float64List rowOffsetACos = _rowOffsetACos!;
-      final Float64List columnWaveX = _columnWaveX!;
-      final Float64List columnWaveY = _columnWaveY!;
-      final Float64List columnOffsetBSin = _columnOffsetBSin!;
-      final Float64List columnOffsetBCos = _columnOffsetBCos!;
 
-      final double sinWaveXRowShift = math.sin(time * .20 + 1.1);
-      final double cosWaveXRowShift = math.cos(time * .20 + 1.1);
-      final double sinWaveXColumnShift = math.sin(-time * .13 + .7);
-      final double cosWaveXColumnShift = math.cos(-time * .13 + .7);
-      final double sinWaveYColumnShift = math.sin(-time * .18 + 2.2);
-      final double cosWaveYColumnShift = math.cos(-time * .18 + 2.2);
-      final double sinWaveYRowShift = math.sin(time * .11);
-      final double cosWaveYRowShift = math.cos(time * .11);
-      final double sinNestedARowShift = math.sin(-time * .19);
-      final double cosNestedARowShift = math.cos(-time * .19);
-      final double sinNestedBColumnShift = math.sin(time * .17);
-      final double cosNestedBColumnShift = math.cos(time * .17);
-      final double sinMixShift = math.sin(time * .14);
-      final double cosMixShift = math.cos(time * .14);
-
-      for (int row = 0; row <= rows; row++) {
-        rowWaveX[row] =
-            vSinWaveX[row] * cosWaveXRowShift +
-            vCosWaveX[row] * sinWaveXRowShift;
-        rowWaveY[row] =
-            vCosWaveY[row] * cosWaveYRowShift -
-            vSinWaveY[row] * sinWaveYRowShift;
-        final double nestedA =
-            vSinNested[row] * cosNestedARowShift +
-            vCosNested[row] * sinNestedARowShift;
-        final double rowOffsetA = nestedA * 1.15 + time * .21;
-        rowOffsetASin[row] = math.sin(rowOffsetA);
-        rowOffsetACos[row] = math.cos(rowOffsetA);
+    var vertex = 0;
+    for (var row = 0; row <= rows; row++) {
+      final double v = row / rows;
+      final double envelopeY = vEnvelope[row];
+      for (var column = 0; column <= columns; column++) {
+        final double u = column / columns;
+        final double envelope = uEnvelope[column] * envelopeY;
+        final double waveX = rowWaveX[row] * .115 + columnWaveX[column] * .055;
+        final double waveY = columnWaveY[column] * .12 + rowWaveY[row] * .065;
+        positions[vertex * 2] = (u + waveX * envelope);
+        positions[vertex * 2 + 1] = (v + waveY * envelope);
+        final double waveA =
+            .5 +
+            .5 *
+                (uSinOuter[column] * rowOffsetACos[row] +
+                    uCosOuter[column] * rowOffsetASin[row]);
+        final double waveB =
+            .5 +
+            .5 *
+                (vCosOuter[row] * columnOffsetBCos[column] -
+                    vSinOuter[row] * columnOffsetBSin[column]);
+        final double baseMixSin =
+            uSinMix[column] * vCosMix[row] - uCosMix[column] * vSinMix[row];
+        final double baseMixCos =
+            uCosMix[column] * vCosMix[row] + uSinMix[column] * vSinMix[row];
+        final double waveMix =
+            baseMixSin * cosMixShift + baseMixCos * sinMixShift;
+        vertexColors[vertex] = _meshColorArgb(colors, waveA, waveB, waveMix);
+        vertex++;
       }
-      for (int column = 0; column <= columns; column++) {
-        columnWaveX[column] =
-            uSinWaveX[column] * cosWaveXColumnShift +
-            uCosWaveX[column] * sinWaveXColumnShift;
-        columnWaveY[column] =
-            uCosWaveY[column] * cosWaveYColumnShift -
-            uSinWaveY[column] * sinWaveYColumnShift;
-        final double nestedB =
-            uSinNested[column] * cosNestedBColumnShift +
-            uCosNested[column] * sinNestedBColumnShift;
-        final double columnOffsetB = nestedB * 1.05 - time * .16;
-        columnOffsetBSin[column] = math.sin(columnOffsetB);
-        columnOffsetBCos[column] = math.cos(columnOffsetB);
-      }
-
-      var vertex = 0;
-      for (var row = 0; row <= rows; row++) {
-        final double v = row / rows;
-        final double envelopeY = vEnvelope[row];
-        for (var column = 0; column <= columns; column++) {
-          final double u = column / columns;
-          final double envelope = uEnvelope[column] * envelopeY;
-          final double waveX =
-              rowWaveX[row] * .115 + columnWaveX[column] * .055;
-          final double waveY = columnWaveY[column] * .12 + rowWaveY[row] * .065;
-          positions[vertex * 2] = (u + waveX * envelope) * width;
-          positions[vertex * 2 + 1] = (v + waveY * envelope) * height;
-          final double waveA =
-              .5 +
-              .5 *
-                  (uSinOuter[column] * rowOffsetACos[row] +
-                      uCosOuter[column] * rowOffsetASin[row]);
-          final double waveB =
-              .5 +
-              .5 *
-                  (vCosOuter[row] * columnOffsetBCos[column] -
-                      vSinOuter[row] * columnOffsetBSin[column]);
-          final double baseMixSin =
-              uSinMix[column] * vCosMix[row] - uCosMix[column] * vSinMix[row];
-          final double baseMixCos =
-              uCosMix[column] * vCosMix[row] + uSinMix[column] * vSinMix[row];
-          final double waveMix =
-              baseMixSin * cosMixShift + baseMixCos * sinMixShift;
-          vertexColors[vertex] = _meshColorArgb(colors, waveA, waveB, waveMix);
-          vertex++;
-        }
-      }
-      final ui.Vertices vertices = ui.Vertices.raw(
-        ui.VertexMode.triangles,
-        positions,
-        colors: vertexColors,
-        indices: _indices,
-      );
-      canvas.drawVertices(vertices, BlendMode.srcOver, Paint());
-      vertices.dispose();
     }
-    if (veil.a > 0) {
-      final Rect bounds = Offset.zero & size;
-      canvas.drawRect(bounds, Paint()..shader = _veilShaderFor(size, veil));
-      canvas.drawRect(
-        bounds,
-        Paint()..color = veil.withValues(alpha: veil.a * 0.72),
-      );
-    }
+    final ui.Vertices vertices = ui.Vertices.raw(
+      ui.VertexMode.triangles,
+      positions,
+      colors: vertexColors,
+      indices: _indices,
+    );
+    canvas.drawVertices(vertices, BlendMode.srcOver, Paint());
+    vertices.dispose();
+    return recorder.endRecording();
   }
-
-  @override
-  bool shouldRepaint(covariant _FlowPainter oldDelegate) =>
-      oldDelegate.solid != solid ||
-      oldDelegate.veil != veil ||
-      oldDelegate.preview != preview ||
-      oldDelegate.columns != columns ||
-      oldDelegate.rows != rows;
 }
 
 double _fluidEase(double fraction) {
@@ -749,8 +881,6 @@ bool _samePalette(List<Color> a, List<Color> b) {
 // ---------------------------------------------------------------------------
 // Artwork seed extraction (LazerBackgrounds.kt)
 // ---------------------------------------------------------------------------
-
-final Map<String, Color> _seedCache = <String, Color>{};
 
 /// Samples the artwork down to 48×48 and picks the dominant *vibrant* hue,
 /// boosting its saturation — the legacy `seedFromArtwork`.
@@ -932,14 +1062,27 @@ double _colorDistance(Color a, Color b) {
   return math.sqrt(dr * dr + dg * dg + db * db);
 }
 
-final Map<String, List<Color>> _meshPaletteCache = <String, List<Color>>{};
-final Map<String, Future<List<Color>?>> _paletteRequests = {};
+/// Seed and mesh colours are published together, so the accent and every
+/// backdrop consume one immutable result from one decode.
+@immutable
+class AlbumArtworkPalette {
+  AlbumArtworkPalette({required this.seed, required List<Color> colors})
+    : colors = List.unmodifiable(colors);
+  final Color seed;
+  final List<Color> colors;
+}
 
-Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async {
-  final String? url = albumPaletteArtworkUrl(coverUrl);
-  if (url == null) return null;
-  final List<Color>? cached = _meshPaletteCache[url];
-  if (cached != null) return cached;
+final Map<String, AlbumArtworkPalette> _artworkPalettes = {};
+final Map<String, Future<AlbumArtworkPalette?>> _paletteRequests = {};
+
+Future<AlbumArtworkPalette?> albumPaletteForCover(String? coverUrl) {
+  final url = albumPaletteArtworkUrl(coverUrl);
+  if (url == null) return Future.value(null);
+  final cached = _artworkPalettes.remove(url);
+  if (cached != null) {
+    _artworkPalettes[url] = cached;
+    return Future.value(cached);
+  }
   return _paletteRequests.putIfAbsent(
     url,
     () =>
@@ -947,7 +1090,10 @@ Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async {
   );
 }
 
-Future<List<Color>?> _readCoverPalette(String url) async {
+Future<List<Color>?> albumMeshColorsForCover(String? coverUrl) async =>
+    (await albumPaletteForCover(coverUrl))?.colors;
+
+Future<AlbumArtworkPalette?> _readCoverPalette(String url) async {
   final ui.Image? image = await _decode(ArtworkImage(url));
   if (image == null) return null;
   try {
@@ -955,52 +1101,31 @@ Future<List<Color>?> _readCoverPalette(String url) async {
       format: ui.ImageByteFormat.rawRgba,
     );
     if (pixels == null) return null;
-    final List<Color> colors = albumMeshColorsFromPixels(
-      pixels.buffer.asUint8List(),
-      image.width,
-      image.height,
+    final rgba = pixels.buffer.asUint8List(
+      pixels.offsetInBytes,
+      pixels.lengthInBytes,
     );
-    if (_meshPaletteCache.length >= 24) {
-      _meshPaletteCache.remove(_meshPaletteCache.keys.first);
+    final palette = AlbumArtworkPalette(
+      seed: albumSeedFromPixels(rgba, image.width, image.height),
+      colors: albumMeshColorsFromPixels(rgba, image.width, image.height),
+    );
+    if (_artworkPalettes.length >= albumFlowConfiguration.paletteCacheEntries) {
+      _artworkPalettes.remove(_artworkPalettes.keys.first);
     }
-    _meshPaletteCache[url] = colors;
-    if (_seedCache.length >= 24) _seedCache.remove(_seedCache.keys.first);
-    _seedCache[url] = albumSeedFromPixels(
-      pixels.buffer.asUint8List(),
-      image.width,
-      image.height,
-    );
-    return colors;
+    _artworkPalettes[url] = palette;
+    return palette;
   } finally {
     image.dispose();
   }
 }
 
-/// A 96 px rendition of the cover — enough for a palette, cheap to fetch.
-String? albumPaletteArtworkUrl(String? raw) {
-  final String? normalized = normalizedArtworkUrl(raw);
-  if (normalized == null) return null;
-  final RegExp param = RegExp(r'([?&]param=)\d+y\d+', caseSensitive: false);
-  if (param.hasMatch(normalized)) {
-    return normalized.replaceAllMapped(
-      param,
-      (Match match) => '${match.group(1)}96y96',
-    );
-  }
-  return normalized +
-      (normalized.contains('?') ? '&param=96y96' : '?param=96y96');
-}
+/// Resize only providers that support NetEase's rendition parameter. Local
+/// covers and authenticated third-party artwork URLs retain their exact URI.
+String? albumPaletteArtworkUrl(String? raw) =>
+    enlargedArtworkUrl(raw, sizePx: 96);
 
-/// Extracts (and caches) the seed colour for a cover, or null when the artwork
-/// cannot be decoded.
-Future<Color?> albumSeedForCover(String? coverUrl) async {
-  final String? url = albumPaletteArtworkUrl(coverUrl);
-  if (url == null) return null;
-  final Color? cached = _seedCache[url];
-  if (cached != null) return cached;
-  await albumMeshColorsForCover(coverUrl);
-  return _seedCache[url];
-}
+Future<Color?> albumSeedForCover(String? coverUrl) async =>
+    (await albumPaletteForCover(coverUrl))?.seed;
 
 Future<ui.Image?> _decode(ImageProvider provider) {
   final Completer<ui.Image?> completer = Completer<ui.Image?>();
@@ -1091,11 +1216,12 @@ class _LegacyAlbumBackdropState extends State<LegacyAlbumBackdrop> {
   Future<void> _load() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
-    final List<Color>? mesh = await albumMeshColorsForCover(coverUrl);
-    final Color? seed = await albumSeedForCover(coverUrl);
+    final palette = await albumPaletteForCover(coverUrl);
+    final Color? seed = palette?.seed;
     if (!mounted || generation != _generation) return;
     setState(
-      () => _colors = mesh ?? albumFlowColors(seed ?? kAlbumDefaultSeed),
+      () => _colors =
+          palette?.colors ?? albumFlowColors(seed ?? kAlbumDefaultSeed),
     );
     widget.onSeed?.call(seed ?? kAlbumDefaultSeed);
   }

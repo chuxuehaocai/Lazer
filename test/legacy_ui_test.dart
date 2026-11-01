@@ -639,7 +639,6 @@ void main() {
       '震动反馈',
       '歌词控件自动隐藏',
       '字体自定义',
-      '歌词同时显示封面',
       '音频引擎',
       '歌词模糊',
       '手动浏览后恢复跟随',
@@ -649,6 +648,7 @@ void main() {
     ]) {
       expect(find.text(label), findsOneWidget, reason: 'missing $label');
     }
+    expect(find.text('歌词同时显示封面'), findsNothing);
     expect(find.text('70%'), findsOneWidget);
     // The precision slider reads its stored percentage and reports the mesh
     // that setting draws.

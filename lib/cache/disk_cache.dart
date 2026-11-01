@@ -28,6 +28,13 @@ class DiskCache {
   final _pruneRequested = <CacheBucket, Uri>{};
   final Map<String, Future<void>> _jsonOperations = <String, Future<void>>{};
   int _serial = 0;
+  final Set<Uri> _retainedFiles = <Uri>{};
+
+  /// A higher-level policy can retain indexed files by song count rather than
+  /// the generic byte budget. Explicit removal still deletes retained files.
+  void retainFile(File file) => _retainedFiles.add(file.uri.normalizePath());
+  void releaseFile(File file) =>
+      _retainedFiles.remove(file.uri.normalizePath());
 
   static Future<Directory> _defaultDirectory() async => Directory(
     '${(await getApplicationCacheDirectory()).path}/lazer_cache_v1',
@@ -209,14 +216,23 @@ class DiskCache {
           }
           continue;
         }
-        files.add((entry, stat));
-        total += stat.size;
+        // Playback retention has its own song-count policy. Including those
+        // files in this byte budget would evict unrelated disposable entries
+        // as soon as the retained library grows beyond the generic quota.
+        if (!_retainedFiles.contains(entry.uri.normalizePath())) {
+          files.add((entry, stat));
+          total += stat.size;
+        }
       }
       final budget = limits[bucket] ?? 0;
       if (total <= budget) return;
       files.sort((a, b) => a.$2.modified.compareTo(b.$2.modified));
       for (final (file, stat) in files) {
         if (total <= budget) break;
+        if (_retainedFiles.contains(file.uri.normalizePath())) {
+          total -= stat.size;
+          continue;
+        }
         if (file.uri == keep || file.uri == _pruneRequested[bucket]) continue;
         try {
           await file.delete();

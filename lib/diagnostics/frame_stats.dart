@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../l10n/app_localizations.dart';
 import '../state/build_safe_notifier.dart';
+import '../theme/font_preferences.dart';
 import '../theme/tokens.dart';
 
 /// Rolling frame-time statistics from the engine's own timings callback.
@@ -202,12 +203,16 @@ class _FrameStatsOverlayState extends State<FrameStatsOverlay> {
                     vertical: 8,
                   ),
                   child: DefaultTextStyle(
-                    style: const TextStyle(
-                      fontFamily: AppFonts.sans,
-                      fontSize: 11,
-                      height: 1.5,
-                      color: Color(0xFFE2E8E9),
-                      fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+                    style: context.fonts.apply(
+                      FontCategory.caption,
+                      const TextStyle(
+                        fontSize: 11,
+                        height: 1.5,
+                        color: Color(0xFFE2E8E9),
+                        fontFeatures: <FontFeature>[
+                          FontFeature.tabularFigures(),
+                        ],
+                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,

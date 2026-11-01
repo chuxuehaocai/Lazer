@@ -8,16 +8,19 @@
 /// are the single place where those sizes are decided.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
 import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/copyable_song_title.dart';
+import '../widgets/cover_transition.dart';
 import '../utils/artwork.dart';
 import '../widgets/artwork_image.dart';
 import '../widgets/interaction_feedback.dart';
@@ -89,6 +92,7 @@ class LargeScreenTapTarget extends StatelessWidget {
     required this.child,
     this.onTap,
     this.onFocusChange,
+    this.focusNode,
     this.borderRadius = const BorderRadius.all(Radius.circular(14)),
     this.focusScale = 1.04,
   });
@@ -96,6 +100,7 @@ class LargeScreenTapTarget extends StatelessWidget {
   final Widget child;
   final VoidCallback? onTap;
   final ValueChanged<bool>? onFocusChange;
+  final FocusNode? focusNode;
   final BorderRadius borderRadius;
   final double focusScale;
 
@@ -103,6 +108,7 @@ class LargeScreenTapTarget extends StatelessWidget {
   Widget build(BuildContext context) => TvTapTarget(
     onTap: onTap,
     onFocusChange: onFocusChange,
+    focusNode: focusNode,
     borderRadius: borderRadius,
     focusScale: focusScale,
     child: GestureDetector(
@@ -279,6 +285,7 @@ class LargeScreenFeatureCard extends StatefulWidget {
     this.imageUrl,
     this.onTap,
     this.icon = Icons.playlist_play_rounded,
+    this.coverTransitionIdentity,
   });
 
   final double width;
@@ -287,6 +294,7 @@ class LargeScreenFeatureCard extends StatefulWidget {
   final String? imageUrl;
   final VoidCallback? onTap;
   final IconData icon;
+  final String? coverTransitionIdentity;
 
   @override
   State<LargeScreenFeatureCard> createState() => _LargeScreenFeatureCardState();
@@ -294,6 +302,14 @@ class LargeScreenFeatureCard extends StatefulWidget {
 
 class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard> {
   bool _focused = false;
+  final GlobalKey _coverKey = GlobalKey();
+
+  void _open() {
+    if (widget.coverTransitionIdentity != null) {
+      rememberCoverTransition(widget.coverTransitionIdentity!, _coverKey);
+    }
+    widget.onTap?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -301,7 +317,7 @@ class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard> {
     return SizedBox(
       width: widget.width,
       child: LargeScreenTapTarget(
-        onTap: feedbackAction(context, widget.onTap),
+        onTap: feedbackAction(context, widget.onTap == null ? null : _open),
         onFocusChange: (bool value) => setState(() => _focused = value),
         borderRadius: BorderRadius.circular(18),
         focusScale: 1.035,
@@ -325,6 +341,7 @@ class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               RepaintBoundary(
+                key: _coverKey,
                 child: LargeScreenArtwork(
                   url: widget.imageUrl,
                   size: widget.width,
@@ -393,6 +410,7 @@ class LargeScreenMediaCard extends StatefulWidget {
     this.circular = false,
     this.centerCaption = false,
     this.icon = Icons.music_note_rounded,
+    this.coverTransitionIdentity,
   });
 
   final double width;
@@ -403,6 +421,7 @@ class LargeScreenMediaCard extends StatefulWidget {
   final bool circular;
   final bool centerCaption;
   final IconData icon;
+  final String? coverTransitionIdentity;
 
   @override
   State<LargeScreenMediaCard> createState() => _LargeScreenMediaCardState();
@@ -410,6 +429,14 @@ class LargeScreenMediaCard extends StatefulWidget {
 
 class _LargeScreenMediaCardState extends State<LargeScreenMediaCard> {
   bool _focused = false;
+  final GlobalKey _coverKey = GlobalKey();
+
+  void _open() {
+    if (widget.coverTransitionIdentity != null) {
+      rememberCoverTransition(widget.coverTransitionIdentity!, _coverKey);
+    }
+    widget.onTap?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -422,7 +449,7 @@ class _LargeScreenMediaCardState extends State<LargeScreenMediaCard> {
     return SizedBox(
       width: widget.width,
       child: LargeScreenTapTarget(
-        onTap: feedbackAction(context, widget.onTap),
+        onTap: feedbackAction(context, widget.onTap == null ? null : _open),
         onFocusChange: (bool value) => setState(() => _focused = value),
         borderRadius: BorderRadius.circular(16),
         focusScale: 1.05,
@@ -445,6 +472,7 @@ class _LargeScreenMediaCardState extends State<LargeScreenMediaCard> {
                 ],
               ),
               child: RepaintBoundary(
+                key: _coverKey,
                 child: LargeScreenArtwork(
                   url: widget.imageUrl,
                   size: widget.width,
@@ -600,6 +628,9 @@ class LargeScreenTrackRow extends StatefulWidget {
     this.onTap,
     this.trailing,
     this.leading,
+    this.onLongPress,
+    this.selectionMode = false,
+    this.selected = false,
   });
 
   final int index;
@@ -612,6 +643,9 @@ class LargeScreenTrackRow extends StatefulWidget {
   final VoidCallback? onTap;
   final Widget? trailing;
   final Widget? leading;
+  final VoidCallback? onLongPress;
+  final bool selectionMode;
+  final bool selected;
 
   @override
   State<LargeScreenTrackRow> createState() => _LargeScreenTrackRowState();
@@ -619,112 +653,181 @@ class LargeScreenTrackRow extends StatefulWidget {
 
 class _LargeScreenTrackRowState extends State<LargeScreenTrackRow> {
   bool _focused = false;
+  late final FocusNode _focusNode = FocusNode(onKeyEvent: _onKeyEvent);
+  Timer? _holdTimer;
+  LogicalKeyboardKey? _heldKey;
+  bool _longPressed = false;
+
+  // Consume Select until key-up so holding the remote enters selection without
+  // first starting playback. Pointer long-press uses the same callback below.
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (widget.onLongPress == null ||
+        !<LogicalKeyboardKey>{
+          LogicalKeyboardKey.select,
+          LogicalKeyboardKey.enter,
+          LogicalKeyboardKey.numpadEnter,
+          LogicalKeyboardKey.space,
+          LogicalKeyboardKey.gameButtonA,
+        }.contains(event.logicalKey)) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyDownEvent && _heldKey == null) {
+      _heldKey = event.logicalKey;
+      _longPressed = false;
+      _holdTimer = Timer(const Duration(milliseconds: 500), () {
+        if (!mounted || !_focusNode.hasFocus || _heldKey == null) return;
+        _longPressed = true;
+        widget.onLongPress?.call();
+      });
+    } else if (event is KeyUpEvent && event.logicalKey == _heldKey) {
+      _holdTimer?.cancel();
+      _heldKey = null;
+      if (!_longPressed) feedbackAction(context, widget.onTap)?.call();
+    }
+    return KeyEventResult.handled;
+  }
+
+  void _setFocused(bool value) {
+    if (!value) {
+      _holdTimer?.cancel();
+      _heldKey = null;
+    }
+    setState(() => _focused = value);
+  }
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    _focusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return LargeScreenTapTarget(
       onTap: feedbackAction(context, widget.onTap),
-      onFocusChange: (bool value) => setState(() => _focused = value),
+      onFocusChange: _setFocused,
+      focusNode: _focusNode,
       borderRadius: BorderRadius.circular(12),
       focusScale: 1.008,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 130),
-        width: double.infinity,
-        height: 64,
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: widget.current
-              ? apple.accentSoft
-              : _focused
-              ? apple.fill
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: <Widget>[
-            SizedBox(
-              width: 38,
-              child: widget.current
-                  ? Icon(
-                      widget.playing
-                          ? Icons.graphic_eq_rounded
-                          : Icons.pause_rounded,
-                      size: 18,
-                      color: apple.accent,
-                    )
-                  : Text(
-                      '${widget.index + 1}',
-                      textAlign: TextAlign.center,
-                      style: LargeScreenType.rowMeta(context).copyWith(
-                        fontFeatures: const <FontFeature>[
-                          FontFeature.tabularFigures(),
-                        ],
-                        color: _focused
-                            ? apple.secondaryLabel
+      child: GestureDetector(
+        onLongPress: widget.onLongPress,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 130),
+          width: double.infinity,
+          height: 64,
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: widget.selected
+                ? apple.accentSoft
+                : widget.current
+                ? apple.accentSoft
+                : _focused
+                ? apple.fill
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: <Widget>[
+              SizedBox(
+                width: 38,
+                child: widget.selectionMode
+                    ? Icon(
+                        widget.selected
+                            ? Icons.check_circle_rounded
+                            : Icons.radio_button_unchecked_rounded,
+                        size: 21,
+                        color: widget.selected
+                            ? apple.accent
                             : apple.tertiaryLabel,
+                      )
+                    : widget.current
+                    ? Icon(
+                        widget.playing
+                            ? Icons.graphic_eq_rounded
+                            : Icons.pause_rounded,
+                        size: 18,
+                        color: apple.accent,
+                      )
+                    : Text(
+                        '${widget.index + 1}',
+                        textAlign: TextAlign.center,
+                        style: LargeScreenType.rowMeta(context).copyWith(
+                          fontFeatures: const <FontFeature>[
+                            FontFeature.tabularFigures(),
+                          ],
+                          color: _focused
+                              ? apple.secondaryLabel
+                              : apple.tertiaryLabel,
+                        ),
+                      ),
+              ),
+              ?widget.leading,
+              LargeScreenArtwork(
+                url: widget.imageUrl,
+                size: 44,
+                radius: 9,
+                iconScale: .34,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    _title(
+                      Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: LargeScreenType.rowTitle(context).copyWith(
+                          color: widget.current ? apple.accent : apple.label,
+                          fontWeight: widget.current || _focused
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
                       ),
                     ),
-            ),
-            ?widget.leading,
-            LargeScreenArtwork(
-              url: widget.imageUrl,
-              size: 44,
-              radius: 9,
-              iconScale: .34,
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  CopyableSongTitle(
-                    title: widget.title,
-                    child: Text(
-                      widget.title,
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.artist,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: LargeScreenType.rowTitle(context).copyWith(
-                        color: widget.current ? apple.accent : apple.label,
-                        fontWeight: widget.current || _focused
-                            ? FontWeight.w600
-                            : FontWeight.w500,
-                      ),
+                      style: LargeScreenType.rowMeta(context),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    widget.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: LargeScreenType.rowMeta(context),
-                  ),
-                ],
-              ),
-            ),
-            if (widget.trailing != null) ...<Widget>[
-              const SizedBox(width: 12),
-              widget.trailing!,
-            ],
-            if (widget.duration != null)
-              Padding(
-                padding: const EdgeInsets.only(left: 16),
-                child: Text(
-                  legacyDuration(widget.duration!),
-                  style: LargeScreenType.rowMeta(context).copyWith(
-                    fontFeatures: const <FontFeature>[
-                      FontFeature.tabularFigures(),
-                    ],
-                  ),
+                  ],
                 ),
               ),
-          ],
+              if (widget.trailing != null) ...<Widget>[
+                const SizedBox(width: 12),
+                widget.trailing!,
+              ],
+              if (widget.duration != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 16),
+                  child: Text(
+                    legacyDuration(widget.duration!),
+                    style: LargeScreenType.rowMeta(context).copyWith(
+                      fontFeatures: const <FontFeature>[
+                        FontFeature.tabularFigures(),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
+
+  Widget _title(Widget child) =>
+      widget.onLongPress != null || widget.selectionMode
+      ? child
+      : CopyableSongTitle(title: widget.title, child: child);
 }
 
 /// The primary action of a hero: a white pill with a glyph.

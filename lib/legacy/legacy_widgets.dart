@@ -10,6 +10,7 @@ import '../utils/artwork.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/artwork_image.dart';
 import '../widgets/copyable_song_title.dart';
+import '../widgets/cover_transition.dart';
 
 /// `mm:ss` for transport labels.
 String legacyDuration(Duration value) {
@@ -124,8 +125,14 @@ class LegacyPlaylistCard extends StatefulWidget {
 }
 
 class _LegacyPlaylistCardState extends State<LegacyPlaylistCard> {
+  final GlobalKey _coverKey = GlobalKey();
   bool _hovering = false;
   bool _focused = false;
+
+  void _open() {
+    rememberCoverTransition('playlist:${widget.playlist.id}', _coverKey);
+    widget.onTap();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -145,11 +152,11 @@ class _LegacyPlaylistCardState extends State<LegacyPlaylistCard> {
       onExit: (_) => setState(() => _hovering = false),
       cursor: SystemMouseCursors.click,
       child: TvTapTarget(
-        onTap: feedbackAction(context, widget.onTap),
+        onTap: feedbackAction(context, _open),
         onFocusChange: (bool value) => setState(() => _focused = value),
         borderRadius: BorderRadius.circular(12),
         child: GestureDetector(
-          onTap: feedbackAction(context, widget.onTap),
+          onTap: feedbackAction(context, _open),
           behavior: HitTestBehavior.opaque,
           child: SizedBox(
             width: widget.width,
@@ -164,6 +171,7 @@ class _LegacyPlaylistCardState extends State<LegacyPlaylistCard> {
                   child: Stack(
                     children: <Widget>[
                       RepaintBoundary(
+                        key: _coverKey,
                         child: LegacyCover(
                           url: widget.playlist.coverUrl,
                           size: widget.width,
@@ -243,6 +251,10 @@ class LegacyTrackRow extends StatefulWidget {
     this.current = false,
     this.playing = false,
     this.onMenuRequested,
+    this.onLongPress,
+    this.selectionMode = false,
+    this.selected = false,
+    this.trailing,
   });
 
   final Track track;
@@ -250,6 +262,10 @@ class LegacyTrackRow extends StatefulWidget {
   final VoidCallback onTap;
   final bool current;
   final bool playing;
+  final VoidCallback? onLongPress;
+  final bool selectionMode;
+  final bool selected;
+  final Widget? trailing;
 
   /// Right-click or long-press position, in global coordinates.
   final ValueChanged<Offset>? onMenuRequested;
@@ -285,22 +301,26 @@ class _LegacyTrackRowState extends State<LegacyTrackRow> {
               ? null
               : (TapDownDetails details) =>
                     widget.onMenuRequested!(details.globalPosition),
-          onLongPress: widget.onMenuRequested == null
-              ? null
-              : () {
-                  final RenderBox? box =
-                      context.findRenderObject() as RenderBox?;
-                  widget.onMenuRequested!(
-                    box?.localToGlobal(box.size.center(Offset.zero)) ??
-                        Offset.zero,
-                  );
-                },
+          onLongPress:
+              widget.onLongPress ??
+              (widget.onMenuRequested == null
+                  ? null
+                  : () {
+                      final RenderBox? box =
+                          context.findRenderObject() as RenderBox?;
+                      widget.onMenuRequested!(
+                        box?.localToGlobal(box.size.center(Offset.zero)) ??
+                            Offset.zero,
+                      );
+                    }),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
             decoration: BoxDecoration(
-              color: widget.current
+              color: widget.selected
+                  ? apple.accentSoft
+                  : widget.current
                   ? apple.accentSoft
                   : highlighted
                   ? apple.fill
@@ -311,7 +331,20 @@ class _LegacyTrackRowState extends State<LegacyTrackRow> {
               children: <Widget>[
                 SizedBox(
                   width: 28,
-                  child: widget.current
+                  child: widget.selectionMode
+                      ? Icon(
+                          widget.selected
+                              ? Icons.check_circle_rounded
+                              : Icons.radio_button_unchecked_rounded,
+                          size: 21,
+                          color: widget.selected
+                              ? apple.accent
+                              : apple.tertiaryLabel,
+                          semanticLabel: context.tr(
+                            widget.selected ? '已选择' : '未选择',
+                          ),
+                        )
+                      : widget.current
                       ? Icon(
                           widget.playing
                               ? Icons.graphic_eq_rounded
@@ -346,9 +379,8 @@ class _LegacyTrackRowState extends State<LegacyTrackRow> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      CopyableSongTitle(
-                        title: widget.track.title,
-                        child: Text(
+                      _trackTitle(
+                        Text(
                           widget.track.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -395,7 +427,9 @@ class _LegacyTrackRowState extends State<LegacyTrackRow> {
                       ),
                     ),
                   ),
-                if (wide || highlighted)
+                if (widget.trailing != null)
+                  widget.trailing!
+                else if (wide || highlighted)
                   SizedBox(
                     width: 46,
                     child: Text(
@@ -416,6 +450,11 @@ class _LegacyTrackRowState extends State<LegacyTrackRow> {
       ),
     );
   }
+
+  Widget _trackTitle(Widget child) =>
+      widget.onLongPress != null || widget.selectionMode
+      ? child
+      : CopyableSongTitle(title: widget.track.title, child: child);
 }
 
 class LegacySectionHeader extends StatelessWidget {

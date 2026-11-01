@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 
 import '../audio/audio_device_report.dart';
+import '../cache/playback_cache_settings.dart';
 import '../data/audio_quality.dart';
 import '../diagnostics/build_info.dart';
 import '../diagnostics/export_logs.dart';
@@ -22,6 +23,7 @@ import '../widgets/listen_together_dialog.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/settings_choice.dart';
 import '../tv/tv_mode.dart';
+import '../tv/lan_remote.dart';
 import '../updates/update_dialog.dart';
 import '../utils/background_image.dart';
 import '../utils/byte_format.dart';
@@ -103,7 +105,7 @@ class _SettingsOverview extends StatelessWidget {
                   AppleListTile(
                     key: const ValueKey('open-font-settings'),
                     title: context.tr('字体自定义'),
-                    subtitle: context.tr('调节页面文字与歌词的大小和粗细'),
+                    subtitle: context.tr('选择 MiSans、系统或导入字体，调节文字与歌词大小和粗细'),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => SettingsDetailHost.open(
                       context,
@@ -203,6 +205,7 @@ class _SettingsOverview extends StatelessWidget {
                       },
                     ),
                   ),
+                  const LanRemoteSettings(),
                   _LegacySliderRow(
                     key: const ValueKey('dpi-scale-slider'),
                     label: 'DPI 缩放',
@@ -482,6 +485,7 @@ class _SettingsOverview extends StatelessWidget {
             ),
             HifiSettingsSection(state: state),
             const _LegacySectionLabel('下载'),
+            PlaybackCacheSettings(controller: state.playbackCache),
             AppleGroupedCard(
               margin: EdgeInsets.zero,
               child: Column(
@@ -621,14 +625,6 @@ class _SettingsOverview extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
-                  _LegacySwitchRow(
-                    key: const ValueKey('artwork-with-lyrics-switch'),
-                    label: '歌词同时显示封面',
-                    subtitle: '仅移动端：封面缩至歌曲信息旁，随播放控件收起；顶部保留歌曲信息',
-                    value: state.showArtworkWithLyrics,
-                    onChanged: (value) =>
-                        unawaited(state.setShowArtworkWithLyrics(value)),
-                  ),
                   _LegacySwitchRow(
                     label: '歌词模糊',
                     subtitle: '距离当前歌词越远，模糊越强；手动浏览时渐隐',

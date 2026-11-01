@@ -123,6 +123,18 @@ void main() {
     );
     expect(albumPaletteArtworkUrl(''), isNull);
     expect(albumPaletteArtworkUrl(null), isNull);
+    expect(
+      albumPaletteArtworkUrl('file:///music/cover.png'),
+      'file:///music/cover.png',
+    );
+    expect(
+      albumPaletteArtworkUrl('http://server/getCoverArt.view?id=42&token=abc'),
+      'http://server/getCoverArt.view?id=42&token=abc',
+    );
+    expect(
+      albumPaletteArtworkUrl('https://covers.example.com/song?signature=abc'),
+      'https://covers.example.com/song?signature=abc',
+    );
   });
 
   test('the seed extractor prefers the dominant vibrant colour', () {
@@ -219,6 +231,90 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(Transform), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('flow surfaces reuse one rendered frame across different sizes', (
+    tester,
+  ) async {
+    final colors = albumFlowColors(const Color(0xFF9B4EBA));
+    final before = albumFlowRenderer.debugFrameBuilds;
+    await tester.pumpWidget(
+      _app(
+        Row(
+          children: [
+            for (final size in [const Size(160, 240), const Size(310, 460)])
+              SizedBox.fromSize(
+                size: size,
+                child: AlbumFlowBackground(colors: colors, quality: .43),
+              ),
+          ],
+        ),
+      ),
+    );
+    expect(albumFlowRenderer.debugFrameBuilds - before, 1);
+    await tester.pump(const Duration(milliseconds: 40));
+    final previousFrame = albumFlowRenderer.debugFrameBuilds;
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(albumFlowRenderer.debugFrameBuilds - previousFrame, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('shared pictures live until the last surface is removed', (
+    tester,
+  ) async {
+    final colors = albumFlowColors(const Color(0xFF516782));
+    Widget surfaces(int count) => _app(
+      Row(
+        children: [
+          for (int index = 0; index < count; index++)
+            SizedBox(
+              key: ValueKey(index),
+              width: 160,
+              height: 240,
+              child: AlbumFlowBackground(colors: colors, animated: false),
+            ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(surfaces(2));
+    final pictures = albumFlowRenderer.debugCachedFrames;
+    expect(pictures, hasLength(1));
+    expect(pictures.single.debugDisposed, isFalse);
+    await tester.pumpWidget(surfaces(1));
+    expect(pictures.single.debugDisposed, isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(pictures.single.debugDisposed, isTrue);
+    expect(albumFlowRenderer.debugCachedFrames, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('shared native pictures are disposed on eviction and pressure', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        AlbumFlowBackground(colors: albumFlowColors(const Color(0xFF8A6924))),
+      ),
+    );
+    final first = albumFlowRenderer.debugCachedFrames.single;
+    for (int frame = 0; frame < 12; frame++) {
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+    expect(first.debugDisposed, isTrue);
+    final remaining = albumFlowRenderer.debugCachedFrames;
+    expect(remaining, hasLength(albumFlowConfiguration.frameCacheEntries));
+    tester.binding.handleMemoryPressure();
+    expect(albumFlowRenderer.debugCachedFrames, isEmpty);
+    expect(remaining.every((picture) => picture.debugDisposed), isTrue);
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(albumFlowRenderer.debugCachedFrames, isNotEmpty);
+    final recovered = albumFlowRenderer.debugCachedFrames;
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(recovered.every((picture) => picture.debugDisposed), isTrue);
     expect(tester.takeException(), isNull);
   });
 

@@ -45,7 +45,7 @@ void main() {
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
         final semantics = tester.ensureSemantics();
-        final state = _State()..showArtworkWithLyrics = true;
+        final state = _State();
         addTearDown(state.dispose);
         state.lyricControlsSeconds = 1;
         await tester.pumpWidget(

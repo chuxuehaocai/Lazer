@@ -32,6 +32,21 @@ Future<bool> detectTelevision() async {
   }
 }
 
+/// Ordinary Android configuration and hardware features; no Wear OS APIs.
+Future<({bool watch, bool round})> detectWatch() async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return (watch: false, round: false);
+  }
+  try {
+    final result = await _tvChannel
+        .invokeMapMethod<String, bool>('watchShape')
+        .timeout(const Duration(milliseconds: 800));
+    return (watch: result?['watch'] ?? false, round: result?['round'] ?? false);
+  } catch (_) {
+    return (watch: false, round: false);
+  }
+}
+
 /// Publishes whether the television interaction model is active.
 ///
 /// This is separate from the density profile: a user can force the television

@@ -191,7 +191,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('now-playing-more')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('歌词'));
+    await tester.tap(
+      find.descendant(of: find.byType(BottomSheet), matching: find.text('歌词')),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 

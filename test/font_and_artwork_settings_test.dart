@@ -15,6 +15,7 @@ import 'package:lazer_nextgen/theme/font_preferences.dart';
 import 'package:lazer_nextgen/widgets/animated_track_cover.dart';
 import 'package:lazer_nextgen/player/artwork_lyrics_layout.dart';
 import 'package:lazer_nextgen/widgets/player_seek_bar.dart';
+import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
 
 const _track = Track(
   id: 'artwork-setting',
@@ -39,7 +40,39 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets(
-    'the mobile artwork preference does not change desktop presentation',
+    'open player refreshes cached lyrics after changing font family',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final state = _State()..lyricControlsSeconds = 10;
+      addTearDown(state.dispose);
+      await tester.pumpWidget(MaterialApp(home: NowPlayingPage(state: state)));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('legacy-now-playing-cover')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      final line = find.descendant(
+        of: find.byType(LyricViewport),
+        matching: find.text('First line'),
+      );
+      expect(tester.widget<Text>(line).style!.fontFamily, 'MiSans');
+      await state.setFontFamily(
+        const FontFamilyPreference(source: FontSource.system),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(
+        tester.widget<Text>(line).style!.fontFamily,
+        state.fontPreferences.family.resolvedFamily,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'the fixed mobile artwork layout does not change desktop presentation',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 800);
       tester.view.devicePixelRatio = 1;
@@ -50,7 +83,6 @@ void main() {
       await tester.pump();
       final art = find.byKey(const ValueKey('legacy-now-playing-cover'));
       final rect = tester.getRect(art);
-      await state.setShowArtworkWithLyrics(true);
       await tester.pump();
       await tester.tap(art);
       await tester.pump(const Duration(milliseconds: 450));
@@ -71,7 +103,7 @@ void main() {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final state = _State()..showArtworkWithLyrics = true;
+    final state = _State();
     state.lyricControlsSeconds = 1;
     addTearDown(state.dispose);
     await tester.pumpWidget(MaterialApp(home: NowPlayingPage(state: state)));
@@ -125,12 +157,10 @@ void main() {
       expect(theme.textTheme.bodyLarge!.fontSize, closeTo(22.1, .01));
       expect(theme.textTheme.bodyLarge!.fontWeight, FontWeight.w700);
       expect(theme.textTheme.titleMedium!.fontWeight, FontWeight.w600);
-      await state.setShowArtworkWithLyrics(true);
-      expect(prefs.getBool('lazer_show_artwork_with_lyrics'), isTrue);
+      expect(prefs.getBool('lazer_show_artwork_with_lyrics'), isNull);
       await state.resetFonts();
       expect(prefs.getString('lazer_font_preferences'), isNull);
       expect(state.lyricFontSize, 22);
-      expect(state.showArtworkWithLyrics, isTrue);
     },
   );
 
@@ -207,7 +237,6 @@ void main() {
       final state = _State();
       addTearDown(state.dispose);
       state.uiMode = size.width == 844 ? AppUiMode.mobile : AppUiMode.auto;
-      state.showArtworkWithLyrics = true;
       state.lyricControlsSeconds = 1;
       await tester.pumpWidget(
         MaterialApp(

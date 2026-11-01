@@ -66,7 +66,7 @@ ThemeData buildAppTheme({
     tooltipTheme: TooltipThemeData(
       decoration: BoxDecoration(color: palette.slateDark),
       textStyle: TextStyle(
-        fontFamily: AppFonts.sans,
+        fontFamily: fonts.family.resolvedFamily,
         color: palette.onInk,
         fontSize: 12,
       ),
@@ -74,8 +74,8 @@ ThemeData buildAppTheme({
     snackBarTheme: SnackBarThemeData(
       backgroundColor: palette.ivoryLight,
       contentTextStyle: TextStyle(
-        fontFamily: AppFonts.sans,
-        fontFamilyFallback: AppFonts.sansFallback,
+        fontFamily: fonts.family.resolvedFamily,
+        fontFamilyFallback: fonts.family.fallbackFor(AppFonts.sansFallback),
         fontSize: 14,
         height: 1.4,
         color: palette.slateDark,
@@ -87,11 +87,11 @@ ThemeData buildAppTheme({
     ),
     // Global safety net: any Text without an explicit AppText style still
     // renders in bundled MiSans instead of the system fallback.
-    fontFamily: AppFonts.sans,
-    fontFamilyFallback: AppFonts.sansFallback,
+    fontFamily: fonts.family.resolvedFamily,
+    fontFamilyFallback: fonts.family.fallbackFor(AppFonts.sansFallback),
     textTheme: fonts.applyTo(
       ThemeData(brightness: brightness).textTheme.apply(
-        fontFamily: AppFonts.sans,
+        fontFamily: fonts.family.resolvedFamily,
         bodyColor: palette.slateDark,
         displayColor: palette.slateDark,
       ),

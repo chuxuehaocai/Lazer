@@ -71,12 +71,13 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
   Future<void> _updatePalette() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
-    final List<Color>? mesh = await albumMeshColorsForCover(coverUrl);
-    final Color? seed = await albumSeedForCover(coverUrl);
+    final palette = await albumPaletteForCover(coverUrl);
+    final Color? seed = palette?.seed;
     if (!mounted || generation != _generation) return;
     widget.onSeed?.call(seed);
     setState(
-      () => _colors = mesh ?? albumFlowColors(seed ?? kAlbumDefaultSeed),
+      () => _colors =
+          palette?.colors ?? albumFlowColors(seed ?? kAlbumDefaultSeed),
     );
   }
 

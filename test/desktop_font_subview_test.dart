@@ -77,9 +77,19 @@ void main() {
           lessThan(tester.getRect(second).left),
         );
       } else {
+        final firstRect = tester.getRect(first);
+        await tester.scrollUntilVisible(
+          second,
+          180,
+          scrollable: find.byType(Scrollable).last,
+        );
         expect(
-          tester.getRect(first).bottom,
-          lessThanOrEqualTo(tester.getRect(second).top),
+          tester.getRect(second).left,
+          closeTo(firstRect.left, .1),
+        );
+        expect(
+          tester.getRect(second).width,
+          closeTo(firstRect.width, .1),
         );
       }
       expect(tester.takeException(), isNull);

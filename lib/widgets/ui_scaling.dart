@@ -149,9 +149,12 @@ class UiScaling extends StatelessWidget {
       state.autoDpiScale ? autoScale : state.dpiScale,
       floor: floor,
     );
-    final Widget scaled = scale == kDpiScaleDefault
+    // TV components were authored for a much larger presentation. Keep a
+    // smaller baseline, with the user's DPI preference applied on top.
+    final double renderedScale = scale * (tv ? .7 : 1);
+    final Widget scaled = renderedScale == kDpiScaleDefault
         ? child
-        : _ScaledInterface(scale: scale, child: child);
+        : _ScaledInterface(scale: renderedScale, child: child);
     return TvScope(
       // Remote navigation follows the input device, not the density choice: a
       // television told to use standard density still has no touch screen.
@@ -165,7 +168,16 @@ class UiScaling extends StatelessWidget {
         minScale: floor,
         car: car,
         tv: tv,
-        child: scaled,
+        child: tv || state.deviceIsTelevision || state.surface == AppSurface.tv
+            ? Builder(
+                builder: (context) => MediaQuery(
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(navigationMode: NavigationMode.directional),
+                  child: scaled,
+                ),
+              )
+            : scaled,
       ),
     );
   }

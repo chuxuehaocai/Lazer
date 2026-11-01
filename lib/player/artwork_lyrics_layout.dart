@@ -100,6 +100,7 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
     children: [
       Stack(
         alignment: Alignment.center,
+        clipBehavior: Clip.none,
         children: [
           _chromeChild(widget.header),
           ExcludeFocus(
@@ -108,15 +109,19 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
               excluding: widget.controlsVisible,
               child: IgnorePointer(
                 ignoring: widget.controlsVisible,
-                child: FadeTransition(
-                  key: const ValueKey('compact-player-summary-fade'),
-                  opacity: _summary,
-                  child: SizeTransition(
-                    sizeFactor: _summary,
+                child: AnimatedBuilder(
+                  animation: _summary,
+                  builder: (context, child) => Align(
                     alignment: Alignment.topLeft,
+                    heightFactor: _summary.value,
+                    child: child,
+                  ),
+                  child: FadeTransition(
+                    key: const ValueKey('compact-player-summary-fade'),
+                    opacity: _summary,
                     child: SlideTransition(
                       position: Tween<Offset>(
-                        begin: const Offset(0, -.15),
+                        begin: const Offset(0, -.10),
                         end: Offset.zero,
                       ).animate(_summary),
                       child: RepaintBoundary(child: widget.summary),
