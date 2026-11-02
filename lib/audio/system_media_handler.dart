@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_service_platform_interface/audio_service_platform_interface.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import '../data/models.dart';
 import '../state/app_state.dart';
 import 'media_artwork_cache.dart';
@@ -11,6 +12,20 @@ import 'linux_media_platform.dart';
 import 'switchable_media_platform.dart';
 
 typedef MediaArtworkResolver = Future<Uri?> Function(String? url);
+
+const MethodChannel _androidAudioServiceChannel = MethodChannel(
+  'dev.naominet.lazer/audio_service',
+);
+
+Future<void> _startAndroidAudioService() async {
+  if (defaultTargetPlatform != TargetPlatform.android) return;
+  try {
+    await _androidAudioServiceChannel.invokeMethod<void>('start');
+  } catch (error) {
+    // The service may already be running, or the activity may have detached.
+    debugPrint('Android audio service bootstrap failed: $error');
+  }
+}
 
 Future<LazerMediaHandler> initializeSystemMedia(AppState state) async {
   return AudioService.init<LazerMediaHandler>(
@@ -69,12 +84,20 @@ class SystemMediaController {
   LazerMediaHandler? _handler;
   bool? _enabled;
   bool _closed = false;
+  bool _mediaReady = false;
+  bool _wasPlaying = false;
   int _generation = 0;
   Future<void> _pending = Future<void>.value();
   Future<void> get settled => _pending;
 
   void _changed() {
     final enabled = !state.independentPlayback;
+    final playing = enabled && state.playing && state.current != null;
+    final playbackStarted = playing && !_wasPlaying;
+    _wasPlaying = playing;
+    if (playbackStarted && _mediaReady) {
+      unawaited(_startAndroidAudioService());
+    }
     if (_closed || _enabled == enabled) return;
     _enabled = enabled;
     final generation = ++_generation;
@@ -91,6 +114,7 @@ class SystemMediaController {
     if (!enabled && _initialization == null) return;
     final handler = await (_initialization ??= _initialize());
     _handler = handler;
+    _mediaReady = true;
     if (_closed || generation != _generation) {
       if (_closed || state.independentPlayback) {
         handler.setEnabled(false);
@@ -98,6 +122,10 @@ class SystemMediaController {
         if (_closed) handler.close();
       }
       return;
+    }
+    if (enabled && state.playing && state.current != null) {
+      // Start from the visible activity before publishing the playing state.
+      await _startAndroidAudioService();
     }
     await _togglePlatform(enabled);
     if (_closed || generation != _generation) return;
@@ -107,6 +135,7 @@ class SystemMediaController {
   void close() {
     if (_closed) return;
     _closed = true;
+    _mediaReady = false;
     ++_generation;
     state.removeListener(_changed);
     _handler?.close();

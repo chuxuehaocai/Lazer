@@ -26,6 +26,12 @@ seek. In particular, iOS receives track commands, not the podcast-style 30-secon
 skip controls. System commands share the same playlist, repeat and shuffle state
 as the Flutter UI. Artwork is cached locally using the CDN's required headers.
 
+On Android, the first foreground playback transition starts the media service
+from the visible activity before publishing the playing state. This keeps the
+`mediaPlayback` foreground service eligible for Android 17 background audio
+hardening, so Control Center commands continue through the same Dart queue and
+audio engine after the activity is hidden.
+
 Windows events are posted to the window thread before using Flutter's method
 channel. Shutdown revokes the WinRT event handlers and drains pending events.
 

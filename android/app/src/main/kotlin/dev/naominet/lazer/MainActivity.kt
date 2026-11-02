@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import androidx.core.content.ContextCompat
+import com.ryanheise.audioservice.AudioService
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -30,6 +32,26 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_SERVICE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "start") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    val intent = Intent(this, AudioService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        // Start from the visible activity so Android 17 grants
+                        // the media service while-in-use audio capability.
+                        ContextCompat.startForegroundService(this, intent)
+                    } else {
+                        startService(intent)
+                    }
+                    result.success(null)
+                } catch (error: Exception) {
+                    result.error("audio_service_start_failed", error.message, null)
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.naominet.lazer/logs")
             .setMethodCallHandler { call, result ->
                 if (call.method != "export") {
@@ -253,6 +275,7 @@ class MainActivity : AudioServiceActivity() {
     }
 
     private companion object {
+        const val AUDIO_SERVICE_CHANNEL = "dev.naominet.lazer/audio_service"
         const val HAPTICS_CHANNEL = "dev.naominet.lazer/haptics"
         const val LOCAL_MEDIA_CHANNEL = "dev.naominet.lazer/local_media"
         const val TV_CHANNEL = "dev.naominet.lazer/tv"
