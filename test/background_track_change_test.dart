@@ -17,7 +17,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
+import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 
 const Color _green = Color(0xFF2E7D32);
@@ -90,7 +90,7 @@ void main() {
           child: AlbumBlurFlow(
             boundaryKey: boundary,
             track: track,
-            mode: LegacyBackgroundMode.nowPlayingDynamic,
+            mode: AppBackgroundMode.nowPlayingDynamic,
             animationsEnabled: true,
             preview: true,
             pageColor: Colors.black,
@@ -128,7 +128,7 @@ void main() {
       home: AlbumBlurFlow(
         boundaryKey: boundary,
         track: track,
-        mode: LegacyBackgroundMode.nowPlayingDynamic,
+        mode: AppBackgroundMode.nowPlayingDynamic,
         animationsEnabled: true,
         preview: true,
         pageColor: Colors.black,
@@ -159,7 +159,7 @@ void main() {
       home: AlbumBlurFlow(
         boundaryKey: boundary,
         track: track,
-        mode: LegacyBackgroundMode.nowPlayingStatic,
+        mode: AppBackgroundMode.nowPlayingStatic,
         pageColor: Colors.black,
         preview: true,
         paletteLoader: (String? url) async {
@@ -202,7 +202,7 @@ void main() {
     Widget page(Track track) => MaterialApp(
       home: AlbumBlurFlow(
         track: track,
-        mode: LegacyBackgroundMode.nowPlayingStatic,
+        mode: AppBackgroundMode.nowPlayingStatic,
         pageColor: Colors.black,
         preview: true,
         paletteLoader: (String? url) async => null,

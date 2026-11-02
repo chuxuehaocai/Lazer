@@ -109,7 +109,9 @@ void main() {
   }) async {
     final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
     while (!predicate()) {
-      if (DateTime.now().isAfter(deadline)) fail('Timed out waiting for $reason');
+      if (DateTime.now().isAfter(deadline)) {
+        fail('Timed out waiting for $reason');
+      }
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
   }
@@ -140,7 +142,10 @@ void main() {
     expect(task.resolvedQuality, AudioQuality.lossless);
     expect(local.tracks.single.quality, AudioQuality.lossless);
     expect(local.tracks.single.source, LocalTrackSource.download);
-    expect((await local.localFileFor(_track('1', '夜の歌')))?.path, native(file.path));
+    expect(
+      (await local.localFileFor(_track('1', '夜の歌')))?.path,
+      native(file.path),
+    );
     expect(manager.completedCount, 1);
   });
 
@@ -162,7 +167,10 @@ void main() {
       () => tasks.every((DownloadTask task) => task.isDone),
       reason: 'batch to finish',
     );
-    expect(tasks.map((DownloadTask task) => task.status), everyElement(DownloadStatus.completed));
+    expect(
+      tasks.map((DownloadTask task) => task.status),
+      everyElement(DownloadStatus.completed),
+    );
     expect(tasks.first.path, endsWith('专辑${Platform.pathSeparator}01. 第一.mp3'));
     expect(tasks.last.path, endsWith('专辑${Platform.pathSeparator}02. 第二.mp3'));
     expect(await File(tasks.first.path!).exists(), isTrue);
@@ -197,8 +205,7 @@ void main() {
   });
 
   test('a failed resolution reports an error and can be retried', () async {
-    final _DownloadCatalog catalog = _DownloadCatalog(base)
-      ..failing.add('1');
+    final _DownloadCatalog catalog = _DownloadCatalog(base)..failing.add('1');
     final DownloadManager manager = DownloadManager(
       catalog: catalog,
       library: library(),
@@ -225,27 +232,30 @@ void main() {
     );
   });
 
-  test('a server error fails the task without leaving a partial file', () async {
-    final DownloadManager manager = DownloadManager(
-      catalog: _DownloadCatalog(base),
-      library: library(),
-    );
-    addTearDown(manager.dispose);
-    final DownloadTask task = manager
-        .enqueue(
-          <Track>[_track('500')],
-          quality: AudioQuality.exhigh,
-          directory: downloads.path,
-        )
-        .single;
-    await waitUntil(
-      () => task.status == DownloadStatus.failed,
-      reason: 'server error',
-    );
-    expect(task.error, contains('500'));
-    final List<FileSystemEntity> files = await downloads.list().toList();
-    expect(files.whereType<File>(), isEmpty);
-  });
+  test(
+    'a server error fails the task without leaving a partial file',
+    () async {
+      final DownloadManager manager = DownloadManager(
+        catalog: _DownloadCatalog(base),
+        library: library(),
+      );
+      addTearDown(manager.dispose);
+      final DownloadTask task = manager
+          .enqueue(
+            <Track>[_track('500')],
+            quality: AudioQuality.exhigh,
+            directory: downloads.path,
+          )
+          .single;
+      await waitUntil(
+        () => task.status == DownloadStatus.failed,
+        reason: 'server error',
+      );
+      expect(task.error, contains('500'));
+      final List<FileSystemEntity> files = await downloads.list().toList();
+      expect(files.whereType<File>(), isEmpty);
+    },
+  );
 
   test('cancelling an active download removes its partial file', () async {
     final DownloadManager manager = DownloadManager(
@@ -277,9 +287,7 @@ void main() {
     );
     final List<FileSystemEntity> files = await downloads.list().toList();
     expect(
-      files.whereType<File>().where(
-        (File file) => file.path.endsWith('.part'),
-      ),
+      files.whereType<File>().where((File file) => file.path.endsWith('.part')),
       isEmpty,
     );
   });

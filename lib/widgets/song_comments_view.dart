@@ -1,3 +1,5 @@
+import '../animation/apple_spring.dart';
+import 'spring_buttons.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -5,7 +7,7 @@ import 'package:flutter/material.dart';
 import '../data/models.dart';
 import '../data/song_comments.dart';
 import '../l10n/app_localizations.dart';
-import '../legacy/legacy_login.dart';
+import '../ui/login.dart';
 import '../state/app_state.dart';
 import '../state/song_comments_controller.dart';
 import '../theme/tokens.dart';
@@ -86,7 +88,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
 
   Future<void> _like(int id) async {
     if (!widget.state.signedIn) {
-      await showLegacyLoginDialog(context, widget.state);
+      await showAppLoginDialog(context, widget.state);
       if (!mounted || !widget.state.signedIn) return;
       await _comments.openSong(
         widget.track.id,
@@ -99,7 +101,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
 
   Future<void> _loginAgain() async {
     final SessionUser previous = widget.state.user;
-    await showLegacyLoginDialog(context, widget.state);
+    await showAppLoginDialog(context, widget.state);
     if (!mounted ||
         !widget.state.signedIn ||
         identical(previous, widget.state.user)) {
@@ -158,6 +160,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
               ),
             ),
             AnimatedSize(
+              curve: const AppleSpringCurve(),
               duration: AppMotion.standard,
               alignment: Alignment.topLeft,
               child: _comments.loginRequired
@@ -165,7 +168,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
                       alignment: Alignment.centerLeft,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: TextButton(
+                        child: SpringTextButton(
                           onPressed: () => unawaited(_loginAgain()),
                           child: const TrText('重新登录'),
                         ),
@@ -222,7 +225,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
                                 ),
                               ),
                               if (_comments.error != null)
-                                TextButton(
+                                SpringTextButton(
                                   onPressed: () => unawaited(_comments.retry()),
                                   child: const TrText('重试'),
                                 ),
@@ -284,7 +287,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
                                                           .onSurfaceVariant,
                                                     ),
                                               ),
-                                              TextButton(
+                                              SpringTextButton(
                                                 onPressed: () => unawaited(
                                                   _comments.retry(),
                                                 ),
@@ -293,7 +296,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
                                             ],
                                           )
                                         : _comments.hasMore
-                                        ? TextButton(
+                                        ? SpringTextButton(
                                             onPressed: () =>
                                                 unawaited(_comments.loadMore()),
                                             child: const TrText('加载更多评论'),
@@ -504,6 +507,8 @@ class _CommentRow extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         AnimatedSwitcher(
+                          switchInCurve: const AppleSpringCurve(),
+                          switchOutCurve: const AppleSpringCurve(),
                           duration: AppMotion.quick,
                           transitionBuilder:
                               (Widget child, Animation<double> animation) =>
@@ -524,6 +529,8 @@ class _CommentRow extends StatelessWidget {
                         ),
                         const SizedBox(width: 6),
                         AnimatedSwitcher(
+                          switchInCurve: const AppleSpringCurve(),
+                          switchOutCurve: const AppleSpringCurve(),
                           duration: AppMotion.quick,
                           child: Text(
                             MaterialLocalizations.of(

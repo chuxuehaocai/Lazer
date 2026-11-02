@@ -1,44 +1,28 @@
-﻿# Now Playing / Lyric Engine Rewrite
+# Now playing and lyric engine
 
-The player stack was rebuilt from scratch. The old page, desktop/mobile
-implementations and the old lyric renderer are no longer used.
+The player uses one adaptive entry point on every platform. Desktop, phone and
+television presentations share playback state, lyrics, artwork, queue and
+comment services; each layout adapts the same controls to its available space.
+The browse shell and settings live in `lib/ui/` and use `buildAppleTheme` from
+`lib/theme/apple_design.dart`. There is no separate old/new player wrapper.
 
-## Removed
-
-- `lib/legacy/legacy_desktop_player.dart`
-- `lib/legacy/now_playing_m3.dart`
-- the old implementation inside `lib/legacy/legacy_now_playing.dart`
-- the old lyric implementations previously in:
-  - `lib/widgets/lyric_viewport.dart`
-  - `lib/widgets/timed_lyric_text.dart`
-  - `lib/widgets/lyric_text_hit_region.dart`
-  - `lib/widgets/lyric_selection_toolbar.dart`
-  - `lib/widgets/lyric_image_dialog.dart`
-  - `lib/data/lyrics.dart`
-  - `lib/data/lyric_selection.dart`
-  - `lib/animation/lyric_spring.dart`
-  - `lib/animation/lyric_word_motion.dart`
-
-Those public paths remain as one-line compatibility exports, so callers and
-tests can keep importing existing symbols while all implementation lives in
-the new `lib/lyrics` package.
-
-## New player modules
+## Player modules
 
 | Module | Responsibility |
 | --- | --- |
-| `lib/player/now_playing_page.dart` | One adaptive page for desktop and phone; top bar, artwork, lyrics, transport, queue/comments sheets |
-| `lib/player/now_playing_route.dart` | Standalone entry/exit route: fade + upward compositor slide |
-| `lib/player/player_backdrop.dart` | AMLL mesh-gradient cover flow, multi-hue palette and Apple Music vignette |
+| `lib/player/now_playing_page.dart` | Adaptive page, artwork, lyrics, transport, queue and comments |
+| `lib/player/desktop_now_playing.dart` | Desktop split composition and collapsible transport dock |
+| `lib/player/artwork_lyrics_layout.dart` | Compact portrait/landscape artwork, lyrics and metadata layout |
+| `lib/player/now_playing_route.dart` | Standalone spring presentation and pull-down dismissal |
+| `lib/player/player_backdrop.dart` | Separately configured player background and album-colour vignette |
+| `lib/animation/apple_spring.dart` | Shared duration/bounce springs and bounded spring curve |
 
 The desktop composition is an artwork-led split view with a borderless lyric
-canvas. The phone composition uses a compact header and a borderless lyric
-canvas over the darkened artwork. Queue and comments remain shared app views
-but now run inside the new glass panels/sheets. The desktop header also carries
-a download action for the current track: it opens the shared quality and
-destination dialog, shows live progress while the task runs, and switches to
-the download queue once the track is queued or saved. Local files keep the
-action disabled.
+canvas. The phone composition keeps artwork and lyrics in one adaptive layout;
+queue and comments use the shared panels/sheets. The desktop header's download
+action opens the shared quality and destination dialog, shows active progress
+and opens the download queue after a track is queued or saved. Local files keep
+that action disabled.
 
 ## Lyric motion and layout
 
@@ -109,7 +93,7 @@ The lyric canvas follows the AMLL/Apple Music reading rhythm:
   and translation, so scrolling, scale/blur transitions and line lifecycle are
   invisible to UIA and cannot leave pending lyric nodes in the AXTree.
 
-## New lyric engine
+## Lyric engine
 
 | Module | Responsibility |
 | --- | --- |
@@ -118,7 +102,7 @@ The lyric canvas follows the AMLL/Apple Music reading rhythm:
 | `lib/lyrics/spring.dart` | Closed-form spring and adaptive position policy |
 | `lib/lyrics/word_motion.dart` | Word emphasis/float motion envelopes |
 | `lib/lyrics/timed_line.dart` | Grapheme-aware progressive glyph painting |
-| `lib/legacy/legacy_background.dart` | AMLL mesh-gradient cover flow + multi-hue cover palette extraction |
+| `lib/ui/background.dart` | AMLL mesh-gradient cover flow + multi-hue cover palette extraction |
 | `lib/lyrics/hit_region.dart` | Hit testing limited to actual glyph boxes |
 | `lib/lyrics/selection_bar.dart` | Apple-style floating selection actions |
 | `lib/lyrics/edge_fade.dart` | Four-edge soft viewport mask for the lyric raster |
@@ -133,117 +117,76 @@ white highlight; selected rows (main text and translation) paint at full
 alpha while every unselected row keeps the brightness it had before selection
 began.
 
-Tapping the artwork no longer opens a large cover overlay. Long-pressing any
-cover (desktop or compact header) opens a confirmation dialog before saving
-the current artwork to the device.
+## Artwork and compact metadata
 
-### Track changes
+Tapping compact artwork switches between the large cover and the lyric layout.
+The artwork shrinks beside the metadata while controls remain visible. When
+controls hide, the top summary shows the small cover, title and artist. It enters
+from above and moves downward; hiding it moves upward from its presented
+position while fading. Reversing the action retargets the current spring instead
+of resetting its position. Long-pressing artwork offers to save the current cover.
 
-`AnimatedTrackCover` dissolves one plate into the next: 420 ms, a symmetric
-`Cubic(0.4, 0, 0.2, 1)` fade and a 1.2% scale settle. The previous carousel
-slide is gone; both plates are compositor layers, so the cross-fade costs two
-opacity updates rather than a re-rasterised artwork per frame. A metadata
-refresh keeps the same `ValueKey` and does not replay the dissolve.
+`AnimatedTrackCover` dissolves the outgoing visible composition above an opaque
+incoming cover, avoiding a dark dip. A rapid return to a still-visible track
+reuses that plate and its current spring velocity. Desktop artwork uses the
+slower `AppleSpring.smooth` response; compact artwork uses
+`AppleSpring.responsive`. Metadata refreshes do not replay a track change, and
+reduced motion replaces the artwork immediately.
 
+## Presentation and direct manipulation
 
-## Performance and accessibility
+The shell mounts the player over its existing root. Direct callers can use
+`NowPlayingRoute`. Both hosts move the actual presented coordinate with the
+shared Apple-style spring; the controller value is the displayed openness.
+Closing during entrance or opening during exit starts from the current position
+and velocity. No extra easing is applied to a finger-driven coordinate.
 
-### Entering / leaving
+A downward drag in the upper part of the page pulls it one-to-one with the
+pointer. The player closes after 22% travel, or a downward release faster than
+900 px/s after a small minimum travel; otherwise it springs back. An upward
+release can cancel dismissal. Release velocity is normalized into the same
+coordinate used by the animation, so there is no first-frame jump. Pointer
+cancellation settles the visible player back into place. Mouse drags share this
+path; wheel and trackpad scroll signals remain available to scroll content.
 
-The shell no longer pushes the player as a new Navigator route. It mounts the
-player as a same-route overlay over the existing app root:
+Reduced motion removes decorative travel and disables ambient background flow.
+It does not force a long animated path through an accessibility preference.
 
-- the whole player uses Material's open-upwards motion: a compositor-only
-  slide from `Offset(0, 1)` to `Offset.zero`, 500 ms, closing on the same
-  motion reversed. The curve is decelerating, not symmetric: a third of the
-  travel is covered in the first tenth of the duration and the landing is
-  soft, so the page answers the tap immediately instead of easing away from
-  it. The same curve runs the close, so leaving never starts with a hang;
-- the curve shapes time, never the offset. The pull-down writes the
-  controller value straight through and reads it back, so a dragged page
-  still sits exactly under the finger — both the shell overlay and the
-  standalone `NowPlayingRoute` keep the finger-driven path linear and curve
-  only the push, the pop and the settle after a release;
-- no full-screen clip radius, scale or fade is animated;
-- the motion keeps its duration even when the platform reports reduced motion
-  (`AnimationBehavior.preserve`). That flag shrinks a controller to 5% of its
-  duration, which skipped the entrance and turned a released pull into a
-  single-frame snap instead of carrying the page the rest of the way out;
-  compositor transforms are not a vestibular trigger;
-- the shell's ambient tickers are paused while the player is up. The player's
-  own tickers are not: a `TickerMode` gate around the whole player made every
-  ticker in it depend on that gate, so unmuting it on the last frame of the
-  entrance rebuilt the whole page exactly when the animation landed;
-- the lyric canvas is the one exception, and it is gated narrowly: the slide
-  re-executes the page display list on every frame, and the lyric painter
-  carries one blurred layer per visible row, so its 60 fps tick is muted for
-  the 500 ms of travel. The gate owns the viewport as a plain child, so
-  unmuting it rebuilds a single `TickerMode` node — not the page — and the
-  rows are already laid out, so nothing jumps when it resumes;
-- the album-colour mesh flow is held back until the entrance has settled, and
-  it follows a `ValueListenable<bool>` on its own, so the frame it starts on
-  rebuilds the backdrop and nothing else;
-- while the slide runs the backdrop paints a single vertical ramp through the
-  five album colours instead of the warped mesh. A warped full-window
-  `drawVertices` re-executed on every frame of a moving layer is what pegged
-  the GPU on entry; the ramp costs one fill, and the mesh takes over on the
-  settle frame with the same palette, so the handover reads as the warp
-  appearing rather than a colour change. The exit slide uses the same
-  stand-in;
-- the player page widget is built once per opening and handed to the tree
-  unchanged: a shell rebuild — a playback report while the player is up, the
-  entrance settling — never rebuilds the player's subtree;
-- the covered browse tree is kept warm, so the frame that opens the player
-  reuses it instead of rebuilding a page the player is about to hide;
-- on exit the mesh is disabled before the reverse slide begins;
-- the background never renders the song cover image itself; only the extracted
-  multi-hue palette drives the mesh flow;
-- the mesh honours `动态背景渲染精度` from Settings (0.1 … 1.0) live: the setting
-  scales the vertices uploaded per frame and the interval between two
-  updates, so a slow GPU can be handed back the time instead of dropping the
-  flow entirely;
-- the player canvas ignores the browse backdrop setting: choosing 不使用 or a
-  custom picture in Settings never removes the song's flow from this page;
-- large subtrees are wrapped in `RepaintBoundary` so the slide transforms a
-  cached layer.
+## Background and resource handling
 
-A standalone `NowPlayingRoute` still exists for direct callers and uses the
-same Material open-upwards slide without a full-screen animated clip.
+The player has independent dynamic, static, solid-colour and custom-image
+settings. Browsing defaults to 30 fps; player flow follows the display refresh
+rate unless a manual limit is chosen. Mesh precision changes density separately
+from frame cadence. Static and hidden backgrounds do not keep continuous tickers
+running. Custom images are copied into app storage so the selected file can move.
 
-### Pulling the player down
+Album colours are extracted from a small analysis image, with generations that
+prevent an older request overwriting the current track's palette. Displayed
+artwork still uses the rendition appropriate for its painted size. Settled
+palettes reuse processed colours instead of rebuilding them on every paint.
 
-The player also leaves the way a sheet does, on phones and on desktop alike:
+During player travel, ambient work is suspended and the backdrop uses a cheap
+palette ramp. Large stable subtrees are repaint boundaries or captured motion
+surfaces, so presentation moves a composed layer. The covered browse page stays
+mounted with its state and scroll position; hidden tickers, focus and semantics
+are gated until the page is visible again. See
+[performance-validation.md](performance-validation.md) for focused measurements
+and their limits.
 
-- a downward drag that starts anywhere in the upper half of the window pulls
-  it away: the header, the artwork and the lyrics all arm the gesture;
-- the page tracks the finger one to one over a full window height of travel,
-  and the browse tree is revealed underneath it;
-- an upward drag never claims the gesture, so the lyric canvas keeps its own
-  scrolling inside the same region, and a tap still reaches the header;
-- the strip is armed on the desktop presentation as well, where a mouse drag
-  closes the player the same way; scrolling a list with a wheel or a trackpad
-  arrives as pointer signals rather than drags, so it is untouched;
-- on release the player closes once it has travelled 22% of the height or was
-  flung downward faster than 900 px/s; otherwise it springs back to the open
-  position;
-- the settle animation is proportional to the distance that is left (80-260
-  ms) instead of replaying the whole transition;
-- the gesture is hosted by whatever owns the player's transition, so the shell
-  overlay and `NowPlayingRoute` share one implementation
-  (`lib/navigation/pull_down_to_close.dart`);
-- the drag strip is a sibling above the page content in the stack, so its
-  recognizer answers the gesture arena before the lyric viewport's.
+## Accessibility and verification
 
-### Windows AXTree stability
+The same-route player preserves the Windows accessibility root. Browse
+semantics are excluded while the player is open; player semantics become active
+after entrance. Lyrics contribute one stable live-region node, rather than one
+changing node per animated row. Transport and seek controls keep stable labelled
+semantics outside structural page rebuilds.
 
-The previous route swap left the Windows accessibility bridge with two
-semantic roots during enter/exit. The app now keeps a stable same-route
-semantics container, excludes the shell while the player is open, and defers
-exposing the player semantics until the entrance slide has finished. On exit
-the player semantics are removed before the shell returns. The lyric column
-now contributes exactly one stable live-region semantics node; animated rows
-are `ExcludeSemantics`. Transport controls live outside the 100 ms tick builder,
-and the seek bar exposes one stable labelled slider node while changing only its
-value. Together these changes remove the per-line/per-tick semantic node churn
-that produced the `AXTree ... not the new root` / `Nodes left pending` family
-during lyric playback.
+Tests cover compact/desktop layouts, portrait/landscape changes, enlarged text,
+artwork blending, rapid reverse transitions, interrupted drag releases,
+queue/comments, lyric timing, resource cleanup and reduced motion. Relevant
+focused suites include `test/player_pull_down_test.dart`,
+`test/apple_player_route_test.dart`, `test/animated_track_cover_test.dart`,
+`test/mobile_artwork_player_test.dart`,
+`test/accessible_player_transitions_test.dart` and
+`test/player_open_cost_test.dart`. These checks do not substitute for frame-time
+and input testing on each physical platform.

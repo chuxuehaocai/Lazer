@@ -28,7 +28,7 @@ import '../lyrics/imported_lyrics_store.dart';
 import '../updates/release_version.dart';
 import '../updates/update_checker.dart';
 import '../utils/background_image.dart';
-import '../legacy/legacy_background.dart' show albumSeedForCover;
+import '../ui/background.dart' show albumSeedForCover;
 import 'build_safe_notifier.dart';
 import 'listen_together.dart';
 import 'media_shortcuts.dart';
@@ -158,8 +158,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        _queueStore = queueStore ?? PlaybackQueueStore(),
        updateChecker = updateChecker ?? UpdateChecker() {
     if (deviceIsWatch) {
-      legacyBackground = LegacyBackgroundMode.nowPlayingStatic;
-      playerBackground = LegacyBackgroundMode.nowPlayingStatic;
+      backgroundMode = AppBackgroundMode.nowPlayingStatic;
+      playerBackground = AppBackgroundMode.nowPlayingStatic;
     }
     this.importedLyrics = importedLyrics ?? ImportedLyricsStore();
     this.downloadManager =
@@ -206,18 +206,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ScheduledPauseSettings scheduledPause = ScheduledPauseSettings();
   late final ScheduledPauseController _pauseSchedule = ScheduledPauseController(
     now: () => scheduledPauseClock(),
-    onCheck: (active) {
-      if (active) pause();
-      if (_scheduledPauseActive != active) {
-        _scheduledPauseActive = active;
-        notifyListeners();
-      }
-    },
+    onPause: pause,
   );
   final DateTime Function() scheduledPauseClock;
-  bool _scheduledPauseActive = false;
-  bool get scheduledPauseActive =>
-      scheduledPause.activeAt(scheduledPauseClock());
   late final _pauseScheduleWriter = CoalescingWriter(() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(scheduledPauseKey, scheduledPause.encode());
@@ -630,22 +621,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await _playlistOrderWriter.request();
   }
 
-  /// Legacy shell backdrop: the album-coloured flowing canvas, the listener's
+  /// App shell backdrop: the album-coloured flowing canvas, the listener's
   /// own picture, or off.
-  LegacyBackgroundMode legacyBackground =
-      LegacyBackgroundMode.nowPlayingDynamic;
+  AppBackgroundMode backgroundMode = AppBackgroundMode.nowPlayingDynamic;
 
-  /// Stored copy of the picture used by [LegacyBackgroundMode.customImage].
+  /// Stored copy of the picture used by [AppBackgroundMode.customImage].
   /// Null until the listener picks one; the canvas still renders without it.
-  String? legacyBackgroundImagePath;
+  String? backgroundImagePath;
 
-  /// `内容不透明度` of the legacy shell — how much of the backdrop the content
+  /// `内容不透明度` of the app shell — how much of the backdrop the content
   /// veil hides.
-  double legacyUiAlpha = 0.7;
+  double uiAlpha = 0.7;
   double browseBackgroundFps = 30;
   double playerBackgroundFps = 0;
-  LegacyBackgroundMode playerBackground =
-      LegacyBackgroundMode.nowPlayingDynamic;
+  AppBackgroundMode playerBackground = AppBackgroundMode.nowPlayingDynamic;
   Color? browseBackgroundColor, playerBackgroundColor;
   String? playerBackgroundImagePath;
 
@@ -666,7 +655,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
   }
 
-  Future<void> setPlayerBackground(LegacyBackgroundMode mode) async {
+  Future<void> setPlayerBackground(AppBackgroundMode mode) async {
     playerBackground = mode;
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
@@ -707,9 +696,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  Future<void> setLegacyBackground(LegacyBackgroundMode value) async {
-    if (legacyBackground == value) return;
-    legacyBackground = value;
+  Future<void> setAppBackground(AppBackgroundMode value) async {
+    if (backgroundMode == value) return;
+    backgroundMode = value;
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
       'lazer_legacy_background',
@@ -717,9 +706,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
   }
 
-  Future<void> setLegacyBackgroundImage(String? path) async {
-    if (legacyBackgroundImagePath == path) return;
-    legacyBackgroundImagePath = path;
+  Future<void> setAppBackgroundImage(String? path) async {
+    if (backgroundImagePath == path) return;
+    backgroundImagePath = path;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     if (path == null) {
@@ -734,13 +723,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  Future<void> setLegacyUiAlpha(double value) async {
+  Future<void> setAppUiAlpha(double value) async {
     if (!value.isFinite) return;
-    legacyUiAlpha = value.clamp(0.4, 1.0);
+    uiAlpha = value.clamp(0.4, 1.0);
     notifyListeners();
     await (await SharedPreferences.getInstance()).setDouble(
       'lazer_legacy_ui_alpha',
-      legacyUiAlpha,
+      uiAlpha,
     );
   }
 
@@ -902,7 +891,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       final seed = await artworkSeedLoader(track?.coverUrl);
       if (generation != _paletteGeneration) return;
       if (current?.id == track?.id && current?.coverUrl == track?.coverUrl) {
-        setLegacySeed(seed);
+        setAppSeed(seed);
       }
       // A cover that yielded no seed — a rejected CDN node, artwork not in the
       // cache yet — is worth exactly one more attempt on the next report.
@@ -911,7 +900,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (seed == null) _retryArtworkSeed(identity, track);
     } catch (_) {
       if (generation != _paletteGeneration) return;
-      setLegacySeed(null);
+      setAppSeed(null);
       _retryArtworkSeed(identity, track);
     }
   }
@@ -1027,30 +1016,30 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
   }
 
-  /// The legacy shell's accent palette: the fixed Lazer scheme, one seeded
+  /// The app shell's accent palette: the fixed Lazer scheme, one seeded
   /// from the current cover like the app's "follow the song" palette, or the
   /// listener's own colour.
-  LegacyPaletteMode legacyPalette = LegacyPaletteMode.fixed;
+  AppPaletteMode paletteMode = AppPaletteMode.fixed;
 
-  /// The accent picked in [LegacyPaletteMode.custom]; null until the listener
+  /// The accent picked in [AppPaletteMode.custom]; null until the listener
   /// chooses one, in which case the shipped red remains in effect.
-  Color? legacyAccentColor;
+  Color? accentColor;
 
-  /// The last artwork seed the legacy backdrop extracted; only used while
-  /// [legacyPalette] is [LegacyPaletteMode.nowPlaying].
-  Color? legacySeed;
+  /// The last artwork seed the compatibility backdrop extracted; only used while
+  /// [paletteMode] is [AppPaletteMode.nowPlaying].
+  Color? artworkSeed;
 
   /// The accent seed handed to the Apple theme builders. Null keeps the
   /// shipped Apple Music red.
-  Color? get legacyAccentSeed => switch (legacyPalette) {
-    LegacyPaletteMode.fixed => null,
-    LegacyPaletteMode.nowPlaying => legacySeed,
-    LegacyPaletteMode.custom => legacyAccentColor,
+  Color? get accentSeed => switch (paletteMode) {
+    AppPaletteMode.fixed => null,
+    AppPaletteMode.nowPlaying => artworkSeed,
+    AppPaletteMode.custom => accentColor,
   };
 
-  Future<void> setLegacyPalette(LegacyPaletteMode value) async {
-    if (legacyPalette == value) return;
-    legacyPalette = value;
+  Future<void> setAppPalette(AppPaletteMode value) async {
+    if (paletteMode == value) return;
+    paletteMode = value;
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
       'lazer_legacy_palette',
@@ -1058,9 +1047,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
   }
 
-  Future<void> setLegacyAccent(Color value) async {
-    if (legacyAccentColor == value) return;
-    legacyAccentColor = value;
+  Future<void> setAppAccent(Color value) async {
+    if (accentColor == value) return;
+    accentColor = value;
     notifyListeners();
     await (await SharedPreferences.getInstance()).setInt(
       'lazer_legacy_accent',
@@ -1068,12 +1057,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
   }
 
-  void setLegacySeed(Color? value) {
-    if (legacySeed == value) return;
-    legacySeed = value;
+  void setAppSeed(Color? value) {
+    if (artworkSeed == value) return;
+    artworkSeed = value;
     // The fixed palette does not consume the seed; rebuilding the whole shell
     // for it on every track change was pure work.
-    if (legacyPalette == LegacyPaletteMode.nowPlaying) notifyListeners();
+    if (paletteMode == AppPaletteMode.nowPlaying) notifyListeners();
   }
 
   Future<void> setLyricFontSize(double value) async {
@@ -1366,9 +1355,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final int initialQueueActivity = _queueActivity;
     try {
       final prefs = await SharedPreferences.getInstance();
-      scheduledPause = ScheduledPauseSettings.decode(
-        prefs.getString(scheduledPauseKey),
-      );
+      final storedPause = prefs.getString(scheduledPauseKey);
+      scheduledPause = ScheduledPauseSettings.decode(storedPause);
+      final encodedPause = scheduledPause.encode();
+      if (storedPause != null && storedPause != encodedPause) {
+        await prefs.setString(scheduledPauseKey, encodedPause);
+      }
       _pauseSchedule.update(scheduledPause);
       _independentPlayback =
           prefs.getBool('lazer_independent_playback') ?? _independentPlayback;
@@ -1380,13 +1372,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         orElse: () => ThemeMode.system,
       );
       language = AppLanguage.parse(prefs.getString('lazer_language'));
-      legacyBackground = LegacyBackgroundModeLabels.parse(
+      backgroundMode = AppBackgroundModeLabels.parse(
         prefs.getString('lazer_legacy_background') ??
-            (deviceIsWatch ? LegacyBackgroundMode.nowPlayingStatic.name : null),
+            (deviceIsWatch ? AppBackgroundMode.nowPlayingStatic.name : null),
       );
-      playerBackground = LegacyBackgroundModeLabels.parse(
+      playerBackground = AppBackgroundModeLabels.parse(
         prefs.getString('lazer_player_background') ??
-            (deviceIsWatch ? LegacyBackgroundMode.nowPlayingStatic.name : null),
+            (deviceIsWatch ? AppBackgroundMode.nowPlayingStatic.name : null),
       );
       final browseFps = prefs.getDouble('lazer_browse_background_fps') ?? 30;
       browseBackgroundFps = browseFps.isFinite ? browseFps.clamp(10, 1000) : 30;
@@ -1406,7 +1398,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       final String? restoredBackgroundImage = await backgroundImageStore
           .restore(storedBackgroundImage);
-      legacyBackgroundImagePath = restoredBackgroundImage;
+      backgroundImagePath = restoredBackgroundImage;
       mediaShortcuts = MediaShortcutSettings.decode(
         prefs.getString('lazer_media_shortcuts'),
       );
@@ -1419,7 +1411,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           backgroundImageStore.preferenceValue(restoredBackgroundImage),
         );
       }
-      legacyUiAlpha = (prefs.getDouble('lazer_legacy_ui_alpha') ?? 0.7).clamp(
+      uiAlpha = (prefs.getDouble('lazer_legacy_ui_alpha') ?? 0.7).clamp(
         0.4,
         1.0,
       );
@@ -1506,11 +1498,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       importedEnginePath = prefs.getString('lazer_native_engine_path');
       systemMediaLyrics = prefs.getBool('lazer_system_media_lyrics') ?? true;
       await prefs.remove('lazer_show_artwork_with_lyrics');
-      legacyPalette = LegacyPaletteModeLabels.parse(
+      paletteMode = AppPaletteModeLabels.parse(
         prefs.getString('lazer_legacy_palette'),
       );
       final int? accent = prefs.getInt('lazer_legacy_accent');
-      legacyAccentColor = accent == null ? null : Color(accent);
+      accentColor = accent == null ? null : Color(accent);
       scrollRetention =
           (prefs.getDouble('lazer_scroll_retention') ??
                   ScrollMotion.defaultRetention)
@@ -2274,7 +2266,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _replaceQueue(List<Track> tracks, {int startIndex = 0}) {
-    if (scheduledPauseActive) return;
+    checkScheduledPause();
     if (tracks.isEmpty) return;
     _finishPlaySession();
     trackChangeDirection = 1;
@@ -2292,12 +2284,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void togglePlay() {
-    if (scheduledPauseActive) {
-      pause();
-      return;
-    }
+    final shouldPlay = !_playing;
+    checkScheduledPause();
     if (current == null) return;
-    _playing = !_playing;
+    _playing = shouldPlay;
     if (_playing) {
       _ensureTicker();
       if (_realActive) {
@@ -2314,7 +2304,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void play() {
-    if (scheduledPauseActive) return;
+    checkScheduledPause();
     if (current == null || _playing) return;
     _playing = true;
     _ensureTicker();
@@ -2535,7 +2525,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
   }
 
-  /// The legacy single play-mode button: Sequential → ListLoop → SingleLoop →
+  /// The single play-mode button: Sequential → ListLoop → SingleLoop →
   /// Shuffle → Sequential.
   void cyclePlayMode() {
     if (_shuffle) {
@@ -2562,7 +2552,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void playTrackAt(int index) {
-    if (scheduledPauseActive) return;
+    checkScheduledPause();
     if (index < 0 || index >= _queue.length) return;
     _finishPlaySession();
     trackChangeDirection = index < _queueIndex ? -1 : 1;
@@ -2740,7 +2730,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         if (_presentationDisposed || generation != _generation) return;
         // A pause during the wait is a decision, not a hiccup: park the track
         // where it is and let play resume it when the listener asks again.
-        if (!_playing || scheduledPauseActive) return;
+        checkScheduledPause();
+        if (!_playing) return;
         final Duration? buffered = _bufferedAhead(buffer);
         // A backend that cannot answer is started at once: waiting on silence
         // is worse than the stutter this lead time exists to avoid.
@@ -2998,17 +2989,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> _resumeAudio() async {
     if (_presentationDisposed) return;
-    if (!_playing || scheduledPauseActive) {
-      pause();
-      return;
-    }
+    checkScheduledPause();
+    if (!_playing) return;
     final generation = _generation;
     try {
       await audioEngine!.play();
       if (_presentationDisposed) return;
       // A pending native play may finish after the pause boundary.
-      if (!_playing || scheduledPauseActive) {
-        pause();
+      checkScheduledPause();
+      if (!_playing) {
         await audioEngine!.pause();
       }
     } catch (_) {

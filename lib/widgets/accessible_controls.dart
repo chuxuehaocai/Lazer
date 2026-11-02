@@ -120,8 +120,7 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
                     widget.onChangeEnd?.call(value);
                   }
                 : widget.onChangeEnd,
-            semanticFormatterCallback:
-                widget.semanticFormatterCallback == null
+            semanticFormatterCallback: widget.semanticFormatterCallback == null
                 ? null
                 : (value) =>
                       context.tr(widget.semanticFormatterCallback!(value)),
@@ -177,21 +176,24 @@ class AccessibleIconButton extends IconButton {
   Widget build(BuildContext context) {
     return Semantics(
       container: true,
-      child: IconButton(
-        icon: icon,
-        onPressed: feedbackAction(context, onPressed),
-        tooltip: tooltip == null ? null : context.tr(tooltip!),
-        isSelected: isSelected,
-        iconSize: iconSize,
-        padding: padding,
-        style: style,
-        color: color,
-        constraints: constraints,
-        visualDensity: visualDensity,
-        alignment: alignment,
-        focusNode: focusNode,
-        autofocus: autofocus,
-        enableFeedback: false,
+      child: SpringPress(
+        builder: (context, states) => IconButton(
+          statesController: states,
+          icon: icon,
+          onPressed: feedbackAction(context, onPressed),
+          tooltip: tooltip == null ? null : context.tr(tooltip!),
+          isSelected: isSelected,
+          iconSize: iconSize,
+          padding: padding,
+          style: style,
+          color: color,
+          constraints: constraints,
+          visualDensity: visualDensity,
+          alignment: alignment,
+          focusNode: focusNode,
+          autofocus: autofocus,
+          enableFeedback: false,
+        ),
       ),
     );
   }

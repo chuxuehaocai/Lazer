@@ -6,16 +6,10 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/local/local_library.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/scheduled_pause.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const window = PauseWindow(
-  id: 'night',
-  startMinute: 23 * 60,
-  endMinute: 7 * 60,
-);
 const track = Track(
   id: 'scheduled-pause-fixture',
   title: 'Song',
@@ -26,11 +20,12 @@ const track = Track(
 );
 
 class _Catalog extends Catalog {
+  Completer<String?>? urlGate;
   @override
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
-  }) async => 'fixture://schedule';
+  }) => urlGate?.future ?? Future.value('fixture://schedule');
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => null;
   @override
@@ -39,6 +34,7 @@ class _Catalog extends Catalog {
 
 class _Engine implements AudioEngine {
   int pauses = 0, plays = 0;
+  bool audible = false;
   Completer<void>? playGate;
   @override
   bool active = false;
@@ -54,11 +50,13 @@ class _Engine implements AudioEngine {
   Future<void> play() async {
     plays++;
     await playGate?.future;
+    audible = true;
   }
 
   @override
   Future<void> pause() async {
     pauses++;
+    audible = false;
   }
 
   @override
@@ -71,157 +69,88 @@ class _Engine implements AudioEngine {
   void dispose() {}
 }
 
-class _Library extends LocalLibrary {
-  @override
-  Future<void> load() async {}
-}
-
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
-  test('bootstrap restores saved ranges and active state', () async {
-    SharedPreferences.setMockInitialValues({
-      AppState.scheduledPauseKey: ScheduledPauseSettings(
-        enabled: true,
-        windows: [window],
-      ).encode(),
-    });
-    final state = AppState(
-      catalog: _Catalog(),
-      localLibrary: _Library(),
-      scheduledPauseClock: () => DateTime(2026, 10, 30, 23),
-    );
-    try {
-      await state.bootstrap();
-      expect(state.scheduledPause.enabled, isTrue);
-      expect(state.scheduledPause.windows.single.id, 'night');
-      expect(state.scheduledPauseActive, isTrue);
-      expect(state.playing, isFalse);
-    } finally {
-      state.dispose();
-    }
-  });
-  test(
-    'ranges include start, exclude end, cross midnight and repeat daily',
-    () {
-      for (final day in [29, 30]) {
-        expect(window.contains(DateTime(2026, 10, day, 23)), isTrue);
-        expect(window.contains(DateTime(2026, 10, day, 6, 59, 59)), isTrue);
-        expect(window.contains(DateTime(2026, 10, day, 7)), isFalse);
-        expect(window.contains(DateTime(2026, 10, day, 22, 59, 59)), isFalse);
-      }
-      const daytime = PauseWindow(
-        id: 'day',
-        startMinute: 12 * 60,
-        endMinute: 13 * 60,
-      );
-      expect(daytime.contains(DateTime(2026, 10, 30, 12)), isTrue);
-      expect(daytime.contains(DateTime(2026, 10, 30, 13)), isFalse);
-      expect(
-        window.copyWith(enabled: false).contains(DateTime(2026, 10, 30, 23)),
-        isFalse,
-      );
-    },
-  );
-  test('multiple overlapping ranges, global toggle and persistence', () {
-    final settings = ScheduledPauseSettings(
-      enabled: true,
-      windows: [
-        window,
-        const PauseWindow(
-          id: 'lunch',
-          startMinute: 12 * 60,
-          endMinute: 13 * 60,
-        ),
-        const PauseWindow(
-          id: 'overlap',
-          startMinute: 12 * 60 + 30,
-          endMinute: 14 * 60,
-        ),
-      ],
-    );
+
+  test('daily points fire once and decode old ranges as their start point', () {
+    const point = PausePoint(id: 'night', minute: 23 * 60);
+    final settings = ScheduledPauseSettings(enabled: true, points: [point]);
     final restored = ScheduledPauseSettings.decode(settings.encode());
-    expect(restored.windows, hasLength(3));
-    expect(restored.activeAt(DateTime(2026, 10, 30, 13, 30)), isTrue);
-    expect(restored.activeAt(DateTime(2026, 10, 30, 14)), isFalse);
-    expect(
-      restored.copyWith(enabled: false).activeAt(DateTime(2026, 10, 30, 23)),
-      isFalse,
+    expect(restored.points.single.minute, 23 * 60);
+    final migrated = ScheduledPauseSettings.decode(
+      '{"enabled":true,"windows":[{"id":"old","start":720,"end":780}]}',
     );
-    expect(ScheduledPauseSettings.decode('invalid').enabled, isFalse);
-    final invalid = ScheduledPauseSettings.decode(
-      '{"enabled":true,"windows":[{"id":"bad","start":1440,"end":0},{"id":"same","start":0,"end":0},{"id":"ok","start":10,"end":20},{"id":"ok","start":30,"end":40}]}',
-    );
-    expect(invalid.windows.map((item) => item.id), ['ok']);
+    expect(migrated.points.single.minute, 720);
+    expect(restored.points.single.id, point.id);
+    expect(restored.points.single.enabled, isTrue);
   });
+
   testWidgets(
-    'timer fires at precise boundary and rechecks after clock changes',
+    'controller fires a configured point once and schedules tomorrow',
     (tester) async {
       var now = DateTime(2026, 10, 30, 22, 59, 59, 500);
-      final checks = <bool>[];
+      var checks = 0;
       final controller = ScheduledPauseController(
-        onCheck: checks.add,
+        onPause: () => checks++,
         now: () => now,
       );
       controller.update(
-        ScheduledPauseSettings(enabled: true, windows: [window]),
+        ScheduledPauseSettings(
+          enabled: true,
+          points: [const PausePoint(id: 'night', minute: 23 * 60)],
+        ),
       );
-      expect(checks, [false]);
-      now = now.add(const Duration(milliseconds: 500));
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(checks.last, isTrue);
-      now = DateTime(2026, 10, 31, 8);
-      controller.check();
-      expect(checks.last, isFalse);
-      now = DateTime(2026, 10, 31, 23);
-      await tester.pump(const Duration(seconds: 30));
-      expect(checks.last, isTrue);
-      controller.dispose();
-      final count = checks.length;
-      await tester.pump(const Duration(minutes: 2));
-      expect(checks, hasLength(count));
-    },
-  );
-  testWidgets(
-    'active range pauses playback, blocks play and never auto-resumes',
-    (tester) async {
-      var now = DateTime(2026, 10, 30, 22, 59, 59);
-      final engine = _Engine();
-      final state = AppState(
-        catalog: _Catalog(),
-        audioEngine: engine,
-        scheduledPauseClock: () => now,
-      );
-      state.playQueue([track]);
-      await tester.pump();
-      expect(engine.plays, 1);
-      await state.setScheduledPause(
-        ScheduledPauseSettings(enabled: true, windows: [window]),
-      );
+      expect(checks, 0);
       now = DateTime(2026, 10, 30, 23);
-      await tester.pump(const Duration(seconds: 1));
-      expect(state.playing, isFalse);
-      expect(engine.pauses, 1);
-      state.play();
-      state.togglePlay();
-      state.playTrackAt(0);
-      state.playQueue([track]);
-      await tester.pump();
-      expect(engine.plays, 1);
-      now = DateTime(2026, 10, 31, 7);
-      state.checkScheduledPause();
-      expect(state.playing, isFalse);
-      expect(engine.plays, 1);
-      state.play();
-      await tester.pump();
-      expect(engine.plays, 2);
-      final saved = (await SharedPreferences.getInstance()).getString(
-        AppState.scheduledPauseKey,
-      );
-      expect(ScheduledPauseSettings.decode(saved).windows.single.id, window.id);
-      state.dispose();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(checks, 1);
+      controller.check();
+      expect(checks, 1);
+      controller.dispose();
     },
   );
-  testWidgets('pending play cannot restart engine after schedule pauses', (
+
+  testWidgets('a point pauses playback but manual play remains available', (
+    tester,
+  ) async {
+    var now = DateTime(2026, 10, 30, 22, 59, 59);
+    final engine = _Engine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      scheduledPauseClock: () => now,
+    );
+    state.playQueue([track]);
+    await tester.pump();
+    expect(engine.plays, 1);
+    state.seek(.25);
+    await tester.pump();
+    await state.setScheduledPause(
+      ScheduledPauseSettings(
+        enabled: true,
+        points: [const PausePoint(id: 'night', minute: 23 * 60)],
+      ),
+    );
+    now = DateTime(2026, 10, 30, 23);
+    await tester.pump(const Duration(seconds: 1));
+    expect(state.playing, isFalse);
+    expect(engine.audible, isFalse);
+    expect(state.current, track);
+    expect(state.queue, [track]);
+    expect(state.precisePosition, const Duration(minutes: 1));
+    expect(engine.pauses, greaterThanOrEqualTo(1));
+    state.play();
+    await tester.pump();
+    expect(engine.plays, 2);
+    expect(engine.audible, isTrue);
+    state.checkScheduledPause();
+    await tester.pump();
+    expect(state.playing, isTrue);
+    state.pause();
+    state.dispose();
+  });
+
+  testWidgets('pending play cannot restart after the point pauses it', (
     tester,
   ) async {
     var now = DateTime(2026, 10, 30, 22);
@@ -233,15 +162,172 @@ void main() {
     );
     state.playQueue([track]);
     await tester.pump();
-    expect(engine.plays, 1);
     now = DateTime(2026, 10, 30, 23);
     await state.setScheduledPause(
-      ScheduledPauseSettings(enabled: true, windows: [window]),
+      ScheduledPauseSettings(
+        enabled: true,
+        points: [const PausePoint(id: 'night', minute: 23 * 60)],
+      ),
     );
     engine.playGate!.complete();
     await tester.pump();
     expect(state.playing, isFalse);
-    expect(engine.pauses, 2);
+    expect(engine.audible, isFalse);
     state.dispose();
+  });
+
+  testWidgets('foreground resume catches a point missed while suspended', (
+    tester,
+  ) async {
+    var now = DateTime(2026, 10, 30, 22, 59);
+    final engine = _Engine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      scheduledPauseClock: () => now,
+    );
+    await state.setScheduledPause(
+      ScheduledPauseSettings(
+        enabled: true,
+        points: [const PausePoint(id: 'night', minute: 1380)],
+      ),
+    );
+    state.playQueue([track]);
+    await tester.pump();
+    expect(engine.audible, isTrue);
+    now = DateTime(2026, 10, 31, 0, 15);
+    state.synchronizePlaybackAfterResume();
+    await tester.pump();
+    expect(state.playing, isFalse);
+    expect(engine.audible, isFalse);
+    final pauses = engine.pauses;
+    state.play();
+    await tester.pump();
+    state.checkScheduledPause();
+    expect(engine.pauses, pauses);
+    expect(engine.audible, isTrue);
+    state.pause();
+    state.dispose();
+  });
+
+  testWidgets('a late source load cannot start across a pause point', (
+    tester,
+  ) async {
+    var now = DateTime(2026, 10, 30, 22, 59);
+    final catalog = _Catalog()..urlGate = Completer<String?>();
+    final engine = _Engine();
+    final state = AppState(
+      catalog: catalog,
+      audioEngine: engine,
+      scheduledPauseClock: () => now,
+    );
+    await state.setScheduledPause(
+      ScheduledPauseSettings(
+        enabled: true,
+        points: [const PausePoint(id: 'night', minute: 1380)],
+      ),
+    );
+    state.playQueue([track]);
+    await tester.pump();
+    expect(engine.plays, 0);
+    now = DateTime(2026, 10, 30, 23, 2);
+    catalog.urlGate!.complete('fixture://schedule');
+    await tester.pump();
+    expect(state.playing, isFalse);
+    expect(engine.plays, 0);
+    expect(engine.audible, isFalse);
+    state.play();
+    await tester.pump();
+    expect(engine.audible, isTrue);
+    state.pause();
+    state.dispose();
+  });
+
+  testWidgets('a late native play rechecks the clock before keeping audio on', (
+    tester,
+  ) async {
+    var now = DateTime(2026, 10, 30, 22, 59);
+    final engine = _Engine()..playGate = Completer<void>();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      scheduledPauseClock: () => now,
+    );
+    await state.setScheduledPause(
+      ScheduledPauseSettings(
+        enabled: true,
+        points: [const PausePoint(id: 'night', minute: 1380)],
+      ),
+    );
+    state.playQueue([track]);
+    await tester.pump();
+    expect(engine.plays, 1);
+    now = DateTime(2026, 10, 30, 23, 2);
+    engine.playGate!.complete();
+    await tester.pump();
+    expect(state.playing, isFalse);
+    expect(engine.audible, isFalse);
+    engine.playGate = null;
+    state.play();
+    await tester.pump();
+    expect(state.playing, isTrue);
+    expect(engine.audible, isTrue);
+    state.pause();
+    state.dispose();
+  });
+
+  testWidgets('manual toggle at the boundary remains a playback request', (
+    tester,
+  ) async {
+    var now = DateTime(2026, 10, 30, 22, 59);
+    final engine = _Engine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      scheduledPauseClock: () => now,
+    );
+    state.playQueue([track]);
+    await tester.pump();
+    state.pause();
+    await state.setScheduledPause(
+      ScheduledPauseSettings(
+        enabled: true,
+        points: [const PausePoint(id: 'night', minute: 1380)],
+      ),
+    );
+    now = DateTime(2026, 10, 30, 23);
+    state.togglePlay();
+    await tester.pump();
+    expect(state.playing, isTrue);
+    expect(engine.audible, isTrue);
+    state.pause();
+    state.dispose();
+  });
+
+  test('bootstrap migrates and persists only old range start points', () async {
+    SharedPreferences.setMockInitialValues({
+      AppState.scheduledPauseKey:
+          '{"enabled":true,"windows":['
+          '{"id":"night","start":1380,"end":420},'
+          '{"id":"noon","start":720,"end":780,"enabled":false}'
+          ']}',
+    });
+    final state = AppState(
+      catalog: _Catalog(),
+      scheduledPauseClock: () => DateTime(2026, 10, 30, 12, 30),
+    );
+    addTearDown(state.dispose);
+    await state.bootstrap();
+    expect(state.scheduledPause.enabled, isTrue);
+    expect(state.scheduledPause.points.map((point) => point.minute), [
+      1380,
+      720,
+    ]);
+    expect(state.scheduledPause.points.last.enabled, isFalse);
+    final stored = (await SharedPreferences.getInstance()).getString(
+      AppState.scheduledPauseKey,
+    );
+    expect(stored, state.scheduledPause.encode());
+    expect(stored, isNot(contains('windows')));
   });
 }

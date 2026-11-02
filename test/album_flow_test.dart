@@ -8,9 +8,9 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/background.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 
@@ -54,7 +54,7 @@ class _Catalog extends Catalog {
 }
 
 Widget _app(Widget home) => MaterialApp(
-  theme: buildLegacyTheme(brightness: Brightness.dark),
+  theme: buildAppleTheme(brightness: Brightness.dark),
   home: home,
 );
 
@@ -324,30 +324,30 @@ void main() {
     addTearDown(tester.view.reset);
     final AppState state = AppState(catalog: _Catalog());
     addTearDown(state.dispose);
-    await state.setLegacyBackground(LegacyBackgroundMode.off);
-    await tester.pumpWidget(_app(_reducedMotion(LegacyShell(state: state))));
+    await state.setAppBackground(AppBackgroundMode.off);
+    await tester.pumpWidget(_app(_reducedMotion(AppShell(state: state))));
     await tester.pumpAndSettle();
-    expect(find.byType(LegacyAlbumBackdrop), findsNothing);
+    expect(find.byType(AppAlbumBackdrop), findsNothing);
     expect(
       tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
       isNot(Colors.transparent),
     );
 
-    await state.setLegacyBackground(LegacyBackgroundMode.nowPlayingDynamic);
+    await state.setAppBackground(AppBackgroundMode.nowPlayingDynamic);
     await tester.pumpAndSettle();
-    expect(find.byType(LegacyAlbumBackdrop), findsOneWidget);
+    expect(find.byType(AppAlbumBackdrop), findsOneWidget);
     expect(find.byType(AlbumFlowBackground), findsOneWidget);
   });
 
   test('the backdrop preferences persist and clamp', () async {
     final AppState state = AppState(catalog: _Catalog());
     addTearDown(state.dispose);
-    expect(state.legacyBackground, LegacyBackgroundMode.nowPlayingDynamic);
-    expect(state.legacyUiAlpha, 0.7);
+    expect(state.backgroundMode, AppBackgroundMode.nowPlayingDynamic);
+    expect(state.uiAlpha, 0.7);
 
-    await state.setLegacyBackground(LegacyBackgroundMode.nowPlayingStatic);
-    await state.setLegacyUiAlpha(0.1);
-    expect(state.legacyUiAlpha, 0.4);
+    await state.setAppBackground(AppBackgroundMode.nowPlayingStatic);
+    await state.setAppUiAlpha(0.1);
+    expect(state.uiAlpha, 0.4);
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('lazer_legacy_background'), 'nowPlayingStatic');
     expect(prefs.getDouble('lazer_legacy_ui_alpha'), 0.4);
@@ -355,11 +355,11 @@ void main() {
     final AppState restarted = AppState(catalog: _Catalog());
     addTearDown(restarted.dispose);
     await restarted.bootstrap();
-    expect(restarted.legacyBackground, LegacyBackgroundMode.nowPlayingStatic);
-    expect(restarted.legacyUiAlpha, 0.4);
+    expect(restarted.backgroundMode, AppBackgroundMode.nowPlayingStatic);
+    expect(restarted.uiAlpha, 0.4);
     expect(
-      LegacyBackgroundModeLabels.parse('nope'),
-      LegacyBackgroundMode.nowPlayingDynamic,
+      AppBackgroundModeLabels.parse('nope'),
+      AppBackgroundMode.nowPlayingDynamic,
     );
   });
 
@@ -369,7 +369,7 @@ void main() {
     addTearDown(tester.view.reset);
     final AppState state = AppState(catalog: _Catalog());
     addTearDown(state.dispose);
-    await tester.pumpWidget(_app(_reducedMotion(LegacyShell(state: state))));
+    await tester.pumpWidget(_app(_reducedMotion(AppShell(state: state))));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('rail-account')));
     await tester.pumpAndSettle();
@@ -387,23 +387,23 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('不使用').last);
     await tester.pumpAndSettle();
-    expect(state.legacyBackground, LegacyBackgroundMode.off);
-    expect(find.byType(LegacyAlbumBackdrop), findsNothing);
+    expect(state.backgroundMode, AppBackgroundMode.off);
+    expect(find.byType(AppAlbumBackdrop), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('browse-background-mode')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('静态背景').last);
     await tester.pumpAndSettle();
-    expect(state.legacyBackground, LegacyBackgroundMode.nowPlayingStatic);
+    expect(state.backgroundMode, AppBackgroundMode.nowPlayingStatic);
 
     final Finder alpha = find.descendant(
-      of: find.byKey(const ValueKey('legacy-ui-alpha')),
+      of: find.byKey(const ValueKey('ui-alpha')),
       matching: find.byType(Slider),
     );
     await tester.ensureVisible(alpha);
     await tester.drag(alpha, const Offset(-120, 0));
     await tester.pumpAndSettle();
-    expect(state.legacyUiAlpha, lessThan(0.7));
+    expect(state.uiAlpha, lessThan(0.7));
     expect(tester.takeException(), isNull);
   });
 }

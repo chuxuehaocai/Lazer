@@ -35,7 +35,9 @@ import 'package:lazer_nextgen/audio/native/output_path_state.dart';
 int _failures = 0;
 
 void _check(String what, bool ok, [String? detail]) {
-  stdout.writeln('${ok ? 'ok  ' : 'FAIL'} $what${detail == null ? '' : ' — $detail'}');
+  stdout.writeln(
+    '${ok ? 'ok  ' : 'FAIL'} $what${detail == null ? '' : ' — $detail'}',
+  );
   if (!ok) _failures++;
 }
 
@@ -70,7 +72,9 @@ Future<void> main(List<String> arguments) async {
     _check(
       'launch path is the native engine',
       decision.isNative,
-      decision.isNative ? null : '${decision.fallback?.name}: ${decision.detail}',
+      decision.isNative
+          ? null
+          : '${decision.fallback?.name}: ${decision.detail}',
     );
     // Streaming needs the bridge; a bundle that ships the engine without it
     // would still be "native" but unable to play a network source.
@@ -104,14 +108,9 @@ Future<void> main(List<String> arguments) async {
 /// UI derives them (`OutputPathState`). An endpoint that refuses the request is
 /// reported as such, not treated as a failure: on most machines the default
 /// device's mix format is not the file's.
-Future<void> _playKnownWav(
-  List<String> arguments,
-  LazerAudioApi api,
-) async {
+Future<void> _playKnownWav(List<String> arguments, LazerAudioApi api) async {
   final String? explicit = _valueOf(arguments, '--file');
-  final File fixture = explicit == null
-      ? _writeFixture()
-      : File(explicit);
+  final File fixture = explicit == null ? _writeFixture() : File(explicit);
   _check('fixture exists', fixture.existsSync(), fixture.path);
   if (!fixture.existsSync()) return;
 
@@ -297,10 +296,7 @@ File _writeFixture() {
     'lazer-native-path',
   );
   final File file = File('${directory.path}/tone441.wav');
-  file.writeAsBytesSync(<int>[
-    ...header.buffer.asUint8List(),
-    ...data,
-  ]);
+  file.writeAsBytesSync(<int>[...header.buffer.asUint8List(), ...data]);
   return file;
 }
 
@@ -329,7 +325,11 @@ Future<void> _applyConvolver(
       ? _syntheticImpulse()
       : _readWavImpulse(File(irPath));
   if (channels.isEmpty) {
-    _check('the impulse response could be read', false, irPath ?? '(synthetic)');
+    _check(
+      'the impulse response could be read',
+      false,
+      irPath ?? '(synthetic)',
+    );
     return;
   }
   final int frames = channels.first.length;
@@ -356,15 +356,23 @@ Future<void> _applyConvolver(
         'error': status == lazerAudioOk ? null : api.lastError(engine),
       }),
     );
-    _check('the convolver accepted the impulse response', status == lazerAudioOk);
+    _check(
+      'the convolver accepted the impulse response',
+      status == lazerAudioOk,
+    );
     if (status != lazerAudioOk) return;
     /* Re-read the path: whatever it was before, a chain with the convolver in it is
      * processing, so `dsp_active` must be set and the derived bit-perfect verdict false. */
     api.streamInfo(engine, info);
-    final OutputPathState after = LazerStreamInfo.fromNative(info.ref).outputPath;
+    final OutputPathState after = LazerStreamInfo.fromNative(
+      info.ref,
+    ).outputPath;
     _check('the convolver is in the signal path', after.dspActive);
-    _check('the path no longer claims bit-perfect', !after.bitPerfect,
-        after.bitPerfectMeaning);
+    _check(
+      'the path no longer claims bit-perfect',
+      !after.bitPerfect,
+      after.bitPerfectMeaning,
+    );
     _check(
       'the engine agrees with the derived verdict',
       after.agreesWithEngine,
@@ -421,11 +429,16 @@ List<List<double>> _readWavImpulse(File file) {
     }
     offset = body + size + (size.isOdd ? 1 : 0);
   }
-  if (channels <= 0 || dataOffset == 0 || dataLength <= 0) return const <List<double>>[];
+  if (channels <= 0 || dataOffset == 0 || dataLength <= 0) {
+    return const <List<double>>[];
+  }
   final bool floatFormat = formatTag == 3 && bits == 32;
   final int bytesPerSample = bits ~/ 8;
-  if (!floatFormat && bytesPerSample != 1 && bytesPerSample != 2 &&
-      bytesPerSample != 3 && bytesPerSample != 4) {
+  if (!floatFormat &&
+      bytesPerSample != 1 &&
+      bytesPerSample != 2 &&
+      bytesPerSample != 3 &&
+      bytesPerSample != 4) {
     return const <List<double>>[];
   }
   final int frames = dataLength ~/ (bytesPerSample * channels);
@@ -444,7 +457,8 @@ List<List<double>> _readWavImpulse(File file) {
       } else if (bytesPerSample == 2) {
         value = data.getInt16(at, Endian.little) / 32768.0;
       } else if (bytesPerSample == 3) {
-        final int raw = bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16);
+        final int raw =
+            bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16);
         final int signed = raw & 0x800000 != 0 ? raw - 0x1000000 : raw;
         value = signed / 8388608.0;
       } else {

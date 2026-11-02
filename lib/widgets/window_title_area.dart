@@ -1,3 +1,4 @@
+import '../animation/apple_spring.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
@@ -293,8 +294,10 @@ class _CaptionButtonState extends State<_CaptionButton> {
           onTapCancel: () => setState(() => _pressing = false),
           onTap: widget.onPressed,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 90),
-            curve: Curves.easeOut,
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : AppleSpring.responsive.duration,
+            curve: const AppleSpringCurve(),
             width: kWindowCaptionButtonWidth,
             height: kWindowTitleAreaHeight,
             color: fill,

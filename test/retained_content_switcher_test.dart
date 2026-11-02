@@ -3,6 +3,44 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/widgets/retained_content_switcher.dart';
 
 void main() {
+  testWidgets('rapid A B A retargets preserve the visible page and momentum', (
+    tester,
+  ) async {
+    Widget host(String name) => MaterialApp(
+      home: RetainedContentSwitcher(
+        currentKey: name,
+        page: SizedBox.expand(child: Text(name)),
+        retainKeys: const {'a'},
+      ),
+    );
+    Finder slide(String name) => find
+        .ancestor(of: find.text(name), matching: find.byType(SlideTransition))
+        .first;
+    await tester.pumpWidget(host('a'));
+    final a = tester.element(find.text('a'));
+    await tester.pumpWidget(host('b'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    final before = tester.widget<SlideTransition>(slide('b')).position.value.dy;
+    await tester.pumpWidget(host('a'));
+    expect(
+      tester.widget<SlideTransition>(slide('b')).position.value.dy,
+      closeTo(before, .000001),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    final after = tester.widget<SlideTransition>(slide('b')).position.value.dy;
+    expect(
+      after,
+      lessThan(before),
+      reason: 'entrance momentum continues before the spring reverses',
+    );
+    await tester.pumpAndSettle();
+    expect(tester.element(find.text('a')), same(a));
+    expect(find.text('b', skipOffstage: false), findsNothing);
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
   testWidgets('parked history does no frame work during another page switch', (
     tester,
   ) async {
@@ -36,7 +74,7 @@ void main() {
         current = 'page-$page';
       });
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 440));
+      await tester.pumpAndSettle();
       await tester.pump();
     }
     update(() {
@@ -90,7 +128,7 @@ void main() {
           'Seven invisible ancestors must not rebuild on every motion tick.',
     );
     expect(counts.keys, hasLength(9));
-    await tester.pump(const Duration(milliseconds: 440));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
@@ -130,7 +168,7 @@ void main() {
         retain = {'root'};
       });
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 440));
+      await tester.pumpAndSettle();
       await tester.pump();
       final rootBuilds = counts['root'];
       expect(find.text('root'), findsNothing);
@@ -183,7 +221,7 @@ void main() {
         retain = {};
       });
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 440));
+      await tester.pumpAndSettle();
       await tester.pump();
       expect(tester.element(find.text('root')), same(rootElement));
       expect(find.text('detail', skipOffstage: false), findsNothing);
@@ -203,7 +241,7 @@ void main() {
     );
     await tester.pumpWidget(app('root', {}));
     await tester.pumpWidget(app('detail', {'root'}));
-    await tester.pump(const Duration(milliseconds: 440));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(find.text('root', skipOffstage: false), findsOneWidget);
     await tester.pumpWidget(app('detail', {}));
@@ -235,7 +273,7 @@ void main() {
     await tester.pumpWidget(app('root', Brightness.dark));
     final rootElement = tester.element(find.text('root/dark/800.0'));
     await tester.pumpWidget(app('detail', Brightness.dark));
-    await tester.pump(const Duration(milliseconds: 440));
+    await tester.pumpAndSettle();
     await tester.pump();
     // Exercise the cached hidden view before changing its inherited inputs.
     await tester.pumpWidget(app('detail', Brightness.dark));
@@ -246,7 +284,7 @@ void main() {
       same(rootElement),
     );
     await tester.pumpWidget(app('root', Brightness.light));
-    await tester.pump(const Duration(milliseconds: 440));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(tester.element(find.text('root/light/1000.0')), same(rootElement));
     expect(tester.takeException(), isNull);
@@ -274,13 +312,13 @@ void main() {
     await tester.pump();
     expect(rootFocus.hasFocus, isTrue);
     await tester.pumpWidget(app('detail', {'root'}));
-    await tester.pump(const Duration(milliseconds: 440));
+    await tester.pumpAndSettle();
     await tester.pump();
     detailFocus.requestFocus();
     await tester.pump();
     expect(rootFocus.hasFocus, isFalse);
     await tester.pumpWidget(app('root', {}));
-    await tester.pump(const Duration(milliseconds: 440));
+    await tester.pumpAndSettle();
     await tester.pump();
     await tester.pump();
     expect(rootFocus.hasFocus, isTrue);

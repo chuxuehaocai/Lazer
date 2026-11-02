@@ -6,6 +6,7 @@ import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
 import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
+import 'interaction_feedback.dart';
 
 /// A translucent Apple material: blur plus a semantic glass tint and hairline.
 ///
@@ -269,78 +270,91 @@ class _AppleListTileState extends State<AppleListTile> {
       constraints: BoxConstraints(minHeight: widget.minHeight),
       child: Padding(
         padding: widget.padding,
-        child: Row(
-          children: <Widget>[
-            if (widget.leading != null) ...<Widget>[
-              widget.leading!,
-              const SizedBox(width: 12),
-            ],
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    widget.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: apple.label,
-                    ),
-                  ),
-                  if (widget.subtitle != null &&
-                      widget.subtitle!.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 1),
+        child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: <Widget>[
+              if (widget.leading != null) ...<Widget>[
+                widget.leading!,
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
                     Text(
-                      widget.subtitle!,
-                      maxLines: 2,
+                      widget.title,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: apple.secondaryLabel,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: apple.label,
                       ),
                     ),
+                    if (widget.subtitle != null &&
+                        widget.subtitle!.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 1),
+                      Text(
+                        widget.subtitle!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: apple.secondaryLabel,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            if (widget.trailing != null) ...<Widget>[
-              const SizedBox(width: 12),
-              widget.trailing!,
+              if (widget.trailing != null) ...<Widget>[
+                const SizedBox(width: 12),
+                // Long version labels and actions can wrap without consuming
+                // the title's entire width in a narrow settings panel.
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: constraints.maxWidth * .6,
+                  ),
+                  child: widget.trailing!,
+                ),
+              ],
+              if (widget.showChevron) ...<Widget>[
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: apple.tertiaryLabel,
+                ),
+              ],
             ],
-            if (widget.showChevron) ...<Widget>[
-              const SizedBox(width: 8),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 20,
-                color: apple.tertiaryLabel,
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
     if (widget.onTap == null && widget.onLongPress == null) return row;
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTap: widget.onTap,
-        onLongPress: widget.onLongPress,
-        onFocusChange: (bool value) => setState(() => _focused = value),
-        highlightColor: apple.fill,
-        splashFactory: NoSplash.splashFactory,
-        child: Stack(
-          children: <Widget>[
-            row,
-            if (_focused && TvScope.isActive(context))
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: TvFocusOutline(
-                    borderRadius: BorderRadius.circular(10),
-                    width: 2,
+      child: SpringPress(
+        pressedScale: .99,
+        builder: (context, states) => InkWell(
+          statesController: states,
+          onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
+          onFocusChange: (bool value) => setState(() => _focused = value),
+          highlightColor: apple.fill,
+          splashFactory: NoSplash.splashFactory,
+          child: Stack(
+            children: <Widget>[
+              row,
+              if (_focused && TvScope.isActive(context))
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: TvFocusOutline(
+                      borderRadius: BorderRadius.circular(10),
+                      width: 2,
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -27,7 +27,7 @@ can move from beta 2 to beta 3 while 2.0 users are not pushed onto a beta.
 
 ## When it runs
 
-- **Startup.** `LegacyShell` schedules a check four seconds after the first
+- **Startup.** `AppShell` schedules a check four seconds after the first
   frame when production enables `autoCheckUpdates`. At most one automatic check
   runs per 24 hours (`AppState.updateCheckInterval`); the timestamp of the last
   successful check is persisted.

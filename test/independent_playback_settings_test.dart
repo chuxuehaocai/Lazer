@@ -8,8 +8,8 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 const _preferenceKey = 'lazer_independent_playback';
@@ -46,7 +46,10 @@ class _Catalog extends Catalog {
       UserCollections.empty;
 
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => null;
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => null;
 
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async =>
@@ -123,7 +126,7 @@ void main() {
   }
 
   testWidgets(
-    'Legacy settings toggle independent playback in the playback group',
+    'App settings toggle independent playback in the playback group',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 3000);
       tester.view.devicePixelRatio = 1;
@@ -134,8 +137,8 @@ void main() {
         AnimatedBuilder(
           animation: state,
           builder: (context, _) => MaterialApp(
-            theme: buildLegacyTheme(),
-            home: Scaffold(body: LegacySettingsPage(state: state)),
+            theme: buildAppleTheme(),
+            home: Scaffold(body: AppSettingsPage(state: state)),
           ),
         ),
       );

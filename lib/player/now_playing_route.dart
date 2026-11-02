@@ -4,7 +4,7 @@ import '../navigation/pull_down_to_close.dart';
 import '../state/app_state.dart';
 import 'now_playing_page.dart';
 import '../animation/motion_snapshot.dart';
-import '../animation/view_transitions.dart';
+import '../animation/apple_spring.dart';
 
 /// Material open-upwards presentation: the player rises from the window
 /// bottom to the top and reverses on close.
@@ -40,48 +40,43 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
     super.dispose();
   }
 
-  /// Time the pull takes to cover its whole travel when it settles.
-  static const Duration _settleDuration = Duration(milliseconds: 260);
+  double? _releaseVelocity;
+  double _initialOpen = 1;
 
-  /// Push and pop decelerate: fast on the way out of the tap, slow on arrival.
-  static const Curve _transitionCurve = ViewMotion.curve;
+  bool get _reduceMotion =>
+      WidgetsBinding.instance.disableAnimations ||
+      (navigator != null &&
+          (MediaQuery.maybeDisableAnimationsOf(navigator!.context) ?? false));
 
   /// The controller is the actual visible openness, for both finger drags and
   /// timed transitions. Applying another curve in buildTransitions would jump
   /// a released pull and make a normal pop run the entrance backwards.
   @override
   Simulation createSimulation({required bool forward}) {
-    final start = controller!.value;
-    final duration =
-        (forward ? transitionDuration : reverseTransitionDuration) *
-        (forward ? 1 - start : start);
-    return _PlayerRouteSimulation(
-      start: start,
-      end: forward ? 1 : 0,
-      // Custom simulations bypass AnimationController's reduced-motion time
-      // scaling. Preserve its normal behaviour so hidden transition semantics
-      // and route disposal do not wait the full 300 ms on those systems.
-      duration: WidgetsBinding.instance.disableAnimations
-          ? duration * .05
-          : duration,
+    final target = forward ? 1.0 : 0.0;
+    final velocity = _releaseVelocity ?? controller!.velocity;
+    _releaseVelocity = null;
+    return AppleSpring.smooth.simulation(
+      _reduceMotion ? target : controller!.value,
+      target,
+      velocity: _reduceMotion ? 0 : velocity,
     );
   }
 
   /// Whether a finger owns the transition right now.
   ///
-  /// The drag writes [controller] directly, so the offset has to stay linear
-  /// with the finger; only the push, the pop and the settle after a released
-  /// pull are shaped by [_transitionCurve].
+  /// The drag writes [controller] directly, and its release supplies the
+  /// spring's initial velocity in the same visible coordinate.
   bool _dragging = false;
 
-  /// A pull may only begin once the route has finished presenting itself.
   @override
   bool get canStart =>
-      isCurrent && animation?.status == AnimationStatus.completed;
+      isCurrent && !_dragging && (controller?.value ?? 0) > .001;
 
   @override
   void startPull() {
     _dragging = true;
+    _initialOpen = controller!.value;
     _settled.value = false;
     controller?.stop();
   }
@@ -89,7 +84,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   @override
   void updatePull(double progress) {
     // Stay off the lower bound: popping, not dragging, finishes the dismissal.
-    controller?.value = (1 - progress).clamp(.001, 1);
+    controller?.value = (_initialOpen - progress).clamp(.001, 1);
   }
 
   @override
@@ -101,20 +96,22 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
         ? false
         : (velocity > 900 && pulled > .02) || pulled >= .22;
     if (dismiss) {
-      // Popping continues the route's own reverse transition from here.
+      _releaseVelocity =
+          -velocity / MediaQuery.sizeOf(navigator!.context).height;
       navigator?.pop();
       return;
     }
-    controller?.animateTo(
+    controller?.springTo(
       1,
-      duration: Duration(
-        milliseconds: (pulled * _settleDuration.inMilliseconds).round().clamp(
-          80,
-          260,
-        ),
-      ),
-      curve: _transitionCurve,
+      velocity: -velocity / MediaQuery.sizeOf(navigator!.context).height,
+      reduceMotion: _reduceMotion,
     );
+  }
+
+  @override
+  void cancelPull() {
+    _dragging = false;
+    controller?.springTo(1, velocity: 0, reduceMotion: _reduceMotion);
   }
 
   @override
@@ -178,35 +175,4 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       },
     );
   }
-}
-
-class _PlayerRouteSimulation extends Simulation {
-  _PlayerRouteSimulation({
-    required this.start,
-    required this.end,
-    required Duration duration,
-  }) : seconds = duration.inMicroseconds / Duration.microsecondsPerSecond;
-
-  final double start;
-  final double end;
-  final double seconds;
-
-  @override
-  double x(double time) {
-    if (seconds == 0 || time >= seconds) return end;
-    final progress = (time / seconds).clamp(0.0, 1.0);
-    return start + (end - start) * ViewMotion.curve.transform(progress);
-  }
-
-  @override
-  double dx(double time) {
-    if (seconds == 0 || time >= seconds) return 0;
-    const delta = .00001;
-    final before = (time - delta).clamp(0.0, seconds);
-    final after = (time + delta).clamp(0.0, seconds);
-    return (x(after) - x(before)) / (after - before);
-  }
-
-  @override
-  bool isDone(double time) => time >= seconds;
 }

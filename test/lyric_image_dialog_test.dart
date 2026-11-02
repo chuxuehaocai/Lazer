@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/lyrics.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/lyric_image_dialog.dart';
 
 const _lines = [
@@ -121,10 +121,10 @@ void main() {
       PaintingBinding.instance.imageCache.clearLiveImages();
       await tester.pumpWidget(
         MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           home: Scaffold(
             body: Theme(
-              data: buildLegacyTheme(brightness: Brightness.dark),
+              data: buildAppleTheme(brightness: Brightness.dark),
               child: Builder(
                 builder: (context) => TextButton(
                   onPressed: () => showLyricImageDialog(
@@ -188,7 +188,7 @@ void main() {
         RepaintBoundary(
           key: key,
           child: MaterialApp(
-            theme: buildLegacyTheme(brightness: brightness),
+            theme: buildAppleTheme(brightness: brightness),
             builder: (context, child) => MediaQuery(
               data: MediaQuery.of(
                 context,
@@ -231,7 +231,7 @@ void main() {
       });
       await tester.pumpWidget(
         MaterialApp(
-          theme: buildLegacyTheme(brightness: Brightness.dark),
+          theme: buildAppleTheme(brightness: Brightness.dark),
           home: Scaffold(
             body: Builder(
               builder: (context) => TextButton(

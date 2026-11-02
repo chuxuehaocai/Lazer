@@ -10,7 +10,7 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/lyric_edge_fade.dart';
 import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -57,7 +57,7 @@ void main() {
       final key = GlobalKey();
       await tester.pumpWidget(
         MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           home: Material(
             child: Center(
               child: RepaintBoundary(

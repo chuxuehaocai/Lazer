@@ -1,6 +1,8 @@
+import '../widgets/spring_buttons.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 
 import '../data/audio_quality.dart';
 import '../l10n/app_localizations.dart';
@@ -12,7 +14,7 @@ import 'download_manager.dart';
 Future<void> showDownloadQueueSheet(BuildContext context, AppState state) {
   final bool wide = MediaQuery.sizeOf(context).width >= 700;
   if (wide) {
-    return showDialog<void>(
+    return showAppleDialog<void>(
       context: context,
       builder: (BuildContext context) => Dialog(
         clipBehavior: Clip.antiAlias,
@@ -27,7 +29,7 @@ Future<void> showDownloadQueueSheet(BuildContext context, AppState state) {
       ),
     );
   }
-  return showModalBottomSheet<void>(
+  return showAppleModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     useRootNavigator: true,
@@ -88,7 +90,7 @@ class DownloadQueueView extends StatelessWidget {
                     ),
                   ),
                   if (tasks.any((DownloadTask task) => task.isDone))
-                    TextButton(
+                    SpringTextButton(
                       onPressed: manager.clearFinished,
                       child: TrText('清空已完成'),
                     ),

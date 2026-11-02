@@ -28,7 +28,7 @@ class _MusicPlatformState {
     String password,
     bool allowHttp,
   ) async {
-    if (busy) return const AuthOutcome(false, error: '正在连接音乐服务器。');
+    if (busy) return const AuthOutcome(false, error: '正在连接音乐服务器。'); // i18n:key
     final request = ++_request;
     busy = true;
     state.notifyListeners();
@@ -44,13 +44,13 @@ class _MusicPlatformState {
       await candidate.login(password);
       if (request != _request) {
         candidate.close();
-        return const AuthOutcome(false, error: '连接已取消。');
+        return const AuthOutcome(false, error: '连接已取消。'); // i18n:key
       }
       final key = GatewayRegistry.keyOf(candidate);
       await _resetPlayback();
       if (request != _request) {
         candidate.close();
-        return const AuthOutcome(false, error: '连接已取消。');
+        return const AuthOutcome(false, error: '连接已取消。'); // i18n:key
       }
       if (!state.isNavidrome) neteaseUser = state.user;
       final registry = state.catalog.connections;
@@ -225,7 +225,7 @@ class _MusicPlatformState {
         song == null ||
         playlist.connection != song.connection ||
         playlist.provider != song.provider) {
-      throw ArgumentError('歌曲和歌单必须属于同一个音乐平台账号。');
+      throw ArgumentError('歌曲和歌单必须属于同一个音乐平台账号。'); // i18n:key
     }
     final gateway = state.catalog.connections.resolve(playlist);
     if (playlist.value == '__lazer_favorites__') {
@@ -250,7 +250,7 @@ class _MusicPlatformState {
       state.likeError = null;
       await state.refreshCollections(force: true);
     } catch (_) {
-      state.likeError = '收藏失败，请稍后重试。';
+      state.likeError = '收藏失败，请稍后重试。'; // i18n:key
     }
     if (!state._presentationDisposed) state.notifyListeners();
   }

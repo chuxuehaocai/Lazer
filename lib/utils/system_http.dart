@@ -67,13 +67,10 @@ class SystemHttpProxy {
   static Future<SystemHttpProxy?> _fromWindowsRegistry() async {
     if (!Platform.isWindows) return null;
     try {
-      final ProcessResult result = await Process.run(
-        'reg',
-        <String>[
-          'query',
-          r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-        ],
-      ).timeout(const Duration(seconds: 3));
+      final ProcessResult result = await Process.run('reg', <String>[
+        'query',
+        r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
+      ]).timeout(const Duration(seconds: 3));
       if (result.exitCode != 0) return null;
       final String output = '${result.stdout}';
       if (!RegExp(r'ProxyEnable\s+REG_DWORD\s+0x1\b').hasMatch(output)) {

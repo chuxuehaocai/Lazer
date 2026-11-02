@@ -7,14 +7,16 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/background.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
+
+import 'support/player_transition.dart';
 
 const Track _track = Track(
   id: 'precision-fixture',
@@ -92,7 +94,7 @@ class _Catalog extends Catalog {
 }
 
 Widget _app(Widget home) => MaterialApp(
-  theme: buildLegacyTheme(brightness: Brightness.dark),
+  theme: buildAppleTheme(brightness: Brightness.dark),
   home: home,
 );
 
@@ -185,7 +187,7 @@ void main() {
         AnimatedBuilder(
           animation: state,
           builder: (BuildContext context, _) =>
-              Scaffold(body: LegacySettingsPage(state: state)),
+              Scaffold(body: AppSettingsPage(state: state)),
         ),
       ),
     );
@@ -232,12 +234,12 @@ void main() {
     final AppState state = AppState(catalog: _Catalog());
     addTearDown(state.dispose);
 
-    await tester.pumpWidget(_app(_reducedMotion(LegacyShell(state: state))));
+    await tester.pumpWidget(_app(_reducedMotion(AppShell(state: state))));
     await tester.pumpAndSettle();
 
     AlbumFlowBackground flow() => tester.widget<AlbumFlowBackground>(
       find.descendant(
-        of: find.byType(LegacyAlbumBackdrop),
+        of: find.byType(AppAlbumBackdrop),
         matching: find.byType(AlbumFlowBackground),
       ),
     );
@@ -264,7 +266,7 @@ void main() {
     await state.setPlayerBackgroundQuality(0.5);
     state.playQueue(const <Track>[_track]);
 
-    await tester.pumpWidget(_app(LegacyShell(state: state)));
+    await tester.pumpWidget(_app(AppShell(state: state)));
     await tester.pump(const Duration(milliseconds: 200));
 
     AlbumFlowBackground playerFlow() => tester.widget<AlbumFlowBackground>(
@@ -286,7 +288,7 @@ void main() {
 
     await tester.tap(
       find.descendant(
-        of: find.byType(LegacyPlayerBar),
+        of: find.byType(AppPlayerBar),
         matching: find.text(_track.title),
       ),
     );
@@ -299,9 +301,16 @@ void main() {
     expect(playerFlow().quality, 0.5);
     expect(lyricGate(), isFalse);
 
-    for (int i = 0; i < 34; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-    }
+    await pumpPlayerTransition(
+      tester,
+      playerSlideAnimation(tester),
+      AnimationStatus.completed,
+      onMovingFrame: () {
+        expect(playerFlow().preview, isTrue);
+        expect(playerFlow().animated, isFalse);
+        expect(lyricGate(), isFalse);
+      },
+    );
     expect(playerFlow().preview, isFalse);
     expect(playerFlow().animated, isTrue);
     expect(lyricGate(), isTrue);

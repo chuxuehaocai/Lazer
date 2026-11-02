@@ -22,12 +22,16 @@ class SettingsRow extends StatelessWidget {
     required this.subtitle,
     required this.trailing,
     this.controlFlex = 9,
+    this.expandControl = false,
   });
 
   final String label;
   final String subtitle;
   final Widget trailing;
   final int controlFlex;
+
+  /// Choices use their available width; switches retain their natural size.
+  final bool expandControl;
 
   @override
   Widget build(BuildContext context) {
@@ -45,8 +49,8 @@ class SettingsRow extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             context.tr(subtitle),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+            maxLines: expandControl ? null : 2,
+            overflow: expandControl ? null : TextOverflow.ellipsis,
             style: theme.textTheme.bodySmall?.copyWith(
               color: apple.secondaryLabel,
             ),
@@ -60,7 +64,13 @@ class SettingsRow extends StatelessWidget {
         builder: (BuildContext context, BoxConstraints constraints) {
           // Use the actual card width: settings can be shown in an inset
           // pane even when the window itself is much wider.
-          final bool stacked = constraints.maxWidth < 360;
+          final double textScale =
+              MediaQuery.textScalerOf(context).scale(16) / 16;
+          final bool stacked =
+              constraints.maxWidth < 360 * textScale.clamp(1, 2);
+          final Widget control = expandControl
+              ? SizedBox(width: double.infinity, child: trailing)
+              : trailing;
           return Container(
             constraints: const BoxConstraints(
               minHeight: SettingsSpacing.rowMinHeight,
@@ -78,7 +88,7 @@ class SettingsRow extends StatelessWidget {
                     children: <Widget>[
                       heading,
                       const SizedBox(height: 8),
-                      Align(alignment: Alignment.centerLeft, child: trailing),
+                      Align(alignment: Alignment.centerLeft, child: control),
                     ],
                   )
                 : Row(
@@ -90,7 +100,7 @@ class SettingsRow extends StatelessWidget {
                         flex: controlFlex,
                         child: Align(
                           alignment: Alignment.centerRight,
-                          child: trailing,
+                          child: control,
                         ),
                       ),
                     ],

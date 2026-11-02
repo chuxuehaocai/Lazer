@@ -54,25 +54,27 @@ TRANSLATING_WIDGETS: dict[str, set[str | None]] = {
     "AnimatedNotice": {"message"},
     # lib/widgets/song_comments_view.dart
     "_CommentsSectionLabel": {None},
-    # lib/widgets/legacy/legacy_widgets.dart
-    "LegacySectionHeader": {"title", "subtitle"},
-    "LegacyNotice": {"message", None},
-    "LegacyRailItem": {"label"},
-    # lib/legacy/legacy_pages.dart (settings scaffolding)
-    "_LegacySectionLabel": {None},
-    "_LegacySettingRow": {"label", "subtitle"},
-    "_LegacySwitchRow": {"label", "subtitle"},
-    "_LegacySliderRow": {"label", "valueText", "subtitle"},
-    "_LegacyChoiceRow": {"label", "valueText", "labelOf"},
-    "_LegacyGradientSlider": {"label"},
+    # lib/ui/widgets.dart
+    "AppSectionHeader": {"title", "subtitle"},
+    "AppNotice": {"message", None},
+    "AppRailItem": {"label"},
+    # lib/ui/pages.dart (settings scaffolding)
+    "_AppSectionLabel": {None},
+    "_AppSettingRow": {"label", "subtitle"},
+    "_AppSwitchRow": {"label", "subtitle"},
+    "_AppSliderRow": {"label", "valueText", "subtitle"},
+    "_AppChoiceRow": {"label", "valueText", "labelOf"},
+    "_AppGradientSlider": {"label"},
     "_SearchTabButton": {"label"},
     "_ChartLoadCard": {"message"},
     "_HomeActionCard": {"title", "subtitle"},
     "_StationCard": {"title", "detail"},
-    # lib/legacy/legacy_player_bar.dart
-    "LegacyThinSeekBar": {"semanticLabel"},
+    # lib/ui/player_bar.dart
+    "AppThinSeekBar": {"semanticLabel"},
     "_VerticalVolumeBar": {"semanticLabel"},
-    # lib/legacy/legacy_shell.dart
+    # lib/ui/font_settings_page.dart
+    "_FontCard": {"label", "detail", "sample"},
+    # lib/ui/shell.dart
     "_CompactIcon": {"tooltip"},
     "_ToolbarButton": {"tooltip"},
     "_Avatar": {"label"},
@@ -92,6 +94,14 @@ TRANSLATING_CALLS: dict[str, set[str | None]] = {
     "_message": {None},
     "_notify": {None},
     "_showLocalMessage": {None},
+    # Watch helpers translate interface labels at their render sites. Their
+    # explicit *IsData / isData arguments preserve catalogue and lyric text.
+    "_watchPage": {None, "empty"},
+    "_watchEntry": {None, "subtitle"},
+    "_watchButton": {None},
+    "_watchInput": {"hint"},
+    "_watchMessage": {None},
+    "_openWatchTracks": {None},
 }
 
 # Flutter APIs that paint a String on screen.

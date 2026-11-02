@@ -44,8 +44,10 @@ listeners attached after the widgets were removed. The lifecycle regression in
 
 Cover flights use an independent overlay ticker and a paint transform. The
 incoming page's paused tickers therefore cannot freeze the flight. Forward and
-return flights use the same 420 ms curve, `Cubic(.22, 1, .36, 1)`, which moves
-most of the distance early and slows on arrival. Regression tests check actual
+return flights now share a critically damped spring. Each rectangle edge
+retains its presented position and velocity when the destination changes;
+the perceived response parameter is not a fixed completion time.
+Regression tests check actual
 transformed bounds, moving return targets, rapid cancellation and re-entry, and
 that intermediate frames do not rebuild or lay out the artwork.
 
@@ -105,16 +107,112 @@ loads, warm loads without further downloads, distinct painted pixels and three
 out-of-order cover requests. This checks the new analysis decoder against the
 actual disk/network path; `build/reports/bga-real-catalog.json` records the run.
 
+## Native-window scheduling comparison on 2026-11-02
+
+`tool/resource_usage_profile.dart` measures an offline background in a native
+Windows window. It does not play audio, restore an account or load the user's
+library. Each isolated stage starts a fresh process, warms up for two seconds,
+then samples for five seconds. CPU time includes all process threads and is
+reported as a percentage of one CPU core, not of the whole machine. RSS is
+sampled every 250 ms. Flutter frame timings are drained for another second and
+filtered to the sampled vsync interval.
+
+The local comparison uses the same current probe harness for two renderers:
+`frozen-renderer-current-harness` and `unified-current`. The frozen copy retains
+the previous shared clock, which requests every display vsync even when its
+consumers discard frames for a manual cap. The current clock sleeps until a
+requested background frame is due. This isolates that scheduling change; it
+is not a comparison of the complete beta.4 and beta.5 applications. All accepted
+reports below recorded a 100 Hz display, a requested 1280x720 window, a
+1264x681 logical content area and device pixel ratio 1.0. A different reported
+refresh rate must be compared separately.
+
+Reports are accepted only when `samples_complete` and the report/stage `valid`
+fields are true, the window remains visible and not minimized, and an animated
+stage delivers frames. The accepted runs report no lifecycle changes. Windows
+did not report an initial Flutter lifecycle state, which the JSON records as a
+warning; the native visibility checks and an external window monitor remain
+available. The external monitor did not identify these windows as the foreground
+window, so these results do not establish foreground scheduling behavior.
+Earlier `before-*`, `frozen-repeat-*`, `baseline-valid-1.json` and
+`current-valid-1/2.json` attempts are excluded: they either lack these validity
+fields or contain hidden, minimized or inactive samples. In particular,
+zero frames from a hidden animated window are not a performance improvement.
+
+Values are shown as frozen renderer -> current renderer. RSS is the process
+working set at the end of the sample, in MiB (1,048,576 bytes). The table
+preserves each pair instead of pooling runs with different display scheduling.
+
+| Stage / isolated pair | Scheduled callbacks/s | CPU, one core % | Build p95, ms | Raster p95, ms | Ending RSS, MiB |
+| --- | --- | --- | --- | --- | --- |
+| 10 fps / 1 | 76.98 -> 9.99 | 9.37 -> 1.56 | 0.265 -> 0.420 | 37.490 -> 5.092 | 52.75 -> 52.38 |
+| 10 fps / 2 | 40.99 -> 9.99 | 4.69 -> 1.25 | 0.232 -> 0.263 | 108.357 -> 118.214 | 53.40 -> 52.72 |
+| 10 fps / 3 | 101.37 -> 10.00 | 7.81 -> 1.25 | 0.200 -> 0.227 | 0.729 -> 0.622 | 52.98 -> 52.25 |
+| 30 fps / 1 | 80.79 -> 29.90 | 5.62 -> 1.87 | 0.248 -> 0.283 | 40.566 -> 24.056 | 53.51 -> 52.50 |
+| 30 fps / 2 | 56.39 -> 25.60 | 5.31 -> 2.50 | 0.222 -> 0.247 | 85.923 -> 89.935 | 52.68 -> 53.51 |
+| Display vsync / 1 | 62.58 -> 69.79 | 6.87 -> 17.18 | 0.348 -> 0.341 | 67.479 -> 54.633 | 52.26 -> 54.60 |
+| Display vsync / 2 | 52.59 -> 42.39 | 7.81 -> 4.69 | 0.325 -> 0.385 | 86.969 -> 90.195 | 53.30 -> 52.63 |
+| Static / 1 | 0 -> 0 | 0.94 -> 0.31 | no frames | no frames | 52.22 -> 52.38 |
+| Static / 2 | 0 -> 0 | 0 -> 0 | no frames | no frames | 52.51 -> 52.21 |
+| Static / 3 | 0 -> 0 | 0 -> 0.31 | no frames | no frames | 56.30 -> 54.16 |
+
+Only two complete paired samples exist for 30 fps and display-vsync mode in
+this captured set. The third baseline files for those stages have no matching
+current report and are excluded from paired conclusions.
+
+At the manual 10 fps cap, all three current runs request approximately ten
+callbacks per second and use less CPU than their paired frozen runs. Both
+complete 30 fps pairs also request fewer callbacks and use less CPU; one
+delivers 25.60 callbacks/s under the measured scheduling conditions, so the cap
+does not guarantee 30 delivered frames/s. Static mode schedules no frames in
+either renderer. The simulation regressions in
+`test/background_frame_schedule_test.dart` additionally cover 10/30 fps
+deadlines on 60/120/165 Hz displays, faster shared consumers and cancellation
+while inactive.
+
+The uncapped CPU pairs disagree about direction, and raster p95 changes from
+sub-millisecond values to more than 100 ms between runs. Ending RSS also moves
+in both directions. These measurements support reduced unnecessary wakeups
+at manual caps, but do not establish an uncapped CPU improvement, a consistent
+raster-time reduction, a total-process memory reduction or a whole-app FPS
+increase. Older 144 Hz attempts cannot be averaged with these 100 Hz pairs.
+The probe's CPU counter is coarse for five-second near-idle samples; static
+values from 0 to 0.94% are not evidence of a repeatable idle CPU difference.
+
+GPU busy time and GPU memory residency were not measured:
+`gpu_busy_measured` is false. Scheduled Flutter callbacks and raster-thread
+duration are not GPU utilization. The separate artwork regressions establish
+a narrower memory budget: two nearby thumbnail sizes share one 96x96 decoded
+cache entry (36,864 RGBA bytes), instead of retaining a 2048x2048 decode
+(16,777,216 RGBA bytes) for that fixture. Extreme panoramas cannot exceed four
+times the target on their longest edge. This reduces the nominal uncompressed
+pixel/texture payload for those images; it does not quantify driver allocation,
+texture residency, mipmaps, decoder temporary storage or application-wide VRAM.
+The palette-only 96x48 decode and its non-retention in the display cache are
+covered separately above.
+
+Raw local reports use
+`build/reports/resource-usage/{baseline,current}-valid-isolated{1,2,3}-<stage>.json`.
+They include process IDs, sample times, view size, validity checks and local
+application hashes. They do not record the Flutter SDK revision, so they cannot
+prove that revision by themselves. These generated reports and frozen binaries
+remain local and are not release assets. The maintained probe and regression
+tests are the reproducible method; a future comparison should also retain the
+build commands and SDK revision, keep the display configuration fixed, reject
+invalid samples and publish all complete pairs.
+
 ## Motion and compact screens
 
 Artwork dissolves keep the previous opaque composition above the new artwork,
 avoiding the dark dip caused by fading both plates over the page background.
 Rapid next/previous changes start from that visible composition. Reduced motion
 replaces the artwork immediately. Player artwork/lyrics and compact metadata
-use the same decelerating curve as cover flights, with whole-element opacity.
+use the shared spring model, with whole-element opacity. Desktop track-cover
+changes use the slower smooth response, while compact layouts use the responsive
+response. Both use spring settlement rather than a fixed dissolve deadline.
 
 Composite home cards (daily recommendations and charts) capture their last
-painted mosaic, logo and caption once before navigation. Their 420 ms flight
+painted mosaic, logo and caption once before navigation. Their spring flight
 now blends those pixels into the detail artwork, and reverses that blend on
 return. Rectangle-to-square motion crops both images proportionally and eases
 the corner radius; it does not stretch the cover. Interrupted returns preserve
@@ -133,11 +231,12 @@ immediately; browse thumbnails keep their existing rendering path.
 
 Route returns ease from their current visible position, including when Back
 interrupts an entrance. The player controller now represents the displayed
-position itself, and timed simulations apply easing once. Releasing a 10% or
+position itself, and its simulation applies motion once. Releasing a 10% or
 40% pull therefore retains that exact offset on the first released frame;
 previously the extra curve mapping jumped to approximately 0.34% or 7.16%.
-Full player presentation/dismissal remains 300 ms, scaled to the remaining
-distance on interruption. Rebuild/disposal tests cover listener cleanup and
+Player presentation/dismissal uses the shared smooth spring and retains the
+presented position and velocity on interruption. The route's nominal duration
+does not force a spring to stop before it settles. Rebuild/disposal tests cover listener cleanup and
 opening another player while the previous route exits.
 
 Large-screen components use an 84% design baseline, 20% larger than the previous
@@ -165,3 +264,47 @@ For native frame measurements, build and run `tool/rendering_profile.dart` and
 same display and hardware, keeping viewport size, refresh rate, engine backend,
 lyric fixture and settings fixed. Inspect both build and raster distributions,
 including presentation and dismissal, before drawing a frame-rate conclusion.
+
+## Resource and spring validation for beta.5
+
+`tool/resource_usage_profile.dart` measures one background mode at a time in a
+fresh Windows release process. It records visibility, lifecycle changes,
+scheduled Flutter frames, process CPU time, RSS samples and engine raster
+timings. A minimized or suspended run is invalid rather than a zero-cost result.
+The frozen original renderer and current renderer use the same probe.
+
+In the third valid isolated 10 fps pair, both windows reported a 100 Hz display
+and a 1264 by 681 logical viewport. Over five seconds the original renderer
+scheduled 101.37 Flutter frames per second and consumed 7.81% of one CPU core;
+the current renderer scheduled 10.00 frames per second and consumed 1.25%.
+The setting still requested ten background paints per second: the reduction is
+in unnecessary frame callbacks. Static runs scheduled no frames in both
+implementations. These short synthetic samples do not establish an
+application-wide CPU percentage or GPU utilization. Other pairs varied in
+delivered display cadence, so their full-vsync timings are not treated as a
+causal speed improvement. RSS stayed close to 53 MiB in this background-only
+workload and does not demonstrate a process-wide memory reduction.
+
+Image-cache tests separately verify the memory improvement for displayed
+artwork. A 2048 by 2048 local cover shown at the 96-pixel rendition retains
+36,864 decoded RGBA bytes instead of 16,777,216. Nearby thumbnail sizes share a
+cache key. Normal covers retain enough pixels for proportional cropping and
+small images are never upscaled. Exceptionally elongated images have their
+longest edge capped at four times the selected rendition: their cropped
+resolution may be lower in exchange for a bounded texture. Unsized original
+image export retains full resolution.
+
+Navigation and cover geometry now run physical duration/bounce springs and
+inherit presented position and velocity when retargeted. Duration is a
+perceptual response parameter, not a fixed removal deadline. Regression tests
+wait for the actual simulation to finish, check canceled/regrabbed gestures and
+verify that tickers, source snapshots and temporary overlay layers are released.
+Cover pixel tests include the first returning frame and immediate reopening;
+the old layer stays visible until its replacement has painted.
+
+The system media clock sleeps when playback is paused or absent. Paused seek
+notifications still update the OS timeline immediately through the tick lane;
+playing ticks do not increase the one-second publication cadence. These work
+counts and decoded-byte budgets are the regression gates. GPU busy time,
+whole-session peak RSS and hardware-specific power consumption require device
+profiling and are not claimed by these checks.

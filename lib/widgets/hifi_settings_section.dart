@@ -8,6 +8,8 @@
 // of being reported as "enabled".
 library;
 
+import 'spring_buttons.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -23,9 +25,9 @@ import '../state/hifi_settings.dart';
 import '../theme/apple_design.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
-import 'ui_scaling.dart';
 import 'audio_engine_settings.dart';
 import 'settings_detail.dart';
+import 'settings_choice.dart';
 import 'settings_row.dart';
 
 /// Renders the 高保真播放 group: engine status, output device, exclusive/bit-perfect
@@ -122,6 +124,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                 _SettingRow(
                   label: '输出设备',
                   subtitle: _deviceSubtitle(hifi, settings),
+                  expandControl: true,
                   trailing: _DevicePicker(
                     hifi: hifi,
                     settings: settings,
@@ -181,18 +184,18 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
               if (native)
                 _SettingRow(
                   label: 'DSP 链顺序',
-                  subtitle: '当前：${settings.dspChainSummary}',
-                  trailing: DropdownButton<String>(
+                  subtitle:
+                      '当前：${settings.dspStageOrder.map(dspStageLabel).map(context.tr).join(' → ')}',
+                  expandControl: true,
+                  trailing: SettingsChoice<String>(
                     key: const ValueKey('hifi-dsp-order'),
                     value: _dspOrderChoice(settings),
-                    underline: const SizedBox.shrink(),
-                    borderRadius: BorderRadius.circular(12),
                     items: <DropdownMenuItem<String>>[
                       for (final MapEntry<String, List<int>> preset
                           in kDspChainPresets.entries)
                         DropdownMenuItem<String>(
                           value: encodeDspStageOrder(preset.value),
-                          child: Text(preset.key),
+                          child: TrText(preset.key),
                         ),
                       // A persisted order that matches no preset (hand-edited, or a
                       // future preset that was removed) still has to be selectable,
@@ -202,7 +205,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                           .contains(_dspOrderChoice(settings)))
                         DropdownMenuItem<String>(
                           value: _dspOrderChoice(settings),
-                          child: const Text('自定义'),
+                          child: const TrText('自定义'),
                         ),
                     ],
                     onChanged: (String? value) {
@@ -222,11 +225,10 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                 _SettingRow(
                   label: 'DSD 输出',
                   subtitle: _dsdSubtitle(hifi, settings),
-                  trailing: DropdownButton<HifiDsdOutputMode>(
+                  expandControl: true,
+                  trailing: SettingsChoice<HifiDsdOutputMode>(
                     key: const ValueKey('hifi-dsd-mode'),
                     value: settings.dsdOutputMode,
-                    underline: const SizedBox.shrink(),
-                    borderRadius: BorderRadius.circular(12),
                     items: <DropdownMenuItem<HifiDsdOutputMode>>[
                       for (final HifiDsdOutputMode mode
                           in HifiDsdOutputMode.values)
@@ -234,7 +236,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                             hifi.supportsNativeDsd)
                           DropdownMenuItem<HifiDsdOutputMode>(
                             value: mode,
-                            child: Text(mode.label),
+                            child: TrText(mode.label),
                           ),
                     ],
                     onChanged: (HifiDsdOutputMode? value) {
@@ -250,17 +252,16 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                 _SettingRow(
                   label: 'DSD 倍率策略',
                   subtitle: _dsdRatePolicySubtitle(settings),
-                  trailing: DropdownButton<HifiDsdRatePolicy>(
+                  expandControl: true,
+                  trailing: SettingsChoice<HifiDsdRatePolicy>(
                     key: const ValueKey('hifi-dsd-rate-policy'),
                     value: settings.dsdRatePolicy,
-                    underline: const SizedBox.shrink(),
-                    borderRadius: BorderRadius.circular(12),
                     items: <DropdownMenuItem<HifiDsdRatePolicy>>[
                       for (final HifiDsdRatePolicy policy
                           in HifiDsdRatePolicy.values)
                         DropdownMenuItem<HifiDsdRatePolicy>(
                           value: policy,
-                          child: Text(policy.label),
+                          child: TrText(policy.label),
                         ),
                     ],
                     onChanged: (HifiDsdRatePolicy? value) {
@@ -276,17 +277,16 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                 _SettingRow(
                   label: '响度归一',
                   subtitle: _normalizationSubtitle(settings),
-                  trailing: DropdownButton<HifiVolumeNormalization>(
+                  expandControl: true,
+                  trailing: SettingsChoice<HifiVolumeNormalization>(
                     key: const ValueKey('hifi-normalization'),
                     value: settings.volumeNormalization,
-                    underline: const SizedBox.shrink(),
-                    borderRadius: BorderRadius.circular(12),
                     items: <DropdownMenuItem<HifiVolumeNormalization>>[
                       for (final HifiVolumeNormalization mode
                           in HifiVolumeNormalization.values)
                         DropdownMenuItem<HifiVolumeNormalization>(
                           value: mode,
-                          child: Text(mode.label),
+                          child: TrText(mode.label),
                         ),
                     ],
                     onChanged: (HifiVolumeNormalization? value) {
@@ -304,16 +304,17 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                 _SettingRow(
                   label: '输出缓冲',
                   subtitle: '更小的缓冲换更低延迟，更大的缓冲更容易在负载下不断流',
-                  trailing: DropdownButton<HifiBufferSize>(
+                  expandControl: true,
+                  trailing: SettingsChoice<HifiBufferSize>(
                     key: const ValueKey('hifi-buffer'),
                     value: settings.buffer,
-                    underline: const SizedBox.shrink(),
-                    borderRadius: BorderRadius.circular(12),
                     items: <DropdownMenuItem<HifiBufferSize>>[
                       for (final HifiBufferSize size in HifiBufferSize.values)
                         DropdownMenuItem<HifiBufferSize>(
                           value: size,
-                          child: Text('${size.label} · ${size.millis}ms'),
+                          child: Text(
+                            '${context.tr(size.label)} · ${size.millis}ms',
+                          ),
                         ),
                     ],
                     onChanged: (HifiBufferSize? value) {
@@ -372,17 +373,16 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection> {
                     subtitle:
                         '延时 ${settings.crossfeed.effectiveDelayMs.toStringAsFixed(2)} ms'
                         ' · 截止 ${settings.crossfeed.effectiveCutoffHz.round()} Hz',
-                    trailing: DropdownButton<HifiCrossfeedAlgorithm>(
+                    expandControl: true,
+                    trailing: SettingsChoice<HifiCrossfeedAlgorithm>(
                       key: const ValueKey('hifi-crossfeed-algorithm'),
                       value: settings.crossfeed.algorithm,
-                      underline: const SizedBox.shrink(),
-                      borderRadius: BorderRadius.circular(12),
                       items: <DropdownMenuItem<HifiCrossfeedAlgorithm>>[
                         for (final HifiCrossfeedAlgorithm algorithm
                             in HifiCrossfeedAlgorithm.values)
                           DropdownMenuItem<HifiCrossfeedAlgorithm>(
                             value: algorithm,
-                            child: Text(algorithm.label),
+                            child: TrText(algorithm.label),
                           ),
                       ],
                       onChanged: (HifiCrossfeedAlgorithm? value) {
@@ -477,6 +477,7 @@ class _SettingRow extends SettingsRow {
     required super.label,
     required super.subtitle,
     required super.trailing,
+    super.expandControl,
   }) : super(controlFlex: 6);
 }
 
@@ -564,12 +565,9 @@ class _DevicePicker extends StatelessWidget {
             ),
           ),
         Flexible(
-          child: DropdownButton<String?>(
+          child: SettingsChoice<String?>(
             key: const ValueKey('hifi-device'),
             value: selectionKnown ? selected : null,
-            isExpanded: true,
-            underline: const SizedBox.shrink(),
-            borderRadius: BorderRadius.circular(12),
             items: <DropdownMenuItem<String?>>[
               const DropdownMenuItem<String?>(
                 value: null,
@@ -582,7 +580,6 @@ class _DevicePicker extends StatelessWidget {
                     '${device.isActive ? '' : '（未激活）'}'
                     '${device.displayName}'
                     '${device.isDefault ? ' · 默认' : ''}',
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
             ],
@@ -697,12 +694,11 @@ class _EqualizerControls extends StatelessWidget {
                   subtitle: settings.equalizer.matchingPresetId == null
                       ? '自定义曲线'
                       : '选择预设会自动启用均衡器',
-                  trailing: DropdownButton<String>(
+                  expandControl: true,
+                  trailing: SettingsChoice<String>(
                     key: const ValueKey('hifi-eq-preset'),
                     value: settings.equalizer.matchingPresetId,
                     hint: const TrText('自定义'),
-                    underline: const SizedBox.shrink(),
-                    borderRadius: BorderRadius.circular(12),
                     items: <DropdownMenuItem<String>>[
                       for (final HifiEqPreset preset in hifiEqPresets)
                         DropdownMenuItem<String>(
@@ -803,63 +799,62 @@ class _EqBandEditor extends StatelessWidget {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final ThemeData theme = Theme.of(context);
     final List<HifiEqBand> bands = equalizer.effectiveBands;
+    final double bandWidth =
+        40 * (MediaQuery.textScalerOf(context).scale(12) / 12).clamp(1, 3);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          SizedBox(
-            height: UiMetrics.scaleOf(context) > 1.2 ? 210 : 180,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: <Widget>[
-                  for (int index = 0; index < bands.length; index++)
-                    SizedBox(
-                      width: 40,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: <Widget>[
-                          Text(
-                            bands[index].gainDb.toStringAsFixed(1),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: apple.secondaryLabel,
-                            ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                for (int index = 0; index < bands.length; index++)
+                  SizedBox(
+                    width: bandWidth,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          bands[index].gainDb.toStringAsFixed(1),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: apple.secondaryLabel,
                           ),
-                          RotatedBox(
-                            quarterTurns: -1,
-                            child: SizedBox(
-                              width: 130,
-                              height: 40,
-                              child: SemanticsPortal(
-                                child: Slider(
-                                  key: ValueKey<String>('hifi-eq-band-$index'),
-                                  value: clampHifiEqGainDb(bands[index].gainDb),
-                                  min: kMinHifiEqGainDb,
-                                  max: kMaxHifiEqGainDb,
-                                  onChanged: (double value) =>
-                                      onChanged(index, _tenthDb(value)),
-                                ),
+                        ),
+                        RotatedBox(
+                          quarterTurns: -1,
+                          child: SizedBox(
+                            width: 130,
+                            height: 40,
+                            child: SemanticsPortal(
+                              child: Slider(
+                                key: ValueKey<String>('hifi-eq-band-$index'),
+                                value: clampHifiEqGainDb(bands[index].gainDb),
+                                min: kMinHifiEqGainDb,
+                                max: kMaxHifiEqGainDb,
+                                onChanged: (double value) =>
+                                    onChanged(index, _tenthDb(value)),
                               ),
                             ),
                           ),
-                          Text(
-                            _frequencyLabel(bands[index].frequencyHz),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: apple.label,
-                            ),
+                        ),
+                        Text(
+                          _frequencyLabel(bands[index].frequencyHz),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: apple.label,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ),
           Align(
             alignment: Alignment.centerRight,
-            child: TextButton(
+            child: SpringTextButton(
               onPressed: onReset,
               child: Text(context.tr('重置为平直')),
             ),

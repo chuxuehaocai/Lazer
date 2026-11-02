@@ -49,7 +49,10 @@ class _Gateway extends NeteaseGateway {
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => track.id;
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => track.id;
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();
 }
@@ -115,6 +118,44 @@ class _Callbacks extends platform.AudioHandlerCallbacks {
     calls.add(invocation);
     return Future<void>.value();
   }
+}
+
+class _MediaState extends AppState {
+  _MediaState() : super(catalog: _Catalog());
+
+  bool isPlaying = true;
+  Duration clock = Duration.zero;
+  int positionReads = 0;
+  @override
+  Track get current => _tracks.first;
+  @override
+  List<Track> get queue => _tracks;
+  @override
+  bool get playing => isPlaying;
+  @override
+  bool get audioReady => true;
+  @override
+  Duration get precisePosition {
+    positionReads++;
+    return clock;
+  }
+
+  @override
+  void pause() {
+    isPlaying = false;
+    notifyListeners();
+  }
+
+  @override
+  void play() {
+    isPlaying = true;
+    notifyListeners();
+  }
+
+  @override
+  void seek(double fraction) => clock = current.duration * fraction;
+
+  void unrelatedSettingChanged() => notifyListeners();
 }
 
 void main() {
@@ -306,7 +347,7 @@ void main() {
     },
   );
   test(
-    'system controls publish every 100ms and share next, previous, seek, queue and stop state',
+    'system controls publish a 1Hz timeline and share next, previous, seek, queue and stop state',
     () async {
       final engine = _Engine();
       final state = AppState(catalog: _Catalog(), audioEngine: engine);
@@ -400,6 +441,166 @@ void main() {
     state.dispose();
     engine.dispose();
     await Future<void>.delayed(Duration.zero);
+  });
+  test(
+    'system media sleeps while paused and resumes position updates immediately',
+    () async {
+      final state = _MediaState();
+      final handler = LazerMediaHandler(state, artwork: (_) async => null);
+      final updates = <PlaybackState>[];
+      final subscription = handler.playbackState.listen(updates.add);
+      state.pause();
+      await Future<void>.delayed(Duration.zero);
+      expect(handler.playbackState.value.playing, false);
+      updates.clear();
+      state.positionReads = 0;
+
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      expect(updates, isEmpty);
+      expect(state.positionReads, 0);
+
+      // Settings outside the transport must not resend identical OS state.
+      state.unrelatedSettingChanged();
+      await Future<void>.delayed(Duration.zero);
+      expect(updates, isEmpty);
+
+      // Seek/repeat still publish without waiting for a running clock.
+      await handler.seek(const Duration(seconds: 2));
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        handler.playbackState.value.updatePosition,
+        const Duration(seconds: 2),
+      );
+      state.cycleRepeat();
+      expect(
+        handler.playbackState.value.repeatMode,
+        AudioServiceRepeatMode.all,
+      );
+
+      state.play();
+      await Future<void>.delayed(Duration.zero);
+      expect(handler.playbackState.value.playing, true);
+      updates.clear();
+      state.clock = const Duration(seconds: 3);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      expect(updates.single.updatePosition, const Duration(seconds: 3));
+      updates.clear();
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      expect(updates, isEmpty, reason: 'A stalled clock has no new OS state.');
+
+      handler.close();
+      await subscription.cancel();
+      state.dispose();
+    },
+  );
+  testWidgets('paused app seeks publish immediately without a media clock', (
+    tester,
+  ) async {
+    final engine = _Engine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    state.playQueue(_tracks);
+    await tester.pump();
+    final handler = LazerMediaHandler(state, artwork: (_) async => null);
+    state.pause();
+    await tester.pump();
+    final updates = <PlaybackState>[];
+    final subscription = handler.playbackState.listen(updates.add);
+    await tester.pump();
+    updates.clear();
+
+    // AppState seeks notify the transport lane without a structural change.
+    state.seek(0.5);
+    await tester.pump();
+    expect(updates.single.updatePosition, const Duration(seconds: 2));
+    expect(updates.single.playing, false);
+    updates.clear();
+    state.seek(0.5);
+    await tester.pump(const Duration(seconds: 2));
+    expect(updates, isEmpty);
+
+    handler.close();
+    state.seek(0.75);
+    await tester.pump();
+    expect(
+      updates,
+      isEmpty,
+      reason: 'Closing detaches the transport listener.',
+    );
+    unawaited(subscription.cancel());
+    state.dispose();
+    engine.dispose();
+    await tester.pump();
+  });
+  testWidgets('playing app ticks leave system publication on the 1Hz clock', (
+    tester,
+  ) async {
+    final engine = _Engine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    state.playQueue(_tracks);
+    await tester.pump();
+    final handler = LazerMediaHandler(state, artwork: (_) async => null);
+    final updates = <PlaybackState>[];
+    final subscription = handler.playbackState.listen(updates.add);
+    await tester.pump();
+    updates.clear();
+
+    for (var beat = 1; beat <= 9; beat++) {
+      engine.position = Duration(milliseconds: beat * 100);
+      await tester.pump(AppState.playbackInterval);
+    }
+    expect(state.position, const Duration(milliseconds: 900));
+    expect(updates, isEmpty);
+    engine.position = const Duration(seconds: 1);
+    await tester.pump(AppState.playbackInterval);
+    expect(updates.single.updatePosition, const Duration(seconds: 1));
+    updates.clear();
+    for (var beat = 11; beat <= 19; beat++) {
+      engine.position = Duration(milliseconds: beat * 100);
+      await tester.pump(AppState.playbackInterval);
+    }
+    expect(state.position, const Duration(milliseconds: 1900));
+    expect(updates, isEmpty);
+
+    handler.close();
+    unawaited(subscription.cancel());
+    state.dispose();
+    engine.dispose();
+    await tester.pump();
+  });
+  test('idle and paused media keep no active timers', () {
+    final timers = <Timer>[];
+    runZoned(
+      () {
+        final idle = AppState(catalog: _Catalog());
+        final idleHandler = LazerMediaHandler(idle, artwork: (_) async => null);
+        expect(timers.where((timer) => timer.isActive), isEmpty);
+        idleHandler.close();
+        idle.dispose();
+
+        final state = _MediaState()..isPlaying = false;
+        final handler = LazerMediaHandler(state, artwork: (_) async => null);
+        state.unrelatedSettingChanged();
+        expect(timers.where((timer) => timer.isActive), isEmpty);
+        state.play();
+        expect(timers.where((timer) => timer.isActive), hasLength(1));
+        state.pause();
+        expect(timers.where((timer) => timer.isActive), isEmpty);
+        handler.close();
+        state.dispose();
+      },
+      zoneSpecification: ZoneSpecification(
+        createTimer: (self, parent, zone, duration, callback) {
+          final timer = parent.createTimer(zone, duration, callback);
+          timers.add(timer);
+          return timer;
+        },
+        createPeriodicTimer: (self, parent, zone, duration, callback) {
+          final timer = parent.createPeriodicTimer(zone, duration, callback);
+          timers.add(timer);
+          return timer;
+        },
+      ),
+    );
   });
   testWidgets(
     'Windows bridge sends actual timeline and cached artwork, receives seek on the same handler',

@@ -6,9 +6,9 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
+import 'package:lazer_nextgen/ui/background.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -65,13 +65,13 @@ void main() {
             navigation: navigation,
             child: child!,
           ),
-          home: LegacyShell(state: state),
+          home: AppShell(state: state),
         ),
       );
       await tester.pump();
       await tester.tap(
         find.descendant(
-          of: find.byType(LegacyPlayerBar),
+          of: find.byType(AppPlayerBar),
           matching: find.text(_first.title),
         ),
       );
@@ -80,7 +80,7 @@ void main() {
       expect(find.byType(NowPlayingPage), findsOneWidget);
       final player = tester.element(find.byType(NowPlayingPage));
       final backdrop = tester.element(find.byType(AlbumBlurFlow));
-      final browse = tester.element(find.byType(LegacyAlbumBackdrop));
+      final browse = tester.element(find.byType(AppAlbumBackdrop));
       expect(
         tester.widget<AlbumBlurFlow>(find.byType(AlbumBlurFlow)).track,
         _first,
@@ -99,7 +99,7 @@ void main() {
         isTrue,
       );
       expect(
-        identical(tester.element(find.byType(LegacyAlbumBackdrop)), browse),
+        identical(tester.element(find.byType(AppAlbumBackdrop)), browse),
         isTrue,
       );
       expect(
@@ -107,9 +107,7 @@ void main() {
         _second,
       );
       expect(
-        tester
-            .widget<LegacyAlbumBackdrop>(find.byType(LegacyAlbumBackdrop))
-            .track,
+        tester.widget<AppAlbumBackdrop>(find.byType(AppAlbumBackdrop)).track,
         _second,
       );
       expect(tester.takeException(), isNull);

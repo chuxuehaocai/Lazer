@@ -56,7 +56,7 @@ Future<void> removeImportedLyrics(
 }
 
 void _notify(BuildContext context, String message) {
-  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-    SnackBar(content: Text(context.tr(message))),
-  );
+  ScaffoldMessenger.maybeOf(
+    context,
+  )?.showSnackBar(SnackBar(content: Text(context.tr(message))));
 }

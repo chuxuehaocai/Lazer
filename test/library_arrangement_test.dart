@@ -6,9 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
-import 'package:lazer_nextgen/legacy/legacy_widgets.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
+import 'package:lazer_nextgen/ui/widgets.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/ui_scaling.dart';
 
@@ -80,14 +80,14 @@ Widget _library(
   ValueChanged<Playlist>? onOpen,
   bool scaled = false,
 }) => MaterialApp(
-  theme: buildLegacyTheme(brightness: Brightness.dark),
+  theme: buildAppleTheme(brightness: Brightness.dark),
   builder: scaled
       ? (context, child) => UiScaling(state: state, child: child!)
       : null,
   home: Scaffold(
     body: AnimatedBuilder(
       animation: state,
-      builder: (BuildContext context, _) => LegacyLibraryPage(
+      builder: (BuildContext context, _) => AppLibraryPage(
         state: state,
         onOpenPlaylist: onOpen ?? (Playlist playlist) {},
         onOpenLocalMusic: () {},
@@ -127,7 +127,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
-    final Finder cards = find.byType(LegacyPlaylistCard);
+    final Finder cards = find.byType(AppPlaylistCard);
     expect(cards, findsNWidgets(5));
     final double rowTop = tester.getTopLeft(cards.at(0)).dy;
     expect(tester.getTopLeft(cards.at(1)).dy, rowTop);
@@ -179,7 +179,7 @@ void main() {
         .opacity;
 
     // First lift and drop.
-    final Finder cards = find.byType(LegacyPlaylistCard);
+    final Finder cards = find.byType(AppPlaylistCard);
     TestGesture gesture = await tester.startGesture(
       tester.getCenter(cards.at(3)),
       kind: PointerDeviceKind.mouse,
@@ -196,7 +196,7 @@ void main() {
 
     // Second lift: the landing animation must not leave the preview faded out.
     gesture = await tester.startGesture(
-      tester.getCenter(find.byType(LegacyPlaylistCard).at(2)),
+      tester.getCenter(find.byType(AppPlaylistCard).at(2)),
       kind: PointerDeviceKind.mouse,
     );
     await tester.pump(const Duration(milliseconds: 24));
@@ -224,9 +224,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
-    final Finder cards = find.byType(LegacyPlaylistCard);
+    final Finder cards = find.byType(AppPlaylistCard);
     final String draggedId = tester
-        .widget<LegacyPlaylistCard>(cards.at(3))
+        .widget<AppPlaylistCard>(cards.at(3))
         .playlist
         .id;
     final TestGesture gesture = await tester.startGesture(
@@ -261,7 +261,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
-    await tester.tap(find.byType(LegacyPlaylistCard).first);
+    await tester.tap(find.byType(AppPlaylistCard).first);
     await tester.pump();
     expect(opened.single.name, 'Alpha');
     // A tap must not leave a lift behind.
@@ -279,10 +279,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(state.playlistOrder, isEmpty);
-    final Finder cards = find.byType(LegacyPlaylistCard);
-    final LegacyPlaylistCard dragged = tester.widget<LegacyPlaylistCard>(
-      cards.at(3),
-    );
+    final Finder cards = find.byType(AppPlaylistCard);
+    final AppPlaylistCard dragged = tester.widget<AppPlaylistCard>(cards.at(3));
     final String draggedId = dragged.playlist.id;
 
     final TestGesture gesture = await tester.startGesture(
@@ -298,8 +296,8 @@ void main() {
     await tester.pump();
     // The grid makes room before the listener lets go: the held card already
     // owns the first slot, and nothing is saved yet.
-    final LegacyPlaylistCard held = tester.widget<LegacyPlaylistCard>(
-      find.byType(LegacyPlaylistCard).at(0),
+    final AppPlaylistCard held = tester.widget<AppPlaylistCard>(
+      find.byType(AppPlaylistCard).at(0),
     );
     expect(held.playlist.id, draggedId);
     expect(
@@ -322,8 +320,8 @@ void main() {
 
     expect(state.playlistOrder, isNotEmpty);
     expect(state.playlistOrder.first, draggedId);
-    final LegacyPlaylistCard first = tester.widget<LegacyPlaylistCard>(
-      find.byType(LegacyPlaylistCard).at(0),
+    final AppPlaylistCard first = tester.widget<AppPlaylistCard>(
+      find.byType(AppPlaylistCard).at(0),
     );
     expect(first.playlist.id, draggedId);
     expect(tester.takeException(), isNull);
@@ -338,11 +336,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
-    final Finder cards = find.byType(LegacyPlaylistCard);
-    final String home = tester
-        .widget<LegacyPlaylistCard>(cards.at(0))
-        .playlist
-        .id;
+    final Finder cards = find.byType(AppPlaylistCard);
+    final String home = tester.widget<AppPlaylistCard>(cards.at(0)).playlist.id;
 
     final TestGesture gesture = await tester.startGesture(
       tester.getCenter(cards.at(3)),
@@ -351,7 +346,7 @@ void main() {
     await gesture.moveTo(tester.getCenter(cards.at(0)));
     await tester.pump();
     expect(
-      tester.widget<LegacyPlaylistCard>(cards.at(0)).playlist.id,
+      tester.widget<AppPlaylistCard>(cards.at(0)).playlist.id,
       isNot(home),
       reason: 'the preview moved while the pointer was over the slot',
     );
@@ -372,7 +367,7 @@ void main() {
     );
     expect(
       tester
-          .widget<LegacyPlaylistCard>(find.byType(LegacyPlaylistCard).at(0))
+          .widget<AppPlaylistCard>(find.byType(AppPlaylistCard).at(0))
           .playlist
           .id,
       home,
@@ -399,9 +394,9 @@ void main() {
         await state.setPlaylistColumns(2);
         await tester.pumpWidget(_library(state));
         await tester.pumpAndSettle();
-        final cards = find.byType(LegacyPlaylistCard);
+        final cards = find.byType(AppPlaylistCard);
         final original = [
-          for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+          for (final card in tester.widgetList<AppPlaylistCard>(cards))
             card.playlist.id,
         ];
         final expected = [...original];
@@ -421,7 +416,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 16));
         expect(
           [
-            for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+            for (final card in tester.widgetList<AppPlaylistCard>(cards))
               card.playlist.id,
           ],
           expected,
@@ -446,9 +441,9 @@ void main() {
     await state.setPlaylistColumns(2);
     await tester.pumpWidget(_library(state));
     await tester.pumpAndSettle();
-    final cards = find.byType(LegacyPlaylistCard);
+    final cards = find.byType(AppPlaylistCard);
     final original = [
-      for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+      for (final card in tester.widgetList<AppPlaylistCard>(cards))
         card.playlist.id,
     ];
     final slots = [
@@ -466,7 +461,7 @@ void main() {
       expected.insert(index, original.first);
       expect(
         [
-          for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+          for (final card in tester.widgetList<AppPlaylistCard>(cards))
             card.playlist.id,
         ],
         expected,
@@ -476,7 +471,7 @@ void main() {
       await gesture.moveTo(slots[index] + const Offset(1, 1));
       await tester.pump(const Duration(milliseconds: 16));
       expect([
-        for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+        for (final card in tester.widgetList<AppPlaylistCard>(cards))
           card.playlist.id,
       ], expected);
     }
@@ -498,7 +493,7 @@ void main() {
       await state.setPlaylistColumns(2);
       await tester.pumpWidget(_library(state, scaled: true));
       await tester.pumpAndSettle();
-      final cards = find.byType(LegacyPlaylistCard);
+      final cards = find.byType(AppPlaylistCard);
       final source = _screenRect(tester, cards.at(0));
       final destination = _screenRect(tester, cards.at(1));
       final grab = source.topLeft + const Offset(12, 12);
@@ -513,7 +508,7 @@ void main() {
       await gesture.moveTo(point);
       await tester.pump(const Duration(milliseconds: 16));
       expect(
-        tester.widget<LegacyPlaylistCard>(cards.at(1)).playlist.id,
+        tester.widget<AppPlaylistCard>(cards.at(1)).playlist.id,
         '1',
         reason: 'the entire visible card is the target, even beside its edges',
       );
@@ -541,7 +536,7 @@ void main() {
       await state.setPlaylistColumns(2);
       await tester.pumpWidget(_library(state));
       await tester.pumpAndSettle();
-      final cards = find.byType(LegacyPlaylistCard);
+      final cards = find.byType(AppPlaylistCard);
       final slots = [for (var i = 0; i < 5; i++) tester.getCenter(cards.at(i))];
       final gesture = await tester.startGesture(
         slots.first,
@@ -553,7 +548,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
       expect(
         [
-          for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+          for (final card in tester.widgetList<AppPlaylistCard>(cards))
             card.playlist.id,
         ],
         ['2', '3', '1', '4', '5'],
@@ -578,10 +573,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
     final List<String> ids = <String>[
-      for (final LegacyPlaylistCard card
-          in tester.widgetList<LegacyPlaylistCard>(
-            find.byType(LegacyPlaylistCard),
-          ))
+      for (final AppPlaylistCard card in tester.widgetList<AppPlaylistCard>(
+        find.byType(AppPlaylistCard),
+      ))
         card.playlist.id,
     ];
     expect(ids.first, '4');

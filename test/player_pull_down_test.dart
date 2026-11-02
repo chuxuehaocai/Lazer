@@ -6,9 +6,9 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/navigation/pull_down_to_close.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/player/now_playing_route.dart';
@@ -28,7 +28,7 @@ const Track _track = Track(
 const Size _phone = Size(390, 844);
 
 /// Records what the strip reports, standing in for the shell or a route.
-class _Host implements PlayerPullDown {
+class _Host extends PlayerPullDown {
   bool allowed = true;
   bool started = false;
   bool ended = false;
@@ -64,11 +64,7 @@ class _Catalog extends Catalog {
 }
 
 Widget _app(Widget home) => MaterialApp(
-  theme: buildLegacyTheme(brightness: Brightness.dark),
-  builder: (BuildContext context, Widget? child) => MediaQuery(
-    data: MediaQuery.of(context).copyWith(disableAnimations: true),
-    child: child!,
-  ),
+  theme: buildAppleTheme(brightness: Brightness.dark),
   home: home,
 );
 
@@ -93,19 +89,20 @@ Future<void> _openPlayer(WidgetTester tester, {Size size = _phone}) async {
 
   final AppState state = AppState(catalog: _Catalog());
   addTearDown(state.dispose);
-  await state.setLegacyBackground(LegacyBackgroundMode.off);
+  await state.setAppBackground(AppBackgroundMode.off);
+  await state.setPlayerBackground(AppBackgroundMode.off);
   state.playQueue(const <Track>[_track]);
-  await tester.pumpWidget(_app(LegacyShell(state: state)));
+  await tester.pumpWidget(_app(AppShell(state: state)));
   await tester.pump(const Duration(milliseconds: 120));
 
   await tester.tap(
     find.descendant(
-      of: find.byType(LegacyPlayerBar),
+      of: find.byType(AppPlayerBar),
       matching: find.text(_track.title),
     ),
   );
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 540));
+  await tester.pump(const Duration(milliseconds: 1200));
   expect(find.byType(NowPlayingPage), findsOneWidget);
   expect(find.byType(PlayerPullDownRegion), findsOneWidget);
 }
@@ -159,7 +156,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(_slide(tester), greaterThan(0));
-    await tester.pump(const Duration(milliseconds: 320));
+    await tester.pump(const Duration(milliseconds: 1200));
     await tester.pump();
     expect(find.byType(NowPlayingPage), findsNothing);
     expect(tester.takeException(), isNull);
@@ -171,14 +168,14 @@ void main() {
     await _openPlayer(tester);
 
     await _slowDrag(tester, const Offset(195, 160), const Offset(0, 60));
-    await tester.pump(const Duration(milliseconds: 540));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(_slide(tester), 0, reason: 'a short pull returns to the open state');
 
     // The strip floats above the header, so its buttons must keep working.
     await tester.tap(find.byTooltip('\u8fd4\u56de'));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 540));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -190,7 +187,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('now-playing-more')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 1200));
     await tester.tap(
       find.descendant(of: find.byType(BottomSheet), matching: find.text('歌词')),
     );
@@ -209,17 +206,17 @@ void main() {
       TickerMode.valuesOf(tester.element(find.byType(LyricViewport))).enabled,
       isFalse,
     );
-    await tester.pump(const Duration(milliseconds: 540));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsNothing);
 
     await tester.tap(
       find.descendant(
-        of: find.byType(LegacyPlayerBar),
+        of: find.byType(AppPlayerBar),
         matching: find.text(_track.title),
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 540));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -235,7 +232,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         navigatorKey: navigator,
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         home: Scaffold(
           body: Builder(
             builder: (BuildContext context) => TextButton(
@@ -250,7 +247,7 @@ void main() {
     );
     await tester.tap(find.text('Open player'));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(
       TickerMode.valuesOf(tester.element(find.byType(NowPlayingPage))).enabled,
@@ -263,7 +260,7 @@ void main() {
       TickerMode.valuesOf(tester.element(find.byType(NowPlayingPage))).enabled,
       isFalse,
     );
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -274,7 +271,7 @@ void main() {
     await _openPlayer(tester);
 
     await _slowDrag(tester, const Offset(195, 470), const Offset(0, 240));
-    await tester.pump(const Duration(milliseconds: 540));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(_slide(tester), 0);
     expect(tester.takeException(), isNull);
@@ -284,7 +281,7 @@ void main() {
     await _openPlayer(tester);
 
     await _slowDrag(tester, const Offset(195, 220), const Offset(0, -200));
-    await tester.pump(const Duration(milliseconds: 540));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(_slide(tester), 0);
     expect(tester.takeException(), isNull);
@@ -348,12 +345,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a released pull still animates with reduced motion on', (
+  testWidgets('a released pull settles immediately with reduced motion on', (
     tester,
   ) async {
-    // Windows reports this when its animation effects are off, and it is what
-    // turned the settle into a single-frame snap: the controller would have
-    // run its 80-260 ms in 5% of the time.
     tester.binding.platformDispatcher.accessibilityFeaturesTestValue =
         const FakeAccessibilityFeatures(disableAnimations: true);
     addTearDown(
@@ -374,19 +368,7 @@ void main() {
     expect(pulled, greaterThan(.3));
 
     await gesture.up();
-    // A ticker only learns where it started on its first tick, so the frame
-    // after the release cannot move yet.
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 16));
-    final double afterRelease = _slide(tester);
-    expect(
-      find.byType(NowPlayingPage),
-      findsOneWidget,
-      reason: 'the rest of the pull must animate, not disappear',
-    );
-    expect(afterRelease, greaterThan(pulled));
-    expect(afterRelease, lessThan(1));
-    await tester.pump(const Duration(milliseconds: 540));
     expect(find.byType(NowPlayingPage), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -405,7 +387,7 @@ void main() {
       const Offset(0, 480),
       steps: 16,
     );
-    await tester.pump(const Duration(milliseconds: 540));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -422,7 +404,7 @@ void main() {
       const Offset(0, 240),
       steps: 12,
     );
-    await tester.pump(const Duration(milliseconds: 540));
+    await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsOneWidget);
     expect(_slide(tester), 0);
     expect(tester.takeException(), isNull);

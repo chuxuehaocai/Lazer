@@ -1,5 +1,5 @@
 // Compatibility entry point for existing catalogue and UI consumers.
-export 'legacy_models.dart';
+export 'music_models_compat.dart';
 export 'netease_gateway.dart';
 export 'music_gateway.dart';
 export 'music_models.dart';

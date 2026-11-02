@@ -1,4 +1,8 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -6,6 +10,7 @@ import 'package:lazer_nextgen/data/lyrics.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/player/artwork_lyrics_layout.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
+import 'package:lazer_nextgen/player/player_backdrop.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -45,6 +50,91 @@ class _PlayerState extends AppState {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  for (final size in [const Size(390, 844), const Size(844, 390)]) {
+    testWidgets('cover shadow extends evenly into the side gutters at $size', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final oldDisableShadows = debugDisableShadows;
+      debugDisableShadows = false;
+      final state = _PlayerState(largeText: false)
+        ..playerBackground = AppBackgroundMode.solidColor
+        ..playerBackgroundColor = Colors.white;
+      addTearDown(state.dispose);
+      const captureKey = ValueKey('mobile-cover-shadow-capture');
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: captureKey,
+          child: MaterialApp(
+            theme: buildAppleTheme(),
+            home: NowPlayingPage(state: state),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final art = tester.getRect(
+        find.byKey(const ValueKey('now-playing-cover')),
+      );
+      final boundary = tester.renderObject<RenderRepaintBoundary>(
+        find.byKey(captureKey),
+      );
+      final backdrop = tester.renderObject<RenderRepaintBoundary>(
+        find
+            .descendant(
+              of: find.byType(AlbumBlurFlow),
+              matching: find.byType(RepaintBoundary),
+            )
+            .first,
+      );
+      try {
+        await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final pixels = (await image.toByteData())!.buffer.asUint8List();
+          final background = await backdrop.toImage();
+          final baseline = (await background.toByteData())!.buffer
+              .asUint8List();
+          // Normalize against the player's gradients to compare shadow strength.
+          double transmissionAt(Offset point) {
+            final index =
+                (point.dy.floor() * image.width + point.dx.floor()) * 4;
+            return pixels[index] / baseline[index];
+          }
+
+          final left = transmissionAt(Offset(art.left - 6, art.center.dy));
+          final right = transmissionAt(Offset(art.right + 5, art.center.dy));
+          final top = transmissionAt(Offset(art.center.dx, art.top - 6));
+          final bottom = transmissionAt(Offset(art.center.dx, art.bottom + 5));
+          final png = await image.toByteData(format: ui.ImageByteFormat.png);
+          image.dispose();
+          background.dispose();
+          final orientation = size.width > size.height
+              ? 'landscape'
+              : 'portrait';
+          final capture = File('diag/player/cover-shadow-$orientation.png');
+          await capture.parent.create(recursive: true);
+          await capture.writeAsBytes(png!.buffer.asUint8List());
+          expect(
+            left,
+            lessThan(.96),
+            reason: 'left shadow must survive clipping',
+          );
+          expect(
+            right,
+            lessThan(.96),
+            reason: 'right shadow must survive clipping',
+          );
+          expect((left - right).abs(), lessThan(.02));
+          expect((top - bottom).abs(), lessThan(.02));
+        });
+      } finally {
+        debugDisableShadows = oldDisableShadows;
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   for (final size in [
     const Size(320, 568),
     const Size(390, 844),
@@ -76,7 +166,7 @@ void main() {
         );
         await tester.pump();
 
-        final art = find.byKey(const ValueKey('legacy-now-playing-cover'));
+        final art = find.byKey(const ValueKey('now-playing-cover'));
         final details = find.byKey(const ValueKey('artwork-track-details'));
         final transport = find.byKey(const ValueKey('now-playing-transport'));
         final large = tester.getRect(art);
@@ -111,7 +201,7 @@ void main() {
 
         await tester.tap(art);
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 450));
+        await tester.pumpAndSettle();
         expect(tester.element(art), same(artElement));
         final small = tester.getRect(art);
         final compactDetails = tester.getRect(details);
@@ -137,7 +227,7 @@ void main() {
         expect(tester.takeException(), isNull);
 
         await tester.pump(const Duration(seconds: 3));
-        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pumpAndSettle();
         final summary = tester.getRect(
           find.byKey(const ValueKey('compact-player-summary')),
         );
@@ -154,10 +244,10 @@ void main() {
         );
         await tester.tap(find.byKey(const ValueKey('compact-player-summary')));
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pumpAndSettle();
         await tester.tap(art);
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 450));
+        await tester.pumpAndSettle();
         expect(tester.getRect(art), large);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());

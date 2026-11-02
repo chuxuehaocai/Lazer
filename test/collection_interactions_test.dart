@@ -6,9 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_chart_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_playlist_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/chart_page.dart';
+import 'package:lazer_nextgen/ui/playlist_page.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/tv/large_screen_pages.dart';
 import 'package:lazer_nextgen/tv/large_screen_widgets.dart';
@@ -106,7 +106,7 @@ class _State extends AppState {
 Widget _app(Widget page, {bool tv = false}) => TvScope(
   active: tv,
   child: MaterialApp(
-    theme: buildLegacyTheme(brightness: Brightness.dark),
+    theme: buildAppleTheme(brightness: Brightness.dark),
     builder: (context, child) => MediaQuery(
       data: MediaQuery.of(context).copyWith(disableAnimations: true),
       child: child!,
@@ -137,7 +137,7 @@ void main() {
                   playlist: _playlist,
                   album: album ? _album : null,
                 )
-              : LegacyPlaylistPage(
+              : AppPlaylistPage(
                   state: state,
                   playlist: _playlist,
                   album: album ? _album : null,
@@ -246,7 +246,7 @@ void main() {
               valueListenable: chart,
               builder: (context, value, child) => tv
                   ? LargeScreenChartPage(state: state, chart: value)
-                  : LegacyChartPage(state: state, chart: value),
+                  : AppChartPage(state: state, chart: value),
             ),
             tv: tv,
           ),
@@ -254,7 +254,7 @@ void main() {
         await tester.pump();
         expect(find.text('Chart old'), findsOneWidget);
         expect(
-          find.byType(tv ? LargeScreenCollectionHeader : LegacyPlaylistHeader),
+          find.byType(tv ? LargeScreenCollectionHeader : AppPlaylistHeader),
           findsOneWidget,
         );
         expect(

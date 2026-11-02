@@ -355,9 +355,11 @@ void main() {
     final second = engine.setQueue(<String>['https://audio.test/b']);
     final third = engine.setQueue(<String>['https://audio.test/c']);
     await tester.pump();
-    expect(player.opened, <String>[
-      'https://audio.test/a',
-    ], reason: 'superseded loads queue behind the one already opening');
+    expect(
+      player.opened,
+      <String>['https://audio.test/a'],
+      reason: 'superseded loads queue behind the one already opening',
+    );
 
     held.complete();
     await tester.pump();

@@ -12,7 +12,7 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/lyrics/imported_lyrics_store.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
@@ -80,7 +80,7 @@ Future<void> main() async {
   );
   const bool dynamicBackdrop = bool.fromEnvironment('PROFILE_DYNAMIC_BACKDROP');
   if (!dynamicBackdrop) {
-    await state.setLegacyBackground(LegacyBackgroundMode.off);
+    await state.setAppBackground(AppBackgroundMode.off);
   }
   final tracks = List<Track>.generate(
     5000,
@@ -94,7 +94,7 @@ Future<void> main() async {
     ),
   );
   state.playQueue(tracks);
-  runApp(MaterialApp(home: LegacyShell(state: state)));
+  runApp(MaterialApp(home: AppShell(state: state)));
   final frames = <FrameTiming>[];
   bool recording = false;
   void onFrames(List<FrameTiming> timings) {

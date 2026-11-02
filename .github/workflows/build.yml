@@ -1,4 +1,4 @@
-name: Build nextgen
+name: Build Lazer
 
 on:
   push:
@@ -572,11 +572,45 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+      - name: Identify the selected simulator toolchain
+        id: simulator-toolchain
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          identity="$(
+            {
+              xcodebuild -version
+              xcrun --sdk iphonesimulator --show-sdk-version
+              xcode-select -p
+            } | shasum -a 256 | awk '{print $1}'
+          )"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+      # Cache only an exact toolchain/profile match. The original timeout was
+      # after Xcode completed, so cold builds still have a bounded test path.
+      - name: Restore the cached iOS simulator SDK
+        id: simulator-sdk
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build/ios-ffmpeg/simulator
+          key: ios-ffmpeg-simulator-${{ runner.arch }}-${{ steps.simulator-toolchain.outputs.identity }}-${{ hashFiles('native/lazer-audio/tools/build_ios_dsd_ffmpeg.sh', 'ci/build-ios-audio.sh') }}
       - run: flutter pub get --enforce-lockfile
+        timeout-minutes: 3
       - name: Build the engine for the simulator
+        timeout-minutes: 8
         env:
           FFMPEG_BUILD_JOBS: '4'
-        run: bash ci/build-ios-audio.sh simulator
+        run: |
+          set -euo pipefail
+          bash ci/build-ios-audio.sh simulator
+      # Save before boot/test so a simulator failure does not throw away a
+      # successfully verified cold FFmpeg build.
+      - name: Save the verified iOS simulator SDK
+        if: steps.simulator-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build/ios-ffmpeg/simulator
+          key: ${{ steps.simulator-sdk.outputs.cache-primary-key }}
       - name: Link it into the app
         run: |
           set -euo pipefail
@@ -584,19 +618,23 @@ jobs:
           bash ci/ios-audio-xcconfig.sh build/ios-audio/simulator/stage/lib
       - name: Boot an iPhone simulator
         id: simulator
+        timeout-minutes: 7
         run: |
           set -euo pipefail
-          udid="$(xcrun simctl list devices available |
-            sed -nE 's/^ *iPhone [^(]*\(([0-9A-Fa-f-]{36})\).*/\1/p' | head -n 1)"
-          if [ -z "$udid" ]; then
-            echo "::error::no iPhone simulator is available on this runner"
-            exit 1
-          fi
-          echo "udid=$udid" >> "$GITHUB_OUTPUT"
-          xcrun simctl bootstatus "$udid" -b
-          flutter devices
+          python3 ci/ios-simulator.py prepare
       - name: Prove the running app selects the linked engine
-        run: flutter test integration_test/ios_native_engine_test.dart -d "${{ steps.simulator.outputs.udid }}"
+        timeout-minutes: 32
+        run: |
+          set -euo pipefail
+          python3 ci/ios-simulator.py test --udid "${{ steps.simulator.outputs.udid }}"
+      - name: Upload simulator install and launch diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ios-simulator-diagnostics
+          path: build/ios-simulator-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
 
   ios:
     name: iOS unsigned IPA (arm64)
@@ -649,7 +687,7 @@ jobs:
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [check, windows, macos, linux, android, ios]
+    needs: [check, windows, macos, linux, android, ios, ios-simulator]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:

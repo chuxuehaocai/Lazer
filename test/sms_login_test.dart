@@ -6,8 +6,8 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_login.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/login.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 const String _scanUrl = 'https://music.163.com/login?codekey=fixture-key';
@@ -91,12 +91,12 @@ Future<void> _openCard(WidgetTester tester, AppState state) async {
     AnimatedBuilder(
       animation: state,
       builder: (BuildContext context, _) => MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         home: Builder(
           builder: (BuildContext context) => Scaffold(
             body: Center(
               child: TextButton(
-                onPressed: () => showLegacyLoginDialog(context, state),
+                onPressed: () => showAppLoginDialog(context, state),
                 child: const Text('open'),
               ),
             ),

@@ -1,9 +1,11 @@
+import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 
 import '../data/models.dart';
-import '../legacy/legacy_widgets.dart';
+import '../ui/widgets.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
@@ -318,17 +320,17 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
     }
     final LocalTrack entry = playable[index];
     if (action == 'delete-file') {
-      final bool? confirmed = await showDialog<bool>(
+      final bool? confirmed = await showAppleDialog<bool>(
         context: context,
         builder: (BuildContext context) => AlertDialog(
           title: TrText(entry.isCache ? '删除缓存文件？' : '删除下载文件？'),
           content: Text(context.tr('「${entry.track.title}」的文件会从磁盘删除，无法恢复。')),
           actions: <Widget>[
-            TextButton(
+            SpringTextButton(
               onPressed: () => Navigator.of(context).pop(false),
               child: TrText('取消'),
             ),
-            FilledButton(
+            SpringFilledButton(
               onPressed: () => Navigator.of(context).pop(true),
               child: TrText('删除'),
             ),
@@ -383,7 +385,7 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: <Widget>[
                               if (playable.isNotEmpty)
-                                FilledButton.tonalIcon(
+                                SpringFilledButton.tonalIcon(
                                   key: const ValueKey<String>(
                                     'local-music-play-all',
                                   ),
@@ -395,7 +397,7 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                                   label: TrText('播放全部'),
                                 ),
                               const SizedBox(width: 8),
-                              FilledButton.icon(
+                              SpringFilledButton.icon(
                                 key: const ValueKey<String>(
                                   'local-music-import',
                                 ),
@@ -449,14 +451,14 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                               runSpacing: 8,
                               alignment: WrapAlignment.center,
                               children: <Widget>[
-                                FilledButton(
+                                SpringFilledButton(
                                   key: const ValueKey<String>(
                                     'local-music-import-empty',
                                   ),
                                   onPressed: _busy ? null : () => _import(),
                                   child: TrText('导入本地音乐'),
                                 ),
-                                OutlinedButton.icon(
+                                SpringOutlinedButton.icon(
                                   key: const ValueKey<String>(
                                     'local-music-scan-empty',
                                   ),
@@ -471,7 +473,7 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                             ),
                           )
                         else if (playable.isNotEmpty)
-                          LegacySectionHeader(
+                          AppSectionHeader(
                             title: '歌曲',
                             subtitle: '${playable.length} 首',
                           ),
@@ -485,21 +487,19 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                     padding: EdgeInsets.symmetric(horizontal: inset),
                     sliver: SliverList.builder(
                       itemCount: playable.length,
-                      itemBuilder: (BuildContext context, int i) =>
-                          LegacyTrackRow(
-                            key: ValueKey<String>('local-track-row-$i'),
-                            track: playable[i].track,
-                            index: i,
-                            current: state.current?.id == playable[i].id,
-                            playing: state.playing,
-                            onTap: () => state.playQueue(<Track>[
-                              for (final LocalTrack entry in playable)
-                                entry.track,
-                            ], startIndex: i),
-                            onMenuRequested: (Offset position) => unawaited(
-                              _showRowMenu(context, playable, i, position),
-                            ),
-                          ),
+                      itemBuilder: (BuildContext context, int i) => AppTrackRow(
+                        key: ValueKey<String>('local-track-row-$i'),
+                        track: playable[i].track,
+                        index: i,
+                        current: state.current?.id == playable[i].id,
+                        playing: state.playing,
+                        onTap: () => state.playQueue(<Track>[
+                          for (final LocalTrack entry in playable) entry.track,
+                        ], startIndex: i),
+                        onMenuRequested: (Offset position) => unawaited(
+                          _showRowMenu(context, playable, i, position),
+                        ),
+                      ),
                     ),
                   ),
                 if (missing.isNotEmpty)
@@ -511,10 +511,10 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: <Widget>[
-                              LegacySectionHeader(
+                              AppSectionHeader(
                                 title: '文件已丢失',
                                 subtitle: '${missing.length} 首',
-                                trailing: TextButton(
+                                trailing: SpringTextButton(
                                   key: const ValueKey<String>(
                                     'local-music-clear-missing',
                                   ),

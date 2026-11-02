@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -18,8 +18,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
-        home: Scaffold(body: LegacySettingsPage(state: state)),
+        theme: buildAppleTheme(brightness: Brightness.dark),
+        home: Scaffold(body: AppSettingsPage(state: state)),
       ),
     );
     await tester.pumpAndSettle();
@@ -51,12 +51,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         home: Scaffold(
-          body: LegacySettingsPage(
-            state: state,
-            onOpenLocalMusic: () => opened++,
-          ),
+          body: AppSettingsPage(state: state, onOpenLocalMusic: () => opened++),
         ),
       ),
     );

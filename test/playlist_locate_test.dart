@@ -6,8 +6,8 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 List<Track> _tracks() => <Track>[
@@ -27,7 +27,10 @@ List<Track> _tracks() => <Track>[
 
 class _Catalog extends Catalog {
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => null;
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => null;
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();
   @override
@@ -53,9 +56,9 @@ Future<void> _locateCurrentTrack(WidgetTester tester, Size size) async {
   );
   await tester.pumpWidget(
     MaterialApp(
-      theme: buildLegacyTheme(),
+      theme: buildAppleTheme(),
       home: Scaffold(
-        body: LegacyPlaylistPage(state: state, playlist: playlist),
+        body: AppPlaylistPage(state: state, playlist: playlist),
       ),
     ),
   );
@@ -147,9 +150,9 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         home: Scaffold(
-          body: LegacyPlaylistPage(state: state, playlist: playlist),
+          body: AppPlaylistPage(state: state, playlist: playlist),
         ),
       ),
     );

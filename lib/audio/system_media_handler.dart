@@ -133,8 +133,8 @@ class LazerMediaHandler extends BaseAudioHandler {
     this._enabled = true,
   }) : _artwork = artwork ?? MediaArtworkCache().resolve {
     state.addListener(_stateChanged);
+    state.ticks.addListener(_tickChanged);
     _stateChanged();
-    if (_enabled) _startClock();
   }
   final AppState state;
   final MediaArtworkResolver _artwork;
@@ -143,11 +143,18 @@ class LazerMediaHandler extends BaseAudioHandler {
   bool get _acceptCommands =>
       !_closed && _enabled && !state.independentPlayback;
 
-  void _startClock() {
-    _clock?.cancel();
-    // Play/pause/seek already publish through [_stateChanged]; this clock only
-    // refreshes the interpolated position, so a slow beat is enough and keeps
-    // the platform channel off the playback hot path.
+  void _syncClock() {
+    final bool needed =
+        _acceptCommands && state.playing && state.current != null && !_stopped;
+    if (!needed) {
+      _clock?.cancel();
+      _clock = null;
+      return;
+    }
+    if (_clock != null) return;
+    // Structural controls and paused seeks publish through their listeners.
+    // A slow beat refreshes the playing position without moving platform
+    // channel work onto the app's 100 ms playback hot path.
     _clock = Timer.periodic(
       const Duration(seconds: 1),
       (_) => _publishPlayback(),
@@ -160,8 +167,10 @@ class LazerMediaHandler extends BaseAudioHandler {
     ++_artGeneration;
     _published = null;
     _lyricLine = null;
+    _lastPlayback = null;
     if (!enabled) {
       _clock?.cancel();
+      _clock = null;
       playbackState.add(
         PlaybackState(
           processingState: AudioProcessingState.idle,
@@ -174,7 +183,6 @@ class LazerMediaHandler extends BaseAudioHandler {
       _lastQueueRevision = -1;
       _track = null;
       _stateChanged();
-      _startClock();
     }
   }
 
@@ -183,6 +191,17 @@ class LazerMediaHandler extends BaseAudioHandler {
   int _artGeneration = 0;
   bool _closed = false;
   bool _stopped = false;
+  ({
+    bool active,
+    bool playing,
+    AudioProcessingState processingState,
+    Duration position,
+    int? queueIndex,
+    AudioServiceRepeatMode repeatMode,
+    AudioServiceShuffleMode shuffleMode,
+    String? error,
+  })?
+  _lastPlayback;
 
   /// The item the platform currently holds, kept so the lyric line and the
   /// artwork can update one field without rebuilding the others.
@@ -237,6 +256,7 @@ class LazerMediaHandler extends BaseAudioHandler {
     }
     if (!_enabled) return;
     if (state.playing) _stopped = false;
+    _syncClock();
     if (_lastQueueRevision != state.queueRevision) {
       final tracks = state.queue;
       _lastQueueRevision = state.queueRevision;
@@ -268,6 +288,10 @@ class LazerMediaHandler extends BaseAudioHandler {
     _publishPlayback();
   }
 
+  void _tickChanged() {
+    if (!state.playing) _publishPlayback();
+  }
+
   /// Moves the second line on as the song does.
   ///
   /// Driven by the playback clock rather than by state reports: the app's
@@ -296,6 +320,36 @@ class LazerMediaHandler extends BaseAudioHandler {
     _publishLyricLine();
     final track = state.current;
     final active = track != null && !_stopped;
+    final processingState = !active
+        ? AudioProcessingState.idle
+        : state.playbackError != null
+        ? AudioProcessingState.error
+        : state.playing && !state.audioReady
+        ? AudioProcessingState.loading
+        : AudioProcessingState.ready;
+    // A native position read crosses FFI. Reuse it for both platform fields,
+    // and skip unchanged snapshots from buffering or unrelated UI settings.
+    final position = state.precisePosition;
+    final repeatMode = switch (state.repeat) {
+      LoopMode.off => AudioServiceRepeatMode.none,
+      LoopMode.one => AudioServiceRepeatMode.one,
+      LoopMode.all => AudioServiceRepeatMode.all,
+    };
+    final shuffleMode = state.shuffle
+        ? AudioServiceShuffleMode.all
+        : AudioServiceShuffleMode.none;
+    final publication = (
+      active: active,
+      playing: state.playing,
+      processingState: processingState,
+      position: position,
+      queueIndex: active ? state.queueIndex : null,
+      repeatMode: repeatMode,
+      shuffleMode: shuffleMode,
+      error: state.playbackError,
+    );
+    if (_lastPlayback == publication) return;
+    _lastPlayback = publication;
     playbackState.add(
       PlaybackState(
         // These are track commands on iOS: never expose the podcast +/-30s pair.
@@ -310,25 +364,13 @@ class LazerMediaHandler extends BaseAudioHandler {
         systemActions: active
             ? const {MediaAction.seek, MediaAction.playPause}
             : const {},
-        processingState: !active
-            ? AudioProcessingState.idle
-            : state.playbackError != null
-            ? AudioProcessingState.error
-            : state.playing && !state.audioReady
-            ? AudioProcessingState.loading
-            : AudioProcessingState.ready,
+        processingState: processingState,
         playing: state.playing,
-        updatePosition: state.precisePosition,
-        bufferedPosition: state.precisePosition,
+        updatePosition: position,
+        bufferedPosition: position,
         queueIndex: active ? state.queueIndex : null,
-        repeatMode: switch (state.repeat) {
-          LoopMode.off => AudioServiceRepeatMode.none,
-          LoopMode.one => AudioServiceRepeatMode.one,
-          LoopMode.all => AudioServiceRepeatMode.all,
-        },
-        shuffleMode: state.shuffle
-            ? AudioServiceShuffleMode.all
-            : AudioServiceShuffleMode.none,
+        repeatMode: repeatMode,
+        shuffleMode: shuffleMode,
         errorCode: state.playbackError == null ? null : 1,
         errorMessage: state.playbackError,
       ),
@@ -402,6 +444,8 @@ class LazerMediaHandler extends BaseAudioHandler {
     _closed = true;
     ++_artGeneration;
     _clock?.cancel();
+    _clock = null;
     state.removeListener(_stateChanged);
+    state.ticks.removeListener(_tickChanged);
   }
 }

@@ -15,8 +15,8 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_login.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
+import 'package:lazer_nextgen/ui/login.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/playback_queue_store.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
@@ -516,7 +516,7 @@ void main() {
           home: Scaffold(
             body: Builder(
               builder: (context) => TextButton(
-                onPressed: () => showLegacyLoginDialog(context, state),
+                onPressed: () => showAppLoginDialog(context, state),
                 child: const Text('Open'),
               ),
             ),
@@ -616,7 +616,7 @@ void main() {
   ) async {
     final server = _Server();
     final state = _state(server);
-    state.legacyBackground = LegacyBackgroundMode.off;
+    state.backgroundMode = AppBackgroundMode.off;
     addTearDown(state.dispose);
     await tester.runAsync(() async {
       await _connect(state);
@@ -626,14 +626,14 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: buildAppleTheme(),
-        home: LegacyShell(state: state),
+        home: AppShell(state: state),
       ),
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Server album'), findsWidgets);
     final track = state.home!.quick.single;
-    final context = tester.element(find.byType(LegacyShell));
+    final context = tester.element(find.byType(AppShell));
     await openAlbumDetails(context, state, state.home!.albums.single);
     await _pumpMusicUi(tester);
     expect(

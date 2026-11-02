@@ -2,7 +2,7 @@
   <img src="docs/images/mascot.png" width="220" alt="The Lazer mascot">
 </p>
 
-<h1 align="center">Lazer · nextgen</h1>
+<h1 align="center">Lazer</h1>
 
 <h3 align="center">
   交流群：<a href="https://qm.qq.com/q/JJJfE0QV00">神秘交流群 · 1063238023</a>
@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/chuxuehaocai/Lazer/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/badge/build-GitHub%20Actions-6C8EBF"></a>
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
-  <img alt="version" src="https://img.shields.io/badge/nextgen-v2.0.0-8E7CC3">
+  <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-4C9A7A"></a>
 </p>
@@ -47,7 +47,7 @@
 
 **界面这件事**
 
-- 全页面 Apple 设计语言：语义化系统色与字阶、玻璃导航、分组列表、Apple Music 红，还有从封面取色的主题。
+- 全平台共用一套 Apple 风格界面、主题与弹簧动画：语义化系统色与字阶、玻璃导航、分组列表，还有从封面取色的主题。
 - 桌面是侧边栏 + 完整播放条，手机是底部标签栏 + 迷你播放器——同一套页面与状态，换个姿势陪你听。
 - 布局可以强制桌面 / 移动，DPI 80–175%，车机形态自动放大到 135%。
 - 大屏幕模式：电视和投影自动进入，遥控器方向键在封面货架、资料库网格与播放条之间按位置移动。
@@ -57,8 +57,10 @@
 
 - 滚动惯性与加速度可调，进度条刻度带触感反馈。
 - 没缓存的歌先攒够十秒再开口，开头不再一顿一顿；已下载和已缓存的歌照旧秒开。
-- 界面动画按 10 ms（100 fps）的帧预算排队，流动背景按设置里的渲染精度分档更新（默认约 21 次/秒）；设置里能打开实时帧率浮层。
+- 页面、弹窗和控件采用可中途打断、反向衔接的弹簧动画；拖动直接跟手，松手后延续当前速度，支持减少动态效果。
+- 浏览背景默认限制为 30fps，播放背景默认跟随屏幕刷新率，帧率和渲染精度分别设置；隐藏页面和静态背景停止持续绘制。设置里能打开实时帧率浮层。
 - 正在播放页有 AMLL 网格背景、封面与歌词互切、队列与评论面板，还有 M / L / Q / C / F 一把快捷键。
+- 定时停止支持多个每天重复的时间点。到点暂停一次并保留队列和进度，之后可手动继续。
 
 ## 长这样
 
@@ -112,7 +114,7 @@ flutter run
 Windows 请完整解压后运行；AppImage 下载后先 `chmod +x`；
 macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 
-更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [扫码登录](docs/login-qr.md) · [验证码登录](docs/login-sms.md) · [旧版界面](docs/legacy-ui.md)
+更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [扫码登录](docs/login-qr.md) · [验证码登录](docs/login-sms.md) · [统一界面](docs/ui.md)
 
 ## 参考与致谢
 

@@ -11,10 +11,14 @@ void main() {
     });
 
     test('reads the scheme the registry stores', () {
-      expect(SystemHttpProxy.parse('http://proxy.local:8080')?.rules,
-          'PROXY proxy.local:8080');
-      expect(SystemHttpProxy.parse('socks5://127.0.0.1:7891')?.rules,
-          'SOCKS 127.0.0.1:7891');
+      expect(
+        SystemHttpProxy.parse('http://proxy.local:8080')?.rules,
+        'PROXY proxy.local:8080',
+      );
+      expect(
+        SystemHttpProxy.parse('socks5://127.0.0.1:7891')?.rules,
+        'SOCKS 127.0.0.1:7891',
+      );
     });
 
     test('drops credentials', () {

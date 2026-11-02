@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
+import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/widgets/artwork_image.dart';
@@ -293,14 +293,14 @@ void main() {
           ),
         ),
       );
-      final original = tester.widget<LegacyAlbumBackdrop>(
-        find.byType(LegacyAlbumBackdrop),
+      final original = tester.widget<AppAlbumBackdrop>(
+        find.byType(AppAlbumBackdrop),
       );
       for (var report = 0; report < 100; report++) {
         state.report();
         await tester.pump(const Duration(milliseconds: 20));
         expect(
-          tester.widget<LegacyAlbumBackdrop>(find.byType(LegacyAlbumBackdrop)),
+          tester.widget<AppAlbumBackdrop>(find.byType(AppAlbumBackdrop)),
           same(original),
         );
       }
@@ -308,17 +308,13 @@ void main() {
       state.report();
       await tester.pump();
       expect(
-        tester
-            .widget<LegacyAlbumBackdrop>(find.byType(LegacyAlbumBackdrop))
-            .track,
+        tester.widget<AppAlbumBackdrop>(find.byType(AppAlbumBackdrop)).track,
         same(_second),
       );
       await state.setDynamicBackgroundQuality(.3);
       await tester.pump();
       expect(
-        tester
-            .widget<LegacyAlbumBackdrop>(find.byType(LegacyAlbumBackdrop))
-            .quality,
+        tester.widget<AppAlbumBackdrop>(find.byType(AppAlbumBackdrop)).quality,
         .3,
       );
       state.playerPresented.value = true;
@@ -326,7 +322,7 @@ void main() {
       final tickerMode = tester.widget<TickerMode>(
         find
             .ancestor(
-              of: find.byType(LegacyAlbumBackdrop),
+              of: find.byType(AppAlbumBackdrop),
               matching: find.byType(TickerMode),
             )
             .first,

@@ -7,7 +7,7 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
+import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/diagnostics/app_log.dart';
@@ -54,8 +54,8 @@ void main() {
       addTearDown(state.dispose);
       expect(state.browseBackgroundFps, 30);
       expect(state.playerBackgroundFps, 0);
-      await state.setLegacyBackground(LegacyBackgroundMode.solidColor);
-      await state.setPlayerBackground(LegacyBackgroundMode.nowPlayingStatic);
+      await state.setAppBackground(AppBackgroundMode.solidColor);
+      await state.setPlayerBackground(AppBackgroundMode.nowPlayingStatic);
       await state.setBackgroundFps(20);
       await state.setBackgroundFps(10, player: true);
       await state.setBackgroundColor(Colors.blue);
@@ -67,8 +67,8 @@ void main() {
       final restored = AppState(catalog: _Catalog());
       addTearDown(restored.dispose);
       await restored.bootstrap();
-      expect(restored.legacyBackground, LegacyBackgroundMode.solidColor);
-      expect(restored.playerBackground, LegacyBackgroundMode.nowPlayingStatic);
+      expect(restored.backgroundMode, AppBackgroundMode.solidColor);
+      expect(restored.playerBackground, AppBackgroundMode.nowPlayingStatic);
       expect(restored.browseBackgroundFps, 20);
       expect(restored.playerBackgroundFps, 10);
       expect(
@@ -92,17 +92,17 @@ void main() {
         artworkSeedLoader: (url) => url!.endsWith('/a') ? a.future : b.future,
       );
       addTearDown(state.dispose);
-      state.legacyPalette = LegacyPaletteMode.nowPlaying;
+      state.paletteMode = AppPaletteMode.nowPlaying;
       state.playQueue([_track('a')]);
       await Future<void>.delayed(Duration.zero);
       state.playQueue([_track('b')]);
       await Future<void>.delayed(Duration.zero);
       b.complete(Colors.blue);
       await Future<void>.delayed(Duration.zero);
-      expect(state.legacyAccentSeed, Colors.blue);
+      expect(state.accentSeed, Colors.blue);
       a.complete(Colors.red);
       await Future<void>.delayed(Duration.zero);
-      expect(state.legacyAccentSeed, Colors.blue);
+      expect(state.accentSeed, Colors.blue);
     },
   );
 
@@ -116,21 +116,21 @@ void main() {
       },
     );
     addTearDown(state.dispose);
-    state.legacyPalette = LegacyPaletteMode.nowPlaying;
+    state.paletteMode = AppPaletteMode.nowPlaying;
     state.playQueue([_track('a'), _track('b')]);
     await Future<void>.delayed(Duration.zero);
     state.pause();
-    expect(state.legacyAccentSeed, Colors.red);
+    expect(state.accentSeed, Colors.red);
 
     state.next();
     await Future<void>.delayed(Duration.zero);
     expect(state.playing, isFalse);
-    expect(state.legacyAccentSeed, Colors.blue);
+    expect(state.accentSeed, Colors.blue);
 
     state.previous();
     await Future<void>.delayed(Duration.zero);
     expect(state.playing, isFalse);
-    expect(state.legacyAccentSeed, Colors.red);
+    expect(state.accentSeed, Colors.red);
     expect(requested, [
       'https://cover.test/a',
       'https://cover.test/b',
@@ -150,7 +150,7 @@ void main() {
       },
     );
     addTearDown(state.dispose);
-    state.legacyPalette = LegacyPaletteMode.nowPlaying;
+    state.paletteMode = AppPaletteMode.nowPlaying;
     state.playQueue([_track('a'), _track('b'), _track('c')]);
     await Future<void>.delayed(Duration.zero);
     state.pause();
@@ -158,10 +158,10 @@ void main() {
     state.next();
     await Future<void>.delayed(Duration.zero);
     expect(state.current?.id, 'c');
-    expect(state.legacyAccentSeed, Colors.blue);
+    expect(state.accentSeed, Colors.blue);
     old.complete(Colors.green);
     await Future<void>.delayed(Duration.zero);
-    expect(state.legacyAccentSeed, Colors.blue);
+    expect(state.accentSeed, Colors.blue);
     expect(requested, [
       'https://cover.test/a',
       'https://cover.test/b',
@@ -180,7 +180,7 @@ void main() {
       },
     );
     addTearDown(state.dispose);
-    state.legacyPalette = LegacyPaletteMode.nowPlaying;
+    state.paletteMode = AppPaletteMode.nowPlaying;
     state.playQueue([_track('1'), _track('2')]);
     await Future<void>.delayed(Duration.zero);
     state.pause();
@@ -199,7 +199,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(state.playing, isFalse);
     expect(state.current?.coverUrl, 'https://cover.test/hydrated');
-    expect(state.legacyAccentSeed, Colors.green);
+    expect(state.accentSeed, Colors.green);
     expect(requested, [
       'https://cover.test/1',
       'https://cover.test/2',
@@ -285,9 +285,9 @@ void main() {
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          home: LegacyAlbumBackdrop(
+          home: AppAlbumBackdrop(
             track: null,
-            mode: LegacyBackgroundMode.nowPlayingStatic,
+            mode: AppBackgroundMode.nowPlayingStatic,
             uiAlpha: .7,
           ),
         ),

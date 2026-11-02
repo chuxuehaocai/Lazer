@@ -23,14 +23,14 @@ Navidrome leaves the independent NetEase session intact.
 | `netease_music_gateway.dart` | New interface backed by the existing NetEase implementation |
 | `navidrome_gateway.dart` | Experimental Subsonic/OpenSubsonic adapter |
 | `navidrome_transport.dart` | Authentication, HTTP, media URLs and safe transport failures |
-| `netease_gateway.dart`, `legacy_models.dart` | Existing NetEase API and compatibility models |
+| `netease_gateway.dart`, `music_models_compat.dart` | Existing NetEase API and compatibility models |
 | `gateway.dart` | Compatibility exports; existing imports continue to work |
 | `../data/platform_catalog.dart` | Maps provider values into shared UI models |
 | `../state/music_platform_state.dart` | Connect/select, account state and native playback actions |
-| `../legacy/navidrome_login_fields.dart` | Shared server login form |
+| `../ui/navidrome_login_fields.dart` | Shared server login form |
 | `../animation/view_transitions.dart` | Nonlinear form, tab and desktop route transitions |
 
-New consumers should use `MusicGateway` and `MusicId`. The legacy NetEase API is
+New consumers should use `MusicGateway` and `MusicId`. The NetEase-specific API is
 retained to keep the running application compatible while consumers migrate.
 
 ## Connect and select
@@ -69,7 +69,8 @@ When wrapping an existing NetEase gateway, pass
 Closing that wrapper leaves the borrowed gateway and its session intact. Calling
 `clearSession()` explicitly signs out the borrowed gateway.
 
-For QR/SMS login, the existing NetEase-specific methods remain on `legacy`.
+For QR/SMS login, the existing NetEase-specific methods remain on the adapter's
+`api` (`NeteaseGateway`) instance.
 After they finish, call `checkSession()` on the new adapter to adopt the profile.
 The provider-neutral API has no cookie, phone-number or QR-code assumptions.
 
@@ -158,7 +159,7 @@ selection. The Navidrome form and active account display a localized Experimenta
 badge. Saved connections can be selected from the same dialog. Passwords are not
 saved with connection preferences.
 
-`Catalog` keeps the legacy NetEase behavior while delegating provider references
+`Catalog` keeps the NetEase-specific behavior while delegating provider references
 to the registered owner. Use `albumDetailsFor`, `albumTracksFor`,
 `artistAlbumPageFor` and `artistSongsFor` in shared views; the integer overloads
 remain compatible with NetEase callers. Native song references also route audio,
@@ -170,8 +171,8 @@ shared quality controls use platform-appropriate descriptions. NetEase charts,
 comments and listen-together controls are omitted on Navidrome. Random discovery
 and shuffled favorites use the server's own collection.
 
-Forms and search-result categories share eased fade/slide transitions. Desktop
-routes use the same curve. Existing shell, player and embedded-settings nonlinear
+Forms and search-result categories share spring fade/slide transitions. Desktop
+routes use the same motion system. Shell, player and embedded-settings nonlinear
 transitions are retained, with reduced-motion behavior covered by UI tests.
 
 ## Verification

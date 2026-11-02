@@ -86,8 +86,7 @@ class HifiEqBand {
       );
 
   /// `frequency:gain:q:kind:enabled`
-  String encode() =>
-      '$frequencyHz:$gainDb:$q:${kind.name}:${enabled ? 1 : 0}';
+  String encode() => '$frequencyHz:$gainDb:$q:${kind.name}:${enabled ? 1 : 0}';
 
   static HifiEqBand? decode(String entry) {
     final List<String> fields = entry.split(':');
@@ -135,48 +134,90 @@ class HifiEqPreset {
 /// same curve on both branches.
 const List<HifiEqPreset> hifiEqPresets = <HifiEqPreset>[
   HifiEqPreset('flat', '平直', <double>[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-  HifiEqPreset(
-    'pop',
-    '流行',
-    <double>[-1, -0.5, 0, 2, 3.5, 3, 1, -0.5, -1, -1.5],
-    preampDb: -1,
-  ),
-  HifiEqPreset(
-    'rock',
-    '摇滚',
-    <double>[4, 3, 1, -1, -1.5, 0.5, 2.5, 3.5, 3, 2.5],
-    preampDb: -2,
-  ),
-  HifiEqPreset(
-    'classical',
-    '古典',
-    <double>[3, 2.5, 1.5, 0.5, -0.5, -0.5, 0, 1.5, 2.5, 3],
-    preampDb: -1.5,
-  ),
-  HifiEqPreset(
-    'jazz',
-    '爵士',
-    <double>[3, 2, 0.5, 1, -0.5, -0.5, 0.5, 1.5, 2, 2.5],
-    preampDb: -1.5,
-  ),
-  HifiEqPreset(
-    'bass',
-    '低音增强',
-    <double>[7, 6, 4.5, 2.5, 0.5, -0.5, -1, -1.5, -2, -2.5],
-    preampDb: -3,
-  ),
-  HifiEqPreset(
-    'vocal',
-    '人声',
-    <double>[-2, -1.5, -0.5, 1, 3, 3.5, 2.5, 1, -0.5, -1.5],
-    preampDb: -2,
-  ),
-  HifiEqPreset(
-    'treble',
-    '高音增强',
-    <double>[-2.5, -2, -1.5, -1, -0.5, 0.5, 2, 3.5, 5, 6],
-    preampDb: -2.5,
-  ),
+  HifiEqPreset('pop', '流行', <double>[
+    -1,
+    -0.5,
+    0,
+    2,
+    3.5,
+    3,
+    1,
+    -0.5,
+    -1,
+    -1.5,
+  ], preampDb: -1),
+  HifiEqPreset('rock', '摇滚', <double>[
+    4,
+    3,
+    1,
+    -1,
+    -1.5,
+    0.5,
+    2.5,
+    3.5,
+    3,
+    2.5,
+  ], preampDb: -2),
+  HifiEqPreset('classical', '古典', <double>[
+    3,
+    2.5,
+    1.5,
+    0.5,
+    -0.5,
+    -0.5,
+    0,
+    1.5,
+    2.5,
+    3,
+  ], preampDb: -1.5),
+  HifiEqPreset('jazz', '爵士', <double>[
+    3,
+    2,
+    0.5,
+    1,
+    -0.5,
+    -0.5,
+    0.5,
+    1.5,
+    2,
+    2.5,
+  ], preampDb: -1.5),
+  HifiEqPreset('bass', '低音增强', <double>[
+    7,
+    6,
+    4.5,
+    2.5,
+    0.5,
+    -0.5,
+    -1,
+    -1.5,
+    -2,
+    -2.5,
+  ], preampDb: -3),
+  HifiEqPreset('vocal', '人声', <double>[
+    -2,
+    -1.5,
+    -0.5,
+    1,
+    3,
+    3.5,
+    2.5,
+    1,
+    -0.5,
+    -1.5,
+  ], preampDb: -2),
+  HifiEqPreset('treble', '高音增强', <double>[
+    -2.5,
+    -2,
+    -1.5,
+    -1,
+    -0.5,
+    0.5,
+    2,
+    3.5,
+    5,
+    6,
+  ], preampDb: -2.5),
 ];
 
 /// How DSD sources are handed to the device.
@@ -276,7 +317,8 @@ enum HifiVolumeNormalization {
   bool get isSupported => this != HifiVolumeNormalization.loudnorm;
 
   /// Whether the mode needs a per-source gain from metadata.
-  bool get needsSourceGain => this == HifiVolumeNormalization.track ||
+  bool get needsSourceGain =>
+      this == HifiVolumeNormalization.track ||
       this == HifiVolumeNormalization.album;
 
   static HifiVolumeNormalization parse(String? name) =>
@@ -339,8 +381,9 @@ class HifiCrossfeedState {
   double get effectiveDelayMs =>
       algorithm == HifiCrossfeedAlgorithm.custom ? delayMs : algorithm.delayMs;
 
-  double get effectiveCutoffHz =>
-      algorithm == HifiCrossfeedAlgorithm.custom ? cutoffHz : algorithm.cutoffHz;
+  double get effectiveCutoffHz => algorithm == HifiCrossfeedAlgorithm.custom
+      ? cutoffHz
+      : algorithm.cutoffHz;
 
   HifiCrossfeedState copyWith({
     bool? enabled,
@@ -363,7 +406,9 @@ class HifiCrossfeedState {
       '${enabled ? 1 : 0}|$strength|${algorithm.name}|$delayMs|$cutoffHz';
 
   static HifiCrossfeedState decode(String? value) {
-    if (value == null || value.trim().isEmpty) return const HifiCrossfeedState();
+    if (value == null || value.trim().isEmpty) {
+      return const HifiCrossfeedState();
+    }
     final List<String> parts = value.split('|');
     if (parts.length < 5) return const HifiCrossfeedState();
     return HifiCrossfeedState(
@@ -452,7 +497,9 @@ class HifiEqualizerState {
   }
 
   static HifiEqualizerState decode(String? value) {
-    if (value == null || value.trim().isEmpty) return const HifiEqualizerState();
+    if (value == null || value.trim().isEmpty) {
+      return const HifiEqualizerState();
+    }
     final List<String> parts = value.split('|');
     if (parts.length < 4) return const HifiEqualizerState();
     final List<HifiEqBand> bands = <HifiEqBand>[];

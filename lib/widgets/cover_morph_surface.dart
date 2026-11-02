@@ -152,11 +152,7 @@ class _RenderCoverMorph extends RenderProxyBox {
     final frame = _frameRect();
     if (size.isEmpty || frame.isEmpty || !frame.size.isFinite) return;
     final blend = ui
-        .lerpDouble(
-          _fromBlend,
-          _toBlend,
-          Curves.easeInOut.transform(_animation.value.clamp(0.0, 1.0)),
-        )!
+        .lerpDouble(_fromBlend, _toBlend, _animation.value.clamp(0.0, 1.0))!
         .clamp(0.0, 1.0);
     final radius = math.max(
       0.0,

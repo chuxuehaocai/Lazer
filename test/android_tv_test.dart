@@ -11,7 +11,7 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/tv/tv_mode.dart';
 import 'package:lazer_nextgen/widgets/haptic_seek_slider.dart';
@@ -177,7 +177,7 @@ void main() {
               body: Center(
                 child: SizedBox(
                   width: 320,
-                  child: LegacyThinSeekBar(
+                  child: AppThinSeekBar(
                     progress: .5,
                     onSeek: seeks.add,
                     onSeekFinished: () => committed++,
@@ -192,7 +192,7 @@ void main() {
         tester.element(
           find
               .descendant(
-                of: find.byType(LegacyThinSeekBar),
+                of: find.byType(AppThinSeekBar),
                 matching: find.byType(Semantics),
               )
               .last,

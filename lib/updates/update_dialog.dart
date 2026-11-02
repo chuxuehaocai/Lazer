@@ -1,4 +1,6 @@
+import '../widgets/spring_buttons.dart';
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 
 import '../diagnostics/build_info.dart';
 import '../l10n/app_localizations.dart';
@@ -32,7 +34,7 @@ Future<void> showUpdateDialog(
   AppState state,
   AppRelease release,
 ) async {
-  final bool? skipped = await showDialog<bool>(
+  final bool? skipped = await showAppleDialog<bool>(
     context: context,
     builder: (BuildContext context) =>
         _UpdateDialog(state: state, release: release),
@@ -152,15 +154,15 @@ class _UpdateDialog extends StatelessWidget {
         ),
       ),
       actions: <Widget>[
-        TextButton(
+        SpringTextButton(
           onPressed: () => Navigator.of(context).pop(false),
           child: const TrText('稍后'),
         ),
-        TextButton(
+        SpringTextButton(
           onPressed: () => _skip(context),
           child: const TrText('跳过此版本'),
         ),
-        FilledButton(
+        SpringFilledButton(
           autofocus: TvScope.isActive(context),
           onPressed: () => _open(context),
           child: const TrText('前往下载'),

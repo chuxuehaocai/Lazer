@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/player/desktop_now_playing.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/accessible_controls.dart';
@@ -19,7 +19,7 @@ Track _track(String title) => Track(
 );
 
 Widget _page(AppState state, Track track) => MaterialApp(
-  theme: buildLegacyTheme(),
+  theme: buildAppleTheme(),
   home: Scaffold(
     body: DesktopNowPlaying(
       state: state,
@@ -53,10 +53,7 @@ void main() {
     final state = AppState(catalog: Catalog());
     addTearDown(state.dispose);
 
-    for (final size in <Size>[
-      const Size(1280, 800),
-      const Size(1280, 650),
-    ]) {
+    for (final size in <Size>[const Size(1280, 800), const Size(1280, 650)]) {
       tester.view.physicalSize = size;
       for (final title in <String>[
         'Short title',

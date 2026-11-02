@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'legacy_models.dart';
+import 'music_models_compat.dart';
 import 'transport.dart';
 
 extension on GatewaySearchType {

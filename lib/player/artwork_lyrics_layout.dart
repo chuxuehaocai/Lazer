@@ -3,7 +3,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 
-import '../animation/view_transitions.dart';
+import '../animation/apple_spring.dart';
 import '../data/models.dart';
 import '../theme/font_preferences.dart';
 import '../widgets/animated_track_cover.dart';
@@ -46,32 +46,38 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
   late final Animation<double> _summary = ReverseAnimation(_chrome);
 
   @override
+  void initState() {
+    super.initState();
+    _mode;
+    _chrome;
+  }
+
+  @override
   void didUpdateWidget(covariant ArtworkLyricsLayout oldWidget) {
     super.didUpdateWidget(oldWidget);
     final bool reduced = MediaQuery.disableAnimationsOf(context);
     if (oldWidget.lyricsVisible != widget.lyricsVisible) {
-      if (reduced) {
-        _mode.value = widget.lyricsVisible ? 1 : 0;
-      } else {
-        // Ease each journey, including reversals, from its current position.
-        // Curving the value itself makes the return journey accelerate instead.
-        _mode.animateTo(
-          widget.lyricsVisible ? 1 : 0,
-          duration: const Duration(milliseconds: 420),
-          curve: ViewMotion.curve,
-        );
-      }
+      _mode.springTo(
+        widget.lyricsVisible ? 1 : 0,
+        spring: AppleSpring.responsive,
+        reduceMotion: reduced,
+      );
     }
     if (oldWidget.controlsVisible != widget.controlsVisible) {
-      if (reduced) {
-        _chrome.value = widget.controlsVisible ? 1 : 0;
-      } else {
-        _chrome.animateTo(
-          widget.controlsVisible ? 1 : 0,
-          duration: const Duration(milliseconds: 360),
-          curve: ViewMotion.curve,
-        );
-      }
+      _chrome.springTo(
+        widget.controlsVisible ? 1 : 0,
+        spring: AppleSpring.responsive,
+        reduceMotion: reduced,
+      );
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _mode.value = widget.lyricsVisible ? 1 : 0;
+      _chrome.value = widget.controlsVisible ? 1 : 0;
     }
   }
 
@@ -97,70 +103,74 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
   );
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Stack(
-        alignment: Alignment.center,
-        clipBehavior: Clip.none,
-        children: [
-          _chromeChild(widget.header),
-          ExcludeFocus(
-            excluding: widget.controlsVisible,
-            child: ExcludeSemantics(
+  Widget build(BuildContext context) => ClipRect(
+    child: Column(
+      children: [
+        Stack(
+          // Keep the top edge fixed while the summary's reserved height grows.
+          // Center alignment counteracted its downward entrance translation.
+          alignment: Alignment.topCenter,
+          clipBehavior: Clip.none,
+          children: [
+            _chromeChild(widget.header),
+            ExcludeFocus(
               excluding: widget.controlsVisible,
-              child: IgnorePointer(
-                ignoring: widget.controlsVisible,
-                child: AnimatedBuilder(
-                  animation: _summary,
-                  builder: (context, child) => Align(
-                    alignment: Alignment.topLeft,
-                    heightFactor: _summary.value,
-                    child: child,
-                  ),
-                  child: FadeTransition(
-                    key: const ValueKey('compact-player-summary-fade'),
-                    opacity: _summary,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, -.10),
-                        end: Offset.zero,
-                      ).animate(_summary),
-                      child: RepaintBoundary(child: widget.summary),
+              child: ExcludeSemantics(
+                excluding: widget.controlsVisible,
+                child: IgnorePointer(
+                  ignoring: widget.controlsVisible,
+                  child: AnimatedBuilder(
+                    animation: _summary,
+                    builder: (context, child) => Align(
+                      alignment: Alignment.topLeft,
+                      heightFactor: _summary.value,
+                      child: child,
+                    ),
+                    child: FadeTransition(
+                      key: const ValueKey('compact-player-summary-fade'),
+                      opacity: _summary,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, -.22),
+                          end: Offset.zero,
+                        ).animate(_summary),
+                        child: RepaintBoundary(child: widget.summary),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
-      Expanded(
-        child: LayoutBuilder(
-          builder: (context, box) => Padding(
-            padding: EdgeInsets.fromLTRB(
-              box.maxWidth < 360 ? 20 : 24,
-              box.maxHeight < 400 ? 0 : 8,
-              box.maxWidth < 360 ? 20 : 24,
-              box.maxHeight < 400 ? 8 : 16,
-            ),
-            child: ClipRect(
+          ],
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, box) => Padding(
+              padding: EdgeInsets.fromLTRB(
+                box.maxWidth < 360 ? 20 : 24,
+                box.maxHeight < 400 ? 0 : 8,
+                box.maxWidth < 360 ? 20 : 24,
+                box.maxHeight < 400 ? 8 : 16,
+              ),
               child: CustomMultiChildLayout(
                 key: const ValueKey('artwork-lyrics-content'),
                 delegate: _ArtworkLyricsDelegate(_mode, _chrome),
                 children: [
                   LayoutId(
                     id: 'lyrics',
-                    child: ExcludeFocus(
-                      excluding: !widget.lyricsVisible,
-                      child: ExcludeSemantics(
+                    child: ClipRect(
+                      child: ExcludeFocus(
                         excluding: !widget.lyricsVisible,
-                        child: IgnorePointer(
-                          ignoring: !widget.lyricsVisible,
-                          child: FadeTransition(
-                            opacity: _mode,
-                            child: TickerMode(
-                              enabled: widget.lyricsVisible,
-                              child: RepaintBoundary(child: widget.lyrics),
+                        child: ExcludeSemantics(
+                          excluding: !widget.lyricsVisible,
+                          child: IgnorePointer(
+                            ignoring: !widget.lyricsVisible,
+                            child: FadeTransition(
+                              opacity: _mode,
+                              child: TickerMode(
+                                enabled: widget.lyricsVisible,
+                                child: RepaintBoundary(child: widget.lyrics),
+                              ),
                             ),
                           ),
                         ),
@@ -178,8 +188,8 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
             ),
           ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
 }
 

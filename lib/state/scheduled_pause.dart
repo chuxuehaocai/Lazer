@@ -1,99 +1,73 @@
 import 'dart:async';
 import 'dart:convert';
 
-/// A repeating local wall-clock interval, including midnight-spanning ranges.
-class PauseWindow {
-  const PauseWindow({
+/// One repeating local wall-clock time at which playback should pause.
+class PausePoint {
+  const PausePoint({
     required this.id,
-    required this.startMinute,
-    required this.endMinute,
+    required this.minute,
     this.enabled = true,
   });
 
   final String id;
-  final int startMinute, endMinute;
+  final int minute;
   final bool enabled;
 
-  bool get valid =>
-      id.isNotEmpty &&
-      startMinute >= 0 &&
-      startMinute < 1440 &&
-      endMinute >= 0 &&
-      endMinute < 1440 &&
-      startMinute != endMinute;
+  bool get valid => id.isNotEmpty && minute >= 0 && minute < 1440;
 
-  bool contains(DateTime now) {
-    if (!enabled || !valid) return false;
-    final minute = now.hour * 60 + now.minute;
-    return startMinute < endMinute
-        ? minute >= startMinute && minute < endMinute
-        : minute >= startMinute || minute < endMinute;
-  }
+  PausePoint copyWith({int? minute, bool? enabled}) => PausePoint(
+    id: id,
+    minute: minute ?? this.minute,
+    enabled: enabled ?? this.enabled,
+  );
 
-  PauseWindow copyWith({int? startMinute, int? endMinute, bool? enabled}) =>
-      PauseWindow(
-        id: id,
-        startMinute: startMinute ?? this.startMinute,
-        endMinute: endMinute ?? this.endMinute,
-        enabled: enabled ?? this.enabled,
-      );
-
-  Map<String, Object> toMap() => {
-    'id': id,
-    'start': startMinute,
-    'end': endMinute,
-    'enabled': enabled,
-  };
+  Map<String, Object> toMap() => {'id': id, 'at': minute, 'enabled': enabled};
 }
 
 class ScheduledPauseSettings {
   ScheduledPauseSettings({
     this.enabled = false,
-    List<PauseWindow> windows = const [],
-  }) : windows = List.unmodifiable(windows);
+    List<PausePoint> points = const [],
+  }) : points = List.unmodifiable(points);
 
   final bool enabled;
-  final List<PauseWindow> windows;
+  final List<PausePoint> points;
 
-  bool activeAt(DateTime now) =>
-      enabled && windows.any((item) => item.contains(now));
-
-  ScheduledPauseSettings copyWith({
-    bool? enabled,
-    List<PauseWindow>? windows,
-  }) => ScheduledPauseSettings(
-    enabled: enabled ?? this.enabled,
-    windows: windows ?? this.windows,
-  );
+  ScheduledPauseSettings copyWith({bool? enabled, List<PausePoint>? points}) =>
+      ScheduledPauseSettings(
+        enabled: enabled ?? this.enabled,
+        points: points ?? this.points,
+      );
 
   String encode() => jsonEncode({
     'enabled': enabled,
-    'windows': windows.map((item) => item.toMap()).toList(),
+    'points': points.map((item) => item.toMap()).toList(),
   });
 
   static ScheduledPauseSettings decode(String? source) {
     try {
       final data = jsonDecode(source ?? '') as Map<String, dynamic>;
-      final windows = <PauseWindow>[];
+      final pointData = data['points'];
+      // Older installations stored ranges. Only their start times migrate;
+      // an end time never creates a period in which playback is blocked.
+      final migratingRanges = pointData == null;
+      final raw = migratingRanges ? data['windows'] : pointData;
+      final points = <PausePoint>[];
       final ids = <String>{};
-      for (final item in data['windows'] as List? ?? []) {
-        if (item is! Map ||
-            item['id'] is! String ||
-            item['start'] is! int ||
-            item['end'] is! int) {
-          continue;
-        }
-        final window = PauseWindow(
+      for (final item in raw is List ? raw : const []) {
+        if (item is! Map || item['id'] is! String) continue;
+        final at = item[migratingRanges ? 'start' : 'at'];
+        if (at is! int) continue;
+        final point = PausePoint(
           id: item['id'] as String,
-          startMinute: item['start'] as int,
-          endMinute: item['end'] as int,
+          minute: at,
           enabled: item['enabled'] != false,
         );
-        if (window.valid && ids.add(window.id)) windows.add(window);
+        if (point.valid && ids.add(point.id)) points.add(point);
       }
       return ScheduledPauseSettings(
         enabled: data['enabled'] == true,
-        windows: windows,
+        points: points,
       );
     } catch (_) {
       return ScheduledPauseSettings();
@@ -101,21 +75,31 @@ class ScheduledPauseSettings {
   }
 }
 
-/// One boundary timer, with a 30s wall-clock recheck for clock/timezone changes.
+/// Delivers daily pause events without holding playback in a paused interval.
+///
+/// A foreground check also catches a point crossed while timers were suspended.
+/// Coincident points coalesce, and clock rollback cannot repeat a delivered
+/// local date/minute. The small date history is bounded for long-lived players.
 class ScheduledPauseController {
-  ScheduledPauseController({required this.onCheck, DateTime Function()? now})
+  ScheduledPauseController({required this.onPause, DateTime Function()? now})
     : now = now ?? DateTime.now;
 
-  final void Function(bool active) onCheck;
+  final void Function() onPause;
   final DateTime Function() now;
-  ScheduledPauseSettings settings = ScheduledPauseSettings();
+  ScheduledPauseSettings _settings = ScheduledPauseSettings();
+  final Map<int, Set<int>> _firedMinutes = {};
+  DateTime? _lastCheck;
   Timer? _timer;
   bool _disposed = false;
 
-  bool get active => settings.activeAt(now());
+  static const _clockCheckInterval = Duration(seconds: 30);
+  static const _retainedDates = 32;
 
   void update(ScheduledPauseSettings value) {
-    settings = value;
+    _settings = value;
+    // Editing or enabling a schedule must not retroactively pause for an
+    // earlier time. A point in the current minute still takes effect.
+    _lastCheck = null;
     check();
   }
 
@@ -123,39 +107,56 @@ class ScheduledPauseController {
     if (_disposed) return;
     _timer?.cancel();
     final time = now();
-    onCheck(settings.activeAt(time));
-    if (_disposed) return;
-    if (!settings.enabled ||
-        !settings.windows.any((item) => item.enabled && item.valid)) {
-      return;
-    }
-    var delay = const Duration(seconds: 30);
-    for (final item in settings.windows.where(
-      (item) => item.enabled && item.valid,
-    )) {
-      for (final minute in [item.startMinute, item.endMinute]) {
-        // Construct local calendar dates rather than adding 24h across DST.
-        var boundary = DateTime(
-          time.year,
-          time.month,
-          time.day,
-          minute ~/ 60,
-          minute % 60,
-        );
-        if (!boundary.isAfter(time)) {
-          boundary = DateTime(
-            time.year,
-            time.month,
-            time.day + 1,
-            minute ~/ 60,
-            minute % 60,
-          );
-        }
-        final until = boundary.difference(time);
-        if (until > Duration.zero && until < delay) delay = until;
+    final previous = _lastCheck;
+    _lastCheck = time;
+    final minutes = {
+      for (final point in _settings.points)
+        if (point.enabled && point.valid) point.minute,
+    };
+    if (!_settings.enabled || minutes.isEmpty) return;
+
+    var shouldPause = false;
+    var delay = _clockCheckInterval;
+    for (final minute in minutes) {
+      var occurrence = _onDay(time, 0, minute);
+      if (occurrence.isAfter(time)) {
+        occurrence = _onDay(time, -1, minute);
       }
+      final inCurrentMinute = time.hour * 60 + time.minute == minute;
+      final crossed =
+          previous != null &&
+          time.isAfter(previous) &&
+          occurrence.isAfter(previous);
+      if (inCurrentMinute || crossed) {
+        final day =
+            occurrence.year * 10000 + occurrence.month * 100 + occurrence.day;
+        if ((_firedMinutes[day] ??= {}).add(minute)) shouldPause = true;
+      }
+
+      var next = _onDay(time, 0, minute);
+      if (!next.isAfter(time)) next = _onDay(time, 1, minute);
+      final remaining = next.difference(time);
+      if (remaining > Duration.zero && remaining < delay) delay = remaining;
     }
+    while (_firedMinutes.length > _retainedDates) {
+      _firedMinutes.remove(_firedMinutes.keys.first);
+    }
+    // A bounded clock check picks up manual clock/time-zone changes even if
+    // the next configured point is hours away.
     _timer = Timer(delay, check);
+    if (shouldPause) onPause();
+  }
+
+  static DateTime _onDay(DateTime time, int dayOffset, int minute) {
+    // Construct calendar dates rather than adding 24h across DST boundaries.
+    final constructor = time.isUtc ? DateTime.utc : DateTime.new;
+    return constructor(
+      time.year,
+      time.month,
+      time.day + dayOffset,
+      minute ~/ 60,
+      minute % 60,
+    );
   }
 
   void dispose() {

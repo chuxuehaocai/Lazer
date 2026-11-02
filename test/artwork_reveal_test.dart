@@ -5,8 +5,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_playlist_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_widgets.dart';
+import 'package:lazer_nextgen/ui/playlist_page.dart';
+import 'package:lazer_nextgen/ui/widgets.dart';
 import 'package:lazer_nextgen/tv/large_screen_pages.dart';
 import 'package:lazer_nextgen/tv/large_screen_widgets.dart';
 import 'package:lazer_nextgen/widgets/artwork_reveal.dart';
@@ -137,7 +137,7 @@ void main() {
                   dimension: 64,
                   child: tv
                       ? LargeScreenArtwork(url: url, size: 64, fadeIn: true)
-                      : LegacyCover(url: url, size: 64, fadeIn: true),
+                      : AppCover(url: url, size: 64, fadeIn: true),
                 ),
               ),
             ),
@@ -213,12 +213,12 @@ void main() {
       trackIds: [],
       coverSeed: 1,
     );
-    expect(const LegacyCover().fadeIn, isFalse);
+    expect(const AppCover().fadeIn, isFalse);
     expect(const LargeScreenArtwork(size: 60).fadeIn, isFalse);
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
-          body: LegacyPlaylistHeader(
+          body: AppPlaylistHeader(
             playlist: playlist,
             compact: false,
             onPlay: null,
@@ -226,7 +226,7 @@ void main() {
         ),
       ),
     );
-    expect(tester.widget<LegacyCover>(find.byType(LegacyCover)).fadeIn, isTrue);
+    expect(tester.widget<AppCover>(find.byType(AppCover)).fadeIn, isTrue);
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(

@@ -9,7 +9,7 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/downloads/download_manager.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/player/desktop_now_playing.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/accessible_controls.dart';
@@ -52,7 +52,7 @@ class _HangingCatalog extends Catalog {
 }
 
 Widget _page(AppState state, Track track) => MaterialApp(
-  theme: buildLegacyTheme(),
+  theme: buildAppleTheme(),
   home: Scaffold(
     body: DesktopNowPlaying(
       state: state,
@@ -77,7 +77,9 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    directory = await Directory.systemTemp.createTemp('lazer-desktop-download-');
+    directory = await Directory.systemTemp.createTemp(
+      'lazer-desktop-download-',
+    );
   });
 
   tearDown(() async {

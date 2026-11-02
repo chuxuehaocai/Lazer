@@ -103,7 +103,9 @@ Future<AudioEngineSelection> createAudioEngine({
         AudioPathFallback.sessionStartupFailed,
         '$error',
       );
-      debugPrint('Audio engine: native start-up threw, falling back: $error\n$stack');
+      debugPrint(
+        'Audio engine: native start-up threw, falling back: $error\n$stack',
+      );
     }
     logAudioPathEvent('fallback', <String, Object?>{
       'path': 'just_audio',
@@ -117,7 +119,9 @@ Future<AudioEngineSelection> createAudioEngine({
       'detail': decision.detail,
     });
   }
-  debugPrint('Audio engine: falling back to just_audio (${decision.detail ?? decision.fallback!.name})');
+  debugPrint(
+    'Audio engine: falling back to just_audio (${decision.detail ?? decision.fallback!.name})',
+  );
   JustAudioMediaKit.ensureInitialized();
   JustAudioMediaKit.prefetchPlaylist = true;
   final JustAudioEngine platform = JustAudioEngine(
@@ -132,4 +136,3 @@ Future<AudioEngineSelection> createAudioEngine({
     path: decision,
   );
 }
-

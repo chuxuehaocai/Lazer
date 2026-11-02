@@ -61,7 +61,7 @@ void main() {
         if (width >= 720) {
           for (int cycle = 0; cycle < 3; cycle++) {
             await tester.tap(
-              find.byKey(const ValueKey('legacy-now-playing-cover')),
+              find.byKey(const ValueKey('now-playing-cover')),
             );
             await frames(20);
             await tester.tap(find.byKey(const ValueKey('desktop-queue')));
@@ -74,7 +74,7 @@ void main() {
         } else {
           for (int cycle = 0; cycle < 3; cycle++) {
             await tester.tap(
-              find.byKey(const ValueKey('legacy-now-playing-cover')),
+              find.byKey(const ValueKey('now-playing-cover')),
             );
             await frames(30);
             state.seek(.04 * (cycle + 1));
@@ -92,7 +92,7 @@ void main() {
             );
             await frames(3);
             await tester.tap(
-              find.byKey(const ValueKey('legacy-now-playing-cover')),
+              find.byKey(const ValueKey('now-playing-cover')),
             );
             await frames(30);
           }

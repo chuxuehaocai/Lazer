@@ -27,7 +27,10 @@ class AppHaptics {
     }
     _last = now;
     final Map<String, Object> impact = <String, Object>{
-      'intensity': (intensity * (detent && !boundary ? .55 : 1)).clamp(0.0, 1.0),
+      'intensity': (intensity * (detent && !boundary ? .55 : 1)).clamp(
+        0.0,
+        1.0,
+      ),
       'kind': boundary
           ? 'boundary'
           : detent

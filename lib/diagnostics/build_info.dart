@@ -11,7 +11,7 @@ abstract final class BuildInfo {
   static const String _stamped = String.fromEnvironment('LAZER_COMMIT');
   static const String _fallback = 'a8518ab';
   static const String _stampedVersion = String.fromEnvironment('LAZER_VERSION');
-  static const String _fallbackVersion = '2.0.0-beta.4';
+  static const String _fallbackVersion = '2.0.0-beta.5';
 
   /// The full commit SHA the binary was built from.
   static String get commit => _stamped.isEmpty ? _fallback : _stamped;
@@ -24,7 +24,7 @@ abstract final class BuildInfo {
 
   /// The release version without the tag's `v` prefix, e.g. `2.0.0-beta.2`.
   ///
-  /// A branch build (`nextgen`) is not a version, so it falls back to the
+  /// A branch build is not a version, so it falls back to the
   /// version in pubspec instead of feeding a branch name to SemVer comparison.
   static String get version {
     final ReleaseVersion? parsed = ReleaseVersion.parse(_stampedVersion);

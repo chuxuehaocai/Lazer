@@ -249,10 +249,7 @@ void main() {
       final license = await rootBundle.loadString(
         'assets/easter_eggs/still_alive/GPL-3.0.txt',
       );
-      expect(
-        license,
-        startsWith('GNU GENERAL PUBLIC LICENSE'),
-      );
+      expect(license, startsWith('GNU GENERAL PUBLIC LICENSE'));
       expect(license.length, greaterThan(30000));
     },
   );

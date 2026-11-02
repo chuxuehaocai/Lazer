@@ -368,7 +368,7 @@ class Catalog {
     final selected = usesPlatformGateway ? activeGateway : null;
     if (selected != null && selected.user == null) {
       _home = null;
-      _homeError = '请登录 Navidrome 服务器。';
+      _homeError = '请登录 Navidrome 服务器。'; // i18n:key
       return null;
     }
     _homeError = null;
@@ -538,16 +538,15 @@ class Catalog {
     if (query.isEmpty) return SearchResults.empty;
     if (usesPlatformGateway) return _platform.search(activeGateway, query);
     try {
-      final List<Object?> results = await Future.wait<Object?>(
-        <Future<Object?>>[
-          // cloudsearch carries album.picUrl; the legacy /search payload only
-          // exposes a picId, which leaves track covers unrenderable.
-          gateway.search(query, limit: 20, useCloudSearch: true),
-          gateway.searchAlbums(query, limit: 10),
-          gateway.searchPlaylists(query, limit: 10),
-          gateway.searchArtists(query, limit: 10),
-        ],
-      );
+      final List<Object?>
+      results = await Future.wait<Object?>(<Future<Object?>>[
+        // cloudsearch carries album.picUrl; the compatibility /search payload only
+        // exposes a picId, which leaves track covers unrenderable.
+        gateway.search(query, limit: 20, useCloudSearch: true),
+        gateway.searchAlbums(query, limit: 10),
+        gateway.searchPlaylists(query, limit: 10),
+        gateway.searchArtists(query, limit: 10),
+      ]);
       final List<GatewaySong> songs =
           results[0] as List<GatewaySong>? ?? const <GatewaySong>[];
       final List<GatewayAlbum> albumHits =
@@ -1254,7 +1253,7 @@ class Catalog {
             p.created || p.creatorId == uid || p.subscribed == false;
         // The personal liked collection also shows up as an own playlist;
         // pull it out so the profile can label and count it on its own
-        // (mirrors the reference: specialType 5, name fallback for legacy
+        // (mirrors the reference: specialType 5, name fallback for compatibility
         // payloads).
         if (p.specialType == 5 || (mine && p.name.endsWith('喜欢的音乐'))) {
           liked ??= playlist;

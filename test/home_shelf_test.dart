@@ -7,9 +7,9 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 const Track _track = Track(
@@ -59,8 +59,10 @@ class _Catalog extends Catalog {
   Future<List<Track>?> cachedPlaylistTracks(String playlistId) async => null;
 
   @override
-  Future<MusicChart> prepareChart(MusicChart chart, {bool force = false}) async =>
-      chart;
+  Future<MusicChart> prepareChart(
+    MusicChart chart, {
+    bool force = false,
+  }) async => chart;
 
   @override
   Future<String?> audioUrlFor(
@@ -72,12 +74,12 @@ class _Catalog extends Catalog {
 class _Gateway extends NeteaseGateway {}
 
 Widget _app(AppState state) => MaterialApp(
-  theme: buildLegacyTheme(brightness: Brightness.dark),
+  theme: buildAppleTheme(brightness: Brightness.dark),
   builder: (BuildContext context, Widget? child) => MediaQuery(
     data: MediaQuery.of(context).copyWith(disableAnimations: true),
     child: child!,
   ),
-  home: LegacyShell(state: state),
+  home: AppShell(state: state),
 );
 
 ScrollableState _scrollableInside(WidgetTester tester, Finder shelf) {
@@ -94,114 +96,119 @@ ScrollableState _scrollableInside(WidgetTester tester, Finder shelf) {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('phone home shelves follow mouse and touch drags and open cards', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final AppState state = AppState(catalog: _Catalog());
-    state.discoveryCharts = <MusicChart>[
-      for (int i = 0; i < 6; i++) _chart(i),
-    ];
-    addTearDown(state.dispose);
-    await tester.pumpWidget(_app(state));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'phone home shelves follow mouse and touch drags and open cards',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final AppState state = AppState(catalog: _Catalog());
+      state.discoveryCharts = <MusicChart>[
+        for (int i = 0; i < 6; i++) _chart(i),
+      ];
+      addTearDown(state.dispose);
+      await tester.pumpWidget(_app(state));
+      await tester.pumpAndSettle();
 
-    final Finder recommendations = find.byKey(
-      const ValueKey<String>('recommendations'),
-    );
-    final Finder charts = find.byKey(const ValueKey<String>('charts'));
-    final Finder homeScroll = find
-        .descendant(
-          of: find.byType(CustomScrollView),
-          matching: find.byType(Scrollable),
-        )
-        .first;
+      final Finder recommendations = find.byKey(
+        const ValueKey<String>('recommendations'),
+      );
+      final Finder charts = find.byKey(const ValueKey<String>('charts'));
+      final Finder homeScroll = find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first;
 
-    // The sliver list builds lazily; scroll the page until each shelf exists.
-    // The charts shelf shares the same drag handling, so check it first.
-    await tester.scrollUntilVisible(charts, 300, scrollable: homeScroll);
-    await tester.pumpAndSettle();
-    final ScrollableState chartScroll = _scrollableInside(tester, charts);
-    expect(chartScroll.position.axis, Axis.horizontal);
-    expect(chartScroll.position.maxScrollExtent, greaterThan(0));
-    await tester.drag(
-      find.descendant(of: charts, matching: find.byType(ListView)),
-      const Offset(-200, 0),
-      kind: PointerDeviceKind.mouse,
-    );
-    await tester.pumpAndSettle();
-    expect(chartScroll.position.pixels, greaterThan(0));
+      // The sliver list builds lazily; scroll the page until each shelf exists.
+      // The charts shelf shares the same drag handling, so check it first.
+      await tester.scrollUntilVisible(charts, 300, scrollable: homeScroll);
+      await tester.pumpAndSettle();
+      final ScrollableState chartScroll = _scrollableInside(tester, charts);
+      expect(chartScroll.position.axis, Axis.horizontal);
+      expect(chartScroll.position.maxScrollExtent, greaterThan(0));
+      await tester.drag(
+        find.descendant(of: charts, matching: find.byType(ListView)),
+        const Offset(-200, 0),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(chartScroll.position.pixels, greaterThan(0));
 
-    await tester.scrollUntilVisible(recommendations, 300, scrollable: homeScroll);
-    await tester.pumpAndSettle();
-    expect(recommendations, findsOneWidget);
+      await tester.scrollUntilVisible(
+        recommendations,
+        300,
+        scrollable: homeScroll,
+      );
+      await tester.pumpAndSettle();
+      expect(recommendations, findsOneWidget);
 
-    // A mouse drag is how a phone-sized emulator or a head unit is used.
-    await tester.ensureVisible(recommendations);
-    await tester.pumpAndSettle();
-    final ScrollableState playlistScroll = _scrollableInside(
-      tester,
-      recommendations,
-    );
-    expect(playlistScroll.position.axis, Axis.horizontal);
-    expect(playlistScroll.position.maxScrollExtent, greaterThan(0));
-    final double start = playlistScroll.position.pixels;
-    await tester.drag(
-      find.descendant(of: recommendations, matching: find.byType(ListView)),
-      const Offset(-200, 0),
-      kind: PointerDeviceKind.mouse,
-    );
-    await tester.pumpAndSettle();
-    expect(
-      playlistScroll.position.pixels,
-      greaterThan(start),
-      reason: 'the shelf should follow a horizontal mouse drag on mobile too',
-    );
+      // A mouse drag is how a phone-sized emulator or a head unit is used.
+      await tester.ensureVisible(recommendations);
+      await tester.pumpAndSettle();
+      final ScrollableState playlistScroll = _scrollableInside(
+        tester,
+        recommendations,
+      );
+      expect(playlistScroll.position.axis, Axis.horizontal);
+      expect(playlistScroll.position.maxScrollExtent, greaterThan(0));
+      final double start = playlistScroll.position.pixels;
+      await tester.drag(
+        find.descendant(of: recommendations, matching: find.byType(ListView)),
+        const Offset(-200, 0),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        playlistScroll.position.pixels,
+        greaterThan(start),
+        reason: 'the shelf should follow a horizontal mouse drag on mobile too',
+      );
 
-    final Finder playlistList = find.descendant(
-      of: recommendations,
-      matching: find.byType(ListView),
-    );
-    final double afterMouse = playlistScroll.position.pixels;
-    await tester.drag(playlistList, const Offset(-160, 0));
-    await tester.pumpAndSettle();
-    expect(
-      playlistScroll.position.pixels,
-      greaterThan(afterMouse),
-      reason: 'the shelf should follow a horizontal touch drag',
-    );
+      final Finder playlistList = find.descendant(
+        of: recommendations,
+        matching: find.byType(ListView),
+      );
+      final double afterMouse = playlistScroll.position.pixels;
+      await tester.drag(playlistList, const Offset(-160, 0));
+      await tester.pumpAndSettle();
+      expect(
+        playlistScroll.position.pixels,
+        greaterThan(afterMouse),
+        reason: 'the shelf should follow a horizontal touch drag',
+      );
 
-    final double afterTouch = playlistScroll.position.pixels;
-    await tester.drag(
-      playlistList,
-      const Offset(120, 0),
-      kind: PointerDeviceKind.mouse,
-    );
-    await tester.pumpAndSettle();
-    expect(
-      playlistScroll.position.pixels,
-      lessThan(afterTouch),
-      reason: 'the shelf should scroll back the other way',
-    );
+      final double afterTouch = playlistScroll.position.pixels;
+      await tester.drag(
+        playlistList,
+        const Offset(120, 0),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        playlistScroll.position.pixels,
+        lessThan(afterTouch),
+        reason: 'the shelf should scroll back the other way',
+      );
 
-    await tester.ensureVisible(recommendations);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('歌单 3'));
-    await tester.pumpAndSettle();
-    expect(find.byType(LegacyPlaylistPage), findsOneWidget);
-    expect(find.text('歌单 3'), findsWidgets);
-    expect(tester.takeException(), isNull);
+      await tester.ensureVisible(recommendations);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('歌单 3'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppPlaylistPage), findsOneWidget);
+      expect(find.text('歌单 3'), findsWidgets);
+      expect(tester.takeException(), isNull);
 
-    // A chart card opens the same way the playlist card does.
-    await tester.tap(find.byTooltip('返回'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(charts, -300, scrollable: homeScroll);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('榜单 1'));
-    await tester.pumpAndSettle();
-    expect(find.byType(LegacyChartPage), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+      // A chart card opens the same way the playlist card does.
+      await tester.tap(find.byTooltip('返回'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(charts, -300, scrollable: homeScroll);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('榜单 1'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppChartPage), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

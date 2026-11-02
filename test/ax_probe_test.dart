@@ -9,9 +9,9 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/lyrics/selection_bar.dart';
 import 'package:lazer_nextgen/lyrics/viewport.dart';
 import 'package:lazer_nextgen/player/desktop_now_playing.dart';
@@ -65,12 +65,12 @@ class _Catalog extends Catalog {
 }
 
 Widget _app(AppState state) => MaterialApp(
-  theme: buildLegacyTheme(brightness: Brightness.dark),
+  theme: buildAppleTheme(brightness: Brightness.dark),
   builder: (BuildContext context, Widget? child) => MediaQuery(
     data: MediaQuery.of(context).copyWith(disableAnimations: true),
     child: child!,
   ),
-  home: LegacyShell(state: state),
+  home: AppShell(state: state),
 );
 
 void main() {
@@ -107,7 +107,7 @@ void main() {
     await frames(tester, 40);
 
     final Finder title = find.descendant(
-      of: find.byType(LegacyPlayerBar),
+      of: find.byType(AppPlayerBar),
       matching: find.text(_track.title),
     );
     await tester.tap(title.first);
@@ -226,7 +226,7 @@ void main() {
     report('hover reset');
 
     final Finder title = find.descendant(
-      of: find.byType(LegacyPlayerBar),
+      of: find.byType(AppPlayerBar),
       matching: find.text(_track.title),
     );
     if (title.evaluate().isNotEmpty) {

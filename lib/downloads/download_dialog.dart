@@ -1,8 +1,10 @@
+import '../widgets/spring_buttons.dart';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../data/audio_quality.dart';
@@ -35,7 +37,7 @@ Future<DownloadRequest?> showDownloadDialog(
   String? folderName,
 }) {
   if (tracks.isEmpty) return Future<DownloadRequest?>.value(null);
-  return showDialog<DownloadRequest>(
+  return showAppleDialog<DownloadRequest>(
     context: context,
     builder: (BuildContext context) =>
         _DownloadDialog(state: state, tracks: tracks, folderName: folderName),
@@ -315,7 +317,7 @@ class _DownloadDialogState extends State<_DownloadDialog> {
                     ),
                   ),
                   if (_canPickDirectory)
-                    TextButton(
+                    SpringTextButton(
                       onPressed: _busy ? null : _pickDirectory,
                       child: TrText('选择…'),
                     ),
@@ -364,11 +366,11 @@ class _DownloadDialogState extends State<_DownloadDialog> {
         ),
       ),
       actions: <Widget>[
-        TextButton(
+        SpringTextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
           child: TrText('取消'),
         ),
-        FilledButton(
+        SpringFilledButton(
           key: const ValueKey<String>('download-confirm'),
           onPressed: _busy ? null : _confirm,
           child: _busy

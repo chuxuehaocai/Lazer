@@ -1,4 +1,6 @@
+import 'spring_buttons.dart';
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
@@ -23,7 +25,7 @@ Future<ShortcutSelection?> showShortcutRecorderDialog(
   required MediaShortcutAction action,
   required MediaShortcutBinding? current,
   required MediaShortcutAction? Function(MediaShortcutBinding binding) conflict,
-}) => showDialog<ShortcutSelection>(
+}) => showAppleDialog<ShortcutSelection>(
   context: context,
   builder: (BuildContext context) => _ShortcutRecorderDialog(
     action: action,
@@ -192,7 +194,7 @@ class _ShortcutRecorderDialogState extends State<_ShortcutRecorderDialog> {
                 const SizedBox(height: 6),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
+                  child: SpringTextButton.icon(
                     key: const ValueKey<String>('shortcut-record-again'),
                     onPressed: _listenAgain,
                     icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -205,17 +207,17 @@ class _ShortcutRecorderDialogState extends State<_ShortcutRecorderDialog> {
         ),
         actions: <Widget>[
           if (widget.current != null)
-            TextButton(
+            SpringTextButton(
               key: const ValueKey<String>('shortcut-clear'),
               onPressed: () =>
                   Navigator.of(context).pop(const ShortcutSelection.clear()),
               child: const TrText('清除'),
             ),
-          TextButton(
+          SpringTextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const TrText('取消'),
           ),
-          FilledButton(
+          SpringFilledButton(
             key: const ValueKey<String>('shortcut-save'),
             onPressed: canSave
                 ? () => Navigator.of(

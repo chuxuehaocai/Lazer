@@ -1,4 +1,6 @@
+import '../widgets/spring_buttons.dart';
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 import 'package:flutter/services.dart';
 
 import '../data/models.dart';
@@ -31,7 +33,7 @@ Future<void> searchInOsu(BuildContext context, Track? track) async {
   final bool opened = await openExternalUrl(url);
   if (opened || !context.mounted) return;
 
-  await showDialog<void>(
+  await showAppleDialog<void>(
     context: context,
     builder: (BuildContext dialogContext) => AlertDialog(
       title: const TrText('无法打开浏览器'),
@@ -45,11 +47,11 @@ Future<void> searchInOsu(BuildContext context, Track? track) async {
         ],
       ),
       actions: <Widget>[
-        TextButton(
+        SpringTextButton(
           onPressed: () => Navigator.of(dialogContext).pop(),
           child: const TrText('关闭'),
         ),
-        FilledButton(
+        SpringFilledButton(
           autofocus: true,
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: url));

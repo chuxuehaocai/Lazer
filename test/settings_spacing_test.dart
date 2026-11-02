@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lazer_nextgen/legacy/legacy_settings_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/settings_page.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/tv/lan_remote.dart';
 import 'package:lazer_nextgen/tv/tv_mode.dart';
@@ -37,10 +37,10 @@ void main() {
       });
       await tester.pumpWidget(
         MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           home: LanRemoteScope(
             controller: remote,
-            child: Scaffold(body: LegacySettingsPage(state: state)),
+            child: Scaffold(body: AppSettingsPage(state: state)),
           ),
         ),
       );
@@ -102,7 +102,7 @@ void main() {
     bool enabled = false;
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         home: TvScope(
           active: true,
           child: Scaffold(

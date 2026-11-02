@@ -4,6 +4,9 @@
 uses Flutter and the application's existing Android playback, files, accounts
 and device-shape detection. It adds no Wear OS dependency or Wear OS-only API.
 Detected watches retain the static background default.
+Interface labels, hints and accessibility text follow the app's four supported
+languages. Track/artist names, playlist names, user names and lyric lines remain
+catalogue or user data and are displayed without translation.
 
 ## Layout and navigation
 

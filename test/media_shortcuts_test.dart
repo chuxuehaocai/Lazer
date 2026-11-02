@@ -7,8 +7,8 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/media_shortcuts.dart';
 import 'package:lazer_nextgen/widgets/media_shortcut_listener.dart';
@@ -40,7 +40,7 @@ class _Catalog extends Catalog {
 }
 
 Widget _app(Widget home) => MaterialApp(
-  theme: buildLegacyTheme(brightness: Brightness.dark),
+  theme: buildAppleTheme(brightness: Brightness.dark),
   builder: (BuildContext context, Widget? child) => MediaQuery(
     data: MediaQuery.of(context).copyWith(disableAnimations: true),
     child: child!,
@@ -218,8 +218,7 @@ void main() {
         Scaffold(
           body: AnimatedBuilder(
             animation: state,
-            builder: (BuildContext context, _) =>
-                LegacySettingsPage(state: state),
+            builder: (BuildContext context, _) => AppSettingsPage(state: state),
           ),
         ),
       ),
@@ -298,7 +297,12 @@ void main() {
     expect(find.text('已用于「增大音量」'), findsOneWidget);
     expect(
       tester
-          .widget<FilledButton>(find.byKey(const ValueKey('shortcut-save')))
+          .widget<FilledButton>(
+            find.descendant(
+              of: find.byKey(const ValueKey('shortcut-save')),
+              matching: find.byType(FilledButton),
+            ),
+          )
           .onPressed,
       isNull,
     );
@@ -311,7 +315,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<FilledButton>(find.byKey(const ValueKey('shortcut-save')))
+          .widget<FilledButton>(
+            find.descendant(
+              of: find.byKey(const ValueKey('shortcut-save')),
+              matching: find.byType(FilledButton),
+            ),
+          )
           .onPressed,
       isNotNull,
     );

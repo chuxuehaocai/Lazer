@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:lazer_nextgen/animation/apple_spring.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/widgets/animated_track_cover.dart';
 import 'package:lazer_nextgen/widgets/artwork_image.dart';
@@ -28,14 +29,15 @@ const Track _second = Track(
   coverSeed: 2,
 );
 
-Widget _host(Track track) => MaterialApp(
-  home: Center(
-    child: SizedBox.square(
-      dimension: 240,
-      child: AnimatedTrackCover(track: track, direction: 1),
-    ),
-  ),
-);
+Widget _host(Track track, {AppleSpring spring = AppleSpring.responsive}) =>
+    MaterialApp(
+      home: Center(
+        child: SizedBox.square(
+          dimension: 240,
+          child: AnimatedTrackCover(track: track, direction: 1, spring: spring),
+        ),
+      ),
+    );
 
 Future<Uint8List> _pixels(WidgetTester tester, GlobalKey key) async {
   late Uint8List pixels;
@@ -85,6 +87,122 @@ Future<Track> _cover(
 }
 
 void main() {
+  testWidgets('continuous different-track changes retire old cover layers', (
+    tester,
+  ) async {
+    Widget host(int index) => _host(
+      Track(
+        id: 'stress-$index',
+        title: 'Track $index',
+        artist: 'Artist',
+        album: 'Album',
+        duration: const Duration(minutes: 3),
+        coverSeed: index,
+      ),
+      spring: AppleSpring.smooth,
+    );
+
+    await tester.pumpWidget(host(0));
+    for (var index = 1; index <= 240; index++) {
+      await tester.pumpWidget(host(index));
+      await tester.pump(const Duration(milliseconds: 16));
+      if (index >= 120) {
+        expect(
+          find
+              .descendant(
+                of: find.byType(AnimatedTrackCover),
+                matching: find.byType(FadeTransition),
+              )
+              .evaluate()
+              .length,
+          lessThan(90),
+          reason: 'retiring layers must not accumulate throughout a long burst',
+        );
+        expect(
+          find.byKey(ValueKey<String>('stress-${index - 120}')),
+          findsNothing,
+          reason: 'a cover older than 1.9 seconds has finished its dissolve',
+        );
+      }
+    }
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(AnimatedTrackCover),
+        matching: find.byType(FadeTransition),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('desktop artwork keeps a slower dissolve than mobile artwork', (
+    tester,
+  ) async {
+    Future<double> remainingOpacity(AppleSpring spring) async {
+      await tester.pumpWidget(_host(_first, spring: spring));
+      await tester.pumpWidget(_host(_second, spring: spring));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 140));
+      final first = find.byKey(const ValueKey<String>('cover-first'));
+      final fade = tester.widget<FadeTransition>(
+        find.ancestor(of: first, matching: find.byType(FadeTransition)).first,
+      );
+      final remaining = fade.opacity.value;
+      await tester.pumpAndSettle();
+      expect(first, findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      return remaining;
+    }
+
+    final desktop = await remainingOpacity(
+      const AppleSpring(duration: Duration(milliseconds: 500)),
+    );
+    final mobile = await remainingOpacity(
+      const AppleSpring(duration: Duration(milliseconds: 280)),
+    );
+    expect(desktop, greaterThan(mobile));
+    expect(desktop, inExclusiveRange(0.0, 1.0));
+    expect(mobile, inExclusiveRange(0.0, 1.0));
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'reversing a visible track reuses its plate and opacity velocity',
+    (tester) async {
+      await tester.pumpWidget(_host(_first));
+      final first = find.byKey(const ValueKey<String>('cover-first'));
+      final element = tester.element(first);
+      await tester.pumpWidget(_host(_second));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 70));
+      final fade = tester.widget<FadeTransition>(
+        find.ancestor(of: first, matching: find.byType(FadeTransition)).first,
+      );
+      final opacity = fade.opacity as AnimationController;
+      final value = opacity.value;
+      final velocity = opacity.velocity;
+      expect(value, inExclusiveRange(0.0, 1.0));
+      expect(velocity, lessThan(0));
+      await tester.pumpWidget(_host(_first));
+      expect(tester.element(first), same(element));
+      expect(opacity.value, closeTo(value, .000001));
+      expect(opacity.velocity, closeTo(velocity, .000001));
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(
+        opacity.value,
+        lessThan(value),
+        reason: 'momentum continues before the spring turns around',
+      );
+      await tester.pumpAndSettle();
+      expect(first, findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('cover-second')), findsNothing);
+      expect(tester.binding.transientCallbackCount, 0);
+    },
+  );
+
   testWidgets('a track change dissolves the artwork', (
     WidgetTester tester,
   ) async {
@@ -113,7 +231,7 @@ void main() {
       findsNothing,
     );
 
-    await tester.pump(const Duration(milliseconds: 420));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey<String>('cover-first')), findsNothing);
     expect(find.byKey(const ValueKey<String>('cover-second')), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -160,13 +278,12 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       await tester.runAsync(() async {
         final context = tester.element(find.byType(Navigator));
-        final edge = (80 * MediaQuery.devicePixelRatioOf(context)).ceil();
         for (final track in [firstTrack, secondTrack, thirdTrack]) {
           await precacheImage(
-            ResizeImage(
-              ArtworkImage(track.coverUrl!),
-              width: edge,
-              height: edge,
+            ArtworkImage.forSize(
+              track.coverUrl!,
+              logicalEdge: 80,
+              devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
             ),
             context,
           );

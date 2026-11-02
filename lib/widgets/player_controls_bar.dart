@@ -1,3 +1,4 @@
+import '../animation/apple_spring.dart';
 import 'package:flutter/material.dart';
 
 import '../data/models.dart';
@@ -185,7 +186,10 @@ class _TrackRowState extends State<TrackRow> {
         child: InkWell(
           onTap: feedbackAction(context, widget.onPlay),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
+            curve: const AppleSpringCurve(),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : AppleSpring.responsive.duration,
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.lg,
               vertical: AppSpacing.sm,

@@ -109,6 +109,103 @@ class _Backend implements StillAliveAudioBackend {
 }
 
 void main() {
+  test(
+    'completed at zero after seek cannot cancel a replay before ready playback',
+    () async {
+      var now = Duration.zero;
+      final backend = _Backend();
+      addTearDown(backend.finish);
+      final audio = StillAliveAudio(
+        backendFactory: () => backend,
+        clock: () => now,
+      );
+      addTearDown(audio.dispose);
+      await audio.play();
+      backend.emit(
+        position: backend.length,
+        status: StillAliveAudioStatus.completed,
+      );
+      backend.starting = Completer<void>();
+      final replay = audio.restart();
+      await Future<void>.delayed(Duration.zero);
+      expect(backend.commands.last, 'play');
+      backend.emit(
+        position: Duration.zero,
+        playing: false,
+        status: StillAliveAudioStatus.completed,
+      );
+      backend.emit(
+        position: const Duration(milliseconds: 5),
+        playing: true,
+        status: StillAliveAudioStatus.buffering,
+      );
+      backend.emit(
+        position: Duration.zero,
+        playing: true,
+        status: StillAliveAudioStatus.completed,
+      );
+      expect(audio.position, lessThan(const Duration(milliseconds: 20)));
+      expect(audio.playing, isTrue);
+      backend.starting!.complete();
+      await replay;
+      now += const Duration(milliseconds: 400);
+      expect(audio.position, const Duration(milliseconds: 400));
+      expect(backend.active, isTrue);
+      expect(audio.error, isNull);
+      await audio.close();
+    },
+  );
+
+  test('the latest of overlapping restarts owns the next playback', () async {
+    final backend = _Backend();
+    addTearDown(backend.finish);
+    final audio = StillAliveAudio(backendFactory: () => backend);
+    addTearDown(audio.dispose);
+    await audio.play();
+    backend.emit(position: const Duration(seconds: 60));
+    backend.seeking = Completer<void>();
+    final first = audio.restart();
+    await Future<void>.delayed(Duration.zero);
+    final second = audio.restart();
+    await Future<void>.delayed(Duration.zero);
+    final playCount = backend.commands.where((value) => value == 'play').length;
+    backend.seeking!.complete();
+    await Future.wait([first, second]);
+    expect(
+      backend.commands.where((value) => value == 'play'),
+      hasLength(playCount + 1),
+    );
+    expect(audio.playing, isTrue);
+    expect(audio.position, lessThan(const Duration(milliseconds: 20)));
+    await audio.close();
+  });
+
+  test(
+    'pausing while replay starts still silences a late decoder start',
+    () async {
+      final backend = _Backend();
+      addTearDown(backend.finish);
+      final audio = StillAliveAudio(backendFactory: () => backend);
+      addTearDown(audio.dispose);
+      await audio.play();
+      backend.emit(
+        position: backend.length,
+        status: StillAliveAudioStatus.completed,
+      );
+      backend.starting = Completer<void>();
+      final replay = audio.restart();
+      await Future<void>.delayed(Duration.zero);
+      await audio.pause();
+      backend.starting!.complete();
+      await replay;
+      expect(audio.playing, isFalse);
+      expect(backend.active, isFalse);
+      expect(backend.commands.last, 'pause');
+      expect(audio.error, isNull);
+      await audio.close();
+    },
+  );
+
   for (final wasPlaying in [true, false]) {
     test(
       'completion to restart ignores late EOF while seeking ($wasPlaying)',

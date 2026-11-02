@@ -8,6 +8,8 @@
 /// everywhere on the screen.
 library;
 
+import '../animation/apple_spring.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -19,7 +21,7 @@ import '../widgets/copyable_song_title.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/interaction_feedback.dart';
 import 'large_screen_widgets.dart';
-import '../legacy/legacy_player_bar.dart';
+import '../ui/player_bar.dart';
 
 /// The destinations reachable from the capsule.
 enum LargeScreenTab { home, library, likes, settings }
@@ -190,8 +192,10 @@ class _NavChipState extends State<_NavChip> {
       borderRadius: BorderRadius.circular(24),
       focusScale: 1.06,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeOutCubic,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : AppleSpring.responsive.duration,
+        curve: const AppleSpringCurve(),
         height: 46,
         margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
         padding: EdgeInsets.symmetric(horizontal: widget.iconOnly ? 13 : 20),
@@ -489,7 +493,10 @@ class _TransportGlyphState extends State<_TransportGlyph> {
       borderRadius: BorderRadius.circular(widget.size / 2),
       focusScale: 1.1,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
+        curve: const AppleSpringCurve(),
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : AppleSpring.responsive.duration,
         width: widget.size,
         height: widget.size,
         decoration: BoxDecoration(
@@ -538,7 +545,7 @@ class _TransportActions extends StatelessWidget {
           child: Center(
             child: Transform.scale(
               scale: 1.15,
-              child: LegacyQueueButton(state: state),
+              child: AppQueueButton(state: state),
             ),
           ),
         ),

@@ -68,7 +68,7 @@ class StillAliveAudio extends ChangeNotifier implements StillAlivePlayback {
     StillAliveAudioBackend Function()? backendFactory,
     Duration Function()? clock,
     double volume = 1,
-  }) : _backendFactory = backendFactory ?? _createDefaultBackend {
+  }) : _backendFactory = backendFactory ?? createStillAliveAudioBackend {
     final stopwatch = Stopwatch()..start();
     _clock = clock ?? (() => stopwatch.elapsed);
     _volume = _normalizeVolume(volume);
@@ -136,17 +136,16 @@ class StillAliveAudio extends ChangeNotifier implements StillAlivePlayback {
     if (_closed) return;
     _duration = report.duration ?? _duration;
     if (_restartFence != null) {
-      // A seek away from EOF may report completed again, even with position
-      // already zero. That is the previous transport's terminal state, not a
-      // completion of this replay. Wait for the new ready/playing report.
-      if (!_seekingStart &&
-          _restartFence == _intent &&
+      // Seeking resets the position before every backend resets its completed
+      // status. Even a completed report at zero belongs to the previous pass.
+      if (_seekingStart || report.status == StillAliveAudioStatus.completed) {
+        return;
+      }
+      if (_restartFence == _intent &&
           _requestedPlay &&
           report.playing &&
           report.status == StillAliveAudioStatus.ready) {
         _restartFence = null;
-      } else {
-        return;
       }
     }
     // Native output may deliver its final position tens of milliseconds after
@@ -386,7 +385,9 @@ class StillAliveAudio extends ChangeNotifier implements StillAlivePlayback {
   }
 }
 
-StillAliveAudioBackend _createDefaultBackend() {
+/// Uses the real plugin for desktop validation as well as the terminal page.
+@visibleForTesting
+StillAliveAudioBackend createStillAliveAudioBackend() {
   ensureStillAliveDesktopAudioBackend();
   return _JustAudioBackend();
 }
@@ -480,7 +481,20 @@ class _JustAudioBackend implements StillAliveAudioBackend {
   }
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) async {
+    final source = _player.audioSource;
+    if (_player.processingState == audio.ProcessingState.completed &&
+        source != null) {
+      // media_kit can retain completed after seeking away from EOF. Reopen the
+      // same asset while paused so the next play starts a fresh pass.
+      await _player.pause();
+      if (_disposed) return;
+      await _player.setAudioSource(source, initialPosition: position);
+      return;
+    }
+    await _player.seek(position);
+  }
+
   @override
   Future<void> setVolume(double volume) => _player.setVolume(volume);
   @override

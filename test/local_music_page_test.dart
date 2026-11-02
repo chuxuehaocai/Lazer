@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/local/local_music_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,14 +19,17 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         home: Scaffold(body: LocalMusicPage(state: state)),
       ),
     );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('local-music-import')), findsOneWidget);
-    expect(find.byKey(const ValueKey('local-music-scan-empty')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('local-music-scan-empty')),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const ValueKey('local-music-import-menu')));
     await tester.pumpAndSettle();
@@ -41,7 +44,7 @@ void main() {
     addTearDown(state.dispose);
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         home: Scaffold(
           body: LocalMusicCard(state: state, onOpen: () {}),
         ),

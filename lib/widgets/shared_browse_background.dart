@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../legacy/legacy_background.dart';
+import '../ui/background.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
@@ -39,9 +39,9 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground> {
     final track = state.current;
     return (
       (track?.id, track?.coverUrl, track?.coverSeed),
-      state.legacyBackground,
-      state.legacyBackgroundImagePath,
-      state.legacyUiAlpha,
+      state.backgroundMode,
+      state.backgroundImagePath,
+      state.uiAlpha,
       state.dynamicBackgroundQuality,
       state.browseBackgroundFps,
       state.browseBackgroundColor,
@@ -100,7 +100,7 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground> {
         final state = widget.state;
         final navigation = widget.navigation;
         final apple = AppleSemanticColors.of(context);
-        final painted = state.legacyBackground != LegacyBackgroundMode.off;
+        final painted = state.backgroundMode != AppBackgroundMode.off;
         final canvas =
             !painted && Theme.of(context).brightness == Brightness.dark
             ? AppleColors.darkCanvas
@@ -116,11 +116,11 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground> {
                     !(state.browseTransitionActive.value &&
                         navigation.rootVisible.value) &&
                     !navigation.moving.value,
-                child: LegacyAlbumBackdrop(
+                child: AppAlbumBackdrop(
                   track: state.current,
-                  mode: state.legacyBackground,
-                  imagePath: state.legacyBackgroundImagePath,
-                  uiAlpha: state.legacyUiAlpha,
+                  mode: state.backgroundMode,
+                  imagePath: state.backgroundImagePath,
+                  uiAlpha: state.uiAlpha,
                   quality: state.dynamicBackgroundQuality,
                   frameRate: state.browseBackgroundFps,
                   solidColor: state.browseBackgroundColor,
@@ -130,7 +130,7 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground> {
               IgnorePointer(
                 child: ColoredBox(
                   color: apple.background.withValues(
-                    alpha: (state.legacyUiAlpha * .9).clamp(.56, .92),
+                    alpha: (state.uiAlpha * .9).clamp(.56, .92),
                   ),
                 ),
               ),

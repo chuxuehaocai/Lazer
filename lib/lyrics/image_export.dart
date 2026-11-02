@@ -1,3 +1,5 @@
+import '../animation/apple_spring.dart';
+import '../widgets/spring_buttons.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -45,7 +47,9 @@ Future<void> showLyricImageDialog(
       ),
     ),
     transitionBuilder: (_, animation, _, child) {
-      final eased = animation.drive(CurveTween(curve: Curves.easeOutCubic));
+      final eased = animation.drive(
+        CurveTween(curve: const AppleSpringCurve()),
+      );
       return FadeTransition(
         opacity: eased,
         child: SlideTransition(
@@ -176,7 +180,7 @@ class _LyricImageDialogState extends State<LyricImageDialog> {
       );
       if (mounted && saved) setState(() => _saved = true);
     } catch (_) {
-      if (mounted) setState(() => _error = '保存失败，请检查相册权限或稍后重试。');  // i18n:key
+      if (mounted) setState(() => _error = '保存失败，请检查相册权限或稍后重试。'); // i18n:key
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -184,8 +188,8 @@ class _LyricImageDialogState extends State<LyricImageDialog> {
 
   Widget _preview() => AnimatedSwitcher(
     duration: _motion,
-    switchInCurve: Curves.easeOutCubic,
-    switchOutCurve: Curves.easeInCubic,
+    switchInCurve: const AppleSpringCurve(),
+    switchOutCurve: const AppleSpringCurve(),
     transitionBuilder: (child, animation) => FadeTransition(
       opacity: animation,
       child: SlideTransition(
@@ -259,8 +263,8 @@ class _LyricImageDialogState extends State<LyricImageDialog> {
 
   Widget _status() => AnimatedSwitcher(
     duration: _motion,
-    switchInCurve: Curves.easeOutCubic,
-    switchOutCurve: Curves.easeInCubic,
+    switchInCurve: const AppleSpringCurve(),
+    switchOutCurve: const AppleSpringCurve(),
     transitionBuilder: (child, animation) => SizeTransition(
       sizeFactor: animation,
       alignment: Alignment.topCenter,
@@ -360,7 +364,7 @@ class _LyricImageDialogState extends State<LyricImageDialog> {
 
   Widget _footer() {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final back = TextButton(
+    final back = SpringTextButton(
       onPressed: _saving
           ? null
           : feedbackAction(context, () => Navigator.pop(context)),
@@ -535,8 +539,8 @@ class _SaveImageButtonState extends State<_SaveImageButton> {
         duration: MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
             : const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        child: FilledButton(
+        curve: const AppleSpringCurve(),
+        child: SpringFilledButton(
           onPressed: feedbackAction(context, widget.onPressed),
           style: FilledButton.styleFrom(
             shape: RoundedRectangleBorder(
@@ -556,8 +560,8 @@ class _SaveImageButtonState extends State<_SaveImageButton> {
             duration: MediaQuery.disableAnimationsOf(context)
                 ? Duration.zero
                 : const Duration(milliseconds: 180),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
+            switchInCurve: const AppleSpringCurve(),
+            switchOutCurve: const AppleSpringCurve(),
             child: Row(
               key: ValueKey((widget.saving, widget.saved)),
               mainAxisSize: MainAxisSize.min,

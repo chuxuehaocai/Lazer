@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/local/local_library.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/playback_queue_store.dart';
@@ -36,12 +36,12 @@ Future<AppState> _pumpSettings(
   addTearDown(state.dispose);
   await tester.pumpWidget(
     MaterialApp(
-      theme: buildLegacyTheme(brightness: Brightness.dark),
+      theme: buildAppleTheme(brightness: Brightness.dark),
       home: Scaffold(
         body: AnimatedBuilder(
           animation: state,
           builder: (BuildContext context, Widget? child) =>
-              LegacySettingsPage(state: state),
+              AppSettingsPage(state: state),
         ),
       ),
     ),

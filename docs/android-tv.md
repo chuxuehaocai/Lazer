@@ -92,26 +92,28 @@ The large-screen mode is its own composition, not the desktop shell stretched:
   recent row gains its play count, and the header shows the accumulated plays
   and listening time (`TrackPlayStat`). A guest never issues the request.
 
-The immersive player (正在播放) keeps its existing composition and controls. A
-track change dissolves the artwork (a 420 ms cross-fade) instead of sliding it.
+The immersive player (正在播放) uses the shared desktop composition and controls.
+Track changes dissolve the artwork with the slower desktop spring response.
 
 ## Motion
 
-Large-screen motion is deliberately non-linear — fast first, slow on arrival:
+Large-screen motion uses the same Apple-style springs as the other layouts:
 
-- **Page switches** cross-fade while the incoming page rises a few pixels over
-  320 ms, on a `Cubic(0.32, 0.72, 0, 1)` curve. The outgoing page is
+- **Page switches** cross-fade while the incoming page rises a few pixels,
+  using the retained switcher's shared spring response. The outgoing page is
   ticker-muted, and the incoming page's own tickers wait until the switch
   lands, so the transition is not competing with a dozen cover mosaics. A page
   that has no work to reveal cannot be "dropped" for being late.
-- **Track changes in the player** dissolve the cover over 420 ms with a
-  symmetric ease-in-out and a 1.2% scale settle, so one artwork melts into the
-  next rather than sliding across.
-- **The player slide** uses the same decelerating curve over 500 ms.
+- **Track changes in the player** dissolve the cover with `AppleSpring.smooth`
+  (500 ms perceived response). The outgoing visible composition stays above
+  the opaque incoming cover, preventing a dark dip during a rapid change.
+- **The player slide** uses `AppleSpring.smooth` and preserves its current
+  position and velocity when reversed. Gesture releases use the shared
+  responsive spring, and reduced motion removes decorative travel.
 
 ## Performance
 
-- Playback position ticks no longer rebuild the browse page: `LegacyShell`
+- Playback position ticks no longer rebuild the browse page: `AppShell`
   filters state reports through a structural signature (track, playing, queue,
   collections, play record, charts, surface) while a shelf page is visible. The
   transport and player own their own `AppState` listeners.
@@ -194,7 +196,7 @@ Other remote behaviour:
   pages, then returns a non-home destination to 现在就听; at the root it leaves
   the app.
 - **Seek rail** — inside the immersive player, left/right step the playhead by
-  2% (`LegacyThinSeekBar`); up/down leave the rail. The rail commits the value
+  2% (`AppThinSeekBar`); up/down leave the rail. The rail commits the value
   as it steps. The bottom dock deliberately has no progress rail.
 - **Search** — the magnifier chip opens the search page. Its `SearchBar` is a
   normal focus stop; Select enters text and raises the system IME.

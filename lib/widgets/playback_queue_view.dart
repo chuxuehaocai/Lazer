@@ -1,3 +1,4 @@
+import '../animation/apple_spring.dart';
 import 'package:flutter/material.dart';
 
 import '../data/models.dart';
@@ -341,8 +342,10 @@ class _PlayingBarsState extends State<_PlayingBars> {
           children: <Widget>[
             for (int i = 0; i < 3; i++)
               AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOut,
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : AppleSpring.responsive.duration,
+                curve: const AppleSpringCurve(),
                 width: 2.5,
                 height: heights[i],
                 margin: const EdgeInsets.only(right: 2.5),

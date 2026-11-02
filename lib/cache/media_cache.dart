@@ -159,7 +159,7 @@ class AudioCache {
     return null;
   }
 
-  /// Removes every rendition of one song, including the legacy cache key.
+  /// Removes every rendition of one song, including the compatibility cache key.
   Future<void> removeTrack(String trackId, {File? exceptFile}) async {
     for (final String key in <String>[
       trackId,

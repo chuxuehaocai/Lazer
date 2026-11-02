@@ -7,6 +7,8 @@
 /// go through the same [AppState] the rest of the app uses.
 library;
 
+import '../animation/apple_spring.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -18,9 +20,9 @@ import '../data/catalog_details.dart';
 import '../data/models.dart';
 import '../downloads/download_dialog.dart';
 import '../l10n/app_localizations.dart';
-import '../legacy/legacy_login.dart';
-import '../legacy/legacy_pages.dart';
-import '../legacy/legacy_home_pages.dart' show dailyRecommendationsPlaylist;
+import '../ui/login.dart';
+import '../ui/pages.dart';
+import '../ui/home_pages.dart' show dailyRecommendationsPlaylist;
 import '../local/local_music_page.dart';
 import '../state/app_state.dart';
 import '../state/detail_requests.dart';
@@ -318,7 +320,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
               covers: covers,
               large: true,
               onDaily: !_state.signedIn
-                  ? () => unawaited(showLegacyLoginDialog(context, _state))
+                  ? () => unawaited(showAppLoginDialog(context, _state))
                   : feed.quick.isEmpty && feed.daily.isEmpty
                   ? null
                   : () => widget.actions.onOpenPlaylist(
@@ -329,9 +331,9 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
                     ),
               onFm: _state.signedIn
                   ? () => _playStation(_state.catalog.personalFmTracks)
-                  : () => unawaited(showLegacyLoginDialog(context, _state)),
+                  : () => unawaited(showAppLoginDialog(context, _state)),
               onHeart: !_state.signedIn
-                  ? () => unawaited(showLegacyLoginDialog(context, _state))
+                  ? () => unawaited(showAppLoginDialog(context, _state))
                   : _state.collections.liked == null
                   ? null
                   : () => unawaited(_startHeartMode()),
@@ -780,7 +782,10 @@ class _RailButtonState extends State<_RailButton> {
         borderRadius: BorderRadius.circular(12),
         focusScale: 1.015,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
+          curve: const AppleSpringCurve(),
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : AppleSpring.responsive.duration,
           width: double.infinity,
           height: 46,
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1377,7 +1382,7 @@ class LargeScreenLikesPage extends StatelessWidget {
         action: LargeScreenPrimaryButton(
           label: '登录',
           icon: Icons.person_rounded,
-          onTap: () => unawaited(showLegacyLoginDialog(context, state)),
+          onTap: () => unawaited(showAppLoginDialog(context, state)),
         ),
       );
     }
@@ -2206,7 +2211,7 @@ class LargeScreenSettingsPage extends StatelessWidget {
   final AppState state;
   final VoidCallback onOpenLocalMusic;
 
-  /// Forwarded to [LegacySettingsPage]; the television UI shares the same
+  /// Forwarded to [AppSettingsPage]; the television UI shares the same
   /// picture picker so a big-screen install can change its backdrop too.
   final Future<String?> Function()? backgroundImagePicker;
 
@@ -2214,7 +2219,7 @@ class LargeScreenSettingsPage extends StatelessWidget {
   Widget build(BuildContext context) => LargeScreenReusedPage(
     maxWidth: 980,
     bottomInset: LargeScreenMetrics.floatingBarInset,
-    child: LegacySettingsPage(
+    child: AppSettingsPage(
       state: state,
       onOpenLocalMusic: onOpenLocalMusic,
       backgroundImagePicker: backgroundImagePicker,

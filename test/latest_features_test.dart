@@ -17,8 +17,8 @@ import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/l10n/app_language.dart';
 import 'package:lazer_nextgen/l10n/app_localizations.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/timed_lyric_text.dart';
 import 'package:lazer_nextgen/widgets/lyric_selection_toolbar.dart';
@@ -38,7 +38,10 @@ class _Catalog extends Catalog {
   @override
   Future<HomeFeed?> loadHome({int? userId}) async => null;
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => null;
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => null;
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics(
     lrc: '[00:00]First line\n[00:02]Second line\n[00:04]Third line',
@@ -55,7 +58,10 @@ const _delegates = <LocalizationsDelegate<dynamic>>[
 
 class _WordCatalog extends _Catalog {
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => 'fixture';
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => 'fixture';
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics(
     yrc: '[0,1000](0,500,0)最初(500,500,0)の行\n[1000,1500](1000,1500,0)次の行',
@@ -223,13 +229,13 @@ void main() {
       AnimatedBuilder(
         animation: state,
         builder: (context, _) => MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           locale: state.language.locale,
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: _delegates,
           localeListResolutionCallback: (locales, _) =>
               AppLocalizations.resolve(locales?.firstOrNull),
-          home: Scaffold(body: LegacySettingsPage(state: state)),
+          home: Scaffold(body: AppSettingsPage(state: state)),
         ),
       ),
     );
@@ -264,7 +270,7 @@ void main() {
       state.playQueue([_track]);
       await tester.pumpWidget(
         MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           home: Scaffold(body: LyricViewport(state: state)),
         ),
       );

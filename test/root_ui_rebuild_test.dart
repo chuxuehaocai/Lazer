@@ -59,8 +59,8 @@ void main() {
       expect(reports, 3, reason: 'leaf listeners still receive state changes');
       state.removeListener(observeState);
 
-      await state.setLegacyPalette(LegacyPaletteMode.custom);
-      await state.setLegacyAccent(const Color(0xFF3366CC));
+      await state.setAppPalette(AppPaletteMode.custom);
+      await state.setAppAccent(const Color(0xFF3366CC));
       await tester.pump();
       expect(
         tester

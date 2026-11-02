@@ -7,7 +7,7 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/downloads/download_dialog.dart';
 import 'package:lazer_nextgen/downloads/download_queue_sheet.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -53,7 +53,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         home: Builder(
           builder: (BuildContext context) => Scaffold(
             body: Center(
@@ -113,7 +113,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         home: Builder(
           builder: (BuildContext context) => Scaffold(
             body: Center(

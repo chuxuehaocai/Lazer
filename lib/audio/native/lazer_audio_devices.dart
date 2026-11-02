@@ -64,8 +64,7 @@ class LazerOutputDevice {
   final int? volumeQueryHresult;
 
   /// Whether Windows reports this endpoint as owning the console/multimedia role.
-  bool get isWindowsDefaultRole =>
-      (defaultRoleMask ?? 0) & 0x3 != 0;
+  bool get isWindowsDefaultRole => (defaultRoleMask ?? 0) & 0x3 != 0;
 
   /// Whether the endpoint advertises hardware volume control for the software slider.
   bool get hasHardwareVolume => (hardwareVolumeFlags ?? 0) & 0x1 != 0;
@@ -102,7 +101,11 @@ class LazerPcmFormatProbe {
   @override
   String toString() =>
       '$sampleRate Hz/${validBits}of$containerBits-bit/${channels}ch '
-      '${status == 0 ? 'supported' : status == 1 ? 'unsupported' : 'error'}';
+      '${status == 0
+          ? 'supported'
+          : status == 1
+          ? 'unsupported'
+          : 'error'}';
 }
 
 /// How this host exposes devices, or null when the engine has no catalog here.
@@ -287,11 +290,11 @@ List<LazerOutputDevice> _enumerateUtf8(
             token: lazerReadCString(token),
             identityKey: lazerReadCString(identity),
             displayName: lazerReadCString(name),
-            isDefault:
-                info.ref.flags & lazerAudioOutputDeviceFlagDefault != 0,
+            isDefault: info.ref.flags & lazerAudioOutputDeviceFlagDefault != 0,
             isActive: info.ref.flags & lazerAudioOutputDeviceFlagActive != 0,
             identityIsEphemeral:
-                info.ref.flags & lazerAudioOutputDeviceFlagIdentityEphemeral != 0,
+                info.ref.flags & lazerAudioOutputDeviceFlagIdentityEphemeral !=
+                0,
           ),
         );
       } else {
@@ -395,17 +398,8 @@ double? readEndpointVolume(LazerAudioApi api, String deviceToken) {
 }
 
 /// Writes a Windows endpoint's master-volume scalar; returns whether it stuck.
-bool writeEndpointVolume(
-  LazerAudioApi api,
-  String deviceToken,
-  double volume,
-) {
-  final int Function(
-    Pointer<Uint16>,
-    double,
-    Pointer<Uint32>,
-    Pointer<Int32>,
-  )?
+bool writeEndpointVolume(LazerAudioApi api, String deviceToken, double volume) {
+  final int Function(Pointer<Uint16>, double, Pointer<Uint32>, Pointer<Int32>)?
   set = api.endpointVolumeSet;
   if (set == null) return false;
   final Pointer<Uint32> flags = calloc<Uint32>();

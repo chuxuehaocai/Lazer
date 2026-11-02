@@ -12,7 +12,7 @@ const _song = GatewaySong(
   duration: Duration(seconds: 123),
 );
 
-class _Legacy extends NeteaseGateway {
+class _App extends NeteaseGateway {
   bool rejectLogin = false;
   bool closed = false;
   String? level;
@@ -247,10 +247,10 @@ class _Transport extends NeteaseTransport {
 }
 
 void main() {
-  late _Legacy legacy;
+  late _App legacy;
   late NeteaseMusicGateway gateway;
   setUp(() {
-    legacy = _Legacy();
+    legacy = _App();
     gateway = NeteaseMusicGateway(
       connectionId: 'netease-main',
       gateway: legacy,

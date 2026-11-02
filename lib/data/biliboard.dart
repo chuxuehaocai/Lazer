@@ -37,19 +37,18 @@ class BiliboardClient {
       const accents = <int>[0xFF3978F6, 0xFFFF4F86, 0xFF8B5CF6];
       // Boards are independent: walking them in sequence paid a fresh
       // handshake per board and turned one slow answer into a stalled shelf.
-      final List<MusicChart?> loaded = await Future.wait<MusicChart?>(
-        <Future<MusicChart?>>[
-          for (var index = 0; index < boards.length; index++)
-            if (boards[index] case final Map<String, dynamic> board)
-              _latestChart(
-                transport,
-                board,
-                accents[index % accents.length],
-              ).catchError((_) => null)
-            else
-              Future<MusicChart?>.value(),
-        ],
-      );
+      final List<MusicChart?> loaded =
+          await Future.wait<MusicChart?>(<Future<MusicChart?>>[
+            for (var index = 0; index < boards.length; index++)
+              if (boards[index] case final Map<String, dynamic> board)
+                _latestChart(
+                  transport,
+                  board,
+                  accents[index % accents.length],
+                ).catchError((_) => null)
+              else
+                Future<MusicChart?>.value(),
+          ]);
       return loaded.whereType<MusicChart>().toList();
     } finally {
       transport.close();
@@ -231,9 +230,9 @@ class BiliboardClient {
   }
 
   String _issueLabel(int year, int week) {
-    if (year > 0 && week > 0) return '$year · 第 $week 周';  // i18n:key
-    if (week > 0) return '第 $week 期';  // i18n:key
-    return '历史期数';  // i18n:key
+    if (year > 0 && week > 0) return '$year · 第 $week 周'; // i18n:key
+    if (week > 0) return '第 $week 期'; // i18n:key
+    return '历史期数'; // i18n:key
   }
 
   ChartEntry _entryFromJson(Map<String, dynamic> json) {
@@ -264,11 +263,11 @@ class BiliboardClient {
       final diff = (change['diff'] as num?)?.toInt();
       changeLabel = switch (kind) {
         'new' => 'NEW',
-        'up' => diff == null ? '上升' : '↑$diff',  // i18n:key
-        'down' => diff == null ? '下降' : '↓$diff',  // i18n:key
+        'up' => diff == null ? '上升' : '↑$diff', // i18n:key
+        'down' => diff == null ? '下降' : '↓$diff', // i18n:key
         'same' => '—',
-        'reentry' => '重返',  // i18n:key
-        'revote' => '重投',  // i18n:key
+        'reentry' => '重返', // i18n:key
+        'revote' => '重投', // i18n:key
         _ => null,
       };
     }
@@ -307,7 +306,9 @@ class BiliboardClient {
     }
     // The feed is UTF-8 but not every response advertises a charset, and the
     // package default would turn the board names into mojibake.
-    final value = jsonDecode(utf8.decode(response.bodyBytes, allowMalformed: true));
+    final value = jsonDecode(
+      utf8.decode(response.bodyBytes, allowMalformed: true),
+    );
     if (value is List) return <String, dynamic>{'items': value};
     if (value is Map<String, dynamic>) return value;
     throw const FormatException('Expected JSON data.');

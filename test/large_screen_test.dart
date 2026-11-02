@@ -9,10 +9,10 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/tv/large_screen_chrome.dart';
@@ -136,7 +136,7 @@ Widget _largeScreenApp(AppState state, {bool scaleInterface = false}) =>
     TvScope(
       active: true,
       child: MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         builder: (BuildContext context, Widget? child) => MediaQuery(
           data: MediaQuery.of(context).copyWith(disableAnimations: true),
           child: scaleInterface
@@ -146,7 +146,7 @@ Widget _largeScreenApp(AppState state, {bool scaleInterface = false}) =>
                 )
               : child!,
         ),
-        home: LegacyShell(state: state),
+        home: AppShell(state: state),
       ),
     );
 
@@ -217,7 +217,7 @@ void main() {
       expect(find.text('测试歌单'), findsWidgets);
       // The dock has no seek rail: transport controls sit on the centre line,
       // with the playing metadata on the left and the actions on the right.
-      expect(find.byType(LegacyThinSeekBar), findsNothing);
+      expect(find.byType(AppThinSeekBar), findsNothing);
       final Offset dockCentre = tester.getCenter(
         find.byType(LargeScreenTransport),
       );
@@ -359,7 +359,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField).first, '夜航');
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
       // The idle notice is still there: typing alone must not search. The
       // field's own editable text is not a result, so assert on the artist
       // that only the result row renders.
@@ -411,8 +411,8 @@ void main() {
         TvScope(
           active: true,
           child: MaterialApp(
-            theme: buildLegacyTheme(brightness: Brightness.dark),
-            home: LegacyShell(state: state),
+            theme: buildAppleTheme(brightness: Brightness.dark),
+            home: AppShell(state: state),
           ),
         ),
       );
@@ -428,7 +428,7 @@ void main() {
       expect(find.text('精选推荐'), findsOneWidget);
       expect(find.text('播放列表'), findsWidgets);
 
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
       expect(find.text('精选推荐'), findsNothing);
       expect(tester.takeException(), isNull);
     });
@@ -577,7 +577,7 @@ void main() {
         TvScope(
           active: true,
           child: MaterialApp(
-            theme: buildLegacyTheme(brightness: Brightness.dark),
+            theme: buildAppleTheme(brightness: Brightness.dark),
             home: Scaffold(
               body: LargeScreenLibraryPage(
                 state: state,
@@ -594,7 +594,7 @@ void main() {
         TvScope(
           active: true,
           child: MaterialApp(
-            theme: buildLegacyTheme(brightness: Brightness.dark),
+            theme: buildAppleTheme(brightness: Brightness.dark),
             home: Scaffold(
               body: LargeScreenCollectionPage(
                 state: state,

@@ -7,7 +7,7 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/playback_queue_view.dart';
@@ -47,12 +47,12 @@ Future<AppState> _pumpPlayer(
   state.playQueue(queue ?? <Track>[track]);
   await tester.pumpWidget(
     MaterialApp(
-      theme: buildLegacyTheme(brightness: Brightness.dark),
+      theme: buildAppleTheme(brightness: Brightness.dark),
       home: NowPlayingPage(state: state),
     ),
   );
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pumpAndSettle();
   return state;
 }
 
@@ -64,7 +64,7 @@ Finder _inSheet(Finder matching) =>
 Future<void> _openMore(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('now-playing-more')));
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -130,12 +130,12 @@ void main() {
     await _openMore(tester);
     await tester.tap(_inSheet(find.text('创建一起听')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsNothing);
     expect(find.text('登录后可以和朋友一起听歌'), findsOneWidget);
     await tester.tap(find.byTooltip('关闭'));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
     state.listenTogether
       ..active = true
       ..roomId = 'room-fixture';
@@ -178,7 +178,7 @@ void main() {
       await tester.ensureVisible(search);
       await tester.tap(search);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
 
       expect(calls, hasLength(1));
       expect(calls.single.method, 'openUrl');
@@ -229,7 +229,7 @@ void main() {
 
       state.next();
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
       expect(state.current, same(next));
       expect(_inSheet(find.text(_track.title)), findsNothing);
       expect(_inSheet(find.text(next.title)), findsOneWidget);
@@ -239,7 +239,7 @@ void main() {
       await tester.ensureVisible(search);
       await tester.tap(search);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
       expect(calls, hasLength(1));
       expect(calls.single.arguments, <String, Object>{
         'url': 'https://osu.ppy.sh/beatmapsets?q=Next+artist+Next+song',
@@ -290,7 +290,7 @@ void main() {
       await tester.ensureVisible(search);
       await tester.tap(search);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
 
       expect(calls, isEmpty);
       expect(find.byType(BottomSheet), findsOneWidget);
@@ -307,13 +307,13 @@ void main() {
     await _openMore(tester);
     await tester.tap(_inSheet(find.text('歌词')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('mobile-lyrics')), findsOneWidget);
 
     await _openMore(tester);
     await tester.tap(_inSheet(find.text('播放队列')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
     expect(find.byType(PlaybackQueueView), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

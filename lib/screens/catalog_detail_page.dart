@@ -1,3 +1,5 @@
+import '../animation/apple_spring.dart';
+import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -99,7 +101,9 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
     } catch (_) {
       if (mounted && generation == _generation) {
         setState(
-          () => _error = _isArtist ? '歌手资料加载失败，请重试。' : '专辑资料加载失败，请重试。',
+          () => _error = _isArtist
+              ? '歌手资料加载失败，请重试。' // i18n:key
+              : '专辑资料加载失败，请重试。', // i18n:key
         ); // i18n:key
       }
     } finally {
@@ -219,7 +223,7 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
         const SizedBox(height: 20),
         AnimatedBuilder(
           animation: widget.state,
-          builder: (context, _) => FilledButton.icon(
+          builder: (context, _) => SpringFilledButton.icon(
             style: FilledButton.styleFrom(
               shape: const RoundedRectangleBorder(),
               minimumSize: const Size(0, 48),
@@ -260,7 +264,10 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
           const SectionHeading('介绍'),
           const SizedBox(height: 12),
           AnimatedSize(
-            duration: const Duration(milliseconds: 240),
+            curve: const AppleSpringCurve(),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : AppleSpring.responsive.duration,
             alignment: Alignment.topLeft,
             child: description.isEmpty
                 ? TrText(
@@ -277,7 +284,7 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
                   ),
           ),
           if (description.length > 120)
-            TextButton(
+            SpringTextButton(
               onPressed: () => setState(() => _expanded = !_expanded),
               child: TrText(_expanded ? '收起介绍' : '展开介绍'),
             ),
@@ -293,7 +300,7 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
       children: [
         TrText(text, style: context.type.bodySmMuted),
         if (retry != null)
-          TextButton(onPressed: retry, child: const TrText('重试')),
+          SpringTextButton(onPressed: retry, child: const TrText('重试')),
       ],
     ),
   );
@@ -452,7 +459,7 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
                   if (_moreAlbums && !_albumsLoading && _albumsError == null)
                     SliverToBoxAdapter(
                       child: Center(
-                        child: TextButton(
+                        child: SpringTextButton(
                           onPressed: () => unawaited(_loadAlbums(_generation)),
                           child: const TrText('加载更多专辑'),
                         ),
@@ -511,7 +518,10 @@ class _DetailTabs extends SliverPersistentHeaderDelegate {
           for (final albums in [false, true])
             Expanded(
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
+                curve: const AppleSpringCurve(),
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : AppleSpring.responsive.duration,
                 decoration: BoxDecoration(
                   border: Border(
                     bottom: BorderSide(
@@ -522,7 +532,7 @@ class _DetailTabs extends SliverPersistentHeaderDelegate {
                     ),
                   ),
                 ),
-                child: TextButton(
+                child: SpringTextButton(
                   onPressed: () => onChanged(albums),
                   child: TrText(
                     albums ? '专辑' : '热门歌曲',

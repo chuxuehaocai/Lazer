@@ -6,10 +6,10 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/widgets/ui_scaling.dart';
@@ -213,7 +213,7 @@ void main() {
     double? auto;
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         home: UiScaling(
           state: state,
           child: Scaffold(
@@ -256,7 +256,7 @@ void main() {
     bool tappedCorner = false;
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         home: UiScaling(
           state: state,
           child: Scaffold(
@@ -318,17 +318,17 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         builder: (BuildContext context, Widget? child) =>
             UiScaling(state: state, child: child!),
-        home: LegacyShell(state: state),
+        home: AppShell(state: state),
       ),
     );
     await tester.pump(const Duration(milliseconds: 200));
 
     // The bar sits on the window's bottom edge, not on the edge of an
     // 80%-sized copy floating in the corner.
-    final Rect bar = tester.getRect(find.byType(LegacyPlayerBar));
+    final Rect bar = tester.getRect(find.byType(AppPlayerBar));
     expect(bar.left, closeTo(0, .5));
     expect(bar.width, closeTo(1280, .5));
     expect(bar.bottom, closeTo(720, .5));
@@ -347,7 +347,7 @@ void main() {
     BuildContext? probe;
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         home: UiScaling(
           state: state,
           child: Scaffold(
@@ -379,10 +379,10 @@ void main() {
       AnimatedBuilder(
         animation: state,
         builder: (BuildContext context, _) => MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           builder: (BuildContext context, Widget? child) =>
               UiScaling(state: state, child: child!),
-          home: Scaffold(body: LegacySettingsPage(state: state)),
+          home: Scaffold(body: AppSettingsPage(state: state)),
         ),
       ),
     );

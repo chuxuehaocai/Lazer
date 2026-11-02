@@ -109,8 +109,8 @@ class BackgroundImageStore {
         return;
       }
       if (stored != name) {
-        final File legacy = File(stored);
-        if (await legacy.exists()) await legacy.delete();
+        final File oldFile = File(stored);
+        if (await oldFile.exists()) await oldFile.delete();
       }
     } catch (_) {
       // A leftover copy is harmless; never fail the settings action over it.

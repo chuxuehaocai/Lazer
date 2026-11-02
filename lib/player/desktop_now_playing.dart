@@ -1,3 +1,4 @@
+import '../animation/apple_spring.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import '../widgets/catalog_links.dart';
@@ -172,8 +173,10 @@ class DesktopNowPlaying extends StatelessWidget {
                                               : const Duration(
                                                   milliseconds: 240,
                                                 ),
-                                          switchInCurve: Curves.easeOutCubic,
-                                          switchOutCurve: Curves.easeInCubic,
+                                          switchInCurve:
+                                              const AppleSpringCurve(),
+                                          switchOutCurve:
+                                              const AppleSpringCurve(),
                                           transitionBuilder:
                                               (child, animation) =>
                                                   FadeTransition(
@@ -361,8 +364,10 @@ class _PaneTab extends StatelessWidget {
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOut,
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : AppleSpring.responsive.duration,
+                curve: const AppleSpringCurve(),
                 padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
                   // The selected pane keeps a soft chip around its glyph, the
@@ -652,8 +657,8 @@ class _DesktopDock extends StatelessWidget {
       duration: MediaQuery.disableAnimationsOf(context)
           ? Duration.zero
           : const Duration(milliseconds: 360),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
+      switchInCurve: const AppleSpringCurve(),
+      switchOutCurve: const AppleSpringCurve(),
       transitionBuilder: (child, animation) => SizeTransition(
         axis: Axis.vertical,
         sizeFactor: animation,
@@ -676,7 +681,11 @@ class _DesktopDock extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 200),
+                          switchInCurve: const AppleSpringCurve(),
+                          switchOutCurve: const AppleSpringCurve(),
+                          duration: MediaQuery.disableAnimationsOf(context)
+                              ? Duration.zero
+                              : AppleSpring.responsive.duration,
                           transitionBuilder: (child, animation) =>
                               SizeTransition(
                                 sizeFactor: animation,
@@ -820,6 +829,9 @@ class _DesktopDock extends StatelessWidget {
                                       color: context.colors.onPlayer,
                                       onPressed: state.togglePlay,
                                       icon: AnimatedSwitcher(
+                                        switchInCurve: const AppleSpringCurve(),
+                                        switchOutCurve:
+                                            const AppleSpringCurve(),
                                         duration: const Duration(
                                           milliseconds: 180,
                                         ),

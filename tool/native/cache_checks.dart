@@ -100,9 +100,7 @@ Future<List<String>> verifyAudioStreamCache(Directory root) async {
       }
       final int start = range == null
           ? 0
-          : int.parse(
-              RegExp(r'bytes=(\d+)-').firstMatch(range)!.group(1)!,
-            );
+          : int.parse(RegExp(r'bytes=(\d+)-').firstMatch(range)!.group(1)!);
       request.response.statusCode = range == null
           ? HttpStatus.ok
           : HttpStatus.partialContent;

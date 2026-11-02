@@ -5,10 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
-import 'package:lazer_nextgen/legacy/legacy_widgets.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
+import 'package:lazer_nextgen/ui/widgets.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/cover_transition.dart';
 import 'package:lazer_nextgen/widgets/retained_content_switcher.dart';
@@ -202,6 +202,7 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 16));
   await tester.pump(const Duration(milliseconds: 440));
+  await tester.pumpAndSettle();
   await tester.pump();
 }
 
@@ -223,16 +224,20 @@ void main() {
     state.back();
     await tester.pump();
     await tester.pump();
-    expect(tester.getRect(find.byKey(_returnKey)), detailRect);
+    expect(
+      (tester.getRect(find.byKey(_returnKey)).topLeft - detailRect.topLeft)
+          .distance,
+      lessThan(.001),
+    );
     final hiddenSource = find.descendant(
       of: find.byKey(state.source),
       matching: find.byType(Opacity),
     );
     expect(tester.widget<Opacity>(hiddenSource).opacity, 0);
-    await tester.pump(const Duration(milliseconds: 84));
+    await tester.pump(const Duration(milliseconds: 126));
     final early = tester.getRect(find.byKey(_returnKey));
     expect(early.left, lessThan((detailRect.left + sourceRect.left) / 2));
-    await tester.pump(const Duration(milliseconds: 340));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(find.byKey(_returnKey), findsNothing);
     expect(tester.widget<Opacity>(hiddenSource).opacity, 1);
@@ -255,14 +260,39 @@ void main() {
     state.back();
     await tester.pump();
     await tester.pump();
-    expect(tester.getRect(find.byKey(_returnKey)), visibleRect);
+    expect(
+      (tester.getRect(find.byKey(_returnKey)).topLeft - visibleRect.topLeft)
+          .distance,
+      lessThan(.001),
+    );
     expect(find.byKey(_forwardKey), findsNothing);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(
+      tester.getRect(find.byKey(_returnKey)).left,
+      greaterThan(visibleRect.left),
+      reason: 'Back inherits the outbound velocity before turning around',
+    );
     await tester.pump(const Duration(milliseconds: 80));
+    final beforeReopen = tester.getRect(find.byKey(_returnKey));
     state.enter();
     await tester.pump();
     await tester.pump();
+    // The last returning layer stays until the replacement has painted.
+    // Flush that layer's deferred unmount without advancing either spring.
+    await tester.pump();
     expect(find.byKey(_returnKey), findsNothing);
     expect(find.byKey(_forwardKey), findsOneWidget);
+    expect(
+      (tester.getRect(find.byKey(_forwardKey)).topLeft - beforeReopen.topLeft)
+          .distance,
+      lessThan(.001),
+    );
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(
+      tester.getRect(find.byKey(_forwardKey)).left,
+      lessThan(beforeReopen.left),
+      reason: 'reopen inherits the returning velocity',
+    );
     await _settle(tester);
     expect(find.byKey(_forwardKey), findsNothing);
     expect(find.byType(CoverTransitionTarget), findsOneWidget);
@@ -294,7 +324,7 @@ void main() {
       expect(counts.builds, takeoffBuilds);
       expect(counts.layouts, takeoffLayouts);
     }
-    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(flight, findsNothing);
     expect(tester.takeException(), isNull);
@@ -338,11 +368,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     state.moveSource(const Offset(210, 100));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 80));
+    await tester.pump(const Duration(milliseconds: 500));
     final destination = tester.getRect(find.byKey(state.source));
     final flying = tester.getRect(find.byKey(_returnKey));
     expect((flying.topLeft - destination.topLeft).distance, lessThan(2));
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(find.byKey(_returnKey), findsNothing);
     expect(tester.takeException(), isNull);
@@ -397,20 +427,20 @@ void main() {
     addTearDown(state.dispose);
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
-        home: LegacyShell(state: state),
+        theme: buildAppleTheme(),
+        home: AppShell(state: state),
       ),
     );
     await tester.pump();
-    final card = find.byType(LegacyPlaylistCard).first;
+    final card = find.byType(AppPlaylistCard).first;
     await tester.ensureVisible(card);
     await _settle(tester);
-    final homeState = tester.state(find.byType(LegacyHomePage));
+    final homeState = tester.state(find.byType(AppHomePage));
     final sourceRect = tester.getRect(card);
     final scroll = tester.state<ScrollableState>(
       find
           .descendant(
-            of: find.byType(LegacyHomePage),
+            of: find.byType(AppHomePage),
             matching: find.byType(Scrollable),
           )
           .first,
@@ -418,17 +448,17 @@ void main() {
     final savedOffset = scroll.position.pixels;
     await tester.tap(card);
     await _settle(tester);
-    expect(find.byType(LegacyPlaylistPage), findsOneWidget);
+    expect(find.byType(AppPlaylistPage), findsOneWidget);
     expect(catalog.requests, 1);
     await tester.binding.handlePopRoute();
     await tester.pump();
     await tester.pump();
     expect(find.byKey(_returnKey), findsOneWidget);
     await _settle(tester);
-    expect(tester.state(find.byType(LegacyHomePage)), same(homeState));
+    expect(tester.state(find.byType(AppHomePage)), same(homeState));
     expect(scroll.position.pixels, savedOffset);
     expect(tester.getRect(card), sourceRect);
-    expect(find.byType(LegacyPlaylistPage), findsNothing);
+    expect(find.byType(AppPlaylistPage), findsNothing);
     expect(find.byKey(_returnKey), findsNothing);
     // The toolbar uses the same return path as system/remote Back.
     await tester.tap(card);
@@ -438,7 +468,7 @@ void main() {
     await tester.pump();
     expect(find.byKey(_returnKey), findsOneWidget);
     await _settle(tester);
-    expect(tester.state(find.byType(LegacyHomePage)), same(homeState));
+    expect(tester.state(find.byType(AppHomePage)), same(homeState));
     expect(scroll.position.pixels, savedOffset);
     expect(tester.takeException(), isNull);
   });

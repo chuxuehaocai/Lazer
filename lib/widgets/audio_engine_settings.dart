@@ -1,3 +1,4 @@
+import 'spring_buttons.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import '../audio/native/imported_engine.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import 'apple_ui.dart';
+import 'settings_choice.dart';
 import 'settings_row.dart';
 
 class AudioEngineSettings extends StatefulWidget {
@@ -45,15 +47,13 @@ class _AudioEngineSettingsState extends State<AudioEngineSettings> {
     margin: const EdgeInsets.only(bottom: SettingsSpacing.groupGap),
     child: Column(
       children: [
-        AppleListTile(
-          padding: SettingsSpacing.rowPadding,
-          minHeight: SettingsSpacing.rowMinHeight,
-          title: context.tr('音频引擎'),
-          subtitle: context.tr('切换引擎或导入后，下次启动应用时生效'),
-          trailing: DropdownButton<bool>(
+        SettingsRow(
+          label: '音频引擎', // i18n:key
+          subtitle: '切换引擎或导入后，下次启动应用时生效', // i18n:key
+          expandControl: true,
+          trailing: SettingsChoice<bool>(
             key: const ValueKey('audio-engine-choice'),
             value: widget.state.hifiSettings.preferNativeEngine,
-            underline: const SizedBox.shrink(),
             items: const [
               DropdownMenuItem(value: true, child: TrText('Audio Engine')),
               DropdownMenuItem(value: false, child: TrText('系统音频引擎')),
@@ -80,7 +80,7 @@ class _AudioEngineSettingsState extends State<AudioEngineSettings> {
                 ? '使用应用内置引擎，可导入当前平台的引擎和依赖库'
                 : '已选择导入的引擎',
           ),
-          trailing: TextButton(
+          trailing: SpringTextButton(
             key: const ValueKey('import-audio-engine'),
             onPressed: _importing ? null : _import,
             child: TrText(_importing ? '导入中' : '选择文件'),

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../data/models.dart';
+import '../l10n/app_localizations.dart';
 import '../local/local_music_import.dart';
 import '../local/local_music_page.dart' show runLocalImport;
 import '../state/app_state.dart';
@@ -26,6 +27,7 @@ class _WatchShellState extends State<WatchShell> {
   int _tab = 0;
   List<Track>? _openedTracks;
   String _title = '';
+  bool _titleIsData = false;
   final TextEditingController _query = TextEditingController();
   final TextEditingController _phone = TextEditingController();
   final TextEditingController _captcha = TextEditingController();
@@ -73,10 +75,11 @@ class _WatchShellState extends State<WatchShell> {
     }
   }
 
-  void _openTracks(
+  void _openWatchTracks(
     String title,
     List<Track> tracks, {
     bool fromRequest = false,
+    bool titleIsData = false,
   }) => setState(() {
     if (!fromRequest) {
       _request++;
@@ -85,6 +88,7 @@ class _WatchShellState extends State<WatchShell> {
     }
     _openedTracks = tracks;
     _title = title;
+    _titleIsData = titleIsData;
   });
 
   Future<void> _search(String query) async {
@@ -98,9 +102,11 @@ class _WatchShellState extends State<WatchShell> {
     try {
       final result = await state.search(query.trim());
       if (!mounted || request != _request) return;
-      _openTracks('搜索结果', result.tracks, fromRequest: true);
+      _openWatchTracks('搜索结果', result.tracks, fromRequest: true);
     } catch (_) {
-      if (mounted && request == _request) setState(() => _error = '搜索失败，请重试');
+      if (mounted && request == _request) {
+        setState(() => _error = '搜索失败，请重试'); // i18n:key
+      }
     } finally {
       if (mounted && request == _request) setState(() => _loading = false);
     }
@@ -115,9 +121,16 @@ class _WatchShellState extends State<WatchShell> {
     try {
       final tracks = await state.catalog.playlistTracks(playlist.id);
       if (!mounted || request != _request) return;
-      _openTracks(playlist.name, tracks, fromRequest: true);
+      _openWatchTracks(
+        playlist.name,
+        tracks,
+        fromRequest: true,
+        titleIsData: true,
+      );
     } catch (_) {
-      if (mounted && request == _request) setState(() => _error = '歌单加载失败，请重试');
+      if (mounted && request == _request) {
+        setState(() => _error = '歌单加载失败，请重试'); // i18n:key
+      }
     } finally {
       if (mounted && request == _request) setState(() => _loading = false);
     }
@@ -134,7 +147,7 @@ class _WatchShellState extends State<WatchShell> {
     if (!mounted || request != _request) return;
     setState(() {
       _loading = false;
-      _accountMessage = result.ok ? '验证码已发送' : result.error;
+      _accountMessage = result.ok ? '验证码已发送' : result.error; // i18n:key
       if (result.ok) _smsSeconds = 60;
     });
     if (result.ok) {
@@ -160,7 +173,7 @@ class _WatchShellState extends State<WatchShell> {
     if (!mounted || request != _request) return;
     setState(() {
       _loading = false;
-      _accountMessage = result.ok ? '登录成功' : result.error;
+      _accountMessage = result.ok ? '登录成功' : result.error; // i18n:key
       if (result.ok) _captcha.clear();
     });
   }
@@ -197,50 +210,60 @@ class _WatchShellState extends State<WatchShell> {
   Widget _content(Size size) {
     if (_openedTracks case final tracks?) {
       final showLyric = _title == '歌词与状态' && state.lyrics.isNotEmpty;
-      return _page(size, _title, tracks.length + (showLyric ? 1 : 0), (
-        context,
-        index,
-      ) {
-        if (showLyric && index == 0) {
-          return ListenableBuilder(
-            listenable: state.ticks,
-            builder: (context, _) =>
-                _message(state.currentLyricLine?.text ?? '音乐正在继续'),
+      return _watchPage(
+        size,
+        _title,
+        tracks.length + (showLyric ? 1 : 0),
+        (context, index) {
+          if (showLyric && index == 0) {
+            return ListenableBuilder(
+              listenable: state.ticks,
+              builder: (context, _) {
+                final line = state.currentLyricLine;
+                return line == null
+                    ? _watchMessage('音乐正在继续')
+                    : _watchMessage(line.text, isData: true);
+              },
+            );
+          }
+          final trackIndex = index - (showLyric ? 1 : 0);
+          final track = tracks[trackIndex];
+          return _watchEntry(
+            track.title,
+            () {
+              state.playQueue(tracks, startIndex: trackIndex);
+              _navigate(0);
+            },
+            subtitle: track.artist,
+            titleIsData: true,
+            subtitleIsData: true,
+            icon: state.current?.id == track.id
+                ? Icons.equalizer_rounded
+                : Icons.music_note_rounded,
+            selected: state.current?.id == track.id,
+            key: ValueKey('watch-track-${track.id}'),
           );
-        }
-        final trackIndex = index - (showLyric ? 1 : 0);
-        final track = tracks[trackIndex];
-        return _entry(
-          track.title,
-          () {
-            state.playQueue(tracks, startIndex: trackIndex);
-            _navigate(0);
-          },
-          subtitle: track.artist,
-          icon: state.current?.id == track.id
-              ? Icons.equalizer_rounded
-              : Icons.music_note_rounded,
-          selected: state.current?.id == track.id,
-          key: ValueKey('watch-track-${track.id}'),
-        );
-      }, empty: '暂无歌曲');
+        },
+        empty: '暂无歌曲',
+        titleIsData: _titleIsData,
+      );
     }
     if (_tab == 1) return _library(size);
     if (_tab == 2) return _searchPage(size);
     if (_tab == 3) return _settings(size);
     if (state.current == null) {
-      return _page(
+      return _watchPage(
         size,
         'Lazer',
         2,
         (context, index) => index == 0
-            ? _entry(
+            ? _watchEntry(
                 '选择音乐',
                 () => _navigate(1),
                 subtitle: '从曲库开始播放',
                 icon: Icons.library_music_rounded,
               )
-            : _entry(
+            : _watchEntry(
                 '设置',
                 () => _navigate(3),
                 subtitle: '账号与音量',
@@ -254,12 +277,13 @@ class _WatchShellState extends State<WatchShell> {
     return widget.round ? _roundPlayer(size) : _squarePlayer(size);
   }
 
-  Widget _page(
+  Widget _watchPage(
     Size size,
     String title,
     int count,
     IndexedWidgetBuilder builder, {
     String? empty,
+    bool titleIsData = false,
   }) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final top = keyboard > 0
@@ -277,7 +301,7 @@ class _WatchShellState extends State<WatchShell> {
         (_title == '歌词与状态' && _openedTracks != null
             ? state.playbackError
             : null) ??
-        (_loading ? '正在加载…' : null);
+        (_loading ? '正在加载…' : null); // i18n:key
     final extra = status == null ? 0 : 1;
     final emptyCount = count == 0 && empty != null ? 1 : 0;
     return Stack(
@@ -293,11 +317,11 @@ class _WatchShellState extends State<WatchShell> {
             height: 32,
             child: Row(
               children: [
-                _button('返回', Icons.arrow_back_rounded, _back, side: 32),
+                _watchButton('返回', Icons.arrow_back_rounded, _back, side: 32),
                 const SizedBox(width: 3),
                 Expanded(
                   child: Text(
-                    title,
+                    titleIsData ? title : context.tr(title),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -327,8 +351,8 @@ class _WatchShellState extends State<WatchShell> {
             ),
             itemCount: count + extra + emptyCount,
             itemBuilder: (context, index) {
-              if (index < extra) return _message(status!);
-              if (emptyCount != 0) return _message(empty!);
+              if (index < extra) return _watchMessage(status!);
+              if (emptyCount != 0) return _watchMessage(empty!);
               return builder(context, index - extra);
             },
           ),
@@ -339,16 +363,16 @@ class _WatchShellState extends State<WatchShell> {
 
   Widget _artwork(Track track, double side) => RepaintBoundary(
     child: Tooltip(
-      message: '播放队列',
+      message: context.tr('播放队列'),
       child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(widget.round ? side / 2 : 12),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => _openTracks('播放队列', state.queue),
+          onTap: () => _openWatchTracks('播放队列', state.queue),
           child: Semantics(
             button: true,
-            label: '播放队列',
+            label: context.tr('播放队列'),
             child: SizedBox.square(
               dimension: side,
               child: PlateArt(
@@ -393,7 +417,7 @@ class _WatchShellState extends State<WatchShell> {
           size.width * .25,
           size.height * .26,
           navSide,
-          _button(
+          _watchButton(
             '音乐',
             Icons.library_music_outlined,
             () => _navigate(1),
@@ -404,7 +428,12 @@ class _WatchShellState extends State<WatchShell> {
           size.width * .75,
           size.height * .26,
           navSide,
-          _button('设置', Icons.tune_rounded, () => _navigate(3), side: navSide),
+          _watchButton(
+            '设置',
+            Icons.tune_rounded,
+            () => _navigate(3),
+            side: navSide,
+          ),
         ),
         at(
           size.width / 2,
@@ -421,7 +450,9 @@ class _WatchShellState extends State<WatchShell> {
           size.height * .535,
           size.height * .085,
           _trackText(
-            state.playbackError == null ? track.artist : '播放异常 · 点击歌名',
+            state.playbackError == null
+                ? track.artist
+                : context.tr('播放异常 · 点击歌名'),
             centered: true,
           ),
         ),
@@ -434,7 +465,7 @@ class _WatchShellState extends State<WatchShell> {
           size.width * .28,
           size.height * .78,
           edge * .17,
-          _button(
+          _watchButton(
             '上一首',
             Icons.skip_previous_rounded,
             state.previous,
@@ -451,7 +482,12 @@ class _WatchShellState extends State<WatchShell> {
           size.width * .72,
           size.height * .78,
           edge * .17,
-          _button('下一首', Icons.skip_next_rounded, state.next, side: edge * .17),
+          _watchButton(
+            '下一首',
+            Icons.skip_next_rounded,
+            state.next,
+            side: edge * .17,
+          ),
         ),
       ],
     );
@@ -476,7 +512,7 @@ class _WatchShellState extends State<WatchShell> {
               children: [
                 Expanded(
                   child: Text(
-                    '正在播放',
+                    context.tr('正在播放'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -485,19 +521,24 @@ class _WatchShellState extends State<WatchShell> {
                     ),
                   ),
                 ),
-                _button(
+                _watchButton(
                   '音乐',
                   Icons.library_music_outlined,
                   () => _navigate(1),
                   side: 30,
                 ),
-                _button(
+                _watchButton(
                   '搜索',
                   Icons.search_rounded,
                   () => _navigate(2),
                   side: 30,
                 ),
-                _button('设置', Icons.tune_rounded, () => _navigate(3), side: 30),
+                _watchButton(
+                  '设置',
+                  Icons.tune_rounded,
+                  () => _navigate(3),
+                  side: 30,
+                ),
               ],
             ),
           ),
@@ -523,7 +564,7 @@ class _WatchShellState extends State<WatchShell> {
                       _trackText(
                         state.playbackError == null
                             ? track.artist
-                            : '播放异常 · 点击歌名',
+                            : context.tr('播放异常 · 点击歌名'),
                       ),
                     ],
                   ),
@@ -546,14 +587,14 @@ class _WatchShellState extends State<WatchShell> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _button(
+                _watchButton(
                   '上一首',
                   Icons.skip_previous_rounded,
                   state.previous,
                   side: controlSide * .8,
                 ),
                 _playButton(controlSide),
-                _button(
+                _watchButton(
                   '下一首',
                   Icons.skip_next_rounded,
                   state.next,
@@ -569,7 +610,7 @@ class _WatchShellState extends State<WatchShell> {
 
   Widget _largeTextPlayer(Size size) {
     final track = state.current!;
-    return _page(
+    return _watchPage(
       size,
       '正在播放',
       6,
@@ -585,28 +626,28 @@ class _WatchShellState extends State<WatchShell> {
         2 => Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            _button(
+            _watchButton(
               '上一首',
               Icons.skip_previous_rounded,
               state.previous,
               side: 32,
             ),
             _playButton(42),
-            _button('下一首', Icons.skip_next_rounded, state.next, side: 32),
+            _watchButton('下一首', Icons.skip_next_rounded, state.next, side: 32),
           ],
         ),
         3 => _WatchProgress(state: state),
-        4 => _entry(
+        4 => _watchEntry(
           '音乐',
           () => _navigate(1),
           icon: Icons.library_music_outlined,
         ),
-        _ => _entry('设置', () => _navigate(3), icon: Icons.tune_rounded),
+        _ => _watchEntry('设置', () => _navigate(3), icon: Icons.tune_rounded),
       },
     );
   }
 
-  Widget _playButton(double side) => _button(
+  Widget _playButton(double side) => _watchButton(
     state.playing ? '暂停' : '播放',
     state.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
     state.togglePlay,
@@ -635,19 +676,19 @@ class _WatchShellState extends State<WatchShell> {
     return !title
         ? child
         : Tooltip(
-            message: '歌词与状态',
+            message: context.tr('歌词与状态'),
             child: Semantics(
               button: true,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () => _openTracks('歌词与状态', state.queue),
+                onTap: () => _openWatchTracks('歌词与状态', state.queue),
                 child: child,
               ),
             ),
           );
   }
 
-  Widget _button(
+  Widget _watchButton(
     String label,
     IconData icon,
     VoidCallback onPressed, {
@@ -658,7 +699,7 @@ class _WatchShellState extends State<WatchShell> {
     return SizedBox.square(
       dimension: side,
       child: IconButton(
-        tooltip: label,
+        tooltip: context.tr(label),
         onPressed: onPressed,
         padding: EdgeInsets.zero,
         constraints: BoxConstraints.tightFor(width: side, height: side),
@@ -690,55 +731,59 @@ class _WatchShellState extends State<WatchShell> {
       ...state.collections.subscribed,
     ];
     final basic = <(String, String, IconData, VoidCallback)>[
-      ('搜索音乐', '歌曲 / 歌手', Icons.search_rounded, () => _navigate(2)),
+      ('搜索音乐', '歌曲 / 歌手', Icons.search_rounded, () => _navigate(2)), // i18n:key
       (
-        '本地音乐 · ${local.length}',
-        '下载与缓存',
+        '本地音乐 · ${local.length}', // i18n:key
+        '下载与缓存', // i18n:key
         Icons.offline_pin_outlined,
-        () => _openTracks('本地音乐', local),
+        () => _openWatchTracks('本地音乐', local),
       ),
       (
-        '最近播放',
-        '再听一遍',
+        '最近播放', // i18n:key
+        '再听一遍', // i18n:key
         Icons.history_rounded,
-        () => _openTracks('最近播放', state.recentTracks),
+        () => _openWatchTracks('最近播放', state.recentTracks),
       ),
       if (feed != null)
         (
-          '每日推荐',
-          '${feed.daily.length} 首歌曲',
+          '每日推荐', // i18n:key
+          '${feed.daily.length} 首歌曲', // i18n:key
           Icons.auto_awesome_outlined,
-          () => _openTracks('每日推荐', feed.daily),
+          () => _openWatchTracks('每日推荐', feed.daily),
         ),
     ];
-    return _page(size, '音乐', basic.length + playlists.length, (context, index) {
+    return _watchPage(size, '音乐', basic.length + playlists.length, (
+      context,
+      index,
+    ) {
       if (index < basic.length) {
         final (title, subtitle, icon, action) = basic[index];
-        return _entry(title, action, subtitle: subtitle, icon: icon);
+        return _watchEntry(title, action, subtitle: subtitle, icon: icon);
       }
       final playlist = playlists[index - basic.length];
-      return _entry(
+      return _watchEntry(
         playlist.name,
         () => _openPlaylist(playlist),
         subtitle: '${playlist.trackCount} 首歌曲',
+        titleIsData: true,
         icon: Icons.queue_music_rounded,
       );
     });
   }
 
-  Widget _searchPage(Size size) => _page(
+  Widget _searchPage(Size size) => _watchPage(
     size,
     '搜索',
     2,
     (context, index) => index == 0
-        ? _input(
+        ? _watchInput(
             _query,
             hint: '歌曲 / 歌手',
             action: TextInputAction.search,
             onSubmitted: _search,
             key: const ValueKey('watch-search-query'),
           )
-        : _entry(
+        : _watchEntry(
             '搜索',
             () => _search(_query.text),
             subtitle: '在音乐库中查找',
@@ -749,19 +794,19 @@ class _WatchShellState extends State<WatchShell> {
   Widget _settings(Size size) {
     final rows = <Widget Function()>[
       if (!state.signedIn) ...[
-        () => _input(
+        () => _watchInput(
           _phone,
           hint: '手机号',
           type: TextInputType.phone,
           key: const ValueKey('watch-login-phone'),
         ),
-        () => _entry(
+        () => _watchEntry(
           _smsSeconds > 0 ? '$_smsSeconds 秒后重试' : '发送验证码',
           _sendCode,
           icon: Icons.sms_outlined,
           enabled: !_loading && _smsSeconds == 0,
         ),
-        () => _input(
+        () => _watchInput(
           _captcha,
           hint: '验证码',
           type: TextInputType.number,
@@ -769,22 +814,22 @@ class _WatchShellState extends State<WatchShell> {
           onSubmitted: (_) => _signIn(),
           key: const ValueKey('watch-login-captcha'),
         ),
-        () => _entry(
+        () => _watchEntry(
           '登录',
           _signIn,
           icon: Icons.login_rounded,
           enabled: !_loading,
         ),
       ] else ...[
-        () => _message(state.user.name),
-        () => _entry(
+        () => _watchMessage(state.user.name, isData: true),
+        () => _watchEntry(
           '退出登录',
           () => unawaited(state.signOut()),
           icon: Icons.logout_rounded,
         ),
       ],
-      if (_accountMessage != null) () => _message(_accountMessage!),
-      () => _entry(
+      if (_accountMessage != null) () => _watchMessage(_accountMessage!),
+      () => _watchEntry(
         '导入本地歌曲',
         () => unawaited(
           runLocalImport(context, state, const LocalMusicImporter()),
@@ -794,7 +839,7 @@ class _WatchShellState extends State<WatchShell> {
       () => Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('音量', style: TextStyle(fontSize: 11)),
+          const TrText('音量', style: TextStyle(fontSize: 11)),
           SizedBox(
             height: 28,
             child: _sliderTheme(
@@ -807,7 +852,7 @@ class _WatchShellState extends State<WatchShell> {
           ),
         ],
       ),
-      () => _entry(
+      () => _watchEntry(
         state.themeMode == ThemeMode.dark ? '浅色外观' : '深色外观',
         () => unawaited(
           state.setThemeMode(
@@ -818,9 +863,9 @@ class _WatchShellState extends State<WatchShell> {
         ),
         icon: Icons.contrast_rounded,
       ),
-      () => _message('手表默认使用静态背景'),
+      () => _watchMessage('手表默认使用静态背景'),
     ];
-    return _page(
+    return _watchPage(
       size,
       state.signedIn ? '设置' : '账号与设置',
       rows.length,
@@ -828,7 +873,7 @@ class _WatchShellState extends State<WatchShell> {
     );
   }
 
-  Widget _input(
+  Widget _watchInput(
     TextEditingController controller, {
     required String hint,
     TextInputType? type,
@@ -844,17 +889,17 @@ class _WatchShellState extends State<WatchShell> {
     style: const TextStyle(fontSize: 13),
     scrollPadding: const EdgeInsets.all(28),
     decoration: InputDecoration(
-      hintText: hint,
-      labelText: hint,
+      hintText: context.tr(hint),
+      labelText: context.tr(hint),
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
     ),
   );
 
-  Widget _message(String text) => Center(
+  Widget _watchMessage(String text, {bool isData = false}) => Center(
     child: Text(
-      text,
+      isData ? text : context.tr(text),
       textAlign: TextAlign.center,
       maxLines: 3,
       overflow: TextOverflow.ellipsis,
@@ -862,13 +907,15 @@ class _WatchShellState extends State<WatchShell> {
     ),
   );
 
-  Widget _entry(
+  Widget _watchEntry(
     String title,
     VoidCallback onTap, {
     String? subtitle,
     IconData icon = Icons.chevron_right_rounded,
     bool selected = false,
     bool enabled = true,
+    bool titleIsData = false,
+    bool subtitleIsData = false,
     Key? key,
   }) {
     final scheme = Theme.of(context).colorScheme;
@@ -895,7 +942,7 @@ class _WatchShellState extends State<WatchShell> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      title,
+                      titleIsData ? title : context.tr(title),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -905,7 +952,7 @@ class _WatchShellState extends State<WatchShell> {
                     ),
                     if (subtitle != null)
                       Text(
-                        subtitle,
+                        subtitleIsData ? subtitle : context.tr(subtitle),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

@@ -1,4 +1,4 @@
-import 'legacy_models.dart';
+import 'music_models_compat.dart';
 import 'music_gateway.dart';
 import 'netease_gateway.dart';
 
@@ -6,14 +6,14 @@ import 'netease_gateway.dart';
 /// envelopes or integer identifiers through the multi-platform boundary.
 class NeteaseMusicGateway extends MusicGateway {
   NeteaseMusicGateway({required this.connectionId, NeteaseGateway? gateway})
-    : legacy = gateway ?? NeteaseGateway(),
+    : api = gateway ?? NeteaseGateway(),
       _ownsGateway = gateway == null {
     if (connectionId.trim().isEmpty) {
       throw ArgumentError('Connection ID is required.');
     }
   }
 
-  final NeteaseGateway legacy;
+  final NeteaseGateway api;
   final bool _ownsGateway;
   @override
   final String connectionId;
@@ -48,28 +48,28 @@ class NeteaseMusicGateway extends MusicGateway {
   }
 
   Future<MusicUser?> loginWithCookie(String cookie) async {
-    final status = await legacy.loginWithCookie(cookie);
-    // The legacy gateway rolls back failed credentials; preserve the user too.
+    final status = await api.loginWithCookie(cookie);
+    // The gateway rolls back failed credentials; preserve the user too.
     if (!status.signedIn) return null;
     return _adopt(status);
   }
 
-  /// QR/SMS authentication may use [legacy], then call this to adopt its user.
+  /// QR/SMS authentication may use [api], then call this to adopt its user.
   @override
-  Future<MusicUser?> checkSession() async => _adopt(await legacy.loginStatus());
+  Future<MusicUser?> checkSession() async => _adopt(await api.loginStatus());
 
   @override
   void clearSession() {
     _user = null;
-    legacy.clearSession();
+    api.clearSession();
   }
 
   @override
   void close() {
     _user = null;
     if (_ownsGateway) {
-      legacy.clearSession();
-      legacy.close();
+      api.clearSession();
+      api.close();
     }
   }
 
@@ -162,7 +162,7 @@ class NeteaseMusicGateway extends MusicGateway {
     if (query.trim().isEmpty) throw ArgumentError('Search query is required.');
     final results = await Future.wait([
       for (final type in GatewaySearchType.values)
-        legacy.searchResultPage(query, type, limit: limit + 1, offset: offset),
+        api.searchResultPage(query, type, limit: limit + 1, offset: offset),
     ]);
     return MusicSearchResult(
       songs: _page(
@@ -199,7 +199,7 @@ class NeteaseMusicGateway extends MusicGateway {
   @override
   Future<MusicSong> song(MusicId id) async {
     final numeric = _numeric(id, MusicEntityKind.song);
-    final songs = await legacy.songDetails([numeric]);
+    final songs = await api.songDetails([numeric]);
     for (final song in songs) {
       if (song.id == numeric) return _song(song);
     }
@@ -213,7 +213,7 @@ class NeteaseMusicGateway extends MusicGateway {
 
   @override
   Future<MusicAlbum> album(MusicId id) async {
-    final album = await legacy.albumDetail(_numeric(id, MusicEntityKind.album));
+    final album = await api.albumDetail(_numeric(id, MusicEntityKind.album));
     if (album == null) {
       throw const MusicGatewayException('netease', 'album', code: 70);
     }
@@ -227,7 +227,7 @@ class NeteaseMusicGateway extends MusicGateway {
     int offset = 0,
   }) async {
     validatePage(limit, offset);
-    final body = await legacy.albumDetailRaw(
+    final body = await api.albumDetailRaw(
       _numeric(id, MusicEntityKind.album),
     );
     final songs = _list(body['songs'])
@@ -241,7 +241,7 @@ class NeteaseMusicGateway extends MusicGateway {
 
   @override
   Future<MusicArtist> artist(MusicId id) async {
-    final body = await legacy.artistDetail(
+    final body = await api.artistDetail(
       _numeric(id, MusicEntityKind.artist),
     );
     final data = body['data'];
@@ -266,7 +266,7 @@ class NeteaseMusicGateway extends MusicGateway {
     int offset = 0,
   }) async {
     validatePage(limit, offset);
-    final body = await legacy.artistAlbums(
+    final body = await api.artistAlbums(
       _numeric(id, MusicEntityKind.artist),
       limit: limit,
       offset: offset,
@@ -286,7 +286,7 @@ class NeteaseMusicGateway extends MusicGateway {
   }) async {
     validatePage(limit, offset);
     return _page(
-      (await legacy.userPlaylists(
+      (await api.userPlaylists(
         _uid,
         limit: limit + 1,
         offset: offset,
@@ -298,7 +298,7 @@ class NeteaseMusicGateway extends MusicGateway {
 
   @override
   Future<MusicPlaylist> playlist(MusicId id) async {
-    final playlist = await legacy.topPlaylist(
+    final playlist = await api.topPlaylist(
       _numeric(id, MusicEntityKind.playlist),
     );
     if (playlist == null) {
@@ -314,7 +314,7 @@ class NeteaseMusicGateway extends MusicGateway {
     int offset = 0,
   }) async {
     validatePage(limit, offset);
-    final body = await legacy.playlistTracks(
+    final body = await api.playlistTracks(
       _numeric(id, MusicEntityKind.playlist),
       limit: limit + 1,
       offset: offset,
@@ -337,7 +337,7 @@ class NeteaseMusicGateway extends MusicGateway {
     bool isPublic = false,
   }) async {
     _uid;
-    final playlist = await legacy.createPlaylist(name, privacy: !isPublic);
+    final playlist = await api.createPlaylist(name, privacy: !isPublic);
     if (playlist == null) {
       throw const MusicGatewayException('netease', 'createPlaylist');
     }
@@ -358,7 +358,7 @@ class NeteaseMusicGateway extends MusicGateway {
   Future<void> addToPlaylist(MusicId playlist, List<MusicId> songs) async {
     final playlistId = _numeric(playlist, MusicEntityKind.playlist);
     if (songs.isEmpty) throw ArgumentError('At least one song is required.');
-    await legacy.addTracksToPlaylist(
+    await api.addTracksToPlaylist(
       playlistId,
       songs.map((song) => _numeric(song, MusicEntityKind.song)).toList(),
     );
@@ -370,7 +370,7 @@ class NeteaseMusicGateway extends MusicGateway {
     if (indexes.isEmpty || indexes.any((index) => index < 0)) {
       throw ArgumentError('Invalid playlist positions.');
     }
-    final body = await legacy.playlistDetail(playlistId);
+    final body = await api.playlistDetail(playlistId);
     final raw = body['playlist'];
     if (raw is! Map<String, dynamic>) {
       throw const MusicGatewayException('netease', 'playlist');
@@ -386,7 +386,7 @@ class NeteaseMusicGateway extends MusicGateway {
         'positional removal of duplicate songs',
       );
     }
-    await legacy.removeTracksFromPlaylist(playlistId, removals.toList());
+    await api.removeTracksFromPlaylist(playlistId, removals.toList());
   }
 
   @override
@@ -395,11 +395,11 @@ class NeteaseMusicGateway extends MusicGateway {
     int offset = 0,
   }) async {
     validatePage(limit, offset);
-    final ids = (await legacy.likedSongIds(
+    final ids = (await api.likedSongIds(
       _uid,
     )).skip(offset).take(limit + 1).toList();
     if (ids.isEmpty) return MusicPage([], offset: offset, hasMore: false);
-    final details = await legacy.songDetails(ids.take(limit).toList());
+    final details = await api.songDetails(ids.take(limit).toList());
     final byId = {for (final song in details) song.id: song};
     return _page(
       [
@@ -414,7 +414,7 @@ class NeteaseMusicGateway extends MusicGateway {
 
   @override
   Future<void> setFavorite(MusicId song, bool favorite) =>
-      legacy.setSongLiked(_numeric(song, MusicEntityKind.song), _uid, favorite);
+      api.setSongLiked(_numeric(song, MusicEntityKind.song), _uid, favorite);
 
   @override
   Future<MusicStream> stream(
@@ -427,7 +427,7 @@ class NeteaseMusicGateway extends MusicGateway {
       MusicStreamQuality.medium => 'higher',
       MusicStreamQuality.low => 'standard',
     };
-    final result = await legacy.songUrl(
+    final result = await api.songUrl(
       _numeric(song, MusicEntityKind.song),
       level: level,
     );
@@ -451,7 +451,7 @@ class NeteaseMusicGateway extends MusicGateway {
 
   @override
   Future<List<MusicLyrics>> lyrics(MusicId song) async {
-    final result = await legacy.preferredLyrics(
+    final result = await api.preferredLyrics(
       _numeric(song, MusicEntityKind.song),
     );
     if (result.pureMusic) return [];
@@ -480,19 +480,19 @@ class NeteaseMusicGateway extends MusicGateway {
     _uid;
     if (submission) {
       if (played == Duration.zero) return;
-      await legacy.reportPlayback(
+      await api.reportPlayback(
         songId: songId,
         playedSeconds: played.inSeconds,
       );
     } else {
-      await legacy.reportPlayStart(songId: songId, sourceId: 0);
+      await api.reportPlayStart(songId: songId, sourceId: 0);
     }
   }
 
   @override
   Future<MusicPage<MusicSong>> recommendations({int limit = 30}) async {
     validatePage(limit, 0);
-    final songs = await legacy.dailyRecommendedSongs();
+    final songs = await api.dailyRecommendedSongs();
     return MusicPage(
       songs.take(limit).map(_song).toList(),
       offset: 0,

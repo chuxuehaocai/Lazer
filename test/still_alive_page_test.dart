@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/easter_egg/still_alive_audio.dart';
 import 'package:lazer_nextgen/easter_egg/still_alive_page.dart';
 import 'package:lazer_nextgen/easter_egg/still_alive_score.dart';
-import 'package:lazer_nextgen/legacy/legacy_settings_page.dart';
+import 'package:lazer_nextgen/ui/settings_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -293,9 +293,9 @@ void main() {
           matching: find.byType(DecoratedBox),
         ),
       )) {
-          if (box.decoration case BoxDecoration(color: final color?)) {
+        if (box.decoration case BoxDecoration(color: final color?)) {
           expect(color, Colors.black);
-          }
+        }
       }
       await tester.pumpWidget(const SizedBox.shrink());
       expect(tester.takeException(), isNull);
@@ -412,7 +412,7 @@ void main() {
         );
         await tester.pumpWidget(
           MaterialApp(
-            home: Scaffold(body: LegacySettingsPage(state: state)),
+            home: Scaffold(body: AppSettingsPage(state: state)),
           ),
         );
         await tester.pumpAndSettle();
@@ -438,8 +438,7 @@ void main() {
           await tester.tap(target);
           await tester.pump(const Duration(milliseconds: 40));
         }
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
         expect(find.byType(StillAlivePage), findsOneWidget);
         await tester.tap(find.byKey(const ValueKey('still-alive-close')));
         await tester.pumpAndSettle();

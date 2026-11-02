@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:lazer_nextgen/legacy/font_settings_page.dart';
-import 'package:lazer_nextgen/legacy/shortcut_settings_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
+import 'package:lazer_nextgen/ui/font_settings_page.dart';
+import 'package:lazer_nextgen/ui/shortcut_settings_page.dart';
+import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/hifi_settings_section.dart';
@@ -32,12 +32,12 @@ void main() {
         ),
       );
       await tester.pump();
-      final original = tester.element(find.byType(LegacyAlbumBackdrop));
+      final original = tester.element(find.byType(AppAlbumBackdrop));
       bool running() => tester
           .widget<TickerMode>(
             find
                 .ancestor(
-                  of: find.byType(LegacyAlbumBackdrop),
+                  of: find.byType(AppAlbumBackdrop),
                   matching: find.byType(TickerMode),
                 )
                 .first,
@@ -57,9 +57,9 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
         await tester.pump();
-        expect(find.byType(LegacyAlbumBackdrop), findsOneWidget);
+        expect(find.byType(AppAlbumBackdrop), findsOneWidget);
         expect(
-          identical(tester.element(find.byType(LegacyAlbumBackdrop)), original),
+          identical(tester.element(find.byType(AppAlbumBackdrop)), original),
           isTrue,
         );
         expect(navigation.rootVisible.value, isFalse);
@@ -86,7 +86,11 @@ void main() {
       }
       state.browseTransitionActive.value = false;
       await tester.pump();
-      expect(navigation.moving.value, isFalse, reason: 'navigation must stop gating the background after pop');
+      expect(
+        navigation.moving.value,
+        isFalse,
+        reason: 'navigation must stop gating the background after pop',
+      );
       expect(state.playerPresented.value, isFalse);
       expect(running(), isTrue);
       await tester.pumpWidget(const SizedBox.shrink());

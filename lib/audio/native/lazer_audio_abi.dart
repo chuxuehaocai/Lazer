@@ -150,7 +150,11 @@ const int lazerAudioOutputDeviceFlagIdentityEphemeral = 1 << 2;
 
 /// Read callback: `int32_t (*)(void *context, uint8_t *destination, int32_t length)`.
 typedef LazerAudioReadNative =
-    Int32 Function(Pointer<Void> context, Pointer<Uint8> destination, Int32 length);
+    Int32 Function(
+      Pointer<Void> context,
+      Pointer<Uint8> destination,
+      Int32 length,
+    );
 typedef LazerAudioReadDart =
     int Function(Pointer<Void> context, Pointer<Uint8> destination, int length);
 

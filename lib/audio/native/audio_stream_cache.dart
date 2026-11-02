@@ -143,7 +143,8 @@ class AudioStreamEntry {
     }
     // A server that ignores the range restarts the body at zero, so the partial
     // file has to be truncated or the bytes would be prepended twice.
-    final bool appending = position > 0 && response.statusCode == HttpStatus.partialContent;
+    final bool appending =
+        position > 0 && response.statusCode == HttpStatus.partialContent;
     if (position > 0 && !appending) {
       await _sink?.close();
       _sink = await file.open(mode: FileMode.write);
@@ -176,7 +177,9 @@ class AudioStreamEntry {
 
   /// Total size from `Content-Length`, or from `Content-Range` when resuming.
   int? _totalBytes(HttpClientResponse response, int position) {
-    final String? range = response.headers.value(HttpHeaders.contentRangeHeader);
+    final String? range = response.headers.value(
+      HttpHeaders.contentRangeHeader,
+    );
     if (range != null) {
       final RegExpMatch? match = RegExp(r'/(\d+)\s*$').firstMatch(range);
       final int? total = match == null ? null : int.tryParse(match.group(1)!);

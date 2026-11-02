@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_search_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_playlist_grid.dart';
-import 'package:lazer_nextgen/legacy/legacy_widgets.dart';
+import 'package:lazer_nextgen/ui/search_page.dart';
+import 'package:lazer_nextgen/ui/playlist_grid.dart';
+import 'package:lazer_nextgen/ui/widgets.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -41,7 +41,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: LegacySearchPage(state: state, onOpenPlaylist: (_) {}),
+            body: AppSearchPage(state: state, onOpenPlaylist: (_) {}),
           ),
         ),
       );
@@ -55,7 +55,7 @@ void main() {
       expect(find.text('Song 999'), findsNothing);
       var rowsRebuilt = 0;
       debugOnRebuildDirtyWidget = (element, builtOnce) {
-        if (element.widget is LegacyTrackRow) rowsRebuilt++;
+        if (element.widget is AppTrackRow) rowsRebuilt++;
       };
       addTearDown(() => debugOnRebuildDirtyWidget = null);
       await tester.enterText(find.byType(TextField), 'second');
@@ -79,7 +79,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: LegacySearchPage(
+          body: AppSearchPage(
             state: state,
             onOpenPlaylist: (playlist) => opened = playlist,
           ),
@@ -126,7 +126,7 @@ void main() {
       coverSeed: 1,
       trackCount: 20,
     );
-    final layout = LegacyPlaylistGridLayout(200);
+    final layout = AppPlaylistGridLayout(200);
     expect(layout.columns, 1);
     await tester.pumpWidget(
       MaterialApp(
@@ -138,7 +138,7 @@ void main() {
                 data: const MediaQueryData(textScaler: TextScaler.linear(2)),
                 child: CustomScrollView(
                   slivers: [
-                    LegacyPlaylistRowsSliver(
+                    AppPlaylistRowsSliver(
                       playlists: [playlist, playlist],
                       layout: layout,
                       onOpen: (_) {},
@@ -153,8 +153,8 @@ void main() {
     );
     await tester.pump();
     expect(tester.takeException(), isNull);
-    final cards = tester.widgetList<LegacyPlaylistCard>(
-      find.byType(LegacyPlaylistCard),
+    final cards = tester.widgetList<AppPlaylistCard>(
+      find.byType(AppPlaylistCard),
     );
     expect(cards.every((card) => card.width <= 200), isTrue);
   });
@@ -166,7 +166,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: LegacySearchPage(state: state, onOpenPlaylist: (_) {}),
+          body: AppSearchPage(state: state, onOpenPlaylist: (_) {}),
         ),
       ),
     );
@@ -188,7 +188,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: LegacySearchPage(state: state, onOpenPlaylist: (_) {}),
+          body: AppSearchPage(state: state, onOpenPlaylist: (_) {}),
         ),
       ),
     );
@@ -212,7 +212,7 @@ void main() {
     addTearDown(newState.dispose);
     Widget page(AppState state) => MaterialApp(
       home: Scaffold(
-        body: LegacySearchPage(state: state, onOpenPlaylist: (_) {}),
+        body: AppSearchPage(state: state, onOpenPlaylist: (_) {}),
       ),
     );
     await tester.pumpWidget(page(oldState));
@@ -239,7 +239,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: LegacySearchPage(state: state, onOpenPlaylist: (_) {}),
+          body: AppSearchPage(state: state, onOpenPlaylist: (_) {}),
         ),
       ),
     );
@@ -262,7 +262,7 @@ void main() {
       MaterialApp(
         theme: ThemeData(platform: TargetPlatform.macOS),
         home: Scaffold(
-          body: LegacySearchPage(state: state, onOpenPlaylist: (_) {}),
+          body: AppSearchPage(state: state, onOpenPlaylist: (_) {}),
         ),
       ),
     );

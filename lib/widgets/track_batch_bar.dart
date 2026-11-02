@@ -1,3 +1,4 @@
+import 'spring_buttons.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
@@ -47,7 +48,7 @@ class TrackBatchBar extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 9),
                   child: TrText('已选 $selectedCount 首'),
                 ),
-                TextButton(
+                SpringTextButton(
                   key: const ValueKey<String>('batch-select-all'),
                   onPressed: onSelectAll,
                   child: TrText(selectedCount == totalCount ? '取消全选' : '全选'),

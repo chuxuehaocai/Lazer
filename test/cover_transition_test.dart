@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_home_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_playlist_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
-import 'package:lazer_nextgen/legacy/legacy_widgets.dart';
+import 'package:lazer_nextgen/ui/home_pages.dart';
+import 'package:lazer_nextgen/ui/playlist_page.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
+import 'package:lazer_nextgen/ui/widgets.dart';
 import 'package:lazer_nextgen/widgets/cover_transition.dart';
 
 class _FlightHarness extends StatefulWidget {
@@ -77,14 +77,14 @@ void main() {
         var opened = false;
         await tester.pumpWidget(
           MaterialApp(
-            theme: buildLegacyTheme(),
+            theme: buildAppleTheme(),
             home: Scaffold(
               body: StatefulBuilder(
                 builder: (context, setState) => Center(
                   child: SizedBox(
                     width: 550,
                     child: opened
-                        ? LegacyPlaylistHeader(
+                        ? AppPlaylistHeader(
                             playlist: playlist,
                             compact: false,
                             onPlay: null,
@@ -97,7 +97,7 @@ void main() {
                           )
                         : Align(
                             alignment: Alignment.centerLeft,
-                            child: LegacyPlaylistCard(
+                            child: AppPlaylistCard(
                               playlist: playlist,
                               onTap: () => setState(() => opened = true),
                             ),
@@ -112,8 +112,8 @@ void main() {
         final source = daily
             ? find.byType(FilledCoverCard).first
             : find.descendant(
-                of: find.byType(LegacyPlaylistCard),
-                matching: find.byType(LegacyCover),
+                of: find.byType(AppPlaylistCard),
+                matching: find.byType(AppCover),
               );
         final sourceRect = tester.getRect(source);
         await tester.tap(source);
@@ -126,7 +126,7 @@ void main() {
         expect(tester.getRect(flight), sourceRect);
         await tester.pumpAndSettle();
         expect(flight, findsNothing);
-        expect(find.byType(LegacyPlaylistHeader), findsOneWidget);
+        expect(find.byType(AppPlaylistHeader), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );
@@ -162,13 +162,18 @@ void main() {
     expect(middle.left, lessThan(tester.getRect(destination).left));
     state.moveDestination();
     await tester.pump(const Duration(milliseconds: 160));
+    final beforeRetarget = tester.getRect(flight);
     // The target's new layout is available to the overlay on the next frame.
     await tester.pump(const Duration(milliseconds: 1));
+    final retargeted = tester.getRect(flight);
+    // Destination changes preserve the presented frame; the spring then
+    // follows the new layout instead of teleporting with a lerped endpoint.
+    expect((retargeted.topLeft - beforeRetarget.topLeft).distance, lessThan(1));
+    await tester.pump(const Duration(milliseconds: 240));
     final nearEnd = tester.getRect(flight);
     expect(nearEnd.left, greaterThan(400));
     expect(nearEnd.top, greaterThan(190));
-    await tester.pump(const Duration(milliseconds: 40));
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(flight, findsNothing);
     expect(tester.widget<Opacity>(hidden).opacity, 1);
     expect(

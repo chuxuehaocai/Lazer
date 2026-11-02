@@ -6,10 +6,10 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/background.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/animation/motion_snapshot.dart';
 
@@ -67,7 +67,7 @@ class _Catalog extends Catalog {
 }
 
 Widget _app(Widget home) => MaterialApp(
-  theme: buildLegacyTheme(brightness: Brightness.dark),
+  theme: buildAppleTheme(brightness: Brightness.dark),
   home: home,
 );
 
@@ -78,17 +78,30 @@ Future<AppState> _phoneShell(WidgetTester tester) async {
   final AppState state = AppState(catalog: _Catalog());
   addTearDown(state.dispose);
   state.playQueue(const <Track>[_track]);
-  await tester.pumpWidget(_app(LegacyShell(state: state)));
+  await tester.pumpWidget(_app(AppShell(state: state)));
   await tester.pump(const Duration(milliseconds: 200));
   return state;
 }
 
-/// Runs the mirrored switch motion to its end. A ticker only learns where it
-/// started on its first tick, so the first frame after the tap cannot finish.
+/// Wait for the page spring itself. The ambient canvas resumes continuously
+/// afterward, so pumpAndSettle would wait for an unrelated perpetual animation.
 Future<void> _settleSwitch(WidgetTester tester) async {
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 16));
-  await tester.pump(const Duration(milliseconds: 420));
+  for (var frame = 0; frame < 120; frame++) {
+    await tester.pump(const Duration(milliseconds: 16));
+    final moving = tester
+        .widgetList<MotionSnapshot>(find.byType(MotionSnapshot))
+        .any(
+          (snapshot) =>
+              snapshot.animation.status == AnimationStatus.forward ||
+              snapshot.animation.status == AnimationStatus.reverse,
+        );
+    if (!moving) {
+      await tester.pump();
+      return;
+    }
+  }
+  fail('The page spring did not release its transition snapshot.');
 }
 
 Future<void> _openSearch(WidgetTester tester) async {
@@ -144,7 +157,7 @@ void main() {
     TickerMode backdrop() => tester.widget<TickerMode>(
       find
           .ancestor(
-            of: find.byType(LegacyAlbumBackdrop),
+            of: find.byType(AppAlbumBackdrop),
             matching: find.byType(TickerMode),
           )
           .first,
@@ -158,7 +171,7 @@ void main() {
       isFalse,
       reason: 'the whole-window mesh must not repaint during the switch',
     );
-    expect(find.byType(LegacySearchPage), findsOneWidget);
+    expect(find.byType(AppSearchPage), findsOneWidget);
 
     await _settleSwitch(tester);
     expect(backdrop().enabled, isTrue);
@@ -171,7 +184,7 @@ void main() {
     final AppState state = await _phoneShell(tester);
     int pageBuilds = 0;
     debugOnRebuildDirtyWidget = (Element element, bool builtOnce) {
-      if (element.widget is LegacySearchPage) pageBuilds++;
+      if (element.widget is AppSearchPage) pageBuilds++;
     };
     addTearDown(() => debugOnRebuildDirtyWidget = null);
 

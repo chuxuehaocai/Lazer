@@ -19,7 +19,7 @@ String diagnosticReport(AppState state) => AppLog.redact(
     'Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
     'Dart: ${Platform.version}',
     'Audio engine: ${state.hifi?.status.engineDescription ?? "system"}',
-    'Background: ${state.legacyBackground.name}, ${state.browseBackgroundFps} fps',
+    'Background: ${state.backgroundMode.name}, ${state.browseBackgroundFps} fps',
     'Player background: ${state.playerBackground.name}, ${state.playerBackgroundFps == 0 ? "display refresh rate" : state.playerBackgroundFps} fps',
     'Queue length: ${state.queueLength}',
     if (WidgetsBinding.instance is LazerWidgetsBinding)

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:lazer_nextgen/animation/apple_spring.dart';
 import 'package:lazer_nextgen/animation/view_transitions.dart';
-import 'package:lazer_nextgen/player/now_playing_route.dart';
-import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 
 const _bodyKey = ValueKey('motion-route-body');
 const _body = SizedBox.expand(
@@ -12,16 +10,10 @@ const _body = SizedBox.expand(
   child: ColoredBox(color: Colors.teal),
 );
 
-class _PlayerRoute extends NowPlayingRoute {
-  _PlayerRoute(AppState state, {this.child = _body}) : super(state: state);
-  final Widget child;
-
-  @override
-  Widget buildPage(
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-  ) => child;
+class _Route extends ApplePageRoute<void> {
+  _Route() : super(builder: (_) => _body);
+  double get openness => controller!.value;
+  double get speed => controller!.velocity;
 }
 
 class _TrackedAnimation extends AlwaysStoppedAnimation<double> {
@@ -42,113 +34,124 @@ class _TrackedAnimation extends AlwaysStoppedAnimation<double> {
 
 Future<GlobalKey<NavigatorState>> _host(
   WidgetTester tester, {
+  TargetPlatform platform = TargetPlatform.windows,
   bool reduced = false,
+  TextDirection direction = TextDirection.ltr,
 }) async {
-  final navigator = GlobalKey<NavigatorState>();
+  tester.view.physicalSize = const Size(800, 600);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  final nav = GlobalKey<NavigatorState>();
   await tester.pumpWidget(
     MaterialApp(
-      navigatorKey: navigator,
-      theme: ThemeData(
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: LazerPageTransitionsBuilder(),
-            TargetPlatform.windows: LazerPageTransitionsBuilder(),
-          },
-        ),
-      ),
+      navigatorKey: nav,
+      theme: buildAppleTheme().copyWith(platform: platform),
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
-        child: child!,
+        child: Directionality(textDirection: direction, child: child!),
       ),
       home: const SizedBox.expand(),
     ),
   );
-  return navigator;
+  return nav;
 }
 
-double _pageProgress(WidgetTester tester) => tester
-    .widget<FadeTransition>(
-      find
-          .ancestor(
-            of: find.byKey(_bodyKey),
-            matching: find.byType(FadeTransition),
-          )
-          .first,
-    )
-    .opacity
-    .value;
-
-double _playerOffset(WidgetTester tester, {Key key = _bodyKey}) => tester
-    .widget<FractionalTranslation>(
-      find
-          .ancestor(
-            of: find.byKey(key),
-            matching: find.byType(FractionalTranslation),
-          )
-          .first,
-    )
-    .translation
-    .dy;
-
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
-
-  testWidgets('ordinary routes leave fast and decelerate on pop', (
-    tester,
-  ) async {
-    final navigator = await _host(tester);
-    navigator.currentState!.push(
-      MaterialPageRoute<void>(builder: (_) => _body),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 320));
-    expect(_pageProgress(tester), 1);
-    navigator.currentState!.pop();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 75));
-    final early = _pageProgress(tester);
-    expect(
-      early,
-      lessThan(.5),
-      reason: 'The pop must cover most of its travel early.',
-    );
-    await tester.pump(const Duration(milliseconds: 75));
-    final later = _pageProgress(tester);
-    expect(early - later, lessThan((1 - early) / 2));
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(find.byKey(_bodyKey), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
+  for (final platform in TargetPlatform.values) {
+    testWidgets('same page spring on ${platform.name}', (tester) async {
+      final nav = await _host(tester, platform: platform);
+      final route = _Route();
+      nav.currentState!.push(route);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(
+        route.openness,
+        closeTo(AppleSpring.smooth.simulation(0, 1).x(.12), .00001),
+      );
+      final bounds = tester.getRect(find.byKey(_bodyKey));
+      expect(
+        bounds.left,
+        closeTo((1 - route.openness) * tester.view.physicalSize.width, .001),
+      );
+      await tester.pumpAndSettle();
+      expect(route.openness, 1);
+      nav.currentState!.pop();
+      await tester.pumpAndSettle();
+      expect(find.byKey(_bodyKey), findsNothing);
+      expect(tester.binding.transientCallbackCount, 0);
+    });
+  }
 
   testWidgets(
-    'popping an unfinished ordinary push preserves its visible position',
+    'Back interrupts a page push with continuous position and velocity',
     (tester) async {
-      final navigator = await _host(tester);
-      navigator.currentState!.push(
-        MaterialPageRoute<void>(builder: (_) => _body),
-      );
+      final nav = await _host(tester);
+      final route = _Route();
+      nav.currentState!.push(route);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 80));
-      final before = _pageProgress(tester);
-      navigator.currentState!.pop();
+      final position = route.openness, velocity = route.speed;
+      nav.currentState!.pop();
+      expect(route.openness, closeTo(position, .000001));
+      expect(route.speed, closeTo(velocity, .000001));
       await tester.pump();
-      expect(_pageProgress(tester), closeTo(before, .00001));
-      await tester.pump(const Duration(milliseconds: 20));
-      expect(_pageProgress(tester), lessThan(before / 2));
-      await tester.pump(const Duration(milliseconds: 320));
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(route.openness, greaterThan(position));
+      await tester.pumpAndSettle();
       expect(find.byKey(_bodyKey), findsNothing);
-      expect(tester.takeException(), isNull);
     },
   );
 
-  testWidgets('route rebuilds release every transition listener', (
+  for (final direction in TextDirection.values) {
+    testWidgets('grab an entering page at its visible edge in $direction', (
+      tester,
+    ) async {
+      final nav = await _host(tester, direction: direction);
+      final route = _Route();
+      nav.currentState!.push(route);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      final before = route.openness;
+      final width = tester.view.physicalSize.width;
+      final edge = direction == TextDirection.ltr
+          ? width * (1 - before) + 8
+          : width * before - 8;
+      final sign = direction == TextDirection.ltr ? 1.0 : -1.0;
+      final gesture = await tester.startGesture(Offset(edge, 200));
+      await gesture.moveBy(Offset(40 * sign, 0));
+      await tester.pump();
+      expect(route.openness, closeTo(before - 40 / width, .001));
+      expect(nav.currentState!.userGestureInProgress, isTrue);
+      await gesture.cancel();
+      await tester.pumpAndSettle();
+      expect(route.openness, 1);
+      expect(nav.currentState!.userGestureInProgress, isFalse);
+      nav.currentState!.pop();
+      await tester.pumpAndSettle();
+    });
+  }
+
+  testWidgets('Reduce Motion removes page travel and completes promptly', (
+    tester,
+  ) async {
+    final nav = await _host(tester, reduced: true);
+    final route = _Route();
+    nav.currentState!.push(route);
+    await tester.pumpAndSettle();
+    expect(route.openness, 1);
+    expect(tester.getTopLeft(find.byKey(_bodyKey)), Offset.zero);
+    nav.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(find.byKey(_bodyKey), findsNothing);
+  });
+
+  testWidgets('rebuilding fallback transitions releases every listener', (
     tester,
   ) async {
     final animation = _TrackedAnimation();
     final route = MaterialPageRoute<void>(builder: (_) => _body);
-    var listenerCount = 0;
-    var statusCount = 0;
-    for (var rebuild = 0; rebuild < 10; rebuild++) {
+    var count = (0, 0);
+    for (var i = 0; i < 10; i++) {
       await tester.pumpWidget(
         MaterialApp(
           home: Builder(
@@ -158,198 +161,19 @@ void main() {
                   context,
                   animation,
                   kAlwaysDismissedAnimation,
-                  Text('body $rebuild'),
+                  Text('body $i'),
                 ),
           ),
         ),
       );
-      if (rebuild == 0) {
-        listenerCount = animation.listeners.length;
-        statusCount = animation.statuses.length;
+      if (i == 0) {
+        count = (animation.listeners.length, animation.statuses.length);
       }
-      expect(animation.listeners, hasLength(listenerCount));
-      expect(animation.statuses, hasLength(statusCount));
+      expect((animation.listeners.length, animation.statuses.length), count);
     }
     await tester.pumpWidget(const SizedBox.shrink());
     expect(animation.listeners, isEmpty);
     expect(animation.statuses, isEmpty);
     route.dispose();
   });
-
-  testWidgets(
-    'a fully open player leaves fast and slows into the bottom edge',
-    (tester) async {
-      final state = AppState();
-      addTearDown(state.dispose);
-      final navigator = await _host(tester);
-      navigator.currentState!.push(_PlayerRoute(state));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 320));
-      expect(_playerOffset(tester), 0);
-      navigator.currentState!.pop();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 75));
-      final early = _playerOffset(tester);
-      expect(early, greaterThan(.5));
-      await tester.pump(const Duration(milliseconds: 75));
-      expect(_playerOffset(tester) - early, lessThan(early / 2));
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(find.byKey(_bodyKey), findsNothing);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets('a player can reopen while its previous route is still leaving', (
-    tester,
-  ) async {
-    final state = AppState();
-    addTearDown(state.dispose);
-    final navigator = await _host(tester);
-    navigator.currentState!.push(_PlayerRoute(state));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 320));
-    navigator.currentState!.pop();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 40));
-    const nextKey = ValueKey('next-player');
-    final nextRoute = _PlayerRoute(
-      state,
-      child: const SizedBox.expand(key: nextKey),
-    );
-    navigator.currentState!.push(nextRoute);
-    await tester.pump();
-    await tester.pump();
-    expect(_playerOffset(tester, key: nextKey), 1);
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(_playerOffset(tester, key: nextKey), lessThan(.5));
-    await tester.pump(const Duration(milliseconds: 240));
-    expect(find.byKey(_bodyKey, skipOffstage: false), findsNothing);
-    expect(_playerOffset(tester, key: nextKey), 0);
-    expect(nextRoute.canStart, isTrue);
-    navigator.currentState!.pop();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 320));
-    expect(find.byKey(nextKey), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets(
-    'player pop starts fast and can reverse an unfinished push without a jump',
-    (tester) async {
-      final state = AppState();
-      addTearDown(state.dispose);
-      final navigator = await _host(tester);
-      navigator.currentState!.push(_PlayerRoute(state));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 80));
-      final before = _playerOffset(tester);
-      navigator.currentState!.pop();
-      await tester.pump();
-      expect(_playerOffset(tester), closeTo(before, .00001));
-      await tester.pump(const Duration(milliseconds: 60));
-      expect(_playerOffset(tester), greaterThan(before + (1 - before) / 2));
-      await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byKey(_bodyKey), findsNothing);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  for (final pulled in [.1, .4]) {
-    testWidgets(
-      'player release at $pulled continues from the finger without a jump',
-      (tester) async {
-        final state = AppState();
-        addTearDown(state.dispose);
-        final navigator = await _host(tester);
-        final route = _PlayerRoute(state);
-        navigator.currentState!.push(route);
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 320));
-        expect(route.canStart, isTrue);
-        route.startPull();
-        route.updatePull(pulled);
-        await tester.pump();
-        expect(_playerOffset(tester), closeTo(pulled, .00001));
-        route.endPull(0);
-        await tester.pump();
-        expect(_playerOffset(tester), closeTo(pulled, .00001));
-        await tester.pump(const Duration(milliseconds: 16));
-        expect(
-          _playerOffset(tester),
-          pulled < .22 ? lessThan(pulled) : greaterThan(pulled),
-        );
-        await tester.pump(const Duration(milliseconds: 400));
-        if (pulled < .22) {
-          expect(_playerOffset(tester), 0);
-          expect(route.canStart, isTrue);
-          navigator.currentState!.pop();
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 400));
-        }
-        expect(find.byKey(_bodyKey), findsNothing);
-        expect(tester.takeException(), isNull);
-      },
-    );
-  }
-
-  testWidgets('reduced motion skips ordinary and player route transforms', (
-    tester,
-  ) async {
-    final state = AppState();
-    addTearDown(state.dispose);
-    final navigator = await _host(tester, reduced: true);
-    for (final route in <PageRoute<void>>[
-      MaterialPageRoute<void>(builder: (_) => _body),
-      _PlayerRoute(state),
-    ]) {
-      navigator.currentState!.push(route);
-      await tester.pump();
-      await tester.pump();
-      expect(find.byKey(_bodyKey), findsOneWidget);
-      expect(
-        find.ancestor(
-          of: find.byKey(_bodyKey),
-          matching: find.byType(SlideTransition),
-        ),
-        findsNothing,
-      );
-      expect(
-        find.ancestor(
-          of: find.byKey(_bodyKey),
-          matching: find.byType(FractionalTranslation),
-        ),
-        findsNothing,
-      );
-      await tester.pump(const Duration(milliseconds: 400));
-      navigator.currentState!.pop();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-    }
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets(
-    'platform reduced motion also finishes the player route promptly',
-    (tester) async {
-      tester.binding.platformDispatcher.accessibilityFeaturesTestValue =
-          const FakeAccessibilityFeatures(disableAnimations: true);
-      addTearDown(
-        tester.binding.platformDispatcher.clearAccessibilityFeaturesTestValue,
-      );
-      await tester.pump();
-      final state = AppState();
-      addTearDown(state.dispose);
-      final navigator = await _host(tester, reduced: true);
-      final route = _PlayerRoute(state);
-      navigator.currentState!.push(route);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 20));
-      expect(route.animation!.status, AnimationStatus.completed);
-      navigator.currentState!.pop();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 20));
-      expect(find.byKey(_bodyKey), findsNothing);
-      expect(tester.takeException(), isNull);
-    },
-  );
 }

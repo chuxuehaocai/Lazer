@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 
 import '../data/models.dart';
 import '../gateway/music_models.dart';
@@ -23,10 +24,10 @@ Future<void> openArtists(
   if (available.isEmpty) return;
   final selected = available.length == 1
       ? available.single
-      : await showDialog<ArtistRef>(
+      : await showAppleDialog<ArtistRef>(
           context: context,
           builder: (context) => AlertDialog(
-            // The legacy theme squares off dialogs; the artist chooser wants
+            // The app theme squares off dialogs; the artist chooser wants
             // the rounded card shape the rest of the app uses.
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),

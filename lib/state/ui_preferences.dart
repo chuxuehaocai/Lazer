@@ -27,38 +27,37 @@ const int kPlaylistColumnsMax = 6;
 /// [fixed] is the Apple Music red accent. [nowPlaying] derives the accent and
 /// ambient tint from the current cover, matching the app's album-led chrome.
 /// [custom] uses the colour the listener picked in Settings.
-enum LegacyPaletteMode { fixed, nowPlaying, custom }
+enum AppPaletteMode { fixed, nowPlaying, custom }
 
-extension LegacyPaletteModeLabels on LegacyPaletteMode {
+extension AppPaletteModeLabels on AppPaletteMode {
   /// Chinese source string, translated through `context.tr`.
   String get label => switch (this) {
-    LegacyPaletteMode.fixed => '默认',
-    LegacyPaletteMode.nowPlaying => '跟随当前歌曲',
-    LegacyPaletteMode.custom => '自定义',
+    AppPaletteMode.fixed => '默认',
+    AppPaletteMode.nowPlaying => '跟随当前歌曲',
+    AppPaletteMode.custom => '自定义',
   };
 
   String get detail => switch (this) {
-    LegacyPaletteMode.fixed => 'Apple Music 红色强调色',
-    LegacyPaletteMode.nowPlaying => '由当前封面主色生成强调色与浏览背景',
-    LegacyPaletteMode.custom => '使用你挑选的强调色',
+    AppPaletteMode.fixed => 'Apple Music 红色强调色',
+    AppPaletteMode.nowPlaying => '由当前封面主色生成强调色与浏览背景',
+    AppPaletteMode.custom => '使用你挑选的强调色',
   };
 
   /// Parses a persisted [name]; unknown or missing values keep the fixed
   /// scheme.
-  static LegacyPaletteMode parse(String? name) =>
-      LegacyPaletteMode.values.firstWhere(
-        (LegacyPaletteMode mode) => mode.name == name,
-        orElse: () => LegacyPaletteMode.fixed,
-      );
+  static AppPaletteMode parse(String? name) => AppPaletteMode.values.firstWhere(
+    (AppPaletteMode mode) => mode.name == name,
+    orElse: () => AppPaletteMode.fixed,
+  );
 }
 
-/// How the legacy shell paints its page backdrop.
+/// How the app shell paints its page backdrop.
 ///
 /// The flowing album-colour canvas is ported from the Lazer project's
 /// `AlbumFlowBackground`; [nowPlayingDynamic] animates it, [nowPlayingStatic]
 /// freezes the palette to one flat base, [customImage] paints a picture the
 /// listener chose, and [off] leaves the theme surface.
-enum LegacyBackgroundMode {
+enum AppBackgroundMode {
   nowPlayingDynamic,
   nowPlayingStatic,
   customImage,
@@ -66,30 +65,30 @@ enum LegacyBackgroundMode {
   off,
 }
 
-extension LegacyBackgroundModeLabels on LegacyBackgroundMode {
+extension AppBackgroundModeLabels on AppBackgroundMode {
   /// Chinese source string, translated through `context.tr`.
   String get label => switch (this) {
-    LegacyBackgroundMode.nowPlayingDynamic => '跟随当前歌曲（流动）',
-    LegacyBackgroundMode.nowPlayingStatic => '静态背景',
-    LegacyBackgroundMode.customImage => '自定义图片',
-    LegacyBackgroundMode.solidColor => '纯色背景',
-    LegacyBackgroundMode.off => '不使用',
+    AppBackgroundMode.nowPlayingDynamic => '跟随当前歌曲（流动）',
+    AppBackgroundMode.nowPlayingStatic => '静态背景',
+    AppBackgroundMode.customImage => '自定义图片',
+    AppBackgroundMode.solidColor => '纯色背景',
+    AppBackgroundMode.off => '不使用',
   };
 
   String get detail => switch (this) {
-    LegacyBackgroundMode.nowPlayingDynamic => '使用当前歌曲封面主色渲染整页画布',
-    LegacyBackgroundMode.nowPlayingStatic => '用动态背景生成一帧，保留为静态背景',
-    LegacyBackgroundMode.customImage => '使用你选择的图片铺满整页',
-    LegacyBackgroundMode.solidColor => '自选背景颜色，或根据主题色生成',
-    LegacyBackgroundMode.off => '关闭画布，只保留主题底色',
+    AppBackgroundMode.nowPlayingDynamic => '使用当前歌曲封面主色渲染整页画布',
+    AppBackgroundMode.nowPlayingStatic => '用动态背景生成一帧，保留为静态背景',
+    AppBackgroundMode.customImage => '使用你选择的图片铺满整页',
+    AppBackgroundMode.solidColor => '自选背景颜色，或根据主题色生成',
+    AppBackgroundMode.off => '关闭画布，只保留主题底色',
   };
 
   /// Parses a persisted [name]; unknown or missing values keep the flowing
   /// canvas the port ships with.
-  static LegacyBackgroundMode parse(String? name) =>
-      LegacyBackgroundMode.values.firstWhere(
-        (LegacyBackgroundMode mode) => mode.name == name,
-        orElse: () => LegacyBackgroundMode.nowPlayingDynamic,
+  static AppBackgroundMode parse(String? name) =>
+      AppBackgroundMode.values.firstWhere(
+        (AppBackgroundMode mode) => mode.name == name,
+        orElse: () => AppBackgroundMode.nowPlayingDynamic,
       );
 }
 

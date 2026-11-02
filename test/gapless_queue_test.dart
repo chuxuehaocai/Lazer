@@ -251,13 +251,13 @@ void main() {
       },
     );
     addTearDown(state.dispose);
-    state.legacyPalette = LegacyPaletteMode.nowPlaying;
+    state.paletteMode = AppPaletteMode.nowPlaying;
     state.playQueue([
       _track('1').copyWith(coverUrl: 'https://cover.test/1'),
       _track('2').copyWith(coverUrl: 'https://cover.test/2'),
     ]);
     await tester.pump();
-    expect(state.legacyAccentSeed, Colors.red);
+    expect(state.accentSeed, Colors.red);
 
     state.next();
     await tester.pump();
@@ -265,7 +265,7 @@ void main() {
     expect(state.playing, isTrue);
     expect(engine.jumps, 1);
     expect(engine.loads, ['url-1']);
-    expect(state.legacyAccentSeed, Colors.blue);
+    expect(state.accentSeed, Colors.blue);
     expect(requested, ['https://cover.test/1', 'https://cover.test/2']);
     state.pause();
   });

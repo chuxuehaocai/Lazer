@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../animation/apple_spring.dart';
 
 /// Typography families bundled with the app.
 ///
@@ -51,21 +52,19 @@ abstract final class AppShape {
   static const BorderRadius full = BorderRadius.all(Radius.circular(999));
 }
 
-/// Material 3 motion tokens. Durations are deliberately short: the interface
-/// targets a 100 Hz minimum frame budget, and M3 expressive transitions still read as
-/// immediate at 90–320 ms.
+/// Shared response times and bounded spring easing for Apple-style motion.
+/// Interactive geometry uses AppleSpring simulations to retain its velocity.
 abstract final class AppMotion {
   static const Duration instant = Duration(milliseconds: 90);
   static const Duration quick = Duration(milliseconds: 140);
   static const Duration standard = Duration(milliseconds: 200);
   static const Duration emphasized = Duration(milliseconds: 320);
 
-  static const Curve standardCurve = Curves.easeOutCubic;
-  static const Curve emphasizedCurve = Cubic(0.2, 0, 0, 1);
+  static const Curve standardCurve = AppleSpringCurve();
+  static const Curve emphasizedCurve = AppleSpringCurve();
 
-  /// Material 3 easing for properties entering or leaving the screen.
-  static const Curve emphasizedDecelerate = Cubic(0.05, 0.7, 0.1, 1);
-  static const Curve emphasizedAccelerate = Cubic(0.3, 0, 0.8, 0.15);
+  static const Curve emphasizedDecelerate = AppleSpringCurve();
+  static const Curve emphasizedAccelerate = AppleSpringCurve();
 
   /// The minimum frame budget the app is tuned for: 100 fps.
   static const double frameBudgetMs = 1000 / 100;
@@ -77,8 +76,8 @@ abstract final class AppMotion {
 /// night, warm paper neutrals and a clay tertiary. It is a complete Material 3
 /// role set — every surface role has an explicit tone, so no widget can fall
 /// back to Flutter's purple baseline scheme.
-class LegacyTokens {
-  const LegacyTokens._();
+class AppTokens {
+  const AppTokens._();
 
   // Light neutrals.
   static const Color paper = Color(0xFFF7F5EF);

@@ -1,4 +1,5 @@
 import 'dart:convert';
+// i18n:data - display labels are translated by the settings widgets.
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';

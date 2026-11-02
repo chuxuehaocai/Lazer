@@ -7,19 +7,21 @@ import 'package:flutter/material.dart';
 /// so the page follows the finger instead of replaying a canned animation once
 /// the gesture ends.
 abstract class PlayerPullDown {
-  /// Whether a new pull may begin. The player must be fully presented: a pull
-  /// that starts mid-transition would fight the running animation.
+  /// Whether a new pull may take over the currently presented motion.
   bool get canStart;
 
   /// The finger has travelled far enough down to own the gesture.
   void startPull();
 
-  /// Reports how far the player has been pulled, as a fraction of the travel
-  /// distance: 0 keeps it open, 1 puts it fully off screen.
+  /// Reports the finger's displacement since taking over, divided by the
+  /// travel distance. Hosts apply it to their position at [startPull], so a
+  /// running transition can be grabbed and reversed without a jump.
   void updatePull(double progress);
 
   /// Ends the gesture. [velocity] is positive when the finger moved downward.
   void endPull(double velocity);
+
+  void cancelPull() => endPull(0);
 }
 
 /// An invisible strip that turns a downward drag into a pull on [pullDown].
@@ -69,16 +71,20 @@ class _PlayerPullDownRegionState extends State<PlayerPullDownRegion> {
     // Global coordinates: the page slides under the finger while the pull
     // runs, so a local delta would cancel the movement out.
     final double pulled = (details.globalPosition.dy - _origin).clamp(
-      0.0,
+      -widget.travel,
       widget.travel,
     );
     widget.pullDown.updatePull(pulled / widget.travel);
   }
 
-  void _end(double velocity) {
+  void _end(double velocity, {bool cancel = false}) {
     if (!_pulling) return;
     _pulling = false;
-    widget.pullDown.endPull(velocity);
+    if (cancel) {
+      widget.pullDown.cancelPull();
+    } else {
+      widget.pullDown.endPull(velocity);
+    }
   }
 
   @override
@@ -97,7 +103,8 @@ class _PlayerPullDownRegionState extends State<PlayerPullDownRegion> {
               recognizer.onEnd = (DragEndDetails details) {
                 _end(details.velocity.pixelsPerSecond.dy);
               };
-              recognizer.onCancel = () => _end(0);
+              recognizer.onCancel = () => _end(0, cancel: true);
+              recognizer.onPointerCancelled = () => _end(0, cancel: true);
             },
           ),
     },
@@ -109,6 +116,13 @@ class _PullDownDragRecognizer extends VerticalDragGestureRecognizer {
   _PullDownDragRecognizer({super.debugOwner});
 
   bool Function()? canStart;
+  VoidCallback? onPointerCancelled;
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerCancelEvent) onPointerCancelled?.call();
+    super.handleEvent(event);
+  }
 
   @override
   bool isPointerAllowed(PointerEvent event) =>

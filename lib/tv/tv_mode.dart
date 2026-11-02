@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../animation/apple_spring.dart';
 import '../state/build_safe_notifier.dart';
 import '../theme/apple_design.dart';
 
@@ -85,12 +86,15 @@ EdgeInsets tvSafeInsets(BuildContext context) => TvScope.isActive(context)
 void revealTvFocus(
   FocusNode node, {
   Duration duration = const Duration(milliseconds: 160),
-  Curve curve = Curves.easeOutCubic,
+  Curve curve = const AppleSpringCurve(),
 }) {
   final BuildContext? target = node.context;
   node.requestFocus();
   if (target == null) return;
-  target.findRenderObject()?.showOnScreen(duration: duration, curve: curve);
+  target.findRenderObject()?.showOnScreen(
+    duration: MediaQuery.disableAnimationsOf(target) ? Duration.zero : duration,
+    curve: curve,
+  );
 }
 
 /// Whether the ten-foot presentation is in effect.
@@ -129,7 +133,7 @@ class LargeScreenTraversalPolicy extends ReadingOrderTraversalPolicy {
   }) => revealTvFocus(
     node,
     duration: duration ?? const Duration(milliseconds: 160),
-    curve: curve ?? Curves.easeOutCubic,
+    curve: curve ?? const AppleSpringCurve(),
   );
 
   /// Tab (and any helper that walks the order) becomes a vertical step, which
@@ -194,8 +198,10 @@ class LargeScreenTraversalPolicy extends ReadingOrderTraversalPolicy {
     unawaited(
       position.animateTo(
         next,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : AppleSpring.responsive.duration,
+        curve: const AppleSpringCurve(),
       ),
     );
   }
@@ -293,12 +299,44 @@ class TvTapTarget extends StatefulWidget {
   State<TvTapTarget> createState() => _TvTapTargetState();
 }
 
-class _TvTapTargetState extends State<TvTapTarget> {
+class _TvTapTargetState extends State<TvTapTarget>
+    with SingleTickerProviderStateMixin {
   bool _focused = false;
+  bool _reduceMotion = false;
+  late final AnimationController _focus = AnimationController.unbounded(
+    vsync: this,
+    value: 0,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _focus;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_reduceMotion || !TvScope.isActive(context)) {
+      _focus.value = _focused ? 1 : 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
 
   void _setFocused(bool value) {
     if (_focused == value) return;
     setState(() => _focused = value);
+    _focus.springTo(
+      value ? 1 : 0,
+      spring: AppleSpring.responsive,
+      reduceMotion: _reduceMotion,
+    );
     widget.onFocusChange?.call(value);
   }
 
@@ -331,10 +369,13 @@ class _TvTapTargetState extends State<TvTapTarget> {
           },
         ),
       },
-      child: AnimatedScale(
-        scale: _focused ? widget.focusScale : 1,
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
+      child: AnimatedBuilder(
+        animation: _focus,
+        builder: (context, child) => Transform.scale(
+          scale: 1 + (widget.focusScale - 1) * _focus.value,
+          transformHitTests: false,
+          child: child,
+        ),
         child: Stack(
           clipBehavior: Clip.none,
           children: <Widget>[
@@ -453,8 +494,10 @@ class _TvFocusHighlightState extends State<TvFocusHighlight> {
         if (mounted && value != _focused) setState(() => _focused = value);
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 130),
-        curve: Curves.easeOutCubic,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : AppleSpring.responsive.duration,
+        curve: const AppleSpringCurve(),
         decoration: BoxDecoration(
           color: _focused
               ? AppleSemanticColors.of(context).fill

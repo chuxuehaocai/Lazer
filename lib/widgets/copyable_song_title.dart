@@ -1,4 +1,6 @@
+import 'spring_buttons.dart';
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
@@ -31,7 +33,7 @@ class CopyableSongTitle extends StatelessWidget {
 /// The sheet is a rounded rectangle with the same soft elevation language as
 /// the player's floating cards.
 Future<void> showCopySongTitleDialog(BuildContext context, String title) async {
-  final bool? copy = await showDialog<bool>(
+  final bool? copy = await showAppleDialog<bool>(
     context: context,
     builder: (BuildContext context) => Dialog(
       elevation: 24,
@@ -71,12 +73,12 @@ Future<void> showCopySongTitleDialog(BuildContext context, String title) async {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: <Widget>[
-                  TextButton(
+                  SpringTextButton(
                     onPressed: () => Navigator.of(context).pop(false),
                     child: const TrText('取消'),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
+                  SpringFilledButton(
                     onPressed: () => Navigator.of(context).pop(true),
                     child: const TrText('复制'),
                   ),

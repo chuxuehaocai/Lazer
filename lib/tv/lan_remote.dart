@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../state/app_state.dart';
+import '../l10n/app_localizations.dart';
 import '../state/ui_preferences.dart';
 import '../widgets/settings_row.dart';
 import 'tv_mode.dart';
@@ -345,7 +346,7 @@ class LanRemoteSettings extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  TrText(
                     remote.error ??
                         (remote.running ? '在浏览器打开以下地址：' : '切换到大屏幕模式后启动'),
                   ),

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart'
     show CupertinoFullscreenDialogTransition;
 
+import '../animation/apple_spring.dart';
+
 /// A vertical page transition with a platform-independent top-edge back drag.
 /// The route animation exposes the actual previous page during the gesture.
 class PullDownPageRoute<T> extends MaterialPageRoute<T> {
@@ -14,6 +16,24 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
   bool _settling = false;
   bool _disposed = false;
   bool get _pulling => _pullNavigator != null;
+  bool _dragging = false;
+  double _initialOpen = 1;
+  double _pullHeight = 1;
+  int _settleGeneration = 0;
+
+  @override
+  Simulation createSimulation({required bool forward}) {
+    final target = forward ? 1.0 : 0.0;
+    final reduced =
+        WidgetsBinding.instance.disableAnimations ||
+        (navigator != null &&
+            (MediaQuery.maybeDisableAnimationsOf(navigator!.context) ?? false));
+    return AppleSpring.smooth.simulation(
+      reduced ? target : controller!.value,
+      target,
+      velocity: reduced ? 0 : controller!.velocity,
+    );
+  }
 
   @override
   bool canTransitionFrom(TransitionRoute<dynamic> previousRoute) => false;
@@ -24,22 +44,33 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
 
   bool get _canStartPull =>
       !_disposed &&
-      !_pulling &&
-      !_settling &&
-      popGestureEnabled &&
-      !(navigator?.userGestureInProgress ?? true);
+      !_dragging &&
+      isCurrent &&
+      isActive &&
+      !isFirst &&
+      !willHandlePopInternally &&
+      popDisposition == RoutePopDisposition.pop &&
+      (!(navigator?.userGestureInProgress ?? true) || _pulling);
 
-  bool _startPull() {
+  bool _startPull(double height) {
     if (!_canStartPull) return false;
-    _pullNavigator = navigator;
-    _pullNavigator!.didStartUserGesture();
+    _settleGeneration++;
+    _settling = false;
+    _dragging = true;
+    _initialOpen = controller!.value;
+    _pullHeight = height;
+    controller!.stop();
+    if (!_pulling) {
+      _pullNavigator = navigator;
+      _pullNavigator!.didStartUserGesture();
+    }
     return true;
   }
 
   void _updatePull(double progress) {
-    if (_pulling && !_settling && isCurrent) {
+    if (_dragging && isCurrent) {
       // Keep the route alive even when the finger reaches the bottom edge.
-      controller!.value = (1 - progress).clamp(.001, 1);
+      controller!.value = (_initialOpen - progress).clamp(.001, 1);
     }
   }
 
@@ -50,7 +81,9 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
     bool reduceMotion = false,
   }) async {
     if (!_pulling || _settling || _disposed) return;
+    _dragging = false;
     _settling = true;
+    final generation = ++_settleGeneration;
     final nav = _pullNavigator!;
     final progress = 1 - controller!.value;
     final wantsPop = velocity < -700
@@ -71,29 +104,20 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
         // the page continues from the exact position where the finger left.
         controller!.stop(canceled: false);
       }
-      final remaining = leaving ? controller!.value : 1 - controller!.value;
-      final duration = reduceMotion
-          ? Duration.zero
-          : Duration(
-              milliseconds: (remaining * (leaving ? 340 : 280)).round().clamp(
-                120,
-                340,
-              ),
-            );
-      if (leaving) {
-        await controller!
-            .animateBack(0, duration: duration, curve: Curves.easeOutCubic)
-            .orCancel;
-      } else {
-        await controller!
-            .animateTo(1, duration: duration, curve: Curves.easeOutCubic)
-            .orCancel;
-      }
+      await controller!
+          .springTo(
+            leaving ? 0 : 1,
+            velocity: -velocity / _pullHeight,
+            reduceMotion: reduceMotion,
+          )
+          .orCancel;
     } on TickerCanceled {
       // Removing the route or disposing its navigator cancels the settlement.
     } finally {
-      _settling = false;
-      _releasePull();
+      if (generation == _settleGeneration) {
+        _settling = false;
+        _releasePull();
+      }
     }
   }
 
@@ -154,12 +178,7 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
             child: child!,
           );
         }
-        final progress = _pulling
-            ? animation.value
-            : (animation.status == AnimationStatus.reverse
-                      ? Curves.easeInCubic
-                      : Curves.easeOutCubic)
-                  .transform(animation.value);
+        final progress = animation.value;
         return SlideTransition(
           key: const ValueKey('now-playing-page-transition'),
           position: AlwaysStoppedAnimation(
@@ -169,22 +188,32 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
         );
       },
     );
-    final interactive = LayoutBuilder(
-      builder: (context, box) => _TopEdgeBackGesture(
-        enabled: isMobilePlatform || box.maxWidth < 720,
-        activationHeight: MediaQuery.paddingOf(context).top + 64,
-        height: box.maxHeight,
-        canStart: () => _canStartPull,
-        onStart: _startPull,
-        onUpdate: _updatePull,
-        onEnd: (velocity, cancel) => unawaited(
-          _settlePull(
-            velocity: velocity,
-            cancel: cancel,
-            reduceMotion: MediaQuery.disableAnimationsOf(context),
+    final interactive = AnimatedBuilder(
+      animation: animation,
+      child: page,
+      builder: (context, child) => LayoutBuilder(
+        builder: (context, box) => _TopEdgeBackGesture(
+          enabled: isMobilePlatform || box.maxWidth < 720,
+          // The visible page edge moves down with an interrupted transition.
+          // Expand the hit strip by that same amount so the user can grab it
+          // again without waiting for the spring to finish.
+          activationHeight:
+              MediaQuery.paddingOf(context).top +
+              64 +
+              (1 - animation.value).clamp(0.0, 1.0) * box.maxHeight,
+          height: box.maxHeight,
+          canStart: () => _canStartPull,
+          onStart: () => _startPull(box.maxHeight),
+          onUpdate: _updatePull,
+          onEnd: (velocity, cancel) => unawaited(
+            _settlePull(
+              velocity: velocity,
+              cancel: cancel,
+              reduceMotion: MediaQuery.disableAnimationsOf(context),
+            ),
           ),
+          child: child!,
         ),
-        child: page,
       ),
     );
     if (platform != TargetPlatform.android) return interactive;
@@ -231,13 +260,13 @@ class _TopEdgeBackGestureState extends State<_TopEdgeBackGesture> {
     if (!widget.onStart()) return;
     _started = true;
     _height = widget.height;
-    _distance = details.localPosition.dy - _origin;
+    _distance = details.globalPosition.dy - _origin;
     widget.onUpdate(_distance / _height);
   }
 
   void _update(DragUpdateDetails details) {
     if (!_started) return;
-    _distance = (_distance + details.delta.dy).clamp(0, _height);
+    _distance = (details.globalPosition.dy - _origin).clamp(-_height, _height);
     widget.onUpdate(_distance / _height);
   }
 
@@ -260,13 +289,14 @@ class _TopEdgeBackGestureState extends State<_TopEdgeBackGesture> {
                   widget.enabled && widget.height > 0 && widget.canStart();
               recognizer.activationHeight = widget.activationHeight;
               recognizer.onDown = (details) {
-                _origin = details.localPosition.dy;
+                _origin = details.globalPosition.dy;
               };
               recognizer.onStart = _start;
               recognizer.onUpdate = _update;
               recognizer.onEnd = (details) =>
                   _end(details.velocity.pixelsPerSecond.dy);
               recognizer.onCancel = () => _end(0, cancel: true);
+              recognizer.onPointerCancelled = () => _end(0, cancel: true);
             },
           ),
     },
@@ -278,6 +308,13 @@ class _TopEdgeDragRecognizer extends VerticalDragGestureRecognizer {
   _TopEdgeDragRecognizer({super.debugOwner});
   double activationHeight = 0;
   bool Function()? canStart;
+  VoidCallback? onPointerCancelled;
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerCancelEvent) onPointerCancelled?.call();
+    super.handleEvent(event);
+  }
 
   @override
   bool hasSufficientGlobalDistanceToAccept(

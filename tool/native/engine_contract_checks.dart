@@ -55,7 +55,13 @@ List<String> verifyEngineContracts() {
     cueEndFrame75: 300,
     replayGainDb: -6.5,
   );
-  expect('open message', open.toMessage(), <Object?>[1500, 180000, 75, 300, -6.5]);
+  expect('open message', open.toMessage(), <Object?>[
+    1500,
+    180000,
+    75,
+    300,
+    -6.5,
+  ]);
 
   const LazerEqBandSettings band = LazerEqBandSettings(
     kind: lazerAudioEqBandLowShelf,
@@ -125,16 +131,27 @@ List<String> verifyEngineContracts() {
     clippedSampleCount: 0,
     telemetryValid: false,
   );
-  expect('dsd summary', dsd.summary, 'dsd_lsbf_planar DSD128x → DoP @ 176400 Hz');
+  expect(
+    'dsd summary',
+    dsd.summary,
+    'dsd_lsbf_planar DSD128x → DoP @ 176400 Hz',
+  );
   expect('dsd has a DSD source', dsd.hasDsdSource, true);
   expect('dsd is DoP', dsd.isDoPOutput, true);
   expect('dsd is not native DSD', dsd.isNativeDsdOutput, false);
   // A DoP session carries the decoded bitstream unchanged, so it is bit-perfect in
   // the DSD sense: exclusive, no DSP, carrier exact.
-  expect('dsd path is bit-perfect through its carrier', dsd.outputPath.bitPerfect, true);
+  expect(
+    'dsd path is bit-perfect through its carrier',
+    dsd.outputPath.bitPerfect,
+    true,
+  );
   expect('dsd path is flagged as a DSD path', dsd.outputPath.isDsdPath, true);
-  expect('dsd path states what its verdict means',
-      dsd.outputPath.bitPerfectMeaning.contains('DoP'), true);
+  expect(
+    'dsd path states what its verdict means',
+    dsd.outputPath.bitPerfectMeaning.contains('DoP'),
+    true,
+  );
 
   return failures;
 }

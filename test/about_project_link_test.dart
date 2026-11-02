@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:lazer_nextgen/legacy/legacy_settings_page.dart';
+import 'package:lazer_nextgen/ui/settings_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -34,7 +34,7 @@ Future<void> _showAbout(
           child: Scaffold(
             body: tv
                 ? LargeScreenSettingsPage(state: state, onOpenLocalMusic: () {})
-                : LegacySettingsPage(state: state),
+                : AppSettingsPage(state: state),
           ),
         ),
       ),

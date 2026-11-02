@@ -295,6 +295,7 @@ class HifiController extends ChangeNotifier {
         a.crossfeedAlgorithm != b.crossfeedAlgorithm ||
         a.crossfeedDelayMs != b.crossfeedDelayMs ||
         a.crossfeedCutoffHz != b.crossfeedCutoffHz ||
+        !listEquals(a.stageOrder, b.stageOrder) ||
         a.bands.length != b.bands.length) {
       return false;
     }

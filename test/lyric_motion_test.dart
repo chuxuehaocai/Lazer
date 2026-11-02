@@ -8,7 +8,7 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/lyrics.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
 import 'package:lazer_nextgen/widgets/timed_lyric_text.dart';
@@ -193,12 +193,12 @@ void main() {
       state.playQueue([_track]);
       await tester.pumpWidget(
         MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           home: Scaffold(body: LyricViewport(state: state)),
         ),
       );
       await tester.pumpAndSettle();
-      final blur = find.byKey(const ValueKey('lyric-blur-1'));
+      final blur = find.byKey(const ValueKey('lyric-blur-2'));
       final initial = tester.widget<ImageFiltered>(blur).imageFilter;
       final initialY = tester.getTopLeft(find.text('歌词 1')).dy;
       final gesture = await tester.startGesture(const Offset(200, 600));
@@ -238,7 +238,7 @@ void main() {
     state.playQueue([_track]);
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         home: Scaffold(body: LyricViewport(state: state)),
       ),
     );
@@ -428,7 +428,7 @@ void main() {
           await state.setLyricFontSize(fontSize);
           await tester.pumpWidget(
             MaterialApp(
-              theme: buildLegacyTheme(),
+              theme: buildAppleTheme(),
               home: Scaffold(body: LyricViewport(state: state)),
             ),
           );

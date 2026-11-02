@@ -122,10 +122,7 @@ void main() {
       ).outputPath;
 
       expect(state.bitPerfect, isFalse);
-      expect(
-        state.failingConditions,
-        contains('DoP 载波 / 原生 DSD 字格式与源不一致'),
-      );
+      expect(state.failingConditions, contains('DoP 载波 / 原生 DSD 字格式与源不一致'));
     });
 
     test('a stale engine flag is visible instead of believed', () {
@@ -139,7 +136,8 @@ void main() {
     });
 
     test('reads the facts out of the native struct', () {
-      final Pointer<LazerAudioStreamInfo> native = calloc<LazerAudioStreamInfo>();
+      final Pointer<LazerAudioStreamInfo> native =
+          calloc<LazerAudioStreamInfo>();
       addTearDown(() => calloc.free(native));
       native.ref
         ..outputFormatInitialized = 1
@@ -177,7 +175,9 @@ void main() {
         ..underrunActive = 1
         ..underrunFrames = 512;
 
-      final LazerEngineMetrics metrics = LazerEngineMetrics.fromNative(native.ref);
+      final LazerEngineMetrics metrics = LazerEngineMetrics.fromNative(
+        native.ref,
+      );
 
       expect(metrics.ringFillFraction, closeTo(0.25, 0.0001));
       expect(metrics.ringFillMillis(44100), 93);
@@ -208,7 +208,9 @@ void main() {
       final Pointer<LazerAudioSnapshot> native = calloc<LazerAudioSnapshot>();
       addTearDown(() => calloc.free(native));
 
-      final LazerEngineMetrics metrics = LazerEngineMetrics.fromNative(native.ref);
+      final LazerEngineMetrics metrics = LazerEngineMetrics.fromNative(
+        native.ref,
+      );
 
       expect(metrics.ringFillFraction, 0);
       expect(metrics.ringFillMillis(44100), 0);
@@ -284,16 +286,19 @@ void main() {
       ),
     );
 
-    test('bit-perfect sends a neutral request, not one the engine must refuse', () {
-      final LazerDspRequest request = withDsp
-          .copyWith(bitPerfect: true, exclusiveMode: true)
-          .toDspRequest();
+    test(
+      'bit-perfect sends a neutral request, not one the engine must refuse',
+      () {
+        final LazerDspRequest request = withDsp
+            .copyWith(bitPerfect: true, exclusiveMode: true)
+            .toDspRequest();
 
-      expect(request.preampDb, 0);
-      expect(request.limiterEnabled, isFalse);
-      expect(request.bands, isEmpty);
-      expect(request.crossfeedEnabled, isFalse);
-    });
+        expect(request.preampDb, 0);
+        expect(request.limiterEnabled, isFalse);
+        expect(request.bands, isEmpty);
+        expect(request.crossfeedEnabled, isFalse);
+      },
+    );
 
     test('the same settings reach the engine once bit-perfect is off', () {
       final LazerDspRequest request = withDsp.toDspRequest();
@@ -312,17 +317,19 @@ void main() {
     });
   });
 
-
   group('the explicit DSP chain', () {
-    test('defaults to the engine order and round-trips through persistence', () {
-      expect(decodeDspStageOrder(null), defaultDspStageOrder);
+    test(
+      'defaults to the engine order and round-trips through persistence',
+      () {
+        expect(decodeDspStageOrder(null), defaultDspStageOrder);
 
-      const HifiSettings custom = HifiSettings(dspStageOrder: <int>[3, 1]);
-      final HifiSettings restored = HifiSettings.fromMap(custom.toMap());
+        const HifiSettings custom = HifiSettings(dspStageOrder: <int>[3, 1]);
+        final HifiSettings restored = HifiSettings.fromMap(custom.toMap());
 
-      expect(restored.dspStageOrder, <int>[3, 1]);
-      expect(restored.toDspRequest().stageOrder, <int>[3, 1]);
-    });
+        expect(restored.dspStageOrder, <int>[3, 1]);
+        expect(restored.toDspRequest().stageOrder, <int>[3, 1]);
+      },
+    );
 
     test('drops unknown stages instead of silently reordering', () {
       expect(decodeDspStageOrder('9,1,x'), <int>[1]);
@@ -352,9 +359,9 @@ void main() {
       expect(withBitPerfect.stageOrder, <int>[1, 3]);
     });
 
-
     test('every preset is a legal chain and survives the encoder', () {
-      for (final MapEntry<String, List<int>> preset in kDspChainPresets.entries) {
+      for (final MapEntry<String, List<int>> preset
+          in kDspChainPresets.entries) {
         for (final int stage in preset.value) {
           expect(stage, inInclusiveRange(0, 4), reason: preset.key);
         }

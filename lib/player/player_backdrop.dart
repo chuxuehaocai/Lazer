@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/models.dart';
-import '../legacy/legacy_background.dart';
+import '../ui/background.dart';
 import '../state/ui_preferences.dart';
 import '../theme/adaptive_contrast.dart';
 
@@ -31,7 +31,7 @@ class AlbumBlurFlow extends StatefulWidget {
   final double? frameRate;
   final Color? solidColor;
   final String? imagePath;
-  final LegacyBackgroundMode mode;
+  final AppBackgroundMode mode;
   final Color pageColor;
   final bool animationsEnabled;
 
@@ -96,7 +96,7 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
           fit: StackFit.expand,
           children: <Widget>[
             ColoredBox(color: widget.pageColor),
-            if (widget.mode == LegacyBackgroundMode.solidColor)
+            if (widget.mode == AppBackgroundMode.solidColor)
               ColoredBox(
                 color:
                     widget.solidColor ??
@@ -105,17 +105,17 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
                       Brightness.dark,
                     ),
               )
-            else if (widget.mode == LegacyBackgroundMode.customImage)
+            else if (widget.mode == AppBackgroundMode.customImage)
               CustomImageBackdrop(
                 path: widget.imagePath,
                 pageColor: widget.pageColor,
               )
-            else if (widget.mode != LegacyBackgroundMode.off)
+            else if (widget.mode != AppBackgroundMode.off)
               AlbumFlowBackground(
                 colors: _colors,
                 animated:
                     widget.animationsEnabled &&
-                    widget.mode == LegacyBackgroundMode.nowPlayingDynamic,
+                    widget.mode == AppBackgroundMode.nowPlayingDynamic,
                 solid: false,
                 frameRate: widget.frameRate,
                 quality: widget.quality,

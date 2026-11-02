@@ -10,11 +10,13 @@ class SettingsChoice<T> extends StatelessWidget {
     required this.value,
     required this.items,
     required this.onChanged,
+    this.hint,
   });
 
-  final T value;
+  final T? value;
   final List<DropdownMenuItem<T>> items;
   final ValueChanged<T?>? onChanged;
+  final Widget? hint;
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +32,10 @@ class SettingsChoice<T> extends StatelessWidget {
           value: value,
           items: items,
           onChanged: onChanged,
+          hint: hint,
           isExpanded: true,
+          // Both the button and menu can wrap a complete translated choice.
+          itemHeight: null,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           underline: const SizedBox.shrink(),
           borderRadius: BorderRadius.circular(12),

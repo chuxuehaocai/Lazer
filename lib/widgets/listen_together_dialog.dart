@@ -1,6 +1,8 @@
+import 'spring_buttons.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
@@ -9,7 +11,7 @@ import '../state/listen_together.dart';
 
 /// Opens the 一起听 room sheet from any platform's player header or settings.
 Future<void> showListenTogetherDialog(BuildContext context, AppState state) =>
-    showDialog<void>(
+    showAppleDialog<void>(
       context: context,
       builder: (BuildContext context) => _ListenTogetherDialog(state: state),
     );
@@ -169,12 +171,12 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
       spacing: 10,
       runSpacing: 10,
       children: <Widget>[
-        FilledButton.icon(
+        SpringFilledButton.icon(
           onPressed: room.loading ? null : () => unawaited(_copyInvite(room)),
           icon: const Icon(Icons.copy_rounded),
           label: Text(context.tr('复制邀请')),
         ),
-        OutlinedButton(
+        SpringOutlinedButton(
           onPressed: room.loading
               ? null
               : () async {
@@ -191,7 +193,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
       <Widget>[
         SizedBox(
           width: double.infinity,
-          child: FilledButton.icon(
+          child: SpringFilledButton.icon(
             onPressed: room.loading
                 ? null
                 : () async {
@@ -229,7 +231,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
         const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
-          child: OutlinedButton.icon(
+          child: SpringOutlinedButton.icon(
             onPressed: room.loading ? null : () => _join(room),
             icon: const Icon(Icons.login_rounded),
             label: Text(context.tr('加入一起听')),

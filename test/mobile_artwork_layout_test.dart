@@ -7,15 +7,24 @@ const _artworkKey = ValueKey('layout-artwork');
 const _lyricsKey = ValueKey('layout-lyrics');
 const _detailsKey = ValueKey('layout-details');
 const _transportKey = ValueKey('layout-transport');
+const _summaryKey = ValueKey('layout-summary');
 
-Widget _layout({required bool lyrics, bool controls = true}) => MaterialApp(
+Widget _layout({
+  required bool lyrics,
+  bool controls = true,
+  bool reduced = false,
+}) => MaterialApp(
+  builder: (context, child) => MediaQuery(
+    data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
+    child: child!,
+  ),
   home: Scaffold(
     body: SafeArea(
       child: ArtworkLyricsLayout(
         lyricsVisible: lyrics,
         controlsVisible: controls,
         header: const SizedBox(height: 56),
-        summary: const SizedBox(height: 56),
+        summary: const SizedBox(key: _summaryKey, height: 56),
         artwork: const ColoredBox(key: _artworkKey, color: Colors.blue),
         lyrics: const ColoredBox(key: _lyricsKey, color: Colors.black),
         details: const SizedBox(key: _detailsKey, height: 64),
@@ -26,6 +35,98 @@ Widget _layout({required bool lyrics, bool controls = true}) => MaterialApp(
 );
 
 void main() {
+  testWidgets(
+    'top summary enters downward and exits upward from its current pose',
+    (tester) async {
+      await tester.pumpWidget(_layout(lyrics: true));
+      final summary = find.byKey(_summaryKey);
+      final fade = find.byKey(const ValueKey('compact-player-summary-fade'));
+      final hiddenTop = tester.getTopLeft(summary).dy;
+      await tester.pumpWidget(_layout(lyrics: true, controls: false));
+      await tester.pump(const Duration(milliseconds: 80));
+      final enteringTop = tester.getTopLeft(summary).dy;
+      expect(enteringTop, greaterThan(hiddenTop));
+      expect(
+        tester.widget<FadeTransition>(fade).opacity.value,
+        inExclusiveRange(0, 1),
+      );
+      await tester.pumpAndSettle();
+      final restingTop = tester.getTopLeft(summary).dy;
+      expect(restingTop, greaterThan(enteringTop));
+      await tester.pumpWidget(_layout(lyrics: true, controls: true));
+      expect(tester.getTopLeft(summary).dy, closeTo(restingTop, .0001));
+      await tester.pump(const Duration(milliseconds: 100));
+      final exitingTop = tester.getTopLeft(summary).dy;
+      final exitingOpacity = tester.widget<FadeTransition>(fade).opacity.value;
+      expect(exitingTop, lessThan(restingTop));
+      expect(exitingOpacity, inExclusiveRange(0, 1));
+      await tester.pumpWidget(_layout(lyrics: true, controls: false));
+      expect(tester.getTopLeft(summary).dy, closeTo(exitingTop, .0001));
+      expect(
+        tester.widget<FadeTransition>(fade).opacity.value,
+        closeTo(exitingOpacity, .0001),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(summary).dy, closeTo(restingTop, .0001));
+      expect(tester.binding.transientCallbackCount, 0);
+    },
+  );
+
+  testWidgets('artwork mode reverses with its current position and velocity', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_layout(lyrics: false));
+    final art = find.byKey(_artworkKey);
+    final element = tester.element(art);
+    await tester.pumpWidget(_layout(lyrics: true));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 70));
+    final fade = tester.widget<FadeTransition>(
+      find
+          .ancestor(
+            of: find.byKey(_lyricsKey),
+            matching: find.byType(FadeTransition),
+          )
+          .first,
+    );
+    final mode = fade.opacity as AnimationController;
+    final value = mode.value, velocity = mode.velocity;
+    final bounds = tester.getRect(art);
+    expect(velocity, greaterThan(0));
+    await tester.pumpWidget(_layout(lyrics: false));
+    expect(tester.element(art), same(element));
+    expect(
+      (tester.getRect(art).topLeft - bounds.topLeft).distance,
+      lessThan(.001),
+    );
+    expect(
+      (tester.getRect(art).bottomRight - bounds.bottomRight).distance,
+      lessThan(.001),
+    );
+    expect(mode.value, closeTo(value, .000001));
+    expect(mode.velocity, closeTo(velocity, .000001));
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(mode.value, greaterThan(value));
+    await tester.pumpAndSettle();
+    expect(mode.value, 0);
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
+  testWidgets(
+    'reduced motion finishes a running artwork and chrome transition',
+    (tester) async {
+      await tester.pumpWidget(_layout(lyrics: false));
+      await tester.pumpWidget(_layout(lyrics: true, controls: false));
+      await tester.pump(const Duration(milliseconds: 70));
+      await tester.pumpWidget(
+        _layout(lyrics: true, controls: false, reduced: true),
+      );
+      await tester.pump();
+      expect(tester.binding.transientCallbackCount, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final size in [
     const Size(320, 568),
     const Size(390, 844),
@@ -67,7 +168,7 @@ void main() {
       expect(details.overlaps(transport), isFalse);
 
       await tester.pumpWidget(_layout(lyrics: true));
-      await tester.pump(const Duration(milliseconds: 450));
+      await tester.pumpAndSettle();
       expect(tester.element(art), same(element));
       final small = tester.getRect(art);
       final compactDetails = tester.getRect(find.byKey(_detailsKey));
@@ -87,7 +188,7 @@ void main() {
       }
 
       await tester.pumpWidget(_layout(lyrics: true, controls: false));
-      await tester.pump(const Duration(milliseconds: 380));
+      await tester.pumpAndSettle();
       final expandedLyrics = tester.getRect(find.byKey(_lyricsKey));
       expect(expandedLyrics.height, greaterThan(lyrics.height));
       final content = tester.getRect(

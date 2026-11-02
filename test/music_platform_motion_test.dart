@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lazer_nextgen/animation/view_transitions.dart';
+import 'package:lazer_nextgen/animation/apple_spring.dart';
 
 Widget _host(ValueNotifier<bool> selected, {bool reduced = false}) =>
     MaterialApp(
@@ -37,6 +38,7 @@ void main() {
       await tester.pumpWidget(_host(selected));
       selected.value = true;
       await tester.pump();
+      await tester.pump();
       await tester.pump(const Duration(milliseconds: 80));
       final fade = tester.widget<FadeTransition>(
         find
@@ -48,8 +50,13 @@ void main() {
       );
       expect(
         fade.opacity.value,
-        greaterThan(.5),
-        reason: 'A linear 320 ms fade would still be at 25%.',
+        closeTo(
+          const AppleSpring(
+            duration: ViewMotion.duration,
+          ).simulation(0, 1).x(.08),
+          .00001,
+        ),
+        reason: 'The view uses the same spring response as other transitions.',
       );
       expect(fade.opacity.value, lessThan(1));
       final departing = find.ancestor(

@@ -1,3 +1,4 @@
+import '../animation/apple_spring.dart';
 import 'package:lazer_nextgen/theme/app_palette.dart';
 import 'package:flutter/material.dart';
 
@@ -52,8 +53,8 @@ class LyricSelectionToolbar extends StatelessWidget {
                   duration: MediaQuery.disableAnimationsOf(context)
                       ? Duration.zero
                       : const Duration(milliseconds: 220),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
+                  switchInCurve: const AppleSpringCurve(),
+                  switchOutCurve: const AppleSpringCurve(),
                   transitionBuilder: (child, animation) => FadeTransition(
                     opacity: animation,
                     child: SlideTransition(
@@ -91,8 +92,8 @@ class LyricSelectionToolbar extends StatelessWidget {
                   duration: MediaQuery.disableAnimationsOf(context)
                       ? Duration.zero
                       : const Duration(milliseconds: 180),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
+                  switchInCurve: const AppleSpringCurve(),
+                  switchOutCurve: const AppleSpringCurve(),
                   transitionBuilder: (child, animation) => FadeTransition(
                     opacity: animation,
                     child: ScaleTransition(

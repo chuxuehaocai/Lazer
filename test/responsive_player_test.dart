@@ -13,7 +13,7 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/interaction/app_haptics.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/interaction_feedback.dart';
 import 'package:lazer_nextgen/widgets/window_title_area.dart';
@@ -69,7 +69,10 @@ class _Catalog extends Catalog {
     albums: [],
   );
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => null;
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => null;
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics(
     lrc: '[00:00.00]第一句歌词\n[00:02.00]第二句歌词\n[00:04.00]第三句歌词\n[00:06.00]第四句歌词',
@@ -153,7 +156,7 @@ void main() {
         RepaintBoundary(
           key: key,
           child: MaterialApp(
-            theme: buildLegacyTheme(),
+            theme: buildAppleTheme(),
             builder: (context, child) => Column(
               children: [
                 const WindowTitleArea(),
@@ -175,7 +178,7 @@ void main() {
       expect(rich.text.style?.fontWeight, FontWeight.w400);
       expect(
         rich.text.style?.color,
-        buildLegacyTheme().colorScheme.onSurfaceVariant,
+        buildAppleTheme().colorScheme.onSurfaceVariant,
       );
       // A fixed strip of chrome above the pages, holding the title and all
       // three caption buttons on one row, flush with the trailing edge.
@@ -317,7 +320,9 @@ void main() {
     expect(prefs.getDouble('lazer_lyric_resume_seconds'), 3);
   });
 
-  testWidgets('an iOS control pulses the native impact channel', (tester) async {
+  testWidgets('an iOS control pulses the native impact channel', (
+    tester,
+  ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     try {
       final calls = <MethodCall>[];
@@ -349,23 +354,18 @@ void main() {
       ]);
       expect(
         calls.map(
-          (MethodCall call) => (call.arguments as Map<Object?, Object?>)['kind'],
+          (MethodCall call) =>
+              (call.arguments as Map<Object?, Object?>)['kind'],
         ),
         <String>['tap', 'detent', 'boundary'],
       );
       // Detents are softened so a drag cannot drown out the tap feedback.
-      expect(
-        (calls.first.arguments as Map<Object?, Object?>)['intensity'],
-        .6,
-      );
+      expect((calls.first.arguments as Map<Object?, Object?>)['intensity'], .6);
       expect(
         (calls[1].arguments as Map<Object?, Object?>)['intensity'] as double,
         closeTo(.33, .0001),
       );
-      expect(
-        (calls.last.arguments as Map<Object?, Object?>)['intensity'],
-        .6,
-      );
+      expect((calls.last.arguments as Map<Object?, Object?>)['intensity'], .6);
 
       // The off switch and a zero strength never reach the platform.
       await haptics.pulse(enabled: false, intensity: .6);

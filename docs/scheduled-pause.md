@@ -1,24 +1,33 @@
 # Scheduled pause
 
-Settings → Playback → Scheduled pause supports multiple daily local-time ranges.
+Settings → Playback → Scheduled pause supports multiple daily local-time points.
 Mobile opens a separate settings page; desktop keeps the editor in a settings
-subview. Add, edit, delete or individually disable ranges, then enable the
+subview. Add, edit, delete or individually disable points, then enable the
 master switch. Settings persist across application restarts.
 
-The start is inclusive and the end exclusive. For example, 23:00–07:00 pauses
-from 23:00 through the following morning, while 12:00–13:00 adds a lunch break.
-Overlapping ranges remain active until every covering range has ended. Equal
-start/end times are rejected so a mistaken entry cannot disable playback all day.
+Each entry contains one 24-hour time, such as 23:00 or 12:30. At that time,
+playback pauses once and retains the current queue and position. The listener
+can resume manually immediately afterwards; there is no blocked interval and no
+automatic resume. Entries at the same time coalesce into one pause. Editing or
+enabling a schedule does not retroactively pause for earlier times in the day.
+Existing range settings migrate to their start times; their end times are
+discarded and the saved settings use the point format from then on.
 
-Entering an enabled range pauses the current track and retains its queue and
-position. Playback requests are held while a range is active. Leaving the range,
-disabling the feature or deleting the range never starts playback automatically.
-The listener can resume manually afterwards. The feature pauses music; it does
-not close the application or shut down the device.
+A foreground check catches points crossed while the process was suspended and
+coalesces missed events into one pause. Pending stream loads, buffer waits, and
+native play requests also recheck the schedule, so an earlier play request cannot
+resume audio after the point. An explicit new play request remains available.
 
-A single timer targets the next boundary, with a wall-clock check at most every
-30 seconds while enabled. Resume events trigger an immediate recheck. Boundaries
-use local calendar dates, including overnight ranges. Timezone/system-clock
-changes are picked up by the recheck. Execution requires the application to be
-running; an operating system that suspends the process can defer the check until
-the app resumes. The app cannot pause another application's audio.
+A single timer targets the next point, with a wall-clock check at most every
+30 seconds while enabled. Points use local calendar dates, rather than adding
+24 hours, to follow daylight-saving boundaries. A skipped local time follows
+the platform's calendar normalization; a repeated local minute does not deliver
+the same pause twice. A bounded history retains 32 delivered local dates to
+prevent repeats after a clock rollback. Timezone changes update upcoming local
+times at the next check.
+
+Execution requires the application to be running. An operating system that
+suspends the process can defer the pause until the app resumes. The feature
+pauses music; it does not close the app, shut down the device, or control another
+application's audio. The editor is available in Simplified Chinese, Traditional
+Chinese, English, and Japanese.

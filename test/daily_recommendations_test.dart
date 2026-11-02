@@ -5,7 +5,7 @@ import 'package:lazer_nextgen/cache/disk_cache.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_home_pages.dart';
+import 'package:lazer_nextgen/ui/home_pages.dart';
 
 class _DailyGateway extends NeteaseGateway {
   bool offline = false;

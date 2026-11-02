@@ -44,7 +44,10 @@ void main() {
       final HifiEqualizerState state = const HifiEqualizerState()
           .withPreset(preset)
           .copyWith(enabled: true);
-      expect(HifiEqualizerState.decode(state.encode()).matchingPresetId, preset.id);
+      expect(
+        HifiEqualizerState.decode(state.encode()).matchingPresetId,
+        preset.id,
+      );
     }
   });
 }

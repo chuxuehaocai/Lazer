@@ -6,8 +6,8 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_login.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/login.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/theme/font_preferences.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
@@ -42,7 +42,10 @@ class _QrGateway extends NeteaseGateway {
   Future<String> createQrCodeUrl(String key) async => _scanUrl;
 
   @override
-  Future<GatewayQrCheck> checkQrCode(String key, {String secureCaptcha = ''}) async {
+  Future<GatewayQrCheck> checkQrCode(
+    String key, {
+    String secureCaptcha = '',
+  }) async {
     checkedKeys.add(key);
     captchas.add(secureCaptcha);
     final int index = polls < codes.length ? polls : codes.length - 1;
@@ -74,7 +77,10 @@ class _Catalog extends Catalog {
   Future<UserCollections> userCollections(int uid) async =>
       UserCollections.empty;
   @override
-  Future<String?> audioUrlFor(Track track, {AudioQuality quality = AudioQuality.exhigh}) async => null;
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => null;
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async =>
       const GatewayLyrics(lrc: '');
@@ -104,7 +110,7 @@ void main() {
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
-              onPressed: () => showLegacyLoginDialog(context, state),
+              onPressed: () => showAppLoginDialog(context, state),
               child: const Text('open'),
             ),
           ),
@@ -128,7 +134,10 @@ void main() {
   test('a waiting key keeps the poll at 801 and never signs in', () async {
     final gateway = _QrGateway(codes: <int>[801]);
     final state = _state(gateway);
-    addTearDown(() async { await _flush(); state.dispose(); });
+    addTearDown(() async {
+      await _flush();
+      state.dispose();
+    });
     final String? url = await state.beginQrLogin();
     expect(url, _scanUrl);
     expect(await state.pollQrLogin(url!), 801);
@@ -150,7 +159,10 @@ void main() {
         ],
       );
       final state = _state(gateway);
-      addTearDown(() async { await _flush(); state.dispose(); });
+      addTearDown(() async {
+        await _flush();
+        state.dispose();
+      });
       final String? url = await state.beginQrLogin();
       expect(await state.pollQrLogin(url!), 803);
       expect(gateway.statusCalls, greaterThan(1));
@@ -167,35 +179,41 @@ void main() {
     },
   );
 
-  test('a spent key still adopts a confirmation the account lagged behind', () async {
-    final gateway = _QrGateway(
-      codes: <int>[803, 800],
-      statuses: const <GatewayLoginStatus>[
-        GatewayLoginStatus(),
-        GatewayLoginStatus(),
-        GatewayLoginStatus(),
-        GatewayLoginStatus(profile: _profile),
-      ],
-    );
-    final state = _state(gateway);
-    addTearDown(() async { await _flush(); state.dispose(); });
-    final String? url = await state.beginQrLogin();
-    // First poll: confirmed, but the account is not ready yet.
-    expect(await state.pollQrLogin(url!), 802);
-    expect(state.signedIn, isFalse);
-    // Second poll: the key is spent (800), the account is ready now.
-    expect(await state.pollQrLogin(url), 803);
-    expect(state.signedIn, isTrue);
-  });
+  test(
+    'a spent key still adopts a confirmation the account lagged behind',
+    () async {
+      final gateway = _QrGateway(
+        codes: <int>[803, 800],
+        statuses: const <GatewayLoginStatus>[
+          GatewayLoginStatus(),
+          GatewayLoginStatus(),
+          GatewayLoginStatus(),
+          GatewayLoginStatus(profile: _profile),
+        ],
+      );
+      final state = _state(gateway);
+      addTearDown(() async {
+        await _flush();
+        state.dispose();
+      });
+      final String? url = await state.beginQrLogin();
+      // First poll: confirmed, but the account is not ready yet.
+      expect(await state.pollQrLogin(url!), 802);
+      expect(state.signedIn, isFalse);
+      // Second poll: the key is spent (800), the account is ready now.
+      expect(await state.pollQrLogin(url), 803);
+      expect(state.signedIn, isTrue);
+    },
+  );
 
   test('a URL without a codekey reports expiry instead of polling', () async {
     final gateway = _QrGateway();
     final state = _state(gateway);
-    addTearDown(() async { await _flush(); state.dispose(); });
-    expect(
-      await state.pollQrLogin('https://music.163.com/login'),
-      800,
-    );
+    addTearDown(() async {
+      await _flush();
+      state.dispose();
+    });
+    expect(await state.pollQrLogin('https://music.163.com/login'), 800);
     expect(gateway.polls, 0);
   });
 
@@ -212,18 +230,21 @@ void main() {
       ],
     );
     final state = _state(gateway);
-    addTearDown(() async { await _flush(); state.dispose(); });
+    addTearDown(() async {
+      await _flush();
+      state.dispose();
+    });
 
     await tester.pumpWidget(
       AnimatedBuilder(
         animation: state,
         builder: (BuildContext context, _) => MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           home: Builder(
             builder: (BuildContext context) => Scaffold(
               body: Center(
                 child: TextButton(
-                  onPressed: () => showLegacyLoginDialog(context, state),
+                  onPressed: () => showAppLoginDialog(context, state),
                   child: const Text('open'),
                 ),
               ),

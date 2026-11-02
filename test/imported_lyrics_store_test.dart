@@ -45,14 +45,8 @@ void main() {
         little ? (unit >> 8) & 0xFF : unit & 0xFF,
       ],
     ];
-    expect(
-      decodeLyricsBytes(<int>[0xFF, 0xFE, ...units(little: true)]),
-      text,
-    );
-    expect(
-      decodeLyricsBytes(<int>[0xFE, 0xFF, ...units(little: false)]),
-      text,
-    );
+    expect(decodeLyricsBytes(<int>[0xFF, 0xFE, ...units(little: true)]), text);
+    expect(decodeLyricsBytes(<int>[0xFE, 0xFF, ...units(little: false)]), text);
   });
 
   test('rejects bytes that are not valid UTF-8', () {

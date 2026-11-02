@@ -27,13 +27,14 @@ int _failures = 0;
 
 void _expect(String what, Object? actual, Object? expected) {
   final bool ok = '$actual' == '$expected';
-  stdout.writeln('${ok ? 'ok  ' : 'FAIL'} $what: $actual'
-      '${ok ? '' : ' (expected $expected)'}');
+  stdout.writeln(
+    '${ok ? 'ok  ' : 'FAIL'} $what: $actual'
+    '${ok ? '' : ' (expected $expected)'}',
+  );
   if (!ok) _failures++;
 }
 
-typedef _ReadNative =
-    Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32);
+typedef _ReadNative = Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32);
 typedef _ReadDart = int Function(Pointer<Void>, Pointer<Uint8>, int);
 typedef _SeekNative = Int64 Function(Pointer<Void>, Int64);
 typedef _SeekDart = int Function(Pointer<Void>, int);
@@ -43,8 +44,7 @@ typedef _VoidNative = Void Function(Pointer<Void>);
 typedef _VoidDart = void Function(Pointer<Void>);
 
 String _libraryPath() {
-  final String? override =
-      Platform.environment['LAZER_AUDIO_BRIDGE_LIBRARY'];
+  final String? override = Platform.environment['LAZER_AUDIO_BRIDGE_LIBRARY'];
   if (override != null && override.isNotEmpty) return override;
   // Search the layouts both the CMake build and `tool/build_native_audio.dart`
   // produce, so this works without an environment variable.
@@ -141,11 +141,7 @@ Future<void> main() async {
   await sink.flush();
   api.readerNotify(reader);
   final Pointer<Uint8> buffer = calloc<Uint8>(16);
-  _expect(
-    'second read returns the appended bytes',
-    read(reader, buffer, 8),
-    3,
-  );
+  _expect('second read returns the appended bytes', read(reader, buffer, 8), 3);
   _expect('read is positioned after the payload', buffer[0], 5);
 
   // 3. A seek past the downloaded region waits for the download like a slow
@@ -180,11 +176,7 @@ Future<void> main() async {
   final File failedFile = File('${directory.path}/failed.audio');
   await failedFile.writeAsBytes(<int>[1, 2]);
   final Pointer<Pointer<Void>> failedOut = calloc<Pointer<Void>>();
-  api.readerCreate(
-    failedFile.path.toNativeUtf8().cast<Uint8>(),
-    -1,
-    failedOut,
-  );
+  api.readerCreate(failedFile.path.toNativeUtf8().cast<Uint8>(), -1, failedOut);
   final Pointer<Void> failedReader = failedOut.value;
   calloc.free(failedOut);
   _expect('failed reader reads its bytes', read(failedReader, buffer, 8), 2);
@@ -201,7 +193,11 @@ Future<void> main() async {
   final File stalledFile = File('${directory.path}/stalled.audio');
   await stalledFile.writeAsBytes(<int>[]);
   final Pointer<Pointer<Void>> stalledOut = calloc<Pointer<Void>>();
-  api.readerCreate(stalledFile.path.toNativeUtf8().cast<Uint8>(), -1, stalledOut);
+  api.readerCreate(
+    stalledFile.path.toNativeUtf8().cast<Uint8>(),
+    -1,
+    stalledOut,
+  );
   final Pointer<Void> stalledReader = stalledOut.value;
   calloc.free(stalledOut);
   final Future<int> cancelled = _readInWorker(

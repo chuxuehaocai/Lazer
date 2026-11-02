@@ -6,10 +6,10 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/apple_ui.dart';
@@ -97,19 +97,19 @@ void main() {
     addTearDown(visible.dispose);
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         home: Scaffold(
           body: ValueListenableBuilder<bool>(
             valueListenable: visible,
             builder: (context, enabled, child) =>
                 TickerMode(enabled: enabled, child: child!),
-            child: LegacyPlayerBar(state: state, onOpen: () {}),
+            child: AppPlayerBar(state: state, onOpen: () {}),
           ),
         ),
       ),
     );
-    LegacyThinSeekBar seekBar() =>
-        tester.widget<LegacyThinSeekBar>(find.byType(LegacyThinSeekBar));
+    AppThinSeekBar seekBar() =>
+        tester.widget<AppThinSeekBar>(find.byType(AppThinSeekBar));
     state.tick(const Duration(seconds: 30));
     await tester.pump();
     expect(seekBar().progress, closeTo(1 / 6, 0.001));
@@ -135,12 +135,12 @@ void main() {
     void open() {}
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
+        theme: buildAppleTheme(brightness: Brightness.dark),
         home: Scaffold(
           body: ValueListenableBuilder<int>(
             valueListenable: parent,
             builder: (context, value, _) =>
-                LegacyPlayerBar(state: state, onOpen: open),
+                AppPlayerBar(state: state, onOpen: open),
           ),
         ),
       ),
@@ -178,9 +178,9 @@ void main() {
     void onFirst() => first++;
     void onSecond() => second++;
     Widget app(Brightness brightness, VoidCallback callback) => MaterialApp(
-      theme: buildLegacyTheme(brightness: brightness),
+      theme: buildAppleTheme(brightness: brightness),
       home: Scaffold(
-        body: LegacyPlayerBar(state: state, onOpen: callback),
+        body: AppPlayerBar(state: state, onOpen: callback),
       ),
     );
     await tester.pumpWidget(app(Brightness.dark, onFirst));
@@ -207,8 +207,8 @@ void main() {
     state.playQueue(const <Track>[_track]);
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
-        home: LegacyShell(state: state),
+        theme: buildAppleTheme(brightness: Brightness.dark),
+        home: AppShell(state: state),
       ),
     );
     await tester.pump(const Duration(milliseconds: 200));
@@ -218,13 +218,13 @@ void main() {
     debugOnRebuildDirtyWidget = (Element element, bool builtOnce) {
       final Type type = element.widget.runtimeType;
       if (type == NowPlayingPage) playerBuilds++;
-      if (type == LegacyHomePage) browseBuilds++;
+      if (type == AppHomePage) browseBuilds++;
     };
     addTearDown(() => debugOnRebuildDirtyWidget = null);
 
     await tester.tap(
       find.descendant(
-        of: find.byType(LegacyPlayerBar),
+        of: find.byType(AppPlayerBar),
         matching: find.text(_track.title),
       ),
     );

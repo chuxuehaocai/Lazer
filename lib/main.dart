@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'animation/apple_spring.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -17,7 +18,7 @@ import 'audio/native/lazer_audio_library.dart';
 import 'audio/playback_session.dart';
 import 'diagnostics/frame_stats.dart';
 import 'diagnostics/app_log.dart';
-import 'legacy/legacy_shell.dart';
+import 'ui/shell.dart';
 import 'theme/apple_design.dart';
 import 'state/app_state.dart';
 import 'state/ui_preferences.dart';
@@ -239,7 +240,7 @@ class _LazerAppState extends State<LazerApp> {
   late final LanRemoteController _remote;
 
   _RootUiSignature get _rootUiSignature => (
-    _state.legacyAccentSeed,
+    _state.accentSeed,
     _state.themeMode,
     _state.language.locale,
     _state.scrollRetention,
@@ -305,7 +306,7 @@ class _LazerAppState extends State<LazerApp> {
   Widget build(BuildContext context) {
     // The 配色 setting can seed the whole scheme from the current cover or a
     // colour the listener picked.
-    final Color? seed = _state.legacyAccentSeed;
+    final Color? seed = _state.accentSeed;
     return LanRemoteScope(
       controller: _remote,
       child: InteractionFeedback(
@@ -314,7 +315,7 @@ class _LazerAppState extends State<LazerApp> {
           title: 'Lazer · Field Player',
           debugShowCheckedModeBanner: false,
           navigatorObservers: [_browseNavigation],
-          themeAnimationCurve: Curves.easeOutCubic,
+          themeAnimationCurve: const AppleSpringCurve(),
           // One Apple surface theme drives the custom window frame, root
           // dialogs and the adaptive shell. Pages refine their local player
           // theme where Apple Music intentionally switches to a dark canvas.
@@ -383,8 +384,8 @@ class _LazerAppState extends State<LazerApp> {
             state: _state,
             child: _state.deviceIsWatch
                 ? WatchShell(state: _state, round: _state.deviceIsRoundWatch)
-                : LegacyShell(
-                    key: const ValueKey('legacy'),
+                : AppShell(
+                    key: const ValueKey('app-shell'),
                     state: _state,
                     autoCheckUpdates: true,
                   ),

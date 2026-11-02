@@ -7,11 +7,13 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_player_bar.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
+
+import 'support/player_transition.dart';
 
 const Track _track = Track(
   id: 'route-fixture',
@@ -47,14 +49,14 @@ void main() {
 
     final state = AppState(catalog: _Catalog());
     addTearDown(state.dispose);
-    await state.setLegacyBackground(LegacyBackgroundMode.off);
+    await state.setAppBackground(AppBackgroundMode.off);
     state.playQueue(<Track>[_track]);
 
     await tester.pumpWidget(
       MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: buildLegacyTheme(),
-        home: LegacyShell(state: state),
+        theme: buildAppleTheme(),
+        home: AppShell(state: state),
       ),
     );
     await tester.pump();
@@ -62,19 +64,14 @@ void main() {
     final rootBefore = tester.getSemantics(rootFinder);
     await tester.tap(find.byTooltip('歌词'));
     await tester.pump();
-    final playerSlide = find
-        .ancestor(
-          of: find.byType(NowPlayingPage),
-          matching: find.byType(SlideTransition),
-        )
-        .first;
+    final playerSlide = playerSlideAnimation(tester);
     expect(
-      tester.widget<SlideTransition>(playerSlide).position.value.dy,
+      playerSlide.value.dy,
       closeTo(1, .001),
       reason: 'the player must start below the window',
     );
     await tester.pump(const Duration(milliseconds: 100));
-    final midY = tester.widget<SlideTransition>(playerSlide).position.value.dy;
+    final midY = playerSlide.value.dy;
     expect(midY, greaterThan(0));
     expect(midY, lessThan(1));
     expect(find.byType(NowPlayingPage), findsOneWidget);
@@ -85,16 +82,15 @@ void main() {
     expect(tester.getSemantics(rootFinder).id, rootBefore.id);
     expect(tester.takeException(), isNull);
 
-    await tester.pump(const Duration(milliseconds: 540));
+    await pumpPlayerTransition(tester, playerSlide, AnimationStatus.completed);
     expect(
-      tester.widget<SlideTransition>(playerSlide).position.value.dy,
+      playerSlide.value.dy,
       closeTo(0, .001),
     );
     expect(tester.getSemantics(rootFinder).id, rootBefore.id);
     await tester.tap(find.byKey(const ValueKey<String>('desktop-close')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 540));
-    await tester.pump();
+    await pumpPlayerTransition(tester, playerSlide, AnimationStatus.dismissed);
     expect(find.byType(NowPlayingPage), findsNothing);
     expect(tester.getSemantics(rootFinder).id, rootBefore.id);
     expect(tester.takeException(), isNull);
@@ -112,23 +108,27 @@ void main() {
     addTearDown(tester.view.reset);
     final state = AppState(catalog: _Catalog());
     addTearDown(state.dispose);
-    await state.setLegacyBackground(LegacyBackgroundMode.off);
+    await state.setAppBackground(AppBackgroundMode.off);
     state.playQueue(<Track>[_track]);
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
-        home: LegacyShell(state: state),
+        theme: buildAppleTheme(),
+        home: AppShell(state: state),
       ),
     );
     await tester.pump(const Duration(milliseconds: 120));
     await tester.tap(
       find.descendant(
-        of: find.byType(LegacyPlayerBar),
+        of: find.byType(AppPlayerBar),
         matching: find.text(_track.title),
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 540));
+    await pumpPlayerTransition(
+      tester,
+      playerSlideAnimation(tester),
+      AnimationStatus.completed,
+    );
 
     expect(find.byType(NowPlayingPage), findsOneWidget);
     await tester.tap(find.byIcon(Icons.group_rounded).first);

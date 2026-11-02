@@ -8,7 +8,7 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/data/lyrics.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/player_seek_bar.dart';
@@ -77,7 +77,7 @@ Future<AppState> _pumpPlayer(WidgetTester tester, Size size) async {
   state.playQueue(<Track>[_track]);
   await tester.pumpWidget(
     MaterialApp(
-      theme: buildLegacyTheme(),
+      theme: buildAppleTheme(),
       home: NowPlayingPage(state: state),
     ),
   );
@@ -113,7 +113,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-          theme: buildLegacyTheme(),
+          theme: buildAppleTheme(),
           home: Scaffold(
             body: Column(
               children: [

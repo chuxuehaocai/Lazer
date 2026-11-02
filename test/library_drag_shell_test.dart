@@ -6,9 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_shell.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
-import 'package:lazer_nextgen/legacy/legacy_widgets.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
+import 'package:lazer_nextgen/ui/widgets.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 const GatewayUserProfile _profile = GatewayUserProfile(
@@ -73,8 +73,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(brightness: Brightness.dark),
-        home: LegacyShell(state: state),
+        theme: buildAppleTheme(brightness: Brightness.dark),
+        home: AppShell(state: state),
       ),
     );
     await tester.pump();
@@ -84,7 +84,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    final Finder cards = find.byType(LegacyPlaylistCard);
+    final Finder cards = find.byType(AppPlaylistCard);
     expect(cards, findsWidgets);
     final TestGesture gesture = await tester.startGesture(
       tester.getCenter(cards.first),

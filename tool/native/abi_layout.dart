@@ -46,20 +46,25 @@ const int _sentinel32 = 0x0A0B0C0D;
 const int _sentinel64 = 0x1122334455667788;
 const double _sentinelDouble = 91.5;
 
-List<int> _int32Bytes(int value) =>
-    (ByteData(4)..setInt32(0, value, Endian.host)).buffer.asUint8List().toList();
+List<int> _int32Bytes(int value) => (ByteData(
+  4,
+)..setInt32(0, value, Endian.host)).buffer.asUint8List().toList();
 
-List<int> _uint32Bytes(int value) =>
-    (ByteData(4)..setUint32(0, value, Endian.host)).buffer.asUint8List().toList();
+List<int> _uint32Bytes(int value) => (ByteData(
+  4,
+)..setUint32(0, value, Endian.host)).buffer.asUint8List().toList();
 
-List<int> _int64Bytes(int value) =>
-    (ByteData(8)..setInt64(0, value, Endian.host)).buffer.asUint8List().toList();
+List<int> _int64Bytes(int value) => (ByteData(
+  8,
+)..setInt64(0, value, Endian.host)).buffer.asUint8List().toList();
 
-List<int> _uint64Bytes(int value) =>
-    (ByteData(8)..setUint64(0, value, Endian.host)).buffer.asUint8List().toList();
+List<int> _uint64Bytes(int value) => (ByteData(
+  8,
+)..setUint64(0, value, Endian.host)).buffer.asUint8List().toList();
 
-List<int> _doubleBytes(double value) =>
-    (ByteData(8)..setFloat64(0, value, Endian.host)).buffer.asUint8List().toList();
+List<int> _doubleBytes(double value) => (ByteData(
+  8,
+)..setFloat64(0, value, Endian.host)).buffer.asUint8List().toList();
 
 final List<int> _pointerMarker = _int64Bytes(_sentinel64);
 final List<int> _int32Marker = _int32Bytes(_sentinel32);
@@ -69,7 +74,12 @@ final List<int> _uint64Marker = _uint64Bytes(_sentinel64);
 final List<int> _doubleMarker = _doubleBytes(_sentinelDouble);
 
 /// Finds [marker] in the raw bytes after running [write], or -1.
-int locate(Pointer<Uint8> base, int size, void Function() write, List<int> marker) {
+int locate(
+  Pointer<Uint8> base,
+  int size,
+  void Function() write,
+  List<int> marker,
+) {
   final Uint8List bytes = base.asTypedList(size);
   bytes.fillRange(0, bytes.length, 0);
   write();
@@ -127,7 +137,12 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
     ),
   ]),
   AbiStruct('LazerAudioOpenParams', sizeOf<LazerAudioOpenParams>(), <AbiField>[
-    AbiField('structSize', 0, () => _openParams().ref.structSize = _sentinel32, _uint32Marker),
+    AbiField(
+      'structSize',
+      0,
+      () => _openParams().ref.structSize = _sentinel32,
+      _uint32Marker,
+    ),
     AbiField(
       'startMillis',
       8,
@@ -159,48 +174,67 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       _doubleMarker,
     ),
   ]),
-  AbiStruct('LazerAudioDeviceConfig', sizeOf<LazerAudioDeviceConfig>(), <AbiField>[
-    AbiField(
-      'deviceId',
-      0,
-      () => _deviceConfig().ref.deviceId = Pointer.fromAddress(_sentinel64),
-      _pointerMarker,
-    ),
-    AbiField('exclusive', 8, () => _deviceConfig().ref.exclusive = _sentinel32, _int32Marker),
-    AbiField(
-      'resampleMode',
-      12,
-      () => _deviceConfig().ref.resampleMode = _sentinel32,
-      _int32Marker,
-    ),
-    AbiField(
-      'targetSampleRate',
-      16,
-      () => _deviceConfig().ref.targetSampleRate = _sentinel32,
-      _int32Marker,
-    ),
-    AbiField(
-      'bufferMillis',
-      20,
-      () => _deviceConfig().ref.bufferMillis = _sentinel32,
-      _int32Marker,
-    ),
-    AbiField(
-      'bitPerfect',
-      24,
-      () => _deviceConfig().ref.bitPerfect = _sentinel32,
-      _int32Marker,
-    ),
-    AbiField(
-      'dsdOutputMode',
-      28,
-      () => _deviceConfig().ref.dsdOutputMode = _sentinel32,
-      _int32Marker,
-    ),
-  ]),
-  AbiStruct('LazerAudioEventHandler', sizeOf<LazerAudioEventHandler>(), <AbiField>[]),
-  AbiStruct('LazerAudioLogHandler', sizeOf<LazerAudioLogHandler>(), <AbiField>[]),
-  AbiStruct('LazerAudioEngineConfig', sizeOf<LazerAudioEngineConfig>(), <AbiField>[
+  AbiStruct(
+    'LazerAudioDeviceConfig',
+    sizeOf<LazerAudioDeviceConfig>(),
+    <AbiField>[
+      AbiField(
+        'deviceId',
+        0,
+        () => _deviceConfig().ref.deviceId = Pointer.fromAddress(_sentinel64),
+        _pointerMarker,
+      ),
+      AbiField(
+        'exclusive',
+        8,
+        () => _deviceConfig().ref.exclusive = _sentinel32,
+        _int32Marker,
+      ),
+      AbiField(
+        'resampleMode',
+        12,
+        () => _deviceConfig().ref.resampleMode = _sentinel32,
+        _int32Marker,
+      ),
+      AbiField(
+        'targetSampleRate',
+        16,
+        () => _deviceConfig().ref.targetSampleRate = _sentinel32,
+        _int32Marker,
+      ),
+      AbiField(
+        'bufferMillis',
+        20,
+        () => _deviceConfig().ref.bufferMillis = _sentinel32,
+        _int32Marker,
+      ),
+      AbiField(
+        'bitPerfect',
+        24,
+        () => _deviceConfig().ref.bitPerfect = _sentinel32,
+        _int32Marker,
+      ),
+      AbiField(
+        'dsdOutputMode',
+        28,
+        () => _deviceConfig().ref.dsdOutputMode = _sentinel32,
+        _int32Marker,
+      ),
+    ],
+  ),
+  AbiStruct(
+    'LazerAudioEventHandler',
+    sizeOf<LazerAudioEventHandler>(),
+    <AbiField>[],
+  ),
+  AbiStruct(
+    'LazerAudioLogHandler',
+    sizeOf<LazerAudioLogHandler>(),
+    <AbiField>[],
+  ),
+  AbiStruct('LazerAudioEngineConfig', sizeOf<LazerAudioEngineConfig>(), <
+    AbiField
+  >[
     AbiField(
       'abiVersion',
       0,
@@ -228,7 +262,8 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
     AbiField(
       'events.context',
       48,
-      () => _engineConfig().ref.events.context = Pointer.fromAddress(_sentinel64),
+      () =>
+          _engineConfig().ref.events.context = Pointer.fromAddress(_sentinel64),
       _pointerMarker,
     ),
     AbiField(
@@ -239,8 +274,18 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
     ),
   ]),
   AbiStruct('LazerAudioSnapshot', sizeOf<LazerAudioSnapshot>(), <AbiField>[
-    AbiField('state', 0, () => _snapshot().ref.state = _sentinel32, _int32Marker),
-    AbiField('paused', 4, () => _snapshot().ref.paused = _sentinel32, _int32Marker),
+    AbiField(
+      'state',
+      0,
+      () => _snapshot().ref.state = _sentinel32,
+      _int32Marker,
+    ),
+    AbiField(
+      'paused',
+      4,
+      () => _snapshot().ref.paused = _sentinel32,
+      _int32Marker,
+    ),
     AbiField(
       'positionMillis',
       8,
@@ -259,7 +304,12 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       () => _snapshot().ref.bufferedPercent = _sentinel32,
       _int32Marker,
     ),
-    AbiField('error', 28, () => _snapshot().ref.error = _sentinel32, _int32Marker),
+    AbiField(
+      'error',
+      28,
+      () => _snapshot().ref.error = _sentinel32,
+      _int32Marker,
+    ),
     AbiField(
       'underrunActive',
       32,
@@ -341,7 +391,12 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       () => _streamInfo().ref.sourceBitrateKbps = _sentinel32,
       _int32Marker,
     ),
-    AbiField('lossless', 80, () => _streamInfo().ref.lossless = _sentinel32, _int32Marker),
+    AbiField(
+      'lossless',
+      80,
+      () => _streamInfo().ref.lossless = _sentinel32,
+      _int32Marker,
+    ),
     AbiField(
       'outputSampleRate',
       84,
@@ -477,13 +532,33 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       () => _eqBand().ref.frequencyHz = _sentinelDouble,
       _doubleMarker,
     ),
-    AbiField('gainDb', 16, () => _eqBand().ref.gainDb = _sentinelDouble, _doubleMarker),
+    AbiField(
+      'gainDb',
+      16,
+      () => _eqBand().ref.gainDb = _sentinelDouble,
+      _doubleMarker,
+    ),
     AbiField('q', 24, () => _eqBand().ref.q = _sentinelDouble, _doubleMarker),
-    AbiField('enabled', 32, () => _eqBand().ref.enabled = _sentinel32, _int32Marker),
+    AbiField(
+      'enabled',
+      32,
+      () => _eqBand().ref.enabled = _sentinel32,
+      _int32Marker,
+    ),
   ]),
   AbiStruct('LazerAudioDspConfig', sizeOf<LazerAudioDspConfig>(), <AbiField>[
-    AbiField('preampDb', 0, () => _dsp().ref.preampDb = _sentinelDouble, _doubleMarker),
-    AbiField('bandCount', 8, () => _dsp().ref.bandCount = _sentinel32, _uint32Marker),
+    AbiField(
+      'preampDb',
+      0,
+      () => _dsp().ref.preampDb = _sentinelDouble,
+      _doubleMarker,
+    ),
+    AbiField(
+      'bandCount',
+      8,
+      () => _dsp().ref.bandCount = _sentinel32,
+      _uint32Marker,
+    ),
     AbiField(
       'bands',
       16,
@@ -553,7 +628,8 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
     AbiField(
       'impulseResponse',
       120,
-      () => _dsp().ref.impulseResponse = Pointer<Float>.fromAddress(_sentinel64),
+      () =>
+          _dsp().ref.impulseResponse = Pointer<Float>.fromAddress(_sentinel64),
       _pointerMarker,
     ),
     AbiField(
@@ -569,15 +645,24 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       _uint32Marker,
     ),
   ]),
-  AbiStruct('LazerAudioOutputDeviceInfo', sizeOf<LazerAudioOutputDeviceInfo>(), <AbiField>[
-    AbiField(
-      'structSize',
-      0,
-      () => _outputDeviceInfo().ref.structSize = _sentinel32,
-      _uint32Marker,
-    ),
-    AbiField('flags', 4, () => _outputDeviceInfo().ref.flags = _sentinel32, _uint32Marker),
-  ]),
+  AbiStruct(
+    'LazerAudioOutputDeviceInfo',
+    sizeOf<LazerAudioOutputDeviceInfo>(),
+    <AbiField>[
+      AbiField(
+        'structSize',
+        0,
+        () => _outputDeviceInfo().ref.structSize = _sentinel32,
+        _uint32Marker,
+      ),
+      AbiField(
+        'flags',
+        4,
+        () => _outputDeviceInfo().ref.flags = _sentinel32,
+        _uint32Marker,
+      ),
+    ],
+  ),
   AbiStruct('LazerAudioDeviceInfo', sizeOf<LazerAudioDeviceInfo>(), <AbiField>[
     AbiField(
       'structSize',
@@ -616,40 +701,54 @@ List<AbiStruct> abiLayoutExpectations() => <AbiStruct>[
       _uint32Marker,
     ),
   ]),
-  AbiStruct('LazerAudioPcmFormatCandidate', sizeOf<LazerAudioPcmFormatCandidate>(), <AbiField>[
-    AbiField(
-      'sampleRate',
-      0,
-      () => _candidate().ref.sampleRate = _sentinel32,
-      _uint32Marker,
-    ),
-    AbiField(
-      'channels',
-      4,
-      () => _candidate().ref.channels = 0x7E5D,
-      <int>[0x5D, 0x7E],
-    ),
-    AbiField('containerBits', 6, () => _candidate().ref.containerBits = 0x7E5D, <int>[
-      0x5D,
-      0x7E,
-    ]),
-    AbiField('validBits', 8, () => _candidate().ref.validBits = 0x7E5D, <int>[0x5D, 0x7E]),
-    AbiField('reserved', 10, () => _candidate().ref.reserved = 0x7E5D, <int>[0x5D, 0x7E]),
-  ]),
-  AbiStruct('LazerAudioPcmFormatProbeResult', sizeOf<LazerAudioPcmFormatProbeResult>(), <AbiField>[
-    AbiField(
-      'status',
-      0,
-      () => _probeResult().ref.status = _sentinel32,
-      _int32Marker,
-    ),
-    AbiField(
-      'nativeStatus',
-      4,
-      () => _probeResult().ref.nativeStatus = _sentinel32,
-      _int32Marker,
-    ),
-  ]),
+  AbiStruct(
+    'LazerAudioPcmFormatCandidate',
+    sizeOf<LazerAudioPcmFormatCandidate>(),
+    <AbiField>[
+      AbiField(
+        'sampleRate',
+        0,
+        () => _candidate().ref.sampleRate = _sentinel32,
+        _uint32Marker,
+      ),
+      AbiField('channels', 4, () => _candidate().ref.channels = 0x7E5D, <int>[
+        0x5D,
+        0x7E,
+      ]),
+      AbiField(
+        'containerBits',
+        6,
+        () => _candidate().ref.containerBits = 0x7E5D,
+        <int>[0x5D, 0x7E],
+      ),
+      AbiField('validBits', 8, () => _candidate().ref.validBits = 0x7E5D, <int>[
+        0x5D,
+        0x7E,
+      ]),
+      AbiField('reserved', 10, () => _candidate().ref.reserved = 0x7E5D, <int>[
+        0x5D,
+        0x7E,
+      ]),
+    ],
+  ),
+  AbiStruct(
+    'LazerAudioPcmFormatProbeResult',
+    sizeOf<LazerAudioPcmFormatProbeResult>(),
+    <AbiField>[
+      AbiField(
+        'status',
+        0,
+        () => _probeResult().ref.status = _sentinel32,
+        _int32Marker,
+      ),
+      AbiField(
+        'nativeStatus',
+        4,
+        () => _probeResult().ref.nativeStatus = _sentinel32,
+        _int32Marker,
+      ),
+    ],
+  ),
 ];
 
 /// The C compiler's `sizeof` for every struct, independent of the Dart mirror.
@@ -679,33 +778,54 @@ final Map<String, Pointer<Uint8>> _scratch = <String, Pointer<Uint8>>{};
 Pointer<Uint8> _scratchFor(String key, int size) =>
     _scratch.putIfAbsent(key, () => calloc<Uint8>(size));
 
-Pointer<LazerAudioReader> _reader() =>
-    _scratchFor('LazerAudioReader', sizeOf<LazerAudioReader>()).cast<LazerAudioReader>();
-Pointer<LazerAudioOpenParams> _openParams() =>
-    _scratchFor('LazerAudioOpenParams', sizeOf<LazerAudioOpenParams>()).cast<LazerAudioOpenParams>();
-Pointer<LazerAudioDeviceConfig> _deviceConfig() =>
-    _scratchFor('LazerAudioDeviceConfig', sizeOf<LazerAudioDeviceConfig>()).cast<LazerAudioDeviceConfig>();
-Pointer<LazerAudioEngineConfig> _engineConfig() =>
-    _scratchFor('LazerAudioEngineConfig', sizeOf<LazerAudioEngineConfig>()).cast<LazerAudioEngineConfig>();
-Pointer<LazerAudioSnapshot> _snapshot() =>
-    _scratchFor('LazerAudioSnapshot', sizeOf<LazerAudioSnapshot>()).cast<LazerAudioSnapshot>();
-Pointer<LazerAudioStreamInfo> _streamInfo() =>
-    _scratchFor('LazerAudioStreamInfo', sizeOf<LazerAudioStreamInfo>()).cast<LazerAudioStreamInfo>();
-Pointer<LazerAudioEqBand> _eqBand() =>
-    _scratchFor('LazerAudioEqBand', sizeOf<LazerAudioEqBand>()).cast<LazerAudioEqBand>();
-Pointer<LazerAudioDspConfig> _dsp() =>
-    _scratchFor('LazerAudioDspConfig', sizeOf<LazerAudioDspConfig>()).cast<LazerAudioDspConfig>();
-Pointer<LazerAudioOutputDeviceInfo> _outputDeviceInfo() =>
-    _scratchFor('LazerAudioOutputDeviceInfo', sizeOf<LazerAudioOutputDeviceInfo>())
-        .cast<LazerAudioOutputDeviceInfo>();
-Pointer<LazerAudioDeviceInfo> _deviceInfo() =>
-    _scratchFor('LazerAudioDeviceInfo', sizeOf<LazerAudioDeviceInfo>()).cast<LazerAudioDeviceInfo>();
-Pointer<LazerAudioPcmFormatCandidate> _candidate() =>
-    _scratchFor('LazerAudioPcmFormatCandidate', sizeOf<LazerAudioPcmFormatCandidate>())
-        .cast<LazerAudioPcmFormatCandidate>();
-Pointer<LazerAudioPcmFormatProbeResult> _probeResult() =>
-    _scratchFor('LazerAudioPcmFormatProbeResult', sizeOf<LazerAudioPcmFormatProbeResult>())
-        .cast<LazerAudioPcmFormatProbeResult>();
+Pointer<LazerAudioReader> _reader() => _scratchFor(
+  'LazerAudioReader',
+  sizeOf<LazerAudioReader>(),
+).cast<LazerAudioReader>();
+Pointer<LazerAudioOpenParams> _openParams() => _scratchFor(
+  'LazerAudioOpenParams',
+  sizeOf<LazerAudioOpenParams>(),
+).cast<LazerAudioOpenParams>();
+Pointer<LazerAudioDeviceConfig> _deviceConfig() => _scratchFor(
+  'LazerAudioDeviceConfig',
+  sizeOf<LazerAudioDeviceConfig>(),
+).cast<LazerAudioDeviceConfig>();
+Pointer<LazerAudioEngineConfig> _engineConfig() => _scratchFor(
+  'LazerAudioEngineConfig',
+  sizeOf<LazerAudioEngineConfig>(),
+).cast<LazerAudioEngineConfig>();
+Pointer<LazerAudioSnapshot> _snapshot() => _scratchFor(
+  'LazerAudioSnapshot',
+  sizeOf<LazerAudioSnapshot>(),
+).cast<LazerAudioSnapshot>();
+Pointer<LazerAudioStreamInfo> _streamInfo() => _scratchFor(
+  'LazerAudioStreamInfo',
+  sizeOf<LazerAudioStreamInfo>(),
+).cast<LazerAudioStreamInfo>();
+Pointer<LazerAudioEqBand> _eqBand() => _scratchFor(
+  'LazerAudioEqBand',
+  sizeOf<LazerAudioEqBand>(),
+).cast<LazerAudioEqBand>();
+Pointer<LazerAudioDspConfig> _dsp() => _scratchFor(
+  'LazerAudioDspConfig',
+  sizeOf<LazerAudioDspConfig>(),
+).cast<LazerAudioDspConfig>();
+Pointer<LazerAudioOutputDeviceInfo> _outputDeviceInfo() => _scratchFor(
+  'LazerAudioOutputDeviceInfo',
+  sizeOf<LazerAudioOutputDeviceInfo>(),
+).cast<LazerAudioOutputDeviceInfo>();
+Pointer<LazerAudioDeviceInfo> _deviceInfo() => _scratchFor(
+  'LazerAudioDeviceInfo',
+  sizeOf<LazerAudioDeviceInfo>(),
+).cast<LazerAudioDeviceInfo>();
+Pointer<LazerAudioPcmFormatCandidate> _candidate() => _scratchFor(
+  'LazerAudioPcmFormatCandidate',
+  sizeOf<LazerAudioPcmFormatCandidate>(),
+).cast<LazerAudioPcmFormatCandidate>();
+Pointer<LazerAudioPcmFormatProbeResult> _probeResult() => _scratchFor(
+  'LazerAudioPcmFormatProbeResult',
+  sizeOf<LazerAudioPcmFormatProbeResult>(),
+).cast<LazerAudioPcmFormatProbeResult>();
 
 /// Runs every check and returns human-readable mismatches (empty when the mirror
 /// matches the header).

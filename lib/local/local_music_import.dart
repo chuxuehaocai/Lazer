@@ -49,11 +49,7 @@ Future<List<String>> openLocalAudioPicker() async {
 /// What one import pass did. [skipped] counts files already in the library (or
 /// picked twice), [failed] counts paths that could not be read.
 class LocalImportResult {
-  const LocalImportResult({
-    this.added = 0,
-    this.skipped = 0,
-    this.failed = 0,
-  });
+  const LocalImportResult({this.added = 0, this.skipped = 0, this.failed = 0});
 
   static const LocalImportResult empty = LocalImportResult();
 

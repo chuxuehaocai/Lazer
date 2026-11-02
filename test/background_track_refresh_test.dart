@@ -6,7 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
+import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
@@ -153,9 +153,9 @@ void main() {
                     animation: state,
                     builder: (_, _) => RepaintBoundary(
                       key: boundaryKey,
-                      child: LegacyAlbumBackdrop(
+                      child: AppAlbumBackdrop(
                         track: state.current,
-                        mode: LegacyBackgroundMode.nowPlayingDynamic,
+                        mode: AppBackgroundMode.nowPlayingDynamic,
                         uiAlpha: 0,
                       ),
                     ),

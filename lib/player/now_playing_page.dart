@@ -1,7 +1,10 @@
+import '../animation/apple_spring.dart';
+import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../data/models.dart';
@@ -13,7 +16,7 @@ import '../state/app_state.dart';
 import '../state/song_comments_controller.dart';
 import '../state/ui_preferences.dart';
 import '../theme/app_palette.dart';
-import '../theme/app_theme.dart';
+import '../theme/apple_design.dart';
 import '../theme/design_tokens.dart';
 import '../theme/paper_widgets.dart';
 import '../tv/tv_mode.dart';
@@ -99,7 +102,7 @@ Future<void> showSongComments(
     ],
   );
   if (compact) {
-    await showModalBottomSheet<void>(
+    await showAppleModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: context.colors.ivoryLight,
@@ -111,7 +114,7 @@ Future<void> showSongComments(
     );
     return;
   }
-  await showDialog<void>(
+  await showAppleDialog<void>(
     context: context,
     barrierColor: context.colors.slateDark.withValues(alpha: .2),
     builder: (dialogContext) => Dialog(
@@ -128,7 +131,7 @@ Future<void> showSongComments(
 /// Shared queue entry from the player header and desktop transport.
 Future<void> showPlaybackQueue(BuildContext context, AppState state) async {
   if (!useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width)) {
-    await showDialog<void>(
+    await showAppleDialog<void>(
       context: context,
       barrierColor: context.colors.slateDark.withValues(alpha: .2),
       builder: (context) => Dialog(
@@ -145,7 +148,7 @@ Future<void> showPlaybackQueue(BuildContext context, AppState state) async {
     );
     return;
   }
-  await showModalBottomSheet<void>(
+  await showAppleModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: context.colors.ivoryLight,
@@ -222,13 +225,13 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
 
   ThemeData _playerTheme(BuildContext context) {
     final Color accent =
-        widget.state.legacyAccentSeed ?? Theme.of(context).colorScheme.primary;
+        widget.state.accentSeed ?? Theme.of(context).colorScheme.primary;
     final key = (accent, widget.state.fontPreferences);
     if (_cachedPlayerThemeKey != key) {
       _cachedPlayerThemeKey = key;
-      _cachedPlayerTheme = buildAppTheme(
+      _cachedPlayerTheme = buildAppleTheme(
         brightness: Brightness.dark,
-        accent: accent,
+        seedAccent: accent,
         fonts: widget.state.fontPreferences,
       );
     }
@@ -259,9 +262,9 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       widget.state.lyrics.isNotEmpty;
 
   void _preferencesChanged() {
-    if (_themeSeed != widget.state.legacyAccentSeed ||
+    if (_themeSeed != widget.state.accentSeed ||
         _themeFonts != widget.state.fontPreferences) {
-      _themeSeed = widget.state.legacyAccentSeed;
+      _themeSeed = widget.state.accentSeed;
       _themeFonts = widget.state.fontPreferences;
       if (mounted) setState(() {});
     }
@@ -457,20 +460,20 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
   Future<void> _saveArtwork(Track track) async {
     if (_saving) return;
     _hideTimer?.cancel();
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppleDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const TrText('保存封面图片？'),
         content: TrText('将「${track.title}」的封面保存在设备中。'),
         actions: [
-          TextButton(
+          SpringTextButton(
             style: TextButton.styleFrom(
               foregroundColor: context.colors.slateDark,
             ),
             onPressed: () => Navigator.pop(context, false),
             child: const TrText('取消'),
           ),
-          FilledButton(
+          SpringFilledButton(
             onPressed: track.coverUrl == null
                 ? null
                 : () => Navigator.pop(context, true),
@@ -519,58 +522,57 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     return _EntranceTickerGate(settled: settled, child: child);
   }
 
-  Widget _cover(Track track) => Semantics(
-    label: context.tr('歌曲封面，长按保存'),
-    child: GestureDetector(
-      onTap: () {
-        if (useCompactLayout(
-          widget.state.uiMode,
-          MediaQuery.sizeOf(context).width,
-        )) {
-          unawaited(widget.state.feedback());
-          _toggleLyrics();
-        }
-      },
-      onLongPress: () => unawaited(_saveArtwork(track)),
-      child: AspectRatio(
-        aspectRatio: 1,
-        child: AnimatedContainer(
-          duration: MediaQuery.disableAnimationsOf(context)
-              ? Duration.zero
-              : const Duration(milliseconds: 420),
-          curve: Curves.easeOutCubic,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            boxShadow:
-                _lyricsMode &&
-                    useCompactLayout(
-                      widget.state.uiMode,
-                      MediaQuery.sizeOf(context).width,
-                    )
-                ? const []
-                : const [
-                    BoxShadow(
-                      color: Color(0x66000000),
-                      blurRadius: 24,
-                      spreadRadius: 1,
-                      offset: Offset(0, 8),
-                    ),
-                  ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: KeyedSubtree(
-              key: const ValueKey('legacy-now-playing-cover'),
-              child: AnimatedTrackCover(
-                track: track,
-                direction: widget.state.trackChangeDirection,
+  Widget _cover(Track track) {
+    final compact = useCompactLayout(
+      widget.state.uiMode,
+      MediaQuery.sizeOf(context).width,
+    );
+    return Semantics(
+      label: context.tr('歌曲封面，长按保存'),
+      child: GestureDetector(
+        onTap: () {
+          if (compact) {
+            unawaited(widget.state.feedback());
+            _toggleLyrics();
+          }
+        },
+        onLongPress: () => unawaited(_saveArtwork(track)),
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: AnimatedContainer(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 420),
+            curve: const AppleSpringCurve(),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: _lyricsMode && compact
+                  ? const []
+                  : [
+                      BoxShadow(
+                        color: const Color(0x66000000),
+                        blurRadius: 24,
+                        spreadRadius: 1,
+                        offset: compact ? Offset.zero : const Offset(0, 8),
+                      ),
+                    ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: KeyedSubtree(
+                key: const ValueKey('now-playing-cover'),
+                child: AnimatedTrackCover(
+                  track: track,
+                  direction: widget.state.trackChangeDirection,
+                  spring: compact ? AppleSpring.responsive : AppleSpring.smooth,
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   /// The phone header: one row, one action.
   ///
@@ -611,7 +613,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     if (widget.state.current == null || _moreOpen) return;
     _moreOpen = true;
     _hideTimer?.cancel();
-    await showModalBottomSheet<void>(
+    await showAppleModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: context.colors.ivoryLight,
@@ -1125,7 +1127,11 @@ class _BigPlayPause extends StatelessWidget {
       shape: const CircleBorder(),
     ),
     icon: AnimatedSwitcher(
-      duration: const Duration(milliseconds: 180),
+      switchInCurve: const AppleSpringCurve(),
+      switchOutCurve: const AppleSpringCurve(),
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : AppleSpring.responsive.duration,
       child: Icon(
         playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
         key: ValueKey(playing),

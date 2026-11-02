@@ -7,7 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_home_pages.dart';
+import 'package:lazer_nextgen/ui/home_pages.dart';
 import 'package:lazer_nextgen/widgets/cover_transition.dart';
 import 'package:lazer_nextgen/widgets/retained_content_switcher.dart';
 
@@ -38,6 +38,11 @@ class _HarnessState extends State<_Harness> {
   bool opened = false;
   bool retargeted = false;
   void retarget() => setState(() => retargeted = true);
+  void enter() {
+    rememberCoverTransition(identity, source);
+    setState(() => opened = true);
+  }
+
   String get identity => switch (widget.daily) {
     true => 'playlist:$dailyRecommendationsPlaylistId',
     false => 'chart:board',
@@ -60,10 +65,7 @@ class _HarnessState extends State<_Harness> {
           enabled: false,
           child: widget.daily == null
               ? GestureDetector(
-                  onTap: () {
-                    rememberCoverTransition(identity, source);
-                    setState(() => opened = true);
-                  },
+                  onTap: enter,
                   child: CoverTransitionSource(
                     key: source,
                     identity: identity,
@@ -252,6 +254,149 @@ void main() {
     return tester.state<_HarnessState>(find.byType(_Harness));
   }
 
+  testWidgets('takeoff retains source pixels before the first overlay paint', (
+    tester,
+  ) async {
+    final state = await mount(tester);
+    final source = tester.getRect(find.byKey(state.source));
+    final before = _sample(await _pixels(tester, state.screen), source.center);
+    await tester.tap(find.byKey(state.source));
+    await tester.pump();
+    _near(_sample(await _pixels(tester, state.screen), source.center), before);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Back keeps the detail pixels on its first returning frame', (
+    tester,
+  ) async {
+    final state = await mount(tester);
+    state.enter();
+    await tester.pumpAndSettle();
+    final target = tester.getRect(find.byType(CoverTransitionTarget));
+    final before = _sample(await _pixels(tester, state.screen), target.center);
+    state.back();
+    await tester.pump();
+    _near(_sample(await _pixels(tester, state.screen), target.center), before);
+    await tester.pumpAndSettle();
+    expect(debugCoverSnapshotCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('rapid reopen paints the returning composition immediately', (
+    tester,
+  ) async {
+    final state = await mount(tester);
+    state.enter();
+    await tester.pumpAndSettle();
+    for (var cycle = 0; cycle < 3; cycle++) {
+      state.back();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      final bounds = tester.getRect(find.byKey(_return));
+      final before = _sample(
+        await _pixels(tester, state.screen),
+        bounds.center,
+      );
+      state.enter();
+      await tester.pump();
+      _near(
+        _sample(await _pixels(tester, state.screen), bounds.center),
+        before,
+      );
+      await tester.pump();
+      final reopened = tester.getRect(find.byKey(_forward));
+      expect((reopened.topLeft - bounds.topLeft).distance, lessThan(.001));
+      expect(
+        (reopened.bottomRight - bounds.bottomRight).distance,
+        lessThan(.001),
+      );
+      await tester.pump(const Duration(milliseconds: 80));
+    }
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(debugCoverSnapshotCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('landing hands opaque pixels to live artwork on every frame', (
+    tester,
+  ) async {
+    final state = await mount(tester);
+    state.enter();
+    await tester.pump();
+    await tester.pump();
+    var completed = false;
+    for (var frame = 0; frame < 180; frame++) {
+      final flight = find.byKey(_forward);
+      final flying = flight.evaluate().isNotEmpty;
+      final bounds = tester.getRect(
+        flying ? flight : find.byType(CoverTransitionTarget),
+      );
+      final pixel = _sample(await _pixels(tester, state.screen), bounds.center);
+      expect(
+        pixel.take(3).reduce((sum, value) => sum + value),
+        greaterThan(315),
+        reason: 'frame $frame must keep a cover rather than expose the canvas',
+      );
+      if (!flying) {
+        _near(pixel, [40, 75, 208, 255]);
+        completed = true;
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(completed, isTrue);
+    await tester.pumpAndSettle();
+    state.back();
+    await tester.pump();
+    completed = false;
+    for (var frame = 0; frame < 180; frame++) {
+      final flight = find.byKey(_return);
+      final flying = flight.evaluate().isNotEmpty;
+      final bounds = tester.getRect(flying ? flight : find.byKey(state.source));
+      final pixel = _sample(await _pixels(tester, state.screen), bounds.center);
+      expect(
+        pixel.take(3).reduce((sum, value) => sum + value),
+        greaterThan(315),
+        reason: 'return frame $frame must keep the cover painted',
+      );
+      if (!flying) {
+        _near(pixel, [208, 46, 70, 255]);
+        completed = true;
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(completed, isTrue);
+    await tester.pumpAndSettle();
+    expect(debugCoverSnapshotCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('reopening before return paint preserves the detail pixels', (
+    tester,
+  ) async {
+    final state = await mount(tester);
+    state.enter();
+    await tester.pumpAndSettle();
+    final bounds = tester.getRect(find.byType(CoverTransitionTarget));
+    final before = _sample(await _pixels(tester, state.screen), bounds.center);
+    state.back();
+    state.enter();
+    await tester.pump();
+    _near(_sample(await _pixels(tester, state.screen), bounds.center), before);
+    await tester.pump();
+    _near(_sample(await _pixels(tester, state.screen), bounds.center), before);
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(debugCoverSnapshotCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'different home artwork dissolves in both directions without a hard cut',
     (tester) async {
@@ -272,7 +417,7 @@ void main() {
         source,
       );
       expect(debugCoverSnapshotCount, 1);
-      await tester.pump(const Duration(milliseconds: 210));
+      await tester.pump(const Duration(milliseconds: 113));
       bounds = tester.getRect(find.byKey(_forward));
       final middle = _sample(
         await _pixels(tester, state.screen),
@@ -281,8 +426,7 @@ void main() {
       expect(middle[0], inInclusiveRange(105, 145));
       expect(middle[2], inInclusiveRange(120, 155));
       expect(middle[3], 255);
-      await tester.pump(const Duration(milliseconds: 220));
-      await tester.pump();
+      await tester.pumpAndSettle();
       final target = tester.getRect(find.byType(CoverTransitionTarget));
       _near(_sample(await _pixels(tester, state.screen), target.center), [
         40,
@@ -300,20 +444,20 @@ void main() {
         208,
         255,
       ]);
-      await tester.pump(const Duration(milliseconds: 210));
+      await tester.pump(const Duration(milliseconds: 113));
       bounds = tester.getRect(find.byKey(_return));
       final returning = _sample(
         await _pixels(tester, state.screen),
         bounds.center,
       );
       _near(returning, middle);
-      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 500));
       bounds = tester.getRect(find.byKey(_return));
       _near(
         _sample(await _pixels(tester, state.screen), bounds.center),
         source,
       );
-      await tester.pump(const Duration(milliseconds: 40));
+      await tester.pumpAndSettle();
       await tester.pump();
       _near(
         _sample(await _pixels(tester, state.screen), original.center),
@@ -338,9 +482,10 @@ void main() {
     await tester.pump();
     await tester.pump();
     final after = tester.getRect(find.byKey(_return));
-    expect(after, before);
+    expect((after.topLeft - before.topLeft).distance, lessThan(.001));
+    expect((after.bottomRight - before.bottomRight).distance, lessThan(.001));
     _near(_sample(await _pixels(tester, state.screen), after.center), color);
-    await tester.pump(const Duration(milliseconds: 450));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(debugCoverSnapshotCount, 0);
     expect(tester.takeException(), isNull);
@@ -526,19 +671,31 @@ void main() {
         await tester.tap(find.byKey(state.source));
         await tester.pump();
         await tester.pump();
-        expect(_bounds(tester, find.byKey(_forward)), original);
+        final takeoff = _bounds(tester, find.byKey(_forward));
+        expect((takeoff.topLeft - original.topLeft).distance, lessThan(.001));
+        expect(
+          (takeoff.bottomRight - original.bottomRight).distance,
+          lessThan(.001),
+        );
         _near(_sample(await _pixels(tester, state.screen), original.center), [
           208,
           46,
           70,
           255,
         ]);
-        await tester.pump(const Duration(milliseconds: 450));
+        await tester.pumpAndSettle();
         state.back();
         await tester.pump();
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 410));
-        final landed = _bounds(tester, find.byKey(_return));
+        // The retained source is itself entering. Advance real frames so
+        // the flight follows that moving destination and lets its velocity
+        // settle, then compare the final flying frame before handoff.
+        var landed = _bounds(tester, find.byKey(_return));
+        for (var frame = 0; frame < 120; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          if (find.byKey(_return).evaluate().isEmpty) break;
+          landed = _bounds(tester, find.byKey(_return));
+        }
         expect(landed.center.dx, closeTo(original.center.dx, .1));
         expect(landed.center.dy, closeTo(original.center.dy, .1));
         _near(_sample(await _pixels(tester, state.screen), landed.center), [
@@ -547,7 +704,7 @@ void main() {
           70,
           255,
         ]);
-        await tester.pump(const Duration(milliseconds: 40));
+        await tester.pumpAndSettle();
         await tester.pump();
         expect(debugCoverSnapshotCount, 0);
         expect(tester.takeException(), isNull);
@@ -583,14 +740,21 @@ void main() {
     state.back();
     await tester.pump();
     await tester.pump();
-    expect(_bounds(tester, find.byKey(_return)), source);
+    final returning = find.byKey(_return);
+    expect(
+      _bounds(
+        tester,
+        returning.evaluate().isNotEmpty ? returning : find.byKey(state.source),
+      ),
+      source,
+    );
     _near(_sample(await _pixels(tester, state.screen), source.center), [
       208,
       46,
       70,
       255,
     ]);
-    await tester.pump(const Duration(milliseconds: 450));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(debugCoverSnapshotCount, 0);
     expect(tester.takeException(), isNull);

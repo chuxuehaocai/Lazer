@@ -151,33 +151,36 @@ void main() {
     expect(metadata.duration.inMilliseconds, 261000);
   });
 
-  test('skips large embedded artwork and reads following text frames', () async {
-    final int imageBytes = 4 * 1024 * 1024;
-    final File file = await write('artwork.mp3', <int>[
-      ..._id3Tag(<List<int>>[
-        _id3v23Frame(
-          'APIC',
-          Uint8List.fromList(List<int>.filled(imageBytes, 0xA5)),
-        ),
-        _id3v23Frame('TIT2', _utf8Text('Metadata after artwork')),
-        _id3v23Frame('TPE1', _utf8Text('Scanner test')),
-        _id3v23Frame('TLEN', _utf8Text('90000')),
-      ]),
-      ..._mpegFrameWithXing(1000),
-    ]);
-    int largestRead = 0;
+  test(
+    'skips large embedded artwork and reads following text frames',
+    () async {
+      final int imageBytes = 4 * 1024 * 1024;
+      final File file = await write('artwork.mp3', <int>[
+        ..._id3Tag(<List<int>>[
+          _id3v23Frame(
+            'APIC',
+            Uint8List.fromList(List<int>.filled(imageBytes, 0xA5)),
+          ),
+          _id3v23Frame('TIT2', _utf8Text('Metadata after artwork')),
+          _id3v23Frame('TPE1', _utf8Text('Scanner test')),
+          _id3v23Frame('TLEN', _utf8Text('90000')),
+        ]),
+        ..._mpegFrameWithXing(1000),
+      ]);
+      int largestRead = 0;
 
-    final LocalAudioMetadata metadata = await probe.probe(
-      _CountingFile(file, (int bytes) {
-        if (bytes > largestRead) largestRead = bytes;
-      }),
-    );
+      final LocalAudioMetadata metadata = await probe.probe(
+        _CountingFile(file, (int bytes) {
+          if (bytes > largestRead) largestRead = bytes;
+        }),
+      );
 
-    expect(metadata.title, 'Metadata after artwork');
-    expect(metadata.artist, 'Scanner test');
-    expect(metadata.duration.inMilliseconds, 90000);
-    expect(largestRead, lessThan(1024));
-  });
+      expect(metadata.title, 'Metadata after artwork');
+      expect(metadata.artist, 'Scanner test');
+      expect(metadata.duration.inMilliseconds, 90000);
+      expect(largestRead, lessThan(1024));
+    },
+  );
 
   test('decodes UTF-16 ID3 text', () async {
     final File file = await write('utf16.mp3', <int>[
@@ -205,8 +208,8 @@ void main() {
         ((sampleRate & 0x0F) << 4) |
         ((channels - 1) << 1) |
         (((bitsPerSample - 1) >> 4) & 1);
-    streamInfo[13] = (((bitsPerSample - 1) & 0x0F) << 4) |
-        ((totalSamples >> 32) & 0x0F);
+    streamInfo[13] =
+        (((bitsPerSample - 1) & 0x0F) << 4) | ((totalSamples >> 32) & 0x0F);
     streamInfo[14] = (totalSamples >> 24) & 0xFF;
     streamInfo[15] = (totalSamples >> 16) & 0xFF;
     streamInfo[16] = (totalSamples >> 8) & 0xFF;
@@ -221,10 +224,7 @@ void main() {
         'TITLE=夜の歌',
         'ARTIST=音楽人',
         'ALBUM=アルバム',
-      ]) ...<int>[
-        ..._le32(utf8.encode(entry).length),
-        ...utf8.encode(entry),
-      ],
+      ]) ...<int>[..._le32(utf8.encode(entry).length), ...utf8.encode(entry)],
     ];
     final File file = await write('song.flac', <int>[
       ...ascii.encode('fLaC'),
@@ -264,20 +264,15 @@ void main() {
         ..._be32(0),
         ...utf8.encode(value),
       ];
-      return _atom(name, _atom('data', data));    }
+      return _atom(name, _atom('data', data));
+    }
 
     final List<int> ilst = _atom('ilst', <int>[
       ...item('©nam', '夜の歌'),
       ...item('©ART', '音楽人'),
       ...item('©alb', 'アルバム'),
     ]);
-    final List<int> meta = _atom('meta', <int>[
-      0,
-      0,
-      0,
-      0,
-      ...ilst,
-    ]);
+    final List<int> meta = _atom('meta', <int>[0, 0, 0, 0, ...ilst]);
     final List<int> udta = _atom('udta', meta);
     final List<int> moov = _atom('moov', <int>[
       ..._atom('mvhd', mvhd),
@@ -322,10 +317,12 @@ void main() {
   });
 
   test('falls back to the file name and parent folder', () async {
-    final File file = await write(
-      'Music/夜の歌/音楽人 - 夜に駆ける.ogg',
-      <int>[0x4F, 0x67, 0x67, 0x53],
-    );
+    final File file = await write('Music/夜の歌/音楽人 - 夜に駆ける.ogg', <int>[
+      0x4F,
+      0x67,
+      0x67,
+      0x53,
+    ]);
     final LocalAudioMetadata metadata = await probe.probe(file);
     expect(metadata.title, '夜に駆ける');
     expect(metadata.artist, '音楽人');

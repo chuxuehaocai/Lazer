@@ -44,8 +44,8 @@ void main() {
         addTearDown(tester.view.reset);
         final state = _WatchState(round: round);
         addTearDown(state.dispose);
-        expect(state.legacyBackground, LegacyBackgroundMode.nowPlayingStatic);
-        expect(state.playerBackground, LegacyBackgroundMode.nowPlayingStatic);
+        expect(state.backgroundMode, AppBackgroundMode.nowPlayingStatic);
+        expect(state.playerBackground, AppBackgroundMode.nowPlayingStatic);
         await tester.pumpWidget(
           MaterialApp(
             home: WatchShell(state: state, round: round),

@@ -8,6 +8,8 @@
 /// are the single place where those sizes are decided.
 library;
 
+import '../animation/apple_spring.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -25,7 +27,7 @@ import '../utils/artwork.dart';
 import '../widgets/artwork_image.dart';
 import '../widgets/artwork_reveal.dart';
 import '../widgets/interaction_feedback.dart';
-import '../legacy/legacy_widgets.dart';
+import '../ui/widgets.dart';
 
 /// Distances and type sizes of the large-screen interface.
 ///
@@ -251,7 +253,11 @@ class LargeScreenArtwork extends StatelessWidget {
     final Widget art = resolved == null || resolved.isEmpty
         ? fallback
         : Image(
-            image: ArtworkImage(resolved),
+            image: ArtworkImage.forSize(
+              resolved,
+              logicalEdge: math.max(size, artHeight),
+              devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+            ),
             fit: BoxFit.cover,
             gaplessPlayback: true,
             frameBuilder:
@@ -335,8 +341,10 @@ class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard> {
         borderRadius: BorderRadius.circular(18),
         focusScale: 1.035,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOutCubic,
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : AppleSpring.responsive.duration,
+          curve: const AppleSpringCurve(),
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: const Color(0xFF1C1C1E),
@@ -472,8 +480,10 @@ class _LargeScreenMediaCardState extends State<LargeScreenMediaCard> {
           crossAxisAlignment: cross,
           children: <Widget>[
             AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOutCubic,
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : AppleSpring.responsive.duration,
+              curve: const AppleSpringCurve(),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: <BoxShadow>[
@@ -730,7 +740,10 @@ class _LargeScreenTrackRowState extends State<LargeScreenTrackRow> {
         onLongPress: widget.onLongPress,
         behavior: HitTestBehavior.opaque,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 130),
+          curve: const AppleSpringCurve(),
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : AppleSpring.responsive.duration,
           width: double.infinity,
           height: 64,
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
@@ -824,7 +837,7 @@ class _LargeScreenTrackRowState extends State<LargeScreenTrackRow> {
                 Padding(
                   padding: const EdgeInsets.only(left: 16),
                   child: Text(
-                    legacyDuration(widget.duration!),
+                    formatDuration(widget.duration!),
                     style: LargeScreenType.rowMeta(context).copyWith(
                       fontFeatures: const <FontFeature>[
                         FontFeature.tabularFigures(),
@@ -956,7 +969,10 @@ class LargeScreenChoiceChip extends StatelessWidget {
       borderRadius: BorderRadius.circular(21),
       focusScale: 1.05,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
+        curve: const AppleSpringCurve(),
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : AppleSpring.responsive.duration,
         height: 44,
         padding: const EdgeInsets.symmetric(horizontal: 22),
         decoration: BoxDecoration(

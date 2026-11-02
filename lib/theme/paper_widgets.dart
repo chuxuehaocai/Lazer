@@ -3,6 +3,7 @@ import '../l10n/app_localizations.dart';
 import '../tv/tv_mode.dart';
 import 'package:flutter/material.dart';
 import '../widgets/interaction_feedback.dart';
+import '../animation/apple_spring.dart';
 
 import 'design_tokens.dart';
 
@@ -50,38 +51,41 @@ class _ClayButtonState extends State<ClayButton> {
     final bool enabled = widget.onPressed != null;
     return SizedBox(
       width: widget.expand ? double.infinity : null,
-      child: TextButton(
-        onPressed: feedbackAction(context, widget.onPressed),
-        style: ButtonStyle(
-          minimumSize: const WidgetStatePropertyAll(Size(0, 48)),
-          padding: WidgetStatePropertyAll(
-            widget.compact
-                ? _ButtonSpec.compactPadding
-                : _ButtonSpec.filledPadding,
+      child: SpringPress(
+        builder: (context, states) => TextButton(
+          statesController: states,
+          onPressed: feedbackAction(context, widget.onPressed),
+          style: ButtonStyle(
+            minimumSize: const WidgetStatePropertyAll(Size(0, 48)),
+            padding: WidgetStatePropertyAll(
+              widget.compact
+                  ? _ButtonSpec.compactPadding
+                  : _ButtonSpec.filledPadding,
+            ),
+            backgroundColor: WidgetStateProperty.resolveWith((states) {
+              if (!enabled) return context.colors.stone;
+              if (states.contains(WidgetState.pressed) ||
+                  states.contains(WidgetState.hovered)) {
+                return context.colors.clayDeep;
+              }
+              return context.colors.clay;
+            }),
+            foregroundColor: WidgetStatePropertyAll(
+              enabled ? Colors.white : context.colors.cloudDark,
+            ),
+            shape: WidgetStatePropertyAll(
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
           ),
-          backgroundColor: WidgetStateProperty.resolveWith((states) {
-            if (!enabled) return context.colors.stone;
-            if (states.contains(WidgetState.pressed) ||
-                states.contains(WidgetState.hovered)) {
-              return context.colors.clayDeep;
-            }
-            return context.colors.clay;
-          }),
-          foregroundColor: WidgetStatePropertyAll(
-            enabled ? Colors.white : context.colors.cloudDark,
-          ),
-          shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-        ),
-        child: TrText(
-          widget.label,
-          textAlign: TextAlign.center,
-          style: context.type.bodySm.copyWith(
-            color: enabled ? Colors.white : context.colors.cloudDark,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 0,
+          child: TrText(
+            widget.label,
+            textAlign: TextAlign.center,
+            style: context.type.bodySm.copyWith(
+              color: enabled ? Colors.white : context.colors.cloudDark,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0,
+            ),
           ),
         ),
       ),
@@ -123,44 +127,55 @@ class _IvoryButtonState extends State<IvoryButton> {
         onTap: feedbackAction(context, widget.onPressed),
         enabled: enabled,
         borderRadius: BorderRadius.circular(10),
-        child: GestureDetector(
-          onTap: feedbackAction(context, widget.onPressed),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            padding: _ButtonSpec.filledPadding,
-            width: widget.expand ? double.infinity : null,
-            decoration: BoxDecoration(
-              color: !enabled
-                  ? context.colors.ivoryMedium
-                  : _hovering
-                  ? context.colors.manilla
-                  : context.colors.ivoryLight,
-              borderRadius: AppRadius.filledButton,
-            ),
-            alignment: Alignment.center,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (widget.icon != null) ...[
-                  Icon(
-                    widget.icon,
-                    size: 16,
-                    color: enabled
-                        ? context.colors.slateDark
-                        : context.colors.cloudMedium,
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                ],
-                TrText(
-                  widget.label,
-                  style: context.type.bodySm.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: enabled
-                        ? context.colors.slateDark
-                        : context.colors.cloudMedium,
-                  ),
+        child: SpringPress(
+          builder: (context, states) => Material(
+            color: Colors.transparent,
+            child: InkWell(
+              statesController: states,
+              canRequestFocus: !TvScope.isActive(context),
+              borderRadius: BorderRadius.circular(10),
+              onTap: feedbackAction(context, widget.onPressed),
+              child: AnimatedContainer(
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : AppleSpring.responsive.duration,
+                curve: const AppleSpringCurve(),
+                padding: _ButtonSpec.filledPadding,
+                width: widget.expand ? double.infinity : null,
+                decoration: BoxDecoration(
+                  color: !enabled
+                      ? context.colors.ivoryMedium
+                      : _hovering
+                      ? context.colors.manilla
+                      : context.colors.ivoryLight,
+                  borderRadius: AppRadius.filledButton,
                 ),
-              ],
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.icon != null) ...[
+                      Icon(
+                        widget.icon,
+                        size: 16,
+                        color: enabled
+                            ? context.colors.slateDark
+                            : context.colors.cloudMedium,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                    ],
+                    TrText(
+                      widget.label,
+                      style: context.type.bodySm.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: enabled
+                            ? context.colors.slateDark
+                            : context.colors.cloudMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -208,41 +223,52 @@ class _OutlinedButton2State extends State<OutlinedButton2> {
         onTap: feedbackAction(context, widget.onPressed),
         enabled: enabled,
         borderRadius: BorderRadius.circular(12),
-        child: GestureDetector(
-          onTap: feedbackAction(context, widget.onPressed),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            padding: _ButtonSpec.compactPadding,
-            decoration: BoxDecoration(
-              color: _hovering && enabled
-                  ? (widget.invert
-                        ? context.colors.slateMedium
-                        : context.colors.oatWarm.withValues(alpha: 0.45))
-                  : Colors.transparent,
-              border: Border.all(
-                color: enabled
-                    ? context.colors.cloudDark
-                    : context.colors.stone,
-                width: 1,
-              ),
-              borderRadius: AppRadius.outlinedBorder,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (widget.icon != null) ...[
-                  Icon(widget.icon, size: 14, color: fg),
-                  const SizedBox(width: 6),
-                ],
-                TrText(
-                  widget.label,
-                  style: context.type.caption.copyWith(
-                    color: fg,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+        child: SpringPress(
+          builder: (context, states) => Material(
+            color: Colors.transparent,
+            child: InkWell(
+              statesController: states,
+              canRequestFocus: !TvScope.isActive(context),
+              borderRadius: BorderRadius.circular(12),
+              onTap: feedbackAction(context, widget.onPressed),
+              child: AnimatedContainer(
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : AppleSpring.responsive.duration,
+                curve: const AppleSpringCurve(),
+                padding: _ButtonSpec.compactPadding,
+                decoration: BoxDecoration(
+                  color: _hovering && enabled
+                      ? (widget.invert
+                            ? context.colors.slateMedium
+                            : context.colors.oatWarm.withValues(alpha: 0.45))
+                      : Colors.transparent,
+                  border: Border.all(
+                    color: enabled
+                        ? context.colors.cloudDark
+                        : context.colors.stone,
+                    width: 1,
                   ),
+                  borderRadius: AppRadius.outlinedBorder,
                 ),
-              ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.icon != null) ...[
+                      Icon(widget.icon, size: 14, color: fg),
+                      const SizedBox(width: 6),
+                    ],
+                    TrText(
+                      widget.label,
+                      style: context.type.caption.copyWith(
+                        color: fg,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -292,19 +318,27 @@ class _TextLinkButtonState extends State<TextLinkButton> {
         onTap: feedbackAction(context, widget.onPressed),
         enabled: enabled,
         borderRadius: BorderRadius.circular(6),
-        child: GestureDetector(
-          onTap: feedbackAction(context, widget.onPressed),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: TrText(
-              widget.label,
-              style: context.type.bodySm.copyWith(
-                color: fg,
-                decoration: showUnderline
-                    ? TextDecoration.underline
-                    : TextDecoration.none,
-                decorationColor: fg,
-                decorationThickness: 1,
+        child: SpringPress(
+          builder: (context, states) => Material(
+            color: Colors.transparent,
+            child: InkWell(
+              statesController: states,
+              canRequestFocus: !TvScope.isActive(context),
+              borderRadius: BorderRadius.circular(6),
+              onTap: feedbackAction(context, widget.onPressed),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: TrText(
+                  widget.label,
+                  style: context.type.bodySm.copyWith(
+                    color: fg,
+                    decoration: showUnderline
+                        ? TextDecoration.underline
+                        : TextDecoration.none,
+                    decorationColor: fg,
+                    decorationThickness: 1,
+                  ),
+                ),
               ),
             ),
           ),
@@ -343,7 +377,10 @@ class PaperCard extends StatelessWidget {
     final BorderRadius br = BorderRadius.all(Radius.circular(radius));
     Widget box = AnimatedContainer(
       clipBehavior: Clip.antiAlias,
-      duration: const Duration(milliseconds: 140),
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : AppleSpring.responsive.duration,
+      curve: const AppleSpringCurve(),
       padding: padding,
       decoration: BoxDecoration(
         color: background ?? context.colors.ivoryLight,
@@ -360,8 +397,9 @@ class PaperCard extends StatelessWidget {
         child: TvTapTarget(
           onTap: feedbackAction(context, onTap),
           borderRadius: br,
-          child: GestureDetector(
+          child: _PaperCardPress(
             onTap: feedbackAction(context, onTap),
+            borderRadius: br,
             child: box,
           ),
         ),
@@ -369,6 +407,33 @@ class PaperCard extends StatelessWidget {
     }
     return box;
   }
+}
+
+class _PaperCardPress extends StatelessWidget {
+  const _PaperCardPress({
+    required this.onTap,
+    required this.borderRadius,
+    required this.child,
+  });
+
+  final VoidCallback? onTap;
+  final BorderRadius borderRadius;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => SpringPress(
+    pressedScale: .985,
+    builder: (context, states) => Material(
+      color: Colors.transparent,
+      child: InkWell(
+        statesController: states,
+        canRequestFocus: !TvScope.isActive(context),
+        borderRadius: borderRadius,
+        onTap: onTap,
+        child: child,
+      ),
+    ),
+  );
 }
 
 /// Hairline divider — visible but never assertive.

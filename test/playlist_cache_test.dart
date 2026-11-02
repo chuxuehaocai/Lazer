@@ -7,8 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_pages.dart';
-import 'package:lazer_nextgen/legacy/legacy_theme.dart';
+import 'package:lazer_nextgen/ui/pages.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 const GatewayUserProfile _profile = GatewayUserProfile(
@@ -184,9 +184,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: buildLegacyTheme(),
+        theme: buildAppleTheme(),
         home: Scaffold(
-          body: LegacyPlaylistPage(state: state, playlist: playlist),
+          body: AppPlaylistPage(state: state, playlist: playlist),
         ),
       ),
     );
@@ -210,7 +210,7 @@ void main() {
     addTearDown(state.dispose);
     Widget page(String id) => MaterialApp(
       home: Scaffold(
-        body: LegacyPlaylistPage(
+        body: AppPlaylistPage(
           state: state,
           playlist: _playlist(id, 'List $id'),
         ),
@@ -236,7 +236,7 @@ void main() {
     addTearDown(state.dispose);
     Widget page(String id) => MaterialApp(
       home: Scaffold(
-        body: LegacyPlaylistPage(
+        body: AppPlaylistPage(
           state: state,
           playlist: _playlist(id, 'List $id'),
         ),

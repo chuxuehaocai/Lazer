@@ -1,3 +1,4 @@
+import '../animation/apple_spring.dart';
 import 'package:lazer_nextgen/theme/app_palette.dart';
 import '../l10n/app_localizations.dart';
 import 'accessible_controls.dart';
@@ -10,9 +11,11 @@ class AnimatedNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnimatedSwitcher(
-    duration: const Duration(milliseconds: 220),
-    switchInCurve: Curves.easeOutCubic,
-    switchOutCurve: Curves.easeInCubic,
+    duration: MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : AppleSpring.responsive.duration,
+    switchInCurve: const AppleSpringCurve(),
+    switchOutCurve: const AppleSpringCurve(),
     transitionBuilder: (child, animation) => SizeTransition(
       sizeFactor: animation,
       alignment: Alignment.topLeft,

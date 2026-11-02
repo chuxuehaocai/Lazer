@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import '../animation/view_transitions.dart';
 import 'package:flutter/services.dart';
+import '../animation/apple_spring.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
 import 'apple_ui.dart';
+import 'spring_buttons.dart';
 import 'accessible_controls.dart';
 import 'shared_browse_background.dart';
 
@@ -34,7 +37,7 @@ class SettingsDetailHost extends StatefulWidget {
     if (scope?.open case final open?) {
       open(view);
     } else {
-      Navigator.of(context).push<void>(MaterialPageRoute(builder: page));
+      Navigator.of(context).push<void>(ApplePageRoute(builder: page));
     }
   }
 
@@ -75,7 +78,7 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
     if (MediaQuery.disableAnimationsOf(context)) {
       _transition.value = 1;
     } else {
-      _transition.animateTo(1, curve: Curves.easeOutCubic);
+      _transition.springTo(1, spring: AppleSpring.responsive);
     }
   }
 
@@ -91,7 +94,7 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
     if (immediate) {
       _transition.value = 0;
     } else {
-      _transition.animateBack(0, curve: Curves.easeOutCubic);
+      _transition.springTo(0, spring: AppleSpring.responsive);
     }
   }
 
@@ -255,7 +258,7 @@ class SettingsDetailScaffold extends StatelessWidget {
                     onPressed: close,
                     icon: const Icon(Icons.chevron_left_rounded),
                   ),
-                  TextButton(
+                  SpringTextButton(
                     onPressed: close,
                     child: TrText(
                       '设置',

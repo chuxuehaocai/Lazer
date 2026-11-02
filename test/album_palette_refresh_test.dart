@@ -6,7 +6,7 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
+import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 
@@ -51,7 +51,7 @@ void main() {
     Widget page(Track track) => MaterialApp(
       home: AlbumBlurFlow(
         track: track,
-        mode: LegacyBackgroundMode.nowPlayingStatic,
+        mode: AppBackgroundMode.nowPlayingStatic,
         pageColor: Colors.black,
         paletteLoader: (String? url) async =>
             url!.endsWith('/a') ? _palette(_green) : _palette(_red),
@@ -77,7 +77,7 @@ void main() {
       Widget page(Track track) => MaterialApp(
         home: AlbumBlurFlow(
           track: track,
-          mode: LegacyBackgroundMode.nowPlayingStatic,
+          mode: AppBackgroundMode.nowPlayingStatic,
           pageColor: Colors.black,
           paletteLoader: (String? url) async {
             if (url!.endsWith('/b')) throw StateError('cover refused');
@@ -108,9 +108,9 @@ void main() {
     tester,
   ) async {
     Widget page(Track track) => MaterialApp(
-      home: LegacyAlbumBackdrop(
+      home: AppAlbumBackdrop(
         track: track,
-        mode: LegacyBackgroundMode.nowPlayingStatic,
+        mode: AppBackgroundMode.nowPlayingStatic,
         uiAlpha: .7,
         paletteLoader: (String? url) async =>
             url!.endsWith('/a') ? _palette(_green) : _palette(_red),
@@ -130,9 +130,9 @@ void main() {
   ) async {
     final List<Color> seeds = <Color>[];
     Widget page(Track track) => MaterialApp(
-      home: LegacyAlbumBackdrop(
+      home: AppAlbumBackdrop(
         track: track,
-        mode: LegacyBackgroundMode.nowPlayingStatic,
+        mode: AppBackgroundMode.nowPlayingStatic,
         uiAlpha: .7,
         onSeed: seeds.add,
         paletteLoader: (String? url) async {
@@ -175,17 +175,17 @@ void main() {
         },
       );
       addTearDown(state.dispose);
-      state.legacyPalette = LegacyPaletteMode.nowPlaying;
+      state.paletteMode = AppPaletteMode.nowPlaying;
       state.playQueue(<Track>[_track('a', cover: 'https://cover.test/a')]);
       await Future<void>.delayed(Duration.zero);
       expect(calls, 1);
-      expect(state.legacyAccentSeed, isNull);
+      expect(state.accentSeed, isNull);
 
       // The next report reopens the identity: the artwork is very likely in the
       // cache by then, and latching the failure would strand the accent.
       await state.refreshArtworkSeed();
       expect(calls, 2);
-      expect(state.legacyAccentSeed, _red);
+      expect(state.accentSeed, _red);
 
       await state.refreshArtworkSeed();
       expect(calls, 2, reason: 'a settled accent is not re-extracted');

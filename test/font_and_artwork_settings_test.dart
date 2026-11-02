@@ -4,8 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/lyrics.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/font_settings_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_settings_page.dart';
+import 'package:lazer_nextgen/ui/font_settings_page.dart';
+import 'package:lazer_nextgen/ui/settings_page.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
@@ -49,7 +49,7 @@ void main() {
       addTearDown(state.dispose);
       await tester.pumpWidget(MaterialApp(home: NowPlayingPage(state: state)));
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('legacy-now-playing-cover')));
+      await tester.tap(find.byKey(const ValueKey('now-playing-cover')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
       final line = find.descendant(
@@ -81,7 +81,7 @@ void main() {
       addTearDown(state.dispose);
       await tester.pumpWidget(MaterialApp(home: NowPlayingPage(state: state)));
       await tester.pump();
-      final art = find.byKey(const ValueKey('legacy-now-playing-cover'));
+      final art = find.byKey(const ValueKey('now-playing-cover'));
       final rect = tester.getRect(art);
       await tester.pump();
       await tester.tap(art);
@@ -108,7 +108,7 @@ void main() {
     addTearDown(state.dispose);
     await tester.pumpWidget(MaterialApp(home: NowPlayingPage(state: state)));
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('legacy-now-playing-cover')));
+    await tester.tap(find.byKey(const ValueKey('now-playing-cover')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 450));
     final rail = find.descendant(
@@ -122,7 +122,7 @@ void main() {
     await gesture.up();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1500));
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
     expect(tester.widget<FadeTransition>(opacity).opacity.value, 1);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -207,7 +207,7 @@ void main() {
         animation: state,
         builder: (context, _) => MaterialApp(
           theme: buildAppleTheme(fonts: state.fontPreferences),
-          home: Scaffold(body: LegacySettingsPage(state: state)),
+          home: Scaffold(body: AppSettingsPage(state: state)),
         ),
       ),
     );
@@ -245,7 +245,7 @@ void main() {
         ),
       );
       await tester.pump();
-      final art = find.byKey(const ValueKey('legacy-now-playing-cover'));
+      final art = find.byKey(const ValueKey('now-playing-cover'));
       final element = tester.element(art);
       final large = tester.getRect(art);
       await tester.tap(art);
@@ -271,7 +271,7 @@ void main() {
         isEmpty,
       );
       await tester.pump(const Duration(seconds: 2));
-      await tester.pump(const Duration(milliseconds: 380));
+      await tester.pumpAndSettle();
       final summary = find.byKey(const ValueKey('compact-player-summary'));
       expect(summary, findsOneWidget);
       final opacity = tester.widget<FadeTransition>(
@@ -280,7 +280,10 @@ void main() {
       expect(opacity.opacity.value, 1);
       await tester.tap(summary);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 380));
+      for (var frame = 0; frame < 90 && opacity.opacity.value > 0; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(opacity.opacity.value, 0);
       expect(tester.getRect(art).width, closeTo(64, 1));
       await tester.tap(art);
       await tester.pump();
@@ -303,7 +306,7 @@ void main() {
   testWidgets(
     'an open player updates its theme immediately after a new artwork seed',
     (tester) async {
-      final state = _State()..legacyPalette = LegacyPaletteMode.nowPlaying;
+      final state = _State()..paletteMode = AppPaletteMode.nowPlaying;
       addTearDown(state.dispose);
       await tester.pumpWidget(MaterialApp(home: NowPlayingPage(state: state)));
       await tester.pump();
@@ -313,10 +316,10 @@ void main() {
           find.descendant(of: player, matching: find.byType(Scaffold)).first,
         ),
       ).colorScheme.primary;
-      state.setLegacySeed(const Color(0xFF07182A));
+      state.setAppSeed(const Color(0xFF07182A));
       await tester.pump();
       final first = accent();
-      state.setLegacySeed(const Color(0xFF381108));
+      state.setAppSeed(const Color(0xFF381108));
       await tester.pump();
       expect(accent(), isNot(first));
       expect(tester.takeException(), isNull);

@@ -1,10 +1,12 @@
+import 'spring_buttons.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
-import '../legacy/legacy_login.dart';
+import '../ui/login.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import 'artwork_image.dart';
@@ -20,8 +22,8 @@ Future<void> showAddToPlaylistDialog(
   required Track track,
 }) async {
   final Brightness brightness = Theme.of(context).brightness;
-  final Color accent = state.legacyAccentSeed ?? AppleColors.musicRed;
-  final Object? result = await showDialog<Object>(
+  final Color accent = state.accentSeed ?? AppleColors.musicRed;
+  final Object? result = await showAppleDialog<Object>(
     context: context,
     barrierColor: Colors.black.withValues(alpha: .32),
     builder: (BuildContext context) => Theme(
@@ -44,8 +46,8 @@ Future<void> showCreateCloudPlaylistDialog(
   AppState state,
 ) async {
   final Brightness brightness = Theme.of(context).brightness;
-  final Color accent = state.legacyAccentSeed ?? AppleColors.musicRed;
-  final Object? result = await showDialog<Object>(
+  final Color accent = state.accentSeed ?? AppleColors.musicRed;
+  final Object? result = await showAppleDialog<Object>(
     context: context,
     barrierColor: Colors.black.withValues(alpha: .32),
     builder: (BuildContext context) => Theme(
@@ -64,7 +66,7 @@ Future<void> showCreateCloudPlaylistDialog(
 void _showResult(BuildContext context, Object? result) {
   if (result == null || !context.mounted) return;
   final String message = switch (result) {
-    final Playlist playlist => '已创建「${playlist.name}」',
+    final Playlist playlist => '已创建「${playlist.name}」', // i18n:key
     final String text => text,
     _ => '',
   };
@@ -139,13 +141,13 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog> {
     try {
       await state.addSongToCloudPlaylist(playlist.id, track.id);
       if (!mounted) return;
-      Navigator.of(context).pop('已添加到「${playlist.name}」');
+      Navigator.of(context).pop('已添加到「${playlist.name}」'); // i18n:key
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _busy = false;
         _busyPlaylistId = null;
-        _error = '添加失败，请稍后重试。';
+        _error = '添加失败，请稍后重试。'; // i18n:key
       });
     }
   }
@@ -154,11 +156,11 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog> {
     if (_busy) return;
     final String name = _name.text.trim();
     if (name.isEmpty) {
-      setState(() => _error = '请输入歌单名称');
+      setState(() => _error = '请输入歌单名称'); // i18n:key
       return;
     }
     if (name.characters.length > 40) {
-      setState(() => _error = '歌单名称不能超过 40 个字符');
+      setState(() => _error = '歌单名称不能超过 40 个字符'); // i18n:key
       return;
     }
     setState(() {
@@ -178,12 +180,12 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog> {
       if (!mounted) return;
       Navigator.of(
         context,
-      ).pop(track == null ? created : '已创建并添加到「${created.name}」');
+      ).pop(track == null ? created : '已创建并添加到「${created.name}」'); // i18n:key
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = '创建失败，请稍后重试。';
+        _error = '创建失败，请稍后重试。'; // i18n:key
       });
     }
   }
@@ -204,14 +206,14 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog> {
       ),
     ),
     actions: <Widget>[
-      TextButton(
+      SpringTextButton(
         onPressed: () => Navigator.of(context).pop(),
         child: const TrText('取消'),
       ),
-      FilledButton(
+      SpringFilledButton(
         onPressed: () {
           Navigator.of(context).pop();
-          unawaited(showLegacyLoginDialog(context, state));
+          unawaited(showAppLoginDialog(context, state));
         },
         child: const TrText('登录'),
       ),
@@ -287,7 +289,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog> {
         ),
       ),
       actions: <Widget>[
-        TextButton(
+        SpringTextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(),
           child: const TrText('取消'),
         ),
@@ -362,7 +364,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog> {
         ),
       ),
       actions: <Widget>[
-        TextButton(
+        SpringTextButton(
           onPressed: _busy
               ? null
               : () {
@@ -377,7 +379,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog> {
                 },
           child: const TrText('取消'),
         ),
-        FilledButton(
+        SpringFilledButton(
           onPressed: _busy ? null : () => unawaited(_createAndAdd()),
           child: _busy
               ? const SizedBox.square(
@@ -480,7 +482,11 @@ class _PlaylistCover extends StatelessWidget {
     final String? resolved = url?.trim();
     if (resolved == null || resolved.isEmpty) return fallback;
     return Image(
-      image: ArtworkImage(resolved),
+      image: ArtworkImage.forSize(
+        resolved,
+        logicalEdge: 40,
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+      ),
       fit: BoxFit.cover,
       gaplessPlayback: true,
       errorBuilder: (BuildContext context, Object? error, StackTrace? _) =>

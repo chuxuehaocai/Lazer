@@ -111,25 +111,45 @@ void main() {
   ) async {
     const sourceCount = 120;
     final keys = List<GlobalKey>.generate(sourceCount, (_) => GlobalKey());
+    var opened = false;
+    late StateSetter update;
+    final sources = [
+      for (var i = 0; i < sourceCount; i++)
+        Positioned(
+          left: (i % 12) * 40,
+          top: (i ~/ 12) * 40,
+          child: CoverTransitionSource(
+            key: keys[i],
+            identity: 'shelf:$i',
+            child: const SizedBox.square(
+              dimension: 32,
+              child: ColoredBox(color: Colors.teal),
+            ),
+          ),
+        ),
+    ];
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: Stack(
-            children: [
-              for (var i = 0; i < sourceCount; i++)
-                Positioned(
-                  left: (i % 12) * 40,
-                  top: (i ~/ 12) * 40,
-                  child: CoverTransitionSource(
-                    key: keys[i],
-                    identity: 'shelf:$i',
-                    child: const SizedBox.square(
-                      dimension: 32,
-                      child: ColoredBox(color: Colors.teal),
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return Stack(
+                children: [
+                  ...sources,
+                  if (opened)
+                    const Positioned(
+                      left: 520,
+                      top: 100,
+                      child: CoverTransitionTarget(
+                        identity: 'shelf:12',
+                        size: 64,
+                        child: ColoredBox(color: Colors.teal),
+                      ),
                     ),
-                  ),
-                ),
-            ],
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -142,6 +162,12 @@ void main() {
     ];
     final initial = sourceOpacities();
     rememberCoverTransition('shelf:12', keys[12]);
+    await tester.pump();
+    final waiting = sourceOpacities();
+    expect(waiting[12].opacity, 1);
+    expect(waiting, initial, reason: 'the source stays painted before takeoff');
+    update(() => opened = true);
+    await tester.pump();
     await tester.pump();
     final hidden = sourceOpacities();
     final hiddenRebuilds = [
@@ -167,6 +193,7 @@ void main() {
   ) async {
     final key = GlobalKey();
     var cancelInBuild = false;
+    var opened = false;
     late StateSetter update;
     Widget app() => MaterialApp(
       home: Scaffold(
@@ -177,13 +204,27 @@ void main() {
               rememberCoverTransition('recycled', key);
               cancelCoverTransitions();
             }
-            return CoverTransitionSource(
-              key: key,
-              identity: 'recycled',
-              child: const SizedBox.square(
-                dimension: 60,
-                child: ColoredBox(color: Colors.teal),
-              ),
+            return Stack(
+              children: [
+                CoverTransitionSource(
+                  key: key,
+                  identity: 'recycled',
+                  child: const SizedBox.square(
+                    dimension: 60,
+                    child: ColoredBox(color: Colors.teal),
+                  ),
+                ),
+                if (opened)
+                  const Positioned(
+                    left: 200,
+                    top: 200,
+                    child: CoverTransitionTarget(
+                      identity: 'recycled',
+                      size: 100,
+                      child: ColoredBox(color: Colors.teal),
+                    ),
+                  ),
+              ],
             );
           },
         ),
@@ -203,10 +244,13 @@ void main() {
     );
     cancelInBuild = false;
     rememberCoverTransition('recycled', key);
+    update(() => opened = true);
+    await tester.pump();
     await tester.pump();
     expect(source().opacity, 0);
     await tester.pumpWidget(const SizedBox.shrink());
     cancelCoverTransitions();
+    opened = false;
     await tester.pumpWidget(app());
     expect(
       source().opacity,
@@ -237,7 +281,7 @@ void main() {
       (flightRect.bottomRight - sourceRect.bottomRight).distance,
       lessThan(.001),
     );
-    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(flight, findsNothing);
     expect(tester.takeException(), isNull);
@@ -258,7 +302,7 @@ void main() {
     );
     expect(flight, findsOneWidget);
 
-    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
     await tester.pump();
 
     expect(flight, findsNothing);
@@ -286,19 +330,19 @@ void main() {
     );
     final destination = tester.getRect(find.byType(CoverTransitionTarget));
 
-    await tester.pump(const Duration(milliseconds: 84));
+    await tester.pump(const Duration(milliseconds: 126));
     final early = tester.getRect(flight);
     final totalTravel = destination.left - start.left;
     final earlyTravel = early.left - start.left;
     expect(earlyTravel / totalTravel, greaterThan(.5));
     expect(early.width, greaterThan((start.width + destination.width) / 2));
 
-    await tester.pump(const Duration(milliseconds: 84));
+    await tester.pump(const Duration(milliseconds: 126));
     final later = tester.getRect(flight);
     expect(later.left, greaterThan(early.left));
     expect(later.left - early.left, lessThan(earlyTravel));
 
-    await tester.pump(const Duration(milliseconds: 252));
+    await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 1));
     expect(flight, findsNothing);
     expect(tester.takeException(), isNull);
@@ -333,7 +377,7 @@ void main() {
       expect(counters.layouts, layoutsAtTakeoff);
     }
 
-    await tester.pump(const Duration(milliseconds: 240));
+    await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 1));
     expect(flight, findsNothing);
     expect(tester.takeException(), isNull);

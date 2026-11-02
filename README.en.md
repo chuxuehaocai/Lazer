@@ -2,7 +2,7 @@
   <img src="docs/images/mascot.png" width="220" alt="The Lazer mascot">
 </p>
 
-<h1 align="center">Lazer · nextgen</h1>
+<h1 align="center">Lazer</h1>
 
 <h3 align="center">
   Community: <a href="https://qm.qq.com/q/JJJfE0QV00">神秘交流群 (QQ group) · 1063238023</a>
@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/chuxuehaocai/Lazer/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/badge/build-GitHub%20Actions-6C8EBF"></a>
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
-  <img alt="version" src="https://img.shields.io/badge/nextgen-v2.0.0-8E7CC3">
+  <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-4C9A7A"></a>
 </p>
@@ -45,7 +45,7 @@
 
 **The interface part**
 
-- Apple's design language throughout: semantic system colours and type, translucent navigation, grouped lists, the Apple Music red, and tints pulled from the cover art.
+- One Apple-style interface, theme and spring-motion system across platforms: semantic colours and type, translucent navigation, grouped lists and tints pulled from the cover art.
 - Desktop gets a sidebar and the full transport; phones get a tab bar and a mini-player — one page tree and one state, just a different posture.
 - Layout override (desktop / mobile), DPI 80–175%, and a car head-unit profile that starts at 135%.
 - Large screen mode: TVs and projectors start in it, and the D-pad moves by position across shelves, the library grid and the transport.
@@ -55,8 +55,10 @@
 
 - Adjustable scroll inertia and acceleration; haptic detents on the seek bar.
 - An uncached song gathers ten seconds of stream before it starts, so the opening bars no longer stutter; downloaded and cached tracks still start instantly.
-- Every interface animation is planned against a 10 ms (100 fps) frame budget, the flowing backdrop updates at the precision chosen in Settings (about 21 times a second by default), and Settings can show a live frame-time overlay.
+- Pages, dialogs and controls use interruptible springs. Drags track the pointer directly, release preserves the current velocity, and reduced motion is supported.
+- Browse backgrounds default to 30 fps; the player follows the display refresh rate. Frame rate and mesh precision are separate settings, and hidden pages and static backgrounds stop continuous drawing. Settings can show a live frame-time overlay.
 - The now-playing page brings an AMLL mesh backdrop, cover/lyrics switching, queue and comment panels, and the M / L / Q / C / F shortcuts.
+- Scheduled pause supports multiple repeating daily times. Each time pauses once, preserves the queue and position, and allows an immediate manual resume.
 
 ## A look at it
 
@@ -81,7 +83,7 @@
 
 ## A tidy little cache
 
-What you have played is kept quietly: up to 1 GiB of audio, 256 MiB of artwork and 64 MiB of catalogue data, evicting whatever sat untouched the longest. Playlist tracks stay fresh for 10 minutes, account collections for 5 and the home feed for 20; when the network sulks, the previous snapshot stays instead of an empty screen. Fully cached tracks play locally, and the first play streams while caching in the background. Files live in the system application cache directory and are fetched again if the system clears them.
+Playback caching keeps up to 50 completed songs by default, with a configurable limit. Recent mode evicts the songs not played for the longest time; smart mode favours songs heard more often in the last 30 days. Manually downloaded and imported files are retained. Artwork and catalogue caches have their own bounds, and a failed network request can fall back to an earlier snapshot. Fully cached tracks play locally while new streams cache in the background.
 
 ## Build it yourself
 
@@ -116,7 +118,7 @@ artifacts are retained for 30 days. Extract the complete Windows ZIP before
 launching its EXE, run `chmod +x` on a downloaded AppImage, and note that macOS
 Apps are ad-hoc signed while the IPA needs your own signing.
 
-More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [legacy UI](docs/legacy-ui.md)
+More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [scheduled pause](docs/scheduled-pause.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [unified interface](docs/ui.md)
 
 ## References and thanks
 

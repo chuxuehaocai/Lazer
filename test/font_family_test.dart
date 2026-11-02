@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
-import 'package:lazer_nextgen/theme/app_theme.dart';
 import 'package:lazer_nextgen/theme/font_preferences.dart';
 import 'package:lazer_nextgen/theme/imported_font.dart';
 import 'package:lazer_nextgen/diagnostics/frame_stats.dart';
@@ -46,7 +45,7 @@ void main() {
           expect(restored.family.path, imported.path);
           for (final theme in [
             buildAppleTheme(fonts: restored),
-            buildAppTheme(fonts: restored),
+            buildAppleTheme(brightness: Brightness.dark, fonts: restored),
           ]) {
             expect(theme.textTheme.bodyLarge!.fontFamily, imported.family);
           }
@@ -96,7 +95,7 @@ void main() {
     expect(preferences.family.resolvedFamily, 'sans-serif');
     for (final theme in [
       buildAppleTheme(fonts: preferences),
-      buildAppTheme(fonts: preferences),
+      buildAppleTheme(brightness: Brightness.dark, fonts: preferences),
     ]) {
       expect(theme.textTheme.bodyLarge!.fontFamily, 'sans-serif');
       expect(theme.textTheme.bodyLarge!.fontFamilyFallback, isEmpty);

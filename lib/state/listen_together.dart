@@ -63,7 +63,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
 
   Future<bool> create() async {
     if (state.isNavidrome) {
-      error = '当前音乐平台不支持一起听。';
+      error = '当前音乐平台不支持一起听。'; // i18n:key
       _notify();
       return false;
     }

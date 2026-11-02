@@ -54,9 +54,9 @@ void main() {
         logicalEdge: 44,
         devicePixelRatio: dpr,
       )!;
-      final resized = image.image as ResizeImage;
-      expect(resized.width, (44 * dpr).ceil());
-      expect((resized.imageProvider as ArtworkImage).url, sizedCover);
+      final provider = image.image as ArtworkImage;
+      expect(provider.targetSize, artworkPixelSize(44, dpr));
+      expect(provider.url, sizedCover);
       image.errorBuilder!(
         tester.element(find.byType(Image)),
         NetworkImageLoadException(statusCode: 403, uri: Uri.parse(cover)),
@@ -65,19 +65,14 @@ void main() {
       await tester.pump();
       await tester.pump();
       final retried =
-          (tester.widget<Image>(find.byType(Image)).image as ResizeImage)
-                  .imageProvider
-              as ArtworkImage;
+          tester.widget<Image>(find.byType(Image)).image as ArtworkImage;
       // CDN fallback is now handled once in the shared cache, rather than
       // restarting the same candidate sequence separately in each widget.
       expect(retried.url, sizedCover);
       const next = 'https://p1.music.126.net/another/123.jpg';
       await render(next);
       expect(
-        ((tester.widget<Image>(find.byType(Image)).image as ResizeImage)
-                    .imageProvider
-                as ArtworkImage)
-            .url,
+        (tester.widget<Image>(find.byType(Image)).image as ArtworkImage).url,
         artworkUrlForSize(next, logicalEdge: 44, devicePixelRatio: dpr),
       );
     },

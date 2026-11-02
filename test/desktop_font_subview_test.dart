@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:lazer_nextgen/legacy/legacy_settings_page.dart';
+import 'package:lazer_nextgen/ui/settings_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -20,7 +20,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: buildAppleTheme(),
-        home: Scaffold(body: LegacySettingsPage(state: state)),
+        home: Scaffold(body: AppSettingsPage(state: state)),
       ),
     );
     await tester.tap(find.byKey(const ValueKey('open-font-settings')));
@@ -64,7 +64,7 @@ void main() {
             ).copyWith(textScaler: const TextScaler.linear(1.3)),
             child: child!,
           ),
-          home: Scaffold(body: LegacySettingsPage(state: state)),
+          home: Scaffold(body: AppSettingsPage(state: state)),
         ),
       );
       await tester.tap(find.byKey(const ValueKey('open-font-settings')));
@@ -83,14 +83,8 @@ void main() {
           180,
           scrollable: find.byType(Scrollable).last,
         );
-        expect(
-          tester.getRect(second).left,
-          closeTo(firstRect.left, .1),
-        );
-        expect(
-          tester.getRect(second).width,
-          closeTo(firstRect.width, .1),
-        );
+        expect(tester.getRect(second).left, closeTo(firstRect.left, .1));
+        expect(tester.getRect(second).width, closeTo(firstRect.width, .1));
       }
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());

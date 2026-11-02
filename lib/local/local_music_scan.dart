@@ -1,8 +1,10 @@
+import '../widgets/spring_buttons.dart';
 import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import '../animation/apple_modal.dart';
 
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
@@ -56,7 +58,7 @@ Future<LocalScanResult?> scanMusicFolder(
   bool stop = false;
   final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
   unawaited(
-    showDialog<void>(
+    showAppleDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) => AlertDialog(
@@ -86,10 +88,7 @@ Future<LocalScanResult?> scanMusicFolder(
           ),
         ),
         actions: <Widget>[
-          TextButton(
-            onPressed: () => stop = true,
-            child: TrText('取消'),
-          ),
+          SpringTextButton(onPressed: () => stop = true, child: TrText('取消')),
         ],
       ),
     ),
@@ -130,16 +129,14 @@ Future<LocalScanResult?> scanMusicFolder(
     final int total = state.localLibrary.availableCount;
     _message(
       context,
-      result.tracks.isEmpty
-          ? '没有找到支持的音频文件'
-          : '扫描完成 · 共 $total 首本地歌曲',
+      result.tracks.isEmpty ? '没有找到支持的音频文件' : '扫描完成 · 共 $total 首本地歌曲',
     );
   }
   return result;
 }
 
 void _message(BuildContext context, String message) {
-  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-    SnackBar(content: Text(context.tr(message))),
-  );
+  ScaffoldMessenger.maybeOf(
+    context,
+  )?.showSnackBar(SnackBar(content: Text(context.tr(message))));
 }

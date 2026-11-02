@@ -1,17 +1,20 @@
+import '../widgets/spring_buttons.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../animation/view_transitions.dart';
 
 import '../state/app_state.dart';
+import '../l10n/app_localizations.dart';
 import 'still_alive_audio.dart';
 import 'still_alive_score.dart';
 
 Future<void> openStillAlive(BuildContext context, AppState state) {
   state.pause();
   return Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(builder: (_) => StillAlivePage(appState: state)),
+    ApplePageRoute<void>(builder: (_) => StillAlivePage(appState: state)),
   );
 }
 
@@ -349,7 +352,7 @@ class _StillAlivePageState extends State<StillAlivePage>
                             ),
                             IconButton(
                               key: const ValueKey('still-alive-close'),
-                              tooltip: '返回',
+                              tooltip: context.tr('返回'),
                               onPressed: () => Navigator.of(context).pop(),
                               icon: const Icon(Icons.close_rounded),
                             ),
@@ -395,19 +398,19 @@ class _StillAlivePageState extends State<StillAlivePage>
                             spacing: 8,
                             children: [
                               Text(
-                                '音频暂时无法播放',
+                                context.tr('音频暂时无法播放'),
                                 style: TextStyle(
                                   color: _amber,
                                   fontSize: small ? 10 : 12,
                                 ),
                               ),
-                              TextButton(
+                              SpringTextButton(
                                 onPressed: _starting ? null : _start,
-                                child: const Text('重试'),
+                                child: const TrText('重试'),
                               ),
-                              TextButton(
+                              SpringTextButton(
                                 onPressed: _startDemo,
-                                child: const Text('静音演示'),
+                                child: const TrText('静音演示'),
                               ),
                             ],
                           ),
@@ -419,7 +422,7 @@ class _StillAlivePageState extends State<StillAlivePage>
                             if (!_ended)
                               IconButton(
                                 key: const ValueKey('still-alive-play'),
-                                tooltip: _playing ? '暂停' : '播放',
+                                tooltip: context.tr(_playing ? '暂停' : '播放'),
                                 onPressed:
                                     _starting || (!_demo && !_audio.ready)
                                     ? null
@@ -431,16 +434,16 @@ class _StillAlivePageState extends State<StillAlivePage>
                                 ),
                               ),
                             if (_ended)
-                              TextButton.icon(
+                              SpringTextButton.icon(
                                 key: const ValueKey('still-alive-restart'),
                                 onPressed: _restart,
                                 icon: const Icon(Icons.replay_rounded),
-                                label: const Text('重新播放'),
+                                label: const TrText('重新播放'),
                               )
                             else
                               IconButton(
                                 key: const ValueKey('still-alive-restart'),
-                                tooltip: '重新播放',
+                                tooltip: context.tr('重新播放'),
                                 onPressed:
                                     _starting || (!_demo && !_audio.ready)
                                     ? null
@@ -465,7 +468,7 @@ class _StillAlivePageState extends State<StillAlivePage>
                                   if (_demo || _frame.finished || _ended)
                                     Text(
                                       _demo
-                                          ? '静音演示'
+                                          ? context.tr('静音演示')
                                           : 'THANK YOU FOR PARTICIPATING',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,

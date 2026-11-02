@@ -12,7 +12,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/legacy/legacy_background.dart';
+import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/utils/artwork.dart';
 
@@ -84,223 +84,229 @@ Future<List<Color>> _mesh(Uint8List bytes) async {
 }
 
 void main() {
-  testWidgets('real catalogue covers update cold and warm BGA caches', (
-    tester,
-  ) async {
-    final root = Directory.systemTemp.createTempSync('lazer-bga-live-');
-    final previous = HttpOverrides.current;
-    final network = _Network();
-    HttpOverrides.global = network;
-    addTearDown(() {
-      HttpOverrides.global = previous;
-      root.deleteSync(recursive: true);
-    });
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      const MethodChannel('plugins.flutter.io/path_provider'),
-      (_) async => root.path,
-    );
-    final tracks = <Track>[];
-    final meshes = <String, List<Color>>{};
-    await tester.runAsync(() async {
-      for (final id in [
-        1939575649,
-        518202469,
-        347230,
-        186016,
-        25706282,
-        418603077,
-      ]) {
-        final json =
-            jsonDecode(
-                  utf8.decode(
-                    await _get(
-                      Uri.parse(
-                        'https://music.163.com/api/song/detail/?ids=[$id]',
+  testWidgets(
+    'real catalogue covers update cold and warm BGA caches',
+    (tester) async {
+      final root = Directory.systemTemp.createTempSync('lazer-bga-live-');
+      final previous = HttpOverrides.current;
+      final network = _Network();
+      HttpOverrides.global = network;
+      addTearDown(() {
+        HttpOverrides.global = previous;
+        root.deleteSync(recursive: true);
+      });
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('plugins.flutter.io/path_provider'),
+        (_) async => root.path,
+      );
+      final tracks = <Track>[];
+      final meshes = <String, List<Color>>{};
+      await tester.runAsync(() async {
+        for (final id in [
+          1939575649,
+          518202469,
+          347230,
+          186016,
+          25706282,
+          418603077,
+        ]) {
+          final json =
+              jsonDecode(
+                    utf8.decode(
+                      await _get(
+                        Uri.parse(
+                          'https://music.163.com/api/song/detail/?ids=[$id]',
+                        ),
+                      ),
+                    ),
+                  )
+                  as Map<String, dynamic>;
+          final song = (json['songs'] as List).single as Map<String, dynamic>;
+          final album = song['album'] as Map<String, dynamic>;
+          final cover = album['picUrl'] as String;
+          tracks.add(
+            Track(
+              id: '$id',
+              title: song['name'] as String,
+              artist: 'Catalogue validation',
+              album: album['name'] as String,
+              duration: const Duration(minutes: 3),
+              coverSeed: id,
+              coverUrl: cover,
+            ),
+          );
+          meshes['$id'] = await _mesh(
+            await _get(Uri.parse(albumPaletteArtworkUrl(cover)!)),
+          );
+        }
+      });
+      var current = tracks.first;
+      late StateSetter update;
+      final playerBoundary = GlobalKey();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return Row(
+                children: [
+                  Expanded(
+                    child: RepaintBoundary(
+                      key: playerBoundary,
+                      child: AlbumBlurFlow(
+                        track: current,
+                        mode: AppBackgroundMode.nowPlayingDynamic,
+                        pageColor: Colors.black,
+                        animationsEnabled: true,
                       ),
                     ),
                   ),
-                )
-                as Map<String, dynamic>;
-        final song = (json['songs'] as List).single as Map<String, dynamic>;
-        final album = song['album'] as Map<String, dynamic>;
-        final cover = album['picUrl'] as String;
-        tracks.add(
-          Track(
-            id: '$id',
-            title: song['name'] as String,
-            artist: 'Catalogue validation',
-            album: album['name'] as String,
-            duration: const Duration(minutes: 3),
-            coverSeed: id,
-            coverUrl: cover,
-          ),
-        );
-        meshes['$id'] = await _mesh(
-          await _get(Uri.parse(albumPaletteArtworkUrl(cover)!)),
-        );
-      }
-    });
-    var current = tracks.first;
-    late StateSetter update;
-    final playerBoundary = GlobalKey();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: StatefulBuilder(
-          builder: (context, setState) {
-            update = setState;
-            return Row(
-              children: [
-                Expanded(
-                  child: RepaintBoundary(
-                    key: playerBoundary,
-                    child: AlbumBlurFlow(
+                  Expanded(
+                    child: AppAlbumBackdrop(
                       track: current,
-                      mode: LegacyBackgroundMode.nowPlayingDynamic,
-                      pageColor: Colors.black,
-                      animationsEnabled: true,
+                      mode: AppBackgroundMode.nowPlayingDynamic,
+                      uiAlpha: 0,
                     ),
                   ),
-                ),
-                Expanded(
-                  child: LegacyAlbumBackdrop(
-                    track: current,
-                    mode: LegacyBackgroundMode.nowPlayingDynamic,
-                    uiAlpha: 0,
-                  ),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
-      ),
-    );
-    final samples = <Map<String, Object>>[];
-    final hashes = <String>[];
-    Future<void> ready(Track track, String phase) async {
-      final clock = Stopwatch()..start();
-      for (var frame = 0; frame < 1500; frame++) {
+      );
+      final samples = <Map<String, Object>>[];
+      final hashes = <String>[];
+      Future<void> ready(Track track, String phase) async {
+        final clock = Stopwatch()..start();
+        for (var frame = 0; frame < 1500; frame++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump(const Duration(milliseconds: 50));
+          final backgrounds = tester.widgetList<AlbumFlowBackground>(
+            find.byType(AlbumFlowBackground),
+          );
+          if (backgrounds.length == 2 &&
+              backgrounds.every(
+                (canvas) => listEquals(canvas.colors, meshes[track.id]),
+              )) {
+            await tester.pump(const Duration(seconds: 1));
+            samples.add({
+              'id': track.id,
+              'phase': phase,
+              'milliseconds': clock.elapsedMilliseconds,
+            });
+            return;
+          }
+        }
+        fail(
+          'Both backgrounds did not receive catalogue cover ${track.id} during $phase',
+        );
+      }
+
+      final coldRequests = network.requests.length;
+      for (final track in tracks.take(3)) {
+        update(() => current = track);
+        await tester.pump();
+        await ready(track, 'cold');
+        await tester.runAsync(() async {
+          final image =
+              await (playerBoundary.currentContext!.findRenderObject()
+                      as RenderRepaintBoundary)
+                  .toImage();
+          final data = await image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          hashes.add(sha256.convert(data!.buffer.asUint8List()).toString());
+          image.dispose();
+        });
+      }
+      expect(network.requests.length, greaterThan(coldRequests));
+      expect(
+        hashes.toSet().length,
+        3,
+        reason: 'real painted pixels must change across covers',
+      );
+      final beforeWarm = network.requests.length;
+      for (final track in tracks.take(3).toList().reversed) {
+        update(() => current = track);
+        await tester.pump();
+        await ready(track, 'warm');
+      }
+      expect(
+        network.requests.length,
+        beforeWarm,
+        reason: 'warm palette/cache hits must not re-download',
+      );
+      final warmRequests = network.requests.length - beforeWarm;
+      // Three still-uncached real covers arrive out of order. Delay the first
+      // requests at the network boundary, keeping the actual CDN/cache/decoder.
+      network.delays[Uri.parse(tracks[3].coverUrl!).path] = const Duration(
+        milliseconds: 1800,
+      );
+      network.delays[Uri.parse(tracks[4].coverUrl!).path] = const Duration(
+        milliseconds: 900,
+      );
+      update(() => current = tracks[3]);
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 40)),
+      );
+      update(() => current = tracks[4]);
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 40)),
+      );
+      update(() => current = tracks.last);
+      await tester.pump();
+      await ready(tracks.last, 'rapid-final');
+      final completed = <String, AlbumCoverPalette?>{};
+      for (final track in tracks.skip(3)) {
+        albumPaletteForCover(
+          track.coverUrl,
+        ).then((palette) => completed[track.id] = palette);
+      }
+      // Continue both widget time and real IO. Awaiting a request created by a
+      // widget inside runAsync alone would leave its fake-zone delay unadvanced.
+      for (var frame = 0; frame < 1500 && completed.length < 3; frame++) {
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 20)),
         );
         await tester.pump(const Duration(milliseconds: 50));
-        final backgrounds = tester.widgetList<AlbumFlowBackground>(
-          find.byType(AlbumFlowBackground),
-        );
-        if (backgrounds.length == 2 &&
-            backgrounds.every(
-              (canvas) => listEquals(canvas.colors, meshes[track.id]),
-            )) {
-          await tester.pump(const Duration(seconds: 1));
-          samples.add({
-            'id': track.id,
-            'phase': phase,
-            'milliseconds': clock.elapsedMilliseconds,
-          });
-          return;
-        }
       }
-      fail(
-        'Both backgrounds did not receive catalogue cover ${track.id} during $phase',
+      expect(completed.length, 3);
+      for (final track in tracks.skip(3)) {
+        expect(listEquals(completed[track.id]?.mesh, meshes[track.id]), isTrue);
+      }
+      expect(
+        tester
+            .widgetList<AlbumFlowBackground>(find.byType(AlbumFlowBackground))
+            .every(
+              (canvas) => listEquals(canvas.colors, meshes[tracks.last.id]),
+            ),
+        isTrue,
+        reason: 'late previous CDN results must not replace the final song',
       );
-    }
-
-    final coldRequests = network.requests.length;
-    for (final track in tracks.take(3)) {
-      update(() => current = track);
-      await tester.pump();
-      await ready(track, 'cold');
+      final cached = Directory('${root.path}/lazer_cache_v1/artwork');
+      expect(cached.existsSync(), isTrue);
+      final files = cached.listSync().whereType<File>().length;
+      expect(files, greaterThanOrEqualTo(6));
+      await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(() async {
-        final image =
-            await (playerBoundary.currentContext!.findRenderObject()
-                    as RenderRepaintBoundary)
-                .toImage();
-        final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-        hashes.add(sha256.convert(data!.buffer.asUint8List()).toString());
-        image.dispose();
+        final report = {
+          'covers': samples,
+          'coldCoverRequests': network.requests.length - coldRequests,
+          'warmCoverRequests': warmRequests,
+          'coldRaceCovers': 3,
+          'diskFiles': files,
+          'distinctPixelHashes': hashes.toSet().length,
+        };
+        await File(
+          'build/reports/bga-real-catalog.json',
+        ).writeAsString(const JsonEncoder.withIndent('  ').convert(report));
       });
-    }
-    expect(network.requests.length, greaterThan(coldRequests));
-    expect(
-      hashes.toSet().length,
-      3,
-      reason: 'real painted pixels must change across covers',
-    );
-    final beforeWarm = network.requests.length;
-    for (final track in tracks.take(3).toList().reversed) {
-      update(() => current = track);
-      await tester.pump();
-      await ready(track, 'warm');
-    }
-    expect(
-      network.requests.length,
-      beforeWarm,
-      reason: 'warm palette/cache hits must not re-download',
-    );
-    final warmRequests = network.requests.length - beforeWarm;
-    // Three still-uncached real covers arrive out of order. Delay the first
-    // requests at the network boundary, keeping the actual CDN/cache/decoder.
-    network.delays[Uri.parse(tracks[3].coverUrl!).path] = const Duration(
-      milliseconds: 1800,
-    );
-    network.delays[Uri.parse(tracks[4].coverUrl!).path] = const Duration(
-      milliseconds: 900,
-    );
-    update(() => current = tracks[3]);
-    await tester.pump();
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 40)),
-    );
-    update(() => current = tracks[4]);
-    await tester.pump();
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 40)),
-    );
-    update(() => current = tracks.last);
-    await tester.pump();
-    await ready(tracks.last, 'rapid-final');
-    final completed = <String, AlbumCoverPalette?>{};
-    for (final track in tracks.skip(3)) {
-      albumPaletteForCover(
-        track.coverUrl,
-      ).then((palette) => completed[track.id] = palette);
-    }
-    // Continue both widget time and real IO. Awaiting a request created by a
-    // widget inside runAsync alone would leave its fake-zone delay unadvanced.
-    for (var frame = 0; frame < 1500 && completed.length < 3; frame++) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 20)),
-      );
-      await tester.pump(const Duration(milliseconds: 50));
-    }
-    expect(completed.length, 3);
-    for (final track in tracks.skip(3)) {
-      expect(listEquals(completed[track.id]?.mesh, meshes[track.id]), isTrue);
-    }
-    expect(
-      tester
-          .widgetList<AlbumFlowBackground>(find.byType(AlbumFlowBackground))
-          .every((canvas) => listEquals(canvas.colors, meshes[tracks.last.id])),
-      isTrue,
-      reason: 'late previous CDN results must not replace the final song',
-    );
-    final cached = Directory('${root.path}/lazer_cache_v1/artwork');
-    expect(cached.existsSync(), isTrue);
-    final files = cached.listSync().whereType<File>().length;
-    expect(files, greaterThanOrEqualTo(6));
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.runAsync(() async {
-      final report = {
-        'covers': samples,
-        'coldCoverRequests': network.requests.length - coldRequests,
-        'warmCoverRequests': warmRequests,
-        'coldRaceCovers': 3,
-        'diskFiles': files,
-        'distinctPixelHashes': hashes.toSet().length,
-      };
-      await File(
-        'build/reports/bga-real-catalog.json',
-      ).writeAsString(const JsonEncoder.withIndent('  ').convert(report));
-    });
-    expect(tester.takeException(), isNull);
-  }, timeout: const Timeout(Duration(minutes: 4)));
+      expect(tester.takeException(), isNull);
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
 }

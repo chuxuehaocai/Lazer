@@ -3,9 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:lazer_nextgen/legacy/font_settings_page.dart';
-import 'package:lazer_nextgen/legacy/legacy_settings_page.dart';
-import 'package:lazer_nextgen/legacy/shortcut_settings_page.dart';
+import 'package:lazer_nextgen/ui/font_settings_page.dart';
+import 'package:lazer_nextgen/ui/settings_page.dart';
+import 'package:lazer_nextgen/ui/shortcut_settings_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -38,7 +38,7 @@ void main() {
           MaterialApp(
             theme: buildAppleTheme(),
             navigatorObservers: [navigation],
-            home: Scaffold(body: LegacySettingsPage(state: state)),
+            home: Scaffold(body: AppSettingsPage(state: state)),
           ),
         );
         for (final (entry, page, view) in [
@@ -124,7 +124,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: buildAppleTheme(),
-          home: Scaffold(body: LegacySettingsPage(state: state)),
+          home: Scaffold(body: AppSettingsPage(state: state)),
         ),
       );
       await tester.tap(find.byKey(const ValueKey('open-font-settings')));
@@ -160,7 +160,7 @@ void main() {
           home: Scaffold(
             body: AnimatedBuilder(
               animation: state,
-              builder: (context, _) => LegacySettingsPage(state: state),
+              builder: (context, _) => AppSettingsPage(state: state),
             ),
           ),
         ),
@@ -174,12 +174,12 @@ void main() {
       await tester.scrollUntilVisible(mode, 200);
       await tester.pumpAndSettle();
       expect(mode.hitTestable(), findsOneWidget);
-      expect(tester.widget(mode), isA<SettingsChoice<LegacyBackgroundMode>>());
+      expect(tester.widget(mode), isA<SettingsChoice<AppBackgroundMode>>());
       await tester.tap(mode);
       await tester.pumpAndSettle();
       await tester.tap(find.text('静态背景').last);
       await tester.pumpAndSettle();
-      expect(state.playerBackground, LegacyBackgroundMode.nowPlayingStatic);
+      expect(state.playerBackground, AppBackgroundMode.nowPlayingStatic);
       final follow = find.byKey(
         const ValueKey('player-background-follow-display'),
       );

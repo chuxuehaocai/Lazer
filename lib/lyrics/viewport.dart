@@ -1,3 +1,5 @@
+import '../animation/apple_spring.dart';
+import '../widgets/spring_buttons.dart';
 import 'package:lazer_nextgen/theme/app_palette.dart';
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Adapted lyric animation; reference: README.md. License: licenses/lyric_animation/AGPL-3.0.txt.
@@ -258,7 +260,7 @@ class _LyricViewportState extends State<LyricViewport>
     final target = widget.state.lyricBlurEnabled && !_manual ? 1.0 : 0.0;
     if (_blurTarget != target) {
       _blurTarget = target;
-      _blur.animateTo(target, curve: Curves.easeOutCubic);
+      _blur.animateTo(target, curve: const AppleSpringCurve());
     }
   }
 
@@ -732,11 +734,16 @@ class _LyricViewportState extends State<LyricViewport>
       tween: Tween(
         end: _selection.keys.contains(lyricSelectionKey(_lines[index])) ? 1 : 0,
       ),
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : AppleSpring.responsive.duration,
+      curve: const AppleSpringCurve(),
       builder: (context, selected, _) => AnimatedOpacity(
+        curve: const AppleSpringCurve(),
         opacity: _selection.active ? 0.54 + selected * 0.46 : 1,
-        duration: const Duration(milliseconds: 180),
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : AppleSpring.responsive.duration,
         child: _rowBody(index, selected),
       ),
     ),
@@ -898,13 +905,13 @@ class _LyricViewportState extends State<LyricViewport>
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  TextButton(
+                  SpringTextButton(
                     onPressed: () => unawaited(
                       widget.state.ensureCurrentLyrics(force: true),
                     ),
                     child: const TrText('重新加载歌词'),
                   ),
-                  TextButton(
+                  SpringTextButton(
                     key: const ValueKey<String>('import-lyrics'),
                     onPressed: () =>
                         unawaited(pickAndImportLyrics(context, widget.state)),
@@ -1027,9 +1034,11 @@ class _LyricViewportState extends State<LyricViewport>
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 480),
                     child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 260),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
+                      duration: MediaQuery.disableAnimationsOf(context)
+                          ? Duration.zero
+                          : AppleSpring.responsive.duration,
+                      switchInCurve: const AppleSpringCurve(),
+                      switchOutCurve: const AppleSpringCurve(),
                       transitionBuilder: (child, animation) => FadeTransition(
                         opacity: animation,
                         child: SlideTransition(
