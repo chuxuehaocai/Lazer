@@ -10,6 +10,7 @@ import '../data/audio_quality.dart';
 import '../diagnostics/build_info.dart';
 import '../diagnostics/export_logs.dart';
 import '../downloads/download_queue_sheet.dart';
+import '../easter_egg/still_alive_page.dart';
 import '../l10n/app_language.dart';
 import '../l10n/app_localizations.dart';
 import '../scrolling/scroll_motion.dart';
@@ -25,6 +26,8 @@ import '../widgets/settings_choice.dart';
 import '../widgets/settings_row.dart';
 import '../tv/tv_mode.dart';
 import '../tv/lan_remote.dart';
+import '../updates/open_external.dart';
+import '../updates/update_checker.dart';
 import '../updates/update_dialog.dart';
 import '../utils/background_image.dart';
 import '../utils/byte_format.dart';
@@ -728,33 +731,31 @@ class _SettingsOverview extends StatelessWidget {
                 ],
               ),
             ),
-            if (state.debugOptionsEnabled) ...<Widget>[
-              const _LegacySectionLabel('调试'),
-              AppleGroupedCard(
-                margin: EdgeInsets.zero,
-                child: Column(
-                  children: <Widget>[
-                    _LegacySwitchRow(
-                      label: '显示帧数',
-                      subtitle: '实时显示 UI、GPU、低帧和 100 fps 帧预算',
-                      value: state.showFrameStats,
-                      onChanged: (bool value) =>
-                          unawaited(state.setShowFrameStats(value)),
+            const _LegacySectionLabel('调试'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _LegacySwitchRow(
+                    label: '显示帧数',
+                    subtitle: '实时显示 UI、GPU、低帧和 100 fps 帧预算',
+                    value: state.showFrameStats,
+                    onChanged: (bool value) =>
+                        unawaited(state.setShowFrameStats(value)),
+                  ),
+                  _LegacySettingRow(
+                    label: '音频设备',
+                    subtitle: '查看当前音频输出端点和音频会话详情',
+                    trailing: OutlinedButton(
+                      key: const ValueKey('open-audio-device-info'),
+                      onPressed: () =>
+                          unawaited(showAudioDeviceInfoDialog(context)),
+                      child: const TrText('查看'),
                     ),
-                    _LegacySettingRow(
-                      label: '音频设备',
-                      subtitle: '查看当前音频输出端点和音频会话详情',
-                      trailing: OutlinedButton(
-                        key: const ValueKey('open-audio-device-info'),
-                        onPressed: () =>
-                            unawaited(showAudioDeviceInfoDialog(context)),
-                        child: const TrText('查看'),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
             const _LegacySectionLabel('账户'),
             AppleGroupedCard(
               margin: EdgeInsets.zero,
@@ -828,6 +829,15 @@ class _SettingsOverview extends StatelessWidget {
                   AppleListTile(
                     padding: SettingsSpacing.rowPadding,
                     minHeight: SettingsSpacing.rowMinHeight,
+                    key: const ValueKey('open-github-project'),
+                    title: context.tr('GitHub 项目'),
+                    subtitle: UpdateChecker.repositoryUrl,
+                    trailing: const Icon(Icons.open_in_new_rounded),
+                    onTap: () => unawaited(_openProjectRepository(context)),
+                  ),
+                  AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
                     key: const ValueKey('export-logs'),
                     title: context.tr('导出日志'),
                     subtitle: context.tr('保存运行日志与播放诊断信息'),
@@ -866,6 +876,20 @@ class _SettingsOverview extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _openProjectRepository(BuildContext context) async {
+  final opened = await openExternalUrl(UpdateChecker.repositoryUrl);
+  if (opened || !context.mounted) return;
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(
+          context.tr('无法打开浏览器，请手动访问 ${UpdateChecker.repositoryUrl}'),
+        ),
+      ),
+    );
 }
 
 class _LegacySectionLabel extends StatelessWidget {
@@ -921,9 +945,7 @@ class _LegacySwitchRow extends StatelessWidget {
   }
 }
 
-/// The 关于 version card doubles as the hidden switch for the debug section:
-/// seven taps inside four seconds toggle it. The tap target is invisible, so
-/// ordinary users only ever see an ordinary version row.
+/// Seven taps within four seconds open the terminal credits easter egg.
 class _VersionSecretTile extends StatefulWidget {
   const _VersionSecretTile({required this.state});
 
@@ -934,30 +956,28 @@ class _VersionSecretTile extends StatefulWidget {
 }
 
 class _VersionSecretTileState extends State<_VersionSecretTile> {
-  static const int _tapsToToggle = 7;
+  static const int _tapsToOpen = 7;
   static const Duration _window = Duration(seconds: 4);
 
   int _taps = 0;
-  DateTime? _firstTap;
+  Timer? _tapReset;
 
   void _tap() {
-    final DateTime now = DateTime.now();
-    final DateTime? first = _firstTap;
-    if (first == null || now.difference(first) > _window) {
-      _firstTap = now;
+    _tapReset ??= Timer(_window, () {
       _taps = 0;
-    }
-    if (++_taps < _tapsToToggle) return;
+      _tapReset = null;
+    });
+    if (++_taps < _tapsToOpen) return;
     _taps = 0;
-    _firstTap = null;
-    final bool enabled = !widget.state.debugOptionsEnabled;
-    unawaited(widget.state.setDebugOptionsEnabled(enabled));
-    final String message = enabled
-        ? context.tr('调试选项已开启')
-        : context.tr('调试选项已关闭');
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
-    );
+    _tapReset?.cancel();
+    _tapReset = null;
+    unawaited(openStillAlive(context, widget.state));
+  }
+
+  @override
+  void dispose() {
+    _tapReset?.cancel();
+    super.dispose();
   }
 
   @override
@@ -979,11 +999,20 @@ class _VersionSecretTileState extends State<_VersionSecretTile> {
           fit: BoxFit.cover,
         ),
       ),
-      trailing: Text(
-        BuildInfo.displayVersion,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          color: apple.secondaryLabel,
-          fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+      trailing: TextButton(
+        key: const ValueKey('still-alive-version'),
+        onPressed: _tap,
+        style: TextButton.styleFrom(
+          foregroundColor: apple.secondaryLabel,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          minimumSize: const Size(36, 36),
+        ),
+        child: Text(
+          BuildInfo.displayVersion,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: apple.secondaryLabel,
+            fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+          ),
         ),
       ),
     );

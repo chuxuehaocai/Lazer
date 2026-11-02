@@ -573,7 +573,12 @@ class LegacyPlaylistHeader extends StatelessWidget {
     final double coverSize = compact ? 168 : 190;
     final Widget stillCover =
         cover ??
-        LegacyCover(url: playlist.coverUrl, size: coverSize, radius: 14);
+        LegacyCover(
+          url: playlist.coverUrl,
+          size: coverSize,
+          radius: 14,
+          fadeIn: true,
+        );
     final Widget artwork = CoverTransitionTarget(
       identity: transitionIdentity ?? 'playlist:${playlist.id}',
       size: coverSize,

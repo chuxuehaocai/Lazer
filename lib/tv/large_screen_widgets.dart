@@ -23,6 +23,7 @@ import '../widgets/copyable_song_title.dart';
 import '../widgets/cover_transition.dart';
 import '../utils/artwork.dart';
 import '../widgets/artwork_image.dart';
+import '../widgets/artwork_reveal.dart';
 import '../widgets/interaction_feedback.dart';
 import '../legacy/legacy_widgets.dart';
 
@@ -206,6 +207,7 @@ class LargeScreenArtwork extends StatelessWidget {
     this.circular = false,
     this.icon = Icons.music_note_rounded,
     this.iconScale = .22,
+    this.fadeIn = false,
   });
 
   final String? url;
@@ -219,6 +221,7 @@ class LargeScreenArtwork extends StatelessWidget {
   final bool circular;
   final IconData icon;
   final double iconScale;
+  final bool fadeIn;
 
   @override
   Widget build(BuildContext context) {
@@ -257,7 +260,17 @@ class LargeScreenArtwork extends StatelessWidget {
                   Widget child,
                   int? frame,
                   bool wasSynchronouslyLoaded,
-                ) => wasSynchronouslyLoaded || frame != null ? child : fallback,
+                ) => fadeIn
+                ? ArtworkReveal(
+                    key: ValueKey(resolved),
+                    ready: frame != null,
+                    synchronous: wasSynchronouslyLoaded,
+                    placeholder: fallback,
+                    child: child,
+                  )
+                : wasSynchronouslyLoaded || frame != null
+                ? child
+                : fallback,
             errorBuilder:
                 (BuildContext context, Object error, StackTrace? stack) =>
                     fallback,

@@ -1,14 +1,70 @@
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../animation/view_transitions.dart';
+import 'cover_morph_surface.dart';
+
+class _CoverSnapshot {
+  _CoverSnapshot(this.image) {
+    _liveSnapshots++;
+  }
+  final ui.Image image;
+  int _references = 1;
+  _CoverSnapshot retain() {
+    assert(_references > 0);
+    _references++;
+    return this;
+  }
+
+  void release() {
+    assert(_references > 0);
+    if (--_references == 0) {
+      image.dispose();
+      _liveSnapshots--;
+    }
+  }
+}
+
+int _liveSnapshots = 0;
+@visibleForTesting
+int get debugCoverSnapshotCount => _liveSnapshots;
+
+class _CoverCaptureBoundary extends RepaintBoundary {
+  const _CoverCaptureBoundary({super.key, required super.child});
+  @override
+  _RenderCoverCaptureBoundary createRenderObject(BuildContext context) =>
+      _RenderCoverCaptureBoundary();
+}
+
+class _RenderCoverCaptureBoundary extends RenderRepaintBoundary {
+  ui.Image? captureLastPaint(double pixelRatio) {
+    final painted = layer;
+    if (painted is! OffsetLayer || !hasSize || size.isEmpty) return null;
+    // A tap can mark the card dirty before navigation. Capture its last
+    // visible layer, rather than requiring an extra paint before opening.
+    return painted.toImageSync(Offset.zero & size, pixelRatio: pixelRatio);
+  }
+}
 
 class _CoverOrigin {
-  const _CoverOrigin(this.identity, this.rect, this.sourceKey, this.recordedAt);
+  const _CoverOrigin(
+    this.identity,
+    this.rect,
+    this.sourceKey,
+    this.recordedAt,
+    this.snapshot,
+    this.radius,
+  );
   final String identity;
   final Rect rect;
   final GlobalKey sourceKey;
   final DateTime recordedAt;
+  final _CoverSnapshot? snapshot;
+  final double radius;
 }
 
 _CoverOrigin? _pendingCover;
@@ -18,11 +74,13 @@ final Map<String, Set<GlobalKey>> _sourceKeys = <String, Set<GlobalKey>>{};
 final Set<GlobalKey> _hiddenSources = <GlobalKey>{};
 final Map<GlobalKey, ValueNotifier<bool>> _sourceVisibility =
     <GlobalKey, ValueNotifier<bool>>{};
+final Map<GlobalKey, _CoverTransitionSourceState> _sourceStates = {};
 final Map<GlobalKey, bool> _pendingVisibility = <GlobalKey, bool>{};
 bool _visibilityScheduled = false;
 OverlayEntry? _returnFlight;
 GlobalKey? _returnSource;
 int _returnGeneration = 0;
+_CoverSnapshot? _returnSnapshot;
 
 void _hideSource(GlobalKey key, bool hidden) {
   _pendingVisibility[key] = hidden;
@@ -56,15 +114,23 @@ class CoverTransitionSource extends StatefulWidget {
     required GlobalKey super.key,
     required this.child,
     this.identity,
+    this.morphArtwork = false,
+    this.radius = 14,
   });
   final Widget child;
   final String? identity;
+
+  /// Composite home cards dissolve their original pixels into the detail
+  /// artwork instead of replacing a mosaic/logo at the first flight frame.
+  final bool morphArtwork;
+  final double radius;
 
   @override
   State<CoverTransitionSource> createState() => _CoverTransitionSourceState();
 }
 
 class _CoverTransitionSourceState extends State<CoverTransitionSource> {
+  final GlobalKey _capture = GlobalKey();
   late final ValueNotifier<bool> _hidden = ValueNotifier<bool>(
     _hiddenSources.contains(widget.key),
   );
@@ -85,6 +151,7 @@ class _CoverTransitionSourceState extends State<CoverTransitionSource> {
   void initState() {
     super.initState();
     _sourceVisibility[widget.key! as GlobalKey] = _hidden;
+    _sourceStates[widget.key! as GlobalKey] = this;
     _register();
   }
 
@@ -100,17 +167,44 @@ class _CoverTransitionSourceState extends State<CoverTransitionSource> {
   @override
   void dispose() {
     _unregister(widget);
+    if (_pendingCover?.sourceKey == widget.key) {
+      _pendingCover?.snapshot?.release();
+      _pendingCover = null;
+    }
     _sourceVisibility.remove(widget.key);
+    _sourceStates.remove(widget.key);
     _hiddenSources.remove(widget.key);
     _pendingVisibility.remove(widget.key);
     _hidden.dispose();
     super.dispose();
   }
 
+  _CoverSnapshot? _snapshot() {
+    if (!widget.morphArtwork) return null;
+    final boundary = _capture.currentContext?.findRenderObject();
+    if (boundary is! _RenderCoverCaptureBoundary ||
+        !boundary.hasSize ||
+        boundary.size.isEmpty) {
+      return null;
+    }
+    // Record only the already painted card, without readback or rebuilding its
+    // mosaic. Limit its texture to 1024 px so this cannot become a page capture.
+    final ratio = math.min(
+      math.min(MediaQuery.devicePixelRatioOf(context), 2.0),
+      1024 / boundary.size.longestSide,
+    );
+    try {
+      final image = boundary.captureLastPaint(ratio);
+      return image == null ? null : _CoverSnapshot(image);
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: _hidden,
-    child: RepaintBoundary(child: widget.child),
+    child: _CoverCaptureBoundary(key: _capture, child: widget.child),
     builder: (context, hidden, child) =>
         Opacity(opacity: hidden ? 0 : 1, child: child),
   );
@@ -140,6 +234,8 @@ void _removeReturnFlight() {
   _returnFlight?.remove();
   _returnFlight?.dispose();
   _returnFlight = null;
+  _returnSnapshot?.release();
+  _returnSnapshot = null;
   final source = _returnSource;
   _returnSource = null;
   if (source != null) _hideSource(source, false);
@@ -147,6 +243,7 @@ void _removeReturnFlight() {
 
 /// Cancels visual work when the shell changes account, section, or closes.
 void cancelCoverTransitions() {
+  _pendingCover?.snapshot?.release();
   _pendingCover = null;
   _removeReturnFlight();
   for (final target in _targets.values.toList()) {
@@ -168,6 +265,9 @@ void rememberCoverTransition(String identity, GlobalKey coverKey) {
   final box = coverKey.currentContext?.findRenderObject();
   if (box is! RenderBox || !box.hasSize || box.size.isEmpty) return;
   cancelCoverTransitions();
+  final reduced =
+      MediaQuery.maybeOf(coverKey.currentContext!)?.disableAnimations ?? false;
+  final source = _sourceStates[coverKey];
   _pendingCover = _CoverOrigin(
     identity,
     Rect.fromPoints(
@@ -176,9 +276,10 @@ void rememberCoverTransition(String identity, GlobalKey coverKey) {
     ),
     coverKey,
     DateTime.now(),
+    reduced ? null : source?._snapshot(),
+    source?.widget.radius ?? 14,
   );
-  if (!(MediaQuery.maybeOf(coverKey.currentContext!)?.disableAnimations ??
-      false)) {
+  if (!reduced) {
     _hideSource(coverKey, true);
   }
   // A quick reopen can reactivate the same detail slot before its fade-out
@@ -217,6 +318,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
   int _generation = 0;
   _CoverOrigin? _origin;
   Rect? _flightRect;
+  double _flightBlend = 1;
   bool _returning = false;
 
   void _restartPendingFlight() => setState(_beginPendingFlight);
@@ -237,8 +339,8 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
       }
       _targets[widget.identity] = this;
       if (_origin != null) _hideSource(_origin!.sourceKey, false);
-      _origin = null;
       _removeFlight();
+      _forgetOrigin();
       _flying = false;
       _beginPendingFlight();
     }
@@ -250,12 +352,15 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     if (origin == null || origin.identity != widget.identity) return;
     _returning = false;
     _pendingCover = null;
+    _forgetOrigin();
     _origin = origin;
     if (DateTime.now().difference(origin.recordedAt).inMilliseconds > 1200) {
       _hideSource(origin.sourceKey, false);
+      _forgetOrigin();
       return;
     }
     _flying = true;
+    _flightBlend = 0;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_flying || generation != _generation) return;
       final overlay = Overlay.maybeOf(context, rootOverlay: true);
@@ -303,11 +408,16 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
             start: start,
             destination: destinationRect,
             edge: widget.size,
+            snapshot: origin.snapshot,
+            sourceRadius: origin.radius,
+            targetRadius: widget.radius,
             onRect: (rect) => _flightRect = rect,
+            onBlend: (blend) => _flightBlend = blend,
             onComplete: () {
               if (!mounted || generation != _generation) return;
               _removeFlight();
               _flightRect = null;
+              _flightBlend = 1;
               _hideSource(origin.sourceKey, false);
               setState(() => _flying = false);
             },
@@ -325,10 +435,16 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     _flight = null;
   }
 
+  void _forgetOrigin() {
+    _origin?.snapshot?.release();
+    _origin = null;
+  }
+
   void _cancelFlight() {
     _generation++;
     _removeFlight();
     _flightRect = null;
+    _flightBlend = 1;
     if (_origin != null) _hideSource(_origin!.sourceKey, false);
     if (mounted && _flying) setState(() => _flying = false);
   }
@@ -355,15 +471,22 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     final start =
         _flightRect ??
         Rect.fromPoints(
-          overlayBox.globalToLocal(target.localToGlobal(Offset.zero)),
           overlayBox.globalToLocal(
-            target.localToGlobal(target.size.bottomRight(Offset.zero)),
+            _flying ? origin.rect.topLeft : target.localToGlobal(Offset.zero),
+          ),
+          overlayBox.globalToLocal(
+            _flying
+                ? origin.rect.bottomRight
+                : target.localToGlobal(target.size.bottomRight(Offset.zero)),
           ),
         );
     _generation++;
     _removeFlight();
     _flightRect = null;
     _removeReturnFlight();
+    _returnSnapshot = origin.snapshot?.retain();
+    final snapshot = _returnSnapshot;
+    final fromBlend = _flightBlend;
     _hideSource(sourceKey, true);
     _returnSource = sourceKey;
     _returning = true;
@@ -422,6 +545,11 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
             start: start,
             destination: destination,
             edge: edge,
+            snapshot: snapshot,
+            sourceRadius: origin.radius,
+            targetRadius: widget.radius,
+            fromBlend: fromBlend,
+            toBlend: 0,
             onComplete: () {
               if (generation != _returnGeneration) return;
               _removeReturnFlight();
@@ -442,6 +570,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     _generation++;
     _removeFlight();
     if (!_returning && _origin != null) _hideSource(_origin!.sourceKey, false);
+    _forgetOrigin();
     if (_targets[widget.identity] == this) _targets.remove(widget.identity);
     super.dispose();
   }
@@ -464,6 +593,12 @@ class _CoverFlight extends StatefulWidget {
     required this.onComplete,
     required this.child,
     this.onRect,
+    this.snapshot,
+    this.sourceRadius = 14,
+    this.targetRadius = 14,
+    this.fromBlend = 0,
+    this.toBlend = 1,
+    this.onBlend,
   });
 
   final Rect start;
@@ -472,6 +607,10 @@ class _CoverFlight extends StatefulWidget {
   final VoidCallback onComplete;
   final Widget child;
   final ValueChanged<Rect>? onRect;
+  final _CoverSnapshot? snapshot;
+  final double sourceRadius, targetRadius;
+  final double fromBlend, toBlend;
+  final ValueChanged<double>? onBlend;
 
   @override
   State<_CoverFlight> createState() => _CoverFlightState();
@@ -479,6 +618,7 @@ class _CoverFlight extends StatefulWidget {
 
 class _CoverFlightState extends State<_CoverFlight>
     with SingleTickerProviderStateMixin {
+  _CoverSnapshot? _snapshot;
   late final AnimationController _controller =
       AnimationController(
         vsync: this,
@@ -490,12 +630,27 @@ class _CoverFlightState extends State<_CoverFlight>
   @override
   void initState() {
     super.initState();
+    // OverlayEntry.remove may defer unmounting until the next frame. Keep
+    // pixels alive until this flight actually detaches, even if its page or
+    // the global return slot has already released their own references.
+    _snapshot = widget.snapshot?.retain();
     _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(_CoverFlight oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.snapshot != widget.snapshot) {
+      final previous = _snapshot;
+      _snapshot = widget.snapshot?.retain();
+      previous?.release();
+    }
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _snapshot?.release();
     super.dispose();
   }
 
@@ -510,8 +665,29 @@ class _CoverFlightState extends State<_CoverFlight>
           destination: widget.destination,
           edge: widget.edge,
           onRect: widget.onRect,
+          fromBlend: widget.fromBlend,
+          toBlend: widget.toBlend,
+          onBlend: widget.onBlend,
         ),
-        children: [widget.child],
+        children: [
+          if (_snapshot case final snapshot?)
+            CoverMorphSurface(
+              animation: _controller,
+              source: snapshot.image,
+              frameRect: () => Rect.lerp(
+                widget.start,
+                widget.destination() ?? widget.start,
+                ViewMotion.curve.transform(_controller.value),
+              )!,
+              fromBlend: widget.fromBlend,
+              toBlend: widget.toBlend,
+              sourceRadius: widget.sourceRadius,
+              targetRadius: widget.targetRadius,
+              child: widget.child,
+            )
+          else
+            widget.child,
+        ],
       ),
     ),
   );
@@ -524,6 +700,9 @@ class _CoverFlightDelegate extends FlowDelegate {
     required this.destination,
     required this.edge,
     this.onRect,
+    this.fromBlend = 0,
+    this.toBlend = 1,
+    this.onBlend,
   }) : super(repaint: animation);
 
   final Animation<double> animation;
@@ -531,6 +710,8 @@ class _CoverFlightDelegate extends FlowDelegate {
   final Rect? Function() destination;
   final double edge;
   final ValueChanged<Rect>? onRect;
+  final double fromBlend, toBlend;
+  final ValueChanged<double>? onBlend;
 
   @override
   BoxConstraints getConstraintsForChild(int i, BoxConstraints constraints) =>
@@ -541,6 +722,10 @@ class _CoverFlightDelegate extends FlowDelegate {
     final progress = ViewMotion.curve.transform(animation.value);
     final rect = Rect.lerp(start, destination() ?? start, progress)!;
     onRect?.call(rect);
+    onBlend?.call(
+      fromBlend +
+          (toBlend - fromBlend) * Curves.easeInOut.transform(animation.value),
+    );
     final transform = Matrix4.diagonal3Values(
       rect.width / edge,
       rect.height / edge,
@@ -554,5 +739,7 @@ class _CoverFlightDelegate extends FlowDelegate {
       oldDelegate.animation != animation ||
       oldDelegate.start != start ||
       oldDelegate.destination != destination ||
+      oldDelegate.fromBlend != fromBlend ||
+      oldDelegate.toBlend != toBlend ||
       oldDelegate.edge != edge;
 }

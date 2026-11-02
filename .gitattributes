@@ -2,3 +2,6 @@
 *.sh text eol=lf
 ci/linux/AppRun text eol=lf
 *.yml text eol=lf
+# Preserve the supplied reference's exact bytes, including personnel spacing.
+assets/easter_eggs/still_alive/source.py -text -whitespace
+assets/easter_eggs/still_alive/SOURCE_README.md -text -whitespace

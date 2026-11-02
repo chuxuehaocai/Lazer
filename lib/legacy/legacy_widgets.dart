@@ -9,6 +9,7 @@ import '../widgets/interaction_feedback.dart';
 import '../utils/artwork.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/artwork_image.dart';
+import '../widgets/artwork_reveal.dart';
 import '../widgets/copyable_song_title.dart';
 import '../widgets/cover_transition.dart';
 
@@ -43,12 +44,14 @@ class LegacyCover extends StatelessWidget {
     this.size,
     this.radius = 8,
     this.iconSize = 20,
+    this.fadeIn = false,
   });
 
   final String? url;
   final double? size;
   final double radius;
   final double iconSize;
+  final bool fadeIn;
 
   @override
   Widget build(BuildContext context) {
@@ -81,6 +84,15 @@ class LegacyCover extends StatelessWidget {
             image: ArtworkImage(resolved),
             fit: BoxFit.cover,
             gaplessPlayback: true,
+            frameBuilder: !fadeIn
+                ? null
+                : (context, child, frame, synchronous) => ArtworkReveal(
+                    key: ValueKey(resolved),
+                    ready: frame != null,
+                    synchronous: synchronous,
+                    placeholder: fallback,
+                    child: child,
+                  ),
             errorBuilder:
                 (BuildContext context, Object? error, StackTrace? _) =>
                     fallback,

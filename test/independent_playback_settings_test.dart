@@ -143,6 +143,9 @@ void main() {
 
       final label = find.text('独立播放');
       await tester.scrollUntilVisible(label, 200);
+      // The lazily built heading can be above the row after alignment.
+      // Bring it into view before comparing the group's positions.
+      await tester.scrollUntilVisible(find.text('播放'), -100);
       await tester.pumpAndSettle();
       _expectPlaybackGroup(tester);
       final row = find.ancestor(of: label, matching: find.byType(Row)).first;

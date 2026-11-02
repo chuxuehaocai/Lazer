@@ -1,5 +1,5 @@
 // i18n:data
-// The device list is the whole point of the hidden debug panel; audio_session
+// The device list is the whole point of the debug panel; audio_session
 // still marks its device-type enum as experimental.
 // ignore_for_file: experimental_member_use
 
@@ -7,7 +7,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 
 /// A snapshot of the platform's audio endpoints and session attributes for
-/// the hidden debug panel.
+/// the debug panel.
 ///
 /// `audio_session` only enumerates devices on Android and iOS. On desktop and
 /// web the call still succeeds but returns an empty set, which the panel turns

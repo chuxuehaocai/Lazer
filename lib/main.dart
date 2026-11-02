@@ -82,6 +82,11 @@ Future<void> main() async {
           ['Lyric animation'],
           await rootBundle.loadString('licenses/lyric_animation/AGPL-3.0.txt'),
         );
+        yield LicenseEntryWithLineBreaks(
+          ['Still Alive terminal credits'],
+          'Adapted from LHF (BD4SUP), September 2021.\n\n'
+          '${await rootBundle.loadString('assets/easter_eggs/still_alive/GPL-3.0.txt')}',
+        );
         yield const LicenseEntryWithLineBreaks(
           ['MiSans'],
           'This application uses MiSans by Xiaomi.\n'

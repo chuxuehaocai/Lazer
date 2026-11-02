@@ -313,6 +313,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
             // the top shelf actionable also gives the page a focus anchor.
             child: HomeActionShelf(
               serverLibrary: _state.isNavidrome,
+              dailyOpensPlaylist: _state.signedIn,
               busy: _startingStation,
               covers: covers,
               large: true,
@@ -1048,6 +1049,7 @@ class LargeScreenCollectionHeader extends StatelessWidget {
         radius: 20,
         icon: icon,
         iconScale: .18,
+        fadeIn: true,
       ),
     );
     final Widget info = Column(

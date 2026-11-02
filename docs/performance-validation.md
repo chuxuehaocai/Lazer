@@ -113,6 +113,24 @@ Rapid next/previous changes start from that visible composition. Reduced motion
 replaces the artwork immediately. Player artwork/lyrics and compact metadata
 use the same decelerating curve as cover flights, with whole-element opacity.
 
+Composite home cards (daily recommendations and charts) capture their last
+painted mosaic, logo and caption once before navigation. Their 420 ms flight
+now blends those pixels into the detail artwork, and reverses that blend on
+return. Rectangle-to-square motion crops both images proportionally and eases
+the corner radius; it does not stretch the cover. Interrupted returns preserve
+both current geometry and current colour composition.
+
+Only these composite cards capture an image. Its longest edge is bounded to
+1024 pixels at no more than 2× logical resolution. The detail's retained origin
+keeps that texture available for returning; pending, page and flight references
+release it when no longer needed, including deferred overlay removal. Animating
+the blend only repaints and never rebuilds or lays out the cover again. The
+pixel regressions in `test/home_cover_morph_test.dart` check the first/middle/
+last frames, image proportions, interrupted journeys, DPI and resource cleanup.
+Detail artwork that arrives after the flight uses a separate 200 ms reveal
+over its placeholder. Synchronously cached images and reduced motion show
+immediately; browse thumbnails keep their existing rendering path.
+
 Route returns ease from their current visible position, including when Back
 interrupts an entrance. The player controller now represents the displayed
 position itself, and timed simulations apply easing once. Releasing a 10% or

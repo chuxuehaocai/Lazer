@@ -298,6 +298,7 @@ class HomeActionShelf extends StatelessWidget {
     this.onReplay,
     this.large = false,
     this.serverLibrary = false,
+    this.dailyOpensPlaylist = true,
   });
 
   final bool busy;
@@ -310,6 +311,9 @@ class HomeActionShelf extends StatelessWidget {
   /// Ten-foot layout: four larger cards across the browse width.
   final bool large;
   final bool serverLibrary;
+
+  /// Guests on TV open sign-in instead of navigating to a collection.
+  final bool dailyOpensPlaylist;
 
   @override
   Widget build(BuildContext context) {
@@ -365,9 +369,11 @@ class HomeActionShelf extends StatelessWidget {
             final coverKey = GlobalKey();
             return CoverTransitionSource(
               key: coverKey,
-              identity: index == 0
+              identity: index == 0 && dailyOpensPlaylist
                   ? 'playlist:$dailyRecommendationsPlaylistId'
                   : null,
+              morphArtwork: index == 0,
+              radius: large ? 18 : 16,
               child: FilledCoverCard(
                 width: cardWidth,
                 height: tileHeight,
@@ -384,7 +390,7 @@ class HomeActionShelf extends StatelessWidget {
                 onTap: busy || item.tap == null
                     ? null
                     : () {
-                        if (index == 0) {
+                        if (index == 0 && dailyOpensPlaylist) {
                           rememberCoverTransition(
                             'playlist:$dailyRecommendationsPlaylistId',
                             coverKey,
@@ -964,101 +970,106 @@ class ChartShelf extends StatelessWidget {
             child: CoverTransitionSource(
               key: coverKey,
               identity: 'chart:${chart.id}',
-              child: Stack(
-                fit: StackFit.expand,
-                children: <Widget>[
-                  Transform.scale(
-                    scale: 1.32,
-                    child: _MovingCoverMosaic(
-                      covers: chart.entries
-                          .map(chartEntryCover)
-                          .toList(growable: false),
-                      angle: -.11,
-                      reverse: true,
-                      rows: 4,
-                      tile: 82,
-                      diagonal: -.55,
-                    ),
-                  ),
-                  ColoredBox(color: Colors.black.withValues(alpha: .68)),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: <Color>[Color(0x12000000), Color(0xF2000000)],
-                        stops: <double>[.22, 1],
+              morphArtwork: true,
+              radius: 18,
+              child: ColoredBox(
+                color: Colors.black,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    Transform.scale(
+                      scale: 1.32,
+                      child: _MovingCoverMosaic(
+                        covers: chart.entries
+                            .map(chartEntryCover)
+                            .toList(growable: false),
+                        angle: -.11,
+                        reverse: true,
+                        rows: 4,
+                        tile: 82,
+                        diagonal: -.55,
                       ),
                     ),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      large ? 22 : 18,
-                      large ? 22 : 18,
-                      large ? 22 : 18,
-                      large ? 20 : 16,
+                    ColoredBox(color: Colors.black.withValues(alpha: .68)),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: <Color>[Color(0x12000000), Color(0xF2000000)],
+                          stops: <double>[.22, 1],
+                        ),
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        ChartLogo(chart: chart, large: large),
-                        const Spacer(),
-                        Text(
-                          chart.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(
-                                fontSize: large ? 27 : null,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -.6,
-                              ),
-                        ),
-                        TrText(
-                          chart.issueLabel,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                fontSize: large ? 16 : null,
-                                color: Colors.white70,
-                              ),
-                        ),
-                        SizedBox(height: large ? 12 : 9),
-                        for (final entry in chart.entries.take(3))
-                          Padding(
-                            padding: EdgeInsets.only(top: large ? 7 : 5),
-                            child: Row(
-                              children: <Widget>[
-                                SizedBox(
-                                  width: large ? 32 : 24,
-                                  child: Text(
-                                    '${entry.rank}',
-                                    style: TextStyle(
-                                      fontSize: large ? 17 : null,
-                                      color: Colors.white60,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        large ? 22 : 18,
+                        large ? 22 : 18,
+                        large ? 22 : 18,
+                        large ? 20 : 16,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          ChartLogo(chart: chart, large: large),
+                          const Spacer(),
+                          Text(
+                            chart.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(
+                                  fontSize: large ? 27 : null,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -.6,
                                 ),
-                                Expanded(
-                                  child: Text(
-                                    entry.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: large ? 17 : null,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
                           ),
-                      ],
+                          TrText(
+                            chart.issueLabel,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  fontSize: large ? 16 : null,
+                                  color: Colors.white70,
+                                ),
+                          ),
+                          SizedBox(height: large ? 12 : 9),
+                          for (final entry in chart.entries.take(3))
+                            Padding(
+                              padding: EdgeInsets.only(top: large ? 7 : 5),
+                              child: Row(
+                                children: <Widget>[
+                                  SizedBox(
+                                    width: large ? 32 : 24,
+                                    child: Text(
+                                      '${entry.rank}',
+                                      style: TextStyle(
+                                        fontSize: large ? 17 : null,
+                                        color: Colors.white60,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      entry.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: large ? 17 : null,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

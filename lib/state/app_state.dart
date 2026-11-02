@@ -857,23 +857,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool lyricBlurEnabled = true;
   bool showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
 
-  /// Hidden developer switches. They stay out of the settings list until the
-  /// version card in 关于 is tapped repeatedly, so ordinary users never see
-  /// the frame overlay or the audio-device dump.
-  bool debugOptionsEnabled = false;
-
-  Future<void> setDebugOptionsEnabled(bool value) async {
-    if (debugOptionsEnabled == value) return;
-    debugOptionsEnabled = value;
-    // The switch that turns the overlay back off disappears with the debug
-    // section, so never leave it running behind closed doors.
-    if (!value) showFrameStats = false;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('lazer_debug_options', value);
-    if (!value) await prefs.setBool('lazer_show_frame_stats', false);
-  }
-
   double lyricFontSize = 22;
   int lyricFontWeight = 600;
   FontPreferences fontPreferences = const FontPreferences();
@@ -1503,11 +1486,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricBlurEnabled = prefs.getBool('lazer_lyric_blur') ?? true;
       showFrameStats =
           prefs.getBool('lazer_show_frame_stats') ?? showFrameStats;
-      debugOptionsEnabled = prefs.getBool('lazer_debug_options') ?? false;
-      // A build without the hidden switch must not boot with the overlay on.
-      if (!debugOptionsEnabled) {
-        showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
-      }
       lyricFontSize = (prefs.getDouble('lazer_lyric_font_size') ?? 22).clamp(
         14,
         40,
