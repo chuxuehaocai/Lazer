@@ -250,6 +250,10 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   /// One key per card, so the lift can measure the box it has to settle into.
   final Map<String, GlobalKey> _boxes = <String, GlobalKey>{};
 
+  /// Slot numbers belonging to the most recent layout. Multiple pointer
+  /// reports can arrive before the preview has had another frame to lay out.
+  Map<String, int> _laidOutSlots = <String, int>{};
+
   /// The card in the listener's hand, if any.
   String? _dragging;
 
@@ -311,7 +315,6 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   /// is exactly what a desktop drag does when it starts — so only the hold may
   /// act on those callbacks.
   bool _heldByLongPress = false;
-  String? _lastHoveredSlot;
 
   @override
   void initState() {
@@ -368,7 +371,10 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
     // The key sits on the slide wrapper itself, and a render object never
     // counts its own transform in `localToGlobal`: this is the slot, exactly
     // where hit tests and landings need it, even mid-slide.
-    return object.localToGlobal(Offset.zero) & object.size;
+    return Rect.fromPoints(
+      object.localToGlobal(Offset.zero),
+      object.localToGlobal(object.size.bottomRight(Offset.zero)),
+    );
   }
 
   /// How far [id] is still behind its slot while the grid slides over.
@@ -458,16 +464,15 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
     }
   }
 
-  /// The card under [globalPosition].
-  ///
-  /// While the pointer is moving the card in the air is skipped: it cannot be
-  /// dropped onto itself. When the listener lets go it counts again, so
-  /// releasing over the slot the preview already claimed keeps that slot.
-  String? _cardAt(Offset globalPosition, {bool includeDragged = false}) {
+  /// The logical slot under [globalPosition]. The lifted placeholder counts
+  /// too: staying over that slot leaves the preview still.
+  /// Reflow transforms do not change the slot being pointed at.
+  int? _slotAt(Offset globalPosition) {
     for (final String id in _boxes.keys) {
-      if (!includeDragged && id == _dragging) continue;
+      final int? slot = _laidOutSlots[id];
+      if (slot == null) continue;
       final Rect? rect = _boxOf(id);
-      if (rect != null && rect.contains(globalPosition)) return id;
+      if (rect != null && rect.contains(globalPosition)) return slot;
     }
     return null;
   }
@@ -550,10 +555,11 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
     );
     _settle.value = 0;
     _lift.forward(from: 0);
+    final overlay = Overlay.of(context, rootOverlay: true);
     _proxy = OverlayEntry(
-      builder: (BuildContext context) => _flightLayer(playlist),
+      builder: (BuildContext context) => _flightLayer(playlist, overlay),
     );
-    Overlay.of(context, rootOverlay: true).insert(_proxy!);
+    overlay.insert(_proxy!);
   }
 
   void _updateDrag(Offset globalPosition) {
@@ -566,15 +572,15 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
       flight.width,
       flight.height,
     );
-    final String? over = _cardAt(globalPosition);
-    if (over == null) return;
     final List<String> base = _preview ?? _committed;
-    // Repeated hits on a moving slot must not restart its easing curve.
-    if (over == _lastHoveredSlot) return;
-    _lastHoveredSlot = over;
-    final List<String> moved = <String>[...base]..remove(dragging);
-    final int at = moved.indexOf(over);
-    if (at < 0) return;
+    final int? at = _slotAt(globalPosition);
+    if (at == null || at >= base.length) return;
+    // Claim the pointed slot before removing the lifted card. Looking up the
+    // neighbour afterwards shifts forward moves back by one, forcing the
+    // pointer onto the next card to reach the intended position.
+    final int from = base.indexOf(dragging);
+    if (from < 0 || from == at) return;
+    final List<String> moved = <String>[...base]..removeAt(from);
     moved.insert(at, dragging);
     if (listEquals(moved, base)) return;
     // The grid moves the moment the pointer does: the card the listener is
@@ -596,8 +602,7 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
     final List<String>? preview = _preview;
     // Released over a card: commit that order. Released over empty grid space
     // (or outside the grid): the preview is dropped and the card goes home.
-    if (preview != null &&
-        _cardAt(globalPosition, includeDragged: true) != null) {
+    if (preview != null && _slotAt(globalPosition) != null) {
       // The preview already is the order on screen; the catalogue catches up
       // on the next rebuild, so nothing moves here.
       widget.onReorder?.call(preview);
@@ -660,7 +665,6 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   }
 
   void _finishDrag() {
-    _lastHoveredSlot = null;
     _heldByLongPress = false;
     _proxy?.remove();
     _proxy = null;
@@ -686,30 +690,36 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   /// The card itself is built once and handed in as the builder's child: the
   /// overlay only rewrites a matrix and an opacity per frame, never the cover
   /// or the label.
-  Widget _flightLayer(Playlist playlist) => AnimatedBuilder(
-    animation: Listenable.merge(<Listenable>[_flight, _lift, _settle]),
-    builder: (BuildContext context, Widget? child) {
-      final Rect? rect = _flight.value;
-      if (rect == null) return const SizedBox.shrink();
-      final double lift = _lift.value;
-      final double settle = _settle.value;
-      // Picking the card up grows it a hair on a spring; putting it down
-      // shrinks that growth away as it travels.
-      final double scale = settle > 0
-          ? 1.02 - .02 * Curves.easeOutCubic.transform(settle)
-          : 1 + .025 * Curves.easeOutCubic.transform(lift);
-      return Positioned.fromRect(
-        rect: rect,
-        child: IgnorePointer(
-          child: Opacity(
-            opacity: 1,
-            child: Transform.scale(scale: scale, child: child),
-          ),
-        ),
+  Widget _flightLayer(Playlist playlist, OverlayState overlay) =>
+      AnimatedBuilder(
+        animation: Listenable.merge(<Listenable>[_flight, _lift, _settle]),
+        builder: (BuildContext context, Widget? child) {
+          final Rect? rect = _flight.value;
+          if (rect == null) return const SizedBox.shrink();
+          final overlayBox = overlay.context.findRenderObject()! as RenderBox;
+          final localRect = Rect.fromPoints(
+            overlayBox.globalToLocal(rect.topLeft),
+            overlayBox.globalToLocal(rect.bottomRight),
+          );
+          final double lift = _lift.value;
+          final double settle = _settle.value;
+          // Picking the card up grows it a hair on a spring; putting it down
+          // shrinks that growth away as it travels.
+          final double scale = settle > 0
+              ? 1.02 - .02 * Curves.easeOutCubic.transform(settle)
+              : 1 + .025 * Curves.easeOutCubic.transform(lift);
+          return Positioned.fromRect(
+            rect: localRect,
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: 1,
+                child: Transform.scale(scale: scale, child: child),
+              ),
+            ),
+          );
+        },
+        child: _PlaylistDragStill(playlist: playlist, side: widget.cell),
       );
-    },
-    child: _PlaylistDragStill(playlist: playlist, side: widget.cell),
-  );
 
   Widget _cell(Playlist playlist) {
     final GlobalKey box = _boxes.putIfAbsent(playlist.id, () => GlobalKey());
@@ -779,6 +789,9 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   @override
   Widget build(BuildContext context) {
     final List<Playlist> shown = _shown;
+    _laidOutSlots = <String, int>{
+      for (int i = 0; i < shown.length; i++) shown[i].id: i,
+    };
     final int columns = widget.columns;
     final int count = (shown.length + columns - 1) ~/ columns;
     return SliverList.builder(

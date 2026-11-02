@@ -10,6 +10,7 @@ import 'package:lazer_nextgen/legacy/legacy_pages.dart';
 import 'package:lazer_nextgen/legacy/legacy_theme.dart';
 import 'package:lazer_nextgen/legacy/legacy_widgets.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/widgets/ui_scaling.dart';
 
 const GatewayUserProfile _profile = GatewayUserProfile(
   userId: 7,
@@ -74,26 +75,43 @@ Future<AppState> _signedIn(WidgetTester tester) async {
   return state;
 }
 
-Widget _library(AppState state, {ValueChanged<Playlist>? onOpen}) =>
-    MaterialApp(
-      theme: buildLegacyTheme(brightness: Brightness.dark),
-      home: Scaffold(
-        body: AnimatedBuilder(
-          animation: state,
-          builder: (BuildContext context, _) => LegacyLibraryPage(
-            state: state,
-            onOpenPlaylist: onOpen ?? (Playlist playlist) {},
-            onOpenLocalMusic: () {},
-          ),
-        ),
+Widget _library(
+  AppState state, {
+  ValueChanged<Playlist>? onOpen,
+  bool scaled = false,
+}) => MaterialApp(
+  theme: buildLegacyTheme(brightness: Brightness.dark),
+  builder: scaled
+      ? (context, child) => UiScaling(state: state, child: child!)
+      : null,
+  home: Scaffold(
+    body: AnimatedBuilder(
+      animation: state,
+      builder: (BuildContext context, _) => LegacyLibraryPage(
+        state: state,
+        onOpenPlaylist: onOpen ?? (Playlist playlist) {},
+        onOpenLocalMusic: () {},
       ),
-    );
+    ),
+  ),
+);
+
+Rect _screenRect(WidgetTester tester, Finder finder) {
+  final box = tester.renderObject<RenderBox>(finder);
+  return Rect.fromPoints(
+    box.localToGlobal(Offset.zero),
+    box.localToGlobal(box.size.bottomRight(Offset.zero)),
+  );
+}
 
 /// Runs the frames the release animation needs, however the first frame lands.
 Future<void> _settle(WidgetTester tester) async {
   for (var i = 0; i < 40; i++) {
     await tester.pump(const Duration(milliseconds: 16));
-    if (find.byKey(const ValueKey('playlist-drag-preview')).evaluate().isEmpty) {
+    if (find
+        .byKey(const ValueKey('playlist-drag-preview'))
+        .evaluate()
+        .isEmpty) {
       return;
     }
   }
@@ -353,7 +371,8 @@ void main() {
       reason: 'an abandoned drop must not rearrange the library',
     );
     expect(
-      tester.widget<LegacyPlaylistCard>(find.byType(LegacyPlaylistCard).at(0))
+      tester
+          .widget<LegacyPlaylistCard>(find.byType(LegacyPlaylistCard).at(0))
           .playlist
           .id,
       home,
@@ -361,9 +380,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the arrangement is written to the preferences', (
-    tester,
-  ) async {
+  testWidgets('the arrangement is written to the preferences', (tester) async {
     final AppState state = await _signedIn(tester);
     await state.setPlaylistOrder(<String>['5', '1', '3']);
     await state.setPlaylistColumns(4);
@@ -371,6 +388,183 @@ void main() {
     expect(prefs.getString('lazer_playlist_order'), '5\n1\n3');
     expect(prefs.getInt('lazer_playlist_columns'), 4);
   });
+
+  for (final kind in [PointerDeviceKind.mouse, PointerDeviceKind.touch]) {
+    for (final (from, to) in [(0, 1), (1, 0), (0, 2), (2, 0), (0, 4)]) {
+      testWidgets('${kind.name} drop claims the pointed slot $from → $to', (
+        tester,
+      ) async {
+        final state = await _signedIn(tester);
+        tester.view.physicalSize = const Size(390, 1400);
+        await state.setPlaylistColumns(2);
+        await tester.pumpWidget(_library(state));
+        await tester.pumpAndSettle();
+        final cards = find.byType(LegacyPlaylistCard);
+        final original = [
+          for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+            card.playlist.id,
+        ];
+        final expected = [...original];
+        final dragged = expected.removeAt(from);
+        expected.insert(to, dragged);
+        final target = tester.getCenter(cards.at(to));
+        final gesture = await tester.startGesture(
+          tester.getTopLeft(cards.at(from)) + const Offset(12, 12),
+          kind: kind,
+        );
+        if (kind == PointerDeviceKind.touch) {
+          await tester.pump(
+            kLongPressTimeout + const Duration(milliseconds: 60),
+          );
+        }
+        await gesture.moveTo(target);
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(
+          [
+            for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+              card.playlist.id,
+          ],
+          expected,
+          reason:
+              'the pointer claims that slot, including forward and last slots',
+        );
+        expect(state.playlistOrder, isEmpty);
+        await gesture.up();
+        await tester.pump();
+        await _settle(tester);
+        expect(state.playlistOrder, expected);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  testWidgets('moving back across a card follows slots during an active slide', (
+    tester,
+  ) async {
+    final state = await _signedIn(tester);
+    tester.view.physicalSize = const Size(390, 1400);
+    await state.setPlaylistColumns(2);
+    await tester.pumpWidget(_library(state));
+    await tester.pumpAndSettle();
+    final cards = find.byType(LegacyPlaylistCard);
+    final original = [
+      for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+        card.playlist.id,
+    ];
+    final slots = [
+      for (var i = 0; i < original.length; i++) tester.getCenter(cards.at(i)),
+    ];
+    final gesture = await tester.startGesture(
+      slots.first,
+      kind: PointerDeviceKind.mouse,
+    );
+    var expected = [...original];
+    for (final index in [1, 0, 3, 2, 4, 0]) {
+      await gesture.moveTo(slots[index]);
+      await tester.pump(const Duration(milliseconds: 16));
+      expected.remove(original.first);
+      expected.insert(index, original.first);
+      expect(
+        [
+          for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+            card.playlist.id,
+        ],
+        expected,
+        reason: 'returning across a shifted card must hit its new slot',
+      );
+      // Tiny pointer moves within the claimed placeholder must not move it again.
+      await gesture.moveTo(slots[index] + const Offset(1, 1));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect([
+        for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+          card.playlist.id,
+      ], expected);
+    }
+    await gesture.up();
+    await tester.pump();
+    await _settle(tester);
+    expect(state.playlistOrder, expected);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final scale in [.8, 1.25]) {
+    testWidgets('scaled library points and lands at the same slot at $scale', (
+      tester,
+    ) async {
+      final state = await _signedIn(tester);
+      tester.view.physicalSize = const Size(390, 1400);
+      state.autoDpiScale = false;
+      state.dpiScale = scale;
+      await state.setPlaylistColumns(2);
+      await tester.pumpWidget(_library(state, scaled: true));
+      await tester.pumpAndSettle();
+      final cards = find.byType(LegacyPlaylistCard);
+      final source = _screenRect(tester, cards.at(0));
+      final destination = _screenRect(tester, cards.at(1));
+      final grab = source.topLeft + const Offset(12, 12);
+      final point = Offset(
+        scale < 1 ? destination.left + 3 : destination.right - 3,
+        destination.top + 12,
+      );
+      final gesture = await tester.startGesture(
+        grab,
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveTo(point);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(
+        tester.widget<LegacyPlaylistCard>(cards.at(1)).playlist.id,
+        '1',
+        reason: 'the entire visible card is the target, even beside its edges',
+      );
+      final preview = find.byKey(const ValueKey('playlist-drag-preview'));
+      final flight = _screenRect(tester, preview);
+      final expectedCenter = source.center + point - grab;
+      expect(flight.center.dx, closeTo(expectedCenter.dx, .01));
+      expect(flight.center.dy, closeTo(expectedCenter.dy, .01));
+      await gesture.up();
+      await tester.pump();
+      await _settle(tester);
+      expect(state.playlistOrder, ['2', '1', '3', '4', '5']);
+      final landed = _screenRect(tester, cards.at(1));
+      expect(landed.topLeft.dx, closeTo(destination.left, .01));
+      expect(landed.topLeft.dy, closeTo(destination.top, .01));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'multiple pointer reports before a frame still select the last slot',
+    (tester) async {
+      final state = await _signedIn(tester);
+      tester.view.physicalSize = const Size(390, 1400);
+      await state.setPlaylistColumns(2);
+      await tester.pumpWidget(_library(state));
+      await tester.pumpAndSettle();
+      final cards = find.byType(LegacyPlaylistCard);
+      final slots = [for (var i = 0; i < 5; i++) tester.getCenter(cards.at(i))];
+      final gesture = await tester.startGesture(
+        slots.first,
+        kind: PointerDeviceKind.mouse,
+      );
+      for (final index in [3, 2]) {
+        await gesture.moveTo(slots[index]);
+      }
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(
+        [
+          for (final card in tester.widgetList<LegacyPlaylistCard>(cards))
+            card.playlist.id,
+        ],
+        ['2', '3', '1', '4', '5'],
+      );
+      await gesture.up();
+      await tester.pump();
+      await _settle(tester);
+      expect(state.playlistOrder, ['2', '3', '1', '4', '5']);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('a card that is not in the saved order keeps its place last', (
     tester,
