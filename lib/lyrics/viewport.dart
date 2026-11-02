@@ -78,6 +78,7 @@ class _LyricViewportState extends State<LyricViewport>
   ClampingScrollSimulation? _coast;
   double _coastTime = 0;
   Duration _lastFrame = Duration.zero;
+  Duration _paintPosition = Duration.zero;
   Duration? _lastLanePosition;
   Duration? _lastMedia;
   int _lastWall = 0;
@@ -144,11 +145,11 @@ class _LyricViewportState extends State<LyricViewport>
     _updateBlur();
   }
 
-  void _followLine() {
+  void _followLine(Duration position) {
     if (!mounted || !identical(_lines, widget.state.lyrics) || _lines.isEmpty) {
       return;
     }
-    final active = _activeAt(widget.state.precisePosition);
+    final active = _activeAt(position);
     if (active == _active) return;
     setState(() {
       _active = active;
@@ -189,7 +190,8 @@ class _LyricViewportState extends State<LyricViewport>
 
   void _onLane() {
     if (!mounted) return;
-    final active = _activeAt(widget.state.precisePosition);
+    _paintPosition = widget.state.precisePosition;
+    final active = _activeAt(_paintPosition);
     final seeking = _isSeek();
     final changed = !identical(_lines, widget.state.lyrics);
     final typographyChanged =
@@ -240,7 +242,7 @@ class _LyricViewportState extends State<LyricViewport>
     }
     // Only a paused seek changes the word mask without a running ticker. A
     // playback tick (10 Hz) must not repaint every mounted row.
-    final Duration precise = widget.state.precisePosition;
+    final Duration precise = _paintPosition;
     if (_hasWordTimings &&
         !widget.state.playing &&
         precise != _lastLanePosition) {
@@ -303,7 +305,11 @@ class _LyricViewportState extends State<LyricViewport>
     // thread had headroom.
     final dt = ((elapsed - _lastFrame).inMicroseconds / 1e6).clamp(0.0, 0.1);
     _lastFrame = elapsed;
-    if (widget.state.playing) _followLine();
+    // Native audio reads its snapshot over FFI. Sample the playhead once for
+    // this frame so focus detection and every exiting/active word row agree,
+    // rather than fetching another native snapshot from each painter.
+    _paintPosition = widget.state.precisePosition;
+    if (widget.state.playing) _followLine(_paintPosition);
     if (_manual && !_dragging && _velocity.abs() > 5 && dt > 0) {
       final previous = _offset;
       if (ScrollMotion.isNative(
@@ -490,7 +496,8 @@ class _LyricViewportState extends State<LyricViewport>
     _typography = typography;
     _lines = widget.state.lyrics;
     _hasWordTimings = _lines.any((line) => line.words.isNotEmpty);
-    _active = _activeAt(widget.state.precisePosition);
+    _paintPosition = widget.state.precisePosition;
+    _active = _activeAt(_paintPosition);
     if (needsMeasure) {
       _heights = _measureHeights(scaler);
       var sum = 0.0;
@@ -773,7 +780,7 @@ class _LyricViewportState extends State<LyricViewport>
                       style: style,
                       active: focused,
                       emphasis: emphasis,
-                      position: () => widget.state.precisePosition,
+                      position: () => _paintPosition,
                       repaint: rowFrames,
                     )
                   : Text(

@@ -18,6 +18,7 @@ import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/tv/large_screen_chrome.dart';
 import 'package:lazer_nextgen/tv/large_screen_pages.dart';
 import 'package:lazer_nextgen/tv/tv_mode.dart';
+import 'package:lazer_nextgen/widgets/ui_scaling.dart';
 
 const Track _track = Track(
   id: 'large-screen-track',
@@ -131,17 +132,23 @@ class _Catalog extends Catalog {
   }) async => chart;
 }
 
-Widget _largeScreenApp(AppState state) => TvScope(
-  active: true,
-  child: MaterialApp(
-    theme: buildLegacyTheme(brightness: Brightness.dark),
-    builder: (BuildContext context, Widget? child) => MediaQuery(
-      data: MediaQuery.of(context).copyWith(disableAnimations: true),
-      child: child!,
-    ),
-    home: LegacyShell(state: state),
-  ),
-);
+Widget _largeScreenApp(AppState state, {bool scaleInterface = false}) =>
+    TvScope(
+      active: true,
+      child: MaterialApp(
+        theme: buildLegacyTheme(brightness: Brightness.dark),
+        builder: (BuildContext context, Widget? child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(disableAnimations: true),
+          child: scaleInterface
+              ? UiScaling(
+                  state: state,
+                  child: CarMetrics(child: child!),
+                )
+              : child!,
+        ),
+        home: LegacyShell(state: state),
+      ),
+    );
 
 LargeScreenActions _noopActions() => LargeScreenActions(
   onOpenPlaylist: (Playlist playlist) {},
@@ -497,18 +504,66 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('the large-screen pages fit a 1280×720 panel', (
-      WidgetTester tester,
-    ) async {
-      tester.view.physicalSize = const Size(1280, 720);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      final AppState state = AppState(catalog: _Catalog());
-      addTearDown(state.dispose);
-      await tester.pumpWidget(_largeScreenApp(state));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-    });
+    testWidgets(
+      'the roomier large-screen default fits 1280×720 pages and remote navigation',
+      (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(1280, 720);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final AppState state = AppState(catalog: _Catalog())
+          ..surface = AppSurface.tv;
+        addTearDown(state.dispose);
+        await tester.pumpWidget(_largeScreenApp(state, scaleInterface: true));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        final navigation = tester.getRect(find.byType(LargeScreenNavBar));
+        expect(navigation.left, greaterThanOrEqualTo(0));
+        expect(navigation.right, lessThanOrEqualTo(1280));
+        final transport = tester.getRect(find.byType(LargeScreenTransport));
+        expect(transport.bottom, lessThanOrEqualTo(720));
+        expect(transport.height, closeTo(88 * .84, .1));
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.select);
+        await tester.pumpAndSettle();
+        expect(find.byType(LargeScreenCollectionPage), findsOneWidget);
+        expect(find.text('播放全部'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(
+          find.byKey(const ValueKey('large-screen-tab-library')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(LargeScreenLibraryPage), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(
+          find.byKey(const ValueKey('large-screen-tab-settings')),
+        );
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byType(TvFocusHighlight),
+            matching: find.byType(TvFocusOutline),
+          ),
+          findsWidgets,
+        );
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(find.byKey(const ValueKey('large-screen-search')));
+        await tester.pumpAndSettle();
+        expect(find.byType(SearchBar), findsOneWidget);
+        await tester.enterText(find.byType(TextField).first, '夜航');
+        await tester.testTextInput.receiveAction(TextInputAction.search);
+        await tester.pumpAndSettle();
+        expect(find.text('测试歌手'), findsWidgets);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('the library and collection reflow at a phone-width window', (
       WidgetTester tester,

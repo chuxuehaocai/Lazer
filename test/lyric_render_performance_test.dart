@@ -64,6 +64,123 @@ void main() {
   });
 
   testWidgets(
+    'highlighted ordinary words share one paragraph while still floating',
+    (tester) async {
+      final repaint = ValueNotifier(0);
+      addTearDown(repaint.dispose);
+      var position = const Duration(milliseconds: 600);
+      const text = 'ordinary floating words';
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: SizedBox(
+              width: 120,
+              child: TimedLyricText(
+                line: const LyricLine(
+                  Duration.zero,
+                  text,
+                  words: [
+                    LyricWord(Duration.zero, Duration(milliseconds: 180), text),
+                  ],
+                ),
+                style: const TextStyle(fontSize: 22, color: Colors.white),
+                active: true,
+                position: () => position,
+                repaint: repaint,
+              ),
+            ),
+          ),
+        ),
+      );
+      final finder = find.descendant(
+        of: find.byType(TimedLyricText),
+        matching: find.byType(CustomPaint),
+      );
+      final painter = tester.widget<CustomPaint>(finder).painter!;
+      final size = tester.getSize(finder);
+      TestRecordingCanvas record() {
+        final canvas = TestRecordingCanvas();
+        painter.paint(canvas, size);
+        expect(canvas.getSaveCount(), 0);
+        return canvas;
+      }
+
+      final floated = record();
+      expect(
+        floated.invocations.where(
+          (call) => call.invocation.memberName == #drawParagraph,
+        ),
+        hasLength(2),
+        reason: 'one dim paragraph and one shared bright word, including wraps',
+      );
+      expect(
+        floated.invocations.where(
+          (call) => call.invocation.memberName == #saveLayer,
+        ),
+        isEmpty,
+      );
+      final measure = TextPainter(
+        text: const TextSpan(
+          text: text,
+          style: TextStyle(fontSize: 22, color: Colors.white),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 120);
+      final parts = measure.getBoxesForSelection(
+        const TextSelection(baseOffset: 0, extentOffset: text.length),
+      );
+      final lastGlyph = measure
+          .getBoxesForSelection(
+            const TextSelection(
+              baseOffset: text.length - 1,
+              extentOffset: text.length,
+            ),
+          )
+          .single;
+      final width = parts.fold<double>(
+        0,
+        (sum, part) => sum + part.right - part.left,
+      );
+      final consumed = parts
+          .take(parts.length - 1)
+          .fold<double>(0, (sum, part) => sum + part.right - part.left);
+      final completeUs =
+          ((lastGlyph.right +
+                      (lastGlyph.bottom - lastGlyph.top) / 4 -
+                      parts.last.left +
+                      consumed) *
+                  180000 /
+                  width)
+              .ceil();
+      measure.dispose();
+      position = Duration(microseconds: completeUs - 1);
+      expect(
+        record().invocations.where(
+          (call) => call.invocation.memberName == #saveLayer,
+        ),
+        isNotEmpty,
+        reason: 'the final soft mask edge remains until it clears the glyph',
+      );
+      position = Duration(microseconds: completeUs);
+      expect(
+        record().invocations.where(
+          (call) => call.invocation.memberName == #drawParagraph,
+        ),
+        hasLength(2),
+      );
+      position = const Duration(milliseconds: 90);
+      expect(
+        record().invocations.where(
+          (call) => call.invocation.memberName == #saveLayer,
+        ),
+        isNotEmpty,
+        reason: 'rewinding restores the per-glyph mask at its soft boundary',
+      );
+    },
+  );
+
+  testWidgets(
     'settled focus skips opacity layers and survives backwards seeks',
     (tester) async {
       final repaint = ValueNotifier(0);
@@ -195,6 +312,9 @@ void main() {
       'layout_16_rows_median_ms': layouts[layouts.length ~/ 2] / 1000,
       'paint_300_frames_median_ms': paints[paints.length ~/ 2] / 1000,
       'active_row_save_layers': layers,
+      'active_row_paragraphs': canvas.invocations
+          .where((call) => call.invocation.memberName == #drawParagraph)
+          .length,
     };
     // Timings are observational; regression gates assert work, not host speed.
     // ignore: avoid_print

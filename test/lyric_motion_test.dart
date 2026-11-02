@@ -56,6 +56,15 @@ class _Catalog extends Catalog {
 }
 
 class _WordPlaybackState extends AppState {
+  int precisePositionReads = 0;
+  Duration playhead = const Duration(seconds: 1);
+  bool isPlaying = true;
+
+  void reportPosition(Duration value) {
+    playhead = value;
+    notifyListeners();
+  }
+
   _WordPlaybackState() {
     lyrics = const [
       LyricLine(
@@ -70,9 +79,12 @@ class _WordPlaybackState extends AppState {
   @override
   Track? get current => _track;
   @override
-  bool get playing => true;
+  bool get playing => isPlaying;
   @override
-  Duration get precisePosition => const Duration(seconds: 1);
+  Duration get precisePosition {
+    precisePositionReads++;
+    return playhead;
+  }
 }
 
 void main() {
@@ -261,6 +273,52 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
   testWidgets(
+    'word paint sample refreshes on paused seeks without a running ticker',
+    (tester) async {
+      final state = _WordPlaybackState()
+        ..isPlaying = false
+        ..playhead = const Duration(milliseconds: 90)
+        ..lyrics = const [
+          LyricLine(
+            Duration.zero,
+            'ordinary',
+            words: [
+              LyricWord(Duration.zero, Duration(milliseconds: 180), 'ordinary'),
+            ],
+          ),
+        ];
+      addTearDown(state.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: LyricViewport(state: state)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final finder = find.descendant(
+        of: find.byType(TimedLyricText),
+        matching: find.byType(CustomPaint),
+      );
+      int maskLayers() {
+        final painter = tester.widget<CustomPaint>(finder).painter!;
+        final canvas = TestRecordingCanvas();
+        painter.paint(canvas, tester.getSize(finder));
+        return canvas.invocations
+            .where((call) => call.invocation.memberName == #saveLayer)
+            .length;
+      }
+
+      expect(maskLayers(), greaterThan(0));
+      state.reportPosition(const Duration(milliseconds: 600));
+      await tester.pump();
+      expect(maskLayers(), 0);
+      state.reportPosition(const Duration(milliseconds: 90));
+      await tester.pump();
+      expect(maskLayers(), greaterThan(0));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'settled word animation repaints without rebuilding the position stack',
     (tester) async {
       final state = _WordPlaybackState();
@@ -292,9 +350,16 @@ void main() {
         }
       };
       addTearDown(() => debugOnRebuildDirtyWidget = null);
+      final previousPositionReads = state.precisePositionReads;
       for (var i = 0; i < 10; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
+      expect(
+        state.precisePositionReads - previousPositionReads,
+        10,
+        reason:
+            'the word painter and focus line share one playhead read per frame',
+      );
       expect(stackBuilds, 0);
       expect(
         wordColorBuilds,

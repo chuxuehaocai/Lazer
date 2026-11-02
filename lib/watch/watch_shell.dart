@@ -7,15 +7,17 @@ import '../data/models.dart';
 import '../local/local_music_import.dart';
 import '../local/local_music_page.dart' show runLocalImport;
 import '../state/app_state.dart';
-import '../widgets/plate_art.dart';
 import '../widgets/accessible_controls.dart';
+import '../widgets/plate_art.dart';
+import 'watch_shape_list.dart';
 
-/// A compact touch surface for regular Android watches, square or round.
-/// All playback, downloads and accounts use the existing Android application.
+/// A dedicated, low-motion surface for ordinary Android watches.
+/// Playback, accounts and storage continue to use the normal Android APIs.
 class WatchShell extends StatefulWidget {
   const WatchShell({super.key, required this.state, required this.round});
   final AppState state;
   final bool round;
+
   @override
   State<WatchShell> createState() => _WatchShellState();
 }
@@ -51,9 +53,44 @@ class _WatchShellState extends State<WatchShell> {
     super.dispose();
   }
 
+  void _navigate(int tab) => setState(() {
+    _request++;
+    _loading = false;
+    _tab = tab;
+    _openedTracks = null;
+    _error = null;
+  });
+
+  void _back() {
+    if (_openedTracks != null) {
+      setState(() {
+        _request++;
+        _loading = false;
+        _openedTracks = null;
+      });
+    } else {
+      _navigate(0);
+    }
+  }
+
+  void _openTracks(
+    String title,
+    List<Track> tracks, {
+    bool fromRequest = false,
+  }) => setState(() {
+    if (!fromRequest) {
+      _request++;
+      _loading = false;
+      _error = null;
+    }
+    _openedTracks = tracks;
+    _title = title;
+  });
+
   Future<void> _search(String query) async {
-    final request = ++_request;
     if (query.trim().isEmpty) return;
+    final request = ++_request;
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _loading = true;
       _error = null;
@@ -61,10 +98,7 @@ class _WatchShellState extends State<WatchShell> {
     try {
       final result = await state.search(query.trim());
       if (!mounted || request != _request) return;
-      setState(() {
-        _openedTracks = result.tracks;
-        _title = '搜索结果';
-      });
+      _openTracks('搜索结果', result.tracks, fromRequest: true);
     } catch (_) {
       if (mounted && request == _request) setState(() => _error = '搜索失败，请重试');
     } finally {
@@ -81,10 +115,7 @@ class _WatchShellState extends State<WatchShell> {
     try {
       final tracks = await state.catalog.playlistTracks(playlist.id);
       if (!mounted || request != _request) return;
-      setState(() {
-        _openedTracks = tracks;
-        _title = playlist.name;
-      });
+      _openTracks(playlist.name, tracks, fromRequest: true);
     } catch (_) {
       if (mounted && request == _request) setState(() => _error = '歌单加载失败，请重试');
     } finally {
@@ -94,12 +125,13 @@ class _WatchShellState extends State<WatchShell> {
 
   Future<void> _sendCode() async {
     if (_loading || _smsSeconds > 0) return;
+    final request = ++_request;
     setState(() {
       _loading = true;
       _accountMessage = null;
     });
     final result = await state.sendSmsCode(_phone.text.trim());
-    if (!mounted) return;
+    if (!mounted || request != _request) return;
     setState(() {
       _loading = false;
       _accountMessage = result.ok ? '验证码已发送' : result.error;
@@ -116,6 +148,7 @@ class _WatchShellState extends State<WatchShell> {
 
   Future<void> _signIn() async {
     if (_loading) return;
+    final request = ++_request;
     setState(() {
       _loading = true;
       _accountMessage = null;
@@ -124,7 +157,7 @@ class _WatchShellState extends State<WatchShell> {
       _phone.text.trim(),
       _captcha.text.trim(),
     );
-    if (!mounted) return;
+    if (!mounted || request != _request) return;
     setState(() {
       _loading = false;
       _accountMessage = result.ok ? '登录成功' : result.error;
@@ -138,104 +171,22 @@ class _WatchShellState extends State<WatchShell> {
     builder: (context, _) => PopScope(
       canPop: _openedTracks == null && _tab == 0,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) {
-          setState(() {
-            _request++;
-            _loading = false;
-            _openedTracks = null;
-            _tab = 0;
-          });
-        }
+        if (!didPop) _back();
       },
       child: Scaffold(
-        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: false,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         body: SafeArea(
           child: LayoutBuilder(
-            builder: (context, constraints) {
-              final edge = widget.round ? constraints.maxWidth * .15 : 10.0;
-              final vertical = widget.round ? constraints.maxHeight * .15 : 8.0;
-              return ListView(
-                key: ValueKey(
-                  'watch-$_tab-${_openedTracks == null ? 'root' : _title}',
-                ),
-                padding: EdgeInsets.fromLTRB(
-                  edge,
-                  vertical,
-                  edge,
-                  vertical + 12,
-                ),
-                children: [
-                  if (_openedTracks != null)
-                    TextButton.icon(
-                      onPressed: () => setState(() => _openedTracks = null),
-                      icon: const Icon(Icons.arrow_back, size: 18),
-                      label: const Text('返回'),
-                    ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      for (final (index, icon, label) in const [
-                        (0, Icons.play_circle_outline, '播放'),
-                        (1, Icons.library_music_outlined, '音乐'),
-                        (2, Icons.search, '搜索'),
-                        (3, Icons.settings_outlined, '设置'),
-                      ])
-                        Expanded(
-                          child: IconButton(
-                            tooltip: label,
-                            isSelected: _tab == index,
-                            iconSize: 21,
-                            constraints: const BoxConstraints.tightFor(
-                              width: 32,
-                              height: 36,
-                            ),
-                            padding: EdgeInsets.zero,
-                            icon: Icon(icon),
-                            onPressed: () => setState(() {
-                              _request++;
-                              _loading = false;
-                              _tab = index;
-                              _openedTracks = null;
-                              _error = null;
-                            }),
-                          ),
-                        ),
-                    ],
-                  ),
-                  if (_loading)
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(12),
-                        child: CircularProgressIndicator(),
-                      ),
-                    ),
-                  if (_error != null)
-                    Text(_error!, textAlign: TextAlign.center),
-                  if (_openedTracks != null) ...[
-                    Text(_title, textAlign: TextAlign.center),
-                    ..._songs(_openedTracks!),
-                  ] else if (_tab == 0)
-                    ..._player(constraints.maxWidth - edge * 2)
-                  else if (_tab == 1)
-                    ..._library()
-                  else if (_tab == 2) ...[
-                    TextField(
-                      controller: _query,
-                      onSubmitted: _search,
-                      textInputAction: TextInputAction.search,
-                      decoration: const InputDecoration(
-                        hintText: '歌曲 / 歌手',
-                        isDense: true,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => _search(_query.text),
-                      child: const Text('搜索'),
-                    ),
-                  ] else
-                    ..._settings(),
-                ],
-              );
+            builder: (context, box) {
+              final size = Size(box.maxWidth, box.maxHeight);
+              final content = _content(size);
+              return widget.round
+                  ? ClipOval(
+                      key: const ValueKey('watch-round-display'),
+                      child: content,
+                    )
+                  : content;
             },
           ),
         ),
@@ -243,241 +194,785 @@ class _WatchShellState extends State<WatchShell> {
     ),
   );
 
-  List<Widget> _player(double width) {
-    final track = state.current;
-    final side = math.min(width * .32, 64.0);
-    return [
-      if (track != null) ...[
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox.square(
-                dimension: side,
-                child: PlateArt(
-                  seed: track.coverSeed,
-                  coverUrl: track.coverUrl,
-                  size: side,
-                ),
+  Widget _content(Size size) {
+    if (_openedTracks case final tracks?) {
+      final showLyric = _title == '歌词与状态' && state.lyrics.isNotEmpty;
+      return _page(size, _title, tracks.length + (showLyric ? 1 : 0), (
+        context,
+        index,
+      ) {
+        if (showLyric && index == 0) {
+          return ListenableBuilder(
+            listenable: state.ticks,
+            builder: (context, _) =>
+                _message(state.currentLyricLine?.text ?? '音乐正在继续'),
+          );
+        }
+        final trackIndex = index - (showLyric ? 1 : 0);
+        final track = tracks[trackIndex];
+        return _entry(
+          track.title,
+          () {
+            state.playQueue(tracks, startIndex: trackIndex);
+            _navigate(0);
+          },
+          subtitle: track.artist,
+          icon: state.current?.id == track.id
+              ? Icons.equalizer_rounded
+              : Icons.music_note_rounded,
+          selected: state.current?.id == track.id,
+          key: ValueKey('watch-track-${track.id}'),
+        );
+      }, empty: '暂无歌曲');
+    }
+    if (_tab == 1) return _library(size);
+    if (_tab == 2) return _searchPage(size);
+    if (_tab == 3) return _settings(size);
+    if (state.current == null) {
+      return _page(
+        size,
+        'Lazer',
+        2,
+        (context, index) => index == 0
+            ? _entry(
+                '选择音乐',
+                () => _navigate(1),
+                subtitle: '从曲库开始播放',
+                icon: Icons.library_music_rounded,
+              )
+            : _entry(
+                '设置',
+                () => _navigate(3),
+                subtitle: '账号与音量',
+                icon: Icons.tune_rounded,
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    track.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    track.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Expanded(
-              child: IconButton(
-                tooltip: '上一首',
-                onPressed: state.previous,
-                icon: const Icon(Icons.skip_previous),
-              ),
-            ),
-            Expanded(
-              child: IconButton(
-                tooltip: state.playing ? '暂停' : '播放',
-                onPressed: state.togglePlay,
-                icon: Icon(
-                  state.playing
-                      ? Icons.pause_circle_filled
-                      : Icons.play_circle_fill,
-                ),
-              ),
-            ),
-            Expanded(
-              child: IconButton(
-                tooltip: '下一首',
-                onPressed: state.next,
-                icon: const Icon(Icons.skip_next),
-              ),
-            ),
-          ],
-        ),
-        AccessibleSlider(
-          semanticLabel: '播放进度',
-          value: state.progress.clamp(0, 1),
-          onChanged: state.seek,
-        ),
-        if (state.playbackError != null)
-          Text(
-            state.playbackError!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12),
-          ),
-        if (state.lyrics.isNotEmpty)
-          Text(
-            state.lyrics
-                .lastWhere(
-                  (line) => line.time <= state.position,
-                  orElse: () => state.lyrics.first,
-                )
-                .text,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 13),
-          ),
-      ] else
-        const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('选择音乐开始播放', textAlign: TextAlign.center),
-        ),
-      ..._songs(state.queue),
-    ];
+      );
+    }
+    if (MediaQuery.textScalerOf(context).scale(14) > 18) {
+      return _largeTextPlayer(size);
+    }
+    return widget.round ? _roundPlayer(size) : _squarePlayer(size);
   }
 
-  List<Widget> _library() {
+  Widget _page(
+    Size size,
+    String title,
+    int count,
+    IndexedWidgetBuilder builder, {
+    String? empty,
+  }) {
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final top = keyboard > 0
+        ? math.min(
+            widget.round ? 16.0 : 4.0,
+            math.max(0.0, size.height - keyboard),
+          )
+        : (widget.round ? size.height * .31 : 44.0);
+    final headerTop = widget.round ? size.height * .115 : 4.0;
+    final headerWidth = widget.round
+        ? WatchDisplayGeometry(size).widthForBand(headerTop, headerTop + 32)
+        : size.width - 16;
+    final status =
+        _error ??
+        (_title == '歌词与状态' && _openedTracks != null
+            ? state.playbackError
+            : null) ??
+        (_loading ? '正在加载…' : null);
+    final extra = status == null ? 0 : 1;
+    final emptyCount = count == 0 && empty != null ? 1 : 0;
+    return Stack(
+      key: ValueKey(
+        'watch-page-$_tab-${_openedTracks == null ? 'root' : _title}',
+      ),
+      children: [
+        if (keyboard == 0)
+          Positioned(
+            top: headerTop,
+            left: (size.width - headerWidth) / 2,
+            width: headerWidth,
+            height: 32,
+            child: Row(
+              children: [
+                _button('返回', Icons.arrow_back_rounded, _back, side: 32),
+                const SizedBox(width: 3),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Positioned.fill(
+          top: top,
+          bottom: keyboard.clamp(0.0, math.max(0.0, size.height - top)),
+          child: WatchShapeList(
+            key: ValueKey(
+              'watch-list-$_tab-${_openedTracks == null ? 'root' : _title}',
+            ),
+            round: widget.round,
+            displaySize: size,
+            top: top,
+            storageKey:
+                'watch-$_tab-${_openedTracks == null ? 'root' : _title}',
+            itemExtent: math.max(
+              56,
+              MediaQuery.textScalerOf(context).scale(42),
+            ),
+            itemCount: count + extra + emptyCount,
+            itemBuilder: (context, index) {
+              if (index < extra) return _message(status!);
+              if (emptyCount != 0) return _message(empty!);
+              return builder(context, index - extra);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _artwork(Track track, double side) => RepaintBoundary(
+    child: Tooltip(
+      message: '播放队列',
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(widget.round ? side / 2 : 12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _openTracks('播放队列', state.queue),
+          child: Semantics(
+            button: true,
+            label: '播放队列',
+            child: SizedBox.square(
+              dimension: side,
+              child: PlateArt(
+                seed: track.coverSeed,
+                coverUrl: track.coverUrl,
+                size: side,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _roundPlayer(Size size) {
+    final track = state.current!;
+    final edge = math.min(size.width, size.height);
+    final navSide = math.min(40.0, edge * .18);
+    final artSide = edge * .27;
+    Widget at(double x, double y, double side, Widget child) => Positioned(
+      left: x - side / 2,
+      top: y - side / 2,
+      width: side,
+      height: side,
+      child: child,
+    );
+    Widget band(double top, double height, Widget child) {
+      final width = WatchDisplayGeometry(size).widthForBand(top, top + height);
+      return Positioned(
+        left: (size.width - width) / 2,
+        top: top,
+        width: width,
+        height: height,
+        child: child,
+      );
+    }
+
+    return Stack(
+      key: const ValueKey('watch-player'),
+      children: [
+        at(
+          size.width * .25,
+          size.height * .26,
+          navSide,
+          _button(
+            '音乐',
+            Icons.library_music_outlined,
+            () => _navigate(1),
+            side: navSide,
+          ),
+        ),
+        at(
+          size.width * .75,
+          size.height * .26,
+          navSide,
+          _button('设置', Icons.tune_rounded, () => _navigate(3), side: navSide),
+        ),
+        at(
+          size.width / 2,
+          size.height * .24,
+          artSide,
+          _artwork(track, artSide),
+        ),
+        band(
+          size.height * .405,
+          size.height * .12,
+          _trackText(track.title, title: true, centered: true),
+        ),
+        band(
+          size.height * .535,
+          size.height * .085,
+          _trackText(
+            state.playbackError == null ? track.artist : '播放异常 · 点击歌名',
+            centered: true,
+          ),
+        ),
+        band(
+          size.height * .60,
+          size.height * .10,
+          _WatchProgress(state: state, compact: true),
+        ),
+        at(
+          size.width * .28,
+          size.height * .78,
+          edge * .17,
+          _button(
+            '上一首',
+            Icons.skip_previous_rounded,
+            state.previous,
+            side: edge * .17,
+          ),
+        ),
+        at(
+          size.width / 2,
+          size.height * .825,
+          edge * .255,
+          _playButton(edge * .255),
+        ),
+        at(
+          size.width * .72,
+          size.height * .78,
+          edge * .17,
+          _button('下一首', Icons.skip_next_rounded, state.next, side: edge * .17),
+        ),
+      ],
+    );
+  }
+
+  Widget _squarePlayer(Size size) {
+    final track = state.current!;
+    final edge = math.min(size.width, size.height);
+    final artSide = math.min(edge * .32, size.height * .32);
+    final controlSide = math.min(60.0, edge * .27);
+    return Padding(
+      key: const ValueKey('watch-player'),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Stack(
+        children: [
+          Positioned(
+            top: 2,
+            left: 0,
+            right: 0,
+            height: 34,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '正在播放',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: edge < 180 ? 10 : 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                _button(
+                  '音乐',
+                  Icons.library_music_outlined,
+                  () => _navigate(1),
+                  side: 30,
+                ),
+                _button(
+                  '搜索',
+                  Icons.search_rounded,
+                  () => _navigate(2),
+                  side: 30,
+                ),
+                _button('设置', Icons.tune_rounded, () => _navigate(3), side: 30),
+              ],
+            ),
+          ),
+          Positioned(
+            top: size.height * .24,
+            left: 0,
+            right: 0,
+            height: artSide,
+            child: Row(
+              children: [
+                SizedBox.square(
+                  dimension: artSide,
+                  child: _artwork(track, artSide),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _trackText(track.title, title: true, lines: 2),
+                      const SizedBox(height: 3),
+                      _trackText(
+                        state.playbackError == null
+                            ? track.artist
+                            : '播放异常 · 点击歌名',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            top: size.height * .55,
+            left: 0,
+            right: 0,
+            height: 20,
+            child: _WatchProgress(state: state),
+          ),
+          Positioned(
+            bottom: size.height * .035,
+            left: 8,
+            right: 8,
+            height: controlSide,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _button(
+                  '上一首',
+                  Icons.skip_previous_rounded,
+                  state.previous,
+                  side: controlSide * .8,
+                ),
+                _playButton(controlSide),
+                _button(
+                  '下一首',
+                  Icons.skip_next_rounded,
+                  state.next,
+                  side: controlSide * .8,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _largeTextPlayer(Size size) {
+    final track = state.current!;
+    return _page(
+      size,
+      '正在播放',
+      6,
+      (context, index) => switch (index) {
+        0 => Center(child: _artwork(track, 46)),
+        1 => Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _trackText(track.title, title: true),
+            _trackText(track.artist),
+          ],
+        ),
+        2 => Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _button(
+              '上一首',
+              Icons.skip_previous_rounded,
+              state.previous,
+              side: 32,
+            ),
+            _playButton(42),
+            _button('下一首', Icons.skip_next_rounded, state.next, side: 32),
+          ],
+        ),
+        3 => _WatchProgress(state: state),
+        4 => _entry(
+          '音乐',
+          () => _navigate(1),
+          icon: Icons.library_music_outlined,
+        ),
+        _ => _entry('设置', () => _navigate(3), icon: Icons.tune_rounded),
+      },
+    );
+  }
+
+  Widget _playButton(double side) => _button(
+    state.playing ? '暂停' : '播放',
+    state.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+    state.togglePlay,
+    side: side,
+    prominent: true,
+  );
+
+  Widget _trackText(
+    String text, {
+    bool title = false,
+    bool centered = false,
+    int lines = 1,
+  }) {
+    final child = Text(
+      text,
+      maxLines: lines,
+      overflow: TextOverflow.ellipsis,
+      textAlign: centered ? TextAlign.center : TextAlign.start,
+      style: TextStyle(
+        fontSize: title ? 15 : 11,
+        height: 1.15,
+        fontWeight: title ? FontWeight.w700 : FontWeight.w400,
+        color: title ? null : Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+    return !title
+        ? child
+        : Tooltip(
+            message: '歌词与状态',
+            child: Semantics(
+              button: true,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _openTracks('歌词与状态', state.queue),
+                child: child,
+              ),
+            ),
+          );
+  }
+
+  Widget _button(
+    String label,
+    IconData icon,
+    VoidCallback onPressed, {
+    required double side,
+    bool prominent = false,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox.square(
+      dimension: side,
+      child: IconButton(
+        tooltip: label,
+        onPressed: onPressed,
+        padding: EdgeInsets.zero,
+        constraints: BoxConstraints.tightFor(width: side, height: side),
+        style: IconButton.styleFrom(
+          minimumSize: Size.square(side),
+          maximumSize: Size.square(side),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          backgroundColor: prominent
+              ? scheme.primary
+              : scheme.surfaceContainerHighest,
+          foregroundColor: prominent ? scheme.onPrimary : scheme.onSurface,
+          shape: const CircleBorder(),
+        ),
+        iconSize: prominent ? side * .58 : math.min(23, side * .6),
+        icon: Icon(icon),
+      ),
+    );
+  }
+
+  Widget _library(Size size) {
     final local = state.localLibrary.tracks
         .where((entry) => !entry.missing)
         .map((entry) => entry.track)
         .toList();
-    return [
-      _entry(
-        '本地音乐 · ${local.length}',
-        () => setState(() {
-          _openedTracks = local;
-          _title = '本地音乐';
-        }),
-      ),
-      _entry(
-        '最近播放',
-        () => setState(() {
-          _openedTracks = state.recentTracks;
-          _title = '最近播放';
-        }),
-      ),
-      if (state.home case final feed?) ...[
-        _entry(
-          '每日推荐',
-          () => setState(() {
-            _openedTracks = feed.daily;
-            _title = '每日推荐';
-          }),
-        ),
-        for (final playlist in feed.recommended)
-          _entry(playlist.name, () => _openPlaylist(playlist)),
-      ],
-      for (final playlist in [
-        ...state.collections.created,
-        ...state.collections.subscribed,
-      ])
-        _entry(playlist.name, () => _openPlaylist(playlist)),
+    final feed = state.home;
+    final playlists = [
+      if (feed != null) ...feed.recommended,
+      ...state.collections.created,
+      ...state.collections.subscribed,
     ];
+    final basic = <(String, String, IconData, VoidCallback)>[
+      ('搜索音乐', '歌曲 / 歌手', Icons.search_rounded, () => _navigate(2)),
+      (
+        '本地音乐 · ${local.length}',
+        '下载与缓存',
+        Icons.offline_pin_outlined,
+        () => _openTracks('本地音乐', local),
+      ),
+      (
+        '最近播放',
+        '再听一遍',
+        Icons.history_rounded,
+        () => _openTracks('最近播放', state.recentTracks),
+      ),
+      if (feed != null)
+        (
+          '每日推荐',
+          '${feed.daily.length} 首歌曲',
+          Icons.auto_awesome_outlined,
+          () => _openTracks('每日推荐', feed.daily),
+        ),
+    ];
+    return _page(size, '音乐', basic.length + playlists.length, (context, index) {
+      if (index < basic.length) {
+        final (title, subtitle, icon, action) = basic[index];
+        return _entry(title, action, subtitle: subtitle, icon: icon);
+      }
+      final playlist = playlists[index - basic.length];
+      return _entry(
+        playlist.name,
+        () => _openPlaylist(playlist),
+        subtitle: '${playlist.trackCount} 首歌曲',
+        icon: Icons.queue_music_rounded,
+      );
+    });
   }
 
-  List<Widget> _songs(List<Track> tracks) => [
-    if (tracks.isEmpty)
-      const Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('暂无歌曲', textAlign: TextAlign.center),
-      ),
-    for (var i = 0; i < tracks.length; i++)
-      _entry(tracks[i].title, () {
-        state.playQueue(tracks, startIndex: i);
-        setState(() {
-          _openedTracks = null;
-          _tab = 0;
-        });
-      }, subtitle: tracks[i].artist),
-  ];
+  Widget _searchPage(Size size) => _page(
+    size,
+    '搜索',
+    2,
+    (context, index) => index == 0
+        ? _input(
+            _query,
+            hint: '歌曲 / 歌手',
+            action: TextInputAction.search,
+            onSubmitted: _search,
+            key: const ValueKey('watch-search-query'),
+          )
+        : _entry(
+            '搜索',
+            () => _search(_query.text),
+            subtitle: '在音乐库中查找',
+            icon: Icons.search_rounded,
+          ),
+  );
 
-  Widget _entry(String title, VoidCallback onTap, {String? subtitle}) =>
-      ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 2),
-        dense: true,
-        title: Text(
-          title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 13),
+  Widget _settings(Size size) {
+    final rows = <Widget Function()>[
+      if (!state.signedIn) ...[
+        () => _input(
+          _phone,
+          hint: '手机号',
+          type: TextInputType.phone,
+          key: const ValueKey('watch-login-phone'),
         ),
-        subtitle: subtitle == null
-            ? null
-            : Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11),
+        () => _entry(
+          _smsSeconds > 0 ? '$_smsSeconds 秒后重试' : '发送验证码',
+          _sendCode,
+          icon: Icons.sms_outlined,
+          enabled: !_loading && _smsSeconds == 0,
+        ),
+        () => _input(
+          _captcha,
+          hint: '验证码',
+          type: TextInputType.number,
+          action: TextInputAction.done,
+          onSubmitted: (_) => _signIn(),
+          key: const ValueKey('watch-login-captcha'),
+        ),
+        () => _entry(
+          '登录',
+          _signIn,
+          icon: Icons.login_rounded,
+          enabled: !_loading,
+        ),
+      ] else ...[
+        () => _message(state.user.name),
+        () => _entry(
+          '退出登录',
+          () => unawaited(state.signOut()),
+          icon: Icons.logout_rounded,
+        ),
+      ],
+      if (_accountMessage != null) () => _message(_accountMessage!),
+      () => _entry(
+        '导入本地歌曲',
+        () => unawaited(
+          runLocalImport(context, state, const LocalMusicImporter()),
+        ),
+        icon: Icons.download_rounded,
+      ),
+      () => Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('音量', style: TextStyle(fontSize: 11)),
+          SizedBox(
+            height: 28,
+            child: _sliderTheme(
+              AccessibleSlider(
+                semanticLabel: '音量',
+                value: state.volume,
+                onChanged: (value) => unawaited(state.setVolume(value)),
               ),
-        onTap: onTap,
-      );
+            ),
+          ),
+        ],
+      ),
+      () => _entry(
+        state.themeMode == ThemeMode.dark ? '浅色外观' : '深色外观',
+        () => unawaited(
+          state.setThemeMode(
+            state.themeMode == ThemeMode.dark
+                ? ThemeMode.light
+                : ThemeMode.dark,
+          ),
+        ),
+        icon: Icons.contrast_rounded,
+      ),
+      () => _message('手表默认使用静态背景'),
+    ];
+    return _page(
+      size,
+      state.signedIn ? '设置' : '账号与设置',
+      rows.length,
+      (context, index) => rows[index](),
+    );
+  }
 
-  List<Widget> _settings() => [
-    if (!state.signedIn) ...[
-      const Text('账号登录', textAlign: TextAlign.center),
-      TextField(
-        key: const ValueKey('watch-login-phone'),
-        controller: _phone,
-        keyboardType: TextInputType.phone,
-        decoration: const InputDecoration(labelText: '手机号', isDense: true),
-      ),
-      TextButton(
-        onPressed: _loading || _smsSeconds > 0 ? null : _sendCode,
-        child: Text(_smsSeconds > 0 ? '$_smsSeconds 秒后重试' : '发送验证码'),
-      ),
-      TextField(
-        key: const ValueKey('watch-login-captcha'),
-        controller: _captcha,
-        keyboardType: TextInputType.number,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _signIn(),
-        decoration: const InputDecoration(labelText: '验证码', isDense: true),
-      ),
-      TextButton(onPressed: _loading ? null : _signIn, child: const Text('登录')),
-    ] else ...[
-      Text(state.user.name, textAlign: TextAlign.center),
-      TextButton(
-        onPressed: () => unawaited(state.signOut()),
-        child: const Text('退出登录'),
-      ),
-    ],
-    if (_accountMessage != null)
-      Text(_accountMessage!, textAlign: TextAlign.center),
-    _entry(
-      '导入本地歌曲',
-      () =>
-          unawaited(runLocalImport(context, state, const LocalMusicImporter())),
+  Widget _input(
+    TextEditingController controller, {
+    required String hint,
+    TextInputType? type,
+    TextInputAction? action,
+    ValueChanged<String>? onSubmitted,
+    Key? key,
+  }) => TextField(
+    key: key,
+    controller: controller,
+    keyboardType: type,
+    textInputAction: action,
+    onSubmitted: onSubmitted,
+    style: const TextStyle(fontSize: 13),
+    scrollPadding: const EdgeInsets.all(28),
+    decoration: InputDecoration(
+      hintText: hint,
+      labelText: hint,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
     ),
-    const Text('音量', textAlign: TextAlign.center),
-    AccessibleSlider(
-      semanticLabel: '音量',
-      value: state.volume,
-      onChanged: (v) => unawaited(state.setVolume(v)),
+  );
+
+  Widget _message(String text) => Center(
+    child: Text(
+      text,
+      textAlign: TextAlign.center,
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 12),
     ),
-    _entry(
-      state.themeMode == ThemeMode.dark ? '浅色外观' : '深色外观',
-      () => unawaited(
-        state.setThemeMode(
-          state.themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark,
+  );
+
+  Widget _entry(
+    String title,
+    VoidCallback onTap, {
+    String? subtitle,
+    IconData icon = Icons.chevron_right_rounded,
+    bool selected = false,
+    bool enabled = true,
+    Key? key,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      key: key,
+      color: selected ? scheme.primaryContainer : scheme.surfaceContainer,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 19,
+                color: enabled ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (subtitle != null)
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _sliderTheme(Widget child) => SliderTheme(
+    data: SliderTheme.of(context).copyWith(
+      trackHeight: 2,
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
+      overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+      trackShape: const RectangularSliderTrackShape(),
     ),
-    const Text(
-      '手表默认使用静态背景',
-      textAlign: TextAlign.center,
-      style: TextStyle(fontSize: 11),
+    child: child,
+  );
+}
+
+/// Progress alone follows the 10 Hz transport lane. Artwork, navigation and
+/// long libraries never rebuild because the playhead advanced.
+class _WatchProgress extends StatefulWidget {
+  const _WatchProgress({required this.state, this.compact = false});
+  final AppState state;
+  final bool compact;
+
+  @override
+  State<_WatchProgress> createState() => _WatchProgressState();
+}
+
+class _WatchProgressState extends State<_WatchProgress> {
+  double? _scrubbing;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.state.ticks,
+    builder: (context, _) => SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: 2,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 3),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 7),
+        trackShape: const RectangularSliderTrackShape(),
+      ),
+      child: AccessibleSlider(
+        semanticLabel: '播放进度',
+        value: (_scrubbing ?? widget.state.progress).clamp(0, 1),
+        semanticFormatterCallback: (value) {
+          final seconds =
+              ((widget.state.current?.duration.inSeconds ?? 0) * value).round();
+          return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+        },
+        onChangeStart: (value) => setState(() => _scrubbing = value),
+        onChanged: (value) => setState(() => _scrubbing = value),
+        onChangeEnd: (value) {
+          widget.state.seek(value);
+          setState(() => _scrubbing = null);
+        },
+      ),
     ),
-  ];
+  );
 }

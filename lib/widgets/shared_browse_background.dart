@@ -15,7 +15,7 @@ class BrowseBackgroundScope extends InheritedWidget {
 }
 
 /// One persistent canvas below the navigator, shared by every browsing route.
-class SharedBrowseBackground extends StatelessWidget {
+class SharedBrowseBackground extends StatefulWidget {
   const SharedBrowseBackground({
     super.key,
     required this.state,
@@ -27,17 +27,78 @@ class SharedBrowseBackground extends StatelessWidget {
   final Widget child;
 
   @override
+  State<SharedBrowseBackground> createState() => _SharedBrowseBackgroundState();
+}
+
+class _SharedBrowseBackgroundState extends State<SharedBrowseBackground> {
+  late Object _signature;
+  late Listenable _motion;
+
+  Object get _backgroundSignature {
+    final state = widget.state;
+    final track = state.current;
+    return (
+      (track?.id, track?.coverUrl, track?.coverSeed),
+      state.legacyBackground,
+      state.legacyBackgroundImagePath,
+      state.legacyUiAlpha,
+      state.dynamicBackgroundQuality,
+      state.browseBackgroundFps,
+      state.browseBackgroundColor,
+    );
+  }
+
+  Listenable get _motionListenable => Listenable.merge([
+    widget.state.playerPresented,
+    widget.state.browseTransitionActive,
+    widget.navigation.moving,
+    widget.navigation.rootVisible,
+  ]);
+
+  @override
+  void initState() {
+    super.initState();
+    _signature = _backgroundSignature;
+    _motion = _motionListenable;
+    widget.state.addListener(_onStateChanged);
+  }
+
+  void _onStateChanged() {
+    final next = _backgroundSignature;
+    if (_signature == next) return;
+    setState(() => _signature = next);
+  }
+
+  @override
+  void didUpdateWidget(SharedBrowseBackground oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.removeListener(_onStateChanged);
+      widget.state.addListener(_onStateChanged);
+      _signature = _backgroundSignature;
+    }
+    if (oldWidget.state != widget.state ||
+        oldWidget.navigation != widget.navigation) {
+      _motion = _motionListenable;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.state.removeListener(_onStateChanged);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => BrowseBackgroundScope(
     child: AnimatedBuilder(
-      animation: Listenable.merge([
-        state,
-        state.playerPresented,
-        state.browseTransitionActive,
-        navigation.moving,
-        navigation.rootVisible,
-      ]),
-      child: child,
+      // Likes, downloads, volume and account updates do not change these
+      // pixels. Only the background selection and route visibility do.
+      animation: _motion,
+      child: widget.child,
       builder: (context, child) {
+        final state = widget.state;
+        final navigation = widget.navigation;
         final apple = AppleSemanticColors.of(context);
         final painted = state.legacyBackground != LegacyBackgroundMode.off;
         final canvas =

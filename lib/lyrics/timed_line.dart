@@ -98,6 +98,8 @@ class _Word {
     required this.emphasized,
     required this.last,
     required this.segments,
+    required this.ordinaryClip,
+    required this.highlightCompleteMs,
   });
 
   final double startMs;
@@ -105,6 +107,8 @@ class _Word {
   final bool emphasized;
   final bool last;
   final List<_Segment> segments;
+  final Path? ordinaryClip;
+  final double highlightCompleteMs;
 
   /// The emphasized motion includes per-glyph stagger and a trailing float.
   /// Two durations cover both, including the special treatment for the last
@@ -161,6 +165,8 @@ class _WordLayout {
           .map((box) => box.toRect())
           .toList();
       final totalWidth = rects.fold<double>(0, (sum, rect) => sum + rect.width);
+      final ordinaryClip = emphasized ? null : Path();
+      var highlightCompleteMs = 0.0;
       for (var ci = 0; ci < chars.length; ci++) {
         final end = offset + chars[ci].length;
         for (final box in bright.getBoxesForSelection(
@@ -185,6 +191,19 @@ class _WordLayout {
                 break;
               }
               consumed += part.width;
+            }
+            if (ordinaryClip != null) {
+              ordinaryClip.addRect(glyphClip);
+              // The mask has a soft edge extending past the word boundary.
+              // Wait until that edge clears every wrapped glyph before
+              // replacing its per-glyph clips with the shared word clip.
+              final fade = math.max(1.0, rect.height * .5);
+              highlightCompleteMs = math.max(
+                highlightCompleteMs,
+                (rect.right + fade / 2 - wordLeft + consumed) *
+                    math.max(1, durationMs) /
+                    totalWidth,
+              );
             }
             wordSegments.add(
               _Segment(
@@ -211,6 +230,8 @@ class _WordLayout {
           emphasized: emphasized,
           last: wi == line.words.length - 1,
           segments: wordSegments,
+          ordinaryClip: ordinaryClip,
+          highlightCompleteMs: highlightCompleteMs,
         ),
       );
     }
@@ -348,6 +369,17 @@ class _WordPainter extends CustomPainter {
       final ordinary = word.emphasized
           ? null
           : LyricWordMotion.ordinary(elapsed, word.durationMs);
+      if (ordinary != null && elapsed >= word.highlightCompleteMs) {
+        // Once a normal word is highlighted, all of its glyphs share the
+        // same vertical motion. It still floats for up to a second, but no
+        // longer needs to repaint the whole paragraph once per character.
+        canvas.save();
+        canvas.translate(0, ordinary.yEm * layout.fontSize * focus);
+        canvas.clipPath(word.ordinaryClip!);
+        layout.bright.paint(canvas, Offset.zero);
+        canvas.restore();
+        continue;
+      }
       for (final _Segment segment in word.segments) {
         final duration = segment.durationMs;
         final motion = segment.emphasized

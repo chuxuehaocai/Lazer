@@ -7,10 +7,10 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 
+import '../cache/media_cache.dart';
 import '../data/models.dart';
 import '../state/ui_preferences.dart';
 import '../utils/artwork.dart';
-import '../widgets/artwork_image.dart';
 import 'legacy_theme.dart';
 import '../theme/adaptive_contrast.dart';
 
@@ -23,6 +23,7 @@ class AlbumFlowConfiguration {
   const AlbumFlowConfiguration();
   Duration get paletteTransition => const Duration(milliseconds: 650);
   int get paletteCacheEntries => 24;
+  int get paletteImageEdge => 96;
   int get meshCacheEntries => 4;
   int get frameCacheEntries => 8;
 }
@@ -181,6 +182,8 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   bool _reduceMotion = false;
   bool _tickerAllowed = true;
   bool _appActive = true;
+  double? _paintedPaletteFraction;
+  List<Color>? _paintedPalette;
   _FlowPainter? _cachedPainter;
   (int, int, Color, bool, bool)? _painterConfiguration;
 
@@ -275,6 +278,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     if (!_samePalette(next, _to)) {
       _from = _rawPalette();
       _to = next;
+      _paintedPaletteFraction = null;
       if (_reduceMotion ||
           !widget.animated ||
           widget.solid ||
@@ -364,6 +368,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   /// The palette before the per-colour vibrancy treatment, used as the
   /// crossfade origin so the adjustment is never applied twice.
   List<Color> _rawPalette() {
+    if (_palette.value == 1) return _to;
     final double t = _palette.value == 0 && !_palette.isAnimating
         ? 1
         : _fluidEase(_palette.value);
@@ -377,9 +382,22 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   /// per colour instead of once per mesh vertex. The old per-vertex HSL
   /// conversion cost ~550 round trips through HSL every frame; doing it here
   /// leaves the mesh with plain colour lerps and looks the same.
-  List<Color> _currentPalette() => <Color>[
-    for (final Color color in _rawPalette()) _vivid(color),
-  ];
+  List<Color> _currentPalette() {
+    final double fraction = _palette.value;
+    if (_paintedPaletteFraction == fraction && _paintedPalette != null) {
+      return _paintedPalette!;
+    }
+    _paintedPaletteFraction = fraction;
+    assert(() {
+      AlbumFlowRenderer._paletteBuilds++;
+      return true;
+    }());
+    // Mesh motion changes every frame, but the cover colours usually do not.
+    // Retain the exact treated result until the fade or its endpoints change.
+    return _paintedPalette = <Color>[
+      for (final Color color in _rawPalette()) _vivid(color),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -449,10 +467,14 @@ class AlbumFlowRenderer {
   static final Map<(int, int), _AlbumFlowMesh> _meshes = {};
   static final Map<_AlbumFlowFrameKey, ui.Picture> _pictures = {};
   static int _frameBuilds = 0;
+  static int _paletteBuilds = 0;
   static int _consumers = 0;
 
   @visibleForTesting
   int get debugFrameBuilds => _frameBuilds;
+
+  @visibleForTesting
+  int get debugPaletteBuilds => _paletteBuilds;
 
   @visibleForTesting
   List<ui.Picture> get debugCachedFrames => List.unmodifiable(_pictures.values);
@@ -1169,7 +1191,7 @@ Future<AlbumCoverPalette?> _readCoverPalette(List<String> candidates) async {
 }
 
 Future<AlbumCoverPalette?> _readOneCoverPalette(String url) async {
-  final ui.Image? image = await _decode(ArtworkImage(url));
+  final ui.Image? image = await decodeAlbumPaletteImage(url);
   if (image == null) return null;
   try {
     final ByteData? pixels = await image.toByteData(
@@ -1197,28 +1219,49 @@ Future<AlbumCoverPalette?> _readOneCoverPalette(String url) async {
 /// Resize only providers that support NetEase's rendition parameter. Local
 /// covers and authenticated third-party artwork URLs retain their exact URI.
 String? albumPaletteArtworkUrl(String? raw) =>
-    enlargedArtworkUrl(raw, sizePx: 96);
+    enlargedArtworkUrl(raw, sizePx: albumFlowConfiguration.paletteImageEdge);
 
 Future<Color?> albumSeedForCover(String? coverUrl) async =>
     (await albumPaletteForCover(coverUrl))?.seed;
 
-Future<ui.Image?> _decode(ImageProvider provider) {
-  final Completer<ui.Image?> completer = Completer<ui.Image?>();
-  final ImageStream stream = provider.resolve(ImageConfiguration.empty);
-  late final ImageStreamListener listener;
-  listener = ImageStreamListener(
-    (ImageInfo info, bool synchronousCall) {
-      if (!completer.isCompleted) completer.complete(info.image.clone());
-      info.dispose();
-      stream.removeListener(listener);
-    },
-    onError: (Object error, StackTrace? stack) {
-      if (!completer.isCompleted) completer.complete(null);
-      stream.removeListener(listener);
-    },
-  );
-  stream.addListener(listener);
-  return completer.future;
+/// Palette extraction only samples a small colour field. Decode that field
+/// directly, including when a server ignores the rendition or the cover is a
+/// local file. The display artwork keeps its own full-quality provider.
+///
+/// These short-lived pixels do not belong in Flutter's display image cache;
+/// only the five colours and seed survive the extraction. Animated artwork
+/// also stops after its first frame instead of retaining a streaming codec.
+@visibleForTesting
+Future<ui.Image?> decodeAlbumPaletteImage(String url) async {
+  ui.ImmutableBuffer? buffer;
+  ui.ImageDescriptor? descriptor;
+  ui.Codec? codec;
+  try {
+    buffer = await ArtworkCache.shared.buffer(url);
+    try {
+      descriptor = await ui.ImageDescriptor.encoded(buffer);
+      final int edge = albumFlowConfiguration.paletteImageEdge;
+      final double scale = math.min(
+        1,
+        edge / math.max(descriptor.width, descriptor.height),
+      );
+      codec = await descriptor.instantiateCodec(
+        targetWidth: math.max(1, (descriptor.width * scale).round()),
+        targetHeight: math.max(1, (descriptor.height * scale).round()),
+      );
+      return (await codec.getNextFrame()).image;
+    } catch (_) {
+      // A corrupt persisted cover must remain retryable when it is replaced.
+      await ArtworkCache.shared.evict(url);
+      rethrow;
+    }
+  } catch (_) {
+    return null;
+  } finally {
+    codec?.dispose();
+    descriptor?.dispose();
+    buffer?.dispose();
+  }
 }
 
 /// The album-tinted page backdrop: flowing palette derived from the current

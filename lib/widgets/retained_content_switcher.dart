@@ -32,6 +32,7 @@ class _RetainedPage {
   double from = 1;
   double to = 1;
   FocusNode? lastFocus;
+  Widget? parkedView;
   bool get transitioning => from != to;
 }
 
@@ -142,10 +143,23 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
 
   Widget _page(String key, _RetainedPage entry) {
     final current = key == widget.currentKey;
-    final animation = _motion
-        .drive(CurveTween(curve: ViewMotion.curve))
-        .drive(Tween<double>(begin: entry.from, end: entry.to));
-    return Offstage(
+    final parked = !current && !entry.transitioning;
+    // The child page was already retained; retain its inactive wrappers too.
+    // They have no changing inputs while parked. Inherited theme/size changes
+    // still reach their dependent elements, and revealing the page replaces
+    // this view before the transition starts.
+    if (parked && entry.parkedView != null) return entry.parkedView!;
+    entry.parkedView = null;
+    // Offstage and TickerMode stop painting and tickers, but an AnimatedWidget
+    // still follows a controller owned above them. Parked history therefore
+    // needs a stationary animation: otherwise every invisible ancestor rebuilds
+    // its slide and updates its opacity on every subsequent navigation frame.
+    final Animation<double> animation = entry.transitioning
+        ? _motion
+              .drive(CurveTween(curve: ViewMotion.curve))
+              .drive(Tween<double>(begin: entry.from, end: entry.to))
+        : AlwaysStoppedAnimation<double>(entry.to);
+    final view = Offstage(
       key: ValueKey<String>(key),
       offstage: !current && !entry.transitioning,
       child: TickerMode(
@@ -166,7 +180,9 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
                     ),
                   ),
                   child: MotionSnapshot(
-                    animation: _motion,
+                    animation: entry.transitioning
+                        ? _motion
+                        : kAlwaysCompleteAnimation,
                     child: RepaintBoundary(child: entry.page),
                   ),
                 ),
@@ -176,5 +192,7 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
         ),
       ),
     );
+    if (parked) entry.parkedView = view;
+    return view;
   }
 }

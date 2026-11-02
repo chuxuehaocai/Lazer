@@ -123,8 +123,8 @@ class UiMetrics extends InheritedWidget {
 ///
 /// The car profile raises the floor: on a head unit the interface never drops
 /// to desktop density, whether the automatic mode or the slider is in charge.
-/// A television keeps the standard density — its panel is already large — and
-/// only adds the remote input model on top.
+/// Television components use [kLargeScreenComponentScale] as their baseline,
+/// with the same automatic/manual DPI preference applied on top.
 class UiScaling extends StatelessWidget {
   const UiScaling({super.key, required this.state, required this.child});
 
@@ -151,7 +151,7 @@ class UiScaling extends StatelessWidget {
     );
     // TV components were authored for a much larger presentation. Keep a
     // smaller baseline, with the user's DPI preference applied on top.
-    final double renderedScale = scale * (tv ? .7 : 1);
+    final double renderedScale = scale * (tv ? kLargeScreenComponentScale : 1);
     final Widget scaled = renderedScale == kDpiScaleDefault
         ? child
         : _ScaledInterface(scale: renderedScale, child: child);

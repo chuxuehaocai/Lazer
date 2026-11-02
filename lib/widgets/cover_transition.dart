@@ -15,24 +15,39 @@ _CoverOrigin? _pendingCover;
 final Map<String, _CoverTransitionTargetState> _targets =
     <String, _CoverTransitionTargetState>{};
 final Map<String, Set<GlobalKey>> _sourceKeys = <String, Set<GlobalKey>>{};
-final ValueNotifier<Set<GlobalKey>> _hiddenSources =
-    ValueNotifier<Set<GlobalKey>>(<GlobalKey>{});
+final Set<GlobalKey> _hiddenSources = <GlobalKey>{};
+final Map<GlobalKey, ValueNotifier<bool>> _sourceVisibility =
+    <GlobalKey, ValueNotifier<bool>>{};
+final Map<GlobalKey, bool> _pendingVisibility = <GlobalKey, bool>{};
+bool _visibilityScheduled = false;
 OverlayEntry? _returnFlight;
 GlobalKey? _returnSource;
 int _returnGeneration = 0;
 
 void _hideSource(GlobalKey key, bool hidden) {
-  void update() {
-    final next = Set<GlobalKey>.of(_hiddenSources.value);
-    if (hidden ? next.add(key) : next.remove(key)) _hiddenSources.value = next;
-  }
-
+  _pendingVisibility[key] = hidden;
   if (SchedulerBinding.instance.schedulerPhase ==
       SchedulerPhase.persistentCallbacks) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => update());
+    if (_visibilityScheduled) return;
+    _visibilityScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _visibilityScheduled = false;
+      final updates = Map<GlobalKey, bool>.of(_pendingVisibility);
+      _pendingVisibility.clear();
+      for (final entry in updates.entries) {
+        _applySourceVisibility(entry.key, entry.value);
+      }
+    });
   } else {
-    update();
+    _pendingVisibility.remove(key);
+    _applySourceVisibility(key, hidden);
   }
+}
+
+void _applySourceVisibility(GlobalKey key, bool hidden) {
+  if (hidden && key.currentContext == null) return;
+  final changed = hidden ? _hiddenSources.add(key) : _hiddenSources.remove(key);
+  if (changed) _sourceVisibility[key]?.value = hidden;
 }
 
 /// A source keeps its layout while its artwork travels in the root overlay.
@@ -50,6 +65,9 @@ class CoverTransitionSource extends StatefulWidget {
 }
 
 class _CoverTransitionSourceState extends State<CoverTransitionSource> {
+  late final ValueNotifier<bool> _hidden = ValueNotifier<bool>(
+    _hiddenSources.contains(widget.key),
+  );
   void _register() {
     final identity = widget.identity;
     if (identity != null) {
@@ -66,6 +84,7 @@ class _CoverTransitionSourceState extends State<CoverTransitionSource> {
   @override
   void initState() {
     super.initState();
+    _sourceVisibility[widget.key! as GlobalKey] = _hidden;
     _register();
   }
 
@@ -81,15 +100,19 @@ class _CoverTransitionSourceState extends State<CoverTransitionSource> {
   @override
   void dispose() {
     _unregister(widget);
+    _sourceVisibility.remove(widget.key);
+    _hiddenSources.remove(widget.key);
+    _pendingVisibility.remove(widget.key);
+    _hidden.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<Set<GlobalKey>>(
-    valueListenable: _hiddenSources,
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: _hidden,
     child: RepaintBoundary(child: widget.child),
     builder: (context, hidden, child) =>
-        Opacity(opacity: hidden.contains(widget.key) ? 0 : 1, child: child),
+        Opacity(opacity: hidden ? 0 : 1, child: child),
   );
 }
 
@@ -129,7 +152,7 @@ void cancelCoverTransitions() {
   for (final target in _targets.values.toList()) {
     target._cancelFlight();
   }
-  for (final key in _hiddenSources.value.toList()) {
+  for (final key in {..._hiddenSources, ..._pendingVisibility.keys}) {
     _hideSource(key, false);
   }
 }

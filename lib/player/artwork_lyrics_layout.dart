@@ -3,6 +3,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 
+import '../animation/view_transitions.dart';
 import '../data/models.dart';
 import '../theme/font_preferences.dart';
 import '../widgets/animated_track_cover.dart';
@@ -57,7 +58,7 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
         _mode.animateTo(
           widget.lyricsVisible ? 1 : 0,
           duration: const Duration(milliseconds: 420),
-          curve: Curves.easeOutCubic,
+          curve: ViewMotion.curve,
         );
       }
     }
@@ -68,7 +69,7 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
         _chrome.animateTo(
           widget.controlsVisible ? 1 : 0,
           duration: const Duration(milliseconds: 360),
-          curve: Curves.easeOutCubic,
+          curve: ViewMotion.curve,
         );
       }
     }

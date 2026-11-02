@@ -269,6 +269,10 @@ const double kDpiScaleStep = 0.05;
 /// The 1× baseline: logical pixels exactly as the platform reports them.
 const double kDpiScaleDefault = 1;
 
+/// Large-screen components at the default DPI: 20% larger than the previous
+/// 0.7 baseline, with manual/automatic DPI still applied on top.
+const double kLargeScreenComponentScale = 0.84;
+
 /// Clamps to the supported range and snaps to [kDpiScaleStep] so the slider
 /// and a persisted value always agree.
 double normalizeDpiScale(double value) {

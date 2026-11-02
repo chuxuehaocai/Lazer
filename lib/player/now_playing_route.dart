@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../navigation/pull_down_to_close.dart';
 import '../state/app_state.dart';
-import '../theme/tokens.dart';
 import 'now_playing_page.dart';
 import '../animation/motion_snapshot.dart';
+import '../animation/view_transitions.dart';
 
 /// Material open-upwards presentation: the player rises from the window
 /// bottom to the top and reverses on close.
@@ -44,7 +44,28 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   static const Duration _settleDuration = Duration(milliseconds: 260);
 
   /// Push and pop decelerate: fast on the way out of the tap, slow on arrival.
-  static const Curve _transitionCurve = AppMotion.standardCurve;
+  static const Curve _transitionCurve = ViewMotion.curve;
+
+  /// The controller is the actual visible openness, for both finger drags and
+  /// timed transitions. Applying another curve in buildTransitions would jump
+  /// a released pull and make a normal pop run the entrance backwards.
+  @override
+  Simulation createSimulation({required bool forward}) {
+    final start = controller!.value;
+    final duration =
+        (forward ? transitionDuration : reverseTransitionDuration) *
+        (forward ? 1 - start : start);
+    return _PlayerRouteSimulation(
+      start: start,
+      end: forward ? 1 : 0,
+      // Custom simulations bypass AnimationController's reduced-motion time
+      // scaling. Preserve its normal behaviour so hidden transition semantics
+      // and route disposal do not wait the full 300 ms on those systems.
+      duration: WidgetsBinding.instance.disableAnimations
+          ? duration * .05
+          : duration,
+    );
+  }
 
   /// Whether a finger owns the transition right now.
   ///
@@ -138,17 +159,13 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
     Widget child,
   ) {
     if (MediaQuery.disableAnimationsOf(context)) return child;
-    // A finger-driven pull stays linear — the drag writes the controller value
-    // itself, so a curve here would leave the page trailing behind the finger.
-    // Every other frame is shaped by the decelerating curve: the page leaves
-    // fast and settles into place instead of easing away and stopping dead.
+    // Timed motion curves the controller itself. A drag and its released
+    // continuation consequently share the exact same visible coordinate.
     return AnimatedBuilder(
       animation: animation,
       child: MotionSnapshot(animation: animation, child: child),
       builder: (BuildContext context, Widget? child) {
-        final double travelled = _dragging
-            ? animation.value
-            : _transitionCurve.transform(animation.value);
+        final double travelled = animation.value;
         // The page is still mounted for the reverse transition. Pause its
         // ambient and lyric tickers so the compositor can move one stable
         // layer offscreen without also repainting the full player each frame.
@@ -161,4 +178,35 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       },
     );
   }
+}
+
+class _PlayerRouteSimulation extends Simulation {
+  _PlayerRouteSimulation({
+    required this.start,
+    required this.end,
+    required Duration duration,
+  }) : seconds = duration.inMicroseconds / Duration.microsecondsPerSecond;
+
+  final double start;
+  final double end;
+  final double seconds;
+
+  @override
+  double x(double time) {
+    if (seconds == 0 || time >= seconds) return end;
+    final progress = (time / seconds).clamp(0.0, 1.0);
+    return start + (end - start) * ViewMotion.curve.transform(progress);
+  }
+
+  @override
+  double dx(double time) {
+    if (seconds == 0 || time >= seconds) return 0;
+    const delta = .00001;
+    final before = (time - delta).clamp(0.0, seconds);
+    final after = (time + delta).clamp(0.0, seconds);
+    return (x(after) - x(before)) / (after - before);
+  }
+
+  @override
+  bool isDone(double time) => time >= seconds;
 }

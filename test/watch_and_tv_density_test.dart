@@ -52,12 +52,14 @@ void main() {
           ),
         );
         await tester.pump();
-        expect(find.byType(ListView), findsOneWidget);
+        expect(find.byTooltip('播放').hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.tap(find.byTooltip('音乐'));
         await tester.pump();
         expect(find.text('本地音乐 · 0'), findsOneWidget);
         expect(tester.takeException(), isNull);
+        await tester.tap(find.byTooltip('返回'));
+        await tester.pump();
         await tester.tap(find.byTooltip('设置'));
         await tester.pump();
         await tester.enterText(
@@ -81,7 +83,62 @@ void main() {
   }
 
   testWidgets(
-    'TV sliders leave vertically, adjust horizontally, and render at 70%',
+    'TV baseline composes with DPI without changing phone or watch density',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 720);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      for (final (surface, watch, dpi, rendered) in [
+        (AppSurface.tv, false, 1.0, .84),
+        (AppSurface.tv, false, 1.25, 1.05),
+        (AppSurface.standard, false, 1.0, 1.0),
+        (AppSurface.auto, true, 1.0, 1.0),
+      ]) {
+        final window = watch ? const Size(192, 192) : const Size(1280, 720);
+        tester.view.physicalSize = window;
+        final state = AppState(deviceIsWatch: watch)
+          ..surface = surface
+          ..autoDpiScale = false
+          ..dpiScale = dpi;
+        addTearDown(state.dispose);
+        Size? workspace;
+        double? preference;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: UiScaling(
+              state: state,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  workspace = constraints.biggest;
+                  preference = UiMetrics.scaleOf(context);
+                  return const Align(
+                    alignment: Alignment.topLeft,
+                    child: SizedBox(
+                      width: 100,
+                      height: 50,
+                      key: ValueKey('density-probe'),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        expect(workspace!.width, closeTo(window.width / rendered, .001));
+        expect(workspace!.height, closeTo(window.height / rendered, .001));
+        expect(preference, dpi);
+        final bounds = tester.getRect(
+          find.byKey(const ValueKey('density-probe')),
+        );
+        expect(bounds.width, closeTo(100 * rendered, .001));
+        expect(bounds.height, closeTo(50 * rendered, .001));
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
+
+  testWidgets(
+    'TV sliders leave vertically, adjust horizontally, and use the roomier baseline',
     (tester) async {
       final state = AppState()..surface = AppSurface.tv;
       final slider = FocusNode(), above = FocusNode(), below = FocusNode();
@@ -129,11 +186,13 @@ void main() {
         find
             .byWidgetPredicate(
               (w) =>
-                  w is Transform && (w.transform.storage[0] - .7).abs() < .001,
+                  w is Transform &&
+                  (w.transform.storage[0] - kLargeScreenComponentScale).abs() <
+                      .001,
             )
             .first,
       );
-      expect(transform.transform.storage[0], .7);
+      expect(transform.transform.storage[0], .84);
       slider.requestFocus();
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);

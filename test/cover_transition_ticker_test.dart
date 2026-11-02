@@ -106,6 +106,116 @@ class _RenderLayoutProbe extends RenderProxyBox {
 }
 
 void main() {
+  testWidgets('hiding a cover only rebuilds the affected shelf source', (
+    tester,
+  ) async {
+    const sourceCount = 120;
+    final keys = List<GlobalKey>.generate(sourceCount, (_) => GlobalKey());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              for (var i = 0; i < sourceCount; i++)
+                Positioned(
+                  left: (i % 12) * 40,
+                  top: (i ~/ 12) * 40,
+                  child: CoverTransitionSource(
+                    key: keys[i],
+                    identity: 'shelf:$i',
+                    child: const SizedBox.square(
+                      dimension: 32,
+                      child: ColoredBox(color: Colors.teal),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    List<Opacity> sourceOpacities() => [
+      for (final key in keys)
+        tester.widget<Opacity>(
+          find.descendant(of: find.byKey(key), matching: find.byType(Opacity)),
+        ),
+    ];
+    final initial = sourceOpacities();
+    rememberCoverTransition('shelf:12', keys[12]);
+    await tester.pump();
+    final hidden = sourceOpacities();
+    final hiddenRebuilds = [
+      for (var i = 0; i < sourceCount; i++)
+        if (!identical(initial[i], hidden[i])) i,
+    ];
+    expect(hidden[12].opacity, 0);
+    cancelCoverTransitions();
+    await tester.pump();
+    final restored = sourceOpacities();
+    final restoreRebuilds = [
+      for (var i = 0; i < sourceCount; i++)
+        if (!identical(hidden[i], restored[i])) i,
+    ];
+    expect(restored[12].opacity, 1);
+    expect(hiddenRebuilds, [12]);
+    expect(restoreRebuilds, [12]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('visibility changes coalesce and release recycled source keys', (
+    tester,
+  ) async {
+    final key = GlobalKey();
+    var cancelInBuild = false;
+    late StateSetter update;
+    Widget app() => MaterialApp(
+      home: Scaffold(
+        body: StatefulBuilder(
+          builder: (context, setState) {
+            update = setState;
+            if (cancelInBuild) {
+              rememberCoverTransition('recycled', key);
+              cancelCoverTransitions();
+            }
+            return CoverTransitionSource(
+              key: key,
+              identity: 'recycled',
+              child: const SizedBox.square(
+                dimension: 60,
+                child: ColoredBox(color: Colors.teal),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpWidget(app());
+    update(() => cancelInBuild = true);
+    await tester.pump();
+    await tester.pump();
+    Opacity source() => tester.widget<Opacity>(
+      find.descendant(of: find.byKey(key), matching: find.byType(Opacity)),
+    );
+    expect(
+      source().opacity,
+      1,
+      reason: 'the final cancellation wins within the build',
+    );
+    cancelInBuild = false;
+    rememberCoverTransition('recycled', key);
+    await tester.pump();
+    expect(source().opacity, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+    cancelCoverTransitions();
+    await tester.pumpWidget(app());
+    expect(
+      source().opacity,
+      1,
+      reason: 'a recycled source must not retain hidden state',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('flight starts at the transformed source artwork bounds', (
     tester,
   ) async {
