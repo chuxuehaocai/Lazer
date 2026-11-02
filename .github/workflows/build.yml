@@ -187,10 +187,10 @@ jobs:
       matrix:
         include:
           - arch: arm64
-            runner: macos-15
+            runner: macos-26
             flutter_arch: arm64
           - arch: x86_64
-            runner: macos-15-intel
+            runner: macos-26-intel
             flutter_arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -234,11 +234,11 @@ jobs:
       matrix:
         include:
           - arch: universal
-            runner: macos-15
+            runner: macos-26
             flutter_arch: arm64
             xcode_archs: 'arm64 x86_64'
           - arch: x86_64
-            runner: macos-15-intel
+            runner: macos-26-intel
             flutter_arch: x64
             xcode_archs: x86_64
     runs-on: ${{ matrix.runner }}
@@ -539,7 +539,7 @@ jobs:
   ios-native:
     name: iOS native audio (arm64)
     needs: check
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -561,7 +561,7 @@ jobs:
   ios-simulator:
     name: iOS simulator runtime selection
     needs: check
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -639,7 +639,7 @@ jobs:
   ios:
     name: iOS unsigned IPA (arm64)
     needs: [check, ios-native]
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
