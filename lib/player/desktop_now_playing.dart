@@ -18,6 +18,7 @@ import '../tv/tv_mode.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/animated_notice.dart';
 import '../widgets/copyable_song_title.dart';
+import '../widgets/cover_transition.dart';
 import '../widgets/player_seek_bar.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/listen_together_dialog.dart';
@@ -427,18 +428,22 @@ class _Presentation extends StatelessWidget {
           Expanded(
             child: CopyableSongTitle(
               title: track.title,
-              child: Text(
-                track.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textWidthBasis: TextWidthBasis.longestLine,
-                style: context.fonts.apply(
-                  FontCategory.playerTitle,
-                  TextStyle(
-                    fontSize: compact ? 22 : 30,
-                    fontWeight: FontWeight.w700,
-                    height: 1.2,
-                    color: context.colors.slateDark,
+              child: CoverTransitionText.target(
+                identity: 'player:${track.id}',
+                role: CoverTextRole.title,
+                child: Text(
+                  track.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textWidthBasis: TextWidthBasis.longestLine,
+                  style: context.fonts.apply(
+                    FontCategory.playerTitle,
+                    TextStyle(
+                      fontSize: compact ? 22 : 30,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                      color: context.colors.slateDark,
+                    ),
                   ),
                 ),
               ),
@@ -480,16 +485,20 @@ class _Presentation extends StatelessWidget {
           ),
         ),
       SizedBox(height: compact ? 8 : 12),
-      ArtistNameLink(
-        state: state,
-        artists: track.artists,
-        fallback: track.artist,
-        maxLines: 2,
-        style: context.fonts.apply(
-          FontCategory.playerArtist,
-          TextStyle(
-            fontSize: compact ? 14 : 18,
-            color: context.colors.slateDark,
+      CoverTransitionText.target(
+        identity: 'player:${track.id}',
+        role: CoverTextRole.detail,
+        child: ArtistNameLink(
+          state: state,
+          artists: track.artists,
+          fallback: track.artist,
+          maxLines: 2,
+          style: context.fonts.apply(
+            FontCategory.playerArtist,
+            TextStyle(
+              fontSize: compact ? 14 : 18,
+              color: context.colors.slateDark,
+            ),
           ),
         ),
       ),

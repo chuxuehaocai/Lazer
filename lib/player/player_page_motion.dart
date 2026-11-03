@@ -4,11 +4,14 @@ import 'package:flutter/widgets.dart';
 
 import '../animation/apple_spring.dart';
 
-/// A finite, non-bouncing desktop slide; direct manipulation and the compact
-/// player retain their spring response. The controller is always the displayed
-/// coordinate, so neither host applies a second easing curve while painting.
+/// A finite desktop ease-out and a bouncing mobile spring. The controller is
+/// always the displayed coordinate; hosts do not curve it again while painting.
 abstract final class PlayerPageMotion {
-  static const desktopDuration = Duration(milliseconds: 460);
+  static const desktopDuration = Duration(milliseconds: 600);
+  static const mobileSpring = AppleSpring(
+    duration: Duration(milliseconds: 480),
+    bounce: .24,
+  );
 
   static Simulation simulation({
     required double from,
@@ -16,7 +19,9 @@ abstract final class PlayerPageMotion {
     required bool compact,
     double velocity = 0,
     bool releasedPull = false,
-  }) => compact || releasedPull
+  }) => compact
+      ? mobileSpring.simulation(from, to, velocity: velocity)
+      : releasedPull
       ? AppleSpring.smooth.simulation(from, to, velocity: velocity)
       : _DesktopPlayerSlide(from, to, velocity);
 
@@ -25,19 +30,25 @@ abstract final class PlayerPageMotion {
     double target, {
     required bool compact,
     required bool reduceMotion,
+    double? velocity,
+    bool releasedPull = false,
   }) {
     if (reduceMotion ||
-        (controller.value == target && controller.velocity == 0)) {
-      controller.value = target;
-      return TickerFuture.complete();
+        (controller.value == target &&
+            (controller.velocity == 0 ||
+                controller.lastElapsedDuration == Duration.zero))) {
+      return target == 0
+          ? controller.animateBack(target, duration: Duration.zero)
+          : controller.animateTo(target, duration: Duration.zero);
     }
     final motion = simulation(
       from: controller.value,
       to: target,
-      velocity: controller.velocity,
+      velocity: velocity ?? controller.velocity,
       compact: compact,
+      releasedPull: releasedPull,
     );
-    return target < controller.value
+    return target == 0
         ? controller.animateBackWith(motion)
         : controller.animateWith(motion);
   }
@@ -45,6 +56,12 @@ abstract final class PlayerPageMotion {
 
 class _DesktopPlayerSlide extends Simulation {
   _DesktopPlayerSlide(this.from, this.to, double velocity) {
+    duration = PlayerPageMotion.desktopDuration.inMilliseconds / 1000;
+    if (velocity == 0 && ((from == 0 && to == 1) || (from == 1 && to == 0))) {
+      // A resting full-page move is ease-out quadratic: quick to respond,
+      // then steadily slower through the same measured 600 ms on either leg.
+      velocity = 2 * (to - from) / duration;
+    }
     if (velocity != 0 && velocity * (to - from) <= 0) {
       // On reversal, brake briefly before changing direction. Limit that
       // travel to half the remaining space so the page cannot cross an edge.
@@ -55,7 +72,6 @@ class _DesktopPlayerSlide extends Simulation {
     initialVelocity = velocity;
     start = from + initialVelocity * brakingTime / 2;
     startVelocity = brakingTime > 0 ? 0 : initialVelocity;
-    duration = PlayerPageMotion.desktopDuration.inMilliseconds / 1000;
     if (start == to) {
       duration = 0;
     } else if (startVelocity * (to - start) > 0) {

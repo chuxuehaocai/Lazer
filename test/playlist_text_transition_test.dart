@@ -20,8 +20,13 @@ const _playlist = Playlist(
 );
 
 class _Harness extends StatefulWidget {
-  const _Harness({this.compact = false, this.reduced = false});
+  const _Harness({
+    this.compact = false,
+    this.reduced = false,
+    this.textScale = 1,
+  });
   final bool compact, reduced;
+  final double textScale;
   @override
   State<_Harness> createState() => _HarnessState();
 }
@@ -48,7 +53,10 @@ class _HarnessState extends State<_Harness> {
     theme: buildAppleTheme(),
     builder: (context, child) => RepaintBoundary(key: screen, child: child),
     home: MediaQuery(
-      data: MediaQueryData(disableAnimations: widget.reduced),
+      data: MediaQueryData(
+        disableAnimations: widget.reduced,
+        textScaler: TextScaler.linear(widget.textScale),
+      ),
       child: Scaffold(
         body: RetainedContentSwitcher(
           currentKey: open ? 'detail' : 'cards',
@@ -107,22 +115,89 @@ Finder _label(
 Finder _flight(CoverTextRole role) =>
     find.byKey(ValueKey('cover-transition-text-${role.name}'));
 
-double _weight(WidgetTester tester) => tester
-    .widget<Text>(
-      find
-          .descendant(
-            of: _flight(CoverTextRole.title),
-            matching: find.byType(Text),
-          )
-          .first,
-    )
-    .style!
-    .fontVariations!
-    .singleWhere((axis) => axis.axis == 'wght')
-    .value;
-
 void main() {
   tearDown(cancelCoverTransitions);
+
+  for (final scale in [1.0, 1.3, 2.0]) {
+    testWidgets(
+      'caption glyphs keep their endpoint layout at text scale $scale',
+      (tester) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(_Harness(compact: true, textScale: scale));
+        RenderParagraph paragraph(Finder parent) =>
+            tester.renderObject<RenderParagraph>(
+              find
+                  .descendant(
+                    of: parent,
+                    matching: find.byType(RichText),
+                    skipOffstage: false,
+                  )
+                  .first,
+            );
+        Object glyphs(RenderParagraph p) => <Object>[
+          p.size,
+          p.didExceedMaxLines,
+          p
+              .getBoxesForSelection(
+                TextSelection(
+                  baseOffset: 0,
+                  extentOffset: p.text.toPlainText().length,
+                ),
+              )
+              .map((box) => (box.left, box.top, box.right, box.bottom))
+              .toList(),
+        ];
+        final source = {
+          for (final role in CoverTextRole.values)
+            role: glyphs(paragraph(_label(role, source: true))),
+        };
+        await tester.tap(find.byType(AppPlaylistCard));
+        await tester.pump();
+        await tester.pump();
+        final target = {
+          for (final role in CoverTextRole.values)
+            role: glyphs(paragraph(_label(role))),
+        };
+        Future<void> checkFrames() async {
+          var frames = 0;
+          while (_flight(CoverTextRole.title).evaluate().isNotEmpty &&
+              frames < 120) {
+            for (final role in CoverTextRole.values) {
+              final labels = find.descendant(
+                of: _flight(role),
+                matching: find.byType(RichText),
+              );
+              expect(labels, findsNWidgets(2));
+              // The existing ellipsis/line breaks must remain stable, including
+              // the last visible glyph; only the paragraph transform changes.
+              expect(
+                glyphs(tester.renderObject<RenderParagraph>(labels.at(0))),
+                source[role],
+              );
+              expect(
+                glyphs(tester.renderObject<RenderParagraph>(labels.at(1))),
+                target[role],
+              );
+            }
+            frames++;
+            await tester.pump(const Duration(milliseconds: 16));
+          }
+          expect(frames, inExclusiveRange(3, 120));
+        }
+
+        await checkFrames();
+        await tester.pumpAndSettle();
+        tester.state<_HarnessState>(find.byType(_Harness)).back();
+        await tester.pump();
+        await tester.pump();
+        await checkFrames();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('handoff never restores labels on a still-departing page', (
     tester,
@@ -259,9 +334,7 @@ void main() {
             0,
           );
         }
-        final restingWeight = _weight(tester);
         await tester.pump(const Duration(milliseconds: 84));
-        expect(_weight(tester), lessThan(restingWeight));
         expect(
           tester.getRect(_flight(CoverTextRole.title)),
           isNot(origin[CoverTextRole.title]),
@@ -290,30 +363,24 @@ void main() {
     );
   }
 
-  testWidgets('rapid back and reopen preserve text position and weight', (
-    tester,
-  ) async {
+  testWidgets('rapid back and reopen preserve text position', (tester) async {
     await tester.pumpWidget(const _Harness());
     await tester.tap(find.byType(AppPlaylistCard));
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 84));
     final before = tester.getRect(_flight(CoverTextRole.title));
-    final beforeWeight = _weight(tester);
     tester.state<_HarnessState>(find.byType(_Harness)).back();
     await tester.pump();
     await tester.pump();
     expect(tester.getRect(_flight(CoverTextRole.title)), before);
-    expect(_weight(tester), closeTo(beforeWeight, .001));
     await tester.pump(const Duration(milliseconds: 80));
     final returning = tester.getRect(_flight(CoverTextRole.title));
-    final returningWeight = _weight(tester);
     await tester.tap(find.byType(AppPlaylistCard));
     await tester.pump();
     await tester.pump();
     await tester.pump();
     expect(tester.getRect(_flight(CoverTextRole.title)), returning);
-    expect(_weight(tester), closeTo(returningWeight, .001));
     await tester.pumpAndSettle();
     expect(_flight(CoverTextRole.title), findsNothing);
     expect(tester.takeException(), isNull);

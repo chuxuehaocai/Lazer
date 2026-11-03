@@ -6,14 +6,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/catalog.dart';
+import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/player/now_playing_page.dart';
+import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/widgets.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/cover_transition.dart';
 import 'package:lazer_nextgen/widgets/retained_content_switcher.dart';
+import 'support/player_transition.dart';
 
 const _forwardKey = ValueKey<String>('cover-transition-flight');
 const _returnKey = ValueKey<String>('cover-transition-return-flight');
@@ -202,6 +207,12 @@ class _Catalog extends Catalog {
   int requests = 0;
 
   @override
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async => null;
+
+  @override
   HomeFeed? get home => const HomeFeed(
     recommended: [_playlist],
     featured: Album(
@@ -239,6 +250,47 @@ Future<void> _settle(WidgetTester tester) async {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   tearDown(cancelCoverTransitions);
+
+  testWidgets(
+    'opening the player retains the underlying playlist return destination',
+    (tester) async {
+      tester.view.physicalSize = const Size(1000, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final state = AppState(catalog: _Catalog());
+      addTearDown(state.dispose);
+      await state.setAppBackground(AppBackgroundMode.off);
+      await state.setPlayerBackground(AppBackgroundMode.off);
+      state.playQueue(const [_track]);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppleTheme(),
+          home: AppShell(state: state),
+        ),
+      );
+      await tester.pump();
+      final card = find.byType(AppPlaylistCard).first;
+      await tester.ensureVisible(card);
+      await _settle(tester);
+      await tester.tap(card);
+      await _settle(tester);
+      tester.widget<AppPlayerBar>(find.byType(AppPlayerBar)).onOpen();
+      await tester.pump();
+      final motion = playerSlideAnimation(tester);
+      await pumpPlayerTransition(tester, motion, AnimationStatus.completed);
+      tester.widget<NowPlayingPage>(find.byType(NowPlayingPage)).onClose!();
+      await tester.pump();
+      await pumpPlayerTransition(tester, motion, AnimationStatus.dismissed);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(_returnKey), findsOneWidget);
+      await _settle(tester);
+      expect(find.byType(AppPlaylistPage), findsNothing);
+      expect(card, findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('return overlays stay inside the content pane on every frame', (
     tester,

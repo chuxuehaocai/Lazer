@@ -357,13 +357,13 @@ void _removeReturnFlight({bool restoreTarget = true}) {
 }
 
 /// Cancels visual work when the shell changes account, section, or closes.
-void cancelCoverTransitions() {
+void cancelCoverTransitions({bool retainOrigins = false}) {
   _pendingCover?.snapshot?.release();
   _pendingCover = null;
   _removeHandoffFlights();
   _removeReturnFlight();
   for (final target in _targets.values.toList()) {
-    target._cancelFlight();
+    target._cancelFlight(forgetOrigin: !retainOrigins);
   }
   for (final key in {..._hiddenSources, ..._pendingVisibility.keys}) {
     _hideSource(key, false);
@@ -393,7 +393,11 @@ void finishReturningCoverOnScroll(BuildContext pageContext) {
 
 /// Records the exact artwork bounds before the content pane changes. Unlike a
 /// route Hero, this also works with the shell's in-place page transitions.
-void rememberCoverTransition(String identity, GlobalKey coverKey) {
+void rememberCoverTransition(
+  String identity,
+  GlobalKey coverKey, {
+  bool retainOrigins = false,
+}) {
   final box = coverKey.currentContext?.findRenderObject();
   if (box is! RenderBox || !box.hasSize || box.size.isEmpty) return;
   // Reopening the same card reverses its currently presented flight. Retain
@@ -410,7 +414,7 @@ void rememberCoverTransition(String identity, GlobalKey coverKey) {
     _returnHandle?.hold();
     _returnFlight = null;
   }
-  cancelCoverTransitions();
+  cancelCoverTransitions(retainOrigins: retainOrigins);
   if (handoff != null) {
     _handoffFlights.add(handoff);
     _handoffIdentity = identity;
@@ -445,6 +449,15 @@ void rememberCoverTransition(String identity, GlobalKey coverKey) {
   }
 }
 
+/// Opens from a persistent transport tile, including keyboard/remote actions.
+void rememberRegisteredCoverTransition(String identity) {
+  for (final key in _sourceKeys[identity] ?? <GlobalKey>{}) {
+    if (_sourceBox(key) == null) continue;
+    rememberCoverTransition(identity, key, retainOrigins: true);
+    return;
+  }
+}
+
 /// Flies artwork from the tapped card to its final position in a detail page.
 /// The destination is remeasured during the flight because the enclosing page
 /// can still be moving in the shell's slide transition.
@@ -455,12 +468,25 @@ class CoverTransitionTarget extends StatefulWidget {
     required this.size,
     required this.child,
     this.radius = 14,
+    this.motion,
+    this.targetTranslation,
+    this.returnToRegisteredSource = false,
   });
 
   final String identity;
   final double size;
   final double radius;
   final Widget child;
+
+  /// An optional page coordinate shared by artwork and labels. Without it,
+  /// collection flights use their own spring and track the moving page.
+  final Animation<double>? motion;
+
+  /// The host's current translation, removed when measuring its resting slot.
+  final Offset Function()? targetTranslation;
+
+  /// A track changed inside the player can return to its current transport tile.
+  final bool returnToRegisteredSource;
 
   @override
   State<CoverTransitionTarget> createState() => _CoverTransitionTargetState();
@@ -547,7 +573,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
           overlayBox.globalToLocal(
             target.localToGlobal(target.size.bottomRight(Offset.zero)),
           ),
-        );
+        ).shift(-(widget.targetTranslation?.call() ?? Offset.zero));
       }
 
       // Capture themes and build the cover once. Its fixed layout is retained
@@ -572,6 +598,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
           (role, value) =>
               MapEntry(role, value.transformed(overlayBox.globalToLocal)),
         ),
+        targetTranslation: widget.targetTranslation,
       );
       final viewport = _coverViewport(context);
       _textPresentations.clear();
@@ -587,6 +614,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
             targetRadius: widget.radius,
             text: text,
             viewport: () => _viewportRect(viewport, overlayBox),
+            motion: widget.motion,
             onTextPresentation: (role, value) =>
                 _textPresentations[role] = value,
             onRect: (rect) => _flightRect = rect,
@@ -642,7 +670,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     _origin = null;
   }
 
-  void _cancelFlight() {
+  void _cancelFlight({bool forgetOrigin = true}) {
     _generation++;
     _removeFlight();
     _removeHandoffFlights(widget.identity);
@@ -652,7 +680,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     _textPresentations.clear();
     _setTargetTextHidden(widget.identity, false);
     if (_origin != null) _hideSource(_origin!.sourceKey, false);
-    _forgetOrigin();
+    if (forgetOrigin) _forgetOrigin();
     if (mounted && _flying) setState(() => _flying = false);
     if (mounted) _refreshSnapshots(context);
   }
@@ -666,6 +694,26 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
   }
 
   bool _returnToSource() {
+    if (_origin == null && widget.returnToRegisteredSource) {
+      for (final key in _sourceKeys[widget.identity] ?? <GlobalKey>{}) {
+        final box = _sourceBox(key);
+        if (box == null) continue;
+        _origin = _CoverOrigin(
+          widget.identity,
+          Rect.fromPoints(
+            box.localToGlobal(Offset.zero),
+            box.localToGlobal(box.size.bottomRight(Offset.zero)),
+          ),
+          key,
+          DateTime.now(),
+          _sourceStates[key]?._snapshot(),
+          _sourceStates[key]?.widget.radius ?? 12,
+          null,
+          _captureSourceText(key),
+        );
+        break;
+      }
+    }
     final origin = _origin;
     final sourceKey = origin == null ? null : _liveSourceKey(origin);
     final source = sourceKey == null ? null : _sourceBox(sourceKey);
@@ -802,6 +850,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
           toBlend: 0,
           text: text,
           viewport: () => _viewportRect(viewport, overlayBox),
+          motion: widget.motion,
           onTextPresentation: (role, value) {
             _returnTextPresentations[role] = value.transformed(
               overlayBox.localToGlobal,
@@ -872,6 +921,7 @@ class _CoverFlight extends StatefulWidget {
     this.text = const [],
     this.onTextPresentation,
     this.viewport,
+    this.motion,
   });
 
   final Rect start;
@@ -890,6 +940,7 @@ class _CoverFlight extends StatefulWidget {
   final List<_CoverTextFlight> text;
   final void Function(CoverTextRole, _CoverPresentation)? onTextPresentation;
   final Rect? Function()? viewport;
+  final Animation<double>? motion;
 
   @override
   State<_CoverFlight> createState() => _CoverFlightState();
@@ -919,6 +970,7 @@ class _CoverFlightState extends State<_CoverFlight>
           _CoverPresentation(widget.start, Rect.zero, widget.fromBlend, 0),
       widget.destination,
       widget.toBlend,
+      motion: widget.motion,
     );
     _blend = _CoverBlend(
       _controller,
@@ -926,7 +978,12 @@ class _CoverFlightState extends State<_CoverFlight>
     );
     _textPhysics = [
       for (final text in widget.text)
-        _CoverPhysics(text.initial, text.destination, widget.toBlend),
+        _CoverPhysics(
+          text.initial,
+          text.destination,
+          widget.toBlend,
+          motion: widget.motion,
+        ),
     ];
     if (!(widget.handle?._held ?? false)) {
       _controller.animateWith(_CoverFlightClock([_physics, ..._textPhysics]));
@@ -1124,8 +1181,9 @@ class _CoverPresentation {
 }
 
 class _CoverPhysics extends Simulation {
-  _CoverPhysics(_CoverPresentation initial, this.destination, double toBlend)
+  _CoverPhysics(this.initial, this.destination, this.toBlend, {this.motion})
     : _target = destination() ?? initial.rect,
+      fromProgress = motion?.value ?? 0,
       _blend = _coverSpring.simulation(
         initial.blend,
         toBlend,
@@ -1135,6 +1193,9 @@ class _CoverPhysics extends Simulation {
   }
 
   final Rect? Function() destination;
+  final _CoverPresentation initial;
+  final Animation<double>? motion;
+  final double fromProgress, toBlend;
   Rect _target;
   double _epoch = 0;
   late List<SpringSimulation> _edges;
@@ -1183,6 +1244,19 @@ class _CoverPhysics extends Simulation {
 
   _CoverPresentation presentation(double time) {
     final target = destination();
+    if (motion case final progress?) {
+      if (target != null) _target = target;
+      final distance = toBlend - fromProgress;
+      final t = distance.abs() < .00001
+          ? 1.0
+          : (progress.value - fromProgress) / distance;
+      return _CoverPresentation(
+        Rect.lerp(initial.rect, _target, t)!,
+        Rect.zero,
+        ui.lerpDouble(initial.blend, toBlend, t)!.clamp(0.0, 1.0),
+        0,
+      );
+    }
     if (target != null && target != _target) {
       final current = _sample(time);
       _target = target;
@@ -1203,6 +1277,12 @@ class _CoverPhysics extends Simulation {
 
   @override
   bool isDone(double time) {
+    if (motion case final progress?) {
+      return progress.status ==
+          (toBlend == 1
+              ? AnimationStatus.completed
+              : AnimationStatus.dismissed);
+    }
     presentation(time);
     return _blend.isDone(time) &&
         _edges.every((spring) => spring.isDone(math.max(0.0, time - _epoch)));

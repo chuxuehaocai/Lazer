@@ -164,7 +164,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _nowPlayingMotion = AnimationController(
+    _nowPlayingMotion = AnimationController.unbounded(
       vsync: this,
       duration: const Duration(milliseconds: 400),
       reverseDuration: const Duration(milliseconds: 400),
@@ -308,6 +308,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     onClose: _closeNowPlaying,
     entranceSettled: _playerSettled,
     pullDown: _playerPull,
+    transition: _nowPlayingMotion,
   );
 
   @override
@@ -539,6 +540,9 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         _nowPlayingMotion.status != AnimationStatus.reverse) {
       return;
     }
+    if (state.current case final track?) {
+      rememberRegisteredCoverTransition('player:${track.id}');
+    }
     setState(() {
       _nowPlayingOpen = true;
       _playerSettled.value = false;
@@ -553,6 +557,9 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
 
   void _closeNowPlaying() {
     if (!_nowPlayingOpen) return;
+    if (state.current case final track?) {
+      returnCoverTransition('player:${track.id}');
+    }
     setState(() {
       _playerSettled.value = false;
       _coveredShellStale = true;
@@ -578,24 +585,34 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         : (velocity > 900 && pulled > .02) || pulled >= .22;
     final normalizedVelocity = -velocity / MediaQuery.sizeOf(context).height;
     if (!dismiss) {
-      _nowPlayingMotion.springTo(
+      PlayerPageMotion.animate(
+        _nowPlayingMotion,
         1,
-        spring: AppleSpring.responsive,
+        compact: useCompactLayout(
+          state.uiMode,
+          MediaQuery.sizeOf(context).width,
+        ),
         velocity: normalizedVelocity,
+        releasedPull: true,
         reduceMotion: MediaQuery.disableAnimationsOf(context),
       );
       return;
     }
     unawaited(state.feedback());
+    if (state.current case final track?) {
+      returnCoverTransition('player:${track.id}');
+    }
     setState(() {
       _playerSettled.value = false;
       // Rebuild the browse tree once so the uncovered page is current.
       _coveredShellStale = true;
     });
-    _nowPlayingMotion.springTo(
+    PlayerPageMotion.animate(
+      _nowPlayingMotion,
       0,
-      spring: AppleSpring.responsive,
+      compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
       velocity: normalizedVelocity,
+      releasedPull: true,
       reduceMotion: MediaQuery.disableAnimationsOf(context),
     );
   }
@@ -791,16 +808,30 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
                     ),
                     if (_nowPlayingOpen)
                       Positioned.fill(
-                        child: SlideTransition(
-                          position: _nowPlayingSlide,
-                          // The settle flag only shapes the wrappers below, and
-                          // they take the page as a prebuilt child: flipping it
-                          // rebuilds a handful of widgets instead of the whole
-                          // player on the frame the entrance lands.
-                          child: ValueListenableBuilder<bool>(
-                            valueListenable: _playerSettled,
-                            builder: _playerOverlay,
-                            child: _playerPageWidget(),
+                        child: AnimatedBuilder(
+                          animation: _nowPlayingMotion,
+                          builder: (context, child) => Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              ColoredBox(
+                                color: _nowPlayingMotion.value > 1
+                                    ? Colors.black
+                                    : Colors.transparent,
+                              ),
+                              child!,
+                            ],
+                          ),
+                          child: SlideTransition(
+                            position: _nowPlayingSlide,
+                            // The settle flag only shapes the wrappers below, and
+                            // they take the page as a prebuilt child: flipping it
+                            // rebuilds a handful of widgets instead of the whole
+                            // player on the frame the entrance lands.
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: _playerSettled,
+                              builder: _playerOverlay,
+                              child: _playerPageWidget(),
+                            ),
                           ),
                         ),
                       ),
@@ -1912,7 +1943,10 @@ class _PlayerPull implements PlayerPullDown {
   void updatePull(double progress) {
     // Stay off the lower bound: the controller reports a dismissal as soon as
     // it reaches zero, and the pull is not committed until the finger lifts.
-    _shell._nowPlayingMotion.value = (_initialOpen - progress).clamp(.001, 1);
+    _shell._nowPlayingMotion.value = (_initialOpen - progress).clamp(
+      .001,
+      _initialOpen > 1 ? _initialOpen : 1.0,
+    );
   }
 
   @override

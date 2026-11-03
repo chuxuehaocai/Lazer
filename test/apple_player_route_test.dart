@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:lazer_nextgen/animation/apple_spring.dart';
+import 'package:lazer_nextgen/player/player_page_motion.dart';
 import 'package:lazer_nextgen/navigation/pull_down_page_route.dart';
 import 'package:lazer_nextgen/player/now_playing_route.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
@@ -46,6 +46,33 @@ Future<GlobalKey<NavigatorState>> _host(
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  testWidgets(
+    'route paints the bounce but exports bounded navigator progress',
+    (tester) async {
+      final state = AppState()..uiMode = AppUiMode.mobile;
+      addTearDown(state.dispose);
+      final nav = await _host(tester);
+      final route = _PlayerRoute(state);
+      nav.currentState!.push(route);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 360));
+      expect(route.openness, greaterThan(1));
+      expect(route.animation!.value, 1);
+      expect(tester.getTopLeft(find.byKey(_bodyKey)).dy, lessThan(0));
+      route.startPull();
+      final position = route.openness;
+      route.updatePull(0);
+      expect(route.openness, position);
+      route.cancelPull();
+      await tester.pumpAndSettle();
+      expect(route.animation!.status, AnimationStatus.completed);
+      nav.currentState!.pop();
+      await tester.pumpAndSettle();
+      expect(find.byKey(_bodyKey), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('player entrance and exit follow the same physical spring', (
     tester,
   ) async {
@@ -59,7 +86,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
     expect(
       route.openness,
-      closeTo(AppleSpring.smooth.simulation(0, 1).x(.12), .00001),
+      closeTo(PlayerPageMotion.mobileSpring.simulation(0, 1).x(.12), .00001),
     );
     await tester.pumpAndSettle();
     expect(route.openness, 1);
@@ -68,7 +95,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
     expect(
       route.openness,
-      closeTo(AppleSpring.smooth.simulation(1, 0).x(.12), .00001),
+      closeTo(PlayerPageMotion.mobileSpring.simulation(1, 0).x(.12), .00001),
     );
     await tester.pumpAndSettle();
     expect(find.byKey(_bodyKey), findsNothing);
@@ -85,8 +112,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 160));
       final firstLeg = route.openness;
-      expect(firstLeg, inExclusiveRange(.2, .4));
-      await tester.pump(const Duration(milliseconds: 300));
+      expect(firstLeg, inExclusiveRange(.45, .48));
+      await tester.pump(const Duration(milliseconds: 440));
       expect(route.openness, 1);
       expect(route.animation!.status, AnimationStatus.completed);
       expect(route.speed, 0);
@@ -94,7 +121,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 160));
       expect(1 - route.openness, closeTo(firstLeg, .00001));
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 440));
       await tester.pump();
       expect(find.byKey(_bodyKey), findsNothing);
     },

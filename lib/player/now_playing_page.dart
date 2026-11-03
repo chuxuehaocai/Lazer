@@ -26,6 +26,7 @@ import '../widgets/animated_notice.dart';
 import '../widgets/animated_track_cover.dart';
 import '../widgets/catalog_links.dart';
 import '../widgets/copyable_song_title.dart';
+import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/listen_together_dialog.dart';
 import '../widgets/lyric_viewport.dart';
@@ -171,6 +172,7 @@ class NowPlayingPage extends StatefulWidget {
     this.onClose,
     this.entranceSettled,
     this.pullDown,
+    this.transition,
   });
 
   final AppState state;
@@ -185,6 +187,7 @@ class NowPlayingPage extends StatefulWidget {
   /// gesture: it drags the whole page away from the top half of the screen and
   /// needs a host that owns the transition.
   final PlayerPullDown? pullDown;
+  final Animation<double>? transition;
 
   @override
   State<NowPlayingPage> createState() => _NowPlayingPageState();
@@ -557,15 +560,33 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                       ),
                     ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: KeyedSubtree(
-                key: const ValueKey('now-playing-cover'),
-                child: AnimatedTrackCover(
-                  track: track,
-                  image: widget.state.currentArtwork.providerFor(track),
-                  direction: widget.state.trackChangeDirection,
-                  spring: compact ? AppleSpring.responsive : AppleSpring.smooth,
+            child: LayoutBuilder(
+              builder: (context, box) => CoverTransitionTarget(
+                identity: 'player:${track.id}',
+                size: box.maxWidth,
+                radius: 12,
+                motion: widget.transition,
+                targetTranslation: widget.transition == null
+                    ? null
+                    : () => Offset(
+                        0,
+                        (1 - widget.transition!.value) *
+                            MediaQuery.sizeOf(context).height,
+                      ),
+                returnToRegisteredSource: true,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: KeyedSubtree(
+                    key: const ValueKey('now-playing-cover'),
+                    child: AnimatedTrackCover(
+                      track: track,
+                      image: widget.state.currentArtwork.providerFor(track),
+                      direction: widget.state.trackChangeDirection,
+                      spring: compact
+                          ? AppleSpring.responsive
+                          : AppleSpring.smooth,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -897,34 +918,42 @@ class _ArtworkTrackDetails extends StatelessWidget {
           children: [
             CopyableSongTitle(
               title: track.title,
-              child: Text(
-                track.title,
-                key: const ValueKey('artwork-track-title'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.fonts.apply(
-                  FontCategory.playerTitle,
-                  const TextStyle(
-                    fontSize: 21,
-                    height: 1.2,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+              child: CoverTransitionText.target(
+                identity: 'player:${track.id}',
+                role: CoverTextRole.title,
+                child: Text(
+                  track.title,
+                  key: const ValueKey('artwork-track-title'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.fonts.apply(
+                    FontCategory.playerTitle,
+                    const TextStyle(
+                      fontSize: 21,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 5),
-            ArtistNameLink(
-              key: const ValueKey('artwork-track-artist'),
-              state: state,
-              artists: track.artists,
-              fallback: track.artist,
-              style: context.fonts.apply(
-                FontCategory.playerArtist,
-                const TextStyle(
-                  fontSize: 16,
-                  height: 1.2,
-                  color: Color(0xCCFFFFFF),
+            CoverTransitionText.target(
+              identity: 'player:${track.id}',
+              role: CoverTextRole.detail,
+              child: ArtistNameLink(
+                key: const ValueKey('artwork-track-artist'),
+                state: state,
+                artists: track.artists,
+                fallback: track.artist,
+                style: context.fonts.apply(
+                  FontCategory.playerArtist,
+                  const TextStyle(
+                    fontSize: 16,
+                    height: 1.2,
+                    color: Color(0xCCFFFFFF),
+                  ),
                 ),
               ),
             ),

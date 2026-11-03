@@ -1,5 +1,27 @@
 # Rendering and resource validation
 
+## Player and caption handoff in beta.5.fix
+
+Caption flights preserve both endpoints' shaped paragraphs, including their
+original constraints, scaling, line breaks and ellipsis. They transform and
+crossfade these retained layouts instead of changing font size, weight and
+available width every frame. The surrounding content viewport still clips
+the flight, but no interpolated text-height clip cuts through glyphs.
+
+The player reuses the same cover/text overlay from its transport tile. Its
+elements share the page's physical progress, with the destination measured
+without the outer page translation. Mobile uses a 480 ms perceived-duration
+spring with 0.24 bounce and an unbounded controller. Navigator-facing progress
+remains clamped for opacity consumers. Desktop uses a 600 ms ease-out quadratic
+for a resting open or close; interruptions retain current position/velocity.
+Pull releases retain their physical velocity and reduced motion completes the
+controller with the correct terminal status.
+
+Regression checks sample caption glyph boxes at 1x, 1.3x and 2x text scales in
+both directions, actual mobile overshoot, desktop deceleration, interrupted
+motion, shared-element handoff and released snapshot ownership. These checks
+do not substitute for frame-timing measurements on each target device.
+
 ## Player readiness and navigation handoff
 
 Selecting a track now starts decoding its 1024-pixel artwork before the player

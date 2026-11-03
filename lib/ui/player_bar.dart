@@ -11,6 +11,7 @@ import '../theme/apple_design.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/copyable_song_title.dart';
+import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/playback_queue_view.dart';
 import 'widgets.dart';
@@ -301,6 +302,7 @@ class _NowPlayingTile extends StatefulWidget {
 }
 
 class _NowPlayingTileState extends State<_NowPlayingTile> {
+  final _coverKey = GlobalKey();
   bool _hovering = false;
   bool _focused = false;
 
@@ -334,10 +336,16 @@ class _NowPlayingTileState extends State<_NowPlayingTile> {
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 child: Row(
                   children: [
-                    AppCover(
-                      url: track?.coverUrl,
-                      size: widget.artworkSize,
+                    CoverTransitionSource(
+                      key: _coverKey,
+                      identity: track == null ? null : 'player:${track.id}',
                       radius: 12,
+                      morphArtwork: true,
+                      child: AppCover(
+                        url: track?.coverUrl,
+                        size: widget.artworkSize,
+                        radius: 12,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -354,11 +362,15 @@ class _NowPlayingTileState extends State<_NowPlayingTile> {
                                 )
                               : CopyableSongTitle(
                                   title: track.title,
-                                  child: Text(
-                                    track.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.titleSmall,
+                                  child: CoverTransitionText.source(
+                                    coverKey: _coverKey,
+                                    role: CoverTextRole.title,
+                                    child: Text(
+                                      track.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleSmall,
+                                    ),
                                   ),
                                 ),
                           if (track?.translatedTitle?.trim().isNotEmpty ??
@@ -371,12 +383,16 @@ class _NowPlayingTileState extends State<_NowPlayingTile> {
                                 color: scheme.onSurfaceVariant,
                               ),
                             ),
-                          Text(
-                            track?.artist ?? 'Lazer',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
+                          CoverTransitionText.source(
+                            coverKey: _coverKey,
+                            role: CoverTextRole.detail,
+                            child: Text(
+                              track?.artist ?? 'Lazer',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                         ],

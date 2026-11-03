@@ -6,11 +6,14 @@ import '../state/ui_preferences.dart';
 import 'now_playing_page.dart';
 import 'player_page_motion.dart';
 import '../animation/motion_snapshot.dart';
-import '../animation/apple_spring.dart';
+import '../widgets/cover_transition.dart';
 
 /// Material open-upwards presentation: the player rises from the window
 /// bottom to the top and reverses on close.
 Future<void> openNowPlayingPage(BuildContext context, AppState state) {
+  if (state.current case final track?) {
+    rememberRegisteredCoverTransition('player:${track.id}');
+  }
   return Navigator.of(context).push<void>(NowPlayingRoute(state: state));
 }
 
@@ -26,9 +29,32 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   final ValueNotifier<bool> _settled = ValueNotifier(false);
 
   @override
+  AnimationController createAnimationController() =>
+      AnimationController.unbounded(
+        vsync: navigator!,
+        duration: transitionDuration,
+        reverseDuration: reverseTransitionDuration,
+        debugLabel: debugLabel,
+      );
+
+  // The navigator's fades and secondary routes require normalized progress.
+  // The player paints the physical controller so its rebound stays visible.
+  @override
+  Animation<double> createAnimation() =>
+      controller!.drive(_ClampedPlayerProgress());
+
+  @override
   void install() {
     super.install();
     animation!.addStatusListener(_onStatus);
+  }
+
+  @override
+  bool didPop(void result) {
+    if (state.current case final track?) {
+      returnCoverTransition('player:${track.id}');
+    }
+    return super.didPop(result);
   }
 
   void _onStatus(AnimationStatus status) {
@@ -96,7 +122,10 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   @override
   void updatePull(double progress) {
     // Stay off the lower bound: popping, not dragging, finishes the dismissal.
-    controller?.value = (_initialOpen - progress).clamp(.001, 1);
+    controller?.value = (_initialOpen - progress).clamp(
+      .001,
+      _initialOpen > 1 ? _initialOpen : 1.0,
+    );
   }
 
   @override
@@ -113,9 +142,12 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       navigator?.pop();
       return;
     }
-    controller?.springTo(
+    PlayerPageMotion.animate(
+      controller!,
       1,
+      compact: _compact,
       velocity: -velocity / MediaQuery.sizeOf(navigator!.context).height,
+      releasedPull: true,
       reduceMotion: _reduceMotion,
     );
   }
@@ -123,7 +155,14 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   @override
   void cancelPull() {
     _dragging = false;
-    controller?.springTo(1, velocity: 0, reduceMotion: _reduceMotion);
+    PlayerPageMotion.animate(
+      controller!,
+      1,
+      compact: _compact,
+      velocity: 0,
+      releasedPull: true,
+      reduceMotion: _reduceMotion,
+    );
   }
 
   @override
@@ -131,7 +170,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
 
   @override
   Duration get transitionDuration => _compact
-      ? const Duration(milliseconds: 300)
+      ? PlayerPageMotion.mobileSpring.duration
       : PlayerPageMotion.desktopDuration;
 
   @override
@@ -157,6 +196,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       state: state,
       pullDown: this,
       entranceSettled: _settled,
+      transition: controller!.view,
     ),
     builder: (context, settled, child) =>
         ExcludeSemantics(excluding: !settled, child: child),
@@ -172,21 +212,35 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
     if (MediaQuery.disableAnimationsOf(context)) return child;
     // Timed motion curves the controller itself. A drag and its released
     // continuation consequently share the exact same visible coordinate.
+    final physical = controller!.view;
     return AnimatedBuilder(
-      animation: animation,
-      child: MotionSnapshot(animation: animation, child: child),
+      animation: physical,
+      child: MotionSnapshot(animation: physical, child: child),
       builder: (BuildContext context, Widget? child) {
-        final double travelled = animation.value;
+        final double travelled = physical.value;
         // The page is still mounted for the reverse transition. Pause its
         // ambient and lyric tickers so the compositor can move one stable
         // layer offscreen without also repainting the full player each frame.
         final bool tickersEnabled =
-            !_dragging && animation.status == AnimationStatus.completed;
-        return FractionalTranslation(
-          translation: Offset(0, 1 - travelled),
-          child: TickerMode(enabled: tickersEnabled, child: child!),
+            !_dragging && physical.status == AnimationStatus.completed;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: travelled > 1 ? Colors.black : Colors.transparent,
+            ),
+            FractionalTranslation(
+              translation: Offset(0, 1 - travelled),
+              child: TickerMode(enabled: tickersEnabled, child: child!),
+            ),
+          ],
         );
       },
     );
   }
+}
+
+class _ClampedPlayerProgress extends Animatable<double> {
+  @override
+  double transform(double t) => t.clamp(0.0, 1.0);
 }

@@ -23,7 +23,7 @@ class CoverTransitionText extends StatefulWidget {
   final GlobalKey? sourceKey;
   final String? identity;
   final CoverTextRole role;
-  final Text child;
+  final Widget child;
 
   @override
   State<CoverTransitionText> createState() => _CoverTransitionTextState();
@@ -96,33 +96,72 @@ class _CoverTransitionTextState extends State<CoverTransitionText> {
     }
   }
 
-  _CoverTextEndpoint? measure() {
-    if (!mounted || !_active || (widget.child.data ?? '').isEmpty) return null;
-    final box = context.findRenderObject();
-    if (box is! RenderBox ||
-        !box.attached ||
-        !box.hasSize ||
-        box.size.isEmpty) {
-      return null;
+  RenderParagraph? _paragraph() {
+    if (!mounted || !_active) return null;
+    RenderParagraph? result;
+    void visit(RenderObject object) {
+      if (result != null) return;
+      if (object is RenderParagraph) {
+        result = object;
+      } else {
+        object.visitChildren(visit);
+      }
     }
-    final rect = Rect.fromPoints(
+
+    final object = context.findRenderObject();
+    if (object != null) visit(object);
+    final paragraph = result;
+    return paragraph != null &&
+            paragraph.attached &&
+            paragraph.hasSize &&
+            !paragraph.size.isEmpty
+        ? paragraph
+        : null;
+  }
+
+  Rect? measureRect() {
+    final box = _paragraph();
+    if (box == null) return null;
+    return Rect.fromPoints(
       box.localToGlobal(Offset.zero),
       box.localToGlobal(box.size.bottomRight(Offset.zero)),
     );
-    final text = widget.child;
-    final style = DefaultTextStyle.of(context).style.merge(text.style);
-    final scaler = text.textScaler ?? MediaQuery.textScalerOf(context);
-    final scale = rect.height / box.size.height;
+  }
+
+  _CoverTextEndpoint? measure() {
+    final paragraph = _paragraph();
+    final rect = measureRect();
+    if (paragraph == null || rect == null) return null;
+    // Keep the paragraph's original constraints, shaping and line breaks.
+    // Interpolating font metrics inside a changing rect can drop the last
+    // glyph or create an ellipsis on the frame immediately before handoff.
     return _CoverTextEndpoint(
       rect,
-      text.data!,
-      style.copyWith(
-        fontSize: scaler.scale(style.fontSize ?? 14) * scale,
-        letterSpacing: (style.letterSpacing ?? 0) * scale,
+      SizedBox.fromSize(
+        size: paragraph.size,
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          minWidth: paragraph.constraints.minWidth,
+          maxWidth: paragraph.constraints.maxWidth,
+          minHeight: paragraph.constraints.minHeight,
+          maxHeight: paragraph.constraints.maxHeight,
+          child: RepaintBoundary(
+            child: RichText(
+              text: paragraph.text,
+              textAlign: paragraph.textAlign,
+              textDirection: paragraph.textDirection,
+              softWrap: paragraph.softWrap,
+              overflow: paragraph.overflow,
+              textScaler: paragraph.textScaler,
+              maxLines: paragraph.maxLines,
+              locale: paragraph.locale,
+              strutStyle: paragraph.strutStyle,
+              textWidthBasis: paragraph.textWidthBasis,
+              textHeightBehavior: paragraph.textHeightBehavior,
+            ),
+          ),
+        ),
       ),
-      text.textAlign ?? TextAlign.start,
-      text.textDirection ?? Directionality.of(context),
-      text.maxLines ?? 2,
     );
   }
 
@@ -185,38 +224,16 @@ Map<CoverTextRole, _CoverTextEndpoint> _captureSourceText(GlobalKey key) {
 }
 
 class _CoverTextEndpoint {
-  const _CoverTextEndpoint(
-    this.rect,
-    this.text,
-    this.style,
-    this.align,
-    this.direction,
-    this.lines,
-  );
+  const _CoverTextEndpoint(this.rect, this.paragraph);
   final Rect rect;
-  final String text;
-  final TextStyle style;
-  final TextAlign align;
-  final TextDirection direction;
-  final int lines;
+  final Widget paragraph;
 
   _CoverTextEndpoint inOverlay(RenderBox overlay) {
     final local = Rect.fromPoints(
       overlay.globalToLocal(rect.topLeft),
       overlay.globalToLocal(rect.bottomRight),
     );
-    final scale = rect.height == 0 ? 1.0 : local.height / rect.height;
-    return _CoverTextEndpoint(
-      local,
-      text,
-      style.copyWith(
-        fontSize: (style.fontSize ?? 14) * scale,
-        letterSpacing: (style.letterSpacing ?? 0) * scale,
-      ),
-      align,
-      direction,
-      lines,
-    );
+    return _CoverTextEndpoint(local, paragraph);
   }
 }
 
@@ -242,6 +259,7 @@ List<_CoverTextFlight> _textFlights({
   required GlobalKey Function() sourceKey,
   required Map<CoverTextRole, _CoverPresentation> initial,
   double? fromBlend,
+  Offset Function()? targetTranslation,
 }) {
   final flights = <_CoverTextFlight>[];
   for (final entry in origin.text.entries) {
@@ -257,7 +275,13 @@ List<_CoverTextFlight> _textFlights({
           ? _sourceText[sourceKey()]
           : _targetText[identity];
       final state = registry?[entry.key];
-      return state?.measure()?.inOverlay(overlay).rect;
+      final rect = state?.measureRect();
+      return rect == null
+          ? null
+          : Rect.fromPoints(
+              overlay.globalToLocal(rect.topLeft),
+              overlay.globalToLocal(rect.bottomRight),
+            ).shift(-(targetTranslation?.call() ?? Offset.zero));
     }
 
     flights.add(
@@ -286,51 +310,24 @@ Widget _buildFlyingText(
 ) {
   onPresentation?.call(flight.role, frame);
   final t = frame.blend.clamp(0.0, 1.0);
-  var style = TextStyle.lerp(flight.source.style, flight.target.style, t)!;
-  final from = (flight.source.style.fontWeight ?? FontWeight.w400).value;
-  final to = (flight.target.style.fontWeight ?? FontWeight.w400).value;
-  final speed = frame.velocity.topLeft.distance;
-  final weight =
-      (ui.lerpDouble(from, to, t)! - 120 * (speed / 1600).clamp(0.0, 1.0))
-          .clamp(100.0, 900.0);
-  style = style.copyWith(
-    fontWeight: FontWeight.lerp(
-      FontWeight.w100,
-      FontWeight.w900,
-      (weight - 100) / 800,
+  // Keep differently wrapped paragraphs from remaining superimposed for most
+  // of the flight. Both ends are fully opaque well before geometry settles.
+  final blend = Curves.easeInOutQuint.transform(t);
+  Widget label(_CoverTextEndpoint endpoint, double opacity) => Opacity(
+    opacity: opacity,
+    child: FittedBox(
+      fit: BoxFit.contain,
+      alignment: Alignment.topLeft,
+      child: endpoint.paragraph,
     ),
-    fontVariations: [
-      for (final axis in style.fontVariations ?? const <ui.FontVariation>[])
-        if (axis.axis != 'wght') axis,
-      ui.FontVariation('wght', weight),
-    ],
   );
-  Widget label(_CoverTextEndpoint endpoint) => Text(
-    endpoint.text,
-    style: style,
-    textAlign: endpoint.align,
-    textDirection: endpoint.direction,
-    textScaler: TextScaler.noScaling,
-    maxLines: endpoint.lines,
-    overflow: TextOverflow.ellipsis,
-  );
-  final identicalLayout =
-      flight.source.text == flight.target.text &&
-      flight.source.align == flight.target.align &&
-      flight.source.lines == flight.target.lines;
   return Positioned.fromRect(
     rect: frame.rect,
-    child: ClipRect(
+    child: Stack(
       key: ValueKey('cover-transition-text-${flight.role.name}'),
-      child: identicalLayout
-          ? label(flight.target)
-          : Stack(
-              fit: StackFit.expand,
-              children: [
-                Opacity(opacity: 1 - t, child: label(flight.source)),
-                Opacity(opacity: t, child: label(flight.target)),
-              ],
-            ),
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: [label(flight.source, 1 - blend), label(flight.target, blend)],
     ),
   );
 }
