@@ -33,10 +33,19 @@ class ArtworkLyricsLayout extends StatefulWidget {
 
 class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
     with TickerProviderStateMixin {
-  late final AnimationController _mode = AnimationController(
+  static const _coverSpring = AppleSpring(
+    // SwiftUI's bouncy preset uses a 500 ms perceptual duration; 0.18 keeps
+    // the rebound visible without turning the compact cover into a toy.
+    duration: Duration(milliseconds: 500),
+    bounce: .18,
+  );
+
+  late final AnimationController _mode = AnimationController.unbounded(
     vsync: this,
-    duration: const Duration(milliseconds: 420),
     value: widget.lyricsVisible ? 1 : 0,
+  );
+  late final Animation<double> _modeOpacity = _mode.drive(
+    const _ClampedProgress(),
   );
   late final AnimationController _chrome = AnimationController(
     vsync: this,
@@ -49,6 +58,7 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
   void initState() {
     super.initState();
     _mode;
+    _modeOpacity;
     _chrome;
   }
 
@@ -59,7 +69,7 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
     if (oldWidget.lyricsVisible != widget.lyricsVisible) {
       _mode.springTo(
         widget.lyricsVisible ? 1 : 0,
-        spring: AppleSpring.responsive,
+        spring: _coverSpring,
         reduceMotion: reduced,
       );
     }
@@ -166,7 +176,7 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
                           child: IgnorePointer(
                             ignoring: !widget.lyricsVisible,
                             child: FadeTransition(
-                              opacity: _mode,
+                              opacity: _modeOpacity,
                               child: TickerMode(
                                 enabled: widget.lyricsVisible,
                                 child: RepaintBoundary(child: widget.lyrics),
@@ -191,6 +201,13 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
       ],
     ),
   );
+}
+
+class _ClampedProgress extends Animatable<double> {
+  const _ClampedProgress();
+
+  @override
+  double transform(double t) => t.clamp(0.0, 1.0);
 }
 
 class _ArtworkLyricsDelegate extends MultiChildLayoutDelegate {

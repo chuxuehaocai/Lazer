@@ -260,7 +260,12 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 260));
       final small = tester.getRect(art);
-      expect(small.width, closeTo(64, 1));
+      expect(small.width, lessThan(63));
+      expect(
+        small.width,
+        greaterThan(55),
+        reason: 'the Bouncy spring overshoots the compact cover then rebounds',
+      );
       expect(identical(tester.element(art), element), isTrue);
       final cover = find
           .ancestor(of: art, matching: find.byType(AnimatedContainer))
@@ -272,6 +277,7 @@ void main() {
       );
       await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
+      expect(tester.getRect(art).width, closeTo(64, 1));
       final summary = find.byKey(const ValueKey('compact-player-summary'));
       expect(summary, findsOneWidget);
       final opacity = tester.widget<FadeTransition>(
@@ -296,6 +302,8 @@ void main() {
             'returning to the large cover must also start fast and end slow',
       );
       await tester.pump(const Duration(milliseconds: 270));
+      expect(tester.getRect(art).width, greaterThan(large.width + 1));
+      await tester.pumpAndSettle();
       expect(tester.getRect(art).width, closeTo(large.width, 1));
       expect(find.byType(AnimatedTrackCover), findsNWidgets(2));
       expect(tester.takeException(), isNull);

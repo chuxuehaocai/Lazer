@@ -6,8 +6,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-$tileColor = [System.Drawing.Color]::FromArgb(255, 201, 201, 201)
-$inkColor = [System.Drawing.Color]::FromArgb(255, 65, 66, 71)
+$backgroundColor = [System.Drawing.Color]::White
+$inkColor = [System.Drawing.Color]::FromArgb(255, 76, 76, 76)
 $cache = @{}
 
 function New-RoundedRectanglePath {
@@ -53,11 +53,13 @@ function New-IconBitmap {
   $graphics.CompositingQuality =
     [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
 
-  $tileBrush = [System.Drawing.SolidBrush]::new($tileColor)
+  $backgroundBrush = [System.Drawing.SolidBrush]::new($backgroundColor)
+  $backgroundPath = New-RoundedRectanglePath `
+    0 0 $workingSize $workingSize (224 * $unit)
+  $graphics.FillPath($backgroundBrush, $backgroundPath)
+  $graphics.SetClip($backgroundPath)
+
   $inkBrush = [System.Drawing.SolidBrush]::new($inkColor)
-  $tilePath = New-RoundedRectanglePath `
-    (64 * $unit) (64 * $unit) (896 * $unit) (896 * $unit) (210 * $unit)
-  $graphics.FillPath($tileBrush, $tilePath)
 
   $lPen = [System.Drawing.Pen]::new($inkColor, 47 * $unit)
   $lPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
@@ -86,9 +88,9 @@ function New-IconBitmap {
   $graphics.FillRegion($inkBrush, $frontRegion)
 
   $graphics.Dispose()
-  $tileBrush.Dispose()
+  $backgroundBrush.Dispose()
+  $backgroundPath.Dispose()
   $inkBrush.Dispose()
-  $tilePath.Dispose()
   $lPen.Dispose()
   $frontPath.Dispose()
   $frontRegion.Dispose()

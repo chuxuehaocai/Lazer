@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -81,18 +83,7 @@ void main() {
     await tester.pumpWidget(_layout(lyrics: true));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 70));
-    final fade = tester.widget<FadeTransition>(
-      find
-          .ancestor(
-            of: find.byKey(_lyricsKey),
-            matching: find.byType(FadeTransition),
-          )
-          .first,
-    );
-    final mode = fade.opacity as AnimationController;
-    final value = mode.value, velocity = mode.velocity;
     final bounds = tester.getRect(art);
-    expect(velocity, greaterThan(0));
     await tester.pumpWidget(_layout(lyrics: false));
     expect(tester.element(art), same(element));
     expect(
@@ -103,12 +94,25 @@ void main() {
       (tester.getRect(art).bottomRight - bounds.bottomRight).distance,
       lessThan(.001),
     );
-    expect(mode.value, closeTo(value, .000001));
-    expect(mode.velocity, closeTo(velocity, .000001));
-    await tester.pump(const Duration(milliseconds: 1));
-    expect(mode.value, greaterThan(value));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(tester.getRect(art).width, lessThan(bounds.width));
     await tester.pumpAndSettle();
-    expect(mode.value, 0);
+    expect(tester.getRect(art).width, greaterThan(bounds.width));
+    expect(tester.binding.transientCallbackCount, 0);
+  });
+
+  testWidgets('shrinking artwork overshoots and springs back', (tester) async {
+    await tester.pumpWidget(_layout(lyrics: false));
+    final art = find.byKey(_artworkKey);
+    await tester.pumpWidget(_layout(lyrics: true));
+    var minimumWidth = double.infinity;
+    for (var frame = 0; frame < 120; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      minimumWidth = math.min(minimumWidth, tester.getRect(art).width);
+    }
+    await tester.pumpAndSettle();
+    final restingWidth = tester.getRect(art).width;
+    expect(minimumWidth, lessThan(restingWidth - 1));
     expect(tester.binding.transientCallbackCount, 0);
   });
 
