@@ -7,6 +7,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lazer_nextgen/audio/native/audio_stream_cache.dart';
 
 import '../../tool/native/cache_checks.dart';
 
@@ -24,4 +25,37 @@ void main() {
   test('the streaming cache downloads, resumes and reports failures', () async {
     expect(await verifyAudioStreamCache(root), isEmpty);
   });
+
+  test(
+    'late readers receive completion instead of waiting for another chunk',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final body = [1, 2, 3, 4];
+      server.listen((request) async {
+        request.response
+          ..contentLength = body.length
+          ..add(body);
+        await request.response.close();
+      });
+      final cache = AudioStreamCache(() async => root);
+      addTearDown(cache.close);
+      addTearDown(() => server.close(force: true));
+      final entry = await cache.open(
+        'http://127.0.0.1:${server.port}/complete',
+      );
+      await entry.done;
+      var appends = 0;
+      final finished = <bool>[];
+      entry.bindReader(appended: () => appends++, finished: finished.add);
+      expect(appends, 1);
+      expect(finished, [false]);
+      final cancelled = AudioStreamEntry(
+        url: 'unused',
+        file: entry.file,
+        key: 1,
+      )..cancel();
+      cancelled.bindReader(appended: () {}, finished: finished.add);
+      expect(finished, [false, true]);
+    },
+  );
 }

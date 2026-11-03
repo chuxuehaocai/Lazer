@@ -24,6 +24,7 @@ class _QueueEngine implements AudioEngine, QueueAudioEngine {
 
   int jumps = 0;
   int playCalls = 0;
+  Completer<void>? playPending;
   int stops = 0;
   int _queueId = 0;
   bool _active = false;
@@ -95,6 +96,7 @@ class _QueueEngine implements AudioEngine, QueueAudioEngine {
     if (failResumeAfterJump && jumps > 0) {
       throw StateError('output stayed paused after the jump');
     }
+    await playPending?.future;
   }
 
   @override
@@ -197,6 +199,24 @@ Track _track(String id) => Track(
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets(
+    'platform queues prefetch even when play lasts until completion',
+    (tester) async {
+      final pending = Completer<void>();
+      final engine = _QueueEngine()..playPending = pending;
+      final state = AppState(catalog: _Catalog(), audioEngine: engine);
+      addTearDown(state.dispose);
+      state.playQueue([_track('1'), _track('2')]);
+      await tester.pump();
+      expect(engine.playCalls, 1);
+      expect(engine.appends, ['url-2']);
+      expect(pending.isCompleted, isFalse);
+      state.pause();
+      pending.complete();
+      await tester.pump();
+    },
+  );
 
   testWidgets('the following track is queued and adopted without reloading', (
     tester,

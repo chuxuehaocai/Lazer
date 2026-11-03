@@ -1,5 +1,22 @@
 # Native audio engine
 
+The first play command now reaches the transport worker before any successor
+probe. Native queue preparation can block on network bytes, so starting that
+probe during the current track's startup buffer wait could hold its play
+command behind an unrelated request. Successor preparation now follows a
+successful play, and an existing prepared successor is reused on resume.
+Platform queues whose play future lasts until completion retain eager prefetch.
+
+New native readers receive the cache's current download state when they attach,
+including completion or cancellation that happened before their callbacks were
+installed. Startup buffer estimation refreshes the native clock directly and
+reports an unknown HTTP length or duration as unknown rather than as an empty
+buffer. Such a stream starts through the engine's own buffering path on the
+first request; measurable streams retain the configured startup lead.
+
+Regression checks are in `test/startup_buffer_test.dart`,
+`test/gapless_queue_test.dart` and `test/audio/audio_stream_cache_test.dart`.
+
 The playback path inherited from the `master` branch: FFmpeg decodes, the
 platform backend (WASAPI / ALSA / CoreAudio HAL) outputs, and one C++ engine owns
 the clock, the gapless queue, DSD/DoP and the EQ/limiter chain. On `nextgen` it

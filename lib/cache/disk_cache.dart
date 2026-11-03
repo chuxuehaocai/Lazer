@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show compute;
-import 'package:path_provider/path_provider.dart';
+import '../storage/app_storage.dart';
 
 enum CacheBucket { audio, artwork, data }
 
@@ -36,9 +36,8 @@ class DiskCache {
   void releaseFile(File file) =>
       _retainedFiles.remove(file.uri.normalizePath());
 
-  static Future<Directory> _defaultDirectory() async => Directory(
-    '${(await getApplicationCacheDirectory()).path}/lazer_cache_v1',
-  );
+  static Future<Directory> _defaultDirectory() async =>
+      Directory('${(await appCacheDirectory()).path}/lazer_cache_v1');
 
   Future<Directory?> _open() => _root ??= () async {
     try {

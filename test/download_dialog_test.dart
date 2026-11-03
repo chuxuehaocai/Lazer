@@ -180,8 +180,21 @@ void main() {
           await tester.tap(
             find.byKey(const ValueKey<String>('download-confirm')),
           );
-          await Future<void>.delayed(const Duration(milliseconds: 150));
         });
+        // Directory validation uses real IO. Wait for the dialog to close
+        // rather than racing the filesystem with a fixed host-speed delay.
+        final confirm = find.byKey(const ValueKey<String>('download-confirm'));
+        for (
+          var attempt = 0;
+          attempt < 250 && confirm.evaluate().isNotEmpty;
+          attempt++
+        ) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(confirm, findsNothing);
         await tester.pumpAndSettle();
       }
 

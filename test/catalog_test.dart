@@ -405,6 +405,12 @@ void main() {
         expect((await catalog.lyricsFor(track))?.lrc, '[00:00]Line 1');
         expect((await catalog.lyricsFor(track))?.lrc, '[00:00]Line 1');
         expect(gateway.lyricCalls, 1);
+        final offlineGateway = _Gateway()..failAll = true;
+        final restarted = Catalog(gateway: offlineGateway, cache: disk);
+        final stored = await restarted.lyricsFor(track);
+        expect(stored?.lrc, '[00:00]Line 1');
+        expect(stored?.tlyric, '[00:00]翻译');
+        expect(offlineGateway.lyricCalls, 0);
         await catalog.invalidateLyrics(track.id);
         expect((await catalog.lyricsFor(track))?.lrc, '[00:00]Line 2');
         gateway.failAll = true;

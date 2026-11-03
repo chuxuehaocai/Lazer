@@ -47,6 +47,18 @@ class AudioStreamEntry {
   /// Called once when the download ends, with whether it failed.
   void Function(bool failed)? onFinished;
 
+  /// A reader can attach after the HTTP response already finished. Replay the
+  /// current state so its first blocking read never waits for a lost event.
+  void bindReader({
+    required void Function() appended,
+    required void Function(bool failed) finished,
+  }) {
+    onAppended = appended;
+    onFinished = finished;
+    appended();
+    if (_complete || _cancelled || _failure != null) finished(!_complete);
+  }
+
   int _downloadedBytes = 0;
   bool _complete = false;
   bool _cancelled = false;

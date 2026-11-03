@@ -89,6 +89,30 @@ class _WordPlaybackState extends AppState {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  testWidgets('a muted player entrance starts with separated focused lyrics', (
+    tester,
+  ) async {
+    final state = _WordPlaybackState()
+      ..lyrics = [
+        for (var i = 0; i < 300; i++)
+          LyricLine(Duration(seconds: i * 4), 'Lyric $i'),
+      ];
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(),
+        home: Scaffold(
+          body: TickerMode(enabled: false, child: LyricViewport(state: state)),
+        ),
+      ),
+    );
+    final first = tester.getRect(find.text('Lyric 0'));
+    final second = tester.getRect(find.text('Lyric 1'));
+    expect(second.top, greaterThan(first.bottom));
+    expect(first.center.dy, closeTo(600 * .35 - 10, 1));
+    expect(find.text('Lyric 299'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
   test(
     'Reference slow, adaptive and scale trajectories match upstream TypeScript',
     () {

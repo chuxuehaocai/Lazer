@@ -2,6 +2,7 @@
 // Run: flutter run --profile -d windows -t tool/player_lifecycle_profile.dart
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' show Timeline;
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -108,8 +109,10 @@ Map<String, Object> _summarize(List<FrameTiming> frames) {
     'frames': frames.length,
     'build_p50_ms': percentile(build, .5),
     'build_p95_ms': percentile(build, .95),
+    'build_max_ms': percentile(build, 1),
     'raster_p50_ms': percentile(raster, .5),
     'raster_p95_ms': percentile(raster, .95),
+    'raster_max_ms': percentile(raster, 1),
     'vsync_p95_ms': percentile(sorted(intervals), .95),
     'frames_over_16_7ms': intervals.where((int us) => us > 16667).length,
   };
@@ -120,15 +123,22 @@ Future<Map<String, Object>> _measure(
   Duration duration,
 ) async {
   final List<FrameTiming> frames = <FrameTiming>[];
-  bool recording = true;
+  final began = Timeline.now;
+  int? ended;
   void onFrames(List<FrameTiming> timings) {
-    if (recording) frames.addAll(timings);
+    frames.addAll(
+      timings.where((timing) {
+        final vsync = timing.timestampInMicroseconds(ui.FramePhase.vsyncStart);
+        return vsync >= began && (ended == null || vsync <= ended);
+      }),
+    );
   }
 
   SchedulerBinding.instance.addTimingsCallback(onFrames);
   await start();
   await Future<void>.delayed(duration);
-  recording = false;
+  ended = Timeline.now;
+  await Future<void>.delayed(const Duration(milliseconds: 600));
   SchedulerBinding.instance.removeTimingsCallback(onFrames);
   return _summarize(frames);
 }
@@ -165,6 +175,8 @@ Future<void> main() async {
     'active_lyrics_blur_off': blurOff,
     'close': close,
   };
+  const path = String.fromEnvironment('PROFILE_OUTPUT');
+  if (path.isNotEmpty) await File(path).writeAsString(jsonEncode(output));
   debugPrint('PLAYER_LIFECYCLE_PROFILE ${jsonEncode(output)}');
   state.dispose();
   semantics.dispose();

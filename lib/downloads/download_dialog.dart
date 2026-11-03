@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../animation/apple_modal.dart';
 import 'package:path_provider/path_provider.dart';
+import '../storage/app_storage.dart';
 
 import '../data/audio_quality.dart';
 import '../data/models.dart';
@@ -396,7 +397,7 @@ Future<String?> defaultDownloadDirectory() async {
       final Directory? downloads = await getDownloadsDirectory();
       if (downloads != null) return downloads.path;
     }
-    final Directory documents = await getApplicationDocumentsDirectory();
+    final Directory documents = await appDocumentsDirectory();
     return '${documents.path}${Platform.pathSeparator}Lazer Downloads';
   } catch (_) {
     return null;

@@ -13,6 +13,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../animation/lyric_spring.dart';
+import '../animation/motion_snapshot.dart';
 import '../data/lyrics.dart';
 import '../data/lyric_selection.dart';
 import '../scrolling/scroll_motion.dart';
@@ -135,6 +136,7 @@ class _LyricViewportState extends State<LyricViewport>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _ticker ??= createTicker(_tick);
+    MotionSnapshot.invalidate(context);
   }
 
   @override
@@ -234,6 +236,7 @@ class _LyricViewportState extends State<LyricViewport>
         if (!changed && !_manual) _targets(seeking: seeking);
         _scaleTargets();
       });
+      MotionSnapshot.invalidate(context);
     }
     if (_playing != widget.state.playing) {
       _playing = widget.state.playing;
@@ -474,6 +477,7 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _layout(Size size, TextScaler scaler) {
+    final firstLayout = _ys.isEmpty;
     final replaced = !identical(_lines, widget.state.lyrics);
     final typography = (_originalStyle, _translationStyle);
     final typographyChanged =
@@ -545,6 +549,13 @@ class _LyricViewportState extends State<LyricViewport>
       _setOffset(_offset);
     } else {
       _targets(stagger: false);
+      if (firstLayout) {
+        // The page already animates in. Start the sheet at its actual focus
+        // instead of holding overlapping rows below it until tickers resume.
+        for (final spring in _ys) {
+          spring.setPosition(spring.target);
+        }
+      }
     }
   }
 

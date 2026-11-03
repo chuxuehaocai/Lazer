@@ -563,6 +563,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                 key: const ValueKey('now-playing-cover'),
                 child: AnimatedTrackCover(
                   track: track,
+                  image: widget.state.currentArtwork.providerFor(track),
                   direction: widget.state.trackChangeDirection,
                   spring: compact ? AppleSpring.responsive : AppleSpring.smooth,
                 ),
@@ -1433,10 +1434,7 @@ class _EmptyNowPlaying extends StatelessWidget {
   }
 }
 
-/// Mutes its subtree's tickers until [settled] reports true.
-///
-/// Same shape as [_EntranceGatedBackdrop]: the child is built once and handed
-/// in, so flipping the flag rebuilds this node and nothing below it.
+/// Mutes its subtree's tickers without rebuilding the lyric page on landing.
 class _EntranceTickerGate extends StatelessWidget {
   const _EntranceTickerGate({required this.settled, required this.child});
 

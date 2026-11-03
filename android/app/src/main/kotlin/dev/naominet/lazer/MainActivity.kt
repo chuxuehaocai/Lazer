@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -27,6 +29,7 @@ import kotlin.math.roundToInt
 class MainActivity : AudioServiceActivity() {
     private var vibrator: Vibrator? = null
     private var permissionResult: MethodChannel.Result? = null
+    private var storageResult: MethodChannel.Result? = null
     private var logExportResult: MethodChannel.Result? = null
     private var logExportText: String? = null
 
@@ -92,6 +95,8 @@ class MainActivity : AudioServiceActivity() {
                 when (call.method) {
                     "hasAudioAccess" -> result.success(hasAudioAccess())
                     "requestAudioAccess" -> requestAudioAccess(result)
+                    "hasAllFilesAccess" -> result.success(hasAllFilesAccess())
+                    "requestAllFilesAccess" -> requestAllFilesAccess(result)
                     else -> result.notImplemented()
                 }
             }
@@ -123,6 +128,11 @@ class MainActivity : AudioServiceActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == STORAGE_REQUEST) {
+            storageResult?.success(hasAllFilesAccess())
+            storageResult = null
+            return
+        }
         if (requestCode != 4102) return
         val pending = logExportResult ?: return
         val text = logExportText ?: ""
@@ -217,8 +227,48 @@ class MainActivity : AudioServiceActivity() {
         }
 
     private fun hasAudioAccess(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) return true
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
         return checkSelfPermission(audioPermission()) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasAllFilesAccess(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        } else true
+
+    private fun requestAllFilesAccess(result: MethodChannel.Result) {
+        if (hasAllFilesAccess()) {
+            result.success(true)
+            return
+        }
+        if (storageResult != null || permissionResult != null) {
+            result.success(false)
+            return
+        }
+        storageResult = result
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            requestPermissions(arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ), STORAGE_REQUEST)
+            return
+        }
+        try {
+            try {
+                startActivityForResult(Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName")
+                ), STORAGE_REQUEST)
+            } catch (_: android.content.ActivityNotFoundException) {
+                startActivityForResult(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), STORAGE_REQUEST)
+            }
+        } catch (error: Exception) {
+            storageResult = null
+            result.error("storage_settings_failed", error.message, null)
+        }
     }
 
     private fun requestAudioAccess(result: MethodChannel.Result) {
@@ -227,7 +277,7 @@ class MainActivity : AudioServiceActivity() {
             return
         }
         // A permission dialog is already on screen; never stack two requests.
-        if (permissionResult != null) {
+        if (permissionResult != null || storageResult != null) {
             result.success(false)
             return
         }
@@ -241,6 +291,11 @@ class MainActivity : AudioServiceActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == STORAGE_REQUEST) {
+            storageResult?.success(hasAllFilesAccess())
+            storageResult = null
+            return
+        }
         if (requestCode != PERMISSION_REQUEST) return
         val granted = grantResults.isNotEmpty() &&
             grantResults[0] == PackageManager.PERMISSION_GRANTED
@@ -282,5 +337,6 @@ class MainActivity : AudioServiceActivity() {
         const val UPDATES_CHANNEL = "dev.naominet.lazer/updates"
         const val TELEVISION_FEATURE = "android.hardware.type.television"
         const val PERMISSION_REQUEST = 4101
+        const val STORAGE_REQUEST = 4103
     }
 }

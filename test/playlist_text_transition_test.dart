@@ -1,4 +1,7 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lazer_nextgen/data/models.dart';
@@ -24,6 +27,7 @@ class _Harness extends StatefulWidget {
 }
 
 class _HarnessState extends State<_Harness> {
+  final screen = GlobalKey();
   bool open = false;
   final scroll = ScrollController();
 
@@ -42,6 +46,7 @@ class _HarnessState extends State<_Harness> {
   @override
   Widget build(BuildContext context) => MaterialApp(
     theme: buildAppleTheme(),
+    builder: (context, child) => RepaintBoundary(key: screen, child: child),
     home: MediaQuery(
       data: MediaQueryData(disableAnimations: widget.reduced),
       child: Scaffold(
@@ -87,13 +92,17 @@ class _HarnessState extends State<_Harness> {
   );
 }
 
-Finder _label(CoverTextRole role, {bool source = false}) =>
-    find.byWidgetPredicate(
-      (widget) =>
-          widget is CoverTransitionText &&
-          widget.role == role &&
-          (widget.sourceKey != null) == source,
-    );
+Finder _label(
+  CoverTextRole role, {
+  bool source = false,
+  bool skipOffstage = true,
+}) => find.byWidgetPredicate(
+  (widget) =>
+      widget is CoverTransitionText &&
+      widget.role == role &&
+      (widget.sourceKey != null) == source,
+  skipOffstage: skipOffstage,
+);
 
 Finder _flight(CoverTextRole role) =>
     find.byKey(ValueKey('cover-transition-text-${role.name}'));
@@ -114,6 +123,108 @@ double _weight(WidgetTester tester) => tester
 
 void main() {
   tearDown(cancelCoverTransitions);
+
+  testWidgets('handoff never restores labels on a still-departing page', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const _Harness());
+    double opacity(CoverTextRole role, {required bool source}) => tester
+        .widget<Opacity>(
+          find
+              .descendant(
+                of: _label(role, source: source, skipOffstage: false),
+                matching: find.byType(Opacity, skipOffstage: false),
+                skipOffstage: false,
+              )
+              .first,
+        )
+        .opacity;
+    await tester.tap(find.byType(AppPlaylistCard));
+    await tester.pumpAndSettle();
+    for (final role in CoverTextRole.values) {
+      expect(opacity(role, source: true), 0);
+      expect(opacity(role, source: false), 1);
+    }
+    tester.state<_HarnessState>(find.byType(_Harness)).back();
+    await tester.pump();
+    for (var frame = 0; frame < 100; frame++) {
+      for (final role in CoverTextRole.values) {
+        final target = _label(role, skipOffstage: false);
+        if (target.evaluate().isNotEmpty) {
+          expect(
+            opacity(role, source: false),
+            0,
+            reason: 'departing text must stay hidden after its flight lands',
+          );
+        }
+      }
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    for (final role in CoverTextRole.values) {
+      expect(opacity(role, source: true), 1);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('departing caption pixels stay absent after the return lands', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const _Harness());
+    final state = tester.state<_HarnessState>(find.byType(_Harness));
+    await tester.tap(find.byType(AppPlaylistCard));
+    await tester.pumpAndSettle();
+    state.back();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    // Exercise the scroll handoff while the old page is still fading.
+    finishReturningCoverOnScroll(
+      tester.element(find.byType(SingleChildScrollView).first),
+    );
+    await tester.pump();
+    expect(_flight(CoverTextRole.title), findsNothing);
+    var sampled = 0;
+    for (var frame = 0; frame < 90; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      final target = _label(CoverTextRole.title, skipOffstage: false);
+      if (_flight(CoverTextRole.title).evaluate().isNotEmpty ||
+          target.evaluate().isEmpty) {
+        continue;
+      }
+      final rect = tester.getRect(target).deflate(1);
+      final dirtyPixels = await tester.runAsync(() async {
+        final boundary =
+            state.screen.currentContext!.findRenderObject()!
+                as RenderRepaintBoundary;
+        final image = await boundary.toImage();
+        try {
+          final data = await image.toByteData(
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          final pixels = data!.buffer.asUint8List();
+          var dirty = 0;
+          for (var y = rect.top.ceil(); y < rect.bottom.floor(); y++) {
+            for (var x = rect.left.ceil(); x < rect.right.floor(); x++) {
+              final offset = (y * image.width + x) * 4;
+              if (pixels[offset] < 252 ||
+                  pixels[offset + 1] < 252 ||
+                  pixels[offset + 2] < 252) {
+                dirty++;
+              }
+            }
+          }
+          return dirty;
+        } finally {
+          image.dispose();
+        }
+      });
+      expect(dirtyPixels, 0, reason: 'old header text must not flash back in');
+      sampled++;
+    }
+    expect(sampled, greaterThan(0));
+    expect(tester.takeException(), isNull);
+  });
 
   for (final compact in [false, true]) {
     testWidgets(

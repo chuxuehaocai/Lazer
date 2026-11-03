@@ -46,6 +46,48 @@ Widget _host({bool reducedMotion = false}) => MaterialApp(
 );
 
 void main() {
+  testWidgets('overview and detail never paint over one another', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host());
+    final overview = find.byKey(_overviewKey, skipOffstage: false);
+    final element = tester.element(overview);
+    double opacity(Finder child) => tester
+        .widget<FadeTransition>(
+          find
+              .ancestor(
+                of: child,
+                matching: find.byType(FadeTransition, skipOffstage: false),
+              )
+              .first,
+        )
+        .opacity
+        .value;
+    Future<void> checkFrames() async {
+      for (var frame = 0; frame < 45; frame++) {
+        final detail = find.byKey(_detailKey, skipOffstage: false);
+        if (detail.evaluate().isNotEmpty) {
+          expect(
+            opacity(overview) * opacity(detail),
+            0,
+            reason: 'settings pages must not cross-fade their controls',
+          );
+        }
+        expect(tester.element(overview), same(element));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    await tester.tap(find.byKey(_openKey));
+    await tester.pump();
+    await checkFrames();
+    await tester.tap(find.byKey(const ValueKey('settings-detail-back')));
+    await tester.pump();
+    await checkFrames();
+    expect(find.byKey(_detailKey), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('desktop detail has a page heading without an AppBar', (
     tester,
   ) async {

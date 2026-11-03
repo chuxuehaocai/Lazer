@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import '../storage/app_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/audio_quality.dart';
@@ -32,7 +32,7 @@ class PlaybackCacheController extends ChangeNotifier with BuildSafeNotifier {
     required this.library,
     Future<Directory> Function()? supportDirectory,
     DateTime Function()? now,
-  }) : _supportDirectory = supportDirectory ?? getApplicationSupportDirectory,
+  }) : _supportDirectory = supportDirectory ?? appSupportDirectory,
        _now = now ?? DateTime.now {
     _observedLibraryRevision = library.tracksRevision;
     library.addListener(_libraryChanged);

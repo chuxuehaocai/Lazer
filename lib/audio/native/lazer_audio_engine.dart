@@ -26,7 +26,7 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../storage/app_storage.dart';
 
 import '../audio_engine.dart';
 import 'audio_path_log.dart';
@@ -48,9 +48,10 @@ class NativeAudioEngine
     implements
         AudioEngine,
         BufferedAudioEngine,
+        StartupBufferReportingAudioEngine,
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
-        QueueAudioEngine,
+        SerialQueueAudioEngine,
         FailureReportingAudioEngine,
         FocusAwareAudioEngine,
         SessionPreparingAudioEngine {
@@ -96,7 +97,7 @@ class NativeAudioEngine
       ) {
         engine?._handleEvent(event, detail, positionMillis);
       });
-      streamCache ??= AudioStreamCache(getApplicationSupportDirectory);
+      streamCache ??= AudioStreamCache(appSupportDirectory);
       engine = NativeAudioEngine._(
         api,
         availability.bridge,
@@ -241,7 +242,9 @@ class NativeAudioEngine
   bool get active => _sourceLoaded;
 
   @override
-  Duration get position {
+  Duration get position => _readPosition();
+
+  Duration _readPosition() {
     final Duration? pending = _pendingSeek;
     if (pending != null) {
       final Duration age = Duration(
@@ -267,13 +270,17 @@ class NativeAudioEngine
   }
 
   @override
-  Duration? get duration => _duration;
+  Duration? get duration {
+    _readPosition();
+    return _duration;
+  }
 
   @override
   bool get seekIsLimitedByBuffer => _activeEntry?.complete == false;
 
   @override
   Duration get bufferedPosition {
+    _readPosition();
     final AudioStreamEntry? entry = _activeEntry;
     final Duration? total = _duration;
     if (entry == null) return total ?? _position;
@@ -282,6 +289,18 @@ class NativeAudioEngine
     }
     final Duration buffered = total * entry.progress;
     return buffered > _position ? buffered : _position;
+  }
+
+  @override
+  Duration? get startupBufferedPosition {
+    _readPosition();
+    final entry = _activeEntry;
+    if (entry != null &&
+        !entry.complete &&
+        (_duration == null || (entry.expectedBytes ?? 0) <= 0)) {
+      return null;
+    }
+    return bufferedPosition;
   }
 
   int? get _engineAddressOrNull => _engineAddress == 0 ? null : _engineAddress;
@@ -625,15 +644,16 @@ class NativeAudioEngine
         }
         final NativeStreamReader sourceReader = reader;
         final AudioStreamEntry sourceEntry = entry;
-        entry
-          ..onAppended = () {
+        entry.bindReader(
+          appended: () {
             sourceReader.notifyAppended();
             if (identical(_activeEntry, sourceEntry)) _emitBufferChange();
-          }
-          ..onFinished = (bool failed) {
+          },
+          finished: (bool failed) {
             sourceReader.finish(failed: failed);
             if (identical(_activeEntry, sourceEntry)) _emitBufferChange();
-          };
+          },
+        );
       }
 
       final int status = await _openWithDsdPolicy(
@@ -778,15 +798,16 @@ class NativeAudioEngine
       // the cache's unawaited download future.
       final NativeStreamReader queuedReader = reader;
       final AudioStreamEntry queuedEntry = entry;
-      entry
-        ..onAppended = () {
+      entry.bindReader(
+        appended: () {
           queuedReader.notifyAppended();
           if (identical(_activeEntry, queuedEntry)) _emitBufferChange();
-        }
-        ..onFinished = (bool failed) {
+        },
+        finished: (bool failed) {
           queuedReader.finish(failed: failed);
           if (identical(_activeEntry, queuedEntry)) _emitBufferChange();
-        };
+        },
+      );
       final int status = _status(
         await _worker.call(LazerWorkerOp.queueReader, <Object?>[
           address,

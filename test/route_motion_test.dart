@@ -37,6 +37,7 @@ Future<GlobalKey<NavigatorState>> _host(
   TargetPlatform platform = TargetPlatform.windows,
   bool reduced = false,
   TextDirection direction = TextDirection.ltr,
+  Widget? home,
 }) async {
   tester.view.physicalSize = const Size(800, 600);
   tester.view.devicePixelRatio = 1;
@@ -50,13 +51,52 @@ Future<GlobalKey<NavigatorState>> _host(
         data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
         child: Directionality(textDirection: direction, child: child!),
       ),
-      home: const SizedBox.expand(),
+      home: home ?? const SizedBox.expand(),
     ),
   );
   return nav;
 }
 
 void main() {
+  testWidgets('transparent routes never blend two pages of text', (
+    tester,
+  ) async {
+    final nav = await _host(tester, home: const Text('Overview'));
+    final route = _Route();
+    nav.currentState!.push(route);
+    await tester.pump();
+    double opacity(Finder child) => tester
+        .widgetList<FadeTransition>(
+          find.ancestor(
+            of: child,
+            matching: find.byType(FadeTransition, skipOffstage: false),
+          ),
+        )
+        .fold(1.0, (value, fade) => value * fade.opacity.value);
+    Future<void> checkFrames() async {
+      for (var frame = 0; frame < 65; frame++) {
+        final detail = find.byKey(_bodyKey, skipOffstage: false);
+        if (detail.evaluate().isNotEmpty) {
+          expect(
+            opacity(find.text('Overview', skipOffstage: false)) *
+                opacity(detail),
+            0,
+            reason:
+                'a shared background must not expose the departing page ink',
+          );
+        }
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    await checkFrames();
+    nav.currentState!.pop();
+    await tester.pump();
+    await checkFrames();
+    expect(find.byKey(_bodyKey), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final platform in TargetPlatform.values) {
     testWidgets('same page spring on ${platform.name}', (tester) async {
       final nav = await _host(tester, platform: platform);

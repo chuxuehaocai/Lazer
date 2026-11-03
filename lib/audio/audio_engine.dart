@@ -12,6 +12,12 @@ abstract interface class BufferedAudioEngine {
   Duration get bufferedPosition;
 }
 
+/// Distinguishes an empty startup buffer from an unmeasurable network stream.
+/// Unknown duration or HTTP length must not be treated as zero downloaded audio.
+abstract interface class StartupBufferReportingAudioEngine {
+  Duration? get startupBufferedPosition;
+}
+
 /// Optional notifications when an engine's buffered position changes.
 ///
 /// This is separate from playback ticks so a paused track can still paint cache
@@ -60,6 +66,10 @@ abstract interface class QueueAudioEngine {
   /// gapless hand-off. Seeks, loads and appends are not reported.
   Stream<int> get indexStream;
 }
+
+/// Queue preparation can block the same worker that accepts play commands.
+/// These engines acknowledge play before starting a successor preparation.
+abstract interface class SerialQueueAudioEngine implements QueueAudioEngine {}
 
 /// Optional engine capability: failures that happen *after* a source was loaded.
 ///

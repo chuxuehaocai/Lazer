@@ -81,7 +81,7 @@ void main() {
                 .first;
             expect(
               tester.widget<FadeTransition>(fade).opacity.value,
-              inExclusiveRange(.7, 1),
+              inExclusiveRange(0, 1),
             );
           }
           await tester.pumpAndSettle();

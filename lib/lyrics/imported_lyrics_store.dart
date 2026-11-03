@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
-import 'package:path_provider/path_provider.dart';
+import '../storage/app_storage.dart';
 
 import '../data/models.dart';
 import 'lyric_document.dart';
@@ -45,7 +45,7 @@ String _utf16(List<int> bytes, {required bool little}) {
 /// so an imported translation keeps working while the cloud copy changes.
 class ImportedLyricsStore {
   ImportedLyricsStore({Future<Directory> Function()? supportDirectory})
-    : _supportDirectory = supportDirectory ?? getApplicationSupportDirectory;
+    : _supportDirectory = supportDirectory ?? appSupportDirectory;
 
   static const String _folder = 'imported_lyrics';
   final Future<Directory> Function() _supportDirectory;

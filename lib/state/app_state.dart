@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../audio/audio_engine.dart';
 import '../audio/hifi_controller.dart';
 import '../cache/playback_cache.dart';
+import '../cache/current_artwork.dart';
 import '../diagnostics/build_info.dart';
 import '../downloads/download_manager.dart';
 import '../interaction/app_haptics.dart';
@@ -874,6 +875,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   final Future<Color?> Function(String?) artworkSeedLoader;
+  final CurrentArtworkCache currentArtwork = CurrentArtworkCache();
   int _paletteGeneration = 0;
   (String?, String?)? _paletteIdentity;
 
@@ -882,6 +884,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> refreshArtworkSeed() async {
     final Track? track = current;
+    currentArtwork.update(track);
     final identity = (track?.id, track?.coverUrl);
     if (_paletteIdentity == identity) return;
     _paletteIdentity = identity;
@@ -1320,6 +1323,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool lyricsImported = false;
   String? _lyricsTrackId;
   int _lyricGeneration = 0;
+  final _lyricSnapshots = <(String, String, String?), _LyricsSnapshot>{};
+  ((String, String, String?), Future<void>)? _lyricRequest;
   final Set<String> _metadataLoaded = <String>{};
   final Set<String> _metadataPending = <String>{};
   Set<int> _likedSongIds = <int>{};
@@ -1849,6 +1854,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _stationLoading = false;
     _stationSeen.clear();
     _queue = <Track>[];
+    currentArtwork.update(null);
+    _lyricSnapshots.clear();
+    _lyricRequest = null;
     _markQueueChanged();
     _queueIndex = 0;
     _position = Duration.zero;
@@ -2653,7 +2661,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     unawaited(_recordCurrentLocally());
     unawaited(_ensureStationBuffer());
     if (_playing) unawaited(_startWhenBuffered(generation, url));
-    unawaited(_prefetchNext());
+    if (engine is! SerialQueueAudioEngine) unawaited(_prefetchNext());
     notifyListeners();
   }
 
@@ -2759,6 +2767,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// calls through [NoSuchMethodError].
   static Duration? _bufferedAhead(BufferedAudioEngine engine) {
     try {
+      if (engine is StartupBufferReportingAudioEngine) {
+        return (engine as StartupBufferReportingAudioEngine)
+            .startupBufferedPosition;
+      }
       return engine.bufferedPosition;
     } catch (_) {
       return null;
@@ -2829,7 +2841,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // playing state. Calling play is harmless for engines that preserved
     // playback and is required for engines that reopened the source.
     unawaited(_resumeAudio());
-    unawaited(_prefetchNext());
+    if (engine is! SerialQueueAudioEngine) unawaited(_prefetchNext());
   }
 
   /// The platform moved to the queued track on its own — the gapless hand-off.
@@ -2928,6 +2940,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queue = snapshot.tracks;
     _markQueueChanged();
     _queueIndex = snapshot.index;
+    currentArtwork.update(current);
     notifyListeners();
   }
 
@@ -2999,6 +3012,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       checkScheduledPause();
       if (!_playing) {
         await audioEngine!.pause();
+      } else if (audioEngine is SerialQueueAudioEngine &&
+          generation == _generation &&
+          _queuedNextIndex == null) {
+        // Native queue preparation shares the transport worker. A slow next
+        // source must never get in front of this source's first play command.
+        unawaited(_prefetchNext());
       }
     } catch (_) {
       if (generation == _generation) _failPlayback('播放中断，请重试。');
@@ -3053,48 +3072,82 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> ensureCurrentLyrics({bool force = false}) async {
     final track = current;
-    if (track == null) return;
+    if (track == null || _presentationDisposed) return;
     if (force) {
+      _lyricSnapshots.remove(_lyricsKey(track));
       await catalog.invalidateLyrics(track.id);
       if (current?.id != track.id) return;
     }
     if (!force &&
         _lyricsTrackId == track.id &&
-        (lyricsLoading || lyrics.isNotEmpty || lyricsPureMusic)) {
+        (lyricsLoading || lyricsError == null)) {
+      if (lyricsLoading) await _lyricRequest?.$2;
       return;
     }
-    await _loadLyrics();
+    await _loadLyrics(refresh: force);
   }
 
-  Future<void> _loadLyrics() async {
+  (String, String, String?) _lyricsKey(Track track) =>
+      (activeConnectionKey, track.id, track.localPath);
+
+  void _rememberLyrics((String, String, String?) key) {
+    if (_presentationDisposed) return;
+    _lyricSnapshots
+      ..remove(key)
+      ..[key] = _LyricsSnapshot(lyrics, lyricsPureMusic, lyricsImported);
+    while (_lyricSnapshots.length > 8) {
+      _lyricSnapshots.remove(_lyricSnapshots.keys.first);
+    }
+  }
+
+  Future<void> _loadLyrics({bool refresh = false}) {
+    if (_presentationDisposed) return Future<void>.value();
     final track = current;
+    final key = track == null ? null : _lyricsKey(track);
+    final request = _lyricRequest;
+    if (!refresh && key != null && request?.$1 == key) return request!.$2;
+    _lyricRequest = null;
     final generation = ++_lyricGeneration;
-    lyrics = const <LyricLine>[];
+    final snapshot = _lyricSnapshots.remove(key);
+    final cached =
+        !refresh &&
+            snapshot != null &&
+            DateTime.now().difference(snapshot.savedAt) <
+                const Duration(days: 7)
+        ? snapshot
+        : null;
+    lyrics = cached?.lines ?? const <LyricLine>[];
     lyricsError = null;
-    lyricsImported = false;
+    lyricsImported = cached?.imported ?? false;
     _lyricsTrackId = track?.id;
-    lyricsLoading = track != null;
-    lyricsPureMusic = false;
+    lyricsLoading = track != null && cached == null;
+    lyricsPureMusic = cached?.pureMusic ?? false;
+    // Both resources start at selection time, independent of audio loading
+    // and of whether the player page has ever been mounted.
+    currentArtwork.update(track);
     notifyListeners();
-    if (track == null) return;
-    // The imported copy is read in parallel and never blocks the sheet: a slow
-    // or unavailable plugin should not keep the spinner up, and the imported
-    // lyrics still win whenever they arrive for this track.
-    unawaited(
-      importedLyrics
-          .read(track)
-          .then((String? imported) {
-            if (imported == null || generation != _lyricGeneration) return;
-            lyrics = parseLrc(imported);
-            lyricsImported = true;
-            lyricsPureMusic = false;
-            lyricsError = null;
-            lyricsLoading = false;
-            notifyListeners();
-          })
-          .catchError((Object _) {}),
-    );
+    if (track == null || key == null) return Future<void>.value();
+    if (cached != null) {
+      _lyricSnapshots[key] = cached;
+      _checkImportedLyrics(track, key, generation);
+      return Future<void>.value();
+    }
+    late final Future<void> loading;
+    loading = _readLyrics(track, key, generation).whenComplete(() {
+      if (identical(_lyricRequest?.$2, loading)) _lyricRequest = null;
+    });
+    _lyricRequest = (key, loading);
+    return loading;
+  }
+
+  Future<void> _readLyrics(
+    Track track,
+    (String, String, String?) key,
+    int generation,
+  ) async {
+    _checkImportedLyrics(track, key, generation);
     Object? failure;
+    bool cacheable = false;
     final bool localOnly =
         track.localPath != null || track.id.startsWith('local:');
     if (!localOnly) {
@@ -3102,9 +3155,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         final payload = await catalog.lyricsFor(track);
         if (generation != _lyricGeneration) return;
         if (!lyricsImported) {
-          lyrics = payload == null ? const <LyricLine>[] : parseLyrics(payload);
+          lyrics = payload == null
+              ? const <LyricLine>[]
+              : List<LyricLine>.unmodifiable(parseLyrics(payload));
           lyricsPureMusic = payload?.pureMusic ?? false;
         }
+        cacheable = payload != null;
       } catch (error) {
         if (generation != _lyricGeneration) return;
         failure = error;
@@ -3122,27 +3178,58 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           lyrics.isEmpty &&
           !lyricsImported &&
           !lyricsPureMusic) {
-        lyrics = parseLrc(sidecar);
+        lyrics = List<LyricLine>.unmodifiable(parseLrc(sidecar));
+        cacheable = true;
       }
     }
     if (lyrics.isEmpty && failure != null) {
       lyricsError = '歌词暂时无法加载。';
     }
     lyricsLoading = false;
+    if (cacheable || lyricsImported || localOnly) _rememberLyrics(key);
     notifyListeners();
+  }
+
+  void _checkImportedLyrics(
+    Track track,
+    (String, String, String?) key,
+    int generation,
+  ) {
+    // The imported copy is read in parallel and never blocks the sheet: a slow
+    // or unavailable plugin should not keep the spinner up, and the imported
+    // lyrics still win whenever they arrive for this track.
+    unawaited(
+      importedLyrics
+          .read(track)
+          .then((String? imported) {
+            if (imported == null || generation != _lyricGeneration) return;
+            lyrics = List<LyricLine>.unmodifiable(parseLrc(imported));
+            lyricsImported = true;
+            lyricsPureMusic = false;
+            lyricsError = null;
+            lyricsLoading = false;
+            _rememberLyrics(key);
+            notifyListeners();
+          })
+          .catchError((Object _) {}),
+    );
   }
 
   /// Saves user-provided lyrics for [track] and refreshes it when current.
   Future<bool> saveImportedLyrics(Track track, String content) async {
     final bool saved = await importedLyrics.save(track, content);
-    if (saved && current?.id == track.id) await _loadLyrics();
+    if (saved) {
+      _lyricSnapshots.remove(_lyricsKey(track));
+      if (current?.id == track.id) await _loadLyrics(refresh: true);
+    }
     return saved;
   }
 
   /// Drops the imported copy so the cloud (or the sidecar) is used again.
   Future<void> clearImportedLyrics(Track track) async {
     await importedLyrics.delete(track);
-    if (current?.id == track.id) await _loadLyrics();
+    _lyricSnapshots.remove(_lyricsKey(track));
+    if (current?.id == track.id) await _loadLyrics(refresh: true);
   }
 
   void _failPlayback(String message) {
@@ -3538,6 +3625,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _musicPlatforms.cancelPending();
     catalog.connections.close();
     _presentationDisposed = true;
+    _lyricSnapshots.clear();
+    _lyricRequest = null;
+    currentArtwork.dispose();
     ++_seekRequest;
     playerPresented.dispose();
     browseTransitionActive.dispose();
@@ -3560,6 +3650,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     playbackCache.dispose();
     super.dispose();
   }
+}
+
+class _LyricsSnapshot {
+  _LyricsSnapshot(this.lines, this.pureMusic, this.imported)
+    : savedAt = DateTime.now();
+  final List<LyricLine> lines;
+  final bool pureMusic, imported;
+  final DateTime savedAt;
 }
 
 enum LoopMode { off, all, one }

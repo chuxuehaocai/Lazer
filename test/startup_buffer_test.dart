@@ -83,6 +83,44 @@ class _BufferingEngine implements AudioEngine, BufferedAudioEngine {
   }
 }
 
+class _QueueBufferingEngine extends _BufferingEngine
+    implements SerialQueueAudioEngine {
+  int appends = 0;
+  bool preparedBeforePlay = false;
+
+  @override
+  Future<int> setQueue(List<String> urls, {int startIndex = 0}) async {
+    await setUrl(urls[startIndex]);
+    return 1;
+  }
+
+  @override
+  Future<bool> appendToQueue(int queueId, String url) async {
+    appends++;
+    if (plays == 0) preparedBeforePlay = true;
+    return true;
+  }
+
+  @override
+  Future<void> play() async {
+    if (preparedBeforePlay) {
+      throw StateError('successor probe is blocking the transport worker');
+    }
+    await super.play();
+  }
+
+  @override
+  Future<bool> playQueuedNext() async => false;
+  @override
+  Stream<int> get indexStream => const Stream.empty();
+}
+
+class _UnknownBufferEngine extends _BufferingEngine
+    implements StartupBufferReportingAudioEngine {
+  @override
+  Duration? get startupBufferedPosition => null;
+}
+
 /// Lets the load path run to the point where it is waiting on the buffer.
 Future<void> _settle([int turns = 8]) async {
   for (var i = 0; i < turns; i++) {
@@ -103,6 +141,30 @@ void main() {
     audioEngine: engine,
     startupBufferTarget: target,
     startupBufferDeadline: deadline,
+  );
+
+  test(
+    'first play precedes a successor probe on the shared native worker',
+    () async {
+      final engine = _QueueBufferingEngine();
+      final state = stateFor(engine);
+      addTearDown(state.dispose);
+      state.playQueue([_track('first'), _track('successor')]);
+      await _settle();
+      expect(engine.plays, 0);
+      expect(
+        engine.appends,
+        0,
+        reason: 'no blocking queue work before first play',
+      );
+      engine.buffered = const Duration(seconds: 5);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      expect(engine.plays, 1);
+      expect(engine.appends, 1);
+      expect(engine.preparedBeforePlay, isFalse);
+      expect(state.playbackError, isNull);
+      expect(state.audioReady, isTrue);
+    },
   );
 
   test(
@@ -136,6 +198,20 @@ void main() {
     expect(engine.plays, 1);
     expect(state.startupBuffering, isFalse);
   });
+
+  test(
+    'a native stream with unknown length starts on the first request',
+    () async {
+      final engine = _UnknownBufferEngine();
+      final state = stateFor(engine);
+      addTearDown(state.dispose);
+      state.playQueue([_track('unknown-length')]);
+      await _settle();
+      expect(engine.plays, 1);
+      expect(state.startupBuffering, isFalse);
+      expect(state.audioReady, isTrue);
+    },
+  );
 
   test('a local or cached file starts immediately', () async {
     final engine = _BufferingEngine();

@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,16 +23,19 @@ class _ReturnHarness extends StatefulWidget {
     this.reducedMotion = false,
     this.artwork,
     this.scrollAxis,
+    this.inset = EdgeInsets.zero,
   });
   final bool reducedMotion;
   final Widget? artwork;
   final Axis? scrollAxis;
+  final EdgeInsets inset;
 
   @override
   State<_ReturnHarness> createState() => _ReturnHarnessState();
 }
 
 class _ReturnHarnessState extends State<_ReturnHarness> {
+  final screen = GlobalKey();
   GlobalKey source = GlobalKey();
   final ValueNotifier<Offset> sourceOffset = ValueNotifier(
     const Offset(20, 24),
@@ -69,64 +74,69 @@ class _ReturnHarnessState extends State<_ReturnHarness> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    builder: (context, child) => RepaintBoundary(key: screen, child: child),
     home: MediaQuery(
       data: MediaQueryData(disableAnimations: widget.reducedMotion),
       child: Scaffold(
-        body: RetainedContentSwitcher(
-          currentKey: open ? 'detail' : 'root',
-          retainKeys: open ? const {'root'} : const {},
-          duration: widget.reducedMotion
-              ? Duration.zero
-              : const Duration(milliseconds: 420),
-          page: open
-              ? Stack(
-                  children: [
-                    Positioned(
-                      left: 300,
-                      top: 160,
-                      child: CoverTransitionTarget(
-                        identity: 'return-fixture',
-                        size: 190,
-                        child:
-                            widget.artwork ??
-                            const ColoredBox(color: Colors.teal),
+        backgroundColor: Colors.white,
+        body: Padding(
+          padding: widget.inset,
+          child: RetainedContentSwitcher(
+            currentKey: open ? 'detail' : 'root',
+            retainKeys: open ? const {'root'} : const {},
+            duration: widget.reducedMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 420),
+            page: open
+                ? Stack(
+                    children: [
+                      Positioned(
+                        left: 300,
+                        top: 160,
+                        child: CoverTransitionTarget(
+                          identity: 'return-fixture',
+                          size: 190,
+                          child:
+                              widget.artwork ??
+                              const ColoredBox(color: Colors.teal),
+                        ),
                       ),
-                    ),
-                  ],
-                )
-              : ValueListenableBuilder<Offset>(
-                  valueListenable: sourceOffset,
-                  builder: (context, offset, _) {
-                    final content = Stack(
-                      children: [
-                        if (!sourceRemoved)
-                          Positioned(
-                            left: offset.dx,
-                            top: offset.dy,
-                            child: CoverTransitionSource(
-                              key: source,
-                              identity: 'return-fixture',
-                              child: const SizedBox.square(
-                                dimension: 90,
-                                child: ColoredBox(color: Colors.teal),
+                    ],
+                  )
+                : ValueListenableBuilder<Offset>(
+                    valueListenable: sourceOffset,
+                    builder: (context, offset, _) {
+                      final content = Stack(
+                        children: [
+                          if (!sourceRemoved)
+                            Positioned(
+                              left: offset.dx,
+                              top: offset.dy,
+                              child: CoverTransitionSource(
+                                key: source,
+                                identity: 'return-fixture',
+                                child: const SizedBox.square(
+                                  dimension: 90,
+                                  child: ColoredBox(color: Colors.teal),
+                                ),
                               ),
                             ),
-                          ),
-                      ],
-                    );
-                    final axis = widget.scrollAxis;
-                    if (axis == null) return content;
-                    return SingleChildScrollView(
-                      controller: scroll,
-                      scrollDirection: axis,
-                      child: SizedBox(
-                        width: axis == Axis.horizontal ? 2400 : 800,
-                        height: axis == Axis.vertical ? 1800 : 600,
-                        child: content,
-                      ),
-                    );
-                  },
-                ),
+                        ],
+                      );
+                      final axis = widget.scrollAxis;
+                      if (axis == null) return content;
+                      return SingleChildScrollView(
+                        controller: scroll,
+                        scrollDirection: axis,
+                        child: SizedBox(
+                          width: axis == Axis.horizontal ? 2400 : 800,
+                          height: axis == Axis.vertical ? 1800 : 600,
+                          child: content,
+                        ),
+                      );
+                    },
+                  ),
+          ),
         ),
       ),
     ),
@@ -229,6 +239,59 @@ Future<void> _settle(WidgetTester tester) async {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   tearDown(cancelCoverTransitions);
+
+  testWidgets('return overlays stay inside the content pane on every frame', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(600, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      const _ReturnHarness(inset: EdgeInsets.fromLTRB(80, 100, 40, 30)),
+    );
+    final state = tester.state<_ReturnHarnessState>(
+      find.byType(_ReturnHarness),
+    );
+    // A retained, scrolled card can sit partly above or beside its viewport.
+    state.moveSource(const Offset(-55, -70));
+    await tester.pump();
+    for (final returning in [false, true]) {
+      if (returning) {
+        state.back();
+      } else {
+        state.enter();
+      }
+      await tester.pump();
+      for (final milliseconds in [0, 80, 80, 120, 180, 300]) {
+        await tester.pump(Duration(milliseconds: milliseconds));
+        final pixels = await tester.runAsync(() async {
+          final boundary =
+              state.screen.currentContext!.findRenderObject()!
+                  as RenderRepaintBoundary;
+          final image = await boundary.toImage();
+          try {
+            final data = await image.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            );
+            return data!.buffer.asUint8List();
+          } finally {
+            image.dispose();
+          }
+        });
+        for (final point in [const Offset(95, 65), const Offset(50, 120)]) {
+          final offset = (point.dy.toInt() * 600 + point.dx.toInt()) * 4;
+          expect(
+            pixels!.sublist(offset, offset + 4),
+            [255, 255, 255, 255],
+            reason:
+                'cover overlays must never paint over chrome or safe insets',
+          );
+        }
+      }
+      await tester.pumpAndSettle();
+    }
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('return flies from detail into the live source and reveals it', (
     tester,

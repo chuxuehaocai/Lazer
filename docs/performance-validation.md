@@ -1,5 +1,49 @@
 # Rendering and resource validation
 
+## Player readiness and navigation handoff
+
+Selecting a track now starts decoding its 1024-pixel artwork before the player
+page is opened. One image-stream listener pins the current cover in memory;
+selecting another artwork releases that owner and its retained cache entry.
+Tracks sharing an album cover reuse the decode. Thumbnails keep their smaller
+rendition keys. A late first image frame invalidates a moving page's snapshot,
+so opening during a download does not freeze the placeholder until landing.
+
+Lyrics start loading at the same selection event. The current request is joined
+by subsequent player opens, and up to eight recent parsed lyric sheets are kept
+in memory, including word timings and translations. Raw service lyrics still
+use the existing seven-day disk cache. Forced refresh and imported-lyric edits
+invalidate the parsed sheet; delayed responses cannot replace a newer
+selection. Imported lyrics retain priority over cloud and sidecar copies.
+
+The first lyric layout places rows at the current focus immediately instead of
+stacking them below the viewport while entrance tickers are muted. The player
+still snapshots the transition: local native-window measurements showed that
+removing the snapshot increased raster work during the slide. Resource arrivals
+refresh it without waiting for the transition to finish.
+
+Settings content fades through the shared background, rather than blending two
+sets of controls. Both routed and embedded presentations use this rule. Cover
+and caption overlays are clipped to their content pane; the departing page
+keeps its duplicate artwork and captions hidden after the flight hands back to
+the destination. Retained pages preserve scroll positions and focus.
+
+Focused checks include `test/current_artwork_test.dart`,
+`test/lyrics_cache_test.dart`, `test/settings_subview_transition_test.dart`,
+`test/route_motion_test.dart`, `test/cover_return_transition_test.dart` and
+`test/playlist_text_transition_test.dart`. They verify decoded-memory reuse,
+late resource arrivals during an active snapshot, cache eviction, stale lyric
+responses, transition opacity, and painted pixels outside the navigation pane
+or in a departing caption's old position.
+
+`tool/player_lifecycle_profile.dart` records build/raster maxima as well as
+percentiles and accepts `--dart-define=PROFILE_OUTPUT=...`. Its timing callback
+filters frames by vsync timestamp and drains batched reports after the sampling
+window, so a late report is attributed to the phase that produced it. Native
+timings remain specific to the device, viewport and renderer used.
+
+## Earlier measurements
+
 The changes reduce repeated work in lyrics, artwork loading, cache maintenance
 and page transitions. They preserve word timing, layout and access to controls.
 The measurements below come from local Windows comparisons; they establish

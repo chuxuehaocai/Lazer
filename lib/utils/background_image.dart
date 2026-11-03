@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
+import '../storage/app_storage.dart';
 
 /// Image formats the backdrop can decode, shared by the picker filter and the
 /// extension keeper.
@@ -43,11 +43,11 @@ const String _filePrefix = 'background_';
 /// The preference holds only the file name. iOS can change the sandbox
 /// container path between launches; an absolute path then points at nothing
 /// even though the file still exists in the new container. Keeping the name
-/// and resolving it through `getApplicationSupportDirectory` makes the
+/// and resolving it through `appSupportDirectory` makes the
 /// backdrop survive a relaunch, an update or the app being killed.
 class BackgroundImageStore {
   BackgroundImageStore({Future<Directory> Function()? directory})
-    : _directory = directory ?? getApplicationSupportDirectory;
+    : _directory = directory ?? appSupportDirectory;
 
   final Future<Directory> Function() _directory;
 

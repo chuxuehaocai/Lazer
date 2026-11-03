@@ -109,6 +109,9 @@ class _MusicPlatformState {
     state._lyricGeneration++;
     await state.audioEngine?.stop();
     state._queue = [];
+    state.currentArtwork.update(null);
+    state._lyricSnapshots.clear();
+    state._lyricRequest = null;
     state._queueIndex = 0;
     state._markQueueChanged();
     state._position = Duration.zero;

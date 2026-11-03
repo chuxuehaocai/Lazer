@@ -52,7 +52,13 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
     vsync: this,
     duration: const Duration(milliseconds: 260),
   )..addStatusListener(_transitionChanged);
-  late final _overviewOpacity = ReverseAnimation(_transition);
+  // Fade through the shared canvas so the two sets of controls never blend.
+  late final _overviewOpacity = ReverseAnimation(
+    _transition.drive(CurveTween(curve: const Interval(0, .35))),
+  );
+  late final _detailOpacity = _transition.drive(
+    CurveTween(curve: const Interval(.35, 1)),
+  );
   late final _overviewPosition = Tween<Offset>(
     begin: Offset.zero,
     end: const Offset(-.025, 0),
@@ -138,9 +144,9 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
                 AnimatedBuilder(
                   animation: _transition,
                   builder: (context, child) => Offstage(
-                    offstage: _transition.value == 1,
+                    offstage: _overviewOpacity.value == 0,
                     child: TickerMode(
-                      enabled: _transition.value != 1,
+                      enabled: _overviewOpacity.value != 0,
                       child: child!,
                     ),
                   ),
@@ -169,7 +175,7 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
                       child: IgnorePointer(
                         ignoring: !active,
                         child: FadeTransition(
-                          opacity: _transition,
+                          opacity: _detailOpacity,
                           child: SlideTransition(
                             position: _detailPosition,
                             child: RepaintBoundary(

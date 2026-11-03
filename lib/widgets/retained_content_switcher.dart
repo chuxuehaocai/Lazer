@@ -3,6 +3,7 @@ import 'package:flutter/physics.dart';
 
 import '../animation/apple_spring.dart';
 import '../animation/motion_snapshot.dart';
+import 'cover_transition.dart';
 
 /// Keeps only the live navigation ancestors, at stable positions in the tree.
 /// Returning to a shelf therefore preserves its scroll offsets and image cache.
@@ -183,12 +184,14 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
   }
 
   @override
-  Widget build(BuildContext context) => Stack(
-    fit: widget.expand ? StackFit.expand : StackFit.loose,
-    alignment: Alignment.topCenter,
-    children: <Widget>[
-      for (final item in _pages.entries) _page(item.key, item.value),
-    ],
+  Widget build(BuildContext context) => CoverTransitionViewport(
+    child: Stack(
+      fit: widget.expand ? StackFit.expand : StackFit.loose,
+      alignment: Alignment.topCenter,
+      children: <Widget>[
+        for (final item in _pages.entries) _page(item.key, item.value),
+      ],
+    ),
   );
 
   Widget _page(String key, _RetainedPage entry) {

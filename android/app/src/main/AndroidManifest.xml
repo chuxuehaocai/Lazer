@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
     <!-- Android TV: the app runs on televisions and set-top boxes, but the
          same APK must stay installable on touch phones and tablets. Leanback
          is optional, and the touch screen is not required. -->
@@ -16,6 +18,7 @@
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.hardware.type.watch" android:required="false" />
     <application
+        android:requestLegacyExternalStorage="true"
         android:enableOnBackInvokedCallback="true"
         android:label="Lazer"
         android:name="${applicationName}"

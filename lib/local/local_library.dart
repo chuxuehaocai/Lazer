@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import '../storage/app_storage.dart';
 
 import '../data/audio_quality.dart';
 import '../data/models.dart';
@@ -117,9 +117,8 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
     Future<Directory> Function()? documentsDirectory,
     Future<bool> Function(String path)? fileExists,
   }) : _fileExists = fileExists ?? _defaultFileExists,
-       _supportDirectory = supportDirectory ?? getApplicationSupportDirectory,
-       _documentsDirectory =
-           documentsDirectory ?? getApplicationDocumentsDirectory;
+       _supportDirectory = supportDirectory ?? appSupportDirectory,
+       _documentsDirectory = documentsDirectory ?? appDocumentsDirectory;
 
   static const String _documentsPrefix = 'documents:';
   static const String _manifestName = 'local_library.json';

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'storage/app_storage.dart';
 import 'animation/apple_spring.dart';
 
 import 'package:flutter/material.dart';
@@ -117,6 +118,7 @@ Future<void> main() async {
       final Future<bool> televisionFuture = detectTelevision();
       final watchFuture = detectWatch();
       final prefs = await prefsFuture;
+      await AppStorage.shared.initialize(prefs);
       LazerAudioLoader.importedLibraryPath = prefs.getString(
         'lazer_native_engine_path',
       );

@@ -472,6 +472,8 @@ class _JustAudioBackend implements StillAliveAudioBackend {
     // just_audio's future lasts until pause/completion. The page needs to
     // remain responsive now, with late failures delivered through [errors].
     unawaited(_player.play().catchError(_error));
+    // Restarting while already playing may emit no new player-state event.
+    _report();
   }
 
   @override

@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../storage/app_storage.dart';
 
 import 'lazer_audio_library.dart';
 
@@ -41,7 +41,7 @@ Future<String?> importAudioEngine() async {
   if (engines.length != 1) {
     throw const FormatException('请选择一个 lazer-audio 引擎文件，可同时选择依赖库');
   }
-  final Directory support = await getApplicationSupportDirectory();
+  final Directory support = await appSupportDirectory();
   final Directory directory = Directory(
     '${support.path}/audio-engines/${DateTime.now().microsecondsSinceEpoch}',
   );

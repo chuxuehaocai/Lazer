@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../utils/artwork.dart';
+import '../animation/motion_snapshot.dart';
 import 'artwork_image.dart';
 
 /// Displays artwork from the media cache, decoded at the size it is painted.
@@ -17,12 +18,14 @@ class PlateArt extends StatelessWidget {
     this.radius,
     this.coverUrl,
     this.size,
+    this.image,
   });
 
   final int seed;
   final int accent;
   final BorderRadius? radius;
   final String? coverUrl;
+  final ImageProvider? image;
 
   /// Painted edge in logical pixels; drives the CDN rendition.
   final double? size;
@@ -48,16 +51,26 @@ class PlateArt extends StatelessWidget {
     );
     return ClipRRect(
       borderRadius: radius ?? BorderRadius.zero,
-      child: url == null || url.isEmpty
+      child: image == null && (url == null || url.isEmpty)
           ? fallback
           : Image(
-              image: ArtworkImage.forSize(
-                url,
-                logicalEdge: size,
-                devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
-              ),
+              image:
+                  image ??
+                  ArtworkImage.forSize(
+                    url!,
+                    logicalEdge: size,
+                    devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+                  ),
               fit: BoxFit.cover,
               gaplessPlayback: true,
+              frameBuilder: image == null
+                  ? null
+                  : (context, child, frame, synchronous) {
+                      if (frame == 0 && !synchronous) {
+                        MotionSnapshot.invalidate(context);
+                      }
+                      return child;
+                    },
               errorBuilder:
                   (BuildContext context, Object error, StackTrace? _) =>
                       fallback,

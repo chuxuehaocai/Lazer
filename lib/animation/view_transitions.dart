@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 
 import '../widgets/retained_content_switcher.dart';
+import '../widgets/cover_transition.dart';
 import 'apple_spring.dart';
 import 'motion_snapshot.dart';
 
@@ -300,19 +301,47 @@ class _SpringPageSurface extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => SlideTransition(
-    position: Tween(
-      begin: Offset.zero,
-      end: const Offset(-.3, 0),
-    ).animate(secondaryAnimation),
-    textDirection: Directionality.of(context),
-    child: SlideTransition(
-      position: Tween(
-        begin: const Offset(1, 0),
-        end: Offset.zero,
-      ).animate(animation),
-      textDirection: Directionality.of(context),
-      child: MotionSnapshot(animation: animation, child: child),
+  Widget build(BuildContext context) => CoverTransitionViewport(
+    child: _PageInkTransition(
+      animation: animation,
+      secondaryAnimation: secondaryAnimation,
+      child: SlideTransition(
+        position: Tween(
+          begin: Offset.zero,
+          end: const Offset(-.3, 0),
+        ).animate(secondaryAnimation),
+        textDirection: Directionality.of(context),
+        child: SlideTransition(
+          position: Tween(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(animation),
+          textDirection: Directionality.of(context),
+          child: MotionSnapshot(animation: animation, child: child),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Transparent routes share the canvas, while their text never cross-fades.
+class _PageInkTransition extends StatelessWidget {
+  const _PageInkTransition({
+    required this.animation,
+    required this.secondaryAnimation,
+    required this.child,
+  });
+  final Animation<double> animation, secondaryAnimation;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: animation.drive(CurveTween(curve: const Interval(.35, 1))),
+    child: FadeTransition(
+      opacity: ReverseAnimation(
+        secondaryAnimation.drive(CurveTween(curve: const Interval(0, .35))),
+      ),
+      child: child,
     ),
   );
 }
@@ -328,7 +357,11 @@ class LazerPageTransitionsBuilder extends PageTransitionsBuilder {
     Widget child,
   ) {
     if (MediaQuery.disableAnimationsOf(context)) return child;
-    return _RouteTransition(animation: animation, child: child);
+    return _RouteTransition(
+      animation: animation,
+      secondaryAnimation: secondaryAnimation,
+      child: child,
+    );
   }
 }
 
@@ -336,8 +369,12 @@ class LazerPageTransitionsBuilder extends PageTransitionsBuilder {
 /// interrupts an entrance. Merely swapping ease-out for its flipped curve at
 /// that point would move the page before the reverse has even taken a frame.
 class _RouteTransition extends StatefulWidget {
-  const _RouteTransition({required this.animation, required this.child});
-  final Animation<double> animation;
+  const _RouteTransition({
+    required this.animation,
+    required this.secondaryAnimation,
+    required this.child,
+  });
+  final Animation<double> animation, secondaryAnimation;
   final Widget child;
 
   @override
@@ -388,13 +425,16 @@ class _RouteTransitionState extends State<_RouteTransition> {
   }
 
   @override
-  Widget build(BuildContext context) => FadeTransition(
-    opacity: _motion,
-    child: SlideTransition(
-      position: _motion.drive(
-        Tween<Offset>(begin: const Offset(.035, 0), end: Offset.zero),
+  Widget build(BuildContext context) => CoverTransitionViewport(
+    child: _PageInkTransition(
+      animation: widget.animation,
+      secondaryAnimation: widget.secondaryAnimation,
+      child: SlideTransition(
+        position: _motion.drive(
+          Tween<Offset>(begin: const Offset(.035, 0), end: Offset.zero),
+        ),
+        child: MotionSnapshot(animation: widget.animation, child: widget.child),
       ),
-      child: MotionSnapshot(animation: widget.animation, child: widget.child),
     ),
   );
 }

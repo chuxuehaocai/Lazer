@@ -1,7 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/lyrics.dart';
@@ -24,7 +20,7 @@ double _referenceEaseOut(double x) {
   return 3 * (1 - t) * t * t + t * t * t;
 }
 
-LyricLine _line(int index) {
+LyricLine _line() {
   final words = <LyricWord>[
     for (var i = 0; i < 24; i++)
       LyricWord(
@@ -194,7 +190,7 @@ void main() {
             child: SizedBox(
               width: 500,
               child: TimedLyricText(
-                line: _line(0),
+                line: _line(),
                 style: const TextStyle(fontSize: 16),
                 active: true,
                 emphasis: () => focus,
@@ -249,83 +245,4 @@ void main() {
       );
     },
   );
-
-  testWidgets('records lyric layout and paint costs with synthetic text', (
-    tester,
-  ) async {
-    final repaint = ValueNotifier(0);
-    addTearDown(repaint.dispose);
-    var position = const Duration(milliseconds: 1800);
-    final lines = List<LyricLine>.generate(16, _line);
-    final layouts = <int>[];
-    for (var iteration = 0; iteration < 8; iteration++) {
-      await tester.pumpWidget(const SizedBox.shrink());
-      final watch = Stopwatch()..start();
-      await tester.pumpWidget(
-        Directionality(
-          textDirection: TextDirection.ltr,
-          child: Column(
-            children: [
-              for (var i = 0; i < lines.length; i++)
-                SizedBox(
-                  width: 760,
-                  height: 30,
-                  child: TimedLyricText(
-                    line: lines[i],
-                    style: const TextStyle(fontSize: 12),
-                    active: i == 0,
-                    position: () => position,
-                    repaint: repaint,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      );
-      layouts.add(watch.elapsedMicroseconds);
-    }
-    final finder = find.descendant(
-      of: find.byType(TimedLyricText).first,
-      matching: find.byType(CustomPaint),
-    );
-    final painter = tester.widget<CustomPaint>(finder).painter!;
-    final size = tester.getSize(finder);
-    final canvas = TestRecordingCanvas();
-    painter.paint(canvas, size);
-    final layers = canvas.invocations
-        .where((call) => call.invocation.memberName == #saveLayer)
-        .length;
-    final paints = <int>[];
-    for (var round = 0; round < 7; round++) {
-      final watch = Stopwatch()..start();
-      for (var frame = 0; frame < 300; frame++) {
-        position = Duration(milliseconds: 1200 + frame * 10);
-        final recorder = ui.PictureRecorder();
-        painter.paint(Canvas(recorder), size);
-        recorder.endRecording().dispose();
-      }
-      paints.add(watch.elapsedMicroseconds);
-    }
-    layouts.sort();
-    paints.sort();
-    final result = {
-      'layout_16_rows_median_ms': layouts[layouts.length ~/ 2] / 1000,
-      'paint_300_frames_median_ms': paints[paints.length ~/ 2] / 1000,
-      'active_row_save_layers': layers,
-      'active_row_paragraphs': canvas.invocations
-          .where((call) => call.invocation.memberName == #drawParagraph)
-          .length,
-    };
-    // Timings are observational; regression gates assert work, not host speed.
-    // ignore: avoid_print
-    print('LYRIC_RENDER_PROFILE ${jsonEncode(result)}');
-    const output = String.fromEnvironment('LYRIC_PROFILE_OUTPUT');
-    if (output.isNotEmpty) {
-      await tester.runAsync(
-        () => File(output).writeAsString(jsonEncode(result)),
-      );
-    }
-    expect(canvas.getSaveCount(), 0);
-    expect(tester.takeException(), isNull);
-  });
 }

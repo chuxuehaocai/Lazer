@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
+import '../storage/app_storage.dart';
 
 import 'font_preferences.dart';
 
@@ -22,7 +22,7 @@ abstract final class ImportedFont {
     final directory =
         storageDirectory ??
         Directory(
-          '${(await getApplicationSupportDirectory()).path}'
+          '${(await appSupportDirectory()).path}'
           '${Platform.pathSeparator}fonts',
         );
     await directory.create(recursive: true);
