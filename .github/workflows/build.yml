@@ -239,10 +239,6 @@ jobs:
             runner: macos-26
             flutter_arch: arm64
             xcode_archs: 'arm64 x86_64'
-          - arch: x86_64
-            runner: macos-26-intel
-            flutter_arch: x64
-            xcode_archs: x86_64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
@@ -277,17 +273,12 @@ jobs:
           arm=build/native-dependencies/native-deps-macos-arm64
           x86=build/native-dependencies/native-deps-macos-x86_64
           mkdir -p "$stage/licenses/lazer-ffmpeg"
-          if [[ "${{ matrix.arch }}" == universal ]]; then
-            for arm_lib in "$arm"/*.dylib; do
-              name="${arm_lib##*/}"
-              test -f "$x86/$name"
-              lipo -create "$arm_lib" "$x86/$name" -output "$stage/$name"
-            done
-            cp "$arm/licenses/lazer-ffmpeg/"* "$stage/licenses/lazer-ffmpeg/"
-          else
-            cp "$x86/"*.dylib "$stage/"
-            cp "$x86/licenses/lazer-ffmpeg/"* "$stage/licenses/lazer-ffmpeg/"
-          fi
+          for arm_lib in "$arm"/*.dylib; do
+            name="${arm_lib##*/}"
+            test -f "$x86/$name"
+            lipo -create "$arm_lib" "$x86/$name" -output "$stage/$name"
+          done
+          cp "$arm/licenses/lazer-ffmpeg/"* "$stage/licenses/lazer-ffmpeg/"
           test -f "$stage/liblazer-audio.dylib"
           test -f "$stage/liblazer-audio-bridge.dylib"
       - run: flutter build macos --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}

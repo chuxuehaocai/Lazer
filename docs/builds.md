@@ -8,14 +8,13 @@ with all platform binaries and SHA-256 files. A tag containing a hyphen, such
 as `v2.0.0-beta.1`, is published as a pre-release. Set the matching app version
 in `pubspec.yaml` before pushing the tag so the binaries report the same version.
 
-Analysis and tests run first. Seven independent platform/architecture builds then
+Analysis and tests run first. Six independent platform/architecture builds then
 upload the following **Artifacts**. Each binary/archive has its own SHA-256 file.
 
 | Artifact / filename stem | Format and contents |
 | --- | --- |
 | `Lazer-Windows-x86_64` | ZIP with EXE, native audio engine, FFmpeg, resources and the MSVC runtime |
 | `Lazer-macOS-universal` | ZIP with an Intel / Apple Silicon App and native audio engine |
-| `Lazer-macOS-x86_64` | ZIP with a native Intel App and native audio engine |
 | `Lazer-Linux-x86_64` | x86_64 AppImage with GTK, libmpv and the native audio engine |
 | `Lazer-Linux-aarch64` | ARM64 AppImage with GTK, libmpv and the native audio engine |
 | `Lazer-Android-universal` | Universal release APK signed with the release key from repository secrets |
@@ -142,7 +141,8 @@ See [updates.md](updates.md) for the client-side rules.
 ## Runners and SDKs
 
 - Windows uses `windows-2022`.
-- macOS universal uses `macos-15`; Intel uses `macos-15-intel`.
+- macOS universal packaging uses `macos-26`; its x86_64 native-audio dependency
+  is built on `macos-26-intel`.
 - Linux uses native `ubuntu-22.04` / `ubuntu-22.04-arm` runners. Both AppImages have
   a glibc 2.35 baseline. The ARM runner bootstraps the SDK from the official Flutter
   3.47.0 tag and verifies its commit, since the official archive only provides an
