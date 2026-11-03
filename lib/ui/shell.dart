@@ -311,7 +311,6 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     onClose: _closeNowPlaying,
     entranceSettled: _playerSettled,
     pullDown: _playerPull,
-    transition: _nowPlayingMotion,
   );
 
   @override
@@ -543,12 +542,6 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         _nowPlayingMotion.status != AnimationStatus.reverse) {
       return;
     }
-    if (state.current case final track?) {
-      rememberRegisteredCoverTransition(
-        'player:${track.id}',
-        progress: _nowPlayingMotion.value,
-      );
-    }
     setState(() {
       _nowPlayingOpen = true;
       _playerSettled.value = false;
@@ -563,9 +556,6 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
 
   void _closeNowPlaying() {
     if (!_nowPlayingOpen) return;
-    if (state.current case final track?) {
-      returnCoverTransition('player:${track.id}');
-    }
     setState(() {
       _playerSettled.value = false;
       _coveredShellStale = true;
@@ -605,9 +595,6 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       return;
     }
     unawaited(state.feedback());
-    if (state.current case final track?) {
-      returnCoverTransition('player:${track.id}');
-    }
     setState(() {
       _playerSettled.value = false;
       // Rebuild the browse tree once so the uncovered page is current.

@@ -5,7 +5,10 @@ import '../animation/apple_spring.dart';
 /// One physical spring for every player host and input device. The controller
 /// is the presentation coordinate, including overshoot and incoming velocity.
 abstract final class PlayerPageMotion {
-  static const spring = AppleSpring.bouncy;
+  static const spring = AppleSpring(
+    duration: AppleSpring.bouncyDuration,
+    bounce: .15,
+  );
 
   // These are perceived response times; settlement is determined by physics.
   static const desktopDuration = AppleSpring.bouncyDuration;

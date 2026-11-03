@@ -6,14 +6,10 @@ import '../state/ui_preferences.dart';
 import 'now_playing_page.dart';
 import 'player_page_motion.dart';
 import '../animation/motion_snapshot.dart';
-import '../widgets/cover_transition.dart';
 
 /// Material open-upwards presentation: the player rises from the window
 /// bottom to the top and reverses on close.
 Future<void> openNowPlayingPage(BuildContext context, AppState state) {
-  if (state.current case final track?) {
-    rememberRegisteredCoverTransition('player:${track.id}');
-  }
   return Navigator.of(context).push<void>(NowPlayingRoute(state: state));
 }
 
@@ -47,14 +43,6 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   void install() {
     super.install();
     animation!.addStatusListener(_onStatus);
-  }
-
-  @override
-  bool didPop(void result) {
-    if (state.current case final track?) {
-      returnCoverTransition('player:${track.id}');
-    }
-    return super.didPop(result);
   }
 
   void _onStatus(AnimationStatus status) {
@@ -194,7 +182,6 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       state: state,
       pullDown: this,
       entranceSettled: _settled,
-      transition: controller,
     ),
     builder: (context, settled, child) =>
         ExcludeSemantics(excluding: !settled, child: child),

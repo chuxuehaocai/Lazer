@@ -1,6 +1,6 @@
 # Rendering and resource validation
 
-## Player and caption handoff in beta.5.fix
+## Caption handoff and player spring in beta.5.fix
 
 Caption flights preserve both endpoints' shaped paragraphs, including their
 original constraints, scaling, line breaks and ellipsis. They transform and
@@ -11,35 +11,26 @@ rectangle. Animation ticks do not rebuild or lay out those labels. The
 surrounding content viewport still clips
 the flight, but no interpolated text-height clip cuts through glyphs.
 
-The player reuses the same cover/text overlay from its transport tile. Its
-elements share the page's physical progress, with the destination measured
-without the outer page translation. All platforms use the same duration/bounce
-spring: a 600 ms perceived duration and 0.1 bounce, implemented in Dart with
-SpringSimulation. Page, cover and labels share that physical coordinate. There
-is no platform-specific ease-out, artificial initial kick, braking segment or
+The player page uses its own duration/bounce spring: a 600 ms perceived
+duration and 0.15 bounce, implemented in Dart with SpringSimulation. There is
+no platform-specific ease-out, artificial initial kick, braking segment or
 second easing curve. Unbounded controllers preserve overshoot; navigator-facing
 progress and opacity stay clamped for their consumers. The player canvas remains
 live through the whole spring rather than falling back to a black placeholder.
-Settlement, rather than
-a fixed animation deadline, completes the motion.
+Settlement, rather than a fixed animation deadline, completes the motion.
 Pull releases retain their physical velocity and reduced motion completes the
 controller with the correct terminal status.
 
-Player flights listen directly to the page controller and allocate no second
-ticker. Rectangle velocity is derived in the same physical coordinate; reverse
-and regrab handoffs keep it. The page coordinate is captured at the opening or
-reversal request, rather than when the overlay happens to mount a frame later.
-This prevents a delayed first overlay frame from restarting its geometry at
-zero while the page is already moving. Geometry samples are shared within a frame/phase,
-and the transport cover reuses the live artwork without taking a card raster.
-Labels start hidden before the player's first snapshot. The browse canvas also
-snapshots during player movement so its glass/background filters do not rerun
-behind every shared-element frame. Snapshots release at settlement as before.
+The transport bar and player page keep independent artwork and labels; opening
+the player does not create a shared cover/text overlay. The page controller
+owns overshoot and reversal velocity directly. The browse canvas snapshots
+during player movement so its glass/background filters do not rerun for every
+page frame, and releases the snapshot at settlement.
 
 Regression checks sample caption glyph boxes at 1x, 1.3x and 2x text scales in
 both directions, physical overshoot, cross-platform parity, interrupted
 motion, retained label widgets, a paused flight with no extra ticker,
-shared-element handoff and released snapshot ownership. These checks
+playlist shared-element handoff and released snapshot ownership. These checks
 do not substitute for frame-timing measurements on each target device.
 
 ## Player readiness and navigation handoff

@@ -12,7 +12,6 @@ import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
-import 'package:lazer_nextgen/widgets/cover_transition.dart';
 
 import 'support/player_transition.dart';
 
@@ -38,11 +37,10 @@ class _Catalog extends Catalog {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
-  tearDown(cancelCoverTransitions);
 
   for (final compact in [true, false]) {
     testWidgets(
-      'player cover and labels share the ${compact ? "mobile spring" : "desktop spring"}',
+      'player page uses the ${compact ? "mobile" : "desktop"} bouncy spring',
       (tester) async {
         tester.view.physicalSize = compact
             ? const Size(390, 844)
@@ -61,27 +59,12 @@ void main() {
           ),
         );
         await tester.pump(const Duration(milliseconds: 120));
-        final source = find.byWidgetPredicate(
-          (w) =>
-              w is CoverTransitionSource && w.identity == 'player:${_track.id}',
-        );
-        final origin = tester.getRect(source);
         final open = tester
             .widget<AppPlayerBar>(find.byType(AppPlayerBar))
             .onOpen;
         open();
         await tester.pump();
         await tester.pump();
-        final flyingCover = find.byKey(
-          const ValueKey('cover-transition-flight'),
-        );
-        expect(tester.getRect(flyingCover), origin);
-        for (final role in CoverTextRole.values) {
-          expect(
-            find.byKey(ValueKey('cover-transition-text-${role.name}')),
-            findsOneWidget,
-          );
-        }
         final motion = playerSlideAnimation(tester);
         var bounced = false;
         await pumpPlayerTransition(
@@ -90,37 +73,17 @@ void main() {
           AnimationStatus.completed,
           onMovingFrame: () {
             bounced |= motion.value.dy < 0;
-            expect(flyingCover, findsOneWidget);
+            expect(find.byType(NowPlayingPage), findsOneWidget);
             expect(tester.takeException(), isNull);
           },
         );
         expect(bounced, isTrue);
-        await tester.pump();
-        expect(flyingCover, findsNothing);
-        final target = find.byWidgetPredicate(
-          (w) =>
-              w is CoverTransitionTarget && w.identity == 'player:${_track.id}',
-        );
-        final destination = tester.getRect(target);
         tester.widget<NowPlayingPage>(find.byType(NowPlayingPage)).onClose!();
         await tester.pump();
         await tester.pump();
-        final returning = find.byKey(
-          const ValueKey('cover-transition-return-flight'),
-        );
-        expect(tester.getRect(returning), destination);
         await pumpPlayerTransition(tester, motion, AnimationStatus.dismissed);
-        await tester.pump();
-        expect(returning, findsNothing);
-        expect(tester.getRect(source), origin);
-        final sourceOpacity = tester.widget<Opacity>(
-          find.descendant(of: source, matching: find.byType(Opacity)).first,
-        );
-        expect(sourceOpacity.opacity, 1);
         expect(find.byType(NowPlayingPage), findsNothing);
         await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump();
-        expect(debugCoverSnapshotCount, 0);
         expect(tester.takeException(), isNull);
       },
     );
@@ -230,75 +193,26 @@ void main() {
     open();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 99));
-    final preceding = tester.getRect(
-      find.byKey(const ValueKey('cover-transition-flight')),
-    );
     await tester.pump(const Duration(milliseconds: 1));
     final page = tester.element(find.byType(NowPlayingPage));
     final motion = playerSlideAnimation(tester);
     final beforeClose = motion.value.dy;
-    final cover = tester.getRect(
-      find.byKey(const ValueKey('cover-transition-flight')),
-    );
-    final title = tester.getRect(
-      find.byKey(const ValueKey('cover-transition-text-title')),
-    );
     tester.widget<NowPlayingPage>(find.byType(NowPlayingPage)).onClose!();
     expect(motion.value.dy, beforeClose);
     await tester.pump();
-    expect(
-      tester.getRect(
-        find.byKey(const ValueKey('cover-transition-return-flight')),
-      ),
-      cover,
-    );
-    expect(
-      tester.getRect(find.byKey(const ValueKey('cover-transition-text-title'))),
-      title,
-    );
     await tester.pump(const Duration(milliseconds: 1));
-    final following = tester.getRect(
-      find.byKey(const ValueKey('cover-transition-return-flight')),
-    );
-    expect(
-      following.top - cover.top,
-      closeTo(cover.top - preceding.top, .1),
-      reason:
-          'the cover keeps its physical velocity when closing interrupts opening',
-    );
+    expect(motion.value.dy, greaterThan(beforeClose));
     await tester.pump(const Duration(milliseconds: 15));
-    expect(motion.value.dy, lessThan(beforeClose));
+    expect(motion.value.dy, greaterThan(beforeClose));
     await tester.pump(const Duration(milliseconds: 130));
     final beforeReopen = motion.value.dy;
-    final returnCover = tester.getRect(
-      find.byKey(const ValueKey('cover-transition-return-flight')),
-    );
-    final returnTitle = tester.getRect(
-      find.byKey(const ValueKey('cover-transition-text-title')),
-    );
     open();
     expect(motion.value.dy, beforeReopen);
     await tester.pump();
     await tester.pump();
     await tester.pump();
-    final reopenedCover = tester.getRect(
-      find.byKey(const ValueKey('cover-transition-flight')),
-    );
-    final reopenedTitle = tester.getRect(
-      find.byKey(const ValueKey('cover-transition-text-title')),
-    );
-    expect(
-      (reopenedCover.topLeft - returnCover.topLeft).distance,
-      lessThan(.01),
-    );
-    expect(reopenedCover.size, returnCover.size);
-    expect(
-      (reopenedTitle.topLeft - returnTitle.topLeft).distance,
-      lessThan(.01),
-    );
-    expect(reopenedTitle.size, returnTitle.size);
     await tester.pump(const Duration(milliseconds: 16));
-    expect(motion.value.dy, greaterThan(beforeReopen));
+    expect(motion.value.dy, lessThan(beforeReopen));
     await pumpPlayerTransition(tester, motion, AnimationStatus.completed);
     expect(tester.element(find.byType(NowPlayingPage)), same(page));
     expect(motion.value.dy, 0);
