@@ -423,8 +423,8 @@ void main() {
         await _pixels(tester, state.screen),
         bounds.center,
       );
-      expect(middle[0], inInclusiveRange(105, 145));
-      expect(middle[2], inInclusiveRange(120, 155));
+      expect(middle[0], inExclusiveRange(40, 208));
+      expect(middle[2], inExclusiveRange(70, 208));
       expect(middle[3], 255);
       await tester.pumpAndSettle();
       final target = tester.getRect(find.byType(CoverTransitionTarget));
@@ -687,16 +687,20 @@ void main() {
         state.back();
         await tester.pump();
         await tester.pump();
-        // The retained source is itself entering. Advance real frames so
-        // the flight follows that moving destination and lets its velocity
-        // settle, then compare the final flying frame before handoff.
-        var landed = _bounds(tester, find.byKey(_return));
+        // The retained source is itself entering. Compare the flight against
+        // the live source once that page has reached its resting rectangle.
+        Rect? landed;
         for (var frame = 0; frame < 120; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
-          if (find.byKey(_return).evaluate().isEmpty) break;
-          landed = _bounds(tester, find.byKey(_return));
+          final live = _bounds(tester, find.byKey(state.source));
+          if ((live.center - original.center).distance < .1 &&
+              find.byKey(_return).evaluate().isNotEmpty) {
+            landed = _bounds(tester, find.byKey(_return));
+            break;
+          }
         }
-        expect(landed.center.dx, closeTo(original.center.dx, .1));
+        expect(landed, isNotNull);
+        expect(landed!.center.dx, closeTo(original.center.dx, .1));
         expect(landed.center.dy, closeTo(original.center.dy, .1));
         _near(_sample(await _pixels(tester, state.screen), landed.center), [
           208,

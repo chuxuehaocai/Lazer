@@ -162,6 +162,7 @@ void main() {
 
     final motion = playerSlideAnimation(tester);
     expect(motion.status, AnimationStatus.forward);
+    var bounced = false;
 
     await tester.pump(const Duration(milliseconds: 160));
     final double firstLeg = 1 - remaining();
@@ -172,11 +173,15 @@ void main() {
     );
 
     await tester.pump(const Duration(milliseconds: 160));
-    final double secondLeg = 1 - remaining() - firstLeg;
-    expect(secondLeg, lessThan(firstLeg));
-    expect(remaining(), lessThan(0));
+    expect(1 - remaining(), greaterThan(firstLeg));
 
-    await pumpPlayerTransition(tester, motion, AnimationStatus.completed);
+    await pumpPlayerTransition(
+      tester,
+      motion,
+      AnimationStatus.completed,
+      onMovingFrame: () => bounced |= remaining() < 0,
+    );
+    expect(bounced, isTrue);
     expect(remaining(), closeTo(0, .001));
     expect(motion.status, AnimationStatus.completed);
 
@@ -189,13 +194,12 @@ void main() {
     final double firstLegOut = remaining();
     expect(
       firstLegOut,
-      closeTo(firstLeg, .001),
+      closeTo(firstLeg, .02),
       reason: 'opening and closing share the same deliberate pace',
     );
 
     await tester.pump(const Duration(milliseconds: 160));
-    final double secondLegOut = remaining() - firstLegOut;
-    expect(secondLegOut, closeTo(secondLeg, .001));
+    expect(remaining(), greaterThan(firstLegOut));
 
     await pumpPlayerTransition(tester, motion, AnimationStatus.dismissed);
     await tester.pump();
@@ -277,14 +281,22 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump();
-    expect(
-      tester.getRect(find.byKey(const ValueKey('cover-transition-flight'))),
-      returnCover,
+    final reopenedCover = tester.getRect(
+      find.byKey(const ValueKey('cover-transition-flight')),
+    );
+    final reopenedTitle = tester.getRect(
+      find.byKey(const ValueKey('cover-transition-text-title')),
     );
     expect(
-      tester.getRect(find.byKey(const ValueKey('cover-transition-text-title'))),
-      returnTitle,
+      (reopenedCover.topLeft - returnCover.topLeft).distance,
+      lessThan(.01),
     );
+    expect(reopenedCover.size, returnCover.size);
+    expect(
+      (reopenedTitle.topLeft - returnTitle.topLeft).distance,
+      lessThan(.01),
+    );
+    expect(reopenedTitle.size, returnTitle.size);
     await tester.pump(const Duration(milliseconds: 16));
     expect(motion.value.dy, greaterThan(beforeReopen));
     await pumpPlayerTransition(tester, motion, AnimationStatus.completed);

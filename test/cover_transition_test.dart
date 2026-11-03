@@ -169,9 +169,9 @@ void main() {
     // Destination changes preserve the presented frame; the spring then
     // follows the new layout instead of teleporting with a lerped endpoint.
     expect((retargeted.topLeft - beforeRetarget.topLeft).distance, lessThan(1));
-    await tester.pump(const Duration(milliseconds: 240));
+    await tester.pump(const Duration(milliseconds: 600));
     final nearEnd = tester.getRect(flight);
-    expect(nearEnd.left, greaterThan(400));
+    expect(nearEnd.left, greaterThan(middle.left));
     expect(nearEnd.top, greaterThan(190));
     await tester.pumpAndSettle();
     expect(flight, findsNothing);

@@ -369,7 +369,7 @@ void main() {
       matching: find.byType(Opacity),
     );
     expect(tester.widget<Opacity>(hiddenSource).opacity, 0);
-    await tester.pump(const Duration(milliseconds: 126));
+    await tester.pump(const Duration(milliseconds: 220));
     final early = tester.getRect(find.byKey(_returnKey));
     expect(early.left, lessThan((detailRect.left + sourceRect.left) / 2));
     await tester.pumpAndSettle();
@@ -546,7 +546,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     state.moveSource(const Offset(210, 100));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 700));
     final destination = tester.getRect(find.byKey(state.source));
     final flying = tester.getRect(find.byKey(_returnKey));
     expect((flying.topLeft - destination.topLeft).distance, lessThan(2));

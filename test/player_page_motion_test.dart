@@ -10,8 +10,12 @@ void main() {
     addTearDown(controller.dispose);
     PlayerPageMotion.animate(controller, 1, compact: true, reduceMotion: false);
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 360));
-    expect(controller.value, greaterThan(1));
+    var bounced = false;
+    for (var frame = 0; frame < 120 && controller.isAnimating; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      bounced |= controller.value > 1;
+    }
+    expect(bounced, isTrue);
     controller.stop();
     PlayerPageMotion.animate(
       controller,
@@ -76,7 +80,7 @@ void main() {
             compact: false,
           );
           expect(motion.x(0), position);
-          expect(motion.dx(0), velocity);
+          expect(motion.dx(0), closeTo(velocity, 1e-12));
           expect((motion.x(1e-8) - position) / 1e-8, closeTo(velocity, .002));
           expect(motion.isDone(2), isTrue);
           expect(motion.x(2), target);

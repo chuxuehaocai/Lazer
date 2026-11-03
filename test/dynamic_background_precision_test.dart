@@ -252,7 +252,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the player slides in on the cheap canvas, then on the mesh', (
+  testWidgets('the player keeps its live canvas throughout the spring', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -294,10 +294,9 @@ void main() {
     );
     await tester.pump();
 
-    // Entrance frame: one gradient instead of the warped mesh, and a lyric
-    // ticker that is held still.
-    expect(playerFlow().preview, isTrue);
-    expect(playerFlow().animated, isFalse);
+    // The background is part of the player from its first visible frame.
+    expect(playerFlow().preview, isFalse);
+    expect(playerFlow().animated, isTrue);
     expect(playerFlow().quality, 0.5);
     expect(lyricGate(), isFalse);
 
@@ -306,8 +305,8 @@ void main() {
       playerSlideAnimation(tester),
       AnimationStatus.completed,
       onMovingFrame: () {
-        expect(playerFlow().preview, isTrue);
-        expect(playerFlow().animated, isFalse);
+        expect(playerFlow().preview, isFalse);
+        expect(playerFlow().animated, isTrue);
         expect(lyricGate(), isFalse);
       },
     );

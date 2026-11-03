@@ -55,10 +55,20 @@ void main() {
       final route = _PlayerRoute(state);
       nav.currentState!.push(route);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 360));
-      expect(route.openness, greaterThan(1));
+      var bounced = false;
+      var paintedOvershoot = false;
+      for (
+        var frame = 0;
+        frame < 120 && route.animation!.status != AnimationStatus.completed;
+        frame++
+      ) {
+        await tester.pump(const Duration(milliseconds: 16));
+        bounced |= route.openness > 1;
+        paintedOvershoot |= tester.getTopLeft(find.byKey(_bodyKey)).dy < 0;
+      }
+      expect(bounced, isTrue);
+      expect(paintedOvershoot, isTrue);
       expect(route.animation!.value, 1);
-      expect(tester.getTopLeft(find.byKey(_bodyKey)).dy, lessThan(0));
       route.startPull();
       final position = route.openness;
       route.updatePull(0);

@@ -366,14 +366,14 @@ void main() {
     );
     final destination = tester.getRect(find.byType(CoverTransitionTarget));
 
-    await tester.pump(const Duration(milliseconds: 126));
+    await tester.pump(const Duration(milliseconds: 220));
     final early = tester.getRect(flight);
     final totalTravel = destination.left - start.left;
     final earlyTravel = early.left - start.left;
     expect(earlyTravel / totalTravel, greaterThan(.5));
     expect(early.width, greaterThan((start.width + destination.width) / 2));
 
-    await tester.pump(const Duration(milliseconds: 126));
+    await tester.pump(const Duration(milliseconds: 220));
     final later = tester.getRect(flight);
     expect(later.left, greaterThan(early.left));
     expect(later.left - early.left, lessThan(earlyTravel));
