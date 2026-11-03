@@ -103,7 +103,7 @@ flutter run
 | 产物 | 说明 |
 | --- | --- |
 | `Lazer-Windows-x86_64.zip` | EXE、依赖库、资源与 Visual C++ 运行库 |
-| `Lazer-macOS-universal.zip` | Intel / Apple Silicon 通用 App |
+| `Lazer-macOS-aarch64.zip` | Apple Silicon App |
 | `Lazer-Linux-x86_64.AppImage` | Linux x86_64，包含 GTK 与 libmpv |
 | `Lazer-Linux-aarch64.AppImage` | Linux ARM64，使用原生 ARM runner 构建 |
 | `Lazer-Android-universal.apk` | 通用 APK，使用仓库密钥库中的发布签名（详见[构建说明](docs/builds.md#android-release-signing)） |
