@@ -822,14 +822,11 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
                           builder: (context, child) => Stack(
                             fit: StackFit.expand,
                             children: [
-                              // Overshoot must retain the player canvas through
-                              // its full extent, rather than exposing the browse
-                              // page at its top or bottom edge.
-                              ColoredBox(
-                                color: _nowPlayingMotion.value.abs() > .001
-                                    ? Colors.black
-                                    : Colors.transparent,
-                              ),
+                              // Keep the browse page hidden under an upward
+                              // overshoot without painting a black layer over
+                              // the player's own album canvas.
+                              if (_nowPlayingMotion.value > 1)
+                                const ColoredBox(color: Colors.black),
                               child!,
                             ],
                           ),

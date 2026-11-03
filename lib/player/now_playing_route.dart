@@ -224,9 +224,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
         return Stack(
           fit: StackFit.expand,
           children: [
-            ColoredBox(
-              color: travelled.abs() > .001 ? Colors.black : Colors.transparent,
-            ),
+            if (travelled > 1) const ColoredBox(color: Colors.black),
             FractionalTranslation(
               translation: Offset(0, 1 - travelled),
               child: TickerMode(enabled: tickersEnabled, child: child!),

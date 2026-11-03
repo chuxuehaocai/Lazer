@@ -746,15 +746,16 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                   solidColor: widget.state.playerBackgroundColor,
                   imagePath: widget.state.playerBackgroundImagePath,
                   pageColor: Colors.black,
-                  animationsEnabled: settled && widget.state.playing,
+                  animationsEnabled: widget.state.playing,
                   // Reads the live preference: the shell rebuilds this page on
                   // every state report, so dragging the slider is reflected on
                   // the next frame instead of on the next opening.
                   quality: widget.state.playerBackgroundQuality,
-                  // The slide re-executes the whole page display list once per
-                  // frame; a single gradient instead of the warped mesh keeps
-                  // those frames affordable.
-                  preview: !settled,
+                  // The background belongs to the visible player at every
+                  // point in its spring. Replacing it with the entrance-only
+                  // placeholder made the selected canvas disappear whenever
+                  // the outer status was interrupted or not delivered.
+                  preview: false,
                 ),
               ),
               if (track == null)
