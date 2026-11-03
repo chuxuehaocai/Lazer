@@ -67,179 +67,162 @@ class DesktopNowPlaying extends StatelessWidget {
       autofocus: !tv,
       canRequestFocus: !tv,
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent || event is KeyRepeatEvent) onActivity();
+        if (tv && (event is KeyDownEvent || event is KeyRepeatEvent)) {
+          onActivity();
+        }
         return KeyEventResult.ignored;
       },
-      child: MouseRegion(
-        onEnter: (_) => onActivity(),
-        onHover: (_) => onActivity(),
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (event) {
-            onPointerStart?.call(event.pointer);
-            onActivity();
-          },
-          onPointerUp: (event) {
-            onPointerEnd?.call(event.pointer);
-            onActivity();
-          },
-          onPointerCancel: (event) {
-            onPointerEnd?.call(event.pointer);
-            onActivity();
-          },
-          onPointerSignal: (_) => onActivity(),
-          child: SafeArea(
-            minimum: tvSafeInsets(context),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 20, 8),
-                  child: Row(
-                    children: [
-                      AccessibleIconButton(
-                        key: const ValueKey('desktop-close'),
-                        tooltip: '返回',
-                        onPressed: onBack,
-                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                      ),
-                      const Spacer(),
-                      AccessibleIconButton(
-                        key: const ValueKey('desktop-search-osu'),
-                        tooltip: '在 osu! 中搜索',
-                        onPressed: osuBeatmapSearchUri(track) == null
-                            ? null
-                            : () => unawaited(searchInOsu(context, track)),
-                        color: context.colors.onPlayer,
-                        icon: const Icon(Icons.search_rounded),
-                      ),
-                      const SizedBox(width: 2),
-                      _AddToPlaylistButton(state: state, track: track),
-                      const SizedBox(width: 2),
-                      _DownloadButton(state: state, track: track),
-                    ],
-                  ),
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (event) {
+          onPointerStart?.call(event.pointer);
+          onActivity();
+        },
+        onPointerUp: (event) => onPointerEnd?.call(event.pointer),
+        onPointerCancel: (event) => onPointerEnd?.call(event.pointer),
+        child: SafeArea(
+          minimum: tvSafeInsets(context),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 20, 8),
+                child: Row(
+                  children: [
+                    AccessibleIconButton(
+                      key: const ValueKey('desktop-close'),
+                      tooltip: '返回',
+                      onPressed: onBack,
+                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                    ),
+                    const Spacer(),
+                    AccessibleIconButton(
+                      key: const ValueKey('desktop-search-osu'),
+                      tooltip: '在 osu! 中搜索',
+                      onPressed: osuBeatmapSearchUri(track) == null
+                          ? null
+                          : () => unawaited(searchInOsu(context, track)),
+                      color: context.colors.onPlayer,
+                      icon: const Icon(Icons.search_rounded),
+                    ),
+                    const SizedBox(width: 2),
+                    _AddToPlaylistButton(state: state, track: track),
+                    const SizedBox(width: 2),
+                    _DownloadButton(state: state, track: track),
+                  ],
                 ),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, box) {
-                      final double sidePadding = (box.maxWidth * .04).clamp(
-                        24.0,
-                        64.0,
-                      );
-                      return Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: sidePadding,
-                          vertical: 24,
-                        ),
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 1280),
-                            child: LayoutBuilder(
-                              builder: (context, content) {
-                                // Both panes share the available width equally
-                                // at every window size. Bound the artwork group
-                                // inside its pane without changing the split.
-                                final double paneGap = (content.maxWidth * .06)
-                                    .clamp(16.0, 80.0);
-                                return Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Expanded(
-                                      child: Align(
-                                        alignment: Alignment.center,
-                                        child: ConstrainedBox(
-                                          constraints: const BoxConstraints(
-                                            maxWidth: 440,
-                                          ),
-                                          child: _Presentation(
-                                            track: track,
-                                            state: state,
-                                            artwork: artwork,
-                                            onSaveArtwork: onSaveArtwork,
-                                          ),
+              ),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    final double sidePadding = (box.maxWidth * .04).clamp(
+                      24.0,
+                      64.0,
+                    );
+                    return Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: sidePadding,
+                        vertical: 24,
+                      ),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1280),
+                          child: LayoutBuilder(
+                            builder: (context, content) {
+                              // Both panes share the available width equally
+                              // at every window size. Bound the artwork group
+                              // inside its pane without changing the split.
+                              final double paneGap = (content.maxWidth * .06)
+                                  .clamp(16.0, 80.0);
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.center,
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxWidth: 440,
+                                        ),
+                                        child: _Presentation(
+                                          track: track,
+                                          state: state,
+                                          artwork: artwork,
+                                          onSaveArtwork: onSaveArtwork,
                                         ),
                                       ),
                                     ),
-                                    SizedBox(width: paneGap),
-                                    Expanded(
-                                      child: RepaintBoundary(
-                                        child: AnimatedSwitcher(
-                                          duration:
-                                              MediaQuery.disableAnimationsOf(
-                                                context,
-                                              )
-                                              ? Duration.zero
-                                              : const Duration(
-                                                  milliseconds: 240,
+                                  ),
+                                  SizedBox(width: paneGap),
+                                  Expanded(
+                                    child: RepaintBoundary(
+                                      child: AnimatedSwitcher(
+                                        duration:
+                                            MediaQuery.disableAnimationsOf(
+                                              context,
+                                            )
+                                            ? Duration.zero
+                                            : const Duration(milliseconds: 240),
+                                        switchInCurve: const AppleSpringCurve(),
+                                        switchOutCurve:
+                                            const AppleSpringCurve(),
+                                        transitionBuilder: (child, animation) =>
+                                            FadeTransition(
+                                              opacity: animation,
+                                              child: SlideTransition(
+                                                position: Tween(
+                                                  begin: const Offset(.025, 0),
+                                                  end: Offset.zero,
+                                                ).animate(animation),
+                                                child: RepaintBoundary(
+                                                  child: child,
                                                 ),
-                                          switchInCurve:
-                                              const AppleSpringCurve(),
-                                          switchOutCurve:
-                                              const AppleSpringCurve(),
-                                          transitionBuilder:
-                                              (child, animation) =>
-                                                  FadeTransition(
-                                                    opacity: animation,
-                                                    child: SlideTransition(
-                                                      position: Tween(
-                                                        begin: const Offset(
-                                                          .025,
-                                                          0,
-                                                        ),
-                                                        end: Offset.zero,
-                                                      ).animate(animation),
-                                                      child: RepaintBoundary(
-                                                        child: child,
-                                                      ),
+                                              ),
+                                            ),
+                                        layoutBuilder: (current, previous) =>
+                                            Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                for (final old in previous)
+                                                  ExcludeSemantics(
+                                                    child: IgnorePointer(
+                                                      child: old,
                                                     ),
                                                   ),
-                                          layoutBuilder: (current, previous) =>
-                                              Stack(
-                                                fit: StackFit.expand,
-                                                children: [
-                                                  for (final old in previous)
-                                                    ExcludeSemantics(
-                                                      child: IgnorePointer(
-                                                        child: old,
-                                                      ),
-                                                    ),
-                                                  ?current,
-                                                ],
-                                              ),
-                                          child: KeyedSubtree(
-                                            key: ValueKey(pane),
-                                            child: switch (pane) {
-                                              DesktopNowPlayingPane.lyrics =>
-                                                lyrics,
-                                              DesktopNowPlayingPane.comments =>
-                                                comments,
-                                              DesktopNowPlayingPane.queue =>
-                                                queue,
-                                            },
-                                          ),
+                                                ?current,
+                                              ],
+                                            ),
+                                        child: KeyedSubtree(
+                                          key: ValueKey(pane),
+                                          child: switch (pane) {
+                                            DesktopNowPlayingPane.lyrics =>
+                                              lyrics,
+                                            DesktopNowPlayingPane.comments =>
+                                              comments,
+                                            DesktopNowPlayingPane.queue =>
+                                              queue,
+                                          },
                                         ),
                                       ),
                                     ),
-                                  ],
-                                );
-                              },
-                            ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    );
+                  },
                 ),
-                _DesktopDock(
-                  state: state,
-                  visible: controlsVisible,
-                  pane: pane,
-                  onPaneChanged: onPaneChanged,
-                  onFullscreen: onFullscreen,
-                ),
-              ],
-            ),
+              ),
+              _DesktopDock(
+                state: state,
+                visible: controlsVisible,
+                pane: pane,
+                onPaneChanged: onPaneChanged,
+                onFullscreen: onFullscreen,
+              ),
+            ],
           ),
         ),
       ),
@@ -637,6 +620,94 @@ class _RenderArtworkAndMetadata extends RenderBox
       defaultHitTestChildren(result, position: position);
 }
 
+class _DesktopDockTransition extends StatefulWidget {
+  const _DesktopDockTransition({required this.visible, required this.child});
+
+  final bool visible;
+  final Widget child;
+
+  @override
+  State<_DesktopDockTransition> createState() => _DesktopDockTransitionState();
+}
+
+class _DesktopDockTransitionState extends State<_DesktopDockTransition>
+    with TickerProviderStateMixin {
+  static const _revealSpring = AppleSpring(
+    duration: Duration(milliseconds: 600),
+    bounce: .15,
+  );
+  // A disappearing dock has no visible resting surface to bounce against.
+  static const _hideSpring = AppleSpring(duration: Duration(milliseconds: 600));
+  late final _extent = AnimationController.unbounded(
+    vsync: this,
+    value: widget.visible ? 1 : 0,
+  );
+  late final _opacity = AnimationController(
+    vsync: this,
+    value: widget.visible ? 1 : 0,
+    duration: const Duration(milliseconds: 220),
+  );
+
+  void _snap() {
+    _extent.value = widget.visible ? 1 : 0;
+    _opacity.value = widget.visible ? 1 : 0;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) _snap();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DesktopDockTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible == oldWidget.visible) return;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _snap();
+      return;
+    }
+    // The cover follows this layout extent directly. Retarget its presented
+    // position and velocity instead of creating another outgoing dock.
+    _extent.springTo(
+      widget.visible ? 1 : 0,
+      spring: widget.visible ? _revealSpring : _hideSpring,
+    );
+    _opacity.animateTo(widget.visible ? 1 : 0, curve: Curves.easeInOutCubic);
+  }
+
+  @override
+  void dispose() {
+    _extent.dispose();
+    _opacity.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ExcludeFocus(
+    excluding: !widget.visible,
+    child: ExcludeSemantics(
+      excluding: !widget.visible,
+      child: IgnorePointer(
+        ignoring: !widget.visible,
+        child: TickerMode(
+          enabled: widget.visible,
+          child: SizeTransition(
+            key: const ValueKey('desktop-dock-size'),
+            sizeFactor: _extent,
+            alignment: Alignment.bottomCenter,
+            child: FadeTransition(
+              key: const ValueKey('desktop-dock-fade'),
+              opacity: _opacity,
+              child: widget.child,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class _DesktopDock extends StatelessWidget {
   const _DesktopDock({
     required this.state,
@@ -653,255 +724,227 @@ class _DesktopDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
-    builder: (context, _) => AnimatedSwitcher(
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 360),
-      switchInCurve: const AppleSpringCurve(),
-      switchOutCurve: const AppleSpringCurve(),
-      transitionBuilder: (child, animation) => SizeTransition(
-        axis: Axis.vertical,
-        sizeFactor: animation,
-        alignment: Alignment.bottomCenter,
-        child: FadeTransition(opacity: animation, child: child),
-      ),
-      child: !visible
-          ? const SizedBox.shrink(key: ValueKey('hidden-desktop-dock'))
-          : Padding(
-              key: const ValueKey('visible-desktop-dock'),
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(color: Colors.transparent),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                    child: Column(
-                      key: const ValueKey('now-playing-transport'),
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AnimatedSwitcher(
-                          switchInCurve: const AppleSpringCurve(),
-                          switchOutCurve: const AppleSpringCurve(),
-                          duration: MediaQuery.disableAnimationsOf(context)
-                              ? Duration.zero
-                              : AppleSpring.responsive.duration,
-                          transitionBuilder: (child, animation) =>
-                              SizeTransition(
-                                sizeFactor: animation,
-                                child: FadeTransition(
-                                  opacity: animation,
-                                  child: child,
-                                ),
-                              ),
-                          child: state.playbackError == null
-                              ? const SizedBox.shrink(
-                                  key: ValueKey('no-playback-error'),
-                                )
-                              : Row(
-                                  key: ValueKey(state.playbackError),
-                                  children: [
-                                    Icon(
-                                      Icons.info_outline_rounded,
-                                      size: 16,
-                                      color: context.colors.clayDeep,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: TrText(
-                                        state.playbackError!,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: context.type.caption.copyWith(
-                                          color: context.colors.clayDeep,
-                                        ),
-                                      ),
-                                    ),
-                                    AccessibleIconButton(
-                                      tooltip: '关闭提示',
-                                      onPressed: state.clearPlaybackError,
-                                      constraints:
-                                          const BoxConstraints.tightFor(
-                                            width: 32,
-                                            height: 32,
-                                          ),
-                                      style: IconButton.styleFrom(
-                                        minimumSize: const Size(32, 32),
-                                        padding: const EdgeInsets.all(4),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      icon: const Icon(
-                                        Icons.close_rounded,
-                                        size: 18,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                        ),
-                        Row(
-                          children: [
-                            _Clock(state: state),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: PlayerSeekBar(
-                                key: const ValueKey('desktop-seek-bar'),
-                                state: state,
-                                trackHeight: 3,
-                                thumbRadius: 5,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            _Clock(state: state, end: true),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: Row(
-                                children: [
-                                  _PaneTab(
-                                    key: const ValueKey('desktop-lyrics'),
-                                    label: '歌词',
-                                    icon: Icons.lyrics_outlined,
-                                    active:
-                                        pane == DesktopNowPlayingPane.lyrics,
-                                    onPressed: () => onPaneChanged(
-                                      DesktopNowPlayingPane.lyrics,
-                                    ),
-                                  ),
-                                  if (!state.isNavidrome)
-                                    _PaneTab(
-                                      key: const ValueKey('desktop-comments'),
-                                      label: '评论',
-                                      icon: Icons.chat_bubble_outline_rounded,
-                                      active:
-                                          pane ==
-                                          DesktopNowPlayingPane.comments,
-                                      onPressed: () => onPaneChanged(
-                                        DesktopNowPlayingPane.comments,
-                                      ),
-                                    ),
-                                  _PaneTab(
-                                    key: const ValueKey('desktop-queue'),
-                                    label: '播放队列 (Q)',
-                                    icon: Icons.queue_music_rounded,
-                                    active: pane == DesktopNowPlayingPane.queue,
-                                    onPressed: () => onPaneChanged(
-                                      DesktopNowPlayingPane.queue,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Expanded(
-                              flex: 3,
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Row(
-                                  children: [
-                                    AccessibleIconButton(
-                                      tooltip: '随机播放',
-                                      onPressed: state.toggleShuffle,
-                                      color: state.shuffle
-                                          ? context.colors.clayDeep
-                                          : context.colors.cloudDark,
-                                      icon: Icon(
-                                        state.shuffle
-                                            ? Icons.shuffle_on_rounded
-                                            : Icons.shuffle_rounded,
-                                        size: 23,
-                                      ),
-                                    ),
-                                    AccessibleIconButton(
-                                      tooltip: '上一首',
-                                      onPressed: state.previous,
-                                      icon: const Icon(
-                                        Icons.skip_previous_rounded,
-                                        size: 28,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    AccessibleIconButton(
-                                      key: const ValueKey('desktop-play-pause'),
-                                      tooltip: state.playing ? '暂停' : '播放',
-                                      color: context.colors.onPlayer,
-                                      onPressed: state.togglePlay,
-                                      icon: AnimatedSwitcher(
-                                        switchInCurve: const AppleSpringCurve(),
-                                        switchOutCurve:
-                                            const AppleSpringCurve(),
-                                        duration: const Duration(
-                                          milliseconds: 180,
-                                        ),
-                                        child: Icon(
-                                          state.playing
-                                              ? Icons.pause_rounded
-                                              : Icons.play_arrow_rounded,
-                                          key: ValueKey(state.playing),
-                                          size: 28,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    AccessibleIconButton(
-                                      tooltip: '下一首',
-                                      onPressed: state.next,
-                                      icon: const Icon(
-                                        Icons.skip_next_rounded,
-                                        size: 28,
-                                      ),
-                                    ),
-                                    AccessibleIconButton(
-                                      tooltip: '循环播放',
-                                      onPressed: state.cycleRepeat,
-                                      color: state.repeat != LoopMode.off
-                                          ? context.colors.clayDeep
-                                          : context.colors.cloudDark,
-                                      icon: Icon(
-                                        state.repeat == LoopMode.one
-                                            ? Icons.repeat_one_rounded
-                                            : Icons.repeat_rounded,
-                                        size: 23,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              flex: 2,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  Flexible(child: VolumeControl(state: state)),
-                                  const SizedBox(width: 2),
-                                  AccessibleIconButton(
-                                    key: const ValueKey('desktop-fullscreen'),
-                                    tooltip: '全屏 (F)',
-                                    color: context.colors.slateDark,
-                                    iconSize: 22,
-                                    constraints: const BoxConstraints(
-                                      minWidth: 40,
-                                      minHeight: 48,
-                                    ),
-                                    padding: const EdgeInsets.all(8),
-                                    onPressed: onFullscreen,
-                                    icon: const Icon(Icons.fullscreen_rounded),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+    builder: (context, _) => _DesktopDockTransition(
+      visible: visible,
+      child: Padding(
+        key: const ValueKey('desktop-dock-content'),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: DecoratedBox(
+            decoration: const BoxDecoration(color: Colors.transparent),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              child: Column(
+                key: const ValueKey('now-playing-transport'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedSwitcher(
+                    switchInCurve: const AppleSpringCurve(),
+                    switchOutCurve: const AppleSpringCurve(),
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : AppleSpring.responsive.duration,
+                    transitionBuilder: (child, animation) => SizeTransition(
+                      sizeFactor: animation,
+                      child: FadeTransition(opacity: animation, child: child),
                     ),
+                    child: state.playbackError == null
+                        ? const SizedBox.shrink(
+                            key: ValueKey('no-playback-error'),
+                          )
+                        : Row(
+                            key: ValueKey(state.playbackError),
+                            children: [
+                              Icon(
+                                Icons.info_outline_rounded,
+                                size: 16,
+                                color: context.colors.clayDeep,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: TrText(
+                                  state.playbackError!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: context.type.caption.copyWith(
+                                    color: context.colors.clayDeep,
+                                  ),
+                                ),
+                              ),
+                              AccessibleIconButton(
+                                tooltip: '关闭提示',
+                                onPressed: state.clearPlaybackError,
+                                constraints: const BoxConstraints.tightFor(
+                                  width: 32,
+                                  height: 32,
+                                ),
+                                style: IconButton.styleFrom(
+                                  minimumSize: const Size(32, 32),
+                                  padding: const EdgeInsets.all(4),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                icon: const Icon(Icons.close_rounded, size: 18),
+                              ),
+                            ],
+                          ),
                   ),
-                ),
+                  Row(
+                    children: [
+                      _Clock(state: state),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: PlayerSeekBar(
+                          key: const ValueKey('desktop-seek-bar'),
+                          state: state,
+                          trackHeight: 3,
+                          thumbRadius: 5,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _Clock(state: state, end: true),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Row(
+                          children: [
+                            _PaneTab(
+                              key: const ValueKey('desktop-lyrics'),
+                              label: '歌词',
+                              icon: Icons.lyrics_outlined,
+                              active: pane == DesktopNowPlayingPane.lyrics,
+                              onPressed: () =>
+                                  onPaneChanged(DesktopNowPlayingPane.lyrics),
+                            ),
+                            if (!state.isNavidrome)
+                              _PaneTab(
+                                key: const ValueKey('desktop-comments'),
+                                label: '评论',
+                                icon: Icons.chat_bubble_outline_rounded,
+                                active: pane == DesktopNowPlayingPane.comments,
+                                onPressed: () => onPaneChanged(
+                                  DesktopNowPlayingPane.comments,
+                                ),
+                              ),
+                            _PaneTab(
+                              key: const ValueKey('desktop-queue'),
+                              label: '播放队列 (Q)',
+                              icon: Icons.queue_music_rounded,
+                              active: pane == DesktopNowPlayingPane.queue,
+                              onPressed: () =>
+                                  onPaneChanged(DesktopNowPlayingPane.queue),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            children: [
+                              AccessibleIconButton(
+                                tooltip: '随机播放',
+                                onPressed: state.toggleShuffle,
+                                color: state.shuffle
+                                    ? context.colors.clayDeep
+                                    : context.colors.cloudDark,
+                                icon: Icon(
+                                  state.shuffle
+                                      ? Icons.shuffle_on_rounded
+                                      : Icons.shuffle_rounded,
+                                  size: 23,
+                                ),
+                              ),
+                              AccessibleIconButton(
+                                tooltip: '上一首',
+                                onPressed: state.previous,
+                                icon: const Icon(
+                                  Icons.skip_previous_rounded,
+                                  size: 28,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              AccessibleIconButton(
+                                key: const ValueKey('desktop-play-pause'),
+                                tooltip: state.playing ? '暂停' : '播放',
+                                color: context.colors.onPlayer,
+                                onPressed: state.togglePlay,
+                                icon: AnimatedSwitcher(
+                                  switchInCurve: const AppleSpringCurve(),
+                                  switchOutCurve: const AppleSpringCurve(),
+                                  duration: const Duration(milliseconds: 180),
+                                  child: Icon(
+                                    state.playing
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
+                                    key: ValueKey(state.playing),
+                                    size: 28,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              AccessibleIconButton(
+                                tooltip: '下一首',
+                                onPressed: state.next,
+                                icon: const Icon(
+                                  Icons.skip_next_rounded,
+                                  size: 28,
+                                ),
+                              ),
+                              AccessibleIconButton(
+                                tooltip: '循环播放',
+                                onPressed: state.cycleRepeat,
+                                color: state.repeat != LoopMode.off
+                                    ? context.colors.clayDeep
+                                    : context.colors.cloudDark,
+                                icon: Icon(
+                                  state.repeat == LoopMode.one
+                                      ? Icons.repeat_one_rounded
+                                      : Icons.repeat_rounded,
+                                  size: 23,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Flexible(child: VolumeControl(state: state)),
+                            const SizedBox(width: 2),
+                            AccessibleIconButton(
+                              key: const ValueKey('desktop-fullscreen'),
+                              tooltip: '全屏 (F)',
+                              color: context.colors.slateDark,
+                              iconSize: 22,
+                              constraints: const BoxConstraints(
+                                minWidth: 40,
+                                minHeight: 48,
+                              ),
+                              padding: const EdgeInsets.all(8),
+                              onPressed: onFullscreen,
+                              icon: const Icon(Icons.fullscreen_rounded),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
+          ),
+        ),
+      ),
     ),
   );
 }
@@ -914,7 +957,7 @@ class _Clock extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
     width: 54 * MediaQuery.textScalerOf(context).scale(1),
     child: AnimatedBuilder(
-      animation: state.all,
+      animation: TickerMode.valuesOf(context).enabled ? state.all : state,
       builder: (context, _) => Text(
         fmt(
           end

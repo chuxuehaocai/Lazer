@@ -6,6 +6,7 @@ import 'package:lazer_nextgen/animation/apple_spring.dart';
 import 'package:lazer_nextgen/navigation/pull_down_page_route.dart';
 import 'package:lazer_nextgen/player/now_playing_route.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/state/ui_preferences.dart';
 
 const _bodyKey = ValueKey('apple-player-body');
 
@@ -50,6 +51,7 @@ void main() {
   ) async {
     final state = AppState();
     addTearDown(state.dispose);
+    state.uiMode = AppUiMode.mobile;
     final nav = await _host(tester);
     final route = _PlayerRoute(state);
     nav.currentState!.push(route);
@@ -71,6 +73,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(_bodyKey), findsNothing);
   });
+
+  testWidgets(
+    'desktop standalone route uses the same finite slide as the shell',
+    (tester) async {
+      final state = AppState()..uiMode = AppUiMode.desktop;
+      addTearDown(state.dispose);
+      final nav = await _host(tester);
+      final route = _PlayerRoute(state);
+      nav.currentState!.push(route);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 160));
+      final firstLeg = route.openness;
+      expect(firstLeg, inExclusiveRange(.2, .4));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(route.openness, 1);
+      expect(route.animation!.status, AnimationStatus.completed);
+      expect(route.speed, 0);
+      nav.currentState!.pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 160));
+      expect(1 - route.openness, closeTo(firstLeg, .00001));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      expect(find.byKey(_bodyKey), findsNothing);
+    },
+  );
 
   testWidgets('unfinished player push can be grabbed and reversed in place', (
     tester,

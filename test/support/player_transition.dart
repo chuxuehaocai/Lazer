@@ -14,7 +14,7 @@ Animation<Offset> playerSlideAnimation(WidgetTester tester) => tester
     .position;
 
 /// Ambient flow and lyric tickers can outlive the transition. Wait for the
-/// player spring itself, retaining a bounded failure for a motion that stalls.
+/// player motion itself, retaining a bounded failure for a motion that stalls.
 Future<void> pumpPlayerTransition(
   WidgetTester tester,
   Animation<Offset> motion,
@@ -32,7 +32,7 @@ Future<void> pumpPlayerTransition(
   expect(
     motion.status,
     destination,
-    reason: 'The player spring must finish within $deadline.',
+    reason: 'The player transition must finish within $deadline.',
   );
   await tester.pump();
 }

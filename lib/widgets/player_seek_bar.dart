@@ -60,7 +60,10 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
       onPointerUp: (_) => _setGrabbing(false),
       onPointerCancel: (_) => _setGrabbing(false),
       child: AnimatedBuilder(
-        animation: widget.state.all,
+        // TickerMode only mutes animation controllers, not position updates.
+        animation: TickerMode.valuesOf(context).enabled
+            ? widget.state.all
+            : widget.state,
         builder: (BuildContext context, _) => SliderTheme(
           data: SliderThemeData(
             trackHeight: railHeight,

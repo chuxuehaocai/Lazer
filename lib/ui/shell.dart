@@ -34,6 +34,7 @@ import 'background.dart';
 import 'login.dart';
 import '../navigation/pull_down_to_close.dart';
 import '../player/now_playing_page.dart';
+import '../player/player_page_motion.dart';
 import 'pages.dart';
 import 'player_bar.dart';
 import 'widgets.dart';
@@ -542,9 +543,10 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _nowPlayingOpen = true;
       _playerSettled.value = false;
     });
-    _nowPlayingMotion.springTo(
+    PlayerPageMotion.animate(
+      _nowPlayingMotion,
       1,
-      spring: AppleSpring.smooth,
+      compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
       reduceMotion: MediaQuery.disableAnimationsOf(context),
     );
   }
@@ -555,9 +557,10 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _playerSettled.value = false;
       _coveredShellStale = true;
     });
-    _nowPlayingMotion.springTo(
+    PlayerPageMotion.animate(
+      _nowPlayingMotion,
       0,
-      spring: AppleSpring.smooth,
+      compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
       reduceMotion: MediaQuery.disableAnimationsOf(context),
     );
   }

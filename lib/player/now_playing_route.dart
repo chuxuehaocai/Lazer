@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../navigation/pull_down_to_close.dart';
 import '../state/app_state.dart';
+import '../state/ui_preferences.dart';
 import 'now_playing_page.dart';
+import 'player_page_motion.dart';
 import '../animation/motion_snapshot.dart';
 import '../animation/apple_spring.dart';
 
@@ -48,17 +50,27 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       (navigator != null &&
           (MediaQuery.maybeDisableAnimationsOf(navigator!.context) ?? false));
 
+  bool get _compact =>
+      navigator == null ||
+      useCompactLayout(
+        state.uiMode,
+        MediaQuery.sizeOf(navigator!.context).width,
+      );
+
   /// The controller is the actual visible openness, for both finger drags and
   /// timed transitions. Applying another curve in buildTransitions would jump
   /// a released pull and make a normal pop run the entrance backwards.
   @override
   Simulation createSimulation({required bool forward}) {
     final target = forward ? 1.0 : 0.0;
+    final releasedPull = _releaseVelocity != null;
     final velocity = _releaseVelocity ?? controller!.velocity;
     _releaseVelocity = null;
-    return AppleSpring.smooth.simulation(
-      _reduceMotion ? target : controller!.value,
-      target,
+    return PlayerPageMotion.simulation(
+      from: _reduceMotion ? target : controller!.value,
+      to: target,
+      compact: _compact,
+      releasedPull: releasedPull,
       velocity: _reduceMotion ? 0 : velocity,
     );
   }
@@ -118,10 +130,12 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   bool get opaque => true;
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 300);
+  Duration get transitionDuration => _compact
+      ? const Duration(milliseconds: 300)
+      : PlayerPageMotion.desktopDuration;
 
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 300);
+  Duration get reverseTransitionDuration => transitionDuration;
 
   @override
   Color? get barrierColor => null;

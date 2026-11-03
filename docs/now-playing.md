@@ -13,7 +13,8 @@ The browse shell and settings live in `lib/ui/` and use `buildAppleTheme` from
 | `lib/player/now_playing_page.dart` | Adaptive page, artwork, lyrics, transport, queue and comments |
 | `lib/player/desktop_now_playing.dart` | Desktop split composition and collapsible transport dock |
 | `lib/player/artwork_lyrics_layout.dart` | Compact portrait/landscape artwork, lyrics and metadata layout |
-| `lib/player/now_playing_route.dart` | Standalone spring presentation and pull-down dismissal |
+| `lib/player/now_playing_route.dart` | Standalone player presentation and pull-down dismissal |
+| `lib/player/player_page_motion.dart` | Finite desktop page slides and shared presentation policy |
 | `lib/player/player_backdrop.dart` | Separately configured player background and album-colour vignette |
 | `lib/animation/apple_spring.dart` | Shared duration/bounce springs and bounded spring curve |
 
@@ -23,6 +24,12 @@ queue and comments use the shared panels/sheets. The desktop header's download
 action opens the shared quality and destination dialog, shows active progress
 and opens the download queue after a track is queued or saved. Local files keep
 that action disabled.
+
+On desktop, clicking reveals the auto-hidden transport dock. Mouse movement,
+window re-entry and scrolling do not reveal it or extend its idle timer.
+Keyboard input does not wake the dock; media shortcuts still work while it is
+hidden. Holding a pointer during a seek keeps the controls visible until release.
+Television remotes retain their key-driven wake behavior.
 
 Opening the player reads an already decoded artwork palette synchronously for
 its first frame. If extraction is still running, its result invalidates the
@@ -139,13 +146,39 @@ slower `AppleSpring.smooth` response; compact artwork uses
 `AppleSpring.responsive`. Metadata refreshes do not replay a track change, and
 reduced motion replaces the artwork immediately.
 
+### Desktop cover resizing
+
+The desktop cover changes size as the transport dock reveals or hides. One
+retargetable layout spring drives the dock's reserved height, so the cover and
+metadata follow the same motion without a second size animation. Revealing the
+dock uses a 600 ms perceptual duration and `bounce: 0.15`; hiding uses the same
+duration with no bounce. A reversal keeps the presented position and velocity.
+The arrival overshoot stays below 2% of the resize distance.
+
+Opacity uses a separate 220 ms cubic fade. The dock retains one control tree
+through reversals, excludes hidden controls from input, focus and semantics, and
+pauses their tickers. Reduced motion snaps both layout and opacity immediately,
+including when enabled during a resize.
+
+This follows the duration/bounce and velocity-continuity guidance in
+[WWDC23: Animate with springs](https://developer.apple.com/cn/videos/play/wwdc2023/10158/)
+and the continuously interruptible transitions in
+[WWDC24: Enhance your UI animations and transitions](https://developer.apple.com/cn/videos/play/wwdc2024/10145/?time=233).
+
 ## Presentation and direct manipulation
 
 The shell mounts the player over its existing root. Direct callers can use
-`NowPlayingRoute`. Both hosts move the actual presented coordinate with the
-shared Apple-style spring; the controller value is the displayed openness.
-Closing during entrance or opening during exit starts from the current position
-and velocity. No extra easing is applied to a finger-driven coordinate.
+`NowPlayingRoute`. Both hosts use a 460 ms cubic ease-in/out for ordinary desktop
+opening and closing: no bounce and no almost-stationary spring tail. Compact
+presentation and the release of a direct pull retain their spring response.
+
+The controller value is the displayed openness. Closing during entrance or
+opening during exit starts from the current position and velocity. A desktop
+reversal briefly brakes the existing movement before changing direction; its
+travel stays within the screen edges. The same page remains mounted throughout.
+No extra easing is applied to a finger-driven coordinate. This applies the
+WWDC23 continuity guidance and WWDC24 continuously interactive transitions to
+both player hosts without giving the full-screen slide a decorative bounce.
 
 A downward drag in the upper part of the page pulls it one-to-one with the
 pointer. The player closes after 22% travel, or a downward release faster than
