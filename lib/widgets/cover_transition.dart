@@ -9,6 +9,8 @@ import 'package:flutter/scheduler.dart';
 import '../animation/apple_spring.dart';
 import 'cover_morph_surface.dart';
 
+part 'cover_transition_text.dart';
+
 const _coverSpring = AppleSpring(duration: Duration(milliseconds: 420));
 
 class _CoverSnapshot {
@@ -62,6 +64,8 @@ class _CoverOrigin {
     this.snapshot,
     this.radius, [
     this.presentation,
+    this.text = const {},
+    this.textPresentations = const {},
   ]);
   final String identity;
   final Rect rect;
@@ -70,6 +74,8 @@ class _CoverOrigin {
   final _CoverSnapshot? snapshot;
   final double radius;
   final _CoverPresentation? presentation;
+  final Map<CoverTextRole, _CoverTextEndpoint> text;
+  final Map<CoverTextRole, _CoverPresentation> textPresentations;
 }
 
 _CoverOrigin? _pendingCover;
@@ -89,6 +95,7 @@ _CoverSnapshot? _returnSnapshot;
 String? _returnIdentity;
 _CoverPresentation? _returnPresentation;
 _CoverFlightHandle? _returnHandle;
+final Map<CoverTextRole, _CoverPresentation> _returnTextPresentations = {};
 VoidCallback? _returnComplete;
 final List<OverlayEntry> _handoffFlights = [];
 String? _handoffIdentity;
@@ -125,6 +132,7 @@ void _hideSource(GlobalKey key, bool hidden) {
 }
 
 void _applySourceVisibility(GlobalKey key, bool hidden) {
+  if (!hidden) _setSourceTextHidden(key, false);
   if (hidden && key.currentContext == null) return;
   final changed = hidden ? _hiddenSources.add(key) : _hiddenSources.remove(key);
   if (changed) {
@@ -304,7 +312,11 @@ void _removeReturnFlight() {
   _returnFlight = null;
   _returnSnapshot?.release();
   _returnSnapshot = null;
+  if (_returnIdentity case final identity?) {
+    _setTargetTextHidden(identity, false);
+  }
   _returnIdentity = null;
+  _returnTextPresentations.clear();
   _returnPresentation = null;
   _returnHandle = null;
   final source = _returnSource;
@@ -355,6 +367,9 @@ void rememberCoverTransition(String identity, GlobalKey coverKey) {
   // Reopening the same card reverses its currently presented flight. Retain
   // its pixels before cancellation releases the global return ownership.
   final presentation = _returnIdentity == identity ? _returnPresentation : null;
+  final textPresentations = presentation == null
+      ? const <CoverTextRole, _CoverPresentation>{}
+      : Map<CoverTextRole, _CoverPresentation>.of(_returnTextPresentations);
   final snapshot = presentation == null ? null : _returnSnapshot?.retain();
   final handoff = presentation == null ? null : _returnFlight;
   if (handoff != null) {
@@ -383,6 +398,8 @@ void rememberCoverTransition(String identity, GlobalKey coverKey) {
     reduced ? null : snapshot ?? source?._snapshot(),
     source?.widget.radius ?? 14,
     presentation,
+    _captureSourceText(coverKey),
+    textPresentations,
   );
   if (reduced) snapshot?.release();
   // Keep the source visible until the overlay flight has been inserted. Hiding
@@ -426,6 +443,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
   Rect? _flightRect;
   double _flightBlend = 1;
   _CoverPresentation? _flightPresentation;
+  final Map<CoverTextRole, _CoverPresentation> _textPresentations = {};
   bool _returning = false;
 
   void _restartPendingFlight() => setState(_beginPendingFlight);
@@ -441,6 +459,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
   void didUpdateWidget(covariant CoverTransitionTarget oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.identity != widget.identity) {
+      _setTargetTextHidden(oldWidget.identity, false);
       if (_targets[oldWidget.identity] == this) {
         _targets.remove(oldWidget.identity);
       }
@@ -511,6 +530,18 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
           ),
         ),
       );
+      final text = _textFlights(
+        origin: origin,
+        identity: widget.identity,
+        overlay: overlayBox,
+        returning: false,
+        sourceKey: () => origin.sourceKey,
+        initial: origin.textPresentations.map(
+          (role, value) =>
+              MapEntry(role, value.transformed(overlayBox.globalToLocal)),
+        ),
+      );
+      _textPresentations.clear();
       _flight = OverlayEntry(
         builder: (_) => Positioned.fill(
           child: _CoverFlight(
@@ -521,6 +552,9 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
             snapshot: origin.snapshot,
             sourceRadius: origin.radius,
             targetRadius: widget.radius,
+            text: text,
+            onTextPresentation: (role, value) =>
+                _textPresentations[role] = value,
             onRect: (rect) => _flightRect = rect,
             onBlend: (blend) => _flightBlend = blend,
             onPresentation: (presentation) =>
@@ -531,6 +565,8 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
               _flightRect = null;
               _flightBlend = 1;
               _flightPresentation = null;
+              _textPresentations.clear();
+              _setTargetTextHidden(widget.identity, false);
               _hideSource(origin.sourceKey, false);
               setState(() => _flying = false);
               _refreshSnapshots(context);
@@ -546,6 +582,16 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
         }
       });
       _hideSource(origin.sourceKey, true);
+      _setSourceTextHidden(
+        origin.sourceKey,
+        true,
+        text.map((item) => item.role),
+      );
+      _setTargetTextHidden(
+        widget.identity,
+        true,
+        text.map((item) => item.role),
+      );
       _refreshSnapshots(context);
     });
   }
@@ -568,6 +614,8 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     _flightRect = null;
     _flightBlend = 1;
     _flightPresentation = null;
+    _textPresentations.clear();
+    _setTargetTextHidden(widget.identity, false);
     if (_origin != null) _hideSource(_origin!.sourceKey, false);
     _forgetOrigin();
     if (mounted && _flying) setState(() => _flying = false);
@@ -644,6 +692,22 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
       ),
     );
     var currentSource = sourceKey;
+    final text = _textFlights(
+      origin: origin,
+      identity: widget.identity,
+      overlay: overlayBox,
+      returning: true,
+      sourceKey: () => currentSource,
+      initial: _textPresentations,
+      fromBlend: fromBlend,
+    );
+    _setSourceTextHidden(sourceKey, true, text.map((item) => item.role));
+    _setTargetTextHidden(widget.identity, true, text.map((item) => item.role));
+    for (final item in text) {
+      _returnTextPresentations[item.role] = item.initial.transformed(
+        overlayBox.localToGlobal,
+      );
+    }
     void complete() {
       if (generation != _returnGeneration) return;
       _removeReturnFlight();
@@ -661,6 +725,11 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
           currentSource = replacement;
           _hideSource(currentSource, true);
           _returnSource = currentSource;
+          _setSourceTextHidden(
+            currentSource,
+            true,
+            text.map((item) => item.role),
+          );
         }
       }
       final box = _sourceBox(currentSource);
@@ -693,6 +762,12 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
           targetRadius: widget.radius,
           fromBlend: fromBlend,
           toBlend: 0,
+          text: text,
+          onTextPresentation: (role, value) {
+            _returnTextPresentations[role] = value.transformed(
+              overlayBox.localToGlobal,
+            );
+          },
           onPresentation: (presentation) {
             _returnPresentation = presentation.transformed(
               overlayBox.localToGlobal,
@@ -755,6 +830,8 @@ class _CoverFlight extends StatefulWidget {
     this.initial,
     this.onPresentation,
     this.handle,
+    this.text = const [],
+    this.onTextPresentation,
   });
 
   final Rect start;
@@ -770,6 +847,8 @@ class _CoverFlight extends StatefulWidget {
   final _CoverPresentation? initial;
   final ValueChanged<_CoverPresentation>? onPresentation;
   final _CoverFlightHandle? handle;
+  final List<_CoverTextFlight> text;
+  final void Function(CoverTextRole, _CoverPresentation)? onTextPresentation;
 
   @override
   State<_CoverFlight> createState() => _CoverFlightState();
@@ -780,6 +859,7 @@ class _CoverFlightState extends State<_CoverFlight>
   _CoverSnapshot? _snapshot;
   late final _CoverPhysics _physics;
   late final Animation<double> _blend;
+  late final List<_CoverPhysics> _textPhysics;
   late final AnimationController _controller =
       AnimationController.unbounded(vsync: this)..addStatusListener((status) {
         if (status == AnimationStatus.completed) widget.onComplete();
@@ -803,7 +883,13 @@ class _CoverFlightState extends State<_CoverFlight>
       _controller,
       () => _physics.presentation(_controller.value).blend,
     );
-    if (!(widget.handle?._held ?? false)) _controller.animateWith(_physics);
+    _textPhysics = [
+      for (final text in widget.text)
+        _CoverPhysics(text.initial, text.destination, widget.toBlend),
+    ];
+    if (!(widget.handle?._held ?? false)) {
+      _controller.animateWith(_CoverFlightClock([_physics, ..._textPhysics]));
+    }
   }
 
   @override
@@ -827,38 +913,77 @@ class _CoverFlightState extends State<_CoverFlight>
   @override
   Widget build(BuildContext context) => IgnorePointer(
     child: ExcludeSemantics(
-      child: Flow(
+      child: Stack(
+        fit: StackFit.expand,
         clipBehavior: Clip.none,
-        delegate: _CoverFlightDelegate(
-          animation: _controller,
-          start: widget.start,
-          destination: widget.destination,
-          edge: widget.edge,
-          onRect: widget.onRect,
-          fromBlend: widget.fromBlend,
-          toBlend: widget.toBlend,
-          onBlend: widget.onBlend,
-          presentation: () => _physics.presentation(_controller.value),
-          onPresentation: widget.onPresentation,
-        ),
         children: [
-          if (_snapshot case final snapshot?)
-            CoverMorphSurface(
-              animation: _blend,
-              source: snapshot.image,
-              frameRect: () => _physics.presentation(_controller.value).rect,
-              fromBlend: 0,
-              toBlend: 1,
-              sourceRadius: widget.sourceRadius,
-              targetRadius: widget.targetRadius,
-              child: widget.child,
-            )
-          else
-            widget.child,
+          Flow(
+            clipBehavior: Clip.none,
+            delegate: _CoverFlightDelegate(
+              animation: _controller,
+              start: widget.start,
+              destination: widget.destination,
+              edge: widget.edge,
+              onRect: widget.onRect,
+              fromBlend: widget.fromBlend,
+              toBlend: widget.toBlend,
+              onBlend: widget.onBlend,
+              presentation: () => _physics.presentation(_controller.value),
+              onPresentation: widget.onPresentation,
+            ),
+            children: [
+              if (_snapshot case final snapshot?)
+                CoverMorphSurface(
+                  animation: _blend,
+                  source: snapshot.image,
+                  frameRect: () =>
+                      _physics.presentation(_controller.value).rect,
+                  fromBlend: 0,
+                  toBlend: 1,
+                  sourceRadius: widget.sourceRadius,
+                  targetRadius: widget.targetRadius,
+                  child: widget.child,
+                )
+              else
+                widget.child,
+            ],
+          ),
+          if (widget.text.isNotEmpty)
+            AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) => Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  for (var i = 0; i < widget.text.length; i++)
+                    _buildFlyingText(
+                      widget.text[i],
+                      _textPhysics[i].presentation(_controller.value),
+                      widget.onTextPresentation,
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     ),
   );
+}
+
+class _CoverFlightClock extends Simulation {
+  _CoverFlightClock(this.parts);
+  final List<_CoverPhysics> parts;
+  @override
+  double x(double time) {
+    for (final part in parts) {
+      part.presentation(time);
+    }
+    return time;
+  }
+
+  @override
+  double dx(double time) => 1;
+  @override
+  bool isDone(double time) => parts.every((part) => part.isDone(time));
 }
 
 class _CoverFlightDelegate extends FlowDelegate {

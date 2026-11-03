@@ -225,26 +225,34 @@ class _AppPlaylistCardState extends State<AppPlaylistCard> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  widget.playlist.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: apple.label,
-                    fontWeight: context.fonts.weightFor(
-                      FontCategory.title,
-                      FontWeight.w500,
+                CoverTransitionText.source(
+                  coverKey: _coverKey,
+                  role: CoverTextRole.title,
+                  child: Text(
+                    widget.playlist.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: apple.label,
+                      fontWeight: context.fonts.weightFor(
+                        FontCategory.title,
+                        FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
                 if (detail.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 1),
-                  Text(
-                    detail,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: apple.secondaryLabel,
+                  CoverTransitionText.source(
+                    coverKey: _coverKey,
+                    role: CoverTextRole.detail,
+                    child: Text(
+                      detail,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: apple.secondaryLabel,
+                      ),
                     ),
                   ),
                 ],

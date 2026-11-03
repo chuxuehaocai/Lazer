@@ -24,6 +24,12 @@ action opens the shared quality and destination dialog, shows active progress
 and opens the download queue after a track is queued or saved. Local files keep
 that action disabled.
 
+Opening the player reads an already decoded artwork palette synchronously for
+its first frame. If extraction is still running, its result invalidates the
+entrance snapshot immediately, so the visible background updates during the
+slide. Generation checks prevent an older track's extraction from replacing
+the current background.
+
 ## Lyric motion and layout
 
 The lyric canvas follows the AMLL/Apple Music reading rhythm:

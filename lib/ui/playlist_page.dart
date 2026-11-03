@@ -616,15 +616,19 @@ class AppPlaylistHeader extends StatelessWidget {
         // row sits on the cover's bottom edge and the leftover height opens
         // above the title. Compact layouts have no bounded height to spend.
         if (!compact) const Spacer(),
-        Text(
-          playlist.name,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          textAlign: compact ? TextAlign.center : TextAlign.start,
-          style: theme.textTheme.headlineLarge?.copyWith(
-            color: apple.label,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -.6,
+        CoverTransitionText.target(
+          identity: transitionIdentity ?? 'playlist:${playlist.id}',
+          role: CoverTextRole.title,
+          child: Text(
+            playlist.name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: compact ? TextAlign.center : TextAlign.start,
+            style: theme.textTheme.headlineLarge?.copyWith(
+              color: apple.label,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -.6,
+            ),
           ),
         ),
         if (artistWidget != null) ...[
@@ -650,17 +654,21 @@ class AppPlaylistHeader extends StatelessWidget {
           metadata!,
         ] else if (artist == null) ...[
           const SizedBox(height: 7),
-          Text(
-            <String>[
-              if (playlist.trackCount > 0)
-                context.tr('${playlist.trackCount} 首歌曲'),
-              if (playlist.description.isNotEmpty) playlist.description,
-            ].join(' · '),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: compact ? TextAlign.center : TextAlign.start,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: apple.secondaryLabel,
+          CoverTransitionText.target(
+            identity: transitionIdentity ?? 'playlist:${playlist.id}',
+            role: CoverTextRole.detail,
+            child: Text(
+              <String>[
+                if (playlist.trackCount > 0)
+                  context.tr('${playlist.trackCount} 首歌曲'),
+                if (playlist.description.isNotEmpty) playlist.description,
+              ].join(' · '),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: compact ? TextAlign.center : TextAlign.start,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: apple.secondaryLabel,
+              ),
             ),
           ),
         ],

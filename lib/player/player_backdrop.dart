@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../animation/motion_snapshot.dart';
 import '../data/models.dart';
 import '../ui/background.dart';
 import '../state/ui_preferences.dart';
@@ -77,14 +78,22 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
     final String? coverUrl = widget.track?.coverUrl;
     // Switch the canvas in this build. Waiting for the artwork must not leave
     // the previous track's palette visible throughout the retry window.
-    _colors = albumFlowColors(albumFallbackSeedForTrack(widget.track));
+    final cached = widget.paletteLoader == albumPaletteForCover
+        ? cachedAlbumPaletteForCover(coverUrl)
+        : null;
+    _colors =
+        cached?.mesh ??
+        albumFlowColors(albumFallbackSeedForTrack(widget.track));
     final AlbumCoverPalette? palette = await albumPaletteForCoverWhenReady(
       widget.paletteLoader,
       coverUrl,
     );
     if (!mounted || generation != _generation) return;
     widget.onSeed?.call(palette?.seed);
-    if (palette != null) setState(() => _colors = palette.mesh);
+    if (palette != null && !identical(_colors, palette.mesh)) {
+      setState(() => _colors = palette.mesh);
+      MotionSnapshot.invalidate(context);
+    }
   }
 
   @override

@@ -183,6 +183,12 @@ placeholder frame. Back can interrupt an entrance, and another destination can
 retarget a moving flight. Navigation ancestors retain their state and scroll
 position but do not keep hidden tickers running.
 
+Playlist names and count lines share the cover flight's clock. Their measured
+card/header bounds and text styles interpolate in both directions; faster
+movement lightens the weight by up to 120 before returning to the configured
+weight at rest. Interrupted flights preserve text position and velocity.
+Scrolling after Back immediately returns the cover and text to the live card.
+
 ## Verification
 
 `flutter analyze` and the full widget/unit suite cover the desktop layout at

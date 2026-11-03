@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
+import 'package:flutter/scheduler.dart';
 
 import '../widgets/cover_transition.dart';
 
@@ -13,6 +14,21 @@ class MotionSnapshot extends StatefulWidget {
   });
   final Animation<double> animation;
   final Widget child;
+
+  /// Refresh frozen transition pixels when asynchronous visible content arrives.
+  static void invalidate(BuildContext context) {
+    if (!context.mounted) return;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => invalidate(context));
+      return;
+    }
+    context.visitAncestorElements((element) {
+      final widget = element.widget;
+      if (widget is SnapshotWidget) widget.controller.clear();
+      return true;
+    });
+  }
 
   @override
   State<MotionSnapshot> createState() => _MotionSnapshotState();

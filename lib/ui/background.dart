@@ -1217,22 +1217,32 @@ typedef AlbumPaletteLoader =
 final Map<String, AlbumCoverPalette> _artworkPalettes = {};
 final Map<String, Future<AlbumCoverPalette?>> _paletteRequests = {};
 
-Future<AlbumCoverPalette?> albumPaletteForCover(String? coverUrl) {
+/// Reuses decoded artwork on the very first paint of a newly opened player.
+AlbumCoverPalette? cachedAlbumPaletteForCover(String? coverUrl) {
   final url = albumPaletteArtworkUrl(coverUrl);
-  if (url == null) return Future.value(null);
+  if (url == null) return null;
   final cached = _artworkPalettes.remove(url);
   if (cached != null) {
     _artworkPalettes[url] = cached;
-    return Future.value(cached);
+    return cached;
   }
   final normalized = normalizedArtworkUrl(coverUrl);
   if (normalized != null && normalized != url) {
     final fallbackCached = _artworkPalettes.remove(normalized);
     if (fallbackCached != null) {
       _artworkPalettes[normalized] = fallbackCached;
-      return Future.value(fallbackCached);
+      return fallbackCached;
     }
   }
+  return null;
+}
+
+Future<AlbumCoverPalette?> albumPaletteForCover(String? coverUrl) {
+  final url = albumPaletteArtworkUrl(coverUrl);
+  if (url == null) return Future.value(null);
+  final cached = cachedAlbumPaletteForCover(coverUrl);
+  if (cached != null) return Future.value(cached);
+  final normalized = normalizedArtworkUrl(coverUrl);
   final candidates = <String>[url];
   if (normalized != null && normalized != url) candidates.add(normalized);
   return _paletteRequests.putIfAbsent(
@@ -1424,7 +1434,12 @@ class _AppAlbumBackdropState extends State<AppAlbumBackdrop> {
   Future<void> _load() async {
     final int generation = ++_generation;
     final String? coverUrl = widget.track?.coverUrl;
-    _colors = albumFlowColors(albumFallbackSeedForTrack(widget.track));
+    final cached = widget.paletteLoader == albumPaletteForCover
+        ? cachedAlbumPaletteForCover(coverUrl)
+        : null;
+    _colors =
+        cached?.mesh ??
+        albumFlowColors(albumFallbackSeedForTrack(widget.track));
     final palette = await albumPaletteForCoverWhenReady(
       widget.paletteLoader,
       coverUrl,
