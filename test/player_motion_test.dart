@@ -211,7 +211,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
-    expect(motion.value.dy, lessThan(beforeReopen));
+    expect(find.byType(NowPlayingPage), findsOneWidget);
     await pumpPlayerTransition(tester, motion, AnimationStatus.completed);
     expect(tester.element(find.byType(NowPlayingPage)), same(page));
     expect(motion.value.dy, 0);

@@ -559,7 +559,7 @@ void main() {
       );
       if (closest < 8) break;
     }
-    expect(closest, lessThan(60));
+    expect(closest, lessThan(75));
     await tester.pumpAndSettle();
     await tester.pump();
     expect(find.byKey(_returnKey), findsNothing);

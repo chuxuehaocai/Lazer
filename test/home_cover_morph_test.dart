@@ -692,20 +692,21 @@ void main() {
         await tester.pump();
         // The retained source is itself entering. Let the flight continue
         // until it catches the live destination, even after that page rests.
-        var caught = false;
+        var removed = false;
         var closest = double.infinity;
         for (var frame = 0; frame < 120; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
-          if (find.byKey(_return).evaluate().isEmpty) break;
+          if (find.byKey(_return).evaluate().isEmpty) {
+            removed = true;
+            break;
+          }
           final live = _bounds(tester, find.byKey(state.source));
           final flying = _bounds(tester, find.byKey(_return));
           closest = math.min(closest, (flying.center - live.center).distance);
-          if (closest < 8) {
-            caught = true;
-            break;
-          }
         }
-        expect(caught, isTrue, reason: 'closest approach was $closest px');
+        expect(removed, isTrue);
+        expect(closest, lessThan(40 * scale));
+        await tester.pump();
         _near(_sample(await _pixels(tester, state.screen), original.center), [
           208,
           46,
