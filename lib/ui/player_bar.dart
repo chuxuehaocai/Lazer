@@ -340,7 +340,6 @@ class _NowPlayingTileState extends State<_NowPlayingTile> {
                       key: _coverKey,
                       identity: track == null ? null : 'player:${track.id}',
                       radius: 12,
-                      morphArtwork: true,
                       child: AppCover(
                         url: track?.coverUrl,
                         size: widget.artworkSize,

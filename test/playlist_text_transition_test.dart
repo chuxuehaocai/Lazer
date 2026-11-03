@@ -162,6 +162,17 @@ void main() {
         };
         Future<void> checkFrames() async {
           var frames = 0;
+          final retained = {
+            for (final role in CoverTextRole.values)
+              role: tester
+                  .widgetList<RichText>(
+                    find.descendant(
+                      of: _flight(role),
+                      matching: find.byType(RichText),
+                    ),
+                  )
+                  .toList(),
+          };
           while (_flight(CoverTextRole.title).evaluate().isNotEmpty &&
               frames < 120) {
             for (final role in CoverTextRole.values) {
@@ -170,6 +181,14 @@ void main() {
                 matching: find.byType(RichText),
               );
               expect(labels, findsNWidgets(2));
+              expect(
+                tester.widget<RichText>(labels.at(0)),
+                same(retained[role]![0]),
+              );
+              expect(
+                tester.widget<RichText>(labels.at(1)),
+                same(retained[role]![1]),
+              );
               // The existing ellipsis/line breaks must remain stable, including
               // the last visible glyph; only the paragraph transform changes.
               expect(

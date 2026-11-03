@@ -42,7 +42,7 @@ void main() {
 
   for (final compact in [true, false]) {
     testWidgets(
-      'player cover and labels share the ${compact ? "mobile bounce" : "desktop slide"}',
+      'player cover and labels share the ${compact ? "mobile spring" : "desktop spring"}',
       (tester) async {
         tester.view.physicalSize = compact
             ? const Size(390, 844)
@@ -94,7 +94,7 @@ void main() {
             expect(tester.takeException(), isNull);
           },
         );
-        expect(bounced, compact);
+        expect(bounced, isTrue);
         await tester.pump();
         expect(flyingCover, findsNothing);
         final target = find.byWidgetPredicate(
@@ -126,7 +126,7 @@ void main() {
     );
   }
 
-  testWidgets('desktop entrance and exit finish with a calm finite slide', (
+  testWidgets('desktop entrance and exit follow the same bouncing spring', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -167,20 +167,20 @@ void main() {
     final double firstLeg = 1 - remaining();
     expect(
       firstLeg,
-      inExclusiveRange(.45, .48),
+      inExclusiveRange(.4, .8),
       reason: 'the full page responds promptly at a deliberate pace',
     );
 
     await tester.pump(const Duration(milliseconds: 160));
     final double secondLeg = 1 - remaining() - firstLeg;
     expect(secondLeg, lessThan(firstLeg));
-    expect(1 - remaining(), inExclusiveRange(.7, .9));
+    expect(remaining(), lessThan(0));
 
-    await tester.pump(const Duration(milliseconds: 280));
+    await pumpPlayerTransition(tester, motion, AnimationStatus.completed);
     expect(remaining(), closeTo(0, .001));
     expect(motion.status, AnimationStatus.completed);
 
-    // Closing has the same pace and no almost-stationary spring tail.
+    // Closing follows the same spring response and settles naturally.
     await tester.tap(find.byKey(const ValueKey('desktop-close')));
     await tester.pump();
     expect(remaining(), closeTo(0, .001));
@@ -197,7 +197,7 @@ void main() {
     final double secondLegOut = remaining() - firstLegOut;
     expect(secondLegOut, closeTo(secondLeg, .001));
 
-    await tester.pump(const Duration(milliseconds: 280));
+    await pumpPlayerTransition(tester, motion, AnimationStatus.dismissed);
     await tester.pump();
     expect(motion.status, AnimationStatus.dismissed);
     expect(find.byType(NowPlayingPage), findsNothing);
@@ -225,7 +225,11 @@ void main() {
     final open = tester.widget<AppPlayerBar>(find.byType(AppPlayerBar)).onOpen;
     open();
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 99));
+    final preceding = tester.getRect(
+      find.byKey(const ValueKey('cover-transition-flight')),
+    );
+    await tester.pump(const Duration(milliseconds: 1));
     final page = tester.element(find.byType(NowPlayingPage));
     final motion = playerSlideAnimation(tester);
     final beforeClose = motion.value.dy;
@@ -248,7 +252,17 @@ void main() {
       tester.getRect(find.byKey(const ValueKey('cover-transition-text-title'))),
       title,
     );
-    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 1));
+    final following = tester.getRect(
+      find.byKey(const ValueKey('cover-transition-return-flight')),
+    );
+    expect(
+      following.top - cover.top,
+      closeTo(cover.top - preceding.top, .1),
+      reason:
+          'the cover keeps its physical velocity when closing interrupts opening',
+    );
+    await tester.pump(const Duration(milliseconds: 15));
     expect(motion.value.dy, lessThan(beforeClose));
     await tester.pump(const Duration(milliseconds: 130));
     final beforeReopen = motion.value.dy;

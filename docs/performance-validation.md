@@ -5,21 +5,39 @@
 Caption flights preserve both endpoints' shaped paragraphs, including their
 original constraints, scaling, line breaks and ellipsis. They transform and
 crossfade these retained layouts instead of changing font size, weight and
-available width every frame. The surrounding content viewport still clips
+available width every frame. A Flow moves fixed-size children, and retained
+transform/opacity layers fit their unchanged paragraphs into the presentation
+rectangle. Animation ticks do not rebuild or lay out those labels. The
+surrounding content viewport still clips
 the flight, but no interpolated text-height clip cuts through glyphs.
 
 The player reuses the same cover/text overlay from its transport tile. Its
 elements share the page's physical progress, with the destination measured
-without the outer page translation. Mobile uses a 480 ms perceived-duration
-spring with 0.24 bounce and an unbounded controller. Navigator-facing progress
-remains clamped for opacity consumers. Desktop uses a 600 ms ease-out quadratic
-for a resting open or close; interruptions retain current position/velocity.
+without the outer page translation. All platforms use the same duration/bounce
+spring: a 600 ms perceived duration and 0.3 bounce, implemented in Dart with
+SpringSimulation. Page, cover and labels share that physical coordinate. There
+is no platform-specific ease-out, artificial initial kick, braking segment or
+second easing curve. Unbounded controllers preserve overshoot; navigator-facing
+progress and opacity stay clamped for their consumers. Settlement, rather than
+a fixed animation deadline, completes the motion.
 Pull releases retain their physical velocity and reduced motion completes the
 controller with the correct terminal status.
 
+Player flights listen directly to the page controller and allocate no second
+ticker. Rectangle velocity is derived in the same physical coordinate; reverse
+and regrab handoffs keep it. The page coordinate is captured at the opening or
+reversal request, rather than when the overlay happens to mount a frame later.
+This prevents a delayed first overlay frame from restarting its geometry at
+zero while the page is already moving. Geometry samples are shared within a frame/phase,
+and the transport cover reuses the live artwork without taking a card raster.
+Labels start hidden before the player's first snapshot. The browse canvas also
+snapshots during player movement so its glass/background filters do not rerun
+behind every shared-element frame. Snapshots release at settlement as before.
+
 Regression checks sample caption glyph boxes at 1x, 1.3x and 2x text scales in
-both directions, actual mobile overshoot, desktop deceleration, interrupted
-motion, shared-element handoff and released snapshot ownership. These checks
+both directions, physical overshoot, cross-platform parity, interrupted
+motion, retained label widgets, a paused flight with no extra ticker,
+shared-element handoff and released snapshot ownership. These checks
 do not substitute for frame-timing measurements on each target device.
 
 ## Player readiness and navigation handoff

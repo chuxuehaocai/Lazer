@@ -11,6 +11,8 @@ class AppleSpring {
   }) : assert(bounce > -1 && bounce < 1);
 
   static const smooth = AppleSpring();
+  static const bouncyDuration = Duration(milliseconds: 600);
+  static const bouncy = AppleSpring(duration: bouncyDuration, bounce: .3);
   static const snappy = AppleSpring(
     duration: Duration(milliseconds: 350),
     bounce: .15,

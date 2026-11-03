@@ -11,7 +11,7 @@ import 'cover_morph_surface.dart';
 
 part 'cover_transition_text.dart';
 
-const _coverSpring = AppleSpring(duration: Duration(milliseconds: 420));
+const _coverSpring = AppleSpring.bouncy;
 
 class _CoverSnapshot {
   _CoverSnapshot(this.image) {
@@ -98,6 +98,7 @@ class _CoverOrigin {
     this.presentation,
     this.text = const {},
     this.textPresentations = const {},
+    this.motionProgress,
   ]);
   final String identity;
   final Rect rect;
@@ -108,6 +109,7 @@ class _CoverOrigin {
   final _CoverPresentation? presentation;
   final Map<CoverTextRole, _CoverTextEndpoint> text;
   final Map<CoverTextRole, _CoverPresentation> textPresentations;
+  final double? motionProgress;
 }
 
 _CoverOrigin? _pendingCover;
@@ -397,6 +399,7 @@ void rememberCoverTransition(
   String identity,
   GlobalKey coverKey, {
   bool retainOrigins = false,
+  double? motionProgress,
 }) {
   final box = coverKey.currentContext?.findRenderObject();
   if (box is! RenderBox || !box.hasSize || box.size.isEmpty) return;
@@ -436,6 +439,7 @@ void rememberCoverTransition(
     presentation,
     _captureSourceText(coverKey),
     textPresentations,
+    motionProgress,
   );
   if (reduced) snapshot?.release();
   // Keep the source visible until the overlay flight has been inserted. Hiding
@@ -450,10 +454,15 @@ void rememberCoverTransition(
 }
 
 /// Opens from a persistent transport tile, including keyboard/remote actions.
-void rememberRegisteredCoverTransition(String identity) {
+void rememberRegisteredCoverTransition(String identity, {double progress = 0}) {
   for (final key in _sourceKeys[identity] ?? <GlobalKey>{}) {
     if (_sourceBox(key) == null) continue;
-    rememberCoverTransition(identity, key, retainOrigins: true);
+    rememberCoverTransition(
+      identity,
+      key,
+      retainOrigins: true,
+      motionProgress: progress,
+    );
     return;
   }
 }
@@ -478,11 +487,8 @@ class CoverTransitionTarget extends StatefulWidget {
   final double radius;
   final Widget child;
 
-  /// An optional page coordinate shared by artwork and labels. Without it,
-  /// collection flights use their own spring and track the moving page.
-  final Animation<double>? motion;
-
-  /// The host's current translation, removed when measuring its resting slot.
+  /// Player flights reuse their host's physical coordinate and ticker.
+  final AnimationController? motion;
   final Offset Function()? targetTranslation;
 
   /// A track changed inside the player can return to its current transport tile.
@@ -538,7 +544,8 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     _pendingCover = null;
     _forgetOrigin();
     _origin = origin;
-    if (DateTime.now().difference(origin.recordedAt).inMilliseconds > 1200) {
+    if (DateTime.now().difference(origin.recordedAt).inMilliseconds > 1200 &&
+        !(widget.motion?.isAnimating ?? false)) {
       _removeHandoffFlights(widget.identity);
       _hideSource(origin.sourceKey, false);
       _forgetOrigin();
@@ -546,6 +553,9 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     }
     _flying = true;
     _flightBlend = 0;
+    // Hide new labels before the page takes its first raster. Hiding them in
+    // the post-frame overlay insertion would force a second full-page capture.
+    _setTargetTextHidden(widget.identity, true, origin.text.keys);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_flying || generation != _generation) return;
       final overlay = Overlay.maybeOf(context, rootOverlay: true);
@@ -555,6 +565,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
           MediaQuery.disableAnimationsOf(context)) {
         _removeHandoffFlights(widget.identity);
         setState(() => _flying = false);
+        _setTargetTextHidden(widget.identity, false);
         _hideSource(origin.sourceKey, false);
         return;
       }
@@ -601,6 +612,12 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
         targetTranslation: widget.targetTranslation,
       );
       final viewport = _coverViewport(context);
+      final roles = text.map((item) => item.role).toSet();
+      _setTargetTextHidden(
+        widget.identity,
+        false,
+        origin.text.keys.where((role) => !roles.contains(role)),
+      );
       _textPresentations.clear();
       _flight = OverlayEntry(
         builder: (_) => Positioned.fill(
@@ -615,6 +632,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
             text: text,
             viewport: () => _viewportRect(viewport, overlayBox),
             motion: widget.motion,
+            fromProgress: origin.motionProgress,
             onTextPresentation: (role, value) =>
                 _textPresentations[role] = value,
             onRect: (rect) => _flightRect = rect,
@@ -655,7 +673,9 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
         true,
         text.map((item) => item.role),
       );
-      _refreshSnapshots(context);
+      if (widget.motion == null || origin.presentation != null) {
+        _refreshSnapshots(context);
+      }
     });
   }
 
@@ -754,6 +774,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     _returnSnapshot = origin.snapshot?.retain();
     final snapshot = _returnSnapshot;
     final fromBlend = _flightBlend;
+    final fromProgress = widget.motion?.value;
     _hideSource(sourceKey, true);
     _returnSource = sourceKey;
     _returnIdentity = widget.identity;
@@ -851,6 +872,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
           text: text,
           viewport: () => _viewportRect(viewport, overlayBox),
           motion: widget.motion,
+          fromProgress: fromProgress,
           onTextPresentation: (role, value) {
             _returnTextPresentations[role] = value.transformed(
               overlayBox.localToGlobal,
@@ -878,7 +900,10 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
     if (_origin != null) _removeHandoffFlights(widget.identity);
     if (!_returning && _origin != null) _hideSource(_origin!.sourceKey, false);
     _forgetOrigin();
-    if (_targets[widget.identity] == this) _targets.remove(widget.identity);
+    if (_targets[widget.identity] == this) {
+      _targets.remove(widget.identity);
+      _hiddenTargetText.remove(widget.identity);
+    }
     super.dispose();
   }
 
@@ -890,14 +915,14 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
   );
 }
 
-/// The root overlay owns the ticker: the incoming page intentionally mutes
-/// its own tickers until its transition ends, but artwork must fly meanwhile.
+/// Collection overlays keep their clock while the page mutes child tickers.
+/// Player overlays listen directly to the host's physical motion instead.
 class _CoverFlightHandle {
   _CoverFlightState? _state;
   bool _held = false;
   void hold() {
     _held = true;
-    _state?._controller.stop();
+    _state?._hold();
   }
 }
 
@@ -922,6 +947,7 @@ class _CoverFlight extends StatefulWidget {
     this.onTextPresentation,
     this.viewport,
     this.motion,
+    this.fromProgress,
   });
 
   final Rect start;
@@ -940,7 +966,8 @@ class _CoverFlight extends StatefulWidget {
   final List<_CoverTextFlight> text;
   final void Function(CoverTextRole, _CoverPresentation)? onTextPresentation;
   final Rect? Function()? viewport;
-  final Animation<double>? motion;
+  final AnimationController? motion;
+  final double? fromProgress;
 
   @override
   State<_CoverFlight> createState() => _CoverFlightState();
@@ -952,10 +979,25 @@ class _CoverFlightState extends State<_CoverFlight>
   late final _CoverPhysics _physics;
   late final Animation<double> _blend;
   late final List<_CoverPhysics> _textPhysics;
-  late final AnimationController _controller =
-      AnimationController.unbounded(vsync: this)..addStatusListener((status) {
-        if (status == AnimationStatus.completed) widget.onComplete();
-      });
+  AnimationController? _controller;
+  late final Animation<double> _clock;
+
+  void _status(AnimationStatus status) {
+    final terminal = widget.motion == null || widget.toBlend == 1
+        ? AnimationStatus.completed
+        : AnimationStatus.dismissed;
+    if (status == terminal && !(widget.handle?._held ?? false)) {
+      widget.onComplete();
+    }
+  }
+
+  void _hold() {
+    _controller?.stop();
+    _physics.hold(_clock.value);
+    for (final text in _textPhysics) {
+      text.hold(_clock.value);
+    }
+  }
 
   @override
   void initState() {
@@ -965,16 +1007,21 @@ class _CoverFlightState extends State<_CoverFlight>
     // pixels alive until this flight actually detaches, even if its page or
     // the global return slot has already released their own references.
     _snapshot = widget.snapshot?.retain();
+    _clock =
+        widget.motion ??
+        (_controller = AnimationController.unbounded(vsync: this));
+    _clock.addStatusListener(_status);
     _physics = _CoverPhysics(
       widget.initial ??
           _CoverPresentation(widget.start, Rect.zero, widget.fromBlend, 0),
       widget.destination,
       widget.toBlend,
       motion: widget.motion,
+      fromProgress: widget.fromProgress,
     );
     _blend = _CoverBlend(
-      _controller,
-      () => _physics.presentation(_controller.value).blend,
+      _clock,
+      () => _physics.presentation(_clock.value).blend,
     );
     _textPhysics = [
       for (final text in widget.text)
@@ -983,10 +1030,11 @@ class _CoverFlightState extends State<_CoverFlight>
           text.destination,
           widget.toBlend,
           motion: widget.motion,
+          fromProgress: widget.fromProgress,
         ),
     ];
     if (!(widget.handle?._held ?? false)) {
-      _controller.animateWith(_CoverFlightClock([_physics, ..._textPhysics]));
+      _controller?.animateWith(_CoverFlightClock([_physics, ..._textPhysics]));
     }
   }
 
@@ -1003,14 +1051,15 @@ class _CoverFlightState extends State<_CoverFlight>
   @override
   void dispose() {
     if (widget.handle?._state == this) widget.handle?._state = null;
-    _controller.dispose();
+    _clock.removeStatusListener(_status);
+    _controller?.dispose();
     _snapshot?.release();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => ClipRect(
-    clipper: _FlightClipper(_controller, widget.viewport),
+    clipper: _FlightClipper(_clock, widget.viewport),
     child: IgnorePointer(
       child: ExcludeSemantics(
         child: Stack(
@@ -1020,7 +1069,7 @@ class _CoverFlightState extends State<_CoverFlight>
             Flow(
               clipBehavior: Clip.none,
               delegate: _CoverFlightDelegate(
-                animation: _controller,
+                animation: _clock,
                 start: widget.start,
                 destination: widget.destination,
                 edge: widget.edge,
@@ -1028,7 +1077,7 @@ class _CoverFlightState extends State<_CoverFlight>
                 fromBlend: widget.fromBlend,
                 toBlend: widget.toBlend,
                 onBlend: widget.onBlend,
-                presentation: () => _physics.presentation(_controller.value),
+                presentation: () => _physics.presentation(_clock.value),
                 onPresentation: widget.onPresentation,
               ),
               children: [
@@ -1036,8 +1085,7 @@ class _CoverFlightState extends State<_CoverFlight>
                   CoverMorphSurface(
                     animation: _blend,
                     source: snapshot.image,
-                    frameRect: () =>
-                        _physics.presentation(_controller.value).rect,
+                    frameRect: () => _physics.presentation(_clock.value).rect,
                     fromBlend: 0,
                     toBlend: 1,
                     sourceRadius: widget.sourceRadius,
@@ -1048,20 +1096,35 @@ class _CoverFlightState extends State<_CoverFlight>
                   widget.child,
               ],
             ),
-            if (widget.text.isNotEmpty)
-              AnimatedBuilder(
-                animation: _controller,
-                builder: (context, _) => Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    for (var i = 0; i < widget.text.length; i++)
-                      _buildFlyingText(
-                        widget.text[i],
-                        _textPhysics[i].presentation(_controller.value),
-                        widget.onTextPresentation,
-                      ),
-                  ],
+            for (var i = 0; i < widget.text.length; i++)
+              Flow(
+                clipBehavior: Clip.none,
+                delegate: _CoverFlightDelegate(
+                  animation: _clock,
+                  start: widget.text[i].initial.rect,
+                  destination: widget.text[i].destination,
+                  edge: 1,
+                  childSize: widget.text[i].target.rect.size,
+                  presentation: () =>
+                      _textPhysics[i].presentation(_clock.value),
+                  onPresentation: (value) => widget.onTextPresentation?.call(
+                    widget.text[i].role,
+                    value,
+                  ),
                 ),
+                children: [
+                  RepaintBoundary(
+                    key: ValueKey(
+                      'cover-transition-text-${widget.text[i].role.name}',
+                    ),
+                    child: _CoverTextSurface(
+                      animation: _clock,
+                      presentation: () =>
+                          _textPhysics[i].presentation(_clock.value),
+                      flight: widget.text[i],
+                    ),
+                  ),
+                ],
               ),
           ],
         ),
@@ -1106,6 +1169,7 @@ class _CoverFlightDelegate extends FlowDelegate {
     required this.start,
     required this.destination,
     required this.edge,
+    this.childSize,
     this.onRect,
     this.fromBlend = 0,
     this.toBlend = 1,
@@ -1118,6 +1182,7 @@ class _CoverFlightDelegate extends FlowDelegate {
   final Rect start;
   final Rect? Function() destination;
   final double edge;
+  final Size? childSize;
   final ValueChanged<Rect>? onRect;
   final double fromBlend, toBlend;
   final ValueChanged<double>? onBlend;
@@ -1126,7 +1191,7 @@ class _CoverFlightDelegate extends FlowDelegate {
 
   @override
   BoxConstraints getConstraintsForChild(int i, BoxConstraints constraints) =>
-      BoxConstraints.tight(Size.square(edge));
+      BoxConstraints.tight(childSize ?? Size.square(edge));
 
   @override
   void paintChildren(FlowPaintingContext context) {
@@ -1136,8 +1201,8 @@ class _CoverFlightDelegate extends FlowDelegate {
     onBlend?.call(frame.blend);
     onPresentation?.call(frame);
     final transform = Matrix4.diagonal3Values(
-      rect.width / edge,
-      rect.height / edge,
+      rect.width / (childSize?.width ?? edge),
+      rect.height / (childSize?.height ?? edge),
       1,
     )..setTranslationRaw(rect.left, rect.top, 0);
     context.paintChild(0, transform: transform);
@@ -1151,6 +1216,7 @@ class _CoverFlightDelegate extends FlowDelegate {
       oldDelegate.fromBlend != fromBlend ||
       oldDelegate.toBlend != toBlend ||
       oldDelegate.presentation != presentation ||
+      oldDelegate.childSize != childSize ||
       oldDelegate.edge != edge;
 }
 
@@ -1181,21 +1247,30 @@ class _CoverPresentation {
 }
 
 class _CoverPhysics extends Simulation {
-  _CoverPhysics(this.initial, this.destination, this.toBlend, {this.motion})
-    : _target = destination() ?? initial.rect,
-      fromProgress = motion?.value ?? 0,
-      _blend = _coverSpring.simulation(
-        initial.blend,
-        toBlend,
-        velocity: initial.blendVelocity,
-      ) {
+  _CoverPhysics(
+    this.initial,
+    this.destination,
+    this.toBlend, {
+    this.motion,
+    double? fromProgress,
+  }) : _target = destination() ?? initial.rect,
+       fromProgress = fromProgress ?? motion?.value ?? 0,
+       _blend = _coverSpring.simulation(
+         initial.blend,
+         toBlend,
+         velocity: initial.blendVelocity,
+       ) {
     _edges = _springs(initial, _target);
   }
 
   final Rect? Function() destination;
   final _CoverPresentation initial;
-  final Animation<double>? motion;
+  final AnimationController? motion;
   final double fromProgress, toBlend;
+  _CoverPresentation? _held, _cached;
+  Duration? _frameStamp;
+  SchedulerPhase? _phase;
+  double? _sampleTime;
   Rect _target;
   double _epoch = 0;
   late List<SpringSimulation> _edges;
@@ -1243,18 +1318,40 @@ class _CoverPhysics extends Simulation {
   }
 
   _CoverPresentation presentation(double time) {
+    if (_held case final held?) return held;
+    final binding = SchedulerBinding.instance;
+    final frameStamp = binding.schedulerPhase == SchedulerPhase.idle
+        ? null
+        : binding.currentFrameTimeStamp;
+    if (_cached != null &&
+        _sampleTime == time &&
+        _frameStamp == frameStamp &&
+        _phase == binding.schedulerPhase) {
+      return _cached!;
+    }
+    _sampleTime = time;
+    _frameStamp = frameStamp;
+    _phase = binding.schedulerPhase;
     final target = destination();
+    if (target != null) _target = target;
     if (motion case final progress?) {
-      if (target != null) _target = target;
       final distance = toBlend - fromProgress;
       final t = distance.abs() < .00001
           ? 1.0
           : (progress.value - fromProgress) / distance;
-      return _CoverPresentation(
+      final speed = distance.abs() < .00001
+          ? 0.0
+          : progress.velocity / distance;
+      return _cached = _CoverPresentation(
         Rect.lerp(initial.rect, _target, t)!,
-        Rect.zero,
+        Rect.fromLTRB(
+          (_target.left - initial.rect.left) * speed,
+          (_target.top - initial.rect.top) * speed,
+          (_target.right - initial.rect.right) * speed,
+          (_target.bottom - initial.rect.bottom) * speed,
+        ),
         ui.lerpDouble(initial.blend, toBlend, t)!.clamp(0.0, 1.0),
-        0,
+        (toBlend - initial.blend) * speed,
       );
     }
     if (target != null && target != _target) {
@@ -1263,8 +1360,10 @@ class _CoverPhysics extends Simulation {
       _edges = _springs(current, target);
       _epoch = time;
     }
-    return _sample(time);
+    return _cached = _sample(time);
   }
+
+  void hold(double time) => _held = _cached ?? presentation(time);
 
   @override
   double x(double time) {
@@ -1277,12 +1376,6 @@ class _CoverPhysics extends Simulation {
 
   @override
   bool isDone(double time) {
-    if (motion case final progress?) {
-      return progress.status ==
-          (toBlend == 1
-              ? AnimationStatus.completed
-              : AnimationStatus.dismissed);
-    }
     presentation(time);
     return _blend.isDone(time) &&
         _edges.every((spring) => spring.isDone(math.max(0.0, time - _epoch)));

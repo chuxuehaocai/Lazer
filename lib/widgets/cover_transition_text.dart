@@ -33,6 +33,7 @@ final Map<GlobalKey, Map<CoverTextRole, _CoverTransitionTextState>>
 _sourceText = {};
 final Map<String, Map<CoverTextRole, _CoverTransitionTextState>> _targetText =
     {};
+final Map<String, Set<CoverTextRole>> _hiddenTargetText = {};
 
 class _CoverTransitionTextState extends State<CoverTransitionText> {
   bool _hidden = false, _scheduled = false, _active = true;
@@ -60,6 +61,8 @@ class _CoverTransitionTextState extends State<CoverTransitionText> {
   @override
   void initState() {
     super.initState();
+    _hidden =
+        _hiddenTargetText[widget.identity]?.contains(widget.role) ?? false;
     _registry(widget)[widget.role] = this;
   }
 
@@ -71,7 +74,8 @@ class _CoverTransitionTextState extends State<CoverTransitionText> {
         oldWidget.role != widget.role) {
       _unregister(oldWidget);
       _registry(widget)[widget.role] = this;
-      _hidden = false;
+      _hidden =
+          _hiddenTargetText[widget.identity]?.contains(widget.role) ?? false;
     }
   }
 
@@ -205,9 +209,18 @@ void _setTargetTextHidden(
   bool hidden, [
   Iterable<CoverTextRole>? roles,
 ]) {
+  final selected = roles?.toList() ?? CoverTextRole.values;
+  if (hidden) {
+    (_hiddenTargetText[identity] ??= {}).addAll(selected);
+  } else {
+    _hiddenTargetText[identity]?.removeAll(selected);
+    if (_hiddenTargetText[identity]?.isEmpty ?? false) {
+      _hiddenTargetText.remove(identity);
+    }
+  }
   final entries = _targetText[identity];
   if (entries == null) return;
-  for (final role in roles ?? entries.keys) {
+  for (final role in selected) {
     entries[role]?.hide(hidden);
   }
 }
@@ -303,31 +316,148 @@ List<_CoverTextFlight> _textFlights({
   return flights;
 }
 
-Widget _buildFlyingText(
-  _CoverTextFlight flight,
-  _CoverPresentation frame,
-  void Function(CoverTextRole, _CoverPresentation)? onPresentation,
-) {
-  onPresentation?.call(flight.role, frame);
-  final t = frame.blend.clamp(0.0, 1.0);
-  // Keep differently wrapped paragraphs from remaining superimposed for most
-  // of the flight. Both ends are fully opaque well before geometry settles.
-  final blend = Curves.easeInOutQuint.transform(t);
-  Widget label(_CoverTextEndpoint endpoint, double opacity) => Opacity(
-    opacity: opacity,
-    child: FittedBox(
-      fit: BoxFit.contain,
-      alignment: Alignment.topLeft,
-      child: endpoint.paragraph,
-    ),
-  );
-  return Positioned.fromRect(
-    rect: frame.rect,
-    child: Stack(
-      key: ValueKey('cover-transition-text-${flight.role.name}'),
-      fit: StackFit.expand,
-      clipBehavior: Clip.none,
-      children: [label(flight.source, 1 - blend), label(flight.target, blend)],
-    ),
-  );
+// Children keep their original paragraph constraints. Only their retained
+// paint layers follow the flight; animation ticks never relayout the labels.
+class _CoverTextSurface extends MultiChildRenderObjectWidget {
+  _CoverTextSurface({
+    required this.animation,
+    required this.presentation,
+    required _CoverTextFlight flight,
+  }) : super(children: [flight.source.paragraph, flight.target.paragraph]);
+  final Animation<double> animation;
+  final _CoverPresentation Function() presentation;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderCoverTextSurface(animation, presentation);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant _RenderCoverTextSurface renderObject,
+  ) {
+    renderObject
+      ..animation = animation
+      ..presentation = presentation;
+  }
+}
+
+class _CoverTextParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderCoverTextSurface extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _CoverTextParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _CoverTextParentData> {
+  _RenderCoverTextSurface(this._animation, this._presentation);
+  Animation<double> _animation;
+  _CoverPresentation Function() _presentation;
+  final _frameLayer = LayerHandle<TransformLayer>();
+  final _transforms = List.generate(2, (_) => LayerHandle<TransformLayer>());
+  final _opacities = List.generate(2, (_) => LayerHandle<OpacityLayer>());
+
+  set animation(Animation<double> value) {
+    if (_animation == value) return;
+    if (attached) _animation.removeListener(markNeedsPaint);
+    _animation = value;
+    if (attached) _animation.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
+  set presentation(_CoverPresentation Function() value) {
+    _presentation = value;
+    markNeedsPaint();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _CoverTextParentData) {
+      child.parentData = _CoverTextParentData();
+    }
+  }
+
+  @override
+  void performLayout() {
+    size = constraints.biggest;
+    RenderBox? child = firstChild;
+    while (child != null) {
+      child.layout(const BoxConstraints(), parentUsesSize: true);
+      child = childAfter(child);
+    }
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _animation.addListener(markNeedsPaint);
+  }
+
+  @override
+  void detach() {
+    _animation.removeListener(markNeedsPaint);
+    super.detach();
+  }
+
+  @override
+  void dispose() {
+    _frameLayer.layer = null;
+    for (final handle in _transforms) {
+      handle.layer = null;
+    }
+    for (final handle in _opacities) {
+      handle.layer = null;
+    }
+    super.dispose();
+  }
+
+  @override
+  bool get alwaysNeedsCompositing => true;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final frame = _presentation();
+    final rect = frame.rect;
+    if (size.isEmpty || rect.isEmpty) return;
+    final blend = frame.blend.clamp(0.0, 1.0);
+    // The enclosing Flow maps our fixed box to the flight rectangle. Undo its
+    // nonuniform scale before fitting each paragraph at its natural aspect.
+    _frameLayer.layer = context.pushTransform(
+      true,
+      offset,
+      Matrix4.diagonal3Values(
+        size.width / rect.width,
+        size.height / rect.height,
+        1,
+      ),
+      (frameContext, frameOffset) {
+        RenderBox? child = firstChild;
+        for (var i = 0; child != null; i++) {
+          final current = child;
+          final alpha = ((i == 0 ? 1 - blend : blend) * 255).round();
+          if (alpha > 0 && !current.size.isEmpty) {
+            final scale = math.min(
+              rect.width / current.size.width,
+              rect.height / current.size.height,
+            );
+            _opacities[i].layer = frameContext.pushOpacity(frameOffset, alpha, (
+              opacityContext,
+              opacityOffset,
+            ) {
+              _transforms[i].layer = opacityContext.pushTransform(
+                true,
+                opacityOffset,
+                Matrix4.diagonal3Values(scale, scale, 1),
+                (textContext, textOffset) =>
+                    textContext.paintChild(current, textOffset),
+                oldLayer: _transforms[i].layer,
+              );
+            }, oldLayer: _opacities[i].layer);
+          } else {
+            _opacities[i].layer = null;
+          }
+          child = childAfter(current);
+        }
+      },
+      oldLayer: _frameLayer.layer,
+    );
+  }
 }

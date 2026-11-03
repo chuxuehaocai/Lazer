@@ -166,10 +166,13 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     super.initState();
     _nowPlayingMotion = AnimationController.unbounded(
       vsync: this,
-      duration: const Duration(milliseconds: 400),
-      reverseDuration: const Duration(milliseconds: 400),
+      duration: PlayerPageMotion.spring.duration,
+      reverseDuration: PlayerPageMotion.spring.duration,
       animationBehavior: AnimationBehavior.preserve,
     )..addStatusListener(_onNowPlayingStatus);
+    // An unbounded controller has no implicit closed endpoint. Keep the idle
+    // browse page live until the player actually starts moving.
+    _nowPlayingMotion.animateBack(0, duration: Duration.zero);
     state.addListener(_onAppStateChanged);
     // The first frame is not a switch: only a change from here on is one.
     _shownContentKey = _contentKey;
@@ -541,7 +544,10 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       return;
     }
     if (state.current case final track?) {
-      rememberRegisteredCoverTransition('player:${track.id}');
+      rememberRegisteredCoverTransition(
+        'player:${track.id}',
+        progress: _nowPlayingMotion.value,
+      );
     }
     setState(() {
       _nowPlayingOpen = true;
@@ -802,7 +808,10 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
                         excluding: _nowPlayingOpen,
                         child: TickerMode(
                           enabled: !_nowPlayingOpen,
-                          child: RepaintBoundary(child: shell),
+                          child: MotionSnapshot(
+                            animation: _nowPlayingMotion,
+                            child: shell,
+                          ),
                         ),
                       ),
                     ),
@@ -813,8 +822,11 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
                           builder: (context, child) => Stack(
                             fit: StackFit.expand,
                             children: [
+                              // Overshoot must retain the player canvas through
+                              // its full extent, rather than exposing the browse
+                              // page at its top or bottom edge.
                               ColoredBox(
-                                color: _nowPlayingMotion.value > 1
+                                color: _nowPlayingMotion.value.abs() > .001
                                     ? Colors.black
                                     : Colors.transparent,
                               ),

@@ -89,14 +89,14 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   @override
   Simulation createSimulation({required bool forward}) {
     final target = forward ? 1.0 : 0.0;
-    final releasedPull = _releaseVelocity != null;
+    // A reversed gesture hands the spring its actual downward velocity. The
+    // navigation animation itself continues at the same physical speed instead
+    // of running a second, out-of-sync spring for the page.
     final velocity = _releaseVelocity ?? controller!.velocity;
     _releaseVelocity = null;
-    return PlayerPageMotion.simulation(
+    return _PlayerRouteSpring(
       from: _reduceMotion ? target : controller!.value,
       to: target,
-      compact: _compact,
-      releasedPull: releasedPull,
       velocity: _reduceMotion ? 0 : velocity,
     );
   }
@@ -169,9 +169,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   bool get opaque => true;
 
   @override
-  Duration get transitionDuration => _compact
-      ? PlayerPageMotion.mobileSpring.duration
-      : PlayerPageMotion.desktopDuration;
+  Duration get transitionDuration => PlayerPageMotion.spring.duration;
 
   @override
   Duration get reverseTransitionDuration => transitionDuration;
@@ -196,7 +194,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       state: state,
       pullDown: this,
       entranceSettled: _settled,
-      transition: controller!.view,
+      transition: controller,
     ),
     builder: (context, settled, child) =>
         ExcludeSemantics(excluding: !settled, child: child),
@@ -227,7 +225,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
           fit: StackFit.expand,
           children: [
             ColoredBox(
-              color: travelled > 1 ? Colors.black : Colors.transparent,
+              color: travelled.abs() > .001 ? Colors.black : Colors.transparent,
             ),
             FractionalTranslation(
               translation: Offset(0, 1 - travelled),
@@ -238,6 +236,33 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       },
     );
   }
+}
+
+/// Follows the player's physical spring while keeping the Navigator's own
+/// progress exactly synchronized with the handoff velocity at every frame.
+class _PlayerRouteSpring extends Simulation {
+  _PlayerRouteSpring({
+    required this.from,
+    required this.to,
+    required this.velocity,
+  }) : progress = PlayerPageMotion.simulation(
+         from: from,
+         to: to,
+         compact: true,
+         velocity: velocity,
+       );
+
+  final double from, to, velocity;
+  final Simulation progress;
+
+  @override
+  double x(double time) => progress.x(time);
+
+  @override
+  double dx(double time) => progress.dx(time);
+
+  @override
+  bool isDone(double time) => progress.isDone(time);
 }
 
 class _ClampedPlayerProgress extends Animatable<double> {

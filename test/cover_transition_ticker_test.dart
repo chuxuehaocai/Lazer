@@ -4,10 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/widgets/cover_transition.dart';
 
 class _MutedPageHarness extends StatefulWidget {
-  const _MutedPageHarness({this.artwork, this.sourceScale = 1});
+  const _MutedPageHarness({this.artwork, this.sourceScale = 1, this.motion});
 
   final Widget? artwork;
   final double sourceScale;
+  final AnimationController? motion;
 
   @override
   State<_MutedPageHarness> createState() => _MutedPageHarnessState();
@@ -53,6 +54,7 @@ class _MutedPageHarnessState extends State<_MutedPageHarness> {
                 child: CoverTransitionTarget(
                   identity: 'playlist:muted-page',
                   size: 190,
+                  motion: widget.motion,
                   child: widget.artwork ?? const ColoredBox(color: Colors.teal),
                 ),
               ),
@@ -106,6 +108,40 @@ class _RenderLayoutProbe extends RenderProxyBox {
 }
 
 void main() {
+  testWidgets(
+    'a player flight follows its host without scheduling another ticker',
+    (tester) async {
+      final motion = AnimationController.unbounded(vsync: tester);
+      addTearDown(motion.dispose);
+      addTearDown(cancelCoverTransitions);
+      await tester.pumpWidget(_MutedPageHarness(motion: motion));
+      await tester.pumpAndSettle();
+      final host = tester.state<_MutedPageHarnessState>(
+        find.byType(_MutedPageHarness),
+      );
+      await tester.tap(find.byKey(host.sourceKey));
+      await tester.pump();
+      await tester.pump();
+      final flight = find.byKey(const ValueKey('cover-transition-flight'));
+      final start = tester.getRect(flight);
+      expect(tester.binding.transientCallbackCount, 0);
+      motion.value = .4;
+      await tester.pump();
+      final paused = tester.getRect(flight);
+      expect(paused, isNot(start));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.getRect(flight), paused);
+      expect(tester.binding.transientCallbackCount, 0);
+      motion.value = .2;
+      await tester.pump();
+      expect(tester.getRect(flight).left, lessThan(paused.left));
+      await motion.animateTo(1, duration: Duration.zero);
+      await tester.pump();
+      expect(flight, findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('hiding a cover only rebuilds the affected shelf source', (
     tester,
   ) async {

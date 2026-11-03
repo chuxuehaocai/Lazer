@@ -32,37 +32,40 @@ void main() {
     expect(controller.status, AnimationStatus.completed);
   });
 
-  test('desktop slide settles on time without overshoot or an abrupt stop', () {
-    for (final target in [0.0, 1.0]) {
-      final motion = PlayerPageMotion.simulation(
-        from: 1 - target,
-        to: target,
-        compact: false,
-      );
-      expect(motion.dx(0).abs(), closeTo(2 / .6, .00001));
-      var previous = motion.x(0);
-      for (var ms = 1; ms <= 600; ms++) {
-        final position = motion.x(ms / 1000);
-        expect(position, inInclusiveRange(0, 1));
-        expect(
-          (position - previous) * (2 * target - 1),
-          greaterThanOrEqualTo(0),
-        );
-        expect(
-          motion.dx(ms / 1000).abs(),
-          lessThanOrEqualTo(motion.dx((ms - 1) / 1000).abs()),
-        );
-        previous = position;
+  test(
+    'all platforms share a spring with zero initial speed and overshoot',
+    () {
+      for (final target in [0.0, 1.0]) {
+        for (final compact in [false, true]) {
+          final motion = PlayerPageMotion.simulation(
+            from: 1 - target,
+            to: target,
+            compact: compact,
+          );
+          final other = PlayerPageMotion.simulation(
+            from: 1 - target,
+            to: target,
+            compact: !compact,
+            releasedPull: true,
+          );
+          expect(motion.dx(0), 0);
+          var overshot = false;
+          for (var ms = 0; ms <= 2000; ms += 8) {
+            final t = ms / 1000;
+            expect(motion.x(t), other.x(t));
+            expect(motion.dx(t), other.dx(t));
+            overshot |= target == 1 ? motion.x(t) > 1 : motion.x(t) < 0;
+          }
+          expect(overshot, isTrue);
+          expect(motion.isDone(2), isTrue);
+          expect(motion.x(2), target);
+          expect(motion.dx(2), 0);
+        }
       }
-      expect(motion.isDone(.599), isFalse);
-      expect(motion.isDone(.600), isTrue);
-      expect(motion.x(.6), target);
-      expect(motion.dx(.599).abs(), lessThan(.03));
-      expect(motion.dx(.6), 0);
-    }
-  });
+    },
+  );
 
-  test('retargets retain velocity while staying inside both screen edges', () {
+  test('spring retargeting preserves the supplied physical velocity', () {
     for (final position in [.001, .04, .5, .96, .999]) {
       for (final velocity in [-12.0, -3.0, 0.0, 3.0, 12.0]) {
         for (final target in [0.0, 1.0]) {
@@ -75,12 +78,9 @@ void main() {
           expect(motion.x(0), position);
           expect(motion.dx(0), velocity);
           expect((motion.x(1e-8) - position) / 1e-8, closeTo(velocity, .002));
-          for (var ms = 1; ms <= 680; ms++) {
-            expect(motion.x(ms / 1000), inInclusiveRange(0, 1));
-          }
-          expect(motion.isDone(.68), isTrue);
-          expect(motion.x(.68), target);
-          expect(motion.dx(.68), 0);
+          expect(motion.isDone(2), isTrue);
+          expect(motion.x(2), target);
+          expect(motion.dx(2), 0);
         }
       }
     }
@@ -135,7 +135,7 @@ void main() {
       reduceMotion: false,
     );
     await tester.pump();
-    await tester.pump(PlayerPageMotion.desktopDuration);
+    await tester.pumpAndSettle();
     expect(controller.value, 1);
     expect(controller.status, AnimationStatus.completed);
   });

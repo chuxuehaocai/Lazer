@@ -102,7 +102,7 @@ void main() {
   });
 
   testWidgets(
-    'desktop standalone route uses the same finite slide as the shell',
+    'desktop standalone route uses the same bouncing spring as mobile',
     (tester) async {
       final state = AppState()..uiMode = AppUiMode.desktop;
       addTearDown(state.dispose);
@@ -112,8 +112,11 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 160));
       final firstLeg = route.openness;
-      expect(firstLeg, inExclusiveRange(.45, .48));
-      await tester.pump(const Duration(milliseconds: 440));
+      expect(
+        firstLeg,
+        closeTo(PlayerPageMotion.spring.simulation(0, 1).x(.16), .00001),
+      );
+      await tester.pumpAndSettle();
       expect(route.openness, 1);
       expect(route.animation!.status, AnimationStatus.completed);
       expect(route.speed, 0);
@@ -121,7 +124,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 160));
       expect(1 - route.openness, closeTo(firstLeg, .00001));
-      await tester.pump(const Duration(milliseconds: 440));
+      await tester.pumpAndSettle();
       await tester.pump();
       expect(find.byKey(_bodyKey), findsNothing);
     },

@@ -187,7 +187,7 @@ class NowPlayingPage extends StatefulWidget {
   /// gesture: it drags the whole page away from the top half of the screen and
   /// needs a host that owns the transition.
   final PlayerPullDown? pullDown;
-  final Animation<double>? transition;
+  final AnimationController? transition;
 
   @override
   State<NowPlayingPage> createState() => _NowPlayingPageState();

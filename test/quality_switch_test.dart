@@ -22,6 +22,9 @@ class _QualityCatalog extends Catalog {
   final List<AudioQuality> requests = <AudioQuality>[];
 
   @override
+  Future<HomeFeed?> loadHome({int? userId}) async => null;
+
+  @override
   Future<AudioSource?> audioSourceFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
