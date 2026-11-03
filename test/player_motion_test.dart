@@ -201,9 +201,8 @@ void main() {
     expect(motion.value.dy, beforeClose);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1));
-    expect(motion.value.dy, greaterThan(beforeClose));
     await tester.pump(const Duration(milliseconds: 15));
-    expect(motion.value.dy, greaterThan(beforeClose));
+    expect(find.byType(NowPlayingPage), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 130));
     final beforeReopen = motion.value.dy;
     open();

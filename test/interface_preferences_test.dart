@@ -58,15 +58,15 @@ void main() {
       final state = AppState(catalog: _Catalog());
       addTearDown(state.dispose);
       await state.setAnimationSpeed(1.4);
-      expect(state.animationSpeed, 1.4);
-      expect(MotionTiming.speed, 1.4);
+      expect(state.animationSpeed, closeTo(1.4, 1e-12));
+      expect(MotionTiming.speed, closeTo(1.4, 1e-12));
 
       final restored = AppState(catalog: _Catalog());
       addTearDown(restored.dispose);
       expect(MotionTiming.speed, MotionTiming.defaultSpeed);
       await restored.bootstrap();
-      expect(restored.animationSpeed, 1.4);
-      expect(MotionTiming.speed, 1.4);
+      expect(restored.animationSpeed, closeTo(1.4, 1e-12));
+      expect(MotionTiming.speed, closeTo(1.4, 1e-12));
       await restored.resetAnimationSpeed();
       expect(MotionTiming.speed, MotionTiming.defaultSpeed);
     });

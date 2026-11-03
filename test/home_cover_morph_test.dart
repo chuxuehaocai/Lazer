@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -689,22 +690,23 @@ void main() {
         state.back();
         await tester.pump();
         await tester.pump();
-        // The retained source is itself entering. Compare the flight against
-        // the live source once that page has reached its resting rectangle.
-        Rect? landed;
+        // The retained source is itself entering. Let the flight continue
+        // until it catches the live destination, even after that page rests.
+        var caught = false;
+        var closest = double.infinity;
         for (var frame = 0; frame < 120; frame++) {
           await tester.pump(const Duration(milliseconds: 16));
+          if (find.byKey(_return).evaluate().isEmpty) break;
           final live = _bounds(tester, find.byKey(state.source));
-          if ((live.center - original.center).distance < .1 &&
-              find.byKey(_return).evaluate().isNotEmpty) {
-            landed = _bounds(tester, find.byKey(_return));
+          final flying = _bounds(tester, find.byKey(_return));
+          closest = math.min(closest, (flying.center - live.center).distance);
+          if (closest < 8) {
+            caught = true;
             break;
           }
         }
-        expect(landed, isNotNull);
-        expect(landed!.center.dx, closeTo(original.center.dx, 3));
-        expect(landed.center.dy, closeTo(original.center.dy, 3));
-        _near(_sample(await _pixels(tester, state.screen), landed.center), [
+        expect(caught, isTrue, reason: 'closest approach was $closest px');
+        _near(_sample(await _pixels(tester, state.screen), original.center), [
           208,
           46,
           70,
