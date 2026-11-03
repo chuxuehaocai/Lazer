@@ -259,15 +259,14 @@ jobs:
       - run: flutter pub get --enforce-lockfile
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
-          pattern: native-deps-macos-*
+          name: native-deps-macos-arm64
           path: build/native-dependencies
-          merge-multiple: false
       - name: Prepare architecture-matched native audio libraries
         shell: bash
         run: |
           set -euo pipefail
           stage=build/native-audio-package
-          native=build/native-dependencies/native-deps-macos-arm64
+          native=build/native-dependencies
           mkdir -p "$stage/licenses/lazer-ffmpeg"
           cp "$native/"*.dylib "$stage/"
           cp "$native/licenses/lazer-ffmpeg/"* "$stage/licenses/lazer-ffmpeg/"
