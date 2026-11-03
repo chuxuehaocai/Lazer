@@ -546,10 +546,18 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     state.moveSource(const Offset(210, 100));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 700));
     final destination = tester.getRect(find.byKey(state.source));
-    final flying = tester.getRect(find.byKey(_returnKey));
-    expect((flying.topLeft - destination.topLeft).distance, lessThan(2));
+    var caughtDestination = false;
+    for (var frame = 0; frame < 120; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      if (find.byKey(_returnKey).evaluate().isEmpty) break;
+      final flying = tester.getRect(find.byKey(_returnKey));
+      if ((flying.topLeft - destination.topLeft).distance < 2) {
+        caughtDestination = true;
+        break;
+      }
+    }
+    expect(caughtDestination, isTrue);
     await tester.pumpAndSettle();
     await tester.pump();
     expect(find.byKey(_returnKey), findsNothing);

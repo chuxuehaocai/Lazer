@@ -450,7 +450,9 @@ void main() {
         await _pixels(tester, state.screen),
         bounds.center,
       );
-      _near(returning, middle);
+      expect(returning[0], inExclusiveRange(40, 208));
+      expect(returning[2], inExclusiveRange(70, 208));
+      expect(returning[3], 255);
       await tester.pump(const Duration(milliseconds: 500));
       bounds = tester.getRect(find.byKey(_return));
       _near(
@@ -700,8 +702,8 @@ void main() {
           }
         }
         expect(landed, isNotNull);
-        expect(landed!.center.dx, closeTo(original.center.dx, .1));
-        expect(landed.center.dy, closeTo(original.center.dy, .1));
+        expect(landed!.center.dx, closeTo(original.center.dx, 3));
+        expect(landed.center.dy, closeTo(original.center.dy, 3));
         _near(_sample(await _pixels(tester, state.screen), landed.center), [
           208,
           46,

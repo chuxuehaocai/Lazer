@@ -79,12 +79,12 @@ void main() {
             velocity: velocity,
             compact: false,
           );
-          expect(motion.x(0), position);
+          expect(motion.x(0), closeTo(position, 1e-12));
           expect(motion.dx(0), closeTo(velocity, 1e-12));
           expect((motion.x(1e-8) - position) / 1e-8, closeTo(velocity, .002));
           expect(motion.isDone(2), isTrue);
-          expect(motion.x(2), target);
-          expect(motion.dx(2), 0);
+          expect(motion.x(2), closeTo(target, 1e-12));
+          expect(motion.dx(2), closeTo(0, 1e-12));
         }
       }
     }

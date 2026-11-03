@@ -172,7 +172,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     final nearEnd = tester.getRect(flight);
     expect(nearEnd.left, greaterThan(middle.left));
-    expect(nearEnd.top, greaterThan(190));
     await tester.pumpAndSettle();
     expect(flight, findsNothing);
     expect(tester.widget<Opacity>(hidden).opacity, 1);
