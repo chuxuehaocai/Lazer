@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../audio/audio_engine.dart';
+import '../animation/apple_spring.dart';
 import '../audio/hifi_controller.dart';
 import '../cache/playback_cache.dart';
 import '../cache/current_artwork.dart';
@@ -158,6 +159,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        localLibrary = localLibrary ?? LocalLibrary(),
        _queueStore = queueStore ?? PlaybackQueueStore(),
        updateChecker = updateChecker ?? UpdateChecker() {
+    MotionTiming.speed = animationSpeed;
     if (deviceIsWatch) {
       backgroundMode = AppBackgroundMode.nowPlayingStatic;
       playerBackground = AppBackgroundMode.nowPlayingStatic;
@@ -570,6 +572,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// [dpiScale].
   bool autoDpiScale = true;
 
+  /// Global speed multiplier for duration-based Apple spring animations.
+  double animationSpeed = MotionTiming.defaultSpeed;
+
+  static const String animationSpeedKey = 'lazer_animation_speed';
+
   Future<void> setUiMode(AppUiMode value) async {
     if (uiMode == value) return;
     uiMode = value;
@@ -842,6 +849,21 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await prefs.setBool('lazer_auto_dpi_scale', true);
     await prefs.setDouble('lazer_dpi_scale', kDpiScaleDefault);
   }
+
+  Future<void> setAnimationSpeed(double value) async {
+    final double next = MotionTiming.normalize(value);
+    if (animationSpeed == next) return;
+    animationSpeed = next;
+    MotionTiming.speed = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      animationSpeedKey,
+      next,
+    );
+  }
+
+  Future<void> resetAnimationSpeed() =>
+      setAnimationSpeed(MotionTiming.defaultSpeed);
 
   double lyricControlsSeconds = 1.5;
   bool lyricBlurEnabled = true;
@@ -1449,6 +1471,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       dpiScale = normalizeDpiScale(
         prefs.getDouble('lazer_dpi_scale') ?? kDpiScaleDefault,
       );
+      animationSpeed = MotionTiming.normalize(
+        prefs.getDouble(animationSpeedKey) ?? MotionTiming.defaultSpeed,
+      );
+      MotionTiming.speed = animationSpeed;
       autoDpiScale = prefs.getBool('lazer_auto_dpi_scale') ?? true;
       _volume = (prefs.getDouble('lazer_volume') ?? 1).clamp(0, 1);
       _unmutedVolume =

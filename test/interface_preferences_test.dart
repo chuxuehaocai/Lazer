@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/audio_quality.dart';
+import 'package:lazer_nextgen/animation/apple_spring.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
@@ -40,6 +41,36 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('ui preferences', () {
+    test('animation speed snaps and rescales spring durations', () {
+      final base = AppleSpring.smooth.duration;
+      MotionTiming.speed = 1.54;
+      expect(MotionTiming.speed, 1.5);
+      expect(
+        AppleSpring.smooth.duration,
+        Duration(microseconds: (base.inMicroseconds / 1.5).round()),
+      );
+      MotionTiming.speed = 9;
+      expect(MotionTiming.speed, MotionTiming.maxSpeed);
+      MotionTiming.speed = MotionTiming.defaultSpeed;
+    });
+
+    test('animation speed persists and restores the runtime scale', () async {
+      final state = AppState(catalog: _Catalog());
+      addTearDown(state.dispose);
+      await state.setAnimationSpeed(1.4);
+      expect(state.animationSpeed, 1.4);
+      expect(MotionTiming.speed, 1.4);
+
+      final restored = AppState(catalog: _Catalog());
+      addTearDown(restored.dispose);
+      expect(MotionTiming.speed, MotionTiming.defaultSpeed);
+      await restored.bootstrap();
+      expect(restored.animationSpeed, 1.4);
+      expect(MotionTiming.speed, 1.4);
+      await restored.resetAnimationSpeed();
+      expect(MotionTiming.speed, MotionTiming.defaultSpeed);
+    });
+
     test('dpi scale snaps to five-percent steps inside the slider range', () {
       expect(normalizeDpiScale(1), 1);
       expect(normalizeDpiScale(1.26), 1.25);
@@ -489,6 +520,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.dpiScale, kDpiScaleDefault);
     expect(state.autoDpiScale, isTrue);
+
+    final speedSlider = find.descendant(
+      of: find.byKey(const ValueKey('animation-speed-slider')),
+      matching: find.byType(Slider),
+    );
+    expect(tester.widget<Slider>(speedSlider).min, MotionTiming.minSpeed);
+    expect(tester.widget<Slider>(speedSlider).max, MotionTiming.maxSpeed);
+    expect(tester.widget<Slider>(speedSlider).value, MotionTiming.defaultSpeed);
+    await tester.drag(speedSlider, const Offset(80, 0));
+    await tester.pumpAndSettle();
+    expect(state.animationSpeed, greaterThan(1));
+    expect(MotionTiming.speed, state.animationSpeed);
+    expect(
+      (await SharedPreferences.getInstance()).getDouble(
+        AppState.animationSpeedKey,
+      ),
+      state.animationSpeed,
+    );
+    await tester.tap(find.byKey(const ValueKey('animation-speed-reset')));
+    await tester.pumpAndSettle();
+    expect(state.animationSpeed, MotionTiming.defaultSpeed);
+    expect(MotionTiming.speed, MotionTiming.defaultSpeed);
+
     await tester.tap(surfaceDropdown);
     await tester.pumpAndSettle();
     await tester.tap(find.text('标准').last);

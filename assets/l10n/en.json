@@ -1,4 +1,6 @@
 {
+  "动画速率": "Animation speed",
+  "数值越大动画越快，作用于页面、播放页和其他弹簧过渡": "Higher values animate faster across pages, the player and other spring transitions.",
   "数据目录不可用，暂用应用默认目录。请检查权限和可用空间。": "The data directory is unavailable. Using the default app directory temporarily. Check permissions and free space.",
   "数据存储": "Data storage",
   "所有文件访问权限": "All files access",

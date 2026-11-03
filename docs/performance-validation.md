@@ -21,6 +21,13 @@ Settlement, rather than a fixed animation deadline, completes the motion.
 Pull releases retain their physical velocity and reduced motion completes the
 controller with the correct terminal status.
 
+The animation-speed preference scales the perceived duration of every
+`AppleSpring` simulation at its call site. A value from 0.5x to 2.0x therefore
+changes the player, retained page switches, cover flights, dialogs and feedback
+springs together while preserving bounce and interruption velocity. The value
+is stored in preferences and restored before regular navigation begins. Slider
+detents use the same enabled/intensity-aware haptic path as the rest of the UI.
+
 The transport bar and player page keep independent artwork and labels; opening
 the player does not create a shared cover/text overlay. The page controller
 owns overshoot and reversal velocity directly. The browse canvas snapshots

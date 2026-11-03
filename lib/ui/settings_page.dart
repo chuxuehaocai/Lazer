@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import '../animation/apple_modal.dart';
+import '../animation/apple_spring.dart';
 
 import '../audio/audio_device_report.dart';
 import '../cache/playback_cache_settings.dart';
@@ -243,6 +244,26 @@ class _SettingsOverview extends StatelessWidget {
                     value: state.autoDpiScale,
                     onChanged: (bool value) =>
                         unawaited(state.setAutoDpiScale(value)),
+                  ),
+                  _AppSliderRow(
+                    key: const ValueKey('animation-speed-slider'),
+                    label: '动画速率',
+                    valueText: '${state.animationSpeed.toStringAsFixed(1)}×',
+                    subtitle: '数值越大动画越快，作用于页面、播放页和其他弹簧过渡',
+                    value: state.animationSpeed,
+                    min: MotionTiming.minSpeed,
+                    max: MotionTiming.maxSpeed,
+                    divisions:
+                        ((MotionTiming.maxSpeed - MotionTiming.minSpeed) /
+                                MotionTiming.step)
+                            .round(),
+                    onChanged: (double value) =>
+                        unawaited(state.setAnimationSpeed(value)),
+                    action: SpringTextButton(
+                      key: const ValueKey('animation-speed-reset'),
+                      onPressed: () => unawaited(state.resetAnimationSpeed()),
+                      child: const TrText('恢复默认'),
+                    ),
                   ),
                   _AppSettingRow(
                     label: '背景',

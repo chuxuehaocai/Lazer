@@ -1,14 +1,47 @@
 import 'package:flutter/physics.dart';
 import 'package:flutter/widgets.dart';
 
+/// Global speed for duration-based Apple springs. Higher values make the
+/// perceived response shorter without changing their bounce.
+abstract final class MotionTiming {
+  static const double minSpeed = .5;
+  static const double maxSpeed = 2;
+  static const double step = .1;
+  static const double defaultSpeed = 1;
+
+  static double _speed = defaultSpeed;
+
+  static double get speed => _speed;
+
+  static set speed(double value) {
+    _speed = normalize(value);
+  }
+
+  static double normalize(double value) {
+    if (!value.isFinite) return defaultSpeed;
+    return (value.clamp(minSpeed, maxSpeed) / step).round() * step;
+  }
+
+  static Duration scale(Duration duration) {
+    if (duration <= Duration.zero) return duration;
+    return Duration(
+      microseconds: (duration.inMicroseconds / _speed).round().clamp(
+        1,
+        1 << 62,
+      ),
+    );
+  }
+}
+
 /// Duration/bounce springs, following Apple's WWDC23 spring model.
 /// Duration describes the perceived response, not a hard animation deadline.
 /// https://developer.apple.com/videos/play/wwdc2023/10158/
 class AppleSpring {
   const AppleSpring({
-    this.duration = const Duration(milliseconds: 500),
+    Duration duration = const Duration(milliseconds: 500),
     this.bounce = 0,
-  }) : assert(bounce > -1 && bounce < 1);
+  }) : _baseDuration = duration,
+       assert(bounce > -1 && bounce < 1);
 
   static const smooth = AppleSpring();
   static const bouncyDuration = Duration(milliseconds: 600);
@@ -19,8 +52,10 @@ class AppleSpring {
   );
   static const responsive = AppleSpring(duration: Duration(milliseconds: 280));
 
-  final Duration duration;
+  final Duration _baseDuration;
   final double bounce;
+
+  Duration get duration => MotionTiming.scale(_baseDuration);
 
   SpringSimulation simulation(double from, double to, {double velocity = 0}) =>
       SpringSimulation(
