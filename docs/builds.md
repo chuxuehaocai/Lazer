@@ -54,9 +54,14 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   that does not contain the engine, the bridge and all four FFmpeg libraries.
 - iOS links `liblazer-audio.a`, `liblazer-audio-bridge.a` and the four FFmpeg
   archives into the Runner binary through `ios/Flutter/LazerAudio.xcconfig`,
-  which `ci/ios-audio-xcconfig.sh` generates (the file is git-ignored and pulled
-  in with `#include?`, so a checkout without a built engine still builds and
-  runs on `just_audio`). The `ios-native` job builds those archives for arm64;
+  which `ci/ios-audio-xcconfig.sh` generates for the archives supplied by CI.
+  Local Xcode and Flutter builds use `ios/Flutter/LazerAudio.defaults.xcconfig`
+  and the Runner's **Prepare Audio Engine** phase instead: it builds the
+  engine automatically on the first build, keeps device and simulator archives
+  separate, and reuses them until native sources or the Xcode SDK change.
+  The first local build requires CMake and network access to the pinned FFmpeg
+  sources. An incomplete engine build fails the build instead of producing
+  an IPA that silently selects `just_audio`. The `ios-native` job builds those archives for arm64;
   the IPA job verifies the built executable's dynamic export trie and refuses to
   package when the engine ABI is not in it. Verified end to end on `macos-15`:
   six arm64 archives, the engine's 18 ABI symbols and the bridge's five exports

@@ -17,9 +17,14 @@ const _forwardKey = ValueKey<String>('cover-transition-flight');
 const _returnKey = ValueKey<String>('cover-transition-return-flight');
 
 class _ReturnHarness extends StatefulWidget {
-  const _ReturnHarness({this.reducedMotion = false, this.artwork});
+  const _ReturnHarness({
+    this.reducedMotion = false,
+    this.artwork,
+    this.scrollAxis,
+  });
   final bool reducedMotion;
   final Widget? artwork;
+  final Axis? scrollAxis;
 
   @override
   State<_ReturnHarness> createState() => _ReturnHarnessState();
@@ -30,6 +35,7 @@ class _ReturnHarnessState extends State<_ReturnHarness> {
   final ValueNotifier<Offset> sourceOffset = ValueNotifier(
     const Offset(20, 24),
   );
+  final scroll = ScrollController();
   bool open = false;
   bool sourceRemoved = false;
 
@@ -57,6 +63,7 @@ class _ReturnHarnessState extends State<_ReturnHarness> {
   void dispose() {
     cancelCoverTransitions();
     sourceOffset.dispose();
+    scroll.dispose();
     super.dispose();
   }
 
@@ -89,23 +96,36 @@ class _ReturnHarnessState extends State<_ReturnHarness> {
                 )
               : ValueListenableBuilder<Offset>(
                   valueListenable: sourceOffset,
-                  builder: (context, offset, _) => Stack(
-                    children: [
-                      if (!sourceRemoved)
-                        Positioned(
-                          left: offset.dx,
-                          top: offset.dy,
-                          child: CoverTransitionSource(
-                            key: source,
-                            identity: 'return-fixture',
-                            child: const SizedBox.square(
-                              dimension: 90,
-                              child: ColoredBox(color: Colors.teal),
+                  builder: (context, offset, _) {
+                    final content = Stack(
+                      children: [
+                        if (!sourceRemoved)
+                          Positioned(
+                            left: offset.dx,
+                            top: offset.dy,
+                            child: CoverTransitionSource(
+                              key: source,
+                              identity: 'return-fixture',
+                              child: const SizedBox.square(
+                                dimension: 90,
+                                child: ColoredBox(color: Colors.teal),
+                              ),
                             ),
                           ),
-                        ),
-                    ],
-                  ),
+                      ],
+                    );
+                    final axis = widget.scrollAxis;
+                    if (axis == null) return content;
+                    return SingleChildScrollView(
+                      controller: scroll,
+                      scrollDirection: axis,
+                      child: SizedBox(
+                        width: axis == Axis.horizontal ? 2400 : 800,
+                        height: axis == Axis.vertical ? 1800 : 600,
+                        child: content,
+                      ),
+                    );
+                  },
                 ),
         ),
       ),
@@ -244,6 +264,49 @@ void main() {
     expect(tester.getRect(find.byKey(state.source)), sourceRect);
     expect(tester.takeException(), isNull);
   });
+
+  for (final axis in Axis.values) {
+    testWidgets(
+      'scrolling $axis during return restores the cover to its card',
+      (tester) async {
+        await tester.pumpWidget(_ReturnHarness(scrollAxis: axis));
+        final state = tester.state<_ReturnHarnessState>(
+          find.byType(_ReturnHarness),
+        );
+        state.enter();
+        await _settle(tester);
+        state.back();
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(_returnKey), findsOneWidget);
+        final scroll = find.byType(SingleChildScrollView).first;
+        await tester.drag(
+          scroll,
+          axis == Axis.vertical ? const Offset(0, -100) : const Offset(-100, 0),
+        );
+        await tester.pump();
+        expect(state.scroll.offset, greaterThan(0));
+        expect(
+          find.byKey(_returnKey),
+          findsNothing,
+          reason: 'the artwork must move with the scrolling card immediately',
+        );
+        final opacity = find.descendant(
+          of: find.byKey(state.source),
+          matching: find.byType(Opacity),
+        );
+        expect(tester.widget<Opacity>(opacity).opacity, 1);
+        final snapshot = tester.widget<SnapshotWidget>(
+          find
+              .ancestor(of: scroll, matching: find.byType(SnapshotWidget))
+              .first,
+        );
+        expect(snapshot.controller.allowSnapshotting, isFalse);
+        await _settle(tester);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('fast back starts at the in-flight artwork and can reopen', (
     tester,
@@ -472,4 +535,74 @@ void main() {
     expect(scroll.position.pixels, savedOffset);
     expect(tester.takeException(), isNull);
   });
+
+  for (final library in [false, true]) {
+    testWidgets(
+      '${library ? 'library' : 'home'} scroll takes over an unfinished cover return',
+      (tester) async {
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final state = AppState(catalog: _Catalog())
+          ..collections = UserCollections(
+            created: [
+              for (var i = 0; i < 20; i++)
+                Playlist(
+                  id: 'return-playlist-$i',
+                  name: 'Playlist $i',
+                  trackIds: const [],
+                  coverSeed: i,
+                  trackCount: 1,
+                ),
+            ],
+          );
+        addTearDown(state.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildAppleTheme(),
+            home: AppShell(state: state),
+          ),
+        );
+        await tester.pump();
+        if (library) {
+          await tester.tap(find.text('音乐库').last);
+          await _settle(tester);
+        }
+        final root = find.byType(library ? AppLibraryPage : AppHomePage);
+        final card = find
+            .descendant(of: root, matching: find.byType(AppPlaylistCard))
+            .first;
+        await tester.ensureVisible(card);
+        await _settle(tester);
+        final scrollable = find
+            .descendant(of: root, matching: find.byType(Scrollable))
+            .first;
+        final position = tester.state<ScrollableState>(scrollable).position;
+        final before = position.pixels;
+        await tester.tap(card);
+        await _settle(tester);
+        await tester.binding.handlePopRoute();
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(_returnKey), findsOneWidget);
+        final returnedPosition = tester
+            .state<ScrollableState>(scrollable)
+            .position;
+        expect(returnedPosition.pixels, before);
+        await tester.drag(scrollable, Offset(0, before > 50 ? 80 : -80));
+        await tester.pump();
+        expect(returnedPosition.pixels, isNot(before));
+        expect(find.byKey(_returnKey), findsNothing);
+        final cover = find
+            .descendant(of: card, matching: find.byType(CoverTransitionSource))
+            .first;
+        final opacity = find
+            .descendant(of: cover, matching: find.byType(Opacity))
+            .first;
+        expect(tester.widget<Opacity>(opacity).opacity, 1);
+        await _settle(tester);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }

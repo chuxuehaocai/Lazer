@@ -1,4 +1,4 @@
 #include "Generated.xcconfig"
-// Optional: written by ci/ios-audio-xcconfig.sh when the native audio engine
-// was built for iOS. Without it the app builds and plays through just_audio.
+// Local builds prepare the engine automatically; CI can supply its archives.
+#include "LazerAudio.defaults.xcconfig"
 #include? "LazerAudio.xcconfig"

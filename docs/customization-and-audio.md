@@ -68,11 +68,23 @@ The root DLL is a local build output: do not commit it or add an ignore rule.
 | Windows | lazer-audio.dll | WASAPI |
 | Linux | liblazer-audio.so | ALSA |
 | macOS | liblazer-audio.dylib | CoreAudio |
+| iOS | liblazer-audio.a linked into Runner | RemoteIO shared PCM |
+| iOS | liblazer-audio.a linked into Runner | RemoteIO shared PCM |
 
 Android uses the same FFmpeg decoder, gapless engine, DSP and Dart worker as the
 desktop. Its AAudio backend negotiates the actual PCM format; Android does not
 advertise desktop exclusive, bit-perfect or direct DSD output capabilities.
 DSD sources use the engine's PCM conversion.
+
+iOS uses the same decoder, DSP and Dart worker with the RemoteIO output backend.
+Xcode prepares and links the static engine automatically for device and simulator
+builds; iOS remains a shared mix and does not expose exclusive, bit-perfect or
+direct DSD output.
+
+iOS uses the same decoder, DSP and Dart worker with the RemoteIO output backend.
+Xcode prepares and links the static engine automatically for device and simulator
+builds; iOS remains a shared mix and does not expose exclusive, bit-perfect or
+direct DSD output.
 
 Import a library for the current platform and architecture using the app's C ABI
 (`LAZER_AUDIO_ABI_VERSION` in `native/lazer-audio/include/lazer_audio_api.h`).

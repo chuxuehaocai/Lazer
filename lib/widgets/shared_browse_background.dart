@@ -114,8 +114,8 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground> {
                 enabled:
                     !state.playerPresented.value &&
                     !(state.browseTransitionActive.value &&
-                        navigation.rootVisible.value) &&
-                    !navigation.moving.value,
+                        navigation.rootVisible.value &&
+                        !navigation.moving.value),
                 child: AppAlbumBackdrop(
                   track: state.current,
                   mode: state.backgroundMode,
@@ -160,8 +160,6 @@ class BrowseNavigationObserver extends NavigatorObserver {
         for (final animation in _active.toList()) {
           if (animation.status == AnimationStatus.completed ||
               animation.status == AnimationStatus.dismissed) {
-            final listener = _listeners.remove(animation);
-            if (listener != null) animation.removeStatusListener(listener);
             _active.remove(animation);
           }
         }
@@ -174,15 +172,19 @@ class BrowseNavigationObserver extends NavigatorObserver {
   void _watch(Route<dynamic> route) {
     if (route is! TransitionRoute<dynamic>) return;
     final animation = route.animation;
-    if (animation == null || _listeners.containsKey(animation)) return;
+    if (animation == null) return;
     _active.add(animation);
+    if (_listeners.containsKey(animation)) {
+      _report();
+      return;
+    }
     late AnimationStatusListener listener;
     listener = (status) {
-      if (status == AnimationStatus.completed ||
-          status == AnimationStatus.dismissed) {
-        _active.remove(animation);
-        animation.removeStatusListener(listener);
-        _listeners.remove(animation);
+      // A spring route can emit its initial dismissed status before its first
+      // forward sample. Keep watching until the route is actually removed.
+      if (status == AnimationStatus.forward ||
+          status == AnimationStatus.reverse) {
+        _active.add(animation);
       }
       _report();
     };

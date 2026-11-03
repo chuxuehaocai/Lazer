@@ -89,6 +89,7 @@ _CoverSnapshot? _returnSnapshot;
 String? _returnIdentity;
 _CoverPresentation? _returnPresentation;
 _CoverFlightHandle? _returnHandle;
+VoidCallback? _returnComplete;
 final List<OverlayEntry> _handoffFlights = [];
 String? _handoffIdentity;
 
@@ -296,6 +297,7 @@ RenderBox? _sourceBox(GlobalKey key) {
 }
 
 void _removeReturnFlight() {
+  _returnComplete = null;
   _returnGeneration++;
   _returnFlight?.remove();
   _returnFlight?.dispose();
@@ -328,6 +330,22 @@ void cancelCoverTransitions() {
 /// The destination is the live retained card, including its restored scrolling.
 bool returnCoverTransition(String identity) =>
     _targets[identity]?._returnToSource() ?? false;
+
+/// Lets a scrolling page take its artwork back from the root overlay.
+void finishReturningCoverOnScroll(BuildContext pageContext) {
+  final complete = _returnComplete;
+  final source = _returnSource?.currentContext;
+  if (complete == null || source == null) return;
+  var belongsToPage = false;
+  source.visitAncestorElements((element) {
+    if (element == pageContext) {
+      belongsToPage = true;
+      return false;
+    }
+    return true;
+  });
+  if (belongsToPage) complete();
+}
 
 /// Records the exact artwork bounds before the content pane changes. Unlike a
 /// route Hero, this also works with the shell's in-place page transitions.
@@ -626,6 +644,14 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
       ),
     );
     var currentSource = sourceKey;
+    void complete() {
+      if (generation != _returnGeneration) return;
+      _removeReturnFlight();
+      _hideSource(currentSource, false);
+      if (mounted) setState(() => _flying = false);
+    }
+
+    _returnComplete = complete;
     Rect? lastDestination;
     Rect? destination() {
       if (_sourceBox(currentSource) == null) {
@@ -672,12 +698,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
               overlayBox.localToGlobal,
             );
           },
-          onComplete: () {
-            if (generation != _returnGeneration) return;
-            _removeReturnFlight();
-            _hideSource(currentSource, false);
-            if (mounted) setState(() => _flying = false);
-          },
+          onComplete: complete,
           child: artwork,
         ),
       ),
