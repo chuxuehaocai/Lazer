@@ -12,7 +12,7 @@ class AppleSpring {
 
   static const smooth = AppleSpring();
   static const bouncyDuration = Duration(milliseconds: 600);
-  static const bouncy = AppleSpring(duration: bouncyDuration, bounce: .05);
+  static const bouncy = AppleSpring(duration: bouncyDuration, bounce: .1);
   static const snappy = AppleSpring(
     duration: Duration(milliseconds: 350),
     bounce: .15,

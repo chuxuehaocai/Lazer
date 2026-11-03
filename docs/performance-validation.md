@@ -14,7 +14,7 @@ the flight, but no interpolated text-height clip cuts through glyphs.
 The player reuses the same cover/text overlay from its transport tile. Its
 elements share the page's physical progress, with the destination measured
 without the outer page translation. All platforms use the same duration/bounce
-spring: a 600 ms perceived duration and 0.05 bounce, implemented in Dart with
+spring: a 600 ms perceived duration and 0.1 bounce, implemented in Dart with
 SpringSimulation. Page, cover and labels share that physical coordinate. There
 is no platform-specific ease-out, artificial initial kick, braking segment or
 second easing curve. Unbounded controllers preserve overshoot; navigator-facing
