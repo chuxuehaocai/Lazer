@@ -31,6 +31,9 @@ can move from beta 2 to beta 3 while 2.0 users are not pushed onto a beta.
   frame when production enables `autoCheckUpdates`. At most one automatic check
   runs per 24 hours (`AppState.updateCheckInterval`); the timestamp of the last
   successful check is persisted.
+  A failed startup check retries after five minutes in the same session. The
+  shell checks whether the daily interval is due once an hour while open.
+  A device clock correction cannot leave a future timestamp blocking checks.
 - **Settings → About → 检查更新.** A manual check ignores both the daily
   interval and a previous skip.
 
@@ -42,6 +45,10 @@ a short snack bar for a manual check.
 
 A found release opens one dialog with the release name, notes, version pair and
 the release page URL:
+
+When another dialog covers the app or it is in the background, the found
+release is retained and presentation is retried every five seconds without
+another network request.
 
 - **前往下载** opens the page in the system browser. Desktop starts
   `rundll32`/`open`/`xdg-open`; Android and iOS answer a small
@@ -60,5 +67,6 @@ does not silence the beta 3 announcement.
 
 `test/update_checker_test.dart` covers version parsing and ordering, release
 selection for stable and pre-release builds, drafts/malformed tags, HTTP
-failures, the daily cadence, and the skip/manual override. `http.Response`
+failures, the daily cadence, clock corrections, deferred prompts, automatic
+retry, and the skip/manual override. `http.Response`
 objects are injected, so the suite never touches the network.

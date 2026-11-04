@@ -1,5 +1,4 @@
 import 'dart:ui' as ui;
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -547,20 +546,19 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     state.moveSource(const Offset(210, 100));
     await tester.pump();
-    final destination = tester.getRect(find.byKey(state.source));
-    var closest = double.infinity;
-    for (var frame = 0; frame < 120; frame++) {
-      await tester.pump(const Duration(milliseconds: 16));
+    Rect? lastFlight;
+    for (var frame = 0; frame < 240; frame++) {
       if (find.byKey(_returnKey).evaluate().isEmpty) break;
-      final flying = tester.getRect(find.byKey(_returnKey));
-      closest = math.min(
-        closest,
-        (flying.topLeft - destination.topLeft).distance,
-      );
-      if (closest < 8) break;
+      lastFlight = tester.getRect(find.byKey(_returnKey));
+      await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(closest, lessThan(75));
     await tester.pumpAndSettle();
+    final destination = tester.getRect(find.byKey(state.source));
+    expect((lastFlight!.topLeft - destination.topLeft).distance, lessThan(.2));
+    expect(
+      (lastFlight.bottomRight - destination.bottomRight).distance,
+      lessThan(.2),
+    );
     await tester.pump();
     expect(find.byKey(_returnKey), findsNothing);
     expect(tester.takeException(), isNull);

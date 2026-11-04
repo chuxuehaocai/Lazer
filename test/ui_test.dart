@@ -637,7 +637,6 @@ void main() {
       '手动浏览后恢复跟随',
       '滚动惯性',
       '滚动加速度',
-      '刷新曲库',
     ]) {
       expect(find.text(label), findsOneWidget, reason: 'missing $label');
     }

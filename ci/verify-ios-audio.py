@@ -7,15 +7,19 @@ loader looks up through `DynamicLibrary.process()`, and it must not have picked
 up an FFmpeg shared library from somewhere outside the app.
 
     python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app
+    python3 ci/verify-ios-audio.py --ipa dist/Lazer-iOS-aarch64.ipa
     python3 ci/verify-ios-audio.py --archive build/ios-audio/device/stage/lib
 """
 
 from __future__ import annotations
 
 import argparse
+import plistlib
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 # Kept in step with lib/audio/native/lazer_audio_library.dart.
 ABI_SYMBOLS = [
@@ -56,7 +60,10 @@ BRIDGE_SYMBOLS = [
 
 
 def run(*command: str) -> str:
-    result = subprocess.run(command, capture_output=True, text=True)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    except OSError as error:
+        raise SystemExit(f"Could not run {command[0]}: {error}") from error
     if result.returncode != 0:
         raise SystemExit(f"{' '.join(command)} failed:\n{result.stderr.strip()}")
     return result.stdout
@@ -81,10 +88,7 @@ def exported_symbols(binary: Path) -> set[str]:
     that `DynamicLibrary.process()` would find the engine. `dyld_info -exports`
     reads the trie the dynamic loader actually uses.
     """
-    try:
-        output = run("dyld_info", "-exports", str(binary))
-    except SystemExit:
-        return set()
+    output = run("dyld_info", "-exports", str(binary))
     symbols = set()
     for line in output.splitlines():
         parts = line.split()
@@ -105,9 +109,6 @@ def verify_executable(binary: Path) -> int:
 
     symbols = exported_symbols(binary)
     source = "the dynamic export trie"
-    if not symbols:
-        symbols = defined_symbols(binary)
-        source = "the symbol table (dyld_info unavailable)"
     missing = [name for name in ABI_SYMBOLS if name not in symbols]
     missing_bridge = [name for name in BRIDGE_SYMBOLS if name not in symbols]
     if missing or missing_bridge:
@@ -132,7 +133,9 @@ def verify_executable(binary: Path) -> int:
         if "@rpath/" in name or "@executable_path/" in name:
             continue
         raise SystemExit(f"{binary.name} links an unexpected image: {name}")
-    for forbidden in ("libavcodec", "libavformat", "liblazer-audio"):
+    for forbidden in (
+        "libavcodec", "libavformat", "libavutil", "libswresample", "liblazer-audio",
+    ):
         if forbidden in linked:
             raise SystemExit(
                 f"{binary.name} still links {forbidden} as a shared library; "
@@ -143,6 +146,35 @@ def verify_executable(binary: Path) -> int:
         "symbols exported, no stray dylibs"
     )
     return 0
+
+
+def verify_ipa(path: Path) -> int:
+    """Inspect the executable from the finished package, after all copying/ZIP steps."""
+    if not path.is_file():
+        raise SystemExit(f"missing IPA: {path}")
+    try:
+        with ZipFile(path) as package:
+            bundle = "Payload/Runner.app/"
+            info = plistlib.loads(package.read(bundle + "Info.plist"))
+            executable = info.get("CFBundleExecutable") if isinstance(info, dict) else None
+            if (
+                not isinstance(executable, str) or not executable
+                or executable in (".", "..") or "/" in executable or "\\" in executable
+            ):
+                raise SystemExit(f"{path.name} has an invalid CFBundleExecutable")
+            contents = package.read(bundle + executable)
+            if not contents:
+                raise SystemExit(f"{path.name} has an empty app executable")
+    except (BadZipFile, KeyError, plistlib.InvalidFileException, ValueError) as error:
+        raise SystemExit(f"Invalid IPA {path}: {error}") from error
+    # Extract only the named binary. No ZIP paths are ever used as local paths.
+    with tempfile.TemporaryDirectory(prefix="lazer-ipa-audio-") as directory:
+        binary = Path(directory) / executable
+        binary.write_bytes(contents)
+        result = verify_executable(binary)
+    if result == 0:
+        print(f"{path.name}: packaged native engine and reader bridge verified")
+    return result
 
 
 def verify_archive(directory: Path) -> int:
@@ -183,12 +215,14 @@ def verify_archive(directory: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--app", type=Path, help="built Runner.app directory")
-    parser.add_argument("--archive", type=Path, help="staged iOS archive directory")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--app", type=Path, help="built Runner.app directory")
+    target.add_argument("--ipa", type=Path, help="finished unsigned device IPA")
+    target.add_argument("--archive", type=Path, help="staged iOS archive directory")
     parser.add_argument("--expect-native", action="store_true", help="fail when the engine is absent")
     args = parser.parse_args()
-    if args.app is None and args.archive is None:
-        parser.error("pass --app or --archive")
+    if args.ipa is not None:
+        return verify_ipa(args.ipa)
     if args.app is not None:
         name = "Runner"
         binary = args.app / name

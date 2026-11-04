@@ -30,7 +30,7 @@ The desktop playback engine ported from `master` (FFmpeg + WASAPI/ALSA/CoreAudio
 DSD/DoP, gapless, EQ/limiter) is built into all Windows, macOS and Linux cloud
 artifacts together with the matching DSD-capable FFmpeg runtime and its LGPL
 notice. Packaging checks fail if any required engine, bridge or FFmpeg library is
-missing. Android packages the native AAudio engine for armeabi-v7a, arm64-v8a and x86_64;
+missing. Android packages the native AAudio engine for armeabi-v7a and arm64-v8a;
 iOS links the engine as static archives (see below). On Windows the engine and FFmpeg are built with MSVC so
 their import libraries match the app toolchain. See
 [audio-engine.md](audio-engine.md) for local build variables and the settings page.
@@ -61,12 +61,12 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   The first local build requires CMake and network access to the pinned FFmpeg
   sources. An incomplete engine build fails the build instead of producing
   an IPA that silently selects `just_audio`. The `ios-native` job builds those archives for arm64;
-  the IPA job verifies the built executable's dynamic export trie and refuses to
-  package when the engine ABI is not in it. Verified end to end on `macos-15`:
-  six arm64 archives, the engine's 18 ABI symbols and the bridge's five exports
-  present in the built `Runner`'s export trie (`dyld_info -exports` reads the
-  trie the dynamic loader uses, not the stripped symbol table), and no FFmpeg
-  dylib inside the bundle.
+  the IPA job verifies the built executable's dynamic export trie, then repeats
+  the check on the executable read from the finished IPA before uploading it.
+  Both gates require the engine's 18 ABI symbols and all ten reader bridge
+  exports. `dyld_info -exports` reads the trie the dynamic loader uses; an empty
+  trie or a failed inspection cannot pass through an ordinary symbol-table
+  fallback. All four FFmpeg components must be statically linked as well.
 
 ## Android release signing
 

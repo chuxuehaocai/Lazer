@@ -342,7 +342,7 @@ void main() {
   test('the backdrop preferences persist and clamp', () async {
     final AppState state = AppState(catalog: _Catalog());
     addTearDown(state.dispose);
-    expect(state.backgroundMode, AppBackgroundMode.nowPlayingDynamic);
+    expect(state.backgroundMode, AppBackgroundMode.off);
     expect(state.uiAlpha, 0.7);
 
     await state.setAppBackground(AppBackgroundMode.nowPlayingStatic);
@@ -357,10 +357,7 @@ void main() {
     await restarted.bootstrap();
     expect(restarted.backgroundMode, AppBackgroundMode.nowPlayingStatic);
     expect(restarted.uiAlpha, 0.4);
-    expect(
-      AppBackgroundModeLabels.parse('nope'),
-      AppBackgroundMode.nowPlayingDynamic,
-    );
+    expect(AppBackgroundModeLabels.parse('nope'), AppBackgroundMode.off);
   });
 
   testWidgets('the legacy settings drive the backdrop', (tester) async {

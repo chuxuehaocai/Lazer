@@ -303,8 +303,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool autoUpdateCheckDue({DateTime? now}) {
     final DateTime moment = now ?? DateTime.now();
     if (updateCheckedAt <= 0) return true;
-    return moment.millisecondsSinceEpoch - updateCheckedAt >=
-        updateCheckInterval.inMilliseconds;
+    final elapsed = moment.millisecondsSinceEpoch - updateCheckedAt;
+    // A corrected device clock must not suppress checks until a future date.
+    return elapsed < 0 || elapsed >= updateCheckInterval.inMilliseconds;
   }
 
   /// Asks GitHub for a newer release.
@@ -630,8 +631,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   /// App shell backdrop: the album-coloured flowing canvas, the listener's
-  /// own picture, or off.
-  AppBackgroundMode backgroundMode = AppBackgroundMode.nowPlayingDynamic;
+  /// own picture, or off. Fresh installs start with the theme surface only.
+  AppBackgroundMode backgroundMode = AppBackgroundMode.off;
 
   /// Stored copy of the picture used by [AppBackgroundMode.customImage].
   /// Null until the listener picks one; the canvas still renders without it.
@@ -1405,7 +1406,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       playerBackground = AppBackgroundModeLabels.parse(
         prefs.getString('lazer_player_background') ??
-            (deviceIsWatch ? AppBackgroundMode.nowPlayingStatic.name : null),
+            (deviceIsWatch
+                ? AppBackgroundMode.nowPlayingStatic.name
+                : AppBackgroundMode.nowPlayingDynamic.name),
       );
       final browseFps = prefs.getDouble('lazer_browse_background_fps') ?? 30;
       browseBackgroundFps = browseFps.isFinite ? browseFps.clamp(10, 1000) : 30;
@@ -1707,18 +1710,56 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<AuthOutcome> signInWithPhonePassword(
     String phone,
-    String password,
-  ) async {
+    String password, {
+    String countryCode = '86',
+  }) async {
     try {
       if (isNavidrome) await _musicPlatforms.selectNetease();
       final GatewayLoginResult result = await gateway.loginWithPhonePassword(
         phone,
         password,
+        countryCode: countryCode,
       );
       return _adoptLoginResult(result, AuthMethod.password, _maskPhone(phone));
     } catch (error) {
       return _failure(error);
     }
+  }
+
+  Future<AuthOutcome> signInWithEmail(String email, String password) async {
+    try {
+      if (isNavidrome) await _musicPlatforms.selectNetease();
+      final GatewayLoginResult result = await gateway.loginWithEmail(
+        email,
+        password,
+      );
+      return _adoptLoginResult(result, AuthMethod.password, _maskEmail(email));
+    } catch (error) {
+      return _failure(error);
+    }
+  }
+
+  /// Password sign-in with one account field: an address containing `@` is an
+  /// email/passport account, everything else is treated as a phone number.
+  Future<AuthOutcome> signInWithPassword(
+    String account,
+    String password, {
+    String countryCode = '86',
+  }) {
+    final String trimmed = account.trim();
+    if (trimmed.isEmpty) {
+      return Future<AuthOutcome>.value(
+        const AuthOutcome(false, error: '请输入手机号或邮箱。'),
+      );
+    }
+    if (password.isEmpty) {
+      return Future<AuthOutcome>.value(
+        const AuthOutcome(false, error: '请输入密码。'),
+      );
+    }
+    return trimmed.contains('@')
+        ? signInWithEmail(trimmed, password)
+        : signInWithPhonePassword(trimmed, password, countryCode: countryCode);
   }
 
   Future<AuthOutcome> signInWithPhoneCaptcha(
@@ -3620,6 +3661,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final String trimmed = phone.trim();
     if (trimmed.length <= 4) return trimmed;
     return '${trimmed.substring(0, 3)}****${trimmed.substring(trimmed.length - 4)}';
+  }
+
+  static String _maskEmail(String email) {
+    final String trimmed = email.trim();
+    final int at = trimmed.indexOf('@');
+    if (at <= 0) return trimmed;
+    final String name = trimmed.substring(0, at);
+    final String visible = name.length <= 2 ? name : name.substring(0, 2);
+    return '$visible***${trimmed.substring(at)}';
   }
 
   static String _cookieDetail(String cookie) {

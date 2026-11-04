@@ -233,6 +233,8 @@ void main() {
     addTearDown(tester.view.reset);
     final AppState state = AppState(catalog: _Catalog());
     addTearDown(state.dispose);
+    // This test exercises the flowing canvas; the app default is now off.
+    state.backgroundMode = AppBackgroundMode.nowPlayingDynamic;
 
     await tester.pumpWidget(_app(_reducedMotion(AppShell(state: state))));
     await tester.pumpAndSettle();

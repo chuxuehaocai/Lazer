@@ -195,17 +195,50 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   }
 
   Timer? _updateTimer;
+  AppRelease? _pendingUpdate;
+
+  void _scheduleUpdateCheck(Duration delay) {
+    _updateTimer?.cancel();
+    if (!mounted || !widget.autoCheckUpdates) return;
+    _updateTimer = Timer(delay, () => unawaited(_checkForUpdates()));
+  }
 
   /// Gives the catalogue time to land before talking to GitHub. A failure is
   /// already silent inside [AppState]; a found release opens the same prompt
   /// the settings button uses.
   Future<void> _checkForUpdates() async {
-    final AppRelease? release = await state.checkForUpdates();
-    if (!mounted || release == null) return;
-    // A dialog the user already opened (login, update, …) keeps the stage.
+    final AppRelease? release = _pendingUpdate ?? await state.checkForUpdates();
+    if (!mounted) return;
+    if (release == null) {
+      // Startup is often the least reliable moment to reach GitHub. Retry a
+      // failure in this session; a successful check keeps the daily cadence.
+      _scheduleUpdateCheck(
+        state.updateError == null
+            ? const Duration(hours: 1)
+            : const Duration(minutes: 5),
+      );
+      return;
+    }
+    // A manual check can skip this release while an automatic prompt is
+    // waiting behind another route. Apply that decision to the retained result.
+    if (state.skippedUpdateVersion == release.version.normalized) {
+      _pendingUpdate = null;
+      _scheduleUpdateCheck(const Duration(hours: 1));
+      return;
+    }
+    _pendingUpdate = release;
+    // Retain the result while another dialog is visible. Previously this
+    // marked the day as checked and silently dropped the update prompt.
     final ModalRoute<dynamic>? route = ModalRoute.of(context);
-    if (route != null && !route.isCurrent) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (route != null && !route.isCurrent ||
+        lifecycle != null && lifecycle != AppLifecycleState.resumed) {
+      _scheduleUpdateCheck(const Duration(seconds: 5));
+      return;
+    }
+    _pendingUpdate = null;
     await showUpdateDialog(context, state, release);
+    _scheduleUpdateCheck(const Duration(hours: 1));
   }
 
   bool _overlayRefreshScheduled = false;

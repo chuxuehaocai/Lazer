@@ -64,6 +64,35 @@ class NativeAudioEngine
     this._deviceSettings,
   );
 
+  @visibleForTesting
+  factory NativeAudioEngine.forTesting({
+    required LazerAudioApi api,
+    required LazerAudioBridgeApi bridge,
+    required LazerAudioWorker worker,
+    required AudioStreamCache cache,
+  }) {
+    void ignoreEvent(
+      Pointer<Void> context,
+      int event,
+      int detail,
+      int positionMillis,
+    ) {}
+    return NativeAudioEngine._(
+      api,
+      bridge,
+      worker,
+      NativeCallable<LazerAudioEventNative>.listener(ignoreEvent),
+      cache,
+      const LazerDeviceSettings(),
+    ).._engineAddress = 1;
+  }
+
+  @visibleForTesting
+  void deliverEventForTesting(int event) => _handleEvent(event, 0, 0);
+
+  @visibleForTesting
+  Future<void> prepareSuccessorForTesting(String url) => _prepareSuccessor(url);
+
   /// Loads the engine and creates a session.
   ///
   /// Returns null (logging why) when the native library is missing, its ABI
@@ -391,6 +420,8 @@ class NativeAudioEngine
 
   @override
   Future<bool> playQueuedNext() async {
+    final bool fromPending = _queuedUrl == null;
+    final pending = _pendingUrls;
     final String? next = _queuedUrl ?? _pendingUrls.firstOrNull;
     if (next == null) return false;
     final int generation = ++_generation;
@@ -399,6 +430,12 @@ class NativeAudioEngine
       if (generation != _generation) return false;
       _queueIndex++;
       await _openSource(next, generation);
+      if (fromPending &&
+          generation == _generation &&
+          identical(_pendingUrls, pending) &&
+          _pendingUrls.firstOrNull == next) {
+        _pendingUrls = _pendingUrls.skip(1).toList();
+      }
       return generation == _generation;
     });
   }
@@ -670,7 +707,7 @@ class NativeAudioEngine
       }
       // The engine just accepted this source, so whatever was active before is
       // gone and its reader can be freed now.
-      _releaseActive();
+      _releaseActive(keepEntry: entry);
       _activeEntry = entry;
       _activeReader = reader;
       _emitBufferChange();
@@ -786,6 +823,18 @@ class NativeAudioEngine
     try {
       entry = await _cacheEntryFor(url);
       if (entry == null) return;
+      if (generation != _queueGeneration || !_sourceLoaded || _disposed) return;
+      // Repeat-one and adjacent copies of the same URL share one growing
+      // download. It currently has one reader callback pair: rebinding it here
+      // would strand the audible reader, and retiring that reader would cancel
+      // the successor's download too. Keep this URL pending and reopen it on
+      // completion (or manual skip), after the old reader has finished.
+      if (identical(entry, _activeEntry)) {
+        // A different successor may already be prepared (for example before
+        // repeat-one was selected). Drop it while keeping this pending repeat.
+        await _clearQueued();
+        return;
+      }
       reader = NativeStreamReader.create(
         bridge,
         path: entry.file.path,
@@ -830,6 +879,13 @@ class NativeAudioEngine
       _queuedReader = reader;
       _queuedEntry = entry;
       _queuedUrl = url;
+      // appendToQueue keeps the URL available while preparation is pending so
+      // a manual skip can still open it. Once prepared, the reader owns it;
+      // leaving it pending would prepare the same song again at its boundary,
+      // racing the app's next prefetch and rebinding the active cache reader.
+      if (_pendingUrls.firstOrNull == url) {
+        _pendingUrls = _pendingUrls.skip(1).toList();
+      }
       reader = null;
       entry = null;
     } catch (error) {
@@ -933,10 +989,10 @@ class NativeAudioEngine
     return url;
   }
 
-  void _releaseActive() {
+  void _releaseActive({AudioStreamEntry? keepEntry}) {
     _activeReader?.release();
     _activeReader = null;
-    _activeEntry?.cancel();
+    if (!identical(_activeEntry, keepEntry)) _activeEntry?.cancel();
     _activeEntry = null;
     _emitBufferChange();
   }
@@ -1064,7 +1120,6 @@ class NativeAudioEngine
     // appends one in reaction to this event.
     final String? next = _pendingUrls.firstOrNull;
     if (next != null) {
-      _pendingUrls = _pendingUrls.skip(1).toList();
       unawaited(_prepareSuccessor(next));
     }
   }

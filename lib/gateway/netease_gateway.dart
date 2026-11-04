@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'crypto.dart';
 import 'music_models_compat.dart';
 import 'transport.dart';
 
@@ -123,11 +124,18 @@ class NeteaseGateway {
     if (password.trim().isEmpty) {
       throw ArgumentError('password cannot be blank.');
     }
+    // The official client hashes only the first 16 characters of an email
+    // password (`PassLoginFragmentV2` → `tf0.i.z` → `NeteaseMusicUtils.a`).
+    // The legacy mail login rejects the full-length MD5 for longer secrets.
+    final String hashedPassword = gatewayMd5(
+      password.length > 16 ? password.substring(0, 16) : password,
+    );
     return _remember(
       GatewayLoginResult.fromJson(
         await _transport.request('/login', <String, String>{
           'email': email,
           'password': password,
+          'md5_password': hashedPassword,
         }),
       ),
     );

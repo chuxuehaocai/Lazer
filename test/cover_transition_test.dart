@@ -172,9 +172,19 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     final nearEnd = tester.getRect(flight);
     expect(nearEnd.left, greaterThan(middle.left));
-    await tester.pumpAndSettle();
+    Rect? lastFlight;
+    for (var frame = 0; frame < 240 && flight.evaluate().isNotEmpty; frame++) {
+      lastFlight = tester.getRect(flight);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
     expect(flight, findsNothing);
     expect(tester.widget<Opacity>(hidden).opacity, 1);
+    final landed = tester.getRect(destination);
+    expect((lastFlight!.topLeft - landed.topLeft).distance, lessThan(.2));
+    expect(
+      (lastFlight.bottomRight - landed.bottomRight).distance,
+      lessThan(.2),
+    );
     expect(
       tester.getRect(destination),
       const Rect.fromLTWH(420, 200, 180, 180),
@@ -207,6 +217,35 @@ void main() {
           .opacity,
       1,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('collection artwork retains its spring overshoot and settles', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const _FlightHarness());
+    final state = tester.state<_FlightHarnessState>(
+      find.byType(_FlightHarness),
+    );
+    await tester.tap(find.byKey(state.source));
+    await tester.pump();
+    await tester.pump();
+    final flight = find.byKey(
+      const ValueKey<String>('cover-transition-flight'),
+    );
+    final destination = tester.getRect(find.byType(CoverTransitionTarget));
+    var furthestLeft = double.negativeInfinity;
+    var frames = 0;
+    while (flight.evaluate().isNotEmpty && frames < 180) {
+      final left = tester.getRect(flight).left;
+      if (left > furthestLeft) furthestLeft = left;
+      await tester.pump(const Duration(milliseconds: 16));
+      frames++;
+    }
+    expect(furthestLeft, greaterThan(destination.left + .5));
+    expect(flight, findsNothing);
+    expect(frames, lessThan(180));
+    expect(tester.binding.transientCallbackCount, 0);
     expect(tester.takeException(), isNull);
   });
 

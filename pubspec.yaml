@@ -88,12 +88,10 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
-    - LICENSE
     - assets/l10n/
     - assets/app_icon.png
     - assets/chart_logos/
     - assets/easter_eggs/still_alive/
-    - licenses/lyric_animation/AGPL-3.0.txt
 
   fonts:
     - family: MiSans

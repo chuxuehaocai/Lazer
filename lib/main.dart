@@ -6,9 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'l10n/app_localizations.dart';
-import 'package:flutter/foundation.dart'
-    show LicenseRegistry, LicenseEntryWithLineBreaks;
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio/audio_engine.dart';
@@ -76,26 +73,6 @@ Future<void> main() async {
         AppLog.shared.record('$error\n$stack');
         return previousPlatformError?.call(error, stack) ?? false;
       };
-      LicenseRegistry.addLicense(() async* {
-        yield LicenseEntryWithLineBreaks([
-          'Lazer',
-        ], await rootBundle.loadString('LICENSE'));
-        yield LicenseEntryWithLineBreaks(
-          ['Lyric animation'],
-          await rootBundle.loadString('licenses/lyric_animation/AGPL-3.0.txt'),
-        );
-        yield LicenseEntryWithLineBreaks(
-          ['Still Alive terminal credits'],
-          'Adapted from LHF (BD4SUP), September 2021.\n\n'
-          '${await rootBundle.loadString('assets/easter_eggs/still_alive/GPL-3.0.txt')}',
-        );
-        yield const LicenseEntryWithLineBreaks(
-          ['MiSans'],
-          'This application uses MiSans by Xiaomi.\n'
-          'MiSans Fonts Intellectual Property License Agreement:\n'
-          'https://hyperos.mi.com/font/en/download/',
-        );
-      });
       // Queue playback hands the next track to libmpv while the current one is
       // still playing, but mpv only opens that entry early with
       // `--prefetch-playlist`. Without it a streamed boundary waits for the

@@ -45,7 +45,9 @@ album-colour mesh, a flat album tone, the listener's own picture, or none.
 A custom picture is copied into the application support directory on import,
 so the backdrop keeps working after the source file moves or is deleted.
 With no backdrop, dark mode paints the deep warm `AppleColors.darkCanvas`
-rather than pure black, so the window still reads as a surface.
+rather than pure black, so the window still reads as a surface. Fresh installs
+default to `不使用` (no backdrop); the mode is stored once the listener picks
+one.
 
 The immersive player owns separately persisted background settings. Both browse
 and player backgrounds support dynamic flow, a static frame, a solid colour or

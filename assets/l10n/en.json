@@ -466,6 +466,12 @@
   "请输入短信验证码。": "Enter the SMS code.",
   "验证码发送失败，请稍后重试。": "Could not send the code. Try again later.",
   "使用手机号和短信验证码登录。": "Sign in with your phone number and an SMS code.",
+  "手机号或邮箱": "Phone or email",
+  "请输入手机号或邮箱": "Enter a phone number or email",
+  "请输入手机号或邮箱。": "Enter a phone number or email.",
+  "邮箱格式不正确。": "Enter a valid email address.",
+  "使用手机号或邮箱和密码登录。": "Sign in with your phone number or email and password.",
+  "忘记密码？": "Forgot password?",
   "大屏幕模式": "Large screen mode",
   "十英尺界面：方向键浏览，封面与文字为沙发距离重排": "Ten-foot interface: D-pad browsing, artwork and type re-laid out for the sofa",
   "在 Android 车机或电视上自动切换；电视默认进入大屏幕模式": "Switches automatically on Android car units and TVs; a TV starts in Large screen mode",
@@ -513,6 +519,11 @@
   "是否复制歌曲名？": "Copy this song title?",
   "复制": "Copy",
   "已复制歌曲名": "Song title copied",
+  "导出 Cookie": "Export cookie",
+  "登录后可导出网易云音乐登录 Cookie": "Sign in to export your NetEase Cloud Music login Cookie",
+  "复制当前网易云音乐登录 Cookie 到剪贴板": "Copy the current NetEase Cloud Music login Cookie to the clipboard",
+  "登录 Cookie 已复制到剪贴板。": "Login Cookie copied to the clipboard.",
+  "当前没有可导出的登录 Cookie。": "No login Cookie is available to export.",
   "在 osu! 中搜索": "Search in osu!",
   "无法打开浏览器": "Couldn't open a browser",
   "请复制链接并在浏览器中打开。": "Please copy the link and open it in a browser.",
@@ -772,5 +783,6 @@
   "音频引擎已中断：{message}（当前非 HiFi 路径）": "Audio engine interrupted: {message} (not currently using the HiFi path)",
   "音频暂时无法播放": "Audio is temporarily unavailable",
   "验证码": "Verification code",
-  "验证码已发送": "Verification code sent"
+  "验证码已发送": "Verification code sent",
+  "间奏": "Interlude"
 }

@@ -31,8 +31,8 @@ does the same: the transport forwards the `/captcha/sent/v1` cookie set and
 
 ## What the card does
 
-- The sign-in card switches between 扫码 / 短信验证码 / Cookie; switching away
-  from the QR tab cancels its poll timer.
+- The sign-in card switches between 扫码 / 短信验证码 / 密码 / Cookie; switching
+  away from the QR tab cancels its poll timer.
 - The phone field is `+86` and accepts an 11-digit mainland number; the code
   field accepts 4–6 digits.
 - `获取验证码` calls `AppState.sendSmsCode` and starts a 60-second resend

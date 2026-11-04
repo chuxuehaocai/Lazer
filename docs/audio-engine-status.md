@@ -68,7 +68,7 @@ native/CMakeLists.txt:78-81
 | Windows | `windows/CMakeLists.txt:65-68` 把 `native/` 加进 Flutter 构建；`:118-120` 把引擎与 FFmpeg DLL 安装到 exe 目录 | 代码 |
 | Linux | `linux/CMakeLists.txt:79-80`、`:116` 安装到 `bundle/lib/` | 代码 |
 | macOS | **没有任何构建接入**：`macos/` 下无 CMake 步骤、Xcode 工程不引用引擎；只能手动或 CI 拷贝 `.dylib` 进 `.app/Contents/MacOS` | `macos/` 目录 + `.github/workflows/build.yml:231-256` |
-| Android | `ci/build-android-audio.sh:16-32` 为 `arm64-v8a`/`armeabi-v7a`/`x86_64` 三个 ABI 构建并暂存到 `jniLibs` | 代码 |
+| Android | `ci/build-android-audio.sh:16-32` 为 `arm64-v8a`/`armeabi-v7a` 两个 ABI 构建并暂存到 `jniLibs` | 代码 |
 
 ### 1.3 CI 启用情况
 

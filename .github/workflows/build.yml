@@ -479,7 +479,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             export ORG_GRADLE_PROJECT_lazerRequireReleaseSigning=true
           fi
-          flutter build apk --release --no-pub --target-platform android-arm,android-arm64,android-x64 \
+          flutter build apk --release --no-pub --target-platform android-arm,android-arm64 \
             --dart-define=LAZER_COMMIT=${{ github.sha }} \
             --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Verify Android Audio Engine is bundled
@@ -570,6 +570,18 @@ jobs:
       - run: flutter build ios --release --no-codesign --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Verify the app exports the native engine ABI
         run: python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
+      - name: Include FFmpeg LGPL materials in the iOS bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir=build/native-deps-ios/licenses
+          target_dir=build/ios/iphoneos/Runner.app/Resources/licenses/lazer-ffmpeg
+          test -d "$source_dir"
+          mkdir -p "$target_dir"
+          cp "$source_dir"/* "$target_dir/"
+          for file in COPYING.LGPLv2.1 BUILDINFO.txt PROFILE.txt ffmpeg-source.tar.gz; do
+            test -s "$target_dir/$file"
+          done
       - name: Create unsigned IPA with the required Payload directory
         shell: bash
         run: |
@@ -579,6 +591,12 @@ jobs:
           ditto build/ios/iphoneos/Runner.app dist/ios/Payload/Runner.app
           (cd dist/ios && zip -qry ../Lazer-iOS-aarch64.ipa Payload)
           unzip -l dist/Lazer-iOS-aarch64.ipa | grep 'Payload/Runner.app/Info.plist'
+          for file in COPYING.LGPLv2.1 BUILDINFO.txt PROFILE.txt ffmpeg-source.tar.gz; do
+            unzip -l dist/Lazer-iOS-aarch64.ipa |
+              grep -q "Payload/Runner.app/Resources/licenses/lazer-ffmpeg/$file"
+          done
+          # Gate on the binary from the finished IPA, not only the build tree.
+          python3 ci/verify-ios-audio.py --ipa dist/Lazer-iOS-aarch64.ipa
           (cd dist && shasum -a 256 Lazer-iOS-aarch64.ipa > Lazer-iOS-aarch64.ipa.sha256)
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:

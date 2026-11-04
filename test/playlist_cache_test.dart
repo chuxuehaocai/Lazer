@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/catalog.dart';
+import 'package:lazer_nextgen/cache/disk_cache.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
@@ -105,8 +107,65 @@ class _SwitchingCatalog extends Catalog {
   }
 }
 
+class _RetryAlbumGateway extends NeteaseGateway {
+  bool offline = true;
+  int calls = 0;
+  @override
+  Future<Map<String, dynamic>> albumDetailRaw(int id) async {
+    calls++;
+    if (offline) throw const SocketException('offline');
+    return {
+      'album': {'id': id, 'name': 'Album'},
+      'songs': [
+        {'id': 1, 'name': 'Recovered album song', 'dt': 180000},
+      ],
+    };
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('the album retry button bypasses the failed request cooldown', (
+    tester,
+  ) async {
+    final gateway = _RetryAlbumGateway();
+    final catalog = Catalog(
+      gateway: gateway,
+      cache: DiskCache(
+        directory: () async => throw const FileSystemException('disabled'),
+      ),
+    );
+    final state = AppState(catalog: catalog);
+    addTearDown(state.dispose);
+    const album = Album(
+      id: '77',
+      title: 'Album',
+      artist: 'Artist',
+      year: '',
+      coverSeed: 1,
+      note: '',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(),
+        home: Scaffold(
+          body: AppPlaylistPage(
+            state: state,
+            playlist: _playlist('77', 'Album'),
+            album: album,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(gateway.calls, 1);
+    gateway.offline = false;
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
+    expect(gateway.calls, 2);
+    expect(find.text('Recovered album song'), findsOneWidget);
+  });
 
   testWidgets('stored collections paint while the live request is pending', (
     tester,

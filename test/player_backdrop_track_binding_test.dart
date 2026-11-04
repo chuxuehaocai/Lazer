@@ -11,6 +11,7 @@ import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/shared_browse_background.dart';
 
@@ -53,6 +54,8 @@ void main() {
       addTearDown(tester.view.reset);
       final state = AppState(catalog: _Catalog());
       addTearDown(state.dispose);
+      // Both canvases are expected here; the browse default is now off.
+      state.backgroundMode = AppBackgroundMode.nowPlayingDynamic;
       final navigation = BrowseNavigationObserver();
       addTearDown(navigation.dispose);
       state.playQueue([_first, _second]);

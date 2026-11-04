@@ -6,6 +6,7 @@ import 'package:lazer_nextgen/ui/font_settings_page.dart';
 import 'package:lazer_nextgen/ui/shortcut_settings_page.dart';
 import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/hifi_settings_section.dart';
 import 'package:lazer_nextgen/widgets/shared_browse_background.dart';
@@ -17,6 +18,8 @@ void main() {
     (tester) async {
       final state = AppState();
       addTearDown(state.dispose);
+      // This test covers the live animated backdrop, which is now opt-in.
+      state.backgroundMode = AppBackgroundMode.nowPlayingDynamic;
       final navigation = BrowseNavigationObserver();
       final navigator = GlobalKey<NavigatorState>();
       await tester.pumpWidget(

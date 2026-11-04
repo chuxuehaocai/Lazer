@@ -248,9 +248,21 @@ void main() {
       final art = find.byKey(const ValueKey('now-playing-cover'));
       final element = tester.element(art);
       final large = tester.getRect(art);
+      // Preserve the shape checks at the same fractions of the slower cover
+      // response, and keep a fixed-time sample to catch a return to 500 ms.
+      Duration responseTime(double fraction) =>
+          Duration(microseconds: (650000 * fraction).round());
+      const fixedSample = Duration(milliseconds: 180);
+      final earlySample = responseTime(.36);
       await tester.tap(art);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 180));
+      await tester.pump(fixedSample);
+      expect(
+        (large.width - tester.getRect(art).width) / (large.width - 64),
+        inExclusiveRange(.5, .65),
+        reason: 'the relaxed cover response must still be underway at 180 ms',
+      );
+      await tester.pump(earlySample - fixedSample);
       final moving = tester.getRect(art);
       expect(moving.width, lessThan(large.width));
       expect(
@@ -258,7 +270,7 @@ void main() {
         greaterThan(.65),
         reason: 'the cover travels most of the distance early, then eases in',
       );
-      await tester.pump(const Duration(milliseconds: 260));
+      await tester.pump(responseTime(.88) - earlySample);
       final small = tester.getRect(art);
       expect(small.width, lessThan(63));
       expect(
@@ -293,7 +305,13 @@ void main() {
       expect(tester.getRect(art).width, closeTo(64, 1));
       await tester.tap(art);
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 180));
+      await tester.pump(fixedSample);
+      expect(
+        (tester.getRect(art).width - 64) / (large.width - 64),
+        inExclusiveRange(.5, .65),
+        reason: 'expanding the cover uses the same relaxed response',
+      );
+      await tester.pump(earlySample - fixedSample);
       final returning = tester.getRect(art);
       expect(
         (returning.width - 64) / (large.width - 64),
@@ -301,7 +319,7 @@ void main() {
         reason:
             'returning to the large cover must also start fast and end slow',
       );
-      await tester.pump(const Duration(milliseconds: 270));
+      await tester.pump(responseTime(.9) - earlySample);
       expect(tester.getRect(art).width, greaterThan(large.width + 1));
       await tester.pumpAndSettle();
       expect(tester.getRect(art).width, closeTo(large.width, 1));

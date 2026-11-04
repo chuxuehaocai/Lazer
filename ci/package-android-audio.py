@@ -27,7 +27,6 @@ def main():
     for name in ("COPYING.LGPLv2.1", "BUILDINFO.txt", "PROFILE.txt", "ffmpeg-source.tar.gz"):
         materials.append((args.ffmpeg / f"share/lazer-ffmpeg/{name}", f"ffmpeg/{name}"))
     materials.append((repo / "native/lazer-audio/src/exports_android.map", "exports_android.map"))
-    materials.append((repo / "LICENSE", "LICENSE.Lazer"))
     for path, _ in materials:
         if not path.is_file() or path.stat().st_size == 0:
             raise SystemExit(f"Missing relinking material: {path}")
@@ -71,8 +70,8 @@ engine object files needed to replace FFmpeg and relink the engine.
    select the generated liblazer-audio.so, then restart the app.
 
 The unmodified archives are included so step 3 can also verify this package.
-Lazer's MIT license and the FFmpeg LGPL license are included. FFmpeg source
-modification and reverse engineering for debugging those modifications are
+The FFmpeg LGPL license is included. FFmpeg source modification and reverse
+engineering for debugging those modifications are
 permitted by the applicable LGPL terms. The app does not require the original
 library's signature or hash when importing a compatible replacement.
 """, encoding="utf-8", newline="\n")

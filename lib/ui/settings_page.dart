@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../animation/apple_modal.dart';
 import '../animation/apple_spring.dart';
 
@@ -25,7 +26,6 @@ import '../theme/apple_design.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/hifi_settings_section.dart';
-import '../widgets/listen_together_dialog.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/settings_choice.dart';
 import '../widgets/settings_row.dart';
@@ -818,23 +818,19 @@ class _SettingsOverview extends StatelessWidget {
                   ),
                   if (!state.isNavidrome)
                     _AppSettingRow(
-                      label: '一起听',
-                      subtitle: '和朋友同步听歌',
+                      label: '导出 Cookie',
+                      subtitle: state.isGuest
+                          ? '登录后可导出网易云音乐登录 Cookie'
+                          : '复制当前网易云音乐登录 Cookie 到剪贴板',
                       trailing: SpringOutlinedButton(
-                        onPressed: () =>
-                            unawaited(showListenTogetherDialog(context, state)),
-                        child: const TrText('打开'),
+                        key: const ValueKey('export-session-cookie'),
+                        onPressed: state.isGuest
+                            ? null
+                            : () =>
+                                  unawaited(_copySessionCookie(context, state)),
+                        child: const TrText('复制'),
                       ),
                     ),
-                  _AppSettingRow(
-                    label: '刷新曲库',
-                    subtitle: '重新拉取首页、歌单和每日推荐',
-                    trailing: SpringOutlinedButton(
-                      onPressed: () =>
-                          unawaited(state.refreshHome(force: true)),
-                      child: const TrText('刷新'),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -905,6 +901,25 @@ Future<void> _openProjectRepository(BuildContext context) async {
       SnackBar(
         content: Text(
           context.tr('无法打开浏览器，请手动访问 ${UpdateChecker.repositoryUrl}'),
+        ),
+      ),
+    );
+}
+
+Future<void> _copySessionCookie(BuildContext context, AppState state) async {
+  final String cookie = state.gateway.sessionCookie?.trim() ?? '';
+  if (cookie.isNotEmpty) {
+    await Clipboard.setData(ClipboardData(text: cookie));
+  }
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(
+          context.tr(
+            cookie.isEmpty ? '当前没有可导出的登录 Cookie。' : '登录 Cookie 已复制到剪贴板。',
+          ),
         ),
       ),
     );

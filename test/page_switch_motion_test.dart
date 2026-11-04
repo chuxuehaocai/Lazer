@@ -11,6 +11,7 @@ import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/animation/motion_snapshot.dart';
 
 const Track _track = Track(
@@ -77,6 +78,8 @@ Future<AppState> _phoneShell(WidgetTester tester) async {
   addTearDown(tester.view.reset);
   final AppState state = AppState(catalog: _Catalog());
   addTearDown(state.dispose);
+  // The ambient mesh is opt-in now; this test measures its scheduling.
+  state.backgroundMode = AppBackgroundMode.nowPlayingDynamic;
   state.playQueue(const <Track>[_track]);
   await tester.pumpWidget(_app(AppShell(state: state)));
   await tester.pump(const Duration(milliseconds: 200));

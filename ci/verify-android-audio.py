@@ -8,6 +8,7 @@ from pathlib import Path
 
 # e_machine values. armeabi-v7a is ELF32; the other two are ELF64.
 ABIS = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40), "x86_64": (2, 62)}
+APK_ABIS = ("arm64-v8a", "armeabi-v7a")
 LIBRARIES = ("liblazer-audio.so", "liblazer-audio-bridge.so")
 SYSTEM_LIBRARIES = {
     "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
@@ -120,7 +121,7 @@ def main():
             print(verify_elf((args.directory / library).read_bytes(), args.abi, library, files))
         return
     with zipfile.ZipFile(args.apk) as apk, args.apk.open("rb") as raw:
-        for abi in ABIS:
+        for abi in APK_ABIS:
             files = {Path(name).name for name in apk.namelist() if name.startswith(f"lib/{abi}/")}
             for library in LIBRARIES:
                 name = f"lib/{abi}/{library}"

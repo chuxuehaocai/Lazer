@@ -143,14 +143,14 @@ void main() {
         closeTo(95 / 240, 1e-9),
       );
       final viewport = tester.getRect(find.byType(LyricViewport));
-      final line = tester.getRect(find.byKey(const ValueKey('lyric-blur-3')));
-      expect(line.center.dy, closeTo(viewport.top + viewport.height * .35, 1));
-      expect(
-        tester
-            .widget<ImageFiltered>(find.byKey(const ValueKey('lyric-blur-3')))
-            .enabled,
-        isFalse,
+      final focusedLine = find.ancestor(
+        of: find.text('Fourth'),
+        matching: find.byType(ImageFiltered),
       );
+      expect(focusedLine, findsOneWidget);
+      final line = tester.getRect(focusedLine);
+      expect(line.center.dy, closeTo(viewport.top + viewport.height * .35, 1));
+      expect(tester.widget<ImageFiltered>(focusedLine).enabled, isFalse);
       lifecycle.dispose();
       state.pause();
       await tester.pumpWidget(const SizedBox.shrink());

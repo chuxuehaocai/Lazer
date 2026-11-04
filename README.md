@@ -17,7 +17,7 @@
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-4C9A7A"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-4C9A7A"></a>
 </p>
 
 <p align="center">
@@ -113,7 +113,7 @@ flutter run
 Windows 请完整解压后运行；AppImage 下载后先 `chmod +x`；
 macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 
-更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [扫码登录](docs/login-qr.md) · [验证码登录](docs/login-sms.md) · [统一界面](docs/ui.md)
+更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [扫码登录](docs/login-qr.md) · [验证码登录](docs/login-sms.md) · [密码登录](docs/login-password.md) · [统一界面](docs/ui.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 
 ## 参考与致谢
 
@@ -126,5 +126,5 @@ macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 <p align="center">
   <img src="docs/images/mark.png" width="44" alt="Lazer">
   <br>
-  <sub>MIT License · 用 Flutter 和一点点耐心做成</sub>
+  <sub>AGPL-3.0-or-later · 第三方组件与素材见 THIRD-PARTY-NOTICES.md</sub>
 </p>

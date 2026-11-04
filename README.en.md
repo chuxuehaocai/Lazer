@@ -17,7 +17,7 @@
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-4C9A7A"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-4C9A7A"></a>
 </p>
 
 <p align="center">
@@ -118,7 +118,7 @@ artifacts are retained for 30 days. Extract the complete Windows ZIP before
 launching its EXE, run `chmod +x` on a downloaded AppImage, and note that macOS
 Apps are ad-hoc signed while the IPA needs your own signing.
 
-More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [scheduled pause](docs/scheduled-pause.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [unified interface](docs/ui.md)
+More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [scheduled pause](docs/scheduled-pause.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [password sign-in](docs/login-password.md) · [unified interface](docs/ui.md) · [third-party notices](THIRD-PARTY-NOTICES.md)
 
 ## References and thanks
 
@@ -131,5 +131,5 @@ More documentation: [build details](docs/builds.md) · [system media](docs/syste
 <p align="center">
   <img src="docs/images/mark.png" width="44" alt="Lazer">
   <br>
-  <sub>MIT License · made with Flutter and a little patience</sub>
+  <sub>AGPL-3.0-or-later · see THIRD-PARTY-NOTICES.md for separate components and assets</sub>
 </p>

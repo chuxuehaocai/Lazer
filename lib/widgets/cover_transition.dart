@@ -11,7 +11,10 @@ import 'cover_morph_surface.dart';
 
 part 'cover_transition_text.dart';
 
-const _coverSpring = AppleSpring.bouncy;
+const _coverSpring = AppleSpring(
+  duration: AppleSpring.bouncyDuration,
+  bounce: .2,
+);
 
 class _CoverSnapshot {
   _CoverSnapshot(this.image) {
@@ -1333,8 +1336,8 @@ class _CoverPhysics extends Simulation {
     _frameStamp = frameStamp;
     _phase = binding.schedulerPhase;
     final target = destination();
-    if (target != null) _target = target;
     if (motion case final progress?) {
+      if (target != null) _target = target;
       final distance = toBlend - fromProgress;
       final t = distance.abs() < .00001
           ? 1.0
@@ -1355,6 +1358,9 @@ class _CoverPhysics extends Simulation {
       );
     }
     if (target != null && target != _target) {
+      // The enclosing page can still be sliding or restoring its shelf.
+      // Compare with the previous endpoint before updating it so the new
+      // spring inherits the currently presented rectangle and its velocity.
       final current = _sample(time);
       _target = target;
       _edges = _springs(current, target);

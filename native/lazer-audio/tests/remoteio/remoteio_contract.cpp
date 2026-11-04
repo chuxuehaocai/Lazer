@@ -227,6 +227,8 @@ struct FakeSession {
     int32_t requestedSampleRate = 0;
     int32_t requestedBufferMillis = 0;
     bool failActivation = false;
+    bool active = false;
+    bool background = false;
     bool notifyDuringActivation = false;
     int stateReads = 0;
     lazer::audio::IosSessionState state{};
@@ -256,7 +258,7 @@ int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
     if (g_session.notifyDuringActivation) ++g_session.state.revision;
     g_session.requestedSampleRate = preferredSampleRate;
     g_session.requestedBufferMillis = bufferMillis;
-    if (g_session.failActivation) {
+    if (g_session.failActivation || (g_session.background && !g_session.active)) {
         error = "fake session refused activation";
         return LazerAudioErrorDevice;
     }
@@ -265,10 +267,14 @@ int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
     info.ioBufferFrames = g_session.ioBufferFrames;
     info.outputLatencyFrames = g_session.outputLatencyFrames;
     info.route = g_session.route;
+    g_session.active = true;
     return LazerAudioOk;
 }
 
-void iosSessionDeactivate() { ++g_session.deactivateCalls; }
+void iosSessionDeactivate() {
+    ++g_session.deactivateCalls;
+    g_session.active = false;
+}
 
 }  // namespace lazer::audio
 
@@ -681,6 +687,34 @@ void testRecoveryFailureIsTemporaryAndCallbackDoesNoRecovery() {
     check(g_unit.running, "successful retry restarts previously running playback");
 }
 
+void testBackgroundSourceReplacementPreservesSession() {
+    g_session = FakeSession{};
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    checkEqual(output->start(error), LazerAudioOk, "starts the first source");
+    g_session.background = true;
+
+    // Engine::open retires its previous output before decoding the next source.
+    output->closeForReplacement();
+    checkEqual(g_session.deactivateCalls, 0,
+        "source replacement keeps background audio focus");
+    check(!output->isOpen(), "replacement still retires the old AudioUnit");
+    auto nextSource = source();
+    nextSource.sampleRate = 48000;
+    openDefault(*output, session, error, request(), nextSource);
+    checkEqual(output->start(error), LazerAudioOk,
+        "the next source starts while backgrounded");
+    checkEqual(g_session.deactivateCalls, 0,
+        "opening the replacement never briefly deactivates the session");
+
+    output->close();
+    checkEqual(g_session.deactivateCalls, 1,
+        "an explicit stop releases the session after replacement");
+    check(!g_session.active, "explicit stop returns audio focus");
+}
+
 }  // namespace
 
 int main() {
@@ -695,6 +729,7 @@ int main() {
     testNoResumeAndPausedOutputsStayStopped();
     testMediaServicesLossResetAndActivationEpoch();
     testRecoveryFailureIsTemporaryAndCallbackDoesNoRecovery();
+    testBackgroundSourceReplacementPreservesSession();
     if (failures != 0) {
         std::printf("%d RemoteIO contract check(s) failed\n", failures);
         return 1;

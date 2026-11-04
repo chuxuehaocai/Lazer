@@ -309,7 +309,7 @@ int32_t Engine::open(
     paused_.store(true, std::memory_order_release);
     cancelCurrentSources();
     joinThreads();
-    if (output_ != nullptr) output_->close();
+    if (output_ != nullptr) output_->closeForReplacement();
     outputSession_ = AudioOutputSession{};
     retireCurrentSources();
     state_.store(LazerAudioStatePreparing, std::memory_order_release);

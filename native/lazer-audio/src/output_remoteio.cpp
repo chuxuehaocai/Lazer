@@ -54,7 +54,7 @@ public:
         AudioOutputSession &session, std::string &error, LogProxy *) override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
-        close();
+        closeForReplacement();
         session = AudioOutputSession{};
 
         if (request.bitPerfect || request.requireDoP || request.requireNativeDsd) {
@@ -128,7 +128,11 @@ public:
         return LazerAudioOk;
     }
 
-    void close() override {
+    void close() override { closeOutput(true); }
+
+    void closeForReplacement() override { closeOutput(false); }
+
+    void closeOutput(bool releaseSession) {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         requestedRunning_ = false;
         opened_ = false;
@@ -136,7 +140,10 @@ public:
         disposeUnit();
         queue_.reset();
         frameBytes_.store(0, std::memory_order_release);
-        if (sessionActive_) {
+        // Deactivating between tracks relinquishes the background playback
+        // session; iOS can then refuse the next activation while locked. Keep
+        // it through replacements and release it only on stop or teardown.
+        if (sessionActive_ && releaseSession) {
             iosSessionDeactivate();
             sessionActive_ = false;
         }

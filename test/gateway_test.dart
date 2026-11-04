@@ -478,6 +478,58 @@ void main() {
       expect(gateway.sessionCookie, 'MUSIC_U=abc; __csrf=t');
     });
   });
+
+  group('email and password sign-in matches the official client', () {
+    test('an email login posts the weapi password form', () {
+      final NeteaseRequest route = buildNeteaseRequest(
+        '/login',
+        const <String, String>{
+          'email': 'listener@example.com',
+          'password': '1234567890123456',
+        },
+      );
+      expect(route.path, '/api/w/login');
+      expect(route.encoding, NeteaseEncoding.weapi);
+      expect(route.payload['type'], '0');
+      expect(route.payload['username'], 'listener@example.com');
+      expect(route.payload['password'], gatewayMd5('1234567890123456'));
+      expect(route.payload['rememberLogin'], 'true');
+
+      final NeteaseRequest prehashed =
+          buildNeteaseRequest('/login', const <String, String>{
+            'email': 'listener@example.com',
+            'password': '12345678901234567890',
+            'md5_password': 'precomputed-md5',
+          });
+      expect(prehashed.payload['password'], 'precomputed-md5');
+    });
+
+    test('a phone password login posts the md5 password, never a captcha', () {
+      final NeteaseRequest route = buildNeteaseRequest(
+        '/login/cellphone',
+        const <String, String>{
+          'phone': '13800000000',
+          'password': 'secret',
+          'countrycode': '86',
+        },
+      );
+      expect(route.path, '/api/w/login/cellphone');
+      expect(route.payload['password'], gatewayMd5('secret'));
+      expect(route.payload.containsKey('captcha'), isFalse);
+    });
+
+    test('the gateway truncates email passwords at 16 characters', () async {
+      final _EmailLoginTransport transport = _EmailLoginTransport();
+      final NeteaseGateway gateway = NeteaseGateway(transport: transport);
+      final GatewayLoginResult result = await gateway.loginWithEmail(
+        'listener@example.com',
+        '12345678901234567890',
+      );
+      expect(result.ok, isTrue);
+      expect(transport.seen['md5_password'], gatewayMd5('1234567890123456'));
+      expect(gateway.sessionCookie, 'MUSIC_U=abc; __csrf=t');
+    });
+  });
   group('cloud playlists', () {
     test('reads ownership from the user playlist payload', () {
       final GatewayPlaylist owned = GatewayPlaylist.fromJson(<String, dynamic>{
@@ -612,6 +664,26 @@ class _CaptchaSentTransport extends NeteaseTransport {
       'code': 200,
       'data': true,
       'cookie': 'NMTID=n1; _ntes_nuid=u1',
+    };
+  }
+}
+
+/// Email login transport: records the hashed form and answers the account.
+class _EmailLoginTransport extends NeteaseTransport {
+  Map<String, String> seen = <String, String>{};
+
+  @override
+  Future<Map<String, dynamic>> request(
+    String alias,
+    Map<String, String> parameters,
+  ) async {
+    expect(alias, '/login');
+    seen = Map<String, String>.of(parameters);
+    return <String, dynamic>{
+      'code': 200,
+      'cookie': 'MUSIC_U=abc; __csrf=t',
+      'profile': <String, dynamic>{'userId': 7, 'nickname': '测试账户'},
+      'account': <String, dynamic>{'id': 7},
     };
   }
 }

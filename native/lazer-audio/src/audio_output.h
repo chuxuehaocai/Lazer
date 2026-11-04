@@ -84,6 +84,10 @@ public:
         AudioOutputSession &session, std::string &error, LogProxy *log) = 0;
     virtual void close() = 0;
 
+    /* A source replacement retires the stream but keeps application-level audio
+     * focus where the platform requires it. Explicit stop/teardown still close(). */
+    virtual void closeForReplacement() { close(); }
+
     virtual int32_t start(std::string &error) = 0;
     virtual int32_t stop(std::string &error) = 0;
     virtual int32_t reset(std::string &error) = 0;

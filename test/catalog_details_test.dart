@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -33,9 +34,12 @@ class _Gateway extends NeteaseGateway {
   int albumCalls = 0, artistCalls = 0, songCalls = 0;
   final offsets = <int>[];
   bool offline = false, failArtistMetadata = false;
+  Completer<void>? albumDelay, albumStarted;
   @override
   Future<Map<String, dynamic>> albumDetailRaw(int id) async {
     albumCalls++;
+    if (albumStarted?.isCompleted == false) albumStarted!.complete();
+    await albumDelay?.future;
     if (offline) throw const SocketException('offline');
     return {
       'album': _album(id),
@@ -88,6 +92,7 @@ class _Gateway extends NeteaseGateway {
     int offset = 0,
   }) async {
     offsets.add(offset);
+    if (offline) throw const SocketException('offline');
     return {
       'hotAlbums': offset == 0
           ? [
@@ -98,6 +103,78 @@ class _Gateway extends NeteaseGateway {
       'more': offset == 0,
     };
   }
+}
+
+class _PlatformGateway extends MusicGateway {
+  _PlatformGateway(this.connectionId);
+  @override
+  final String connectionId;
+  @override
+  MusicProvider get provider => MusicProvider.navidrome;
+  @override
+  MusicUser? get user => null;
+  @override
+  Set<MusicCapability> get capabilities => const {};
+
+  int albumCalls = 0, songCalls = 0, pageCalls = 0;
+  bool offline = false;
+  Completer<void>? albumDelay, albumStarted;
+
+  @override
+  Future<MusicAlbum> album(MusicId id) async {
+    albumCalls++;
+    if (albumStarted?.isCompleted == false) albumStarted!.complete();
+    await albumDelay?.future;
+    if (offline) throw const SocketException('offline');
+    return MusicAlbum(id: id, title: connectionId, artists: const []);
+  }
+
+  @override
+  Future<MusicPage<MusicSong>> albumSongs(
+    MusicId albumId, {
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    songCalls++;
+    return MusicPage(
+      [
+        MusicSong(
+          id: id(MusicEntityKind.song, 'song'),
+          title: 'Song',
+          artists: const [],
+          duration: const Duration(minutes: 3),
+          albumId: albumId,
+        ),
+      ],
+      offset: offset,
+      hasMore: false,
+    );
+  }
+
+  @override
+  Future<MusicPage<MusicAlbum>> artistAlbums(
+    MusicId artist, {
+    int limit = 30,
+    int offset = 0,
+  }) async {
+    pageCalls++;
+    return MusicPage(
+      [
+        MusicAlbum(
+          id: id(MusicEntityKind.album, 'album'),
+          title: connectionId,
+          artists: const [],
+        ),
+      ],
+      offset: offset,
+      hasMore: false,
+    );
+  }
+
+  @override
+  void close() {}
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
@@ -173,6 +250,147 @@ void main() {
         '歌曲',
       );
       expect(gateway.albumCalls, 2);
+    },
+  );
+
+  test(
+    'slow album requests from details and playback stay coalesced',
+    () async {
+      final gateway = _Gateway()
+        ..albumDelay = Completer<void>()
+        ..albumStarted = Completer<void>();
+      final catalog = Catalog(gateway: gateway, cache: disk);
+      final detail = catalog.albumDetails(77);
+      await gateway.albumStarted!.future;
+      final tracks = catalog.albumTracks(77);
+      final reopened = catalog.albumDetails(77);
+      expect(gateway.albumCalls, 1);
+      gateway.albumDelay!.complete();
+      await Future.wait<Object>([detail, tracks, reopened]);
+      expect(gateway.albumCalls, 1);
+    },
+  );
+
+  test(
+    'failed expired album refreshes reuse stale data until an explicit retry',
+    () async {
+      final gateway = _Gateway();
+      final first = Catalog(gateway: gateway, cache: disk);
+      await first.albumDetails(77);
+      await disk.expireJson('album-detail:77');
+      final catalog = Catalog(gateway: gateway, cache: disk);
+      gateway.offline = true;
+      expect((await catalog.albumDetails(77)).tracks.single.id, '1');
+      expect(gateway.albumCalls, 2);
+      await catalog.albumDetails(77);
+      await catalog.albumTracks(77);
+      expect(gateway.albumCalls, 2);
+      await catalog.albumDetails(77, force: true);
+      expect(gateway.albumCalls, 3);
+      await catalog.albumDetails(77);
+      expect(gateway.albumCalls, 3);
+      gateway.offline = false;
+      await catalog.albumDetails(77, force: true);
+      expect(gateway.albumCalls, 4);
+    },
+  );
+
+  test(
+    'uncached album failures cool down while explicit retry stays immediate',
+    () async {
+      final gateway = _Gateway()..offline = true;
+      final catalog = Catalog(gateway: gateway, cache: disk);
+      await expectLater(
+        catalog.albumDetails(77),
+        throwsA(isA<SocketException>()),
+      );
+      await expectLater(
+        catalog.albumDetails(77),
+        throwsA(isA<SocketException>()),
+      );
+      expect(gateway.albumCalls, 1);
+      gateway.offline = false;
+      expect(
+        (await catalog.albumDetails(77, force: true)).tracks.single.id,
+        '1',
+      );
+      expect(gateway.albumCalls, 2);
+    },
+  );
+
+  test(
+    'platform albums coalesce slow loads, persist offline and keep owners isolated',
+    () async {
+      final gateway = _PlatformGateway('first')
+        ..albumDelay = Completer<void>()
+        ..albumStarted = Completer<void>();
+      final other = _PlatformGateway('second');
+      final catalog = Catalog(cache: disk);
+      catalog.connections.add(gateway);
+      catalog.connections.add(other, select: true);
+      final key = gateway.id(MusicEntityKind.album, 'album').cacheKey;
+      final detail = catalog.albumDetailsFor(key);
+      await gateway.albumStarted!.future;
+      final tracks = catalog.albumTracksFor(key);
+      final reopened = catalog.albumDetailsFor(key);
+      gateway.albumDelay!.complete();
+      await Future.wait<Object>([detail, tracks, reopened]);
+      expect(gateway.albumCalls, 1);
+      expect(gateway.songCalls, 1);
+      expect(other.albumCalls, 0);
+      expect((await catalog.albumDetailsFor(key)).album.title, 'first');
+
+      final restarted = Catalog(cache: disk)..connections.add(gateway);
+      gateway.offline = true;
+      expect((await restarted.albumDetailsFor(key)).tracks, hasLength(1));
+      expect(gateway.albumCalls, 1);
+      expect(
+        (await restarted.albumDetailsFor(key, force: true)).album.title,
+        'first',
+      );
+      expect(gateway.albumCalls, 2);
+      expect(
+        (await catalog.albumDetailsFor(
+          other.id(MusicEntityKind.album, 'album').cacheKey,
+        )).album.title,
+        'second',
+      );
+    },
+  );
+
+  test('platform artist pages share snapshots and support refresh', () async {
+    final gateway = _PlatformGateway('artist-server');
+    final catalog = Catalog(cache: disk)..connections.add(gateway);
+    final artist = ArtistRef(
+      id: 0,
+      name: 'Artist',
+      platformKey: gateway.id(MusicEntityKind.artist, 'artist').cacheKey,
+    );
+    await Future.wait([
+      catalog.artistAlbumPageFor(artist),
+      catalog.artistAlbumPageFor(artist),
+    ]);
+    expect(gateway.pageCalls, 1);
+    await catalog.artistAlbumPageFor(artist);
+    expect(gateway.pageCalls, 1);
+    await catalog.artistAlbumPageFor(artist, force: true);
+    expect(gateway.pageCalls, 2);
+  });
+
+  test(
+    'failed artist release refresh keeps its page without repeated pulls',
+    () async {
+      final gateway = _Gateway();
+      final catalog = Catalog(gateway: gateway, cache: disk);
+      await catalog.artistAlbumPage(11);
+      gateway.offline = true;
+      await catalog.artistAlbumPage(11, force: true);
+      await catalog.artistAlbumPage(11);
+      await catalog.artistAlbumPage(11);
+      expect(gateway.offsets, [0, 0]);
+      gateway.offline = false;
+      await catalog.artistAlbumPage(11, force: true);
+      expect(gateway.offsets, [0, 0, 0]);
     },
   );
 

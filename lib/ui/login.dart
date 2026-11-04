@@ -10,6 +10,7 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../animation/view_transitions.dart';
+import '../updates/open_external.dart';
 import '../widgets/music_provider_badge.dart';
 import '../gateway/gateway.dart';
 import 'navidrome_login_fields.dart';
@@ -34,7 +35,7 @@ Future<void> showAppLoginDialog(BuildContext context, AppState state) {
 
 enum _Phase { creating, waiting, scanned, expired, error }
 
-enum _Mode { qr, sms, cookie }
+enum _Mode { qr, sms, password, cookie }
 
 class _AppLoginDialog extends StatefulWidget {
   const _AppLoginDialog({required this.state});
@@ -66,7 +67,10 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
 
   final TextEditingController _phone = TextEditingController();
   final TextEditingController _code = TextEditingController();
+  final TextEditingController _account = TextEditingController();
+  final TextEditingController _password = TextEditingController();
   final TextEditingController _cookie = TextEditingController();
+  bool _obscurePassword = true;
   bool _submitting = false;
   bool _sendingCode = false;
   int _resendSeconds = 0;
@@ -241,12 +245,63 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
     }
   }
 
+  String? _accountValidationError(String account) {
+    if (account.isEmpty) return '请输入手机号或邮箱。';
+    if (account.contains('@')) {
+      return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(account)
+          ? null
+          : '邮箱格式不正确。';
+    }
+    return _phonePattern.hasMatch(account) ? null : '手机号格式不正确。';
+  }
+
+  Future<void> _submitPassword() async {
+    if (_submitting) return;
+    final String account = _account.text.trim();
+    final String password = _password.text;
+    final String? validation = _accountValidationError(account);
+    if (validation != null) {
+      setState(() => _error = validation);
+      return;
+    }
+    if (password.isEmpty) {
+      setState(() => _error = '请输入密码。'); // i18n:key
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final AuthOutcome outcome = await state.signInWithPassword(
+      account,
+      password,
+    );
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (outcome.ok) {
+      _password.clear();
+      Navigator.of(context).maybePop();
+    } else if (_mode == _Mode.password) {
+      setState(() => _error = outcome.error ?? '登录失败，请稍后再试。'); // i18n:key
+    }
+  }
+
+  Future<void> _openForgotPassword() async {
+    const String url = 'https://music.163.com/#/forgetpassword';
+    final bool opened = await openExternalUrl(url);
+    if (!opened && mounted) {
+      setState(() => _error = '无法打开浏览器，请手动访问 $url'); // i18n:key
+    }
+  }
+
   @override
   void dispose() {
     _poll?.cancel();
     _resend?.cancel();
     _phone.dispose();
     _code.dispose();
+    _account.dispose();
+    _password.dispose();
     _cookie.dispose();
     super.dispose();
   }
@@ -364,6 +419,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
                   context.tr(switch (_mode) {
                     _Mode.qr => '使用网易云音乐 App 扫描二维码登录。',
                     _Mode.sms => '使用手机号和短信验证码登录。',
+                    _Mode.password => '使用手机号或邮箱和密码登录。',
                     _Mode.cookie => '粘贴浏览器里网易云音乐的登录 Cookie。',
                   }),
                   style: theme.textTheme.bodySmall?.copyWith(
@@ -391,6 +447,8 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
                           children: [
                             if (_mode == _Mode.sms)
                               ..._smsFields(theme, apple)
+                            else if (_mode == _Mode.password)
+                              ..._passwordFields(theme, apple)
                             else if (_mode == _Mode.cookie)
                               ..._cookieFields(theme)
                             else
@@ -544,6 +602,80 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
     ];
   }
 
+  List<Widget> _passwordFields(ThemeData theme, AppleSemanticColors apple) {
+    return [
+      TextField(
+        key: const ValueKey('login-password-account'),
+        controller: _account,
+        autofocus: true,
+        enabled: !_submitting,
+        keyboardType: TextInputType.emailAddress,
+        textInputAction: TextInputAction.next,
+        autocorrect: false,
+        autofillHints: const <String>[AutofillHints.username],
+        style: theme.textTheme.bodyMedium?.copyWith(color: apple.label),
+        decoration: InputDecoration(
+          labelText: context.tr('手机号或邮箱'),
+          hintText: context.tr('请输入手机号或邮箱'),
+        ),
+      ),
+      const SizedBox(height: 10),
+      TextField(
+        key: const ValueKey('login-password-password'),
+        controller: _password,
+        enabled: !_submitting,
+        obscureText: _obscurePassword,
+        autocorrect: false,
+        enableSuggestions: false,
+        autofillHints: const <String>[AutofillHints.password],
+        onSubmitted: (_) => unawaited(_submitPassword()),
+        style: theme.textTheme.bodyMedium?.copyWith(color: apple.label),
+        decoration: InputDecoration(
+          labelText: context.tr('密码'),
+          suffixIcon: IconButton(
+            tooltip: context.tr(_obscurePassword ? '显示密码' : '隐藏密码'),
+            onPressed: _submitting
+                ? null
+                : () => setState(() => _obscurePassword = !_obscurePassword),
+            icon: Icon(
+              _obscurePassword
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+              size: 20,
+            ),
+          ),
+        ),
+      ),
+      if (_error != null) ...<Widget>[
+        const SizedBox(height: 8),
+        Text(
+          context.tr(_error!),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.error,
+          ),
+        ),
+      ],
+      const SizedBox(height: 14),
+      SpringFilledButton(
+        key: const ValueKey('login-password-submit'),
+        onPressed: _submitting ? null : _submitPassword,
+        child: _submitting
+            ? const SizedBox.square(
+                dimension: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const TrText('登录'),
+      ),
+      const SizedBox(height: 2),
+      Center(
+        child: SpringTextButton(
+          onPressed: _submitting ? null : _openForgotPassword,
+          child: const TrText('忘记密码？'),
+        ),
+      ),
+    ];
+  }
+
   List<Widget> _cookieFields(ThemeData theme) {
     return [
       TextField(
@@ -591,6 +723,11 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
             SpringTextButton(
               onPressed: () => _switchMode(_Mode.sms),
               child: const TrText('短信验证码登录'),
+            ),
+          if (_mode != _Mode.password)
+            SpringTextButton(
+              onPressed: () => _switchMode(_Mode.password),
+              child: const TrText('密码登录'),
             ),
           if (_mode != _Mode.cookie)
             SpringTextButton(

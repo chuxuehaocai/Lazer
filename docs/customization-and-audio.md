@@ -24,8 +24,11 @@ playback state owns palette updates, including while either page is covered.
 Late results for a previous song cannot overwrite the current song's accent.
 
 Browsing and now-playing backgrounds have independent mode, image, color,
-frame-rate and mesh-detail settings. Browsing defaults to 30fps; now playing
-defaults to the display's actual vsync rate, including displays above 240Hz.
+frame-rate and mesh-detail settings. On a fresh install the browse background
+defaults to `不使用` (off) — only the theme surface is painted — while the
+now-playing background keeps its flowing canvas default. Browsing defaults to
+30fps; now playing defaults to the display's actual vsync rate, including
+displays above 240Hz.
 Manual rates can go down to 10fps. Background rendering uses vsync scheduling
 and stops when hidden, paused or reduced motion is requested. Static mode keeps
 one mesh frame, and solid-color mode uses a chosen or theme-generated color.
@@ -64,7 +67,7 @@ The root DLL is a local build output: do not commit it or add an ignore rule.
 
 | Platform | Engine library | Output |
 | --- | --- | --- |
-| Android 8.0+ (armeabi-v7a, arm64-v8a, x86_64) | liblazer-audio.so | AAudio shared PCM |
+| Android 8.0+ (armeabi-v7a, arm64-v8a) | liblazer-audio.so | AAudio shared PCM |
 | Windows | lazer-audio.dll | WASAPI |
 | Linux | liblazer-audio.so | ALSA |
 | macOS | liblazer-audio.dylib | CoreAudio |
@@ -120,7 +123,7 @@ NDK, CMake, Ninja, pkg-config and NASM, then run:
 
 ```sh
 bash ci/build-android-audio.sh
-flutter build apk --release --target-platform android-arm,android-arm64,android-x64
+flutter build apk --release --target-platform android-arm,android-arm64
 ```
 
 Generated Android libraries and FFmpeg license files are ignored by Git. The

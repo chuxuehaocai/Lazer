@@ -34,9 +34,9 @@ class ArtworkLyricsLayout extends StatefulWidget {
 class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
     with TickerProviderStateMixin {
   static const _coverSpring = AppleSpring(
-    // SwiftUI's bouncy preset uses a 500 ms perceptual duration; 0.18 keeps
-    // the rebound visible without turning the compact cover into a toy.
-    duration: Duration(milliseconds: 500),
+    // Give a cover tap a more relaxed response while retaining the same
+    // duration/bounce spring and its velocity when the user taps again.
+    duration: Duration(milliseconds: 650),
     bounce: .18,
   );
 

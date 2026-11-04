@@ -86,7 +86,7 @@ class UpdateChecker {
        endpoint =
            endpoint ??
            Uri.parse(
-             'https://api.github.com/repos/chuxuehaocai/Lazer/releases?per_page=30',
+             'https://api.github.com/repos/chuxuehaocai/Lazer/releases?per_page=100',
            );
 
   static const String repositoryUrl = 'https://github.com/chuxuehaocai/Lazer';
@@ -143,14 +143,16 @@ class UpdateChecker {
     final SystemHttpProxy? proxy = await SystemHttpProxy.resolve();
     final http.Client client = openExternalClient(proxy: proxy);
     try {
-      return await client.get(
-        uri,
-        headers: const <String, String>{
-          'Accept': 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'User-Agent': 'Lazer-Updater',
-        },
-      );
+      return await client
+          .get(
+            uri,
+            headers: const <String, String>{
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'Lazer-Updater',
+            },
+          )
+          .timeout(const Duration(seconds: 8));
     } finally {
       client.close();
     }

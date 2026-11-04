@@ -280,7 +280,10 @@ void main() {
   testWidgets(
     'unrelated state reports leave the browsing background widget intact',
     (tester) async {
-      final state = _State()..track = _first;
+      final state = _State()
+        ..track = _first
+        // The backdrop is opt-in by default; this test keeps it painted.
+        ..backgroundMode = AppBackgroundMode.nowPlayingDynamic;
       final navigation = BrowseNavigationObserver();
       addTearDown(state.dispose);
       addTearDown(navigation.dispose);

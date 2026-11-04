@@ -128,6 +128,7 @@ class Catalog {
   final BillboardClient billboard;
   final AudioCache audioCache;
   final _requests = <String, _PendingRequest>{};
+  final _failedRequests = <String, _FailedRequest>{};
   final Map<String, int> _epochs = <String, int>{};
   // Keys that a mutation invalidated but whose disk tombstone may not have
   // landed yet. Cache-first reads must skip them even during that window.
@@ -155,6 +156,7 @@ class Catalog {
 
   Future<void> _expire(String key) async {
     _memory.remove(key);
+    _failedRequests.remove(key);
     _invalidatedKeys.add(key);
     // Bump the epoch so a request that started before this invalidation can
     // never satisfy the next read: a forced refresh must observe the mutation.
@@ -181,12 +183,21 @@ class Catalog {
     Duration ttl,
     T Function(Map<String, dynamic>) decode,
     Map<String, dynamic> Function(T) encode,
-    Future<T> Function() fetch,
-  ) async {
+    Future<T> Function() fetch, {
+    Duration failureCooldown = Duration.zero,
+  }) async {
     final int epoch = _epochs[key] ?? 0;
     final pending = _requests[key];
     if (pending != null && pending.epoch == epoch) {
       return await pending.future as T;
+    }
+    final failed = _failedRequests[key];
+    if (failed != null &&
+        failed.epoch == epoch &&
+        DateTime.now().difference(failed.failedAt) < failureCooldown) {
+      _online = false;
+      if (failed.previous is T) return failed.previous as T;
+      Error.throwWithStackTrace(failed.error, failed.stackTrace);
     }
     final remembered = _memory[key];
     if (!_invalidatedKeys.contains(key) &&
@@ -227,6 +238,7 @@ class Catalog {
         // A mutation can invalidate the key while the request is in flight;
         // its response predates the mutation, so it must not refill the cache.
         if ((_epochs[key] ?? 0) == epoch) {
+          _failedRequests.remove(key);
           await cache.writeJson(key, encode(result));
           if ((_epochs[key] ?? 0) == epoch) {
             _remember(key, result, DateTime.now());
@@ -234,8 +246,25 @@ class Catalog {
           }
         }
         return result;
-      } catch (_) {
+      } catch (error, stackTrace) {
         _online = false;
+        if (failureCooldown > Duration.zero && (_epochs[key] ?? 0) == epoch) {
+          // A failed album refresh used to leave an expired snapshot behind,
+          // so reopening any of its views immediately downloaded it again.
+          // Remember the fallback (or error) briefly. Explicit invalidation
+          // clears this entry, making a user's retry take effect immediately.
+          _failedRequests
+            ..remove(key)
+            ..[key] = _FailedRequest(
+              epoch: epoch,
+              previous: previous,
+              error: error,
+              stackTrace: stackTrace,
+            );
+          while (_failedRequests.length > _memoryLimit) {
+            _failedRequests.remove(_failedRequests.keys.first);
+          }
+        }
         if (previous != null && (_epochs[key] ?? 0) == epoch) return previous;
         rethrow;
       }
@@ -1281,18 +1310,46 @@ class Catalog {
   Future<List<Track>> albumTracksFor(String key) async =>
       (await albumDetailsFor(key)).tracks;
 
-  Future<AlbumDetails> albumDetailsFor(String key, {bool force = false}) =>
-      MusicId.tryParse(key) != null
-      ? _platform.albumDetails(key)
-      : albumDetails(int.parse(key), force: force);
+  Future<AlbumDetails> albumDetailsFor(String key, {bool force = false}) async {
+    final reference = MusicId.tryParse(key);
+    if (reference == null) return albumDetails(int.parse(key), force: force);
+    // Platform albums must share the same in-flight request and stored snapshot
+    // as native catalogue albums. Opening a second detail or pressing play on a
+    // slow connection used to start the entire metadata/song-page load again.
+    final namespace = _platform.owner(reference).cacheNamespace;
+    final cacheKey = 'album-detail:$namespace:$key';
+    if (force) await _expire(cacheKey);
+    return _cached(
+      cacheKey,
+      const Duration(hours: 1),
+      AlbumDetails.fromJson,
+      (value) => value.toJson(),
+      () => _platform.albumDetails(key),
+      failureCooldown: const Duration(seconds: 30),
+    );
+  }
 
   Future<ArtistAlbumPage> artistAlbumPageFor(
     ArtistRef artist, {
     int offset = 0,
     bool force = false,
-  }) => artist.platformKey != null
-      ? _platform.artistAlbumPage(artist, offset)
-      : artistAlbumPage(artist.id, offset: offset, force: force);
+  }) async {
+    if (artist.platformKey == null) {
+      return artistAlbumPage(artist.id, offset: offset, force: force);
+    }
+    final reference = _platform.reference(artist.key, MusicEntityKind.artist);
+    final namespace = _platform.owner(reference).cacheNamespace;
+    final key = 'artist-albums:$namespace:${artist.key}:$offset';
+    if (force) await _expire(key);
+    return _cached(
+      key,
+      const Duration(minutes: 15),
+      ArtistAlbumPage.fromJson,
+      (value) => value.toJson(),
+      () => _platform.artistAlbumPage(artist, offset),
+      failureCooldown: const Duration(seconds: 30),
+    );
+  }
 
   Future<List<Track>> artistSongsFor(ArtistRef artist, {bool force = false}) =>
       artist.platformKey != null
@@ -1331,6 +1388,7 @@ class Catalog {
           publishTime: (rawAlbum['publishTime'] as num?)?.toInt(),
         );
       },
+      failureCooldown: const Duration(seconds: 30),
     );
   }
 
@@ -1413,6 +1471,7 @@ class Catalog {
           receivedCount: raw is List ? raw.length : 0,
         );
       },
+      failureCooldown: const Duration(seconds: 30),
     );
   }
 
@@ -1773,4 +1832,20 @@ class _PendingRequest {
   const _PendingRequest(this.future, this.epoch);
   final Future<Object> future;
   final int epoch;
+}
+
+/// A bounded pause after a failed refresh, including its last usable snapshot.
+class _FailedRequest {
+  _FailedRequest({
+    required this.epoch,
+    required this.previous,
+    required this.error,
+    required this.stackTrace,
+  }) : failedAt = DateTime.now();
+
+  final int epoch;
+  final Object? previous;
+  final Object error;
+  final StackTrace stackTrace;
+  final DateTime failedAt;
 }

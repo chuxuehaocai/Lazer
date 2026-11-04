@@ -83,12 +83,12 @@ extension AppBackgroundModeLabels on AppBackgroundMode {
     AppBackgroundMode.off => '关闭画布，只保留主题底色',
   };
 
-  /// Parses a persisted [name]; unknown or missing values keep the flowing
-  /// canvas the port ships with.
+  /// Parses a persisted [name]; unknown or missing values keep the app's
+  /// default — no backdrop — so a fresh install never paints the canvas.
   static AppBackgroundMode parse(String? name) =>
       AppBackgroundMode.values.firstWhere(
         (AppBackgroundMode mode) => mode.name == name,
-        orElse: () => AppBackgroundMode.nowPlayingDynamic,
+        orElse: () => AppBackgroundMode.off,
       );
 }
 

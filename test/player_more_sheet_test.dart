@@ -307,8 +307,21 @@ void main() {
     await _openMore(tester);
     await tester.tap(_inSheet(find.text('歌词')));
     await tester.pump();
-    await tester.pumpAndSettle();
+    // Wait for the sheet to release input. Settling the longer cover spring
+    // also advances past the lyric controls' automatic hiding timeout.
+    for (
+      var frame = 0;
+      frame < 120 && find.byType(BottomSheet).evaluate().isNotEmpty;
+      frame++
+    ) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(find.byType(BottomSheet), findsNothing);
     expect(find.byKey(const ValueKey('mobile-lyrics')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('now-playing-more')).hitTestable(),
+      findsOneWidget,
+    );
 
     await _openMore(tester);
     await tester.tap(_inSheet(find.text('播放队列')));

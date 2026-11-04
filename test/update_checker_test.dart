@@ -9,6 +9,8 @@ import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/updates/release_version.dart';
 import 'package:lazer_nextgen/updates/update_checker.dart';
 import 'package:lazer_nextgen/updates/update_dialog.dart';
+import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 
 http.Response _releases(List<Map<String, Object?>> releases) =>
     http.Response.bytes(
@@ -139,6 +141,15 @@ void main() {
   });
 
   group('AppState update flow', () {
+    test('a future check timestamp does not suppress updates', () {
+      final state = AppState();
+      addTearDown(state.dispose);
+      final now = DateTime(2026, 11, 4);
+      state.updateCheckedAt = now
+          .add(const Duration(days: 30))
+          .millisecondsSinceEpoch;
+      expect(state.autoUpdateCheckDue(now: now), isTrue);
+    });
     test('a skip silences automatic checks but not the manual button', () async {
       int calls = 0;
       final UpdateChecker checker = UpdateChecker(
@@ -197,6 +208,123 @@ void main() {
       // A failed check stays due, so the next launch retries.
       expect(state.autoUpdateCheckDue(), isTrue);
     });
+  });
+
+  testWidgets('startup retains an update found behind another dialog', (
+    tester,
+  ) async {
+    var calls = 0;
+    final state = AppState(
+      updateChecker: UpdateChecker(
+        fetch: (_) async {
+          calls++;
+          return _releases([_release('v2.1.0')]);
+        },
+      ),
+    );
+    addTearDown(state.dispose);
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        theme: buildAppleTheme(),
+        home: AppShell(state: state, autoCheckUpdates: true),
+      ),
+    );
+    showDialog<void>(
+      context: navigator.currentContext!,
+      builder: (_) => const AlertDialog(content: Text('Existing dialog')),
+    );
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    expect(calls, 1);
+    expect(find.text('发现新版本'), findsNothing);
+    navigator.currentState!.pop();
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('发现新版本'), findsOneWidget);
+    expect(calls, 1, reason: 'the successful response is retained');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('manually skipping a deferred update prevents its later prompt', (
+    tester,
+  ) async {
+    var calls = 0;
+    final state = AppState(
+      updateChecker: UpdateChecker(
+        fetch: (_) async {
+          calls++;
+          return _releases([_release('v2.1.0')]);
+        },
+      ),
+    );
+    addTearDown(state.dispose);
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        theme: buildAppleTheme(),
+        home: AppShell(state: state, autoCheckUpdates: true),
+      ),
+    );
+    showDialog<void>(
+      context: navigator.currentContext!,
+      builder: (_) => const AlertDialog(content: Text('Existing dialog')),
+    );
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    expect(calls, 1);
+    expect(find.text('发现新版本'), findsNothing);
+
+    final release = (await state.checkForUpdates(manual: true))!;
+    showUpdateDialog(navigator.currentContext!, state, release);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('跳过此版本'));
+    await tester.pumpAndSettle();
+    expect(state.skippedUpdateVersion, '2.1.0');
+    navigator.currentState!.pop();
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('发现新版本'), findsNothing);
+    expect(
+      calls,
+      2,
+      reason: 'discarding the deferred release needs no new request',
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('failed startup check retries during the same session', (
+    tester,
+  ) async {
+    var calls = 0;
+    final state = AppState(
+      updateChecker: UpdateChecker(
+        fetch: (_) async {
+          calls++;
+          return calls == 1
+              ? http.Response('unavailable', 503)
+              : _releases([_release('v2.1.0')]);
+        },
+      ),
+    );
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(),
+        home: AppShell(state: state, autoCheckUpdates: true),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    expect(calls, 1);
+    expect(state.updateError, isNotNull);
+    await tester.pump(const Duration(minutes: 5));
+    await tester.pump(const Duration(seconds: 1));
+    expect(calls, 2);
+    expect(find.text('发现新版本'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('the update prompt can skip a release', (tester) async {

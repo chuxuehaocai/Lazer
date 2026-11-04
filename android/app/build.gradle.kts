@@ -38,7 +38,7 @@ val requireNativeAudio =
     (findProperty("lazerRequireNativeAudio") as String?)?.toBoolean() ?: false
 
 if (requireNativeAudio) {
-    val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+    val abis = listOf("arm64-v8a", "armeabi-v7a")
     val missing = mutableListOf<String>()
     for (abi in abis) {
         for (library in listOf("liblazer-audio.so", "liblazer-audio-bridge.so")) {

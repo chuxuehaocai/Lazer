@@ -334,6 +334,35 @@ void main() {
           for (final role in CoverTextRole.values)
             role: tester.getRect(_label(role, source: true)),
         };
+        Future<Map<String, Rect>> finishFlight(String artworkKey) async {
+          final artwork = find.byKey(ValueKey(artworkKey));
+          final last = <String, Rect>{};
+          for (var frame = 0; frame < 240; frame++) {
+            final parts = <String, Finder>{
+              'artwork': artwork,
+              for (final role in CoverTextRole.values) role.name: _flight(role),
+            };
+            if (parts.values.every((part) => part.evaluate().isEmpty)) break;
+            for (final part in parts.entries) {
+              if (part.value.evaluate().isNotEmpty) {
+                last[part.key] = tester.getRect(part.value);
+              }
+            }
+            await tester.pump(const Duration(milliseconds: 16));
+          }
+          expect(artwork, findsNothing);
+          await tester.pumpAndSettle();
+          return last;
+        }
+
+        void expectLanded(Rect flight, Rect endpoint) {
+          expect((flight.topLeft - endpoint.topLeft).distance, lessThan(.2));
+          expect(
+            (flight.bottomRight - endpoint.bottomRight).distance,
+            lessThan(.2),
+          );
+        }
+
         await tester.tap(find.byType(AppPlaylistCard));
         await tester.pump();
         await tester.pump();
@@ -358,9 +387,14 @@ void main() {
           tester.getRect(_flight(CoverTextRole.title)),
           isNot(origin[CoverTextRole.title]),
         );
-        await tester.pumpAndSettle();
+        final arrived = await finishFlight('cover-transition-flight');
+        expectLanded(
+          arrived['artwork']!,
+          tester.getRect(find.byType(CoverTransitionTarget)),
+        );
         for (final role in CoverTextRole.values) {
           expect(_flight(role), findsNothing);
+          expectLanded(arrived[role.name]!, tester.getRect(_label(role)));
         }
         final target = {
           for (final role in CoverTextRole.values)
@@ -372,10 +406,15 @@ void main() {
         for (final role in CoverTextRole.values) {
           expect(tester.getRect(_flight(role)), target[role]);
         }
-        await tester.pumpAndSettle();
+        final returned = await finishFlight('cover-transition-return-flight');
+        expectLanded(
+          returned['artwork']!,
+          tester.getRect(find.byType(CoverTransitionSource)),
+        );
         for (final role in CoverTextRole.values) {
           expect(_flight(role), findsNothing);
           expect(tester.getRect(_label(role, source: true)), origin[role]);
+          expectLanded(returned[role.name]!, origin[role]!);
         }
         expect(tester.takeException(), isNull);
       },

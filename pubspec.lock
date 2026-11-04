@@ -93,18 +93,18 @@ packages:
     dependency: transitive
     description:
       name: clock
-      sha256: e51d50bca3217c9a9fa2b41a30e4a38971133f5f9ec7a3d57bae095007f1d28e
+      sha256: fddb70d9b5277016c77a80201021d40a2247104d9f4aa7bab7157b7e3f05b84b
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.3"
+    version: "1.1.2"
   code_assets:
     dependency: transitive
     description:
       name: code_assets
-      sha256: "828110d598123b5ea96c00c9f3c72105bf79f8ee36c20a39b26209ade421ec57"
+      sha256: bf394f466ba9205f1812a0433b392d6af280f155f56651eda7c18cc32ed493b8
       url: "https://pub.dev"
     source: hosted
-    version: "2.1.0"
+    version: "1.2.1"
   collection:
     dependency: transitive
     description:
@@ -205,10 +205,10 @@ packages:
     dependency: transitive
     description:
       name: file_selector_ios
-      sha256: "5b42ec0ef7626124b4624ea244341e9df780406793c204e89fa68a2e71af115c"
+      sha256: "97269e5307a0ab813b1fa2430bada0a96e0afb74848417f8676f64ba5de0051c"
       url: "https://pub.dev"
     source: hosted
-    version: "0.5.3+7"
+    version: "0.5.3+6"
   file_selector_linux:
     dependency: transitive
     description:
@@ -221,10 +221,10 @@ packages:
     dependency: transitive
     description:
       name: file_selector_macos
-      sha256: d785431f1910aac8a50e5c492cae912320158030a88703c67b9ef7f1f96fd7ba
+      sha256: d57c62362766b5e7ae739448650b66c6aab7a68ba7ecc65e04018652645ae0f4
       url: "https://pub.dev"
     source: hosted
-    version: "0.9.5+2"
+    version: "0.9.5+1"
   file_selector_platform_interface:
     dependency: transitive
     description:
@@ -323,10 +323,10 @@ packages:
     dependency: transitive
     description:
       name: hooks
-      sha256: eaac480a35ec0814146c2c48d96aaa829e0e44a7662c88ae84c9edf4bc35651f
+      sha256: "9a62a50b50b769a737bc0a8ff381f333529df3ab746b2f6b02e83760231455ba"
       url: "https://pub.dev"
     source: hosted
-    version: "2.2.0"
+    version: "2.0.2"
   http:
     dependency: "direct main"
     description:
@@ -379,10 +379,10 @@ packages:
     dependency: transitive
     description:
       name: image_picker_ios
-      sha256: "57255225702ace8c81b8d92c1de6a04b60ee9befa6dab242b10a7612116886fd"
+      sha256: "4fb88d4350ffc208c2a09fc321db1f80282688716b8cfe10c8c80acc5ae8934a"
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.13+13"
+    version: "0.8.13+10"
   image_picker_linux:
     dependency: transitive
     description:
@@ -600,10 +600,10 @@ packages:
     dependency: transitive
     description:
       name: objective_c
-      sha256: "5c80c2ad6e2c0397de5db38c6d653e69616a3397e13aa7633bf39eb668f2041b"
+      sha256: b7fb95a6d9a4f009edd63dc5ac69f07420b23a16161c6dd8660290b59c602e8e
       url: "https://pub.dev"
     source: hosted
-    version: "9.6.2"
+    version: "9.5.0"
   package_config:
     dependency: transitive
     description:
@@ -672,10 +672,10 @@ packages:
     dependency: transitive
     description:
       name: petitparser
-      sha256: "2f1564aadb14215e478563b5406cb80729d022158c01dc50c96013c2f7eb4790"
+      sha256: "91bd59303e9f769f108f8df05e371341b15d59e995e6806aefab827b58336675"
       url: "https://pub.dev"
     source: hosted
-    version: "7.1.0"
+    version: "7.0.2"
   platform:
     dependency: transitive
     description:
@@ -744,10 +744,10 @@ packages:
     dependency: transitive
     description:
       name: record_use
-      sha256: "1cb8564af8d43b464294411db9217f5ec04891c6f22ee2c32d73ae05e88a6bd2"
+      sha256: "2551bd8eecfe95d14ae75f6021ad0248be5c27f138c2ec12fcb52b500b3ba1ed"
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.1"
+    version: "0.6.0"
   rxdart:
     dependency: transitive
     description:
@@ -824,10 +824,10 @@ packages:
     dependency: transitive
     description:
       name: shared_preferences_foundation
-      sha256: "4e396ac6f8751ab7d2d6e27f22f32c8350b07006028d534f5221503382f1fa69"
+      sha256: "2ec3934efa51e46117f23031cc141b8fc878e8525b94ec1ea4f7f586cf1b47ea"
       url: "https://pub.dev"
     source: hosted
-    version: "2.6.1"
+    version: "2.5.7"
   shared_preferences_linux:
     dependency: transitive
     description:
@@ -917,10 +917,10 @@ packages:
     dependency: transitive
     description:
       name: stack_trace
-      sha256: "277654b3034d17ac6f9f1cb5595db011b1d5d41e8806866db28e0abaa101c490"
+      sha256: "8b27215b45d22309b5cddda1aa2b19bdfec9df0e765f2de506401c071d38d1b1"
       url: "https://pub.dev"
     source: hosted
-    version: "1.12.2"
+    version: "1.12.1"
   stream_channel:
     dependency: transitive
     description:
@@ -1021,10 +1021,10 @@ packages:
     dependency: transitive
     description:
       name: web
-      sha256: e119e82ac4795c7925103b7cf3768191f33941b99e7ccffbd6c645201d9f606b
+      sha256: "868d88a33d8a87b18ffc05f9f030ba328ffefba92d6c127917a2ba740f9cfe4a"
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.2"
+    version: "1.1.1"
   webdriver:
     dependency: transitive
     description:
@@ -1053,10 +1053,10 @@ packages:
     dependency: transitive
     description:
       name: xml
-      sha256: "0fe8cc98946def31cbcbc8734aa4067031e6f65ea3a78a508060bfed2200bfeb"
+      sha256: "67f0aff7be013d107995e9b75bf4e7f2c3ef2dfdb2c8e68024bba0a7fd5756a4"
       url: "https://pub.dev"
     source: hosted
-    version: "7.1.0"
+    version: "7.0.1"
   yaml:
     dependency: transitive
     description:
@@ -1066,5 +1066,5 @@ packages:
     source: hosted
     version: "3.1.4"
 sdks:
-  dart: ">=3.13.0 <4.0.0"
-  flutter: ">=3.47.0"
+  dart: ">=3.12.0 <4.0.0"
+  flutter: ">=3.44.0"

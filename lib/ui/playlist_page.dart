@@ -140,7 +140,7 @@ class _AppPlaylistPageState extends State<AppPlaylistPage> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
     final int serial = ++_requestSerial;
     final catalog = widget.state.catalog;
     final String playlistId = widget.playlist.id;
@@ -169,7 +169,7 @@ class _AppPlaylistPageState extends State<AppPlaylistPage> {
       if (album != null) {
         // The list row only carries a stub Album; the full description lives
         // on the album detail endpoint.
-        final details = await catalog.albumDetailsFor(album.id);
+        final details = await catalog.albumDetailsFor(album.id, force: force);
         tracks = details.tracks;
         note = details.description;
       } else {
@@ -400,7 +400,7 @@ class _AppPlaylistPageState extends State<AppPlaylistPage> {
                           AppNotice(
                             message: _error!,
                             action: SpringFilledButton(
-                              onPressed: () => unawaited(_load()),
+                              onPressed: () => unawaited(_load(force: true)),
                               child: const TrText('重试'),
                             ),
                           )

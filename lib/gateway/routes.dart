@@ -96,6 +96,7 @@ NeteaseRequest buildNeteaseRequest(
     case '/login':
       return request(
         '/api/w/login',
+        web: true,
         body: <String, Object?>{
           'type': '0',
           'https': 'true',
