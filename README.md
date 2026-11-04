@@ -17,7 +17,7 @@
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-4C9A7A"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-4C9A7A"></a>
 </p>
 
 <p align="center">
@@ -120,11 +120,12 @@ macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 - 接口实现参考 [API Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)。
 - 正在播放页版式参考 [AMLL Player](https://github.com/amll-dev/amll-player)。
 - 歌词动画参考 [Apple Music Like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics)。
+- 第三方组件与它们各自的许可：[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 - 界面字体是小米的 **MiSans**，谢谢你，MiSans。
 - 还有屏幕前的你：愿意把它下载下来，认真听完一首歌，就已经很好了。
 
 <p align="center">
   <img src="docs/images/mark.png" width="44" alt="Lazer">
   <br>
-  <sub>MIT License · 用 Flutter 和一点点耐心做成</sub>
+  <sub>AGPL-3.0 License · 用 Flutter 和一点点耐心做成</sub>
 </p>

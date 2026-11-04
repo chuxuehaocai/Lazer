@@ -17,7 +17,7 @@
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-4C9A7A"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-4C9A7A"></a>
 </p>
 
 <p align="center">
@@ -125,11 +125,12 @@ More documentation: [build details](docs/builds.md) · [system media](docs/syste
 - The protocol implementation references [API Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced).
 - The now-playing composition references [AMLL Player](https://github.com/amll-dev/amll-player).
 - Lyric animation references [Apple Music Like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics).
+- Third-party components and their licences: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 - The interface uses **MiSans** by Xiaomi. Thank you, MiSans.
 - And you, reading this: downloading it and finishing one song is already plenty.
 
 <p align="center">
   <img src="docs/images/mark.png" width="44" alt="Lazer">
   <br>
-  <sub>MIT License · made with Flutter and a little patience</sub>
+  <sub>AGPL-3.0 License · made with Flutter and a little patience</sub>
 </p>

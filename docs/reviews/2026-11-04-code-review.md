@@ -45,9 +45,9 @@ Flutter 手写的第三方网易云音乐客户端：WEAPI/EAPI 协议在应用�
 
 ### P0
 
-1. **许可冲突。** `LICENSE:1` 是 MIT，但 `lib/lyrics/viewport.dart:4`、`spring.dart:1`、`word_motion.dart:1`、`timed_line.dart:1` 标 `AGPL-3.0-or-later`；`lib/easter_egg/still_alive_score.dart:1`、`still_alive_data.dart:1` 标 `GPL-3.0-or-later`。AGPL 全文随包分发（`licenses/lyric_animation/AGPL-3.0.txt`）并在应用内展示（`main.dart:83-91`）。README 只写"歌词动画参考 AMLL/Apple Music Like Lyrics"。是否可这样发布是维护者/法务决定。
-2. **Android UAC2 是死代码。** `native/lazer-audio/CMakeLists.txt:67-77` 建 `lazer-uac2`（libusb + JNI），但 `ci/build-android-audio.sh:29-36` 只 stage `liblazer-audio.so` 与 bridge；Kotlin/Dart 侧零引用（`grep -rn "uac2\|UAC2" lib android` 无结果）。它还给每次 Android 构建引入 libusb 的 FetchContent 网络依赖。
-3. **本地不可复现构建。** 仓库不含 SDK；`README.md` 只给 `pub get/analyze/test/run`；Linux 依赖只在 CI 里（`build.yml:332-340`）；原生引擎需现场编 FFmpeg（`native/lazer-audio/tools/build_dsd_ffmpeg.sh`）。本机 WSL 初始无 flutter/dart/cmake/clang/ninja/pkg-config/GTK/unzip。
+1. **许可冲突。** `LICENSE:1` 是 MIT，但 `lib/lyrics/viewport.dart:4`、`spring.dart:1`、`word_motion.dart:1`、`timed_line.dart:1` 标 `AGPL-3.0-or-later`；`lib/easter_egg/still_alive_score.dart:1`、`still_alive_data.dart:1` 标 `GPL-3.0-or-later`。AGPL 全文随包分发（`licenses/lyric_animation/AGPL-3.0.txt`）并在应用内展示（`main.dart:83-91`）。README 只写"歌词动画参考 AMLL/Apple Music Like Lyrics"。是否可这样发布是维护者/法务决定。**（已按 AGPL-3.0 处理，见 §7）**
+2. **Android UAC2 是死代码。** `native/lazer-audio/CMakeLists.txt:67-77` 建 `lazer-uac2`（libusb + JNI），但 `ci/build-android-audio.sh:29-36` 只 stage `liblazer-audio.so` 与 bridge；Kotlin/Dart 侧零引用（`grep -rn "uac2\|UAC2" lib android` 无结果）。该分支默认 `OFF`，打包路径也不会进入，**初稿中"每次 Android 构建引入 libusb FetchContent 网络依赖"的说法有误**，已在 §7 更正并降级为 P2。
+3. **本地不可复现构建。** 仓库不含 SDK；`README.md` 只给 `pub get/analyze/test/run`；Linux 依赖只在 CI 里（`build.yml:332-340`）；原生引擎需现场编 FFmpeg（`native/lazer-audio/tools/build_dsd_ffmpeg.sh`）。本机 WSL 初始无 flutter/dart/cmake/clang/ninja/pkg-config/GTK/unzip。**（已处理，见 §7）**
 
 ### P1
 
@@ -97,7 +97,7 @@ flutter test --no-pub --reporter expanded
 4. `last_error` 改为调用方提供缓冲区或返回不可变快照（§3.9）——FFI 安全。
 5. 会话 cookie 迁移到系统安全存储（§3.6）——需要平台插件，改动面中等。
 6. `AppState` 按域拆分 notifier / 引入不可变快照（§3.4）——长期重构，需单独立项。
-7. 许可问题（§3.1）与 UAC2 取舍（§3.2）需要维护者决策，不建议外部代劳。
+7. 许可问题（§3.1）已按维护者决定改为 AGPL-3.0（§7）；UAC2 取舍（§3.2）改为文档化（§7），是否接入 API 需要产品决策。
 
 ## 6. 复现本次审查
 
@@ -110,3 +110,25 @@ grep -c "case '" lib/gateway/routes.dart                   # 59
 grep -rn "matchesGoldenFile" test lib                      # 0
 grep -rn "uac2\|UAC2" --include='*.kt' --include='*.dart' lib android   # 0
 ```
+
+## 7. 修复与勘误（2026-11-04，审查后立即执行）
+
+分支 `review/2026-11-04`，只改文档/许可/工具脚本，未改业务代码。
+
+**P0-1 许可 → 已处理。** `LICENSE` 由 MIT 换成 GNU AGPL-3.0（677 行 = 15 行前言 + 空行 + 标准 AGPL-3.0 正文；正文与 `licenses/lyric_animation/AGPL-3.0.txt` 第 6 行起 `cmp` 逐字节一致）。新增 `THIRD-PARTY-NOTICES.md`，六项逐条按仓库实况核对：AMLL 歌词动画（AGPL-3.0-or-later）、Still Alive（GPL-3.0-or-later）、MiSans、Twilight Echo crossfeed（Apache-2.0）、FFmpeg（LGPL-2.1-or-later）、libmpv（仓库未写明，标 see upstream）。README 中英双语徽章、页脚与"参考与致谢"入口同步；`docs/audio-engine.md:55` 引用的 `THIRD-PARTY-NOTICES.md` 至此真实存在。选 AGPL 而非 GPL 的理由：4 个歌词文件是 `AGPL-3.0-or-later`，GPLv3 无法吸收 AGPLv3 代码，整体取 AGPL 才自洽。
+
+**P0-2 → 更正并降级为 P2。** 初稿的"每次 Android 构建引入 libusb FetchContent 网络依赖"**不成立**：`native/lazer-audio/CMakeLists.txt:10` 的 `LAZER_ANDROID_BUILD_UAC2` 默认 `OFF`，且 `native/CMakeLists.txt:122-123` 在 Android + 可用 FFmpeg 时强制 `LAZER_ANDROID_BUILD_ENGINE=ON`，`if(ANDROID AND NOT LAZER_ANDROID_BUILD_ENGINE)`（`:9`）分支根本不会进入；`ci/build-android-audio.sh:25` 只构建 `lazer-audio` 与桥两个目标。真实问题只剩"源码在树上但未接入"，按 P2 记录。已在 `docs/android-audio.md` 新增「USB Audio Class 2 (UAC2) transport (not shipped)」：现状、为何不进 APK（带 `file:line`）、本地构建命令、上线还差什么。
+
+**P0-3 可复现构建 → 已处理。** 新增 `tool/check_toolchain.sh`（校验 Flutter 3.47.0 / Dart 3.13.0 与必需二进制；`--build` 额外检查桌面依赖；硬依赖缺失 exit 1）与 `docs/local-build.md`（SDK 下载 URL/字节数/sha256、WSL 快速开始、基线数字、可选 GTK/FFmpeg、四条排错）；`docs/builds.md` 末尾增加 8 行本地开发入口。
+
+**验收记录（本次实测）。**
+
+| 项 | 结果 |
+| --- | --- |
+| `tool/check_toolchain.sh`（带 SDK） | `0 failed / 0 warnings / 10 ok`，exit 0 |
+| 同上（去掉 SDK） | `2 failed`（flutter、dart），exit 1 |
+| 同上 `--build` | `0 failed / 7 warnings`（本机无 clang/cmake/ninja/pkg-config） |
+| `bash -n tool/check_toolchain.sh` | 通过 |
+| `LICENSE` 完整性 | 677 行；`tail -n +17` 与 AGPL 正本 `cmp` 一致；无 MIT 残留（`grep -nw MIT` 空） |
+| 改动后 `flutter analyze --no-pub` | 0 issues |
+| 改动后 `flutter test --no-pub` | 1056 passed / 0 failed |

@@ -162,3 +162,11 @@ download its workflow artifacts and publish that release.
 Extract the whole Windows ZIP before launching the EXE. Downloaded AppImages need
 `chmod +x`. macOS Apps are ad-hoc signed, not Developer ID signed/notarized. The
 unsigned IPA needs your own signing before installation.
+
+## Local development
+
+CI is the reference for packaging, but analysis, tests and desktop builds run on
+a plain Linux/WSL checkout. [local-build.md](local-build.md) covers the pinned
+SDK, the expected baseline and the optional GTK/FFmpeg steps;
+[`tool/check_toolchain.sh`](../tool/check_toolchain.sh) verifies the installed
+versions and, with `--build`, the Linux desktop dependencies.
