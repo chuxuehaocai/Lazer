@@ -132,9 +132,6 @@ def main():
                     filename_size, extra_size = struct.unpack("<HH", raw.read(4))
                     data_offset = info.header_offset + 30 + filename_size + extra_size
                     check(data_offset % 16384 == 0, f"uncompressed APK entry not 16KB aligned: {name}")
-            for notice in ("COPYING.LGPLv2.1", "BUILDINFO.txt"):
-                check(len(apk.read(f"assets/licenses/lazer-ffmpeg/{abi}/{notice}")) > 0,
-                      f"missing FFmpeg notice for {abi}")
 
 
 if __name__ == "__main__":

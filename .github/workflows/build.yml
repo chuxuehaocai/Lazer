@@ -116,9 +116,6 @@ jobs:
           $release = 'build/windows/x64/runner/Release'
           Get-ChildItem -LiteralPath 'build/native-audio' -Filter '*.dll' -File |
             Copy-Item -Destination $release -Force
-          $license = Join-Path $release 'licenses/lazer-ffmpeg'
-          New-Item -ItemType Directory -Path $license -Force | Out-Null
-          Copy-Item -Path "$env:LAZER_FFMPEG_ROOT/share/lazer-ffmpeg/*" -Destination $license -Force
           # Staging that copies nothing must not look like success.
           foreach ($pair in @(
             @('lazer-audio.dll', 'liblazer-audio.dll'),
@@ -214,9 +211,8 @@ jobs:
           ffmpeg_root="$RUNNER_TEMP/lazer-ffmpeg"
           bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$ffmpeg_root"
           dart run tool/build_native_audio.dart --ffmpeg-root "$ffmpeg_root"
-          mkdir -p dist/licenses/lazer-ffmpeg
+          mkdir -p dist
           cp build/native-audio/*.dylib dist/
-          cp "$ffmpeg_root/share/lazer-ffmpeg/"* dist/licenses/lazer-ffmpeg/
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: native-deps-macos-${{ matrix.arch }}
@@ -267,9 +263,8 @@ jobs:
           set -euo pipefail
           stage=build/native-audio-package
           native=build/native-dependencies
-          mkdir -p "$stage/licenses/lazer-ffmpeg"
+          mkdir -p "$stage"
           cp "$native/"*.dylib "$stage/"
-          cp "$native/licenses/lazer-ffmpeg/"* "$stage/licenses/lazer-ffmpeg/"
           test -f "$stage/liblazer-audio.dylib"
           test -f "$stage/liblazer-audio-bridge.dylib"
       - run: flutter build macos --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
@@ -281,9 +276,6 @@ jobs:
           test -d "$app"
           runtime="$app/Contents/MacOS"
           cp build/native-audio-package/*.dylib "$runtime/"
-          mkdir -p "$app/Contents/Resources/licenses/lazer-ffmpeg"
-          cp build/native-audio-package/licenses/lazer-ffmpeg/* \
-            "$app/Contents/Resources/licenses/lazer-ffmpeg/"
           read -r -a required_archs <<< "$FLUTTER_XCODE_ARCHS"
           lipo "$app/Contents/MacOS/lazer_nextgen" -verify_arch "${required_archs[@]}"
           for library in "$runtime"/*.dylib; do
@@ -297,6 +289,7 @@ jobs:
             compgen -G "$runtime/lib${component}*.dylib" > /dev/null \
               || { echo "::error::the app has no $component runtime library"; exit 1; }
           done
+          python3 ci/verify-package-contents.py "$app"
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" dist/Lazer-macOS-${{ matrix.arch }}.zip
           (cd dist && shasum -a 256 Lazer-macOS-${{ matrix.arch }}.zip > Lazer-macOS-${{ matrix.arch }}.zip.sha256)
@@ -372,9 +365,6 @@ jobs:
           dart run tool/build_native_audio.dart --ffmpeg-root "$LAZER_FFMPEG_ROOT"
           bundle="build/linux/${{ matrix.bundle_arch }}/release/bundle"
           cp build/native-audio/*.so* "$bundle/lib/"
-          mkdir -p "$bundle/lib/licenses/lazer-ffmpeg"
-          cp "$LAZER_FFMPEG_ROOT/share/lazer-ffmpeg/"* \
-            "$bundle/lib/licenses/lazer-ffmpeg/"
           # The engine resolves its FFmpeg neighbours through $ORIGIN, so a
           # bundle that carries one without the others does not load at all.
           for name in liblazer-audio.so liblazer-audio-bridge.so; do
@@ -512,6 +502,8 @@ jobs:
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/Lazer-Android-universal.apk
           (cd dist && sha256sum Lazer-Android-universal.apk > Lazer-Android-universal.apk.sha256)
+      - name: Verify Android packages exclude FFmpeg source and notices
+        run: python3 ci/verify-package-contents.py dist
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: Lazer-Android-universal
@@ -567,21 +559,17 @@ jobs:
           set -euo pipefail
           python3 ci/verify-ios-audio.py --archive build/native-deps-ios/lib
           bash ci/ios-audio-xcconfig.sh build/native-deps-ios/lib
-      - run: flutter build ios --release --no-codesign --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
-      - name: Verify the app exports the native engine ABI
-        run: python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
-      - name: Include FFmpeg LGPL materials in the iOS bundle
+      - name: Build the unsigned iOS app
         shell: bash
         run: |
           set -euo pipefail
-          source_dir=build/native-deps-ios/licenses
-          target_dir=build/ios/iphoneos/Runner.app/Resources/licenses/lazer-ffmpeg
-          test -d "$source_dir"
-          mkdir -p "$target_dir"
-          cp "$source_dir"/* "$target_dir/"
-          for file in COPYING.LGPLv2.1 BUILDINFO.txt PROFILE.txt ffmpeg-source.tar.gz; do
-            test -s "$target_dir/$file"
-          done
+          build_name="$(awk '/^version: / { split($2, version, /[-+]/); print version[1] }' pubspec.yaml)"
+          [[ "$build_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          flutter build ios --release --no-codesign --no-pub --build-name="$build_name" \
+            --dart-define=LAZER_COMMIT=${{ github.sha }} \
+            --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Verify the app exports the native engine ABI
+        run: python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
       - name: Create unsigned IPA with the required Payload directory
         shell: bash
         run: |
@@ -591,12 +579,9 @@ jobs:
           ditto build/ios/iphoneos/Runner.app dist/ios/Payload/Runner.app
           (cd dist/ios && zip -qry ../Lazer-iOS-aarch64.ipa Payload)
           unzip -l dist/Lazer-iOS-aarch64.ipa | grep 'Payload/Runner.app/Info.plist'
-          for file in COPYING.LGPLv2.1 BUILDINFO.txt PROFILE.txt ffmpeg-source.tar.gz; do
-            unzip -l dist/Lazer-iOS-aarch64.ipa |
-              grep -q "Payload/Runner.app/Resources/licenses/lazer-ffmpeg/$file"
-          done
           # Gate on the binary from the finished IPA, not only the build tree.
           python3 ci/verify-ios-audio.py --ipa dist/Lazer-iOS-aarch64.ipa
+          python3 ci/verify-package-contents.py dist/Lazer-iOS-aarch64.ipa
           (cd dist && shasum -a 256 Lazer-iOS-aarch64.ipa > Lazer-iOS-aarch64.ipa.sha256)
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -647,6 +632,8 @@ jobs:
             done
             echo "$zip carries the native engine"
           done
+      - name: Verify release archives exclude FFmpeg source and notices
+        run: python3 ci/verify-package-contents.py release-assets
       - name: Publish tag as a GitHub Release
         shell: bash
         env:
@@ -665,5 +652,12 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             release_args+=(--prerelease)
           fi
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" "${release_args[@]}" \
-            -R "$GITHUB_REPOSITORY"
+          if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber -R "$GITHUB_REPOSITORY"
+            if [[ -f "$notes" ]]; then
+              gh release edit "$GITHUB_REF_NAME" --notes-file "$notes" -R "$GITHUB_REPOSITORY"
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" "${release_args[@]}" \
+              -R "$GITHUB_REPOSITORY"
+          fi

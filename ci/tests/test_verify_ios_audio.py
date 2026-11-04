@@ -75,13 +75,54 @@ class IosAudioExportsTest(unittest.TestCase):
                         with self.assertRaisesRegex(SystemExit, "must be linked statically"):
                             VERIFY.verify_executable(binary)
 
-    def ipa(self, path, *, executable="Runner", binary=b"packaged Mach-O"):
+    def ipa(self, path, *, executable="Runner", binary=b"packaged Mach-O", info=None, entries=()):
+        metadata = {
+            "CFBundleIdentifier": "dev.naominet.lazer",
+            "CFBundlePackageType": "APPL",
+            "CFBundleShortVersionString": "2.0.0",
+            "CFBundleVersion": "8",
+            "CFBundleExecutable": executable,
+        }
+        metadata.update(info or {})
+        metadata = {key: value for key, value in metadata.items() if value is not None}
         with ZipFile(path, "w") as package:
-            package.writestr("Payload/Runner.app/Info.plist", plistlib.dumps({
-                "CFBundleExecutable": executable,
-            }))
+            package.writestr("Payload/Runner.app/Info.plist", plistlib.dumps(metadata))
             if binary is not None:
                 package.writestr("Payload/Runner.app/" + executable, binary)
+            for name in entries:
+                package.writestr("Payload/Runner.app/" + name, b"resource")
+
+    def test_ipa_rejects_resources_directory_even_with_valid_bundle_identifier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ipa = Path(directory) / "Lazer-iOS-aarch64.ipa"
+            for entry in ("Resources/", "Resources/licenses/lazer-ffmpeg/BUILDINFO.txt"):
+                with self.subTest(entry=entry):
+                    self.ipa(ipa, entries=(entry,))
+                    with self.assertRaisesRegex(SystemExit, "reserved top-level Resources"):
+                        VERIFY.verify_ipa(ipa)
+
+    def test_app_rejects_resources_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "Runner.app"
+            (bundle / "Resources").mkdir(parents=True)
+            with self.assertRaisesRegex(SystemExit, "reserved top-level Resources"):
+                VERIFY.verify_app(bundle)
+
+    def test_ipa_rejects_missing_or_unexpanded_bundle_identifier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ipa = Path(directory) / "Lazer-iOS-aarch64.ipa"
+            for identifier in (None, "", "$(PRODUCT_BUNDLE_IDENTIFIER)"):
+                with self.subTest(identifier=identifier):
+                    self.ipa(ipa, info={"CFBundleIdentifier": identifier})
+                    with self.assertRaisesRegex(SystemExit, "invalid CFBundleIdentifier"):
+                        VERIFY.verify_ipa(ipa)
+
+    def test_ipa_rejects_four_component_ios_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ipa = Path(directory) / "Lazer-iOS-aarch64.ipa"
+            self.ipa(ipa, info={"CFBundleShortVersionString": "2.0.0.6"})
+            with self.assertRaisesRegex(SystemExit, "invalid CFBundleShortVersionString"):
+                VERIFY.verify_ipa(ipa)
 
     def test_ipa_verifies_the_packaged_binary(self):
         with tempfile.TemporaryDirectory() as directory:

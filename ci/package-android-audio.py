@@ -24,8 +24,6 @@ def main():
         raise SystemExit("Object file names must be unique in the relink package")
     for component in ("avformat", "avcodec", "swresample", "avutil"):
         materials.append((args.ffmpeg / f"lib/lib{component}.a", f"ffmpeg/lib/lib{component}.a"))
-    for name in ("COPYING.LGPLv2.1", "BUILDINFO.txt", "PROFILE.txt", "ffmpeg-source.tar.gz"):
-        materials.append((args.ffmpeg / f"share/lazer-ffmpeg/{name}", f"ffmpeg/{name}"))
     materials.append((repo / "native/lazer-audio/src/exports_android.map", "exports_android.map"))
     for path, _ in materials:
         if not path.is_file() or path.stat().st_size == 0:
@@ -58,22 +56,20 @@ esac
     readme = staging / "README.txt"
     readme.write_text(f"""Lazer Android Audio Engine: {args.abi}
 
-FFmpeg is statically linked under LGPL-2.1-or-later. This package provides its
-exact corresponding source, build options, original archives and the Lazer
+This package provides the original FFmpeg static libraries and the Lazer
 engine object files needed to replace FFmpeg and relink the engine.
 
-1. Extract ffmpeg/ffmpeg-source.tar.gz and use the options in ffmpeg/BUILDINFO.txt
-   with Android NDK 28.2.13676358 to rebuild FFmpeg, including your changes.
+1. Obtain the FFmpeg revision and build options from
+   native/lazer-audio/tools/build_android_dsd_ffmpeg.sh in the Lazer repository.
+   Rebuild FFmpeg for this ABI with Android NDK 28.2.13676358 and your changes.
 2. Replace ffmpeg/lib/*.a with your rebuilt same-ABI archives.
 3. Set ANDROID_NDK_HOME and run: bash relink.sh
 4. In Lazer, open Settings > HiFi playback > Audio Engine > Import engine,
    select the generated liblazer-audio.so, then restart the app.
 
 The unmodified archives are included so step 3 can also verify this package.
-The FFmpeg LGPL license is included. FFmpeg source modification and reverse
-engineering for debugging those modifications are
-permitted by the applicable LGPL terms. The app does not require the original
-library's signature or hash when importing a compatible replacement.
+The app does not require the original library's signature or hash when
+importing a compatible replacement.
 """, encoding="utf-8", newline="\n")
     materials.extend(((relink, "relink.sh"), (readme, "README.txt")))
     manifest = staging / "SHA256.json"
@@ -88,7 +84,7 @@ library's signature or hash when importing a compatible replacement.
     Path(str(args.output) + ".sha256").write_text(
         f"{checksum}  {args.output.name}\n", encoding="ascii"
     )
-    print(f"Packaged {len(objects)} engine objects and FFmpeg source: {args.output}")
+    print(f"Packaged {len(objects)} engine objects and FFmpeg static libraries: {args.output}")
 
 
 if __name__ == "__main__":

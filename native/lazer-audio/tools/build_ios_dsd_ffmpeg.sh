@@ -59,7 +59,6 @@ if [[ -f "$ffmpeg_lib/libavformat.a" &&
     -f "$ffmpeg_lib/libavcodec.a" &&
     -f "$ffmpeg_lib/libavutil.a" &&
     -f "$ffmpeg_lib/libswresample.a" &&
-    -s "$prefix/share/lazer-ffmpeg/ffmpeg-source.tar.gz" &&
     -f "$prefix/share/lazer-ffmpeg/PROFILE.txt" ]] &&
     grep -Fxq "$FFMPEG_REVISION ios $platform $PROFILE_REVISION" \
         "$prefix/share/lazer-ffmpeg/PROFILE.txt"; then
@@ -211,10 +210,6 @@ install -m 0644 COPYING.LGPLv2.1 "$license_dir/COPYING.LGPLv2.1"
     printf 'License: LGPL-2.1-or-later (FFmpeg upstream default configure profile)\n'
 } > "$license_dir/BUILDINFO.txt"
 
-# Static LGPL linkage needs the corresponding source and relinkable engine
-# objects, not just a license notice.
-git archive --format=tar --prefix=ffmpeg/ "$FFMPEG_REVISION" | gzip -n \
-    > "$license_dir/ffmpeg-source.tar.gz"
 printf '%s ios %s %s\n' "$FFMPEG_REVISION" "$platform" "$PROFILE_REVISION" \
     > "$license_dir/PROFILE.txt"
 

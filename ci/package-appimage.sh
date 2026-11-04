@@ -34,8 +34,6 @@ for component in avcodec avformat avutil swresample; do
     exit 1
   fi
 done
-require_file "$bundle/lib/licenses/lazer-ffmpeg/COPYING.LGPLv2.1"
-require_file "$bundle/lib/licenses/lazer-ffmpeg/BUILDINFO.txt"
 
 tools=$(mktemp -d)
 trap 'rm -rf -- "$tools"' EXIT
@@ -73,4 +71,5 @@ chmod +x "$OUTPUT"
 find "$appdir/usr/lib" -name 'libmpv.so*' -print -quit | grep -q .
 require_file "$appdir/usr/bin/lib/liblazer-audio.so"
 require_file "$appdir/usr/bin/lib/liblazer-audio-bridge.so"
+python3 ci/verify-package-contents.py "$appdir"
 (cd dist && sha256sum "$filename" > "$filename.sha256")

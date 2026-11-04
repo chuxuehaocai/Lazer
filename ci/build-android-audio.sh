@@ -24,14 +24,11 @@ for abi in arm64-v8a armeabi-v7a; do
     -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384
   cmake --build "$output" --target lazer-audio lazer-audio-bridge --parallel "${FFMPEG_BUILD_JOBS:-4}"
   libraries="$repo/android/app/src/main/jniLibs/$abi"
-  licenses="$repo/android/app/src/main/assets/licenses/lazer-ffmpeg/$abi"
-  mkdir -p "$libraries" "$licenses"
+  mkdir -p "$libraries"
   cp "$output/lazer-audio/liblazer-audio.so" "$libraries/"
   cp "$output/lazer-audio-bridge/liblazer-audio-bridge.so" "$libraries/"
   "$strip" --strip-unneeded "$libraries/liblazer-audio.so" "$libraries/liblazer-audio-bridge.so"
   python3 "$repo/ci/verify-android-audio.py" --directory "$libraries" --abi "$abi"
-  cp "$prefix/share/lazer-ffmpeg/COPYING.LGPLv2.1" "$licenses/"
-  cp "$prefix/share/lazer-ffmpeg/BUILDINFO.txt" "$licenses/"
   python3 "$repo/ci/package-android-audio.py" --build "$output" --ffmpeg "$prefix" \
     --abi "$abi" --output "$repo/dist/Lazer-Android-Audio-Relink-$abi.tar.gz"
 done

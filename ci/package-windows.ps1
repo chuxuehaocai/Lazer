@@ -27,14 +27,6 @@ foreach ($component in @('avcodec', 'avformat', 'avutil', 'swresample')) {
         throw "Missing FFmpeg runtime DLL: $component"
     }
 }
-foreach ($required in @(
-    'licenses/lazer-ffmpeg/COPYING.LGPLv2.1',
-    'licenses/lazer-ffmpeg/BUILDINFO.txt'
-)) {
-    if (-not (Test-Path -LiteralPath (Join-Path $release $required))) {
-        throw "Missing bundled FFmpeg license/build information: $required"
-    }
-}
 
 # Flutter's EXE requires the entire Release bundle and the MSVC runtime.
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -50,6 +42,8 @@ Get-ChildItem -LiteralPath $crt.FullName -Filter '*.dll' | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $release -Force
 }
 
+python ci/verify-package-contents.py $release
+if ($LASTEXITCODE -ne 0) { throw 'Windows bundle contains excluded FFmpeg materials' }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $archive = Join-Path $OutputDirectory 'Lazer-Windows-x86_64.zip'
 Compress-Archive -Path (Join-Path $release '*') -DestinationPath $archive -CompressionLevel Optimal -Force

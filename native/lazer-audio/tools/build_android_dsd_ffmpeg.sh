@@ -49,7 +49,6 @@ if [[ -f "$ffmpeg_lib/libavformat.a" &&
     -f "$ffmpeg_lib/libavutil.a" &&
     -f "$ffmpeg_lib/libswresample.a" &&
     -f "$ffmpeg_lib/pkgconfig/libavformat.pc" &&
-    -s "$prefix/share/lazer-ffmpeg/ffmpeg-source.tar.gz" &&
     -f "$prefix/share/lazer-ffmpeg/PROFILE.txt" ]] &&
     grep -Fxq "$FFMPEG_REVISION $NDK_REVISION $abi $PROFILE_REVISION" "$prefix/share/lazer-ffmpeg/PROFILE.txt"; then
     echo "Using the existing Android FFmpeg static SDK at $prefix."
@@ -194,11 +193,6 @@ install -m 0644 COPYING.LGPLv2.1 "$license_dir/COPYING.LGPLv2.1"
     printf 'License: LGPL-2.1-or-later (FFmpeg upstream default configure profile)\n'
 } > "$license_dir/BUILDINFO.txt"
 
-# Static LGPL linkage needs the corresponding source and relinkable engine
-# objects, not just a license notice. The CI packager pairs this source archive
-# with the engine build's objects and exact linker invocation for each ABI.
-git archive --format=tar --prefix=ffmpeg/ "$FFMPEG_REVISION" | gzip -n \
-    > "$license_dir/ffmpeg-source.tar.gz"
 printf '%s %s %s %s\n' "$FFMPEG_REVISION" "$NDK_REVISION" "$abi" "$PROFILE_REVISION" \
     > "$license_dir/PROFILE.txt"
 

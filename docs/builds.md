@@ -28,8 +28,8 @@ Architecture checks run before packaging. IPA builds explicitly disable code sig
 
 The desktop playback engine ported from `master` (FFmpeg + WASAPI/ALSA/CoreAudio,
 DSD/DoP, gapless, EQ/limiter) is built into all Windows, macOS and Linux cloud
-artifacts together with the matching DSD-capable FFmpeg runtime and its LGPL
-notice. Packaging checks fail if any required engine, bridge or FFmpeg library is
+artifacts together with the matching DSD-capable FFmpeg runtime.
+Packaging checks fail if any required engine, bridge or FFmpeg library is
 missing. Android packages the native AAudio engine for armeabi-v7a and arm64-v8a;
 iOS links the engine as static archives (see below). On Windows the engine and FFmpeg are built with MSVC so
 their import libraries match the app toolchain. See
@@ -67,6 +67,12 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   exports. `dyld_info -exports` reads the trie the dynamic loader uses; an empty
   trie or a failed inspection cannot pass through an ordinary symbol-table
   fallback. All four FFmpeg components must be statically linked as well.
+
+Release packages exclude FFmpeg source archives, license files and build metadata.
+`ci/verify-package-contents.py` checks the staged desktop apps and release archives.
+The iOS verifier also rejects a top-level `Resources` directory, validates the
+bundle identifier and requires a three-part numeric system version. The app's
+displayed beta version still comes from `LAZER_VERSION`.
 
 ## Android release signing
 

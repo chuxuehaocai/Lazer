@@ -24,7 +24,8 @@ python3 ci/verify-android-audio.py --apk build/app/outputs/flutter-apk/app-relea
 The helper stages `liblazer-audio.so` and `liblazer-audio-bridge.so` for each ABI
 under Android's `jniLibs` directory. The APK verifier checks ELF architecture,
 required C exports, runtime dependencies, absence of private FFmpeg exports,
-16 KiB load alignment, uncompressed ZIP-entry alignment and license notices.
+16 KiB load alignment and uncompressed ZIP-entry alignment. Release packaging
+also rejects bundled FFmpeg source archives, license files and build metadata.
 
 FFmpeg is built from a pinned LGPL revision with the file protocol and audio
 decoders enabled. The profile stamp prevents an older DSD-only SDK from silently
@@ -32,8 +33,9 @@ being reused. The engine uses a version script to keep FFmpeg and static C++
 runtime symbols local to its shared library.
 
 Static FFmpeg linkage also produces a relinking archive for each ABI in `dist/`.
-These archives contain the corresponding FFmpeg source, exact build information,
-static archives, engine object files, licenses and a relink script. Rebuild
+These archives contain static libraries, engine object files and a relink script.
+The pinned FFmpeg revision and build options remain in the repository's
+`native/lazer-audio/tools/build_android_dsd_ffmpeg.sh`. Rebuild
 FFmpeg with changes, replace its archives and run that script to produce a
 replacement engine. The app's Audio Engine importer accepts compatible
 replacement libraries without requiring the original library's signature.

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import plistlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -148,6 +149,42 @@ def verify_executable(binary: Path) -> int:
     return 0
 
 
+def bundle_executable(info, label: str) -> str:
+    if not isinstance(info, dict):
+        raise SystemExit(f"{label} has an invalid Info.plist")
+    identifier = info.get("CFBundleIdentifier")
+    if not isinstance(identifier, str) or not re.fullmatch(
+        r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*", identifier
+    ):
+        raise SystemExit(f"{label} has an invalid CFBundleIdentifier")
+    if info.get("CFBundlePackageType") != "APPL":
+        raise SystemExit(f"{label} has an invalid CFBundlePackageType")
+    for key, pattern in (
+        ("CFBundleShortVersionString", r"[0-9]+\.[0-9]+\.[0-9]+"),
+        ("CFBundleVersion", r"[0-9]+(?:\.[0-9]+){0,2}"),
+    ):
+        value = info.get(key)
+        if not isinstance(value, str) or not re.fullmatch(pattern, value):
+            raise SystemExit(f"{label} has an invalid {key}: {value!r}")
+    executable = info.get("CFBundleExecutable")
+    if (
+        not isinstance(executable, str) or not executable
+        or executable in (".", "..") or "/" in executable or "\\" in executable
+    ):
+        raise SystemExit(f"{label} has an invalid CFBundleExecutable")
+    return executable
+
+
+def verify_app(path: Path) -> int:
+    if (path / "Resources").exists():
+        raise SystemExit(f"{path} has a reserved top-level Resources directory")
+    try:
+        info = plistlib.loads((path / "Info.plist").read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError) as error:
+        raise SystemExit(f"Invalid app {path}: {error}") from error
+    return verify_executable(path / bundle_executable(info, str(path)))
+
+
 def verify_ipa(path: Path) -> int:
     """Inspect the executable from the finished package, after all copying/ZIP steps."""
     if not path.is_file():
@@ -155,13 +192,13 @@ def verify_ipa(path: Path) -> int:
     try:
         with ZipFile(path) as package:
             bundle = "Payload/Runner.app/"
-            info = plistlib.loads(package.read(bundle + "Info.plist"))
-            executable = info.get("CFBundleExecutable") if isinstance(info, dict) else None
-            if (
-                not isinstance(executable, str) or not executable
-                or executable in (".", "..") or "/" in executable or "\\" in executable
+            if any(
+                name == bundle + "Resources" or name.startswith(bundle + "Resources/")
+                for name in package.namelist()
             ):
-                raise SystemExit(f"{path.name} has an invalid CFBundleExecutable")
+                raise SystemExit(f"{path.name} has a reserved top-level Resources directory")
+            info = plistlib.loads(package.read(bundle + "Info.plist"))
+            executable = bundle_executable(info, path.name)
             contents = package.read(bundle + executable)
             if not contents:
                 raise SystemExit(f"{path.name} has an empty app executable")
@@ -224,9 +261,7 @@ def main() -> int:
     if args.ipa is not None:
         return verify_ipa(args.ipa)
     if args.app is not None:
-        name = "Runner"
-        binary = args.app / name
-        return verify_executable(binary)
+        return verify_app(args.app)
     return verify_archive(args.archive)
 
 

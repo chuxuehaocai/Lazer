@@ -30,7 +30,7 @@ ffmpeg_root="${LAZER_IOS_FFMPEG_ROOT:-$repo/build/ios-ffmpeg/$platform}"
 build="$repo/build/ios-audio/$platform"
 stage="$build/stage"
 rm -rf "$build/cmake" "$stage"
-mkdir -p "$stage/lib" "$stage/licenses"
+mkdir -p "$stage/lib"
 
 bash "$repo/native/lazer-audio/tools/build_ios_dsd_ffmpeg.sh" "$ffmpeg_root" "$platform"
 
@@ -55,7 +55,6 @@ cp "$engine" "$bridge" "$stage/lib/"
 for component in avformat avcodec avutil swresample; do
     cp "$ffmpeg_root/lib/lib$component.a" "$stage/lib/"
 done
-cp "$ffmpeg_root/share/lazer-ffmpeg/"* "$stage/licenses/"
 
 # Every archive must be an arm64 slice, and the engine must export the ABI the
 # Dart loader checks before it will ever pick the native path.
