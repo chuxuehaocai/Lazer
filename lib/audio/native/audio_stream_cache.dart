@@ -70,8 +70,23 @@ class AudioStreamEntry {
   /// on every wait, so a reader can tell "slow" from "dead".
   DateTime _lastProgressAt = DateTime.now();
 
+  /// Offset the sequential download has reached, as opposed to bytes on disk.
+  ///
+  /// A random-access fetch (see [fetchAhead]) can leave a hole ahead of this, so
+  /// the two are not the same number: this one is what the next appended chunk
+  /// starts at, and only the sequential download moves it.
+  int _sequentialBytes = 0;
+
+  /// The random-access fetch in flight, if any.
+  Future<void>? _windowFetch;
+
   /// Bytes currently readable from the file.
   int get downloadedBytes => _downloadedBytes;
+
+  /// End of the readable prefix the sequential download has produced.
+  ///
+  /// Anything beyond it is either a hole or a region landed by [fetchAhead].
+  int get sequentialBytes => _sequentialBytes;
 
   /// Whether every announced byte arrived.
   bool get complete => _complete;
@@ -149,6 +164,7 @@ class AudioStreamEntry {
     final int? announced = expectedBytes;
     if (announced != null && announced > 0 && position == announced) {
       _downloadedBytes = position;
+      _sequentialBytes = position;
       _complete = true;
       _lastProgressAt = DateTime.now();
       return;
@@ -162,6 +178,7 @@ class AudioStreamEntry {
       _sink = await file.open(mode: FileMode.append);
     }
     _downloadedBytes = position;
+    _sequentialBytes = position;
 
     final HttpClientRequest request = await client.getUrl(Uri.parse(url));
     request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
@@ -185,6 +202,7 @@ class AudioStreamEntry {
       _sink = await file.open(mode: FileMode.write);
       position = 0;
       _downloadedBytes = 0;
+      _sequentialBytes = 0;
     }
     final int? total = _totalBytes(response, position);
     if (total != null) expectedBytes = total;
@@ -194,12 +212,21 @@ class AudioStreamEntry {
     )) {
       if (_cancelled) return;
       if (chunk.isEmpty) continue;
+      // One writer at a time: the window fetch writes the same file, and two
+      // appenders on Windows would leave a hole between their two positions.
+      while (_windowFetch != null) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        if (_cancelled) return;
+      }
       final RandomAccessFile sink = _sink ??= await file.open(
         mode: FileMode.append,
       );
       sink.writeFromSync(chunk);
       position += chunk.length;
-      _downloadedBytes = position;
+      _sequentialBytes = position;
+      // A random-access fetch may already have gone further; the readable
+      // prefix is the furthest of the two, never less.
+      if (position > _downloadedBytes) _downloadedBytes = position;
       _lastProgressAt = DateTime.now();
       onAppended?.call();
     }
@@ -210,6 +237,105 @@ class AudioStreamEntry {
     }
     _complete = true;
     _lastProgressAt = DateTime.now();
+  }
+
+  /// Lands the byte range at [offset] ahead of the sequential download.
+  ///
+  /// This is what makes "seek anywhere" work on a source that is still arriving.
+  /// libavformat's seek is a byte-region binary search, not a timestamp jump: for
+  /// a container without a precise index it probes the middle and the end of the
+  /// file, and every probe that has not landed blocks the demuxer for the whole
+  /// reader stall deadline — tens of seconds of a frozen playhead and silence
+  /// after a seek. Serving the region the decoder is actually waiting on
+  /// collapses that wait to one range request.
+  ///
+  /// The write is random access into the same cache file the sequential download
+  /// appends to. That is safe: the sequential writer only ever moves forward
+  /// from its own cursor, this one writes a range the sequential download has
+  /// not reached, and both take their bytes from the same URL. Holes are left
+  /// between them, which a sparse file absorbs and the reader never sees because
+  /// it is told about appended bytes through [onAppended].
+  ///
+  /// [maxBytes] bounds how far ahead one call reaches. A caller chasing a seek
+  /// target repeats the call while the decoder is still waiting, so the region
+  /// grows with the decoder instead of downloading everything at once.
+  Future<int> fetchAhead(
+    HttpClient client,
+    int offset, {
+    required int maxBytes,
+    int? length,
+  }) {
+    if (_complete || _cancelled || _failure != null) {
+      return Future<int>.value(0);
+    }
+    if (offset < 0 || maxBytes <= 0) return Future<int>.value(0);
+    // A fetch already in flight is left to finish: the decoder is waiting on the
+    // same region, and a second connection would only split the bandwidth.
+    final Future<void>? inflight = _windowFetch;
+    if (inflight != null) return inflight.then((_) => 0);
+
+    // Never behind the sequential cursor: the download must stay contiguous.
+    final int from = offset < _sequentialBytes ? _sequentialBytes : offset;
+    final Future<int> started = _fetchWindow(client, from, maxBytes, length);
+    _windowFetch = started.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return started.whenComplete(() => _windowFetch = null);
+  }
+
+  Future<int> _fetchWindow(
+    HttpClient client,
+    int offset,
+    int maxBytes,
+    int? length,
+  ) async {
+    final int end = length != null && length > 0
+        ? (offset + maxBytes).clamp(0, length)
+        : offset + maxBytes;
+    if (end <= offset) return 0;
+    final HttpClientRequest request = await client.getUrl(Uri.parse(url));
+    request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    request.headers.set(HttpHeaders.rangeHeader, 'bytes=$offset-${end - 1}');
+    final HttpClientResponse response = await request.close();
+    if (response.statusCode != HttpStatus.partialContent &&
+        response.statusCode != HttpStatus.ok) {
+      await response.drain<void>();
+      return 0;
+    }
+    // A server that ignores the range answers 200 with the whole body from zero;
+    // writing that at `offset` would corrupt the file, so decline the fetch and
+    // let the sequential download carry on.
+    if (response.statusCode == HttpStatus.ok && offset > 0) {
+      await response.drain<void>();
+      return 0;
+    }
+    final RandomAccessFile writer = await file.open(mode: FileMode.append);
+    try {
+      await writer.setPosition(offset);
+      var written = 0;
+      await for (final List<int> chunk in response.timeout(
+        const Duration(seconds: 20),
+      )) {
+        if (_cancelled || chunk.isEmpty) continue;
+        await writer.setPosition(offset + written);
+        await writer.writeFrom(chunk);
+        written += chunk.length;
+        _lastProgressAt = DateTime.now();
+        // The fetch continues the sequential download, so the cursor it leaves
+        // behind stays contiguous with what it wrote.
+        if (offset + written > _sequentialBytes) {
+          _sequentialBytes = offset + written;
+        }
+        if (offset + written > _downloadedBytes) {
+          _downloadedBytes = offset + written;
+        }
+        onAppended?.call();
+      }
+      return written;
+    } finally {
+      await writer.close();
+    }
   }
 
   /// Total size from `Content-Length`, or from `Content-Range` when resuming.
@@ -298,6 +424,22 @@ class AudioStreamCache {
     await _evict();
     unawaited(entry.download(_client));
     return entry;
+  }
+
+  /// Lands the range at [offset] ahead of the sequential download, on the
+  /// cache's own connection pool. See [AudioStreamEntry.fetchAhead].
+  Future<int> fetchAhead(
+    AudioStreamEntry entry,
+    int offset, {
+    required int maxBytes,
+  }) {
+    if (_closed) return Future<int>.value(0);
+    return entry.fetchAhead(
+      _client,
+      offset,
+      maxBytes: maxBytes,
+      length: entry.expectedBytes,
+    );
   }
 
   /// Deletes every cached file; returns how many were removed.

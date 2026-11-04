@@ -73,6 +73,9 @@ struct Reader {
     int64_t final_bytes = -1;
 
     int64_t read_position = 0;
+    /* Byte offset a seek is waiting for, or -1 when no seek is blocked. A blocked seek does not
+     * move `read_position`, so the downloader needs this to know what to fetch. */
+    int64_t waiting_for = -1;
     int64_t observed_bytes = 0;
     uint64_t revision = 0;
 
@@ -273,6 +276,16 @@ LAZER_BRIDGE_API int64_t lazer_bridge_reader_position(void *handle) {
     return reader->read_position;
 }
 
+/* The byte offset a blocked seek is waiting for, or -1 when no seek is waiting.
+ * Distinct from the read cursor: a seek that has not been satisfied does not move
+ * it, so a downloader watching only `reader_position` cannot see what to fetch. */
+LAZER_BRIDGE_API int64_t lazer_bridge_reader_waiting_for(void *handle) {
+    if (handle == nullptr) return -1;
+    auto *reader = static_cast<Reader *>(handle);
+    std::lock_guard<std::mutex> lock(reader->mutex);
+    return reader->waiting_for;
+}
+
 /* ----------------------------------------------------------------------------------------------
  * Engine callbacks. These run on the engine's decode thread and must never throw.
  * -------------------------------------------------------------------------------------------- */
@@ -338,14 +351,17 @@ LAZER_BRIDGE_API int64_t lazer_bridge_reader_seek(void *context, int64_t positio
         }
         if (target <= available) {
             reader->read_position = target;
+            reader->waiting_for = -1;
             return target;
         }
+        reader->waiting_for = target;
         /* Seeking past the downloaded region waits for the download instead of clamping, so the
          * demuxer sees a slow file rather than a short one. A finished or failed download clamps to
          * what exists, which the engine treats as the end of the stream. */
         if (reader->finished || reader->failed ||
             std::chrono::steady_clock::now() - started_at > kStallDeadline) {
             reader->read_position = available;
+            reader->waiting_for = -1;
             return available;
         }
         reader->changed.wait_for(lock, kWaitSlice);

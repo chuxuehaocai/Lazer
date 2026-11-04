@@ -145,6 +145,26 @@ startup path waits for `AppState.startupBytes` whenever the fraction cannot be
 measured. `NativeAudioEngine` exposes all four facts through
 `StreamingBufferHealthAudioEngine`.
 
+### Seeking past the downloaded prefix
+
+libavformat does not jump to a timestamp; it binary-searches byte regions, and for
+a container with a coarse index it reads the seek table at the end of the file as
+well. On a source that is still arriving, those probes block the demuxer until the
+sequential download reaches them — measured at ~30 s of a frozen playhead and
+silence after a seek into unread territory.
+
+Nothing about that is specific to this app, but the growing cache file can answer
+it: the bridge exposes the byte a blocked seek is waiting for
+(`lazer_bridge_reader_waiting_for`), and the engine uses it to pull the next window
+of the file on demand (`AudioStreamCache.fetchAhead`, 4 MiB per request, serialised
+against the sequential appender so the file stays contiguous). The probes then
+land inside the file instead of waiting for the download.
+
+The engine also raises `LazerAudioEventSeekCompleted` when the demuxer applies a
+seek. The ABI declared that event from the start but the engine never sent it, so
+the app had no way to stop publishing the requested target: after a slow seek the
+reported position stayed pinned at the target long after the audio had moved on.
+
 The decode thread cannot be interrupted from Dart, so recovery goes through the
 engine: `NativeAudioEngine.restartStream()` runs `stop()` on the worker isolate
 (which closes the reader and releases the parked read) and then reopens the same

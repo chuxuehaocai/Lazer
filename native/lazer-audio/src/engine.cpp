@@ -1397,6 +1397,17 @@ void Engine::onSeekApplied() {
     resetTimelineForSeek();
     seekFlushRequested_.store(false, std::memory_order_release);
     underrunActive_.store(0, std::memory_order_release);
+    /* Confirm the seek to the caller. The ABI has always declared this event and the app publishes
+     * the requested target until it arrives, so without it a seek the demuxer takes a moment to
+     * apply — a network source whose bytes are still arriving — leaves the reported position pinned
+     * at the target long after the audio has moved on. Raised after the timeline reset, and carrying
+     * the position the new timeline starts from. */
+    int64_t target = 0;
+    {
+        std::lock_guard sourceGuard(sourceMutex_);
+        if (source_ != nullptr) target = source_->source.seekTargetMillis();
+    }
+    raise(LazerAudioEventSeekCompleted, 0, target);
 }
 
 void Engine::resetTimelineForSeek() {

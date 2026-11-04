@@ -568,6 +568,27 @@ class LazerAudioBridgeApi {
         int Function(Pointer<Void>)
       >('lazer_bridge_reader_bytes_available');
 
+  /// Where the decoder's read cursor is, in bytes.
+  ///
+  /// The other half of [readerBytesAvailable]: comparing the two tells whether
+  /// the engine is waiting for bytes that have not landed, which is what a seek
+  /// into an unread region looks like from the downloader's side.
+  late final int Function(Pointer<Void>) readerPosition = _library
+      .lookupFunction<
+        Int64 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('lazer_bridge_reader_position');
+
+  /// The byte offset a blocked seek is waiting for, or -1 when none is.
+  ///
+  /// A seek that has not been satisfied does not move the read cursor, so this is
+  /// the only signal that says which range the decoder actually needs.
+  late final int Function(Pointer<Void>) readerWaitingFor = _library
+      .lookupFunction<
+        Int64 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('lazer_bridge_reader_waiting_for');
+
   /// Addresses of the five callbacks the engine invokes on its own threads.
   ///
   /// These are ordinary exported C functions, so they are taken with

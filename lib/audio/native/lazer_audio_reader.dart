@@ -73,6 +73,16 @@ class NativeStreamReader {
   /// Bytes the cache file holds right now, or -1 before it exists.
   int get bytesAvailable => _bridge.readerBytesAvailable(_handle);
 
+  /// Where the decoder is reading from, in bytes, or -1 before it started.
+  ///
+  /// When this is past [bytesAvailable] the decoder is waiting for a range that
+  /// has not landed — which is what a seek into unread territory looks like from
+  /// the downloader's side, and what it has to hurry up on.
+  int get readPosition => _bridge.readerPosition(_handle);
+
+  /// The byte a blocked seek is waiting for, or -1 when nothing is waiting.
+  int get waitingFor => _bridge.readerWaitingFor(_handle);
+
   /// The downloader appended bytes: wake a blocked read.
   void notifyAppended() {
     if (_released) return;

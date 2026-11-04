@@ -26,6 +26,7 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+
 import '../../storage/app_storage.dart';
 
 import '../audio_engine.dart';
@@ -221,6 +222,21 @@ class NativeAudioEngine
   /// arrives (a seek while paused, or a dropped callback) cannot pin the reported
   /// position forever. See [seekHoldCeiling].
   int _pendingSeekAtMicros = 0;
+
+  /// Chase loop for a seek that lands past what has been downloaded.
+  Timer? _seekWindow;
+  bool _seekWindowFetching = false;
+
+  /// How far ahead of the decoder's read cursor one chase request reaches.
+  ///
+  /// A seek makes the demuxer probe several byte regions, so a single small
+  /// range would only move the blockage along. Wide enough to cover the probes,
+  /// narrow enough that a seek near the end of a long track does not pull the
+  /// whole file at once.
+  static const int seekWindowBytes = 4 * 1024 * 1024;
+
+  /// How often the chase loop looks at the decoder's read cursor.
+  static const Duration _seekWindowPoll = Duration(milliseconds: 120);
 
   /// Successor preparations still inside the worker, drained before `destroy`:
   /// destroying the engine while `queue_reader` is running would free memory the
@@ -580,6 +596,78 @@ class NativeAudioEngine
     // the seek; reporting the target meanwhile keeps the rail from jumping back.
     _pendingSeek = position;
     _pendingSeekAtMicros = DateTime.now().microsecondsSinceEpoch;
+    // A seek past what has landed makes the demuxer probe byte regions that are
+    // not there yet, and it blocks on them. Start chasing the region the decoder
+    // ends up waiting on, so the seek lands in one round trip instead of in the
+    // time the sequential download needs to reach it.
+    _startSeekWindow();
+  }
+
+  /// Watches the decoder's read cursor after a seek and serves the region it is
+  /// waiting for.
+  ///
+  /// The reader knows both numbers: how far the file has landed, and where the
+  /// decoder is reading. While the second is ahead of the first, the demuxer is
+  /// parked on a byte range that has not arrived, and widening that range is
+  /// exactly what unblocks it. Stopped as soon as the seek is applied, the
+  /// source changes, or the decoder is no longer ahead.
+  void _startSeekWindow() {
+    if (_seekWindow != null) return;
+    _seekWindow = Timer.periodic(_seekWindowPoll, (_) => _pumpSeekWindow());
+  }
+
+  void _stopSeekWindow() {
+    _seekWindow?.cancel();
+    _seekWindow = null;
+  }
+
+  void _pumpSeekWindow() {
+    if (_disposed) {
+      _stopSeekWindow();
+      return;
+    }
+    final AudioStreamEntry? entry = _activeEntry;
+    final NativeStreamReader? reader = _activeReader;
+    if (entry == null || reader == null || entry.complete) {
+      _stopSeekWindow();
+      return;
+    }
+    // Nothing left to chase once the download is no longer behind the decoder.
+    final int available = reader.bytesAvailable;
+    // A blocked seek does not advance the read cursor, so the offset it is waiting
+    // for is the one to serve; otherwise the cursor is where the decoder is stuck.
+    final int waiting = reader.waitingFor;
+    final int cursor = reader.readPosition;
+    if (available < 0) return;
+    // Every byte the server announced is readable: there is nothing left to
+    // chase, and a decoder parked on a range that no longer exists is a decoder
+    // that has already been served.
+    final int? length = entry.expectedBytes;
+    if (length != null && length > 0 && available >= length) {
+      _stopSeekWindow();
+      return;
+    }
+    // Chase the contiguous end rather than the exact offset being waited on: a
+    // seek makes the demuxer probe several byte regions (a seek table at the end
+    // of a FLAC, then the timestamps around the target), and filling the gap in
+    // front of the download covers all of them without leaving holes that the
+    // next probe would stumble into.
+    final bool blocked = (waiting >= available) || (cursor >= available);
+    if (!blocked) return;
+    final int wanted = available;
+    if (_seekWindowFetching) return;
+    _seekWindowFetching = true;
+    unawaited(() async {
+      try {
+        await _cache
+            .fetchAhead(entry, wanted, maxBytes: seekWindowBytes)
+            .timeout(const Duration(seconds: 20), onTimeout: () => 0);
+      } catch (error) {
+        debugPrint('lazer-audio: chasing the seek region failed: $error');
+      } finally {
+        _seekWindowFetching = false;
+      }
+    }());
   }
 
   @override
@@ -642,6 +730,7 @@ class NativeAudioEngine
   @override
   Future<void> stop() async {
     ++_generation;
+    _stopSeekWindow();
     _sourceLoaded = false;
     _completionSent = false;
     _pendingUrls = <String>[];
@@ -675,6 +764,7 @@ class NativeAudioEngine
     _drainLogs();
     _disposed = true;
     ++_generation;
+    _stopSeekWindow();
     _sourceLoaded = false;
     final int? address = _engineAddressOrNull;
     // Let the mutation chain and any successor preparation finish (bounded, so a
@@ -1153,6 +1243,7 @@ class NativeAudioEngine
         _reportFailure('the output device was lost');
       case lazerAudioEventSeekCompleted:
         _pendingSeek = null;
+        _stopSeekWindow();
         _position = Duration(milliseconds: positionMillis);
       default:
         // Ready and BufferProgress carry nothing the app does not read from the
