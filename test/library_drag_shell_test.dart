@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/catalog.dart';
+import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
@@ -50,6 +51,27 @@ class _Catalog extends Catalog {
   );
   @override
   Future<HomeFeed?> loadHome({int? userId}) async => null;
+  @override
+  Future<UserAlbumPage> userAlbums(
+    int uid, {
+    int limit = 30,
+    int offset = 0,
+    bool force = false,
+  }) async => UserAlbumPage(
+    albums: <Album>[
+      Album(
+        id: '9001',
+        title: 'Test Album',
+        artist: 'Tester',
+        year: '2026',
+        coverSeed: 1,
+        note: '',
+      ),
+    ],
+    more: false,
+    receivedCount: 1,
+  );
+
   @override
   Future<void> invalidateCollections(int uid) async {}
   @override
@@ -99,6 +121,38 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.takeException(), isNull);
+  });
+
+
+  testWidgets('the library lists collected albums for a signed-in account', (
+    tester,
+  ) async {
+    // A tall viewport keeps the lazily built slivers below the fold alive.
+    tester.view.physicalSize = const Size(390, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final AppState state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+    await state.signInWithCookie('MUSIC_U=fixture');
+    await tester.pump();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(brightness: Brightness.dark),
+        home: AppShell(state: state),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.text('音乐库').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('专辑'), findsWidgets);
+    expect(find.text('Test Album'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

@@ -606,6 +606,33 @@ class NeteaseGateway {
         : const <GatewayPlaylist>[];
   }
 
+  /// One page of the signed-in account's collected albums.
+  ///
+  /// `/album/sublist` is account-scoped: a guest cookie is answered with
+  /// `code != 200`, which the transport raises as a gateway exception.
+  Future<GatewayAlbumPage> collectedAlbums({int limit = 25, int offset = 0}) async {
+    if (limit <= 0 || offset < 0) {
+      throw ArgumentError('Invalid album page.');
+    }
+    final Map<String, dynamic> body = await _transport.request(
+      '/album/sublist',
+      <String, String>{'limit': limit.toString(), 'offset': offset.toString()},
+    );
+    final dynamic raw = body['albums'];
+    final List<GatewayAlbum> albums = raw is List
+        ? raw
+              .whereType<Map<String, dynamic>>()
+              .map<GatewayAlbum>(GatewayAlbum.fromJson)
+              .where((GatewayAlbum album) => album.id > 0)
+              .toList()
+        : const <GatewayAlbum>[];
+    final int count = (body['count'] as num?)?.toInt() ?? albums.length;
+    final bool more = body['more'] is bool
+        ? body['more'] as bool
+        : offset + albums.length < count;
+    return GatewayAlbumPage(albums: albums, more: more, count: count);
+  }
+
   Future<GatewayAlbum?> albumDetail(int id) async {
     final Map<String, dynamic> body = await albumDetailRaw(id);
     final dynamic album = body['album'];

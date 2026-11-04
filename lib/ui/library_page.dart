@@ -16,6 +16,7 @@ import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../widgets/apple_ui.dart';
+import '../widgets/catalog_links.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/ui_scaling.dart';
@@ -81,6 +82,12 @@ class AppLibraryPage extends StatelessWidget {
               gap,
               fill: arranged,
             );
+            final int albumColumns = math.max(
+              2,
+              math.min(6, (width / 168).floor()),
+            );
+            final double albumCell =
+                (width - (albumColumns - 1) * 18) / albumColumns;
             return CustomScrollView(
               slivers: <Widget>[
                 SliverPadding(
@@ -156,6 +163,103 @@ class AppLibraryPage extends StatelessWidget {
                       onOpen: onOpenPlaylist,
                       onReorder: (List<String> order) =>
                           unawaited(state.setPlaylistOrder(order)),
+                    ),
+                  ),
+                if (state.signedIn)
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      inset,
+                      mine.isEmpty ? 30 : 34,
+                      inset,
+                      0,
+                    ),
+                    sliver: SliverList.list(
+                      children: <Widget>[
+                        AppSectionHeader(
+                          title: '专辑',
+                          trailing: IconButton(
+                            tooltip: context.tr('刷新'),
+                            onPressed: () =>
+                                unawaited(state.refreshLibraryAlbums()),
+                            icon: const Icon(Icons.sync_rounded, size: 19),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+                    ),
+                  ),
+                if (state.signedIn &&
+                    state.libraryAlbumsLoading &&
+                    state.libraryAlbums.isEmpty)
+                  const SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: 18),
+                    sliver: SliverToBoxAdapter(
+                      // A static placeholder, not a spinner: the library is
+                      // rebuilt by the shell on every state report, and an
+                      // always-animating indicator keeps the section from
+                      // settling in tests and on a slow account.
+                      child: AppNotice(message: '正在加载资料…'),
+                    ),
+                  ),
+                if (state.signedIn &&
+                    !state.libraryAlbumsLoading &&
+                    state.libraryAlbums.isEmpty &&
+                    state.libraryAlbumsError != null)
+                  SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: inset),
+                    sliver: SliverToBoxAdapter(
+                      child: AppNotice(
+                        message: state.libraryAlbumsError!,
+                        action: SpringFilledButton(
+                          onPressed: () =>
+                              unawaited(state.refreshLibraryAlbums()),
+                          child: const TrText('重试'),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (state.signedIn &&
+                    !state.libraryAlbumsLoading &&
+                    state.libraryAlbums.isEmpty &&
+                    state.libraryAlbumsError == null)
+                  SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: inset),
+                    sliver: const SliverToBoxAdapter(
+                      child: AppNotice(message: '暂无专辑'),
+                    ),
+                  ),
+                if (state.signedIn && state.libraryAlbums.isNotEmpty)
+                  SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: inset),
+                    sliver: SliverGrid.builder(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: albumColumns,
+                        mainAxisSpacing: 18,
+                        crossAxisSpacing: 18,
+                        mainAxisExtent: albumCell + 52,
+                      ),
+                      itemCount: state.libraryAlbums.length,
+                      itemBuilder: (BuildContext context, int index) =>
+                          _AlbumCard(
+                            album: state.libraryAlbums[index],
+                            state: state,
+                          ),
+                    ),
+                  ),
+                if (state.signedIn && state.libraryAlbumsMore)
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(inset, 18, inset, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: Center(
+                        child: SpringOutlinedButton(
+                          onPressed: state.libraryAlbumsLoading
+                              ? null
+                              : () => unawaited(
+                                  state.loadLibraryAlbums(more: true),
+                                ),
+                          child: const TrText('加载更多专辑'),
+                        ),
+                      ),
                     ),
                   ),
                 if (publicLists.isNotEmpty)
@@ -967,3 +1071,51 @@ Widget _playlistArrangementButton(BuildContext context, AppState state) =>
           ),
       ],
     );
+
+/// One collected album in the 资料库 grid.
+class _AlbumCard extends StatelessWidget {
+  const _AlbumCard({required this.album, required this.state});
+
+  final Album album;
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    return InkWell(
+      borderRadius: BorderRadius.circular(11),
+      onTap: feedbackAction(context, () {
+        unawaited(openAlbumDetails(context, state, album));
+      }),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            AppCover(
+              url: album.coverUrl,
+              size: constraints.maxWidth,
+              radius: 11,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              album.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            Text(
+              album.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: apple.secondaryLabel),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

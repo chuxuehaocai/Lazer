@@ -18,6 +18,7 @@ import '../downloads/download_manager.dart';
 import '../interaction/app_haptics.dart';
 import '../data/audio_quality.dart';
 import '../data/catalog.dart';
+import '../data/catalog_details.dart';
 import '../data/lyrics.dart';
 import '../local/local_library.dart';
 import '../local/coalescing_writer.dart';
@@ -1208,6 +1209,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   String? collectionsError;
   Future<void>? _collectionsPending;
 
+  /// The account's collected albums, shown under 资料库 → 专辑.
+  List<Album> libraryAlbums = const <Album>[];
+  bool libraryAlbumsLoading = false;
+  bool libraryAlbumsMore = false;
+  String? libraryAlbumsError;
+
   /// All-time play counts, joined with song durations for 听歌排行.
   List<TrackPlayStat> playStats = const <TrackPlayStat>[];
   bool playStatsLoading = false;
@@ -1314,6 +1321,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             ..clear()
             ..addAll(loaded.liked?.trackIds ?? const []);
         }
+        if (libraryAlbums.isEmpty && !libraryAlbumsLoading) {
+          unawaited(loadLibraryAlbums());
+        }
       }
     } catch (_) {
       if (!_presentationDisposed &&
@@ -1330,6 +1340,49 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       }
     }
   }
+
+  /// Loads one page of the account's collected albums.
+  ///
+  /// [more] appends the next page instead of replacing the list, [force]
+  /// bypasses the catalogue cache.
+  Future<void> loadLibraryAlbums({bool more = false, bool force = false}) async {
+    if (_presentationDisposed || libraryAlbumsLoading) return;
+    final int uid = _user.userId;
+    if (uid <= 0) return;
+    final int offset = more ? libraryAlbums.length : 0;
+    libraryAlbumsLoading = true;
+    if (!more) libraryAlbumsError = null;
+    notifyListeners();
+    try {
+      final UserAlbumPage page = await catalog.userAlbums(
+        uid,
+        offset: offset,
+        force: force,
+      );
+      if (_presentationDisposed || _user.userId != uid) return;
+      final Set<String> seen = <String>{
+        if (more) ...libraryAlbums.map((Album album) => album.id),
+      };
+      libraryAlbums = List<Album>.unmodifiable(<Album>[
+        if (more) ...libraryAlbums,
+        ...page.albums.where((Album album) => seen.add(album.id)),
+      ]);
+      libraryAlbumsMore = page.more;
+      libraryAlbumsError = null;
+    } catch (_) {
+      if (!_presentationDisposed && _user.userId == uid) {
+        libraryAlbumsError = '专辑加载失败，请重试。';
+      }
+    } finally {
+      if (!_presentationDisposed && _user.userId == uid) {
+        libraryAlbumsLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Refreshes the collected albums from scratch.
+  Future<void> refreshLibraryAlbums() => loadLibraryAlbums(force: true);
 
   void clearPlaybackError() {
     playbackError = null;
@@ -1856,6 +1909,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (_user.userId != profile.userId) {
       collections = UserCollections.empty;
       _likedSongIds = <int>{};
+      libraryAlbums = const <Album>[];
+      libraryAlbumsMore = false;
+      libraryAlbumsError = null;
     }
     _user = SessionUser.fromProfile(profile, method: method, detail: detail);
     _persistSession(gateway.sessionCookie);
@@ -1870,6 +1926,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     collections = UserCollections.empty;
     collectionsLoading = false;
     collectionsError = null;
+    libraryAlbums = const <Album>[];
+    libraryAlbumsLoading = false;
+    libraryAlbumsMore = false;
+    libraryAlbumsError = null;
     _finishPlaySession();
     await _flushPlayUploads();
     _playUploads.clear();

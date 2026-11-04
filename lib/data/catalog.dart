@@ -1234,6 +1234,59 @@ class Catalog {
           () => _userCollections(uid),
         );
 
+  /// One page of the signed-in account's collected albums.
+  ///
+  /// The NetEase path is a gated endpoint (`/album/sublist`), so a guest
+  /// session yields an empty page instead of an error; the platform path
+  /// reuses the active gateway's album browser.
+  Future<UserAlbumPage> userAlbums(
+    int uid, {
+    int limit = 30,
+    int offset = 0,
+    bool force = false,
+  }) async {
+    if (limit <= 0 || offset < 0) {
+      throw ArgumentError('Invalid album page.');
+    }
+    if (usesPlatformGateway) {
+      final MusicPage<MusicAlbum> page = await activeGateway.albums(
+        limit: limit,
+        offset: offset,
+      );
+      return UserAlbumPage(
+        albums: page.items.map(_platform.album).toList(),
+        more: page.hasMore,
+        receivedCount: page.items.length,
+      );
+    }
+    if (uid <= 0) {
+      return const UserAlbumPage(
+        albums: <Album>[],
+        more: false,
+        receivedCount: 0,
+      );
+    }
+    final String key = 'user-albums:v1:$_scope:$uid:$offset';
+    if (force) await _expire(key);
+    return _cached<UserAlbumPage>(
+      key,
+      const Duration(minutes: 10),
+      UserAlbumPage.fromJson,
+      (UserAlbumPage page) => page.toJson(),
+      () async {
+        final GatewayAlbumPage page = await gateway.collectedAlbums(
+          limit: limit,
+          offset: offset,
+        );
+        return UserAlbumPage(
+          albums: page.albums.map(albumFromGateway).toList(),
+          more: page.more,
+          receivedCount: page.albums.length,
+        );
+      },
+    );
+  }
+
   Future<UserCollections> _userCollections(int uid) async {
     if (uid <= 0) return UserCollections.empty;
     try {

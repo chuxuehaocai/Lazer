@@ -86,3 +86,28 @@ class ArtistAlbumPage {
         receivedCount: json['receivedCount'] as int? ?? 0,
       );
 }
+
+/// One page of the account's collected albums (资料库 → 专辑).
+class UserAlbumPage {
+  const UserAlbumPage({
+    required this.albums,
+    required this.more,
+    required this.receivedCount,
+  });
+  final List<Album> albums;
+  final bool more;
+  final int receivedCount;
+  Map<String, dynamic> toJson() => {
+    'albums': albums.map((album) => album.toJson()).toList(),
+    'more': more,
+    'receivedCount': receivedCount,
+  };
+  factory UserAlbumPage.fromJson(Map<String, dynamic> json) => UserAlbumPage(
+    albums: [
+      for (final album in json['albums'] as List)
+        Album.fromJson(album as Map<String, dynamic>),
+    ],
+    more: json['more'] == true,
+    receivedCount: json['receivedCount'] as int? ?? 0,
+  );
+}

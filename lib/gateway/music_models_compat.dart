@@ -353,6 +353,23 @@ class GatewayAlbum {
   }
 }
 
+/// One page of an account-scoped album list (`/album/sublist`).
+class GatewayAlbumPage {
+  const GatewayAlbumPage({
+    required this.albums,
+    required this.more,
+    required this.count,
+  });
+
+  final List<GatewayAlbum> albums;
+
+  /// Whether the service reports more albums past this page.
+  final bool more;
+
+  /// Total albums the account has collected, as reported by the service.
+  final int count;
+}
+
 class GatewayBanner {
   const GatewayBanner({this.targetId, this.imageUrl, this.title, this.url});
 

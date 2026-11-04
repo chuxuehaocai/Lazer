@@ -341,6 +341,16 @@ NeteaseRequest buildNeteaseRequest(
       );
     case '/album':
       return request('/api/v1/album/${id()}', web: true);
+    case '/album/sublist':
+      return request(
+        '/api/album/sublist',
+        web: true,
+        body: <String, Object?>{
+          'limit': value('limit', '25'),
+          'offset': value('offset', '0'),
+          'total': true,
+        },
+      );
     case '/artist/detail':
       return request(
         '/api/artist/head/info/get',
