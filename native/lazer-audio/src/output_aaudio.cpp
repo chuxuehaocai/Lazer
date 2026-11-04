@@ -1,8 +1,12 @@
 #include "audio_output.h"
+#include "log_proxy.h"
 
 #include <aaudio/AAudio.h>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <string>
 #include <thread>
 #include <mutex>
 
@@ -14,11 +18,12 @@ public:
     ~AAudioOutput() override { close(); }
 
     int32_t open(const AudioOutputRequest &request, const StreamDescription &source,
-        AudioOutputSession &session, std::string &error, LogProxy *) override {
+        AudioOutputSession &session, std::string &error, LogProxy *log) override {
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
         close();
         session = AudioOutputSession{};
+        log_ = log;
         if (request.bitPerfect || request.requireDoP || request.requireNativeDsd) {
             error = "Android AAudio supports mixed PCM; direct DSD and bit-perfect output are unavailable";
             return LazerAudioErrorUnsupported;
@@ -36,6 +41,14 @@ public:
         if (request.desired.sampleRate > 0 && request.desired.sampleRate != source.sampleRate) {
             AAudioStreamBuilder_setSampleRate(builder, request.desired.sampleRate);
         }
+        /* The endpoint belongs to the platform: another application, a phone call or a route
+         * change can take it away from this stream. This callback is the only notification that
+         * arrives before the next write fails, so it is what turns "the output is gone" into a
+         * known fact instead of a stall. AAudio forbids stopping, closing or reopening a stream
+         * from inside the callback, and taking the device or log lock there could block the
+         * audio service, so it only records the loss. The render thread observes it on its next
+         * query and the control path reopens the output from a thread that may block. */
+        AAudioStreamBuilder_setErrorCallback(builder, &AAudioOutput::onStreamError, this);
         result = AAudioStreamBuilder_openStream(builder, &stream_);
         if (result != AAUDIO_OK) {
             if (stream_ != nullptr) { AAudioStream_close(stream_); stream_ = nullptr; }
@@ -44,6 +57,12 @@ public:
         }
         AAudioStreamBuilder_delete(builder);
         if (result != AAUDIO_OK) { close(); return failed(result, error); }
+        /* This stream is new, so a loss recorded against a retired one must not poison it.
+         * Cleared before the negotiated facts are read: from here on, any report belongs here. */
+        disconnected_.store(false, std::memory_order_release);
+        disconnectStream_.store(0, std::memory_order_relaxed);
+        disconnectCode_.store(AAUDIO_OK, std::memory_order_relaxed);
+        disconnectReported_.store(false, std::memory_order_release);
         target_ = TargetFormat{};
         target_.sampleRate = AAudioStream_getSampleRate(stream_);
         target_.channels = AAudioStream_getChannelCount(stream_);
@@ -80,7 +99,11 @@ public:
         // Variable-write accounting belongs to the render loop. Engine priming
         // uses a fixed-period ledger and would lose the first PCM buffer here.
         session.primeBeforeStart = false;
-        session.description = "Android AAudio shared PCM";
+        description_ = describeStream();
+        session.description = description_;
+        /* Info is for probes and legacy log handlers; the retained log the application reads
+         * starts at Warning, so the identity also travels in the disconnect record below. */
+        if (log_ != nullptr) log_->write(LazerAudioLogInfo, description_);
         return LazerAudioOk;
     }
 
@@ -96,7 +119,12 @@ public:
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
         if (stream_ == nullptr) return LazerAudioErrorInvalidArgument;
+        /* A resume is the moment a stream the platform reclaimed while the app was interrupted
+         * becomes visible: requestStart on a dead stream fails, and reporting the recorded loss
+         * names the cause instead. */
+        if (observeDisconnect(error)) return LazerAudioErrorDevice;
         const auto state = AAudioStream_getState(stream_);
+        if (state == AAUDIO_STREAM_STATE_DISCONNECTED) return failed(AAUDIO_ERROR_DISCONNECTED, error);
         if (state == AAUDIO_STREAM_STATE_STARTED || state == AAUDIO_STREAM_STATE_STARTING) return LazerAudioOk;
         // Legacy AudioTrack may wait for the next PCM write before completing
         // a resume. Waiting here would keep the engine's render loop paused.
@@ -163,6 +191,7 @@ public:
             error = "Android audio output disconnected";
             return -1;
         }
+        if (observeDisconnect(error)) return -1;
         aaudio_stream_state_t state = AAUDIO_STREAM_STATE_UNKNOWN;
         const auto update = AAudioStream_waitForStateChange(stream_, AAUDIO_STREAM_STATE_UNKNOWN, &state, 0);
         if (state == AAUDIO_STREAM_STATE_DISCONNECTED ||
@@ -187,6 +216,9 @@ public:
         std::lock_guard<std::recursive_mutex> guard(mutex_);
         error.clear();
         if (stream_ == nullptr || bytes == nullptr || frames < 0) return LazerAudioErrorInvalidArgument;
+        /* Checked before the write's 100ms timeout: a reclaimed endpoint would otherwise stall
+         * the render thread for the whole timeout every block. */
+        if (observeDisconnect(error)) return LazerAudioErrorDevice;
         int32_t offset = 0;
         while (offset < frames) {
             const auto result = AAudioStream_write(stream_, bytes + static_cast<size_t>(offset) * target_.frameBytes(),
@@ -206,6 +238,50 @@ private:
         error = std::string("AAudio: ") + AAudio_convertResultToText(result);
         return LazerAudioErrorDevice;
     }
+
+    /* Runs on a thread owned by the audio service. Records the loss and nothing else: AAudio
+     * documents that the callback must not stop, close or reopen the stream, and blocking here
+     * on the device or log lock could stall the service. */
+    static void onStreamError(AAudioStream *stream, void *userData, aaudio_result_t error) {
+        auto *self = static_cast<AAudioOutput *>(userData);
+        if (self == nullptr) return;
+        self->disconnectStream_.store(reinterpret_cast<uintptr_t>(stream), std::memory_order_relaxed);
+        self->disconnectCode_.store(static_cast<int32_t>(error), std::memory_order_relaxed);
+        self->disconnected_.store(true, std::memory_order_release);
+    }
+
+    /* The loss recorded for the stream that is open now, or false when there is none. The error
+     * text is the same one the failing call would have produced, so callers keep one vocabulary.
+     * One record per stream reaches the log: a stall that repeats every block must not flood it.
+     * Callers hold the device lock, which the AAudio callback cannot take; this is never called
+     * from the callback. */
+    bool observeDisconnect(std::string &error) {
+        if (!disconnected_.load(std::memory_order_acquire)) return false;
+        if (disconnectStream_.load(std::memory_order_relaxed) != reinterpret_cast<uintptr_t>(stream_)) {
+            return false;
+        }
+        const auto code = static_cast<aaudio_result_t>(disconnectCode_.load(std::memory_order_relaxed));
+        error = std::string("AAudio: ") + AAudio_convertResultToText(code);
+        if (!disconnectReported_.exchange(true, std::memory_order_acq_rel) && log_ != nullptr) {
+            log_->write(LazerAudioLogWarning,
+                "Android AAudio output disconnected (" + description_ + "): " + error);
+        }
+        return true;
+    }
+
+    /* What the platform actually gave this session, for the record the application keeps: a
+     * disconnect is only diagnosable if the log names the endpoint it happened on. */
+    std::string describeStream() const {
+        const int32_t device = AAudioStream_getDeviceId(stream_);
+        std::string text = "Android AAudio shared PCM";
+        text += " (device " + std::to_string(device);
+        text += ", " + std::to_string(target_.sampleRate) + " Hz";
+        text += ", " + std::to_string(target_.channels) + " ch";
+        text += target_.isFloat() ? ", float" : ", i16";
+        text += ", buffer " + std::to_string(AAudioStream_getBufferSizeInFrames(stream_)) + " frames)";
+        return text;
+    }
+
     int32_t awaitState(aaudio_stream_state_t wanted, std::string &error) {
         for (int attempt = 0; attempt < 10; ++attempt) {
             const auto state = AAudioStream_getState(stream_);
@@ -222,6 +298,14 @@ private:
     mutable std::recursive_mutex mutex_;
     AAudioStream *stream_ = nullptr;
     TargetFormat target_{};
+    LogProxy *log_ = nullptr;
+    std::string description_;
+    /* Written by the AAudio callback thread, which holds no lock; read by the control and render
+     * threads, which hold the device lock. */
+    std::atomic<bool> disconnected_{false};
+    std::atomic<uintptr_t> disconnectStream_{0};
+    std::atomic<int32_t> disconnectCode_{AAUDIO_OK};
+    std::atomic<bool> disconnectReported_{false};
 };
 }  // namespace
 

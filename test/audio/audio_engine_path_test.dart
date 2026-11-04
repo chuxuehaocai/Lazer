@@ -127,7 +127,7 @@ void main() {
       );
       addTearDown(engine.dispose);
 
-      expect(engine.pendingFailure, '原生 HiFi 引擎初始化失败：no audio device');
+      expect(engine.pendingFailure?.message, '原生 HiFi 引擎初始化失败：no audio device');
     });
 
     test('a native session has no pending failure to report', () {
@@ -142,15 +142,18 @@ void main() {
       'reportFailure reaches subscribers, and stops after dispose',
       () async {
         final JustAudioEngine engine = JustAudioEngine(player: _IdlePlayer());
-        final List<String> reported = <String>[];
-        final StreamSubscription<String> subscription = engine.failures.listen(
-          reported.add,
-        );
+        final List<AudioFailure> reported = <AudioFailure>[];
+        final StreamSubscription<AudioFailure> subscription = engine.failures
+            .listen(reported.add);
         addTearDown(subscription.cancel);
 
-        expect(engine.reportFailure('device lost'), isTrue);
+        expect(
+          engine.reportFailure('device lost', kind: AudioFailureKind.device),
+          isTrue,
+        );
         await Future<void>.delayed(Duration.zero);
-        expect(reported, <String>['device lost']);
+        expect(reported.single.message, 'device lost');
+        expect(reported.single.kind, AudioFailureKind.device);
 
         engine.dispose();
         expect(engine.reportFailure('too late'), isFalse);

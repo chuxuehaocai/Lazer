@@ -191,7 +191,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // A launch-time downgrade happened before this constructor could subscribe,
     // so the stream cannot deliver it: take it from the engine (or from the
     // selection the app was built with) and keep it as a standing notice.
-    hifiPathNotice = reporter?.pendingFailure ?? hifiPathNotice;
+    hifiPathNotice = reporter?.pendingFailure?.message ?? hifiPathNotice;
     _bufferSubscription = engine is BufferChangeReportingAudioEngine
         ? (engine as BufferChangeReportingAudioEngine).bufferChanges.listen(
             (_) => _onBufferChanged(),
@@ -485,7 +485,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   StreamSubscription<void>? _completionSubscription;
   StreamSubscription<void>? _bufferSubscription;
   StreamSubscription<int>? _indexSubscription;
-  StreamSubscription<String>? _failureSubscription;
+  StreamSubscription<AudioFailure>? _failureSubscription;
   Timer? _bufferPulseTimer;
   static const playbackInterval = Duration(milliseconds: 100);
   bool hapticsEnabled = true;
@@ -2433,6 +2433,44 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
   }
 
+  /// Gives the output device back to the platform, keeping the place in the track.
+  ///
+  /// Audio focus loss, a phone call, another application starting playback or an
+  /// unplugged route all mean the platform has handed the endpoint to someone
+  /// else. Pausing alone would leave the engine holding it — a shared-mode AAudio
+  /// stream parked in PAUSED still owns the device, and the platform reclaims it,
+  /// which is the disconnect the app then fails on. The source is dropped here
+  /// and opened again by [resumeAfterInterruption] (or by the next play) at the
+  /// position below, so the output is only held while it may be played.
+  Future<void> suspendForInterruption() async {
+    if (!_realActive) return;
+    final Duration at = precisePosition;
+    _playing = false;
+    _ticker?.cancel();
+    _realActive = false;
+    _position = at;
+    // The engine's queue went with the output; the next open builds a fresh one.
+    _queuedNextIndex = null;
+    _queueId = null;
+    _flushQualifiedSession();
+    notifyListeners();
+    final AudioEngine? engine = audioEngine;
+    if (engine != null) await engine.stop();
+  }
+
+  /// Opens the output again and continues where [suspendForInterruption] stopped.
+  ///
+  /// Only meaningful for an engine that yielded the device: it is a fresh open at
+  /// the interrupted position, not a resume of a stream that was parked.
+  Future<void> resumeAfterInterruption() async {
+    if (current == null || _playing) return;
+    playbackError = null;
+    _playing = true;
+    _ensureTicker();
+    notifyListeners();
+    await _reopenOutput(_position, '播放中断，请重试。');
+  }
+
   void stop() {
     _finishPlaySession();
     ++_generation;
@@ -2706,7 +2744,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ///
   /// [resumeAt] is used when the stream has to be re-resolved for the same
   /// track — switching audio quality keeps the playhead where it was.
-  Future<void> _startAudio({Duration? resumeAt}) async {
+  ///
+  /// [recovering] marks a reload this app started because the output was lost:
+  /// it keeps the retry budgets already spent on this source, so a device that
+  /// fails every open cannot loop.
+  Future<void> _startAudio({Duration? resumeAt, bool recovering = false}) async {
     unawaited(_loadCurrentArtwork());
     final AudioEngine? engine = audioEngine;
     final Track? track = current;
@@ -2773,8 +2815,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // Remembered so a dead download can be reloaded from the position the
     // listener was at, instead of leaving a parked player on screen.
     _lastStreamUrl = _isNetworkStream(url) ? url : null;
-    _streamRetries = 0;
-    _streamRetryTrack = _queueIndex;
+    if (!recovering) {
+      // A load the listener asked for starts the recovery budgets over. A
+      // recovery reload does not: the budget it already spent is what keeps a
+      // device that fails every open from looping forever.
+      _streamRetries = 0;
+      _streamRetryTrack = _queueIndex;
+      _deviceRetries = 0;
+    }
     _clearStreamStall(quiet: true);
     // A fresh source opens a fresh no-progress window: without a running clock
     // the watchdog would never reach its threshold while the playhead stands.
@@ -3075,6 +3123,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// How many times one track may be recovered from a dead download before the
   /// failure is reported instead.
   static const int maxStreamRetries = 2;
+
+  /// How many times one track may be reopened after the platform reclaimed the
+  /// output before the failure is reported instead. Mirrors [maxStreamRetries]:
+  /// a device that refuses every open must end in a named error, not a loop. A
+  /// recovery reload does not reset the budget it spent — only a load the
+  /// listener asked for does.
+  static const int maxDeviceRetries = 2;
+
+  /// Device reopens spent on the current source; cleared by a requested load.
+  int _deviceRetries = 0;
 
   /// Hands the track that follows the current one to the engine, so the
   /// platform can cross into it while the decoder is still running.
@@ -3558,7 +3616,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// decode error both leave the user with no audio, and both are worth naming.
   /// A terminal failure also ends the HiFi promise for this session — the output
   /// that produced it is gone — so the path notice says so.
-  void _onEngineFailure(String message) {
+  void _onEngineFailure(AudioFailure failure) {
+    final String message = failure.message;
     final bool pathChanged =
         hifiPathNotice == null && audioEngine is FailureReportingAudioEngine;
     if (pathChanged) {
@@ -3566,6 +3625,25 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     if (!_realActive) {
       if (pathChanged) notifyListeners();
+      return;
+    }
+    // A lost output device is not a property of the source. The platform took the
+    // endpoint back — another application asked for the output, the route changed,
+    // a call came in — and the same track plays again on a fresh open at the
+    // position the listener was at. Opening it again here is what turns "the
+    // player is stuck until the next track" into a gap of one output session.
+    if (failure.kind == AudioFailureKind.device &&
+        _deviceRetries < maxDeviceRetries) {
+      final Duration resumeAt = precisePosition;
+      _deviceRetries++;
+      _finishPlaySession();
+      _realActive = false;
+      _queuedNextIndex = null;
+      playbackError = null;
+      _position = resumeAt;
+      _resetStallClock();
+      if (pathChanged) notifyListeners();
+      unawaited(_reopenOutput(resumeAt, message));
       return;
     }
     // A stream whose download died reaches the app here first: the reader
@@ -3594,6 +3672,21 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return;
     }
     _failPlayback(message);
+  }
+
+  /// Opens the output again after the platform reclaimed it, at [resumeAt].
+  ///
+  /// The load path is the same one a quality switch uses: the current track is
+  /// resolved again and the playhead is restored through the fresh open, so a
+  /// re-opened device never restarts the track from the beginning. [message] is
+  /// the device failure to report when the output still does not come up and the
+  /// listener still wants this track; a load that fails reports its own text, and
+  /// a track the listener replaced is left alone.
+  Future<void> _reopenOutput(Duration resumeAt, String message) async {
+    final String? targetId = current?.id;
+    await _startAudio(resumeAt: resumeAt, recovering: true);
+    if (_presentationDisposed || current?.id != targetId) return;
+    if (!_realActive && _playing) _failPlayback(message);
   }
 
   /// Reloads the current network source after its download died, resuming at the

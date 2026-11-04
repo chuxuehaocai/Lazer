@@ -110,6 +110,41 @@ abstract interface class QueueAudioEngine {
 /// These engines acknowledge play before starting a successor preparation.
 abstract interface class SerialQueueAudioEngine implements QueueAudioEngine {}
 
+/// Why a source failed after it was loaded.
+///
+/// Only [device] is actionable by reopening: the output session is gone (the
+/// platform reclaimed the endpoint, another application took it over, or the
+/// audio route changed), and the same track plays again on a fresh open at the
+/// position it reached. Every other kind describes the source itself, which
+/// would decode identically a second time.
+enum AudioFailureKind {
+  /// The output device was lost; reopening it is the recovery.
+  device,
+
+  /// The source could not be read or demuxed.
+  source,
+
+  /// The source decoded badly or not at all.
+  decode,
+
+  /// A failure whose cause the engine cannot classify.
+  unknown,
+}
+
+/// A failure reported by an engine after a source was loaded.
+class AudioFailure {
+  const AudioFailure(this.message, this.kind);
+
+  /// User-facing text (device lost, decode error).
+  final String message;
+
+  /// What kind of loss this is, so the app can pick a recovery.
+  final AudioFailureKind kind;
+
+  @override
+  String toString() => message;
+}
+
 /// Optional engine capability: failures that happen *after* a source was loaded.
 ///
 /// `just_audio` surfaces those through its own player streams, but an engine
@@ -121,8 +156,8 @@ abstract interface class SerialQueueAudioEngine implements QueueAudioEngine {}
 /// through this interface rather than only written to the log, so "not on the
 /// HiFi path" is a fact the UI can state.
 abstract interface class FailureReportingAudioEngine {
-  /// User-facing text for a terminal failure (device lost, decode error).
-  Stream<String> get failures;
+  /// User-facing text and kind for a terminal failure (device lost, decode error).
+  Stream<AudioFailure> get failures;
 
   /// A reason already known before any listener could attach — the fallback this
   /// launch started with. Null when the session came up on the native engine.
@@ -130,7 +165,7 @@ abstract interface class FailureReportingAudioEngine {
   /// Separate from [failures] because the downgrade happens while the engine is
   /// being constructed, before the app subscribes: a broadcast event sent then
   /// would be dropped.
-  String? get pendingFailure;
+  AudioFailure? get pendingFailure;
 }
 
 /// Optional engine capability: the app installs its audio-focus policy here.
@@ -142,6 +177,17 @@ abstract interface class FailureReportingAudioEngine {
 abstract interface class FocusAwareAudioEngine {
   Future<bool> Function()? activateSession;
 }
+
+/// A backend that holds the output device itself, so an interruption has to give
+/// it back rather than park it.
+///
+/// A shared-mode Android stream parked in PAUSED keeps owning the endpoint, and
+/// the platform hands that endpoint to whoever took the output — which is how a
+/// resume ends up starting a stream that no longer exists. Losing focus on such a
+/// backend therefore closes the device (the source is opened again on resume,
+/// at the position it reached), while a backend that owns its session from
+/// inside the player keeps the plain pause/resume behaviour.
+abstract interface class InterruptionYieldingAudioEngine {}
 
 /// A backend that must know the OS session category before opening output.
 ///
@@ -213,22 +259,27 @@ class JustAudioEngine
   /// [reportFailure] and reaches the app through [failures].
   final String? fallbackNotice;
 
-  final StreamController<String> _failures =
-      StreamController<String>.broadcast();
+  final StreamController<AudioFailure> _failures =
+      StreamController<AudioFailure>.broadcast();
 
   @override
-  Stream<String> get failures => _failures.stream;
+  Stream<AudioFailure> get failures => _failures.stream;
 
   @override
-  String? get pendingFailure => fallbackNotice;
+  AudioFailure? get pendingFailure => fallbackNotice == null
+      ? null
+      : AudioFailure(fallbackNotice!, AudioFailureKind.unknown);
 
   /// Reports a failure that happened after start-up on the fallback engine.
   ///
   /// Returns false once the engine is disposed, so a late caller can tell the
   /// report went nowhere instead of assuming the UI saw it.
-  bool reportFailure(String message) {
+  bool reportFailure(
+    String message, {
+    AudioFailureKind kind = AudioFailureKind.unknown,
+  }) {
     if (_failures.isClosed) return false;
-    _failures.add(message);
+    _failures.add(AudioFailure(message, kind));
     return true;
   }
 
