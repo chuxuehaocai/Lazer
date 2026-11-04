@@ -112,59 +112,53 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test(
-    'a seek past the buffer is clamped, and the rail holds the target until the engine applies it',
-    () async {
-      final engine = _BufferedNetworkEngine();
-      final state = AppState(
-        catalog: _Catalog(),
-        audioEngine: engine,
-        startupByteTarget: 0,
-        startupBufferTarget: Duration.zero,
-      );
-      addTearDown(state.dispose);
-      state.playQueue(<Track>[_track]);
-      await Future<void>.delayed(Duration.zero);
-      expect(state.audioReady, isTrue);
+  test('the rail holds a seek target until the engine applies it', () async {
+    final engine = _BufferedNetworkEngine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      startupByteTarget: 0,
+      startupBufferTarget: Duration.zero,
+    );
+    addTearDown(state.dispose);
+    state.playQueue(<Track>[_track]);
+    await Future<void>.delayed(Duration.zero);
+    expect(state.audioReady, isTrue);
 
-      // Twenty seconds in, with 75 % of the track on disk.
-      engine.position = const Duration(seconds: 20);
-      engine.buffered = _track.duration * 0.75;
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect(state.position, const Duration(seconds: 20));
+    // Twenty seconds in, with 75 % of the track on disk.
+    engine.position = const Duration(seconds: 20);
+    engine.buffered = _track.duration * 0.75;
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(state.position, const Duration(seconds: 20));
 
-      // The listener drags past what has been buffered.
-      state.seek(0.9);
-      expect(
-        state.position,
-        _track.duration * 0.75,
-        reason: 'the seek is clamped to the buffered region',
-      );
-      expect(engine.seekRequests, <Duration>[_track.duration * 0.75]);
+    // The listener drags to a position the download has already reached. (A drag
+    // past the buffered region is refused outright; seek_limit_test.dart covers
+    // that side.)
+    state.seek(0.5);
+    expect(state.position, _track.duration * 0.5);
+    expect(engine.seekRequests, <Duration>[_track.duration * 0.5]);
 
-      // The demuxer has not applied it yet: the engine still reports 20 s, and
-      // it keeps doing so for long enough that a heuristic which gives up after
-      // a moment would publish that value. The rail must not snap back there —
-      // that reads as "从头开始".
-      engine.position = const Duration(seconds: 20);
-      await Future<void>.delayed(const Duration(milliseconds: 2500));
-      expect(
-        state.precisePosition,
-        _track.duration * 0.75,
-        reason:
-            'the pre-seek position must not be published while a seek lands',
-      );
-      expect(state.seekInFlight, isTrue);
-      expect(state.progress, closeTo(0.75, 1e-9));
+    // The demuxer has not applied it yet: the engine still reports 20 s, and
+    // it keeps doing so for long enough that a heuristic which gives up after
+    // a moment would publish that value. The rail must not snap back there —
+    // that reads as "从头开始".
+    engine.position = const Duration(seconds: 20);
+    await Future<void>.delayed(const Duration(milliseconds: 2500));
+    expect(
+      state.precisePosition,
+      _track.duration * 0.5,
+      reason: 'the pre-seek position must not be published while a seek lands',
+    );
+    expect(state.seekInFlight, isTrue);
+    expect(state.progress, closeTo(0.5, 1e-9));
 
-      // Once the engine's clock lands on the target, its own value wins.
-      engine.position = _track.duration * 0.75;
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect(state.precisePosition, _track.duration * 0.75);
-      expect(state.position, _track.duration * 0.75);
-      expect(state.seekInFlight, isFalse);
-    },
-  );
+    // Once the engine's clock lands on the target, its own value wins.
+    engine.position = _track.duration * 0.5;
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(state.precisePosition, _track.duration * 0.5);
+    expect(state.position, _track.duration * 0.5);
+    expect(state.seekInFlight, isFalse);
+  });
 
   test(
     'a stream that dies while a seek is being applied resumes at the target',

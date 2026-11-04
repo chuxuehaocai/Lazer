@@ -161,6 +161,19 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   AppState get state => widget.state;
   late String _connectionKey = state.activeConnectionKey;
 
+  /// A refused seek (a drag into audio that has not been downloaded yet) is said
+  /// once, from here, so it lands the same whether the bar or the full player
+  /// page started it.
+  void _onSeekNotice() {
+    final String? message = state.seekNotice.value;
+    if (message == null) return;
+    state.seekNotice.value = null;
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(SnackBar(content: Text(context.tr(message))));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -174,6 +187,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     // browse page live until the player actually starts moving.
     _nowPlayingMotion.animateBack(0, duration: Duration.zero);
     state.addListener(_onAppStateChanged);
+    state.seekNotice.addListener(_onSeekNotice);
     // The first frame is not a switch: only a change from here on is one.
     _shownContentKey = _contentKey;
     // Linear on purpose: the pull writes straight into the controller value,
@@ -363,6 +377,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     cancelCoverTransitions();
     _updateTimer?.cancel();
     state.removeListener(_onAppStateChanged);
+    state.seekNotice.removeListener(_onSeekNotice);
     _playerSettled.dispose();
     _repaint.dispose();
     _nowPlayingMotion

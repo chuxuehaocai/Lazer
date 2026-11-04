@@ -2171,6 +2171,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Duration get position => _position;
   Duration? _optimisticSeek;
   int _optimisticSeekGeneration = 0;
+
+  /// One-shot message for the UI when a seek is refused, cleared once it has been
+  /// shown.
+  final ValueNotifier<String?> seekNotice = ValueNotifier<String?>(null);
   int _seekRequest = 0;
   final Stopwatch _optimisticSeekClock = Stopwatch();
 
@@ -2208,6 +2212,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     _clearOptimisticSeek();
     return actual;
+  }
+
+  /// How far past the loaded edge a pointer may land and still be read as the
+  /// edge itself: a drag to the very end of what has arrived is a legitimate seek,
+  /// not an attempt to jump into audio that is missing.
+  static const double _seekEdgeSlack = 0.01;
+
+  /// When the refusal was last reported, so a drag that produces dozens of seeks
+  /// says it once instead of stacking a message per pointer move.
+  DateTime? _seekRefusedAt;
+  static const Duration _seekRefusedRepeat = Duration(seconds: 3);
+
+  void _reportSeekRefused() {
+    final DateTime now = DateTime.now();
+    final DateTime? last = _seekRefusedAt;
+    if (last != null && now.difference(last) < _seekRefusedRepeat) return;
+    _seekRefusedAt = now;
+    seekNotice.value = '还没加载完，无法跳转进度';
   }
 
   void _clearOptimisticSeek() {
@@ -2301,8 +2323,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     return (available.inMilliseconds / duration).clamp(0.0, 1.0);
   }
 
-  /// Seeking can move through buffered audio, but never past it.
-  /// Keep the current playhead reachable if a backend reports a shorter buffer.
+  /// How far along the rail a seek may land.
+  ///
+  /// A track that is still arriving may only be seeked through what has already
+  /// landed: a jump into audio that has not been downloaded cannot be honoured,
+  /// and pretending otherwise is what makes a drag look like it worked while the
+  /// sound restarts somewhere else. [seek] reports the refusal so the listener is
+  /// told instead of left guessing.
   double get seekLimitFraction {
     if (!_seekLimitedByBuffer) return 1;
     final double buffered = bufferedFraction;
@@ -2600,6 +2627,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void seek(double fraction) {
     final Track? t = current;
     if (t == null) return;
+    final double limit = seekLimitFraction;
+    // A position the download has not reached is refused outright: there is no
+    // audio there to play, and quietly landing somewhere else is what makes a drag
+    // look like it worked while the sound restarts from a different place. A
+    // pointer released within a hair of the edge still counts as the edge.
+    if (fraction > limit + _seekEdgeSlack) {
+      _reportSeekRefused();
+      return;
+    }
     final Duration target = t.duration * clampSeekFraction(fraction);
     _position = target;
     _notePlayheadMoved();
@@ -4056,6 +4092,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _lyricSnapshots.clear();
     _lyricRequest = null;
     currentArtwork.dispose();
+    seekNotice.dispose();
     ++_seekRequest;
     playerPresented.dispose();
     browseTransitionActive.dispose();

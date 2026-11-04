@@ -600,8 +600,12 @@ class _AppThinSeekBarState extends State<AppThinSeekBar> {
 
   void _seekTo(double dx, double width) {
     if (widget.onSeek == null || width <= 0) return;
-    final double fraction = _limit(dx / width);
-    setState(() => _drag = fraction);
+    // Report the position under the pointer and leave the buffered ceiling to the
+    // caller, which reads it live. Clamping here would use `widget.seekLimit` as
+    // of the last build: a bar built while the track was still unbuffered carries
+    // a ceiling of zero, and every drag then turns into a seek to the start.
+    final double fraction = (dx / width).clamp(0.0, 1.0).toDouble();
+    setState(() => _drag = _limit(fraction));
     widget.onSeek!(fraction);
   }
 

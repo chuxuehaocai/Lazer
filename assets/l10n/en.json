@@ -784,5 +784,6 @@
   "音频暂时无法播放": "Audio is temporarily unavailable",
   "验证码": "Verification code",
   "验证码已发送": "Verification code sent",
-  "间奏": "Interlude"
+  "间奏": "Interlude",
+  "还没加载完，无法跳转进度": "This track has not loaded that far yet, so the position cannot be changed."
 }
