@@ -120,8 +120,7 @@ macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 - 接口实现参考 [API Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)。
 - 正在播放页版式参考 [AMLL Player](https://github.com/amll-dev/amll-player)。
 - 歌词动画参考 [Apple Music Like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics)。
-- 界面字体是小米的 **MiSans**，谢谢你，MiSans。
-- 还有屏幕前的你：愿意把它下载下来，认真听完一首歌，就已经很好了。
+- 还有屏幕前的你
 
 <p align="center">
   <img src="docs/images/mark.png" width="44" alt="Lazer">
