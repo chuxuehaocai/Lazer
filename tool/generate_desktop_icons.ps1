@@ -196,9 +196,4 @@ function Write-IconFile {
 }
 
 Write-IconPng 1024 'assets/app_icon.png'
-foreach ($size in @(16, 32, 64, 128, 256, 512, 1024)) {
-  Write-IconPng $size (
-    "macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_$size.png"
-  )
-}
 Write-IconFile
