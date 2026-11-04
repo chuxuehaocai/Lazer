@@ -196,10 +196,4 @@ function(lazer_install_native_audio destination)
             DESTINATION "${destination}"
             COMPONENT Runtime)
     endif()
-    if(bundle_ffmpeg_root AND
-       EXISTS "${bundle_ffmpeg_root}/share/lazer-ffmpeg")
-        install(DIRECTORY "${bundle_ffmpeg_root}/share/lazer-ffmpeg/"
-            DESTINATION "${destination}/licenses/lazer-ffmpeg"
-            COMPONENT Runtime)
-    endif()
 endfunction()
