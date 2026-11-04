@@ -161,8 +161,7 @@ For a standalone Windows build with a root DLL, use
 `dart run tool/build_native_audio.dart --project-root`. The generated root DLL
 is local only; do not stage it or add a `.gitignore` entry.
 
-For macOS (whose Xcode build has no CMake step), or a standalone host build,
-stage the libraries into `build/native-audio/`:
+For a standalone host build, stage the libraries into `build/native-audio/`:
 
 ```bash
 dart run tool/build_native_audio.dart --ffmpeg-root /path/to/ffmpeg
@@ -266,7 +265,7 @@ Status of this port:
 | `AudioEngine` transport, gapless queue, buffered position, failure reporting | Implemented and verified live. |
 | Windows bundle integration | Built with MSVC against a DSD-capable FFmpeg; **CTest 19/19** under both the Ninja and Visual Studio generators, and the suite runs in CI on every Windows build. |
 | Linux bundle integration | Written; not built or run here. |
-| macOS bundle integration | Manual staging only; not run. |
+| macOS bundle integration | Out of scope for now; the macOS target is paused. |
 | Real playback through WASAPI | **Verified on one Windows host**: shared and exclusive, seek, pause/stop, gapless crossing, reader-bridge streaming, EQ. |
 | DSD/DoP/Native DSD | Bound and reachable from the settings page; **no DSD source and no DoP-capable DAC were available**, so none of it is device-verified. |
 | Exclusive mode + bit-perfect | Verified: the session reported the source format unchanged; a shared-only endpoint is rejected rather than downgraded. |
@@ -276,9 +275,9 @@ Status of this port:
 | Normalisation modes | `off`/`track`/`album` map onto the engine's per-source ReplayGain; `loudnorm` needs an EBU R128 measurement stage the engine does not have, so it is offered and reported as unavailable. |
 | Settings page (device, exclusive, bit-perfect, DSD, buffer, EQ + presets, live format) | Written; **not run**, because this machine cannot build the Flutter app (see below). |
 | ReplayGain | Supported per source by the ABI; the app does not compute or pass it yet. |
-| Linux/macOS playback | Not run. The code is the master branch's, unchanged, but ALSA/CoreAudio device behaviour is unverified here. |
+| Linux playback | Not run. The code is the master branch's, unchanged, but ALSA device behaviour is unverified here. |
 | Android | Wired at the build and load layers: CI builds the engine for `arm64-v8a`, `armeabi-v7a` and `x86_64`, stages them into `jniLibs` and verifies the APK, and `LazerAudioLoader` resolves `liblazer-audio.so` on `androidArm64`/`androidX64`. See `docs/android-audio.md`. **`armeabi-v7a` is not in the loader's candidate list**, so a 32-bit ARM build ships the engine without ever selecting it; Android has no exclusive/bit-perfect/DSD path (AAudio shared PCM only). |
-| iOS | The Runner's **Prepare Audio Engine** phase builds and caches the static arm64 engine, reader bridge and FFmpeg SDK for local Xcode/Flutter builds. CI supplies its prebuilt archives through `ios/Flutter/LazerAudio.xcconfig`; both paths use the same linker flags and `DynamicLibrary.process()` loader. The backend is RemoteIO (`src/output_remoteio.cpp`), its state machine is covered by `tests/remoteio` on every host, and the iOS job checks the executable's dynamic export trie. iOS is a shared mix: no exclusive mode, no bit-perfect, no direct DSD. **Physical iOS playback is still unverified here** — see `docs/audio-engine-hardware-verification.md` section 11. |
+| iOS | Out of scope for now; the RemoteIO backend remains in `native/` but no iOS project or CI job is built here. iOS would be a shared mix: no exclusive mode, no bit-perfect, no direct DSD. **Physical iOS playback remains unverified** — see `docs/audio-engine-hardware-verification.md` section 11. |
 
 Nothing here is evidence that a DAC received the source bits unaltered: the engine
 reports what the platform endpoint accepted, which is necessary but not sufficient, and
@@ -329,7 +328,4 @@ labelled as such instead of silently behaving like the fallback.
 2. Capture a digital loopback for one endpoint, which turns "the endpoint accepted the
    format" into a bit-exactness result.
 3. Feed ReplayGain from the local-library metadata into `LazerOpenSettings`.
-4. Verify on Linux (ALSA `hw:`) and macOS (CoreAudio HAL, Hog Mode).
-5. Run `flutter test integration_test/ios_native_engine_test.dart -d <ios-device>`
-   on macOS to verify factory selection, worker startup, silent PCM playback,
-   pause, seek and stop through the linked iOS engine.
+4. Verify on Linux (ALSA `hw:`).

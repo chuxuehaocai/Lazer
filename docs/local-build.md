@@ -4,7 +4,7 @@
 Linux packages and produces every distributed artifact. Everything except
 packaging runs the same way on a local checkout — the same SDK version, the
 same lockfile, the same analysis and tests. This page covers a Linux/WSL setup;
-Windows and macOS use their own SDK installations, still on Flutter 3.47.0.
+Windows and Android use their own SDK installations, still on Flutter 3.47.0.
 
 ## Pinned SDK
 

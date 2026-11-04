@@ -55,7 +55,7 @@ ignored on phones.
   the app is a D-pad.
 
 The channel has an 800 ms timeout and every failure means "not a TV", so
-desktop, iOS and tests are unaffected.
+desktop and tests are unaffected.
 
 A detected television **boots into 大屏幕模式**. `AppState.bootstrap` writes
 `surface = AppSurface.tv` when no `lazer_surface` preference exists yet; an

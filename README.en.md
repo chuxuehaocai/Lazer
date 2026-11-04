@@ -16,7 +16,7 @@
   <a href="https://github.com/chuxuehaocai/Lazer/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/badge/build-GitHub%20Actions-6C8EBF"></a>
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
-  <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
+  <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20Linux%20%C2%B7%20Android-7FB6A4">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-4C9A7A"></a>
 </p>
 
@@ -35,7 +35,7 @@
 - A real catalogue, search, recommended playlists, personal radar, accounts and favourites.
 - Artist pages with popular tracks and paged albums; album pages carry the description and the full track list — tap a name and you are there.
 - Popular and latest comments with pagination, likes and unlikes. Guests can read; sign in to react.
-- System media controls on Windows, macOS, Linux, Android and iOS; the notification, lock screen and Dynamic Island carry the line being sung.
+- System media controls on Windows, Linux and Android; the notification and lock screen carry the line being sung.
 
 **The lyric part**
 
@@ -106,17 +106,13 @@ marked as pre-releases. Output filenames follow `Lazer-<OS>-<Arch>`.
 | Output | Contents |
 | --- | --- |
 | `Lazer-Windows-x86_64.zip` | EXE, DLLs, resources and Visual C++ runtime |
-| `Lazer-macOS-universal.zip` | Universal Intel / Apple Silicon App |
-| `Lazer-macOS-x86_64.zip` | Intel App built on a native Intel runner |
 | `Lazer-Linux-x86_64.AppImage` | Linux x86_64, including GTK and libmpv |
 | `Lazer-Linux-aarch64.AppImage` | Linux ARM64 built on a native ARM runner |
 | `Lazer-Android-universal.apk` | Universal APK signed with the release key from repository secrets (see [build details](docs/builds.md#android-release-signing)) |
-| `Lazer-iOS-aarch64.ipa` | Unsigned device IPA |
 
 Download from a completed run's **Artifacts** section while signed in to GitHub;
 artifacts are retained for 30 days. Extract the complete Windows ZIP before
-launching its EXE, run `chmod +x` on a downloaded AppImage, and note that macOS
-Apps are ad-hoc signed while the IPA needs your own signing.
+launching its EXE, and run `chmod +x` on a downloaded AppImage.
 
 More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [scheduled pause](docs/scheduled-pause.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [unified interface](docs/ui.md)
 

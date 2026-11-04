@@ -62,7 +62,7 @@ Flutter 手写的第三方网易云音乐客户端：WEAPI/EAPI 协议在应用�
 
 ### P2
 
-12. **文档漂移。** `docs/audio-engine.md:60` 写 ABI v24，头文件是 29（`native/lazer-audio/include/lazer_audio_api.h:33`）；`docs/audio-engine.md:55` 引用的 `THIRD-PARTY-NOTICES.md` 不存在；`docs/builds.md:149` 写 iOS 用 `macos-15`，workflow 是 `macos-26`（`build.yml:526`、`:548`）；`README.md:23` 徽章 v2.0.0 vs `pubspec.yaml:19` 的 `2.0.0-beta.5.hotfix+7`；`pubspec.yaml:2` 仍是模板描述。
+12. **文档漂移。** `docs/audio-engine.md:60` 写 ABI v24，头文件是 29（`native/lazer-audio/include/lazer_audio_api.h:33`）；`docs/audio-engine.md:55` 引用的 `THIRD-PARTY-NOTICES.md` 不存在；`README.md:23` 徽章 v2.0.0 vs `pubspec.yaml:19` 的 `2.0.0-beta.5.hotfix+7`；`pubspec.yaml:2` 仍是模板描述。
 13. **死代码/孤儿资产。** `lib/screens/catalog_detail_page.dart` 无任何 import；3 张 golden 未使用。
 14. **三套设计词汇并存。** `theme/tokens.dart`（lake-blue `AppTokens`）、`theme/design_tokens.dart` + `theme/paper_widgets.dart`（暖羊皮纸，播放页仍在用）、`theme/apple_design.dart`（Apple 语义色）。
 15. **版本约束不一致。** `pubspec.yaml:22` 写 `^3.12.0`，`pubspec.lock` 要求 dart `>=3.13.0` / flutter `>=3.47.0`，而 7 处 CI 用 `--enforce-lockfile`。

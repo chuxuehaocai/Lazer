@@ -16,7 +16,7 @@
   <a href="https://github.com/chuxuehaocai/Lazer/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/badge/build-GitHub%20Actions-6C8EBF"></a>
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
-  <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
+  <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20Linux%20%C2%B7%20Android-7FB6A4">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-4C9A7A"></a>
 </p>
 
@@ -37,7 +37,7 @@
 - 真实曲库、搜索、推荐歌单、私人雷达、账号与收藏。
 - 歌手主页有热门歌曲和分页专辑；专辑详情带简介与完整曲目，点名字就钻进去了。
 - 热门 / 最新评论、分页加载、点赞与取消点赞。游客可以看，想说话就先登录。
-- 系统媒体控件：Windows、macOS、Linux、Android、iOS 都认得它；通知、锁屏与灵动岛会跟着唱到哪一句。
+- 系统媒体控件：Windows、Linux、Android 都认得它；通知与锁屏会跟着唱到哪一句。
 
 **歌词这件小事**
 
@@ -103,15 +103,12 @@ flutter run
 | 产物 | 说明 |
 | --- | --- |
 | `Lazer-Windows-x86_64.zip` | EXE、依赖库、资源与 Visual C++ 运行库 |
-| `Lazer-macOS-aarch64.zip` | Apple Silicon App |
 | `Lazer-Linux-x86_64.AppImage` | Linux x86_64，包含 GTK 与 libmpv |
 | `Lazer-Linux-aarch64.AppImage` | Linux ARM64，使用原生 ARM runner 构建 |
 | `Lazer-Android-universal.apk` | 通用 APK，使用仓库密钥库中的发布签名（详见[构建说明](docs/builds.md#android-release-signing)） |
-| `Lazer-iOS-aarch64.ipa` | 未签名的 iOS 真机 IPA |
 
 构建完成后，在对应运行页面的 **Artifacts** 中下载，需登录 GitHub，保留 30 天。
-Windows 请完整解压后运行；AppImage 下载后先 `chmod +x`；
-macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
+Windows 请完整解压后运行；AppImage 下载后先 `chmod +x`。
 
 更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [扫码登录](docs/login-qr.md) · [验证码登录](docs/login-sms.md) · [统一界面](docs/ui.md)
 

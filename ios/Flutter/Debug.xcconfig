@@ -1,4 +1,0 @@
-#include "Generated.xcconfig"
-// Local builds prepare the engine automatically; CI can supply its archives.
-#include "LazerAudio.defaults.xcconfig"
-#include? "LazerAudio.xcconfig"

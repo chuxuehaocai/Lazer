@@ -13,7 +13,7 @@ AudioTrack implementations complete a resume only after the next PCM write.
 ## Build and package
 
 Install NDK `28.2.13676358`, CMake, Ninja, pkg-config, NASM, Make and a C compiler
-on Linux or macOS. Set `ANDROID_HOME`, then run:
+on Linux. Set `ANDROID_HOME`, then run:
 
 ```sh
 bash ci/build-android-audio.sh

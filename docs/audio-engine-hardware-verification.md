@@ -15,7 +15,7 @@
 | 分支 | `nextgen`（已合入 iOS RemoteIO、卷积和会话修复） |
 | 构建 | 必须能找到 DSD-capable FFmpeg：设置 `LAZER_FFMPEG_ROOT`，或把 SDK 放在 `third_party/ffmpeg` |
 | 引擎版本 | 源码与 Dart 镜像同为 **ABI 29**。构建会同时重编引擎；**不要**直接跑旧的 `build/` 产物 |
-| 平台 | Windows 已验证构建；Linux / macOS 的构建链路在 CI 里，但播放行为未验证 |
+| 平台 | Windows 已验证构建；Linux 的构建链路在 CI 里，但播放行为未验证；macOS / iOS 目前不在范围内 |
 
 构建（PowerShell）：
 
@@ -218,6 +218,8 @@ audio.path event=format codec=dsd_lsbf_planar source=DSD64x output=DoP @ 176400 
 
 ## 11. iOS（新增，全部待在真机上验证）
 
+macOS 和 iOS 目前不在范围内，本节保留为技术记录，等有设备时再按此验证。
+
 iOS 的引擎是**静态链接**进 `Runner` 二进制的（`liblazer-audio.a` + reader bridge + 四个 FFmpeg 静态库），
 后端是新写的 RemoteIO（`native/lazer-audio/src/output_remoteio.cpp`），会话由 `AVAudioSession` 承担。
 CI 能证明的只有：两套契约（AAudio / RemoteIO）在假实现上通过、arm64 静态库导出 18 个 ABI 符号、
@@ -227,7 +229,7 @@ CI 能证明的只有：两套契约（AAudio / RemoteIO）在假实现上通过
 设置 → 高保真播放 → 播放引擎，以及诊断日志：应当显示原生引擎。
 若走系统引擎，日志会保留原因（符号找不到 / ABI 不符 / 会话启动失败）。
 
-CI 已经替你证明、不必重复的部分（`ios-native` + `ios` 两个任务，macos-15）：
+此前 CI 已经证明、不必重复的部分（当时在 macOS 上运行的两个 Apple 任务，现已随 Apple 目标一并删除）：
 六个 arm64 静态归档同一次构建产出；`Runner` 可执行文件的**动态导出表**里有引擎的 18 个
 ABI 符号与 reader bridge 的全部 10 个导出（`dyld_info -exports`，读的是动态加载器真正用的导出
 trie，不是被 strip 的符号表），包内没有 FFmpeg 动态库。也就是说 `DynamicLibrary.process()`

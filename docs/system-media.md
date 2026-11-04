@@ -6,10 +6,10 @@ The app has one queue and one audio engine. `LazerMediaHandler` adapts the exist
 | Platform | Integration |
 | --- | --- |
 | Android | `audio_service`, foreground media playback service, MediaSession and notification |
-| iOS | `audio_service`, MPNowPlayingInfoCenter and MPRemoteCommandCenter; background audio enabled |
-| macOS | `audio_service`, MediaPlayer framework |
 | Linux | `audio_service_mpris`, session D-Bus / MPRIS |
 | Windows | App-owned C++/WinRT SMTC bridge, with timeline and seek support |
+
+macOS and iOS are out of scope for now.
 
 Android resolves the media notification's small icon and audio_service's transport
 action icons by resource name at runtime, so `android/app/src/main/res/raw/keep.xml`
@@ -22,8 +22,7 @@ every **100 ms**, and immediately after a structural change. Screens consume the
 position notifier without rebuilding the app or the navigation tree.
 
 The exposed transport is previous track, play/pause, next track and absolute
-seek. In particular, iOS receives track commands, not the podcast-style 30-second
-skip controls. System commands share the same playlist, repeat and shuffle state
+seek. System commands share the same playlist, repeat and shuffle state
 as the Flutter UI. Artwork is cached locally using the CDN's required headers.
 
 On Android, the first foreground playback transition starts the media service
@@ -56,8 +55,8 @@ item's **artist**, so that is where the line being sung goes:
   line is instrumental.
 - It is refreshed by the handler's one-second clock and only pushed to the
   platform when the line actually changed.
-- Queue entries keep the plain artist, so a controller listing the queue —
-  Android Auto, CarPlay — shows songs rather than lyrics.
+- Queue entries keep the plain artist, so a controller listing the queue, such as
+  Android Auto, shows songs rather than lyrics.
 - The desktop controls (SMTC, MPRIS) keep the artist: MPRIS is read by other
   applications, and their flyouts sit next to an app that shows the whole sheet.
 - **Settings → 歌词 → 系统媒体控件显示歌词** turns it off; `AppState.systemMediaLyrics`
@@ -74,8 +73,8 @@ interrupted requests, media commands, position cadence, stale artwork and the
 Windows channel contract. `test/system_media_lyrics_test.dart` covers the lyric
 line following playback, its fallback across instrumental lines, the setting and
 the desktop exception. Responsive and accessibility tests cover the visible
-controls and route changes. Apple and Linux native builds require their own OS
-toolchains; they cannot be compiled or exercised by the Windows build host.
+controls and route changes. Linux native builds require their own OS toolchain;
+they cannot be compiled or exercised by the Windows build host.
 
 References: [audio_service](https://pub.dev/packages/audio_service),
 [MPRIS adapter](https://pub.dev/packages/audio_service_mpris),

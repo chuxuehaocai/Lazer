@@ -8,32 +8,30 @@ with all platform binaries and SHA-256 files. A tag containing a hyphen, such
 as `v2.0.0-beta.1`, is published as a pre-release. Set the matching app version
 in `pubspec.yaml` before pushing the tag so the binaries report the same version.
 
-Analysis and tests run first. Six independent platform/architecture builds then
+Analysis and tests run first. Four independent platform/architecture builds then
 upload the following **Artifacts**. Each binary/archive has its own SHA-256 file.
+macOS and iOS are out of scope for now.
 
 | Artifact / filename stem | Format and contents |
 | --- | --- |
 | `Lazer-Windows-x86_64` | ZIP with EXE, native audio engine, FFmpeg, resources and the MSVC runtime |
-| `Lazer-macOS-aarch64` | ZIP with an Apple Silicon App and native audio engine |
 | `Lazer-Linux-x86_64` | x86_64 AppImage with GTK, libmpv and the native audio engine |
 | `Lazer-Linux-aarch64` | ARM64 AppImage with GTK, libmpv and the native audio engine |
 | `Lazer-Android-universal` | Universal release APK signed with the release key from repository secrets |
-| `Lazer-iOS-aarch64` | Unsigned device IPA containing `Payload/Runner.app` |
 
 All artifact names follow `Lazer-<OS>-<Arch>`. `universal` denotes a multi-architecture
-package. The macOS archives preserve executable permissions and framework symlinks.
-Architecture checks run before packaging. IPA builds explicitly disable code signing.
+package. Architecture checks run before packaging.
 
 ## Native audio engine
 
-The desktop playback engine ported from `master` (FFmpeg + WASAPI/ALSA/CoreAudio,
-DSD/DoP, gapless, EQ/limiter) is built into all Windows, macOS and Linux cloud
-artifacts together with the matching DSD-capable FFmpeg runtime and its LGPL
-notice. Packaging checks fail if any required engine, bridge or FFmpeg library is
-missing. Android packages the native AAudio engine for armeabi-v7a, arm64-v8a and x86_64;
-iOS links the engine as static archives (see below). On Windows the engine and FFmpeg are built with MSVC so
-their import libraries match the app toolchain. See
-[audio-engine.md](audio-engine.md) for local build variables and the settings page.
+The desktop playback engine ported from `master` (FFmpeg + WASAPI/ALSA, DSD/DoP,
+gapless, EQ/limiter) is built into all Windows and Linux cloud artifacts together
+with the matching DSD-capable FFmpeg runtime and its LGPL notice. Packaging checks
+fail if any required engine, bridge or FFmpeg library is missing. Android packages
+the native AAudio engine for armeabi-v7a, arm64-v8a and x86_64. On Windows the
+engine and FFmpeg are built with MSVC so their import libraries match the app
+toolchain. See [audio-engine.md](audio-engine.md) for local build variables and
+the settings page.
 
 Every packaging path is required to ship the engine, and each one now fails
 loudly instead of producing a bundle that quietly falls back to `just_audio`:
@@ -51,22 +49,6 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   bridge; `ci/verify-android-audio.py` then re-checks the APK itself.
 - The release job reads the uploaded desktop archives and refuses to publish one
   that does not contain the engine, the bridge and all four FFmpeg libraries.
-- iOS links `liblazer-audio.a`, `liblazer-audio-bridge.a` and the four FFmpeg
-  archives into the Runner binary through `ios/Flutter/LazerAudio.xcconfig`,
-  which `ci/ios-audio-xcconfig.sh` generates for the archives supplied by CI.
-  Local Xcode and Flutter builds use `ios/Flutter/LazerAudio.defaults.xcconfig`
-  and the Runner's **Prepare Audio Engine** phase instead: it builds the
-  engine automatically on the first build, keeps device and simulator archives
-  separate, and reuses them until native sources or the Xcode SDK change.
-  The first local build requires CMake and network access to the pinned FFmpeg
-  sources. An incomplete engine build fails the build instead of producing
-  an IPA that silently selects `just_audio`. The `ios-native` job builds those archives for arm64;
-  the IPA job verifies the built executable's dynamic export trie and refuses to
-  package when the engine ABI is not in it. Verified end to end on `macos-15`:
-  six arm64 archives, the engine's 18 ABI symbols and the bridge's five exports
-  present in the built `Runner`'s export trie (`dyld_info -exports` reads the
-  trie the dynamic loader uses, not the stripped symbol table), and no FFmpeg
-  dylib inside the bundle.
 
 ## Android release signing
 
@@ -141,12 +123,11 @@ See [updates.md](updates.md) for the client-side rules.
 ## Runners and SDKs
 
 - Windows uses `windows-2022`.
-- macOS packaging uses `macos-26`.
 - Linux uses native `ubuntu-22.04` / `ubuntu-22.04-arm` runners. Both AppImages have
   a glibc 2.35 baseline. The ARM runner bootstraps the SDK from the official Flutter
   3.47.0 tag and verifies its commit, since the official archive only provides an
   x64 Linux SDK. It does not cross-compile or use a third-party SDK.
-- Android uses `ubuntu-24.04` with Java 21; iOS uses `macos-15`.
+- Android uses `ubuntu-24.04` with Java 21.
 
 Linux packaging pins linuxdeploy and its GTK helper, checks the packaging tool's
 SHA-256, and explicitly bundles libmpv because it is loaded through FFI. Each
@@ -160,8 +141,7 @@ the artifacts to their GitHub Release; the release job has write access only to
 download its workflow artifacts and publish that release.
 
 Extract the whole Windows ZIP before launching the EXE. Downloaded AppImages need
-`chmod +x`. macOS Apps are ad-hoc signed, not Developer ID signed/notarized. The
-unsigned IPA needs your own signing before installation.
+`chmod +x`.
 
 ## Local development
 

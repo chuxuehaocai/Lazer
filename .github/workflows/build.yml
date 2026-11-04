@@ -179,135 +179,6 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-  macos-native:
-    name: macOS native audio (${{ matrix.arch }})
-    needs: check
-    env:
-      MACOSX_DEPLOYMENT_TARGET: '12.0'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-26
-            flutter_arch: arm64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-          architecture: ${{ matrix.flutter_arch }}
-      - name: Install native build tools
-        run: brew install cmake ninja nasm pkgconf
-      - run: flutter pub get --enforce-lockfile
-      - name: Build DSD-capable LGPL FFmpeg and native audio
-        env:
-          FFMPEG_BUILD_JOBS: '4'
-        run: |
-          set -euo pipefail
-          ffmpeg_root="$RUNNER_TEMP/lazer-ffmpeg"
-          bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$ffmpeg_root"
-          dart run tool/build_native_audio.dart --ffmpeg-root "$ffmpeg_root"
-          mkdir -p dist/licenses/lazer-ffmpeg
-          cp build/native-audio/*.dylib dist/
-          cp "$ffmpeg_root/share/lazer-ffmpeg/"* dist/licenses/lazer-ffmpeg/
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: native-deps-macos-${{ matrix.arch }}
-          path: dist/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  macos:
-    name: macOS App (${{ matrix.arch }})
-    needs: [check, macos-native]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            runner: macos-26
-            flutter_arch: arm64
-            xcode_archs: arm64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    env:
-      # Ad-hoc signing needs no Apple account, certificate or provisioning profile.
-      FLUTTER_XCODE_CODE_SIGN_IDENTITY: '-'
-      FLUTTER_XCODE_CODE_SIGN_STYLE: Manual
-      FLUTTER_XCODE_DEVELOPMENT_TEAM: ''
-      FLUTTER_XCODE_ARCHS: ${{ matrix.xcode_archs }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-          architecture: ${{ matrix.flutter_arch }}
-      - run: xcodebuild -version
-      - run: flutter config --enable-macos-desktop
-      - run: flutter pub get --enforce-lockfile
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
-        with:
-          name: native-deps-macos-arm64
-          path: build/native-dependencies
-      - name: Prepare architecture-matched native audio libraries
-        shell: bash
-        run: |
-          set -euo pipefail
-          stage=build/native-audio-package
-          native=build/native-dependencies
-          mkdir -p "$stage/licenses/lazer-ffmpeg"
-          cp "$native/"*.dylib "$stage/"
-          cp "$native/licenses/lazer-ffmpeg/"* "$stage/licenses/lazer-ffmpeg/"
-          test -f "$stage/liblazer-audio.dylib"
-          test -f "$stage/liblazer-audio-bridge.dylib"
-      - run: flutter build macos --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
-      - name: Package App with executable permissions and framework symlinks
-        shell: bash
-        run: |
-          set -euo pipefail
-          app=build/macos/Build/Products/Release/lazer_nextgen.app
-          test -d "$app"
-          runtime="$app/Contents/MacOS"
-          cp build/native-audio-package/*.dylib "$runtime/"
-          mkdir -p "$app/Contents/Resources/licenses/lazer-ffmpeg"
-          cp build/native-audio-package/licenses/lazer-ffmpeg/* \
-            "$app/Contents/Resources/licenses/lazer-ffmpeg/"
-          read -r -a required_archs <<< "$FLUTTER_XCODE_ARCHS"
-          lipo "$app/Contents/MacOS/lazer_nextgen" -verify_arch "${required_archs[@]}"
-          for library in "$runtime"/*.dylib; do
-            lipo "$library" -verify_arch "${required_archs[@]}"
-          done
-          codesign --force --deep --sign - "$app"
-          codesign --verify --deep --strict "$app"
-          test -f "$runtime/liblazer-audio.dylib"
-          test -f "$runtime/liblazer-audio-bridge.dylib"
-          for component in avcodec avformat avutil swresample; do
-            compgen -G "$runtime/lib${component}*.dylib" > /dev/null \
-              || { echo "::error::the app has no $component runtime library"; exit 1; }
-          done
-          mkdir -p dist
-          ditto -c -k --sequesterRsrc --keepParent "$app" dist/Lazer-macOS-${{ matrix.arch }}.zip
-          (cd dist && shasum -a 256 Lazer-macOS-${{ matrix.arch }}.zip > Lazer-macOS-${{ matrix.arch }}.zip.sha256)
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: Lazer-macOS-${{ matrix.arch }}
-          path: dist/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-
   linux:
     name: Linux AppImage (${{ matrix.arch }})
     needs: check
@@ -520,80 +391,10 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-  ios-native:
-    name: iOS native audio (arm64)
-    needs: check
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - run: xcodebuild -version
-      - name: Build the iOS FFmpeg SDK and the engine archives
-        env:
-          FFMPEG_BUILD_JOBS: '4'
-        run: bash ci/build-ios-audio.sh device
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: native-deps-ios-arm64
-          path: build/ios-audio/device/stage/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  ios:
-    name: iOS unsigned IPA (arm64)
-    needs: [check, ios-native]
-    runs-on: macos-26
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-      - run: xcodebuild -version
-      - run: flutter pub get --enforce-lockfile
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
-        with:
-          name: native-deps-ios-arm64
-          path: build/native-deps-ios
-      - name: Link the native audio engine into the app
-        run: |
-          set -euo pipefail
-          python3 ci/verify-ios-audio.py --archive build/native-deps-ios/lib
-          bash ci/ios-audio-xcconfig.sh build/native-deps-ios/lib
-      - run: flutter build ios --release --no-codesign --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
-      - name: Verify the app exports the native engine ABI
-        run: python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
-      - name: Create unsigned IPA with the required Payload directory
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -d build/ios/iphoneos/Runner.app
-          mkdir -p dist/ios/Payload
-          ditto build/ios/iphoneos/Runner.app dist/ios/Payload/Runner.app
-          (cd dist/ios && zip -qry ../Lazer-iOS-aarch64.ipa Payload)
-          unzip -l dist/Lazer-iOS-aarch64.ipa | grep 'Payload/Runner.app/Info.plist'
-          (cd dist && shasum -a 256 Lazer-iOS-aarch64.ipa > Lazer-iOS-aarch64.ipa.sha256)
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: Lazer-iOS-aarch64
-          path: |
-            dist/*.ipa
-            dist/*.sha256
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [check, windows, macos, linux, android, ios]
+    needs: [check, windows, linux, android]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
@@ -617,7 +418,7 @@ jobs:
           # The per-platform jobs already gate on the engine; this reads the
           # uploaded archive itself, so a package step that dropped it between
           # the build tree and the artifact cannot reach a release.
-          zips=(release-assets/Lazer-Windows-*/*.zip release-assets/Lazer-macOS-*/*.zip)
+          zips=(release-assets/Lazer-Windows-*/*.zip)
           test "${#zips[@]}" -gt 0 || { echo "::error::no desktop archives were uploaded"; exit 1; }
           for zip in "${zips[@]}"; do
             listing="$(unzip -l "$zip")"

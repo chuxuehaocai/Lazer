@@ -44,7 +44,7 @@ A found release opens one dialog with the release name, notes, version pair and
 the release page URL:
 
 - **前往下载** opens the page in the system browser. Desktop starts
-  `rundll32`/`open`/`xdg-open`; Android and iOS answer a small
+  `rundll32`/`xdg-open`; Android answers a small
   `dev.naominet.lazer/updates` channel. No `url_launcher` dependency is needed.
 - **稍后** closes the dialog for this session. The next launch may offer the
   same release again after the daily interval.
