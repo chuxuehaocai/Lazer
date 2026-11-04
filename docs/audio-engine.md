@@ -125,6 +125,35 @@ while the engine reads it, so a read for a range that has not landed yet waits
 for the download instead of looking like a short file. Local files are opened
 directly with `lazer_audio_open_file_utf8`.
 
+### Streaming failure handling
+
+A growing cache file makes "how much is buffered" and "is the download alive"
+two different questions, and the app answers them separately:
+
+| Question | Source | Used for |
+| --- | --- | --- |
+| Buffered fraction | `AudioStreamEntry.progress` (`Content-Length` / `Content-Range`) | Startup wait, seek rail, seek limit |
+| Downloaded bytes | `AudioStreamEntry.downloadedBytes` | Startup wait when the fraction is unmeasurable |
+| Download failed | `AudioStreamEntry.failure` | Recovery instead of a dead player |
+| No byte for 25 s | `AudioStreamEntry.stalledFor` | Recovery of a parked decoder |
+
+A CDN that never announces a length (chunked transfer, an HTTP/2 front end)
+reports `progress == null`, not zero: the bytes are real but the fraction is
+unknown. Starting playback on zero bytes hands the decoder an empty file that
+parks in `read` until the bridge's own 45 s stall deadline, which is why the
+startup path waits for `AppState.startupBytes` whenever the fraction cannot be
+measured. `NativeAudioEngine` exposes all four facts through
+`StreamingBufferHealthAudioEngine`.
+
+The decode thread cannot be interrupted from Dart, so recovery goes through the
+engine: `NativeAudioEngine.restartStream()` runs `stop()` on the worker isolate
+(which closes the reader and releases the parked read) and then reopens the same
+URL with `AudioStreamCache.open(force: true)`, which resumes the HTTP range from
+the bytes already on disk. `AppState` drives that from two places — the
+`failures` stream (`_recoverFailedStream`) and its own no-progress watchdog
+(`_checkStreamStall`) — reloading the source at the position the listener was at,
+up to `AppState.maxStreamRetries` times per track before reporting the failure.
+
 ## Building
 
 The engine needs a **DSD-capable** FFmpeg (`AV_SAMPLE_FMT_DSD`, `AVChannelLayout`,

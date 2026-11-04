@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 import '../cache/disk_cache.dart';
 import '../cache/media_cache.dart';
 import '../gateway/gateway.dart';
+import '../gateway/transport.dart' show GatewayServiceException;
 import 'audio_quality.dart';
 import 'billboard.dart';
 import 'biliboard.dart';
@@ -1600,7 +1601,12 @@ class Catalog {
         }
       } catch (error) {
         failure ??= error;
-        mayTryUpstream = false;
+        // A refusal is about the account or the song, so hammering every lower
+        // tier would only repeat the same answer. A rate refusal is different:
+        // it has already been retried once inside `_resolveAudioSource`, and a
+        // different rendition is a different request, so the lower tiers are
+        // still worth a try rather than failing the track outright.
+        if (!isRateLimited(error)) mayTryUpstream = false;
         _online = false;
       }
     }
@@ -1609,6 +1615,22 @@ class Catalog {
     return null;
   }
 
+  /// Whether [error] is the service's request-rate refusal.
+  ///
+  /// Holding down "next" is enough to reach it. It is deliberately *not*
+  /// treated as an ordinary failure: it says nothing about the song, so
+  /// playback degrades to another rendition (or a cached file) instead of
+  /// reporting the track as unplayable.
+  static bool isRateLimited(Object? error) =>
+      error is GatewayServiceException && _isRateLimitCode(error.code);
+
+  /// The codes the service uses to say "too many requests".
+  ///
+  /// -460 is the service's "too frequent" code; 406 is the refusal the CDN-side
+  /// endpoints answer with; 429 is the standard one.
+  static bool _isRateLimitCode(int code) =>
+      code == -460 || code == 406 || code == 429;
+
   /// Playback URL for a track, or null when the gateway has none (VIP /
   /// region lock / offline).
   Future<String?> audioUrlFor(
@@ -1616,14 +1638,49 @@ class Catalog {
     AudioQuality quality = AudioQuality.exhigh,
   }) async => (await audioSourceFor(track, quality: quality))?.url;
 
+  /// Resolves one requested tier, retrying it once when the *answer* was a
+  /// request-rate refusal.
+  ///
+  /// A refusal that arrives as an exception is retried by the gateway transport
+  /// itself; here [songUrl] returns normally, so an empty entry carrying the
+  /// refusal code is the signal to wait and ask this same tier again. Retrying
+  /// inside the tier keeps every tier requested exactly once, which is the
+  /// contract the fallback chain is built on.
   Future<AudioSource?> _resolveAudioSource(
     int id,
     AudioQuality requested,
   ) async {
-    final GatewaySongUrl? result = await gateway.songUrl(
-      id,
-      level: requested.level,
-    );
+    for (var attempt = 0; ; attempt++) {
+      final GatewaySongUrl? result = await gateway.songUrl(
+        id,
+        level: requested.level,
+      );
+      final int? code = result?.code;
+      final bool refusedByRate = code != null && _isRateLimitCode(code);
+      final AudioSource? resolved = _audioSourceFrom(result, requested);
+      if (resolved != null) return resolved;
+      if (!refusedByRate || attempt >= _rateLimitAttempts - 1) {
+        if (refusedByRate) {
+          // Still refused after the paced retry: surface it as the service
+          // refusal it is, so the caller degrades instead of blaming the song.
+          throw GatewayServiceException(code, '/song/url/v1');
+        }
+        return null;
+      }
+      // The refusal is a verdict on the request rate, not on the song.
+      await Future<void>.delayed(_rateLimitBackoff);
+    }
+  }
+
+  /// Attempts per tier, and the pause between them, for a rate refusal.
+  static const int _rateLimitAttempts = 2;
+  static const Duration _rateLimitBackoff = Duration(milliseconds: 700);
+
+  /// Maps one gateway answer onto a playable source, or null when there is none.
+  static AudioSource? _audioSourceFrom(
+    GatewaySongUrl? result,
+    AudioQuality requested,
+  ) {
     final String? raw = result?.url;
     if (raw == null || raw.isEmpty) return null;
     final String url = raw.startsWith('http://')

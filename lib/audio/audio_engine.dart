@@ -31,6 +31,45 @@ abstract interface class SeekBoundaryReportingAudioEngine {
   bool get seekIsLimitedByBuffer;
 }
 
+/// Optional capability: what a network source's download is doing right now.
+///
+/// A CDN that never sends `Content-Length` (chunked transfer, a proxied CDN, an
+/// HLS-style segmenter) makes "how far ahead are we" unanswerable: the fraction
+/// is unknown, not zero. That distinction is what this surface carries:
+///
+///   * [streamedBytes] is always real — the downloader's byte counter — so a
+///     caller can tell "the download has not started" (0 bytes: playing now
+///     gives the decoder an empty file to block on) from "the download cannot be
+///     measured" (bytes are landing but there is no total to divide by).
+///   * [streamFailed] is the download the engine is feeding the decoder from
+///     having ended in failure. The engine reports that as a decode failure too,
+///     but a caller watching a screen-position watchdog should see it without
+///     waiting for the terminal event.
+///   * [streamStalled] means no byte has landed for long enough that the reader
+///     is about to give up, which is the state a slow-but-alive CDN produces.
+///
+/// Engines without this surface (and the test doubles that only need transport)
+/// keep the plain [AudioEngine] behaviour: [AudioEngine] itself never requires it.
+abstract interface class StreamingBufferHealthAudioEngine {
+  /// Bytes of the current network source that have landed on disk.
+  ///
+  /// Null when the current source is not a network source.
+  int? get streamedBytes;
+
+  /// Whether the current download has failed (as opposed to still running or
+  /// having finished cleanly).
+  bool get streamFailed;
+
+  /// Whether no byte of the current download has landed for long enough that
+  /// playback is stalled rather than merely slow.
+  bool get streamStalled;
+
+  /// Restarts the current network source, resuming the cache file where it
+  /// stopped. Returns false when there is nothing to restart (not a network
+  /// source, or no cache entry behind the current source).
+  bool restartStream();
+}
+
 /// Optional engine capability: a queue the platform keeps decoding across.
 ///
 /// [AudioEngine.setUrl] replaces the source, which tears the decoder down and

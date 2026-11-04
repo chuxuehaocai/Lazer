@@ -7,6 +7,8 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
+import 'package:lazer_nextgen/gateway/transport.dart'
+    show GatewayServiceException;
 
 const Track _track = Track(
   id: '42',
@@ -59,6 +61,43 @@ class _BitrateGateway extends NeteaseGateway {
         type: 'mp3',
         code: 200,
       );
+}
+
+/// Answers the first [refusalsBeforeSuccess] requests per tier with the
+/// service's "too frequent" refusal: HTTP 200, an empty entry, and code 406.
+class _RateLimitedGateway extends NeteaseGateway {
+  _RateLimitedGateway({
+    required this.refusalsBeforeSuccess,
+    this.available = const <AudioQuality>{},
+  });
+
+  final int refusalsBeforeSuccess;
+  final Set<AudioQuality> available;
+  final List<String> levels = <String>[];
+  final Map<String, int> _refused = <String, int>{};
+
+  @override
+  Future<GatewaySongUrl?> songUrl(int id, {String level = 'exhigh'}) async {
+    levels.add(level);
+    final int refused = _refused[level] ?? 0;
+    final AudioQuality? requested = AudioQualityInfo.fromLevel(level);
+    if (refused < refusalsBeforeSuccess) {
+      _refused[level] = refused + 1;
+      return GatewaySongUrl(id: id, code: 406);
+    }
+    if (requested == null || !available.contains(requested)) {
+      return GatewaySongUrl(id: id, code: 404);
+    }
+    return GatewaySongUrl(
+      id: id,
+      url: 'https://audio.test/$id-${requested.name}.mp3',
+      br: requested.bitrate,
+      type: 'mp3',
+      code: 200,
+      level: requested.level,
+      size: 4096,
+    );
+  }
 }
 
 void main() {
@@ -222,6 +261,61 @@ void main() {
       expect(gateway.levels, <String>['lossless']);
       expect(catalog.online, isFalse);
     });
+
+    test(
+      'a rate refusal with an empty URL retries its tier, not the song',
+      () async {
+        // Holding "next" makes the service answer HTTP 200 with an empty entry
+        // carrying the refusal code. That must not be reported as an
+        // unavailable song: each tier is asked again after a pause, and the
+        // answer that finally succeeds is the one that plays.
+        final _RateLimitedGateway gateway = _RateLimitedGateway(
+          refusalsBeforeSuccess: 1,
+          available: <AudioQuality>{AudioQuality.higher},
+        );
+        final Catalog catalog = Catalog(gateway: gateway);
+        final AudioSource? source = await catalog.audioSourceFor(
+          _track,
+          quality: AudioQuality.lossless,
+          useCache: false,
+        );
+        expect(source?.quality, AudioQuality.higher);
+        expect(
+          gateway.levels,
+          <String>[
+            'lossless',
+            'lossless',
+            'exhigh',
+            'exhigh',
+            'higher',
+            'higher',
+          ],
+          reason: 'every tier is asked exactly twice: refused, then granted',
+        );
+      },
+    );
+
+    test(
+      'a rate refusal that persists is reported as a service refusal',
+      () async {
+        final Catalog catalog = Catalog(
+          gateway: _RateLimitedGateway(
+            refusalsBeforeSuccess: 100,
+            available: <AudioQuality>{},
+          ),
+        );
+        await expectLater(
+          catalog.audioUrlFor(_track, quality: AudioQuality.lossless),
+          throwsA(
+            isA<GatewayServiceException>().having(
+              (GatewayServiceException e) => e.code,
+              'code',
+              406,
+            ),
+          ),
+        );
+      },
+    );
 
     test(
       'a lower-tier cache entry still plays after a transport failure',
