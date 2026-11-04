@@ -6,6 +6,7 @@ enum MusicEntityKind { song, album, artist, playlist, user }
 enum MusicCapability {
   search,
   browseAlbums,
+  savedAlbums,
   playlists,
   editPlaylists,
   favorites,

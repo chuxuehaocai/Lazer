@@ -157,6 +157,7 @@ LargeScreenActions _noopActions() => LargeScreenActions(
   onOpenChart: (MusicChart chart) {},
   onOpenLikes: () {},
   onOpenLocalMusic: () {},
+  onOpenSavedAlbums: () {},
   onPlayTracks: (List<Track> tracks, int index) {},
 );
 
@@ -606,6 +607,48 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('播放全部'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the library rail offers 收藏的专辑 beside the other pages', (
+      WidgetTester tester,
+    ) async {
+      tester.view.physicalSize = const Size(1280, 720);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final AppState state = AppState(catalog: _Catalog());
+      addTearDown(state.dispose);
+      var opened = 0;
+      await tester.pumpWidget(
+        TvScope(
+          active: true,
+          child: MaterialApp(
+            theme: buildAppleTheme(brightness: Brightness.dark),
+            home: Scaffold(
+              body: LargeScreenLibraryPage(
+                state: state,
+                actions: LargeScreenActions(
+                  onOpenPlaylist: (Playlist playlist) {},
+                  onOpenAlbum: (Album album) {},
+                  onOpenArtist: (ArtistRef artist) {},
+                  onOpenChart: (MusicChart chart) {},
+                  onOpenLikes: () {},
+                  onOpenLocalMusic: () {},
+                  onOpenSavedAlbums: () => opened++,
+                  onPlayTracks: (List<Track> tracks, int index) {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final Finder entry = find.text('收藏的专辑');
+      expect(entry, findsOneWidget);
+      await tester.tap(entry);
+      await tester.pumpAndSettle();
+      expect(opened, 1);
       expect(tester.takeException(), isNull);
     });
   });

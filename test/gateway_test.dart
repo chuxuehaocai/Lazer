@@ -273,6 +273,58 @@ void main() {
       );
     });
 
+    test('maps the saved albums sublist onto its weapi route', () {
+      final NeteaseRequest request = buildNeteaseRequest(
+        '/album/sublist',
+        const <String, String>{'limit': '50', 'offset': '100'},
+      );
+      expect(request.path, '/api/album/sublist');
+      expect(request.encoding, NeteaseEncoding.weapi);
+      expect(request.payload['limit'], '50');
+      expect(request.payload['offset'], '100');
+      // Without `total` the service answers without `hasMore`, and the album
+      // library could not tell whether another page exists.
+      expect(request.payload['total'], true);
+
+      final NeteaseRequest first = buildNeteaseRequest(
+        '/album/sublist',
+        const <String, String>{},
+      );
+      expect(first.payload['limit'], '30');
+      expect(first.payload['offset'], '0');
+    });
+
+    test('the sub list envelope is read in exactly one place', () {
+      final List<GatewayAlbum> albums = albumSublistAlbums(<String, dynamic>{
+        'code': 200,
+        'count': 34,
+        'data': <Map<String, dynamic>>[
+          <String, dynamic>{'id': 7, 'name': 'Night', 'size': 4},
+          <String, dynamic>{'id': 8, 'name': 'Day'},
+        ],
+        'hasMore': true,
+      });
+      expect(albums.map((GatewayAlbum album) => album.id), <int>[7, 8]);
+      expect(albums.first.trackCount, 4);
+      expect(albumSublistCount(<String, dynamic>{'count': 34}), 34);
+      expect(albumSublistHasMore(<String, dynamic>{'hasMore': true}), isTrue);
+
+      // The endpoints that spell the array `albums` still read.
+      expect(
+        albumSublistAlbums(<String, dynamic>{
+          'albums': <Map<String, dynamic>>[
+            <String, dynamic>{'id': 9, 'name': 'Later'},
+          ],
+        }).single.title,
+        'Later',
+      );
+      // An envelope without a list is an empty page, not a crash.
+      expect(albumSublistAlbums(const <String, dynamic>{}), isEmpty);
+      expect(albumSublistAlbums(<String, dynamic>{'data': 'no'}), isEmpty);
+      expect(albumSublistCount(const <String, dynamic>{}), isNull);
+      expect(albumSublistHasMore(const <String, dynamic>{}), isFalse);
+    });
+
     test('maps cloud playlist creation and track manipulation', () {
       final NeteaseRequest create = buildNeteaseRequest(
         '/playlist/create',

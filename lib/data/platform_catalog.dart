@@ -158,6 +158,17 @@ class _PlatformCatalog {
     );
   }
 
+  /// Starred albums as the album library shows them: one page at a time, with
+  /// the provider's own "there is more" answer preserved.
+  Future<AlbumPage> savedAlbums(MusicGateway gateway, int offset) async {
+    final page = await gateway.savedAlbums(limit: 100, offset: offset);
+    return AlbumPage(
+      albums: page.items.map(album).toList(),
+      more: page.hasMore,
+      receivedCount: page.items.length,
+    );
+  }
+
   Future<ArtistAlbumPage> artistAlbumPage(ArtistRef seed, int offset) async {
     final id = reference(seed.key, MusicEntityKind.artist);
     final page = await owner(id).artistAlbums(id, limit: 100, offset: offset);

@@ -393,6 +393,12 @@ class Album {
   final String releaseType;
   final String subType;
 
+  /// Whether the shared album detail page can open this entry: a NetEase
+  /// album id or a namespaced platform reference.
+  bool get hasReference =>
+      (int.tryParse(id) ?? 0) > 0 ||
+      MusicId.tryParse(id)?.kind == MusicEntityKind.album;
+
   AlbumReleaseGroup get releaseGroup {
     final String value = '$releaseType $subType'.toLowerCase();
     if (value.contains('single') ||

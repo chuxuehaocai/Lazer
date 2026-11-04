@@ -91,6 +91,7 @@ Widget _library(
         state: state,
         onOpenPlaylist: onOpen ?? (Playlist playlist) {},
         onOpenLocalMusic: () {},
+        onOpenSavedAlbums: () {},
       ),
     ),
   ),

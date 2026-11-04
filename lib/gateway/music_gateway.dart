@@ -72,6 +72,14 @@ abstract class MusicGateway {
     int limit = 30,
     int offset = 0,
   });
+
+  /// Albums the account saved to its collection (NetEase 收藏的专辑).
+  ///
+  /// Distinct from [albums], which browses everything the provider holds.
+  /// Adapters without a saved-album view leave this unsupported.
+  Future<MusicPage<MusicAlbum>> savedAlbums({int limit = 30, int offset = 0}) =>
+      Future.error(MusicUnsupportedException(provider.id, 'savedAlbums'));
+
   Future<MusicPage<MusicPlaylist>> playlists({int limit = 30, int offset = 0});
   Future<MusicPlaylist> playlist(MusicId id);
   Future<MusicPage<MusicSong>> playlistSongs(
