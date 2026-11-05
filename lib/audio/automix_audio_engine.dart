@@ -91,8 +91,8 @@ class AutoMixAudioEngine
   late final Timer _clock;
   final StreamController<void> _completed = StreamController<void>.broadcast();
   final StreamController<int> _advanced = StreamController<int>.broadcast();
-  final StreamController<String> _failures =
-      StreamController<String>.broadcast();
+  final StreamController<AudioFailure> _failures =
+      StreamController<AudioFailure>.broadcast();
   final StreamController<void> _bufferChanges =
       StreamController<void>.broadcast();
 
@@ -200,9 +200,11 @@ class AutoMixAudioEngine
   @override
   Stream<void> get bufferChanges => _bufferChanges.stream;
   @override
-  Stream<String> get failures => _failures.stream;
+  Stream<AudioFailure> get failures => _failures.stream;
   @override
-  String? get pendingFailure => fallbackNotice;
+  AudioFailure? get pendingFailure => fallbackNotice == null
+      ? null
+      : AudioFailure(fallbackNotice!, AudioFailureKind.unknown);
 
   @override
   Future<void> setUrl(String url) async {
@@ -327,7 +329,11 @@ class AutoMixAudioEngine
           );
         } else if (player == _active && _sourceLoaded) {
           _playing = false;
-          if (!_failures.isClosed) _failures.add('$error\n$stack');
+          if (!_failures.isClosed) {
+            _failures.add(
+              AudioFailure('$error\n$stack', AudioFailureKind.unknown),
+            );
+          }
         }
       }),
     );
@@ -551,7 +557,9 @@ class AutoMixAudioEngine
             if (!_disposed &&
                 generation == _generation &&
                 !_failures.isClosed) {
-              _failures.add('$error\n$stack');
+              _failures.add(
+                AudioFailure('$error\n$stack', AudioFailureKind.unknown),
+              );
             }
           })
           .whenComplete(() {
