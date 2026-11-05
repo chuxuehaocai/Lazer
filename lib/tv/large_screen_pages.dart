@@ -19,6 +19,7 @@ import '../data/catalog.dart';
 import '../data/catalog_details.dart';
 import '../data/models.dart';
 import '../downloads/download_dialog.dart';
+import '../gateway/music_models.dart';
 import '../l10n/app_localizations.dart';
 import '../ui/login.dart';
 import '../ui/pages.dart';
@@ -44,6 +45,7 @@ class LargeScreenActions {
     required this.onOpenChart,
     required this.onOpenLikes,
     required this.onOpenLocalMusic,
+    required this.onOpenSavedAlbums,
     required this.onPlayTracks,
   });
 
@@ -53,6 +55,7 @@ class LargeScreenActions {
   final ValueChanged<MusicChart> onOpenChart;
   final VoidCallback onOpenLikes;
   final VoidCallback onOpenLocalMusic;
+  final VoidCallback onOpenSavedAlbums;
   final void Function(List<Track> tracks, int index) onPlayTracks;
 }
 
@@ -649,6 +652,10 @@ class _LargeScreenLibraryPageState extends State<LargeScreenLibraryPage> {
                 setState(() => _filter = value),
             onLocalMusic: widget.actions.onOpenLocalMusic,
             onLikes: widget.actions.onOpenLikes,
+            onSavedAlbums: widget.actions.onOpenSavedAlbums,
+            showsSavedAlbums: widget.state.supportsMusic(
+              MusicCapability.savedAlbums,
+            ),
           ),
         ),
         Expanded(
@@ -677,12 +684,18 @@ class _LibraryRail extends StatelessWidget {
     required this.onSelect,
     required this.onLocalMusic,
     required this.onLikes,
+    required this.onSavedAlbums,
+    required this.showsSavedAlbums,
   });
 
   final LargeScreenLibraryFilter selected;
   final ValueChanged<LargeScreenLibraryFilter> onSelect;
   final VoidCallback onLocalMusic;
   final VoidCallback onLikes;
+  final VoidCallback onSavedAlbums;
+
+  /// Whether the active gateway keeps a saved-album collection at all.
+  final bool showsSavedAlbums;
 
   @override
   Widget build(BuildContext context) {
@@ -717,6 +730,12 @@ class _LibraryRail extends StatelessWidget {
             icon: Icons.folder_rounded,
             onTap: onLocalMusic,
           ),
+          if (showsSavedAlbums)
+            _RailButton(
+              label: '收藏的专辑',
+              icon: Icons.album_rounded,
+              onTap: onSavedAlbums,
+            ),
           _RailButton(
             label: '我喜欢的音乐',
             icon: Icons.favorite_rounded,
@@ -2237,6 +2256,21 @@ class LargeScreenLocalMusicPage extends StatelessWidget {
     maxWidth: 1240,
     bottomInset: LargeScreenMetrics.floatingBarInset,
     child: LocalMusicPage(state: state),
+  );
+}
+
+/// 收藏的专辑 on a television: the same page the desktop rail opens, read at
+/// ten-foot sizing.
+class LargeScreenSavedAlbumsPage extends StatelessWidget {
+  const LargeScreenSavedAlbumsPage({super.key, required this.state});
+
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) => LargeScreenReusedPage(
+    maxWidth: 1240,
+    bottomInset: LargeScreenMetrics.floatingBarInset,
+    child: AppSavedAlbumsPage(state: state),
   );
 }
 

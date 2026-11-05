@@ -20,6 +20,11 @@ part 'platform_catalog.dart';
 /// A local playlist identity for the complete daily recommendation response.
 const String dailyRecommendationsPlaylistId = 'daily-recommendations';
 
+/// Albums read per 收藏的专辑 page. Large enough that a collection of a few
+/// hundred albums opens in a handful of reads, small enough to stay a fast
+/// first paint.
+const int _savedAlbumPageSize = 50;
+
 /// Music returned by the gateway.
 class HomeFeed {
   const HomeFeed({
@@ -134,6 +139,11 @@ class Catalog {
   // Keys that a mutation invalidated but whose disk tombstone may not have
   // landed yet. Cache-first reads must skip them even during that window.
   final Set<String> _invalidatedKeys = <String>{};
+
+  /// One generation per account scope for the paginated 收藏的专辑 reads. A
+  /// forced refresh bumps it, which retires every cached page of the
+  /// collection at once instead of only the one key a page happens to hold.
+  final Map<String, int> _savedAlbumGenerations = <String, int>{};
 
   /// The hottest decoded snapshots, in front of the disk cache.
   ///
@@ -1306,6 +1316,70 @@ class Catalog {
 
   Future<List<Track>> albumTracks(int albumId) async {
     return (await albumDetails(albumId)).tracks;
+  }
+
+  /// 收藏的专辑: one page of the albums the signed-in account saved.
+  ///
+  /// [uid] scopes the NetEase collection; a platform connection ignores it and
+  /// reads its own starred albums instead.
+  ///
+  /// Every page is cached under its own key, so [force] cannot expire them one
+  /// by one: it bumps the generation the keys carry instead, which drops the
+  /// whole set at once and keeps a refreshed collection from mixing fresh
+  /// first pages with stale later ones.
+  Future<AlbumPage> savedAlbums(
+    int uid, {
+    int offset = 0,
+    bool force = false,
+  }) async {
+    if (offset < 0) throw ArgumentError.value(offset, 'offset');
+    if (usesPlatformGateway) {
+      return _platform.savedAlbums(activeGateway, offset);
+    }
+    if (uid <= 0) {
+      return const AlbumPage(albums: <Album>[], more: false, receivedCount: 0);
+    }
+    final String scope = '$_scope:$uid';
+    if (force) {
+      _savedAlbumGenerations[scope] =
+          (_savedAlbumGenerations[scope] ?? 0) + 1;
+    }
+    final int generation = _savedAlbumGenerations[scope] ?? 0;
+    final key = 'saved-albums:v3:$scope:$generation:$offset';
+    return _cached(
+      key,
+      const Duration(minutes: 15),
+      AlbumPage.fromJson,
+      (value) => value.toJson(),
+      () async {
+        final payload = await gateway.albumSublist(
+          limit: _savedAlbumPageSize,
+          offset: offset,
+        );
+        final albums = albumSublistAlbums(payload);
+        _online = true;
+        // Only what the detail page can open: an entry without a usable album
+        // reference would render as a card that does nothing.
+        final List<Album> openable = <Album>[];
+        for (final GatewayAlbum album in albums) {
+          final Album value = albumFromGateway(album);
+          if (value.hasReference) openable.add(value);
+        }
+        return AlbumPage(
+          albums: openable,
+          // The marker the route asked for, with the page length as a
+          // backstop: a service that stops sending it must not truncate the
+          // collection at its first page.
+          more:
+              (albumSublistHasMore(payload) ||
+                  albums.length >= _savedAlbumPageSize) &&
+              albums.isNotEmpty,
+          total: albumSublistCount(payload),
+          receivedCount: albums.length,
+        );
+      },
+      failureCooldown: const Duration(seconds: 30),
+    );
   }
 
   Future<List<Track>> albumTracksFor(String key) async =>

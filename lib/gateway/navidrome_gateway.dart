@@ -54,6 +54,7 @@ class NavidromeGateway extends MusicGateway {
   Set<MusicCapability> get capabilities => const {
     MusicCapability.search,
     MusicCapability.browseAlbums,
+    MusicCapability.savedAlbums,
     MusicCapability.playlists,
     MusicCapability.editPlaylists,
     MusicCapability.favorites,
@@ -486,6 +487,22 @@ class NavidromeGateway extends MusicGateway {
     final body = await _request('getStarred2');
     return _slice(
       _list(_map(body['starred2'])['song']).map(_song).toList(),
+      limit,
+      offset,
+    );
+  }
+
+  /// Starred albums: the Subsonic collection behind 收藏的专辑, read from the
+  /// same `getStarred2` payload that answers [favorites].
+  @override
+  Future<MusicPage<MusicAlbum>> savedAlbums({
+    int limit = 30,
+    int offset = 0,
+  }) async {
+    validatePage(limit, offset);
+    final body = await _request('getStarred2');
+    return _slice(
+      _list(_map(body['starred2'])['album']).map(_album).toList(),
       limit,
       offset,
     );

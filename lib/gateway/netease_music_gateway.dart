@@ -26,6 +26,7 @@ class NeteaseMusicGateway extends MusicGateway {
   @override
   Set<MusicCapability> get capabilities => const {
     MusicCapability.search,
+    MusicCapability.savedAlbums,
     MusicCapability.playlists,
     MusicCapability.editPlaylists,
     MusicCapability.favorites,
@@ -276,6 +277,27 @@ class NeteaseMusicGateway extends MusicGateway {
       limit,
       offset,
       more: body['more'] == true,
+    );
+  }
+
+  @override
+  Future<MusicPage<MusicAlbum>> savedAlbums({
+    int limit = 30,
+    int offset = 0,
+  }) async {
+    validatePage(limit, offset);
+    // The collection belongs to an account; a guest fails here instead of
+    // receiving the service's own sign-in redirect.
+    _uid;
+    final body = await api.albumSublist(limit: limit, offset: offset);
+    final albums = albumSublistAlbums(body);
+    return _page(
+      albums.map(_album).toList(),
+      limit,
+      offset,
+      // A full page without the marker still means "ask again": the next read
+      // answers empty and the paging ends there.
+      more: albumSublistHasMore(body) || albums.length >= limit,
     );
   }
 

@@ -620,6 +620,22 @@ class NeteaseGateway {
     return album is Map<String, dynamic> ? GatewayAlbum.fromJson(album) : null;
   }
 
+  /// 收藏的专辑: the albums the signed-in account saved to its collection.
+  ///
+  /// Answers `{code, data, count, hasMore}` — `data` is this page's album
+  /// array, `count` the size of the whole collection. `hasMore` is only sent
+  /// because the route asks for a total. Read the page with
+  /// [albumSublistAlbums], which is the only place that knows the envelope.
+  Future<Map<String, dynamic>> albumSublist({int limit = 30, int offset = 0}) {
+    if (limit <= 0 || limit > 500 || offset < 0) {
+      throw ArgumentError('Invalid album page.');
+    }
+    return _transport.request('/album/sublist', <String, String>{
+      'limit': '$limit',
+      'offset': '$offset',
+    });
+  }
+
   /// Raw `/album` payload: `album` plus the full `songs` list.
   Future<Map<String, dynamic>> albumDetailRaw(int id) async {
     return _transport.request('/album', <String, String>{'id': id.toString()});
@@ -1082,3 +1098,28 @@ class NeteaseGateway {
     );
   }
 }
+
+/// The albums of one 收藏的专辑 page.
+///
+/// The sub list answers `{code, data, count, hasMore}`: the album array is
+/// `data`, and `count` is the size of the whole collection. `albums` is
+/// accepted as well because the artist and album endpoints spell the same
+/// array that way. Every reader goes through here so the envelope only has to
+/// be learned once.
+List<GatewayAlbum> albumSublistAlbums(Map<String, dynamic> body) {
+  final dynamic raw = body['data'] ?? body['albums'];
+  if (raw is! List) return const <GatewayAlbum>[];
+  return <GatewayAlbum>[
+    for (final dynamic item in raw)
+      if (item is Map<String, dynamic>) GatewayAlbum.fromJson(item),
+  ];
+}
+
+/// How many albums the whole collection holds, when the page reports it.
+int? albumSublistCount(Map<String, dynamic> body) =>
+    (body['count'] as num?)?.toInt();
+
+/// Whether the service says another page exists. It only answers this because
+/// the sub list route asks for a total.
+bool albumSublistHasMore(Map<String, dynamic> body) =>
+    body['hasMore'] == true || body['more'] == true;

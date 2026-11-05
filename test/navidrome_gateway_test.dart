@@ -477,6 +477,23 @@ void main() {
       expect(_parameters(requests.last)['id'], [_songJson['id']]);
     });
 
+    test('收藏的专辑 reads starred albums from the same getStarred2', () async {
+      respond = (_) => _ok({
+        'starred2': {
+          'song': [_songJson],
+          'album': [_albumJson, _albumJson],
+        },
+      });
+      expect(gateway.supports(MusicCapability.savedAlbums), isTrue);
+      final page = await gateway.savedAlbums(limit: 1, offset: 1);
+      expect(_method(requests.last), 'getStarred2');
+      expect(page.items.single.title, 'Night');
+      expect(page.items.single.songCount, 2);
+      expect(page.hasMore, isFalse);
+      expect((await gateway.savedAlbums(limit: 5)).items, hasLength(2));
+      expect((await gateway.savedAlbums()).items, hasLength(2));
+    });
+
     test(
       'streams preserve HTTP+proxy prefix and request raw or transcoding',
       () async {

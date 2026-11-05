@@ -86,3 +86,36 @@ class ArtistAlbumPage {
         receivedCount: json['receivedCount'] as int? ?? 0,
       );
 }
+
+/// One page of the account's saved albums (收藏的专辑), read from the active
+/// gateway's own collection rather than from an artist or a search.
+class AlbumPage {
+  const AlbumPage({
+    required this.albums,
+    required this.more,
+    required this.receivedCount,
+    this.total,
+  });
+  final List<Album> albums;
+  final bool more;
+  final int receivedCount;
+
+  /// The size of the whole collection, when the service reports it.
+  final int? total;
+
+  Map<String, dynamic> toJson() => {
+    'albums': albums.map((album) => album.toJson()).toList(),
+    'more': more,
+    'receivedCount': receivedCount,
+    'total': total,
+  };
+  factory AlbumPage.fromJson(Map<String, dynamic> json) => AlbumPage(
+    albums: [
+      for (final album in json['albums'] as List)
+        Album.fromJson(album as Map<String, dynamic>),
+    ],
+    more: json['more'] == true,
+    receivedCount: json['receivedCount'] as int? ?? 0,
+    total: (json['total'] as num?)?.toInt(),
+  );
+}

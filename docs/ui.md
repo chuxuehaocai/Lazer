@@ -114,7 +114,8 @@ independently of those thresholds.
 | Page | Apple composition |
 | --- | --- |
 | 现在就听 | Large title, edge-to-edge featured playlist hero, horizontal recommendation shelf, grouped quick-pick track rows |
-| 资料库 | Large title, owned playlists, recommendation grid with 2–6 adaptive columns |
+| 资料库 | Large title, local music card, 收藏的专辑 entry, owned playlists, recommendation grid with 2–6 adaptive columns |
+| 收藏的专辑 | Large title with the collection count and a refresh, capsule search field, adaptive cover grid that pages as it scrolls and offers a sign-in state for guests |
 | 我喜欢 | Playlist hero and grouped track list, guest sign-in state; the shared playlist page's floating locate-current button |
 | 歌单详情 | Album-style hero, metadata and play/shuffle controls, grouped track list, floating locate-current-track button |
 | 搜索 | Capsule search field, artist/search result sections, track rows and playlist grid |
