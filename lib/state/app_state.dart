@@ -2819,16 +2819,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return true;
     }
     final DateTime deadline = DateTime.now().add(resumeBufferWait);
-    while (generation == _generation &&
-        _realActive &&
-        !DateTime.now().isAfter(deadline)) {
+    // Every caller is opening a source, so playback has not started yet and `_realActive` is still
+    // false: waiting on it would skip the loop entirely and drop the resume. What bounds the wait is
+    // the load being superseded, which is what `generation` reports.
+    while (generation == _generation && !DateTime.now().isAfter(deadline)) {
       final StreamingBufferHealthAudioEngine? health =
           engine is StreamingBufferHealthAudioEngine
           ? engine as StreamingBufferHealthAudioEngine
           : null;
       if (health != null && health.streamFailed) return false;
       await Future<void>.delayed(const Duration(milliseconds: 50));
-      if (generation != _generation || !_realActive) return false;
+      if (generation != _generation) return false;
       if (range.canSeekTo(target)) {
         await engine.seek(target);
         return true;
@@ -2979,15 +2980,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (generation != _generation) return;
       await engine.setVolume(_volume);
       if (resumeAt != null && resumeAt > Duration.zero) {
+        bool reached = false;
         try {
           // Waits for the download to cover the position: a streaming source is
           // not seekable past what has landed.
-          await _seekWhenReachable(resumeAt, generation);
+          reached = await _seekWhenReachable(resumeAt, generation);
         } catch (_) {
           // A source that cannot seek still plays; only the position is lost.
         }
         if (generation != _generation) return;
-        _position = resumeAt;
+        // Publishing a resume position the engine never took leaves the rail on a
+        // place the decoder never reached, so the position follows the outcome.
+        _position = reached ? resumeAt : Duration.zero;
       }
     } catch (error) {
       if (generation == _generation) _failPlayback('音频加载失败，请重试。');

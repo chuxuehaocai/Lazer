@@ -103,7 +103,7 @@ class _MusicPlatformState {
     await state.listenTogether.leave();
     state.pause();
     state._realActive = false;
-    state._queuedNextIndex = null;
+    state._clearQueuedNext();
     state._queueId = null;
     state._generation++;
     state._lyricGeneration++;
