@@ -156,6 +156,15 @@ class AudioStreamEntry {
     onLengthKnown?.call();
   }
 
+  /// Reports a size the response announced, whether or not the wait for it is still running.
+  ///
+  /// [_resolveLength] latches, so a caller that stopped waiting before the headers arrived would
+  /// otherwise never hear about the size at all.
+  void _announceLength() {
+    if (!_lengthResolved.isCompleted) _lengthResolved.complete();
+    onLengthKnown?.call();
+  }
+
   void cancel() {
     if (_cancelled || _complete) return;
     _cancelled = true;
@@ -198,11 +207,11 @@ class AudioStreamEntry {
       _resolveLength();
       return;
     }
-    if (position > 0 && announced == null) {
-      // A cache file left by a previous launch is its own length; the entry was
-      // re-opened without the size the provider passed the first time.
-      expectedBytes = position;
-    }
+    // A cache file left by a previous launch is a resume hint, never the track's size: it is exactly
+    // as long as the last session got. Publishing its length as `expectedBytes` told the demuxer the
+    // song ended there — the reader returns EOF at that byte count — and made `progress` report a
+    // partial file as fully downloaded. The size is filled in below, from the response or from a
+    // server that says the range is already satisfied.
     if (announced != null && announced > 0 && position > announced) {
       // The file is longer than the track claims to be (a changed variant or a
       // stale partial file): start over rather than resuming past the end.
@@ -219,6 +228,21 @@ class AudioStreamEntry {
       request.headers.set(HttpHeaders.rangeHeader, 'bytes=$position-');
     }
     final HttpClientResponse response = await request.close();
+    // A range starting past the end means the cache file already holds everything the server has,
+    // which is a finished download rather than a failure. It is also the only way to learn the size
+    // of a fully cached track whose provider never announced one, so it is recorded here: for a file
+    // the server will not serve a byte beyond, the file's length *is* the track's length.
+    if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable && position > 0) {
+      await response.drain<void>();
+      await _sink?.close();
+      _sink = null;
+      _downloadedBytes = position;
+      expectedBytes = position;
+      _complete = true;
+      _lastProgressAt = DateTime.now();
+      _announceLength();
+      return;
+    }
     if (response.statusCode != HttpStatus.ok &&
         response.statusCode != HttpStatus.partialContent) {
       throw HttpException(
@@ -239,7 +263,10 @@ class AudioStreamEntry {
     final int? total = _totalBytes(response, position);
     if (total != null) {
       expectedBytes = total;
-      _resolveLength();
+      // Announce even when the wait for it already expired: `expectedLengthWithin` gives up after a
+      // timeout, and the size that lands afterwards still has to reach the demuxer, which cannot
+      // turn a seek's timestamp into a byte offset without it.
+      _announceLength();
     }
 
     await for (final List<int> chunk in response.timeout(
