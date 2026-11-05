@@ -341,7 +341,9 @@ class AudioStreamEntry {
     }
     final int? marked = await _readMarker();
     if (marked != null && marked < length) {
-      // Drop the appended segments: they are not the track's prefix.
+      // Drop the appended segments: they are not the track's prefix. The ranges
+      // published below are what correctness depends on, so a platform that does
+      // not honour this truncate only leaves the file larger than it needs to be.
       final RandomAccessFile handle = await file.open(mode: FileMode.append);
       try {
         await handle.truncate(marked);
@@ -403,9 +405,12 @@ class AudioStreamEntry {
     if (start > 0 && !ranged) {
       // The server ignores the range and restarts the body at zero. Nothing it
       // sends can be appended where the prefix is, so the file is rewritten from
-      // the start instead of holding the same bytes twice.
+      // the start instead of holding the same bytes twice. Opening it in write
+      // mode is what truncates it: an append handle's truncate is not honoured on
+      // every platform, and the body that follows is written sequentially anyway.
       _rangeSupported = false;
-      await _sink?.truncate(0);
+      await _sink?.close();
+      _sink = await file.open(mode: FileMode.write);
       _windowStart = 0;
       _windowEnd = 0;
       _windowFileStart = 0;
