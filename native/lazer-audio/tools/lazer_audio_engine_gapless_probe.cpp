@@ -1767,6 +1767,296 @@ int runAutoMixBeatAlignCase() {
     return 0;
 }
 
+
+/* A click track whose bursts are a square wave at `toneHz` instead of the marker's DC, so a fixture
+ * can say how bright its song is: the exit planner reads the low band to choose between a reverb
+ * and a filter, and a filter that closes is only visible in a song's high band. The beats are the
+ * marker's, so the engine still measures a grid from it. */
+std::vector<uint8_t> makeToneClickTrack(bool rightChannel, double toneHz, uint16_t amplitude,
+    double firstClickSeconds, int32_t seconds, double burstSeconds) {
+    std::vector<uint8_t> wave = makeChannelMarkerWaveAt(rightChannel, 0, kSampleRate, seconds);
+    const int64_t frames = static_cast<int64_t>(seconds) * kSampleRate;
+    const double halfPeriod = 0.5 * static_cast<double>(kSampleRate) / toneHz;
+    for (int64_t frame = 0; frame < frames; ++frame) {
+        const double at = static_cast<double>(frame) / kSampleRate;
+        const double phase = std::fmod(at - firstClickSeconds, 0.5);
+        int16_t value = 0;
+        if (phase >= 0.0 && phase < burstSeconds) {
+            value = std::fmod(static_cast<double>(frame), 2.0 * halfPeriod) < halfPeriod
+                ? static_cast<int16_t>(amplitude) : static_cast<int16_t>(-amplitude);
+        }
+        const size_t offset = 44 + static_cast<size_t>(frame) * kFrameBytes +
+            (rightChannel ? 2 : 0);
+        wave[offset] = static_cast<uint8_t>(static_cast<uint16_t>(value) & 0xFF);
+        wave[offset + 1] = static_cast<uint8_t>(static_cast<uint16_t>(value) >> 8);
+    }
+    return wave;
+}
+
+/* One channel's peak over a window of the capture. */
+int32_t capturedPeak(const std::vector<uint8_t> &bytes, int32_t channel, int64_t from, int64_t to) {
+    int32_t peak = 0;
+    for (int64_t frame = from; frame < to; ++frame) {
+        const size_t offset = static_cast<size_t>(frame) * kFrameBytes +
+            static_cast<size_t>(channel) * 2;
+        if (offset + 1 >= bytes.size()) break;
+        const int16_t value = static_cast<int16_t>(static_cast<uint16_t>(bytes[offset]) |
+            (static_cast<uint16_t>(bytes[offset + 1]) << 8));
+        peak = std::max<int32_t>(peak, std::abs(value));
+    }
+    return peak;
+}
+
+/* How much of a window is audible at all, counted in buckets: a train of short taps covers a tenth
+ * of it, a decaying wash most of it. */
+double capturedCoverage(const std::vector<uint8_t> &bytes, int32_t channel, int64_t from,
+    int64_t to, int64_t bucketFrames, int32_t floor) {
+    if (bucketFrames <= 0) return 0.0;
+    int64_t buckets = 0;
+    int64_t covered = 0;
+    for (int64_t start = from; start + bucketFrames <= to; start += bucketFrames) {
+        buckets += 1;
+        if (capturedPeak(bytes, channel, start, start + bucketFrames) >= floor) covered += 1;
+    }
+    return buckets > 0 ? static_cast<double>(covered) / static_cast<double>(buckets) : 0.0;
+}
+
+/* How much of a window's energy sits in its sample-to-sample edges, which is where a square wave's
+ * harmonics are. A crossfade scales it unchanged; a low-pass that closes takes it away. */
+double capturedBrightness(const std::vector<uint8_t> &bytes, int32_t channel, int64_t from,
+    int64_t to) {
+    double edges = 0.0;
+    double total = 0.0;
+    int16_t previous = 0;
+    bool first = true;
+    for (int64_t frame = from; frame < to; ++frame) {
+        const size_t offset = static_cast<size_t>(frame) * kFrameBytes +
+            static_cast<size_t>(channel) * 2;
+        if (offset + 1 >= bytes.size()) break;
+        const int16_t value = static_cast<int16_t>(static_cast<uint16_t>(bytes[offset]) |
+            (static_cast<uint16_t>(bytes[offset + 1]) << 8));
+        if (!first) {
+            const double difference = static_cast<double>(value) - static_cast<double>(previous);
+            edges += difference * difference;
+        }
+        first = false;
+        total += static_cast<double>(value) * static_cast<double>(value);
+        previous = value;
+    }
+    return total > 0.0 ? edges / total : 0.0;
+}
+
+/* The three exits the reference player's DJ planner can choose. Each case gives the planner the
+ * two facts it reads — how much the two songs' low bands clash, and how far apart their levels
+ * sit — and then measures the exit the outgoing song leaves through. In every one of them the
+ * song is on the right channel and the outgoing one on the left, so the left channel after the
+ * hand-over is the exit alone. */
+
+/* The exit echo: the reference's three taps one beat apart, each 0.28 of the previous. Its point is
+ * the ring-out — the outgoing song has ended and its delay line has not. */
+int runAutoMixEchoTailCase() {
+    /* A twelve second click track, because the engine measures its grid from the first six seconds:
+     * a fixture without beats arms no exit at all. */
+    MemoryReader first(makeClickTrack(false, 0.0, 12));
+    MemoryReader second(makeClickTrack(true, 0.25, 12));
+    const auto firstReader = asReader(first);
+    const auto secondReaderRef = asReader(second);
+    ProbeEvents events;
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.device.buffer_millis = 120;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return fail("echo engine creation failed");
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 12'000};
+    if (engine->setAutoMix(4'000) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+        engine->queueReader(1, secondReaderRef, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("echo session did not start");
+    }
+    bool ended = false;
+    {
+        std::unique_lock guard(events.mutex);
+        ended = events.changed.wait_for(guard, std::chrono::seconds(60), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                events.events.end();
+        });
+    }
+    engine->destroy();
+    if (!ended) return fail("echo session failed to end");
+
+    /* The outgoing song is twelve seconds and the overlap is its last four. */
+    constexpr int64_t end = kSampleRate * 12;
+    std::lock_guard guard(capture->mutex);
+    /* The first beat and a quarter after the hand-over: the taps of the clicks just before it. */
+    const int32_t tailPeak = capturedPeak(capture->bytes, 0, end, end + kSampleRate * 5 / 4);
+    if (tailPeak < 200) {
+        std::cerr << "FAIL: the outgoing song left no echo behind (peak " << tailPeak << ")\n";
+        return fail("AutoMix did not render the exit echo");
+    }
+    /* And it is a tail, not a stuck level: three beats after the hand-over it is gone. */
+    const int32_t settledPeak =
+        capturedPeak(capture->bytes, 0, end + kSampleRate * 2, end + kSampleRate * 5 / 2);
+    if (settledPeak > 40) {
+        std::cerr << "FAIL: the echo never decayed (peak " << settledPeak << ")\n";
+        return fail("AutoMix left the echo ringing");
+    }
+    std::cout << "PASS: AutoMix rang the outgoing song out with the exit echo (peak " << tailPeak
+        << ", settled " << settledPeak << ")\n";
+    return 0;
+}
+
+/* Two bright songs, so their low bands do not clash: the planner's stand-in for the reference's
+ * "same key" test picks a reverb. Its tail is a wash of short combs, so it fills the gaps a train
+ * of taps would leave. The tone is a kilohertz — above the engine's bass band, but not so high
+ * that the reverb's own damping takes it out of the tail. */
+int runAutoMixReverbTailCase() {
+    /* Three hundred milliseconds of tone every half second: a song, rather than a click, so the
+     * reverb still has something to ring with when the hand-over comes. */
+    MemoryReader first(makeToneClickTrack(false, 1'000.0, 8'192, 0.0, 12, 0.3));
+    MemoryReader second(makeToneClickTrack(true, 1'000.0, 8'192, 0.25, 12, 0.3));
+    const auto firstReader = asReader(first);
+    const auto secondReaderRef = asReader(second);
+    ProbeEvents events;
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.device.buffer_millis = 120;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return fail("reverb engine creation failed");
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 12'000};
+    if (engine->setAutoMix(4'000) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+        engine->queueReader(1, secondReaderRef, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("reverb session did not start");
+    }
+    bool ended = false;
+    {
+        std::unique_lock guard(events.mutex);
+        ended = events.changed.wait_for(guard, std::chrono::seconds(60), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                events.events.end();
+        });
+    }
+    engine->destroy();
+    if (!ended) return fail("reverb session failed to end");
+
+    constexpr int64_t end = kSampleRate * 12;
+    std::lock_guard guard(capture->mutex);
+    const int32_t tailPeak = capturedPeak(capture->bytes, 0, end, end + kSampleRate / 4);
+    if (tailPeak < 200) {
+        std::cerr << "FAIL: the outgoing song left no reverb behind (peak " << tailPeak << ")\n";
+        return fail("AutoMix did not render the exit reverb");
+    }
+    /* Three quarters of a second of the tail, in twenty millisecond buckets: a reverb of a train of
+     * clicks is a decaying wash that is audible in most of them, where three taps would cover the
+     * two buckets they land in. */
+    constexpr int64_t bucket = kSampleRate / 50;
+    const double coverage = capturedCoverage(capture->bytes, 0, end, end + kSampleRate * 3 / 4,
+        bucket, 40);
+    if (coverage < 0.6) {
+        std::cerr << "FAIL: the ring-out is a train of taps, not a wash (coverage " << coverage
+            << ")\n";
+        return fail("AutoMix did not render a diffuse reverb tail");
+    }
+    const int32_t settledPeak =
+        capturedPeak(capture->bytes, 0, end + kSampleRate * 2, end + kSampleRate * 5 / 2);
+    if (settledPeak > 40) {
+        std::cerr << "FAIL: the reverb never decayed (peak " << settledPeak << ")\n";
+        return fail("AutoMix left the reverb ringing");
+    }
+    std::cout << "PASS: AutoMix rang the outgoing song out with the exit reverb (peak " << tailPeak
+        << ", coverage " << coverage << ", settled " << settledPeak << ")\n";
+    return 0;
+}
+
+/* A loud song handing over to a much quieter one: the planner filters the outgoing song out rather
+ * than echoing it. The filter closes across the overlap, so the song's high band goes before the
+ * crossfade has taken its level, and nothing is left ringing afterwards. */
+int runAutoMixFilterExitCase() {
+    /* A three hundred hertz square: above the engine's bass band, with the harmonics a closing
+     * low-pass takes away. The incoming song is twelve decibels quieter, which is what the
+     * reference's planner filters on. */
+    MemoryReader first(makeToneClickTrack(false, 300.0, 8'192, 0.0, 12, 0.05));
+    MemoryReader second(makeToneClickTrack(true, 300.0, 2'048, 0.25, 12, 0.05));
+    const auto firstReader = asReader(first);
+    const auto secondReaderRef = asReader(second);
+    ProbeEvents events;
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.device.buffer_millis = 120;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return fail("filter engine creation failed");
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 12'000};
+    if (engine->setAutoMix(4'000) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+        engine->queueReader(1, secondReaderRef, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("filter session did not start");
+    }
+    bool ended = false;
+    {
+        std::unique_lock guard(events.mutex);
+        ended = events.changed.wait_for(guard, std::chrono::seconds(60), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                events.events.end();
+        });
+    }
+    engine->destroy();
+    if (!ended) return fail("filter session failed to end");
+
+    /* The overlap is the song's last four seconds, so these are the bursts at its start and at
+     * seven eighths of the way through it. */
+    constexpr int64_t overlapStart = kSampleRate * 8;
+    constexpr int64_t overlapEnd = kSampleRate * 12;
+    static_assert(overlapStart + kSampleRate * 7 / 2 < overlapEnd,
+        "the filter case measures inside the song");
+    constexpr int64_t burst = kSampleRate / 20;
+    std::lock_guard guard(capture->mutex);
+    const double opening =
+        capturedBrightness(capture->bytes, 0, overlapStart, overlapStart + burst);
+    /* The last burst of the song, which is the one seven eighths of the way through the overlap:
+     * measuring between bursts would be measuring the noise floor. */
+    constexpr int64_t lastBurst = overlapStart + kSampleRate * 7 / 2;
+    const double closing =
+        capturedBrightness(capture->bytes, 0, lastBurst, lastBurst + burst);
+    if (closing > opening * 0.4) {
+        std::cerr << "FAIL: the outgoing song's high band survived the overlap (brightness "
+            << opening << " -> " << closing << ")\n";
+        return fail("AutoMix did not close a filter over the outgoing song");
+    }
+    const int32_t settledPeak =
+        capturedPeak(capture->bytes, 0, overlapEnd + kSampleRate / 2, overlapEnd + kSampleRate);
+    if (settledPeak > 40) {
+        std::cerr << "FAIL: the filter left a tail behind (peak " << settledPeak << ")\n";
+        return fail("AutoMix rang out through the exit filter");
+    }
+    std::cout << "PASS: AutoMix filtered the outgoing song out (brightness " << opening << " -> "
+        << closing << ", settled " << settledPeak << ")\n";
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && std::string(argv[1]) == "--automix-slow") return runAutoMixSlowSuccessorCase();
     if (runExistingFastGaplessCase() != 0) return 1;
@@ -1775,6 +2065,9 @@ int main(int argc, char **argv) {
     if (runAutoMixLevelMatchCase() != 0) return 1;
     if (runAutoMixSilentIntroCase() != 0) return 1;
     if (runAutoMixBeatAlignCase() != 0) return 1;
+    if (runAutoMixEchoTailCase() != 0) return 1;
+    if (runAutoMixReverbTailCase() != 0) return 1;
+    if (runAutoMixFilterExitCase() != 0) return 1;
     if (runAutoMixCancelAndSeekCase() != 0) return 1;
     if (runAutoMixSlowSuccessorCase() != 0) return 1;
     if (runUnderrunRecoveryCase() != 0) return 1;

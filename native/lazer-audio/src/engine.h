@@ -22,6 +22,11 @@
 
 namespace lazer::audio {
 
+/* How the outgoing song leaves a transition. The reference player's DJ planner chooses between a
+ * beat repeat, a reverb, a closing filter and an echo (`am_dj.inc`); the engine renders the last
+ * three — there is no repeat to render — and picks between them in engine.cpp. */
+enum class AutoMixExit { Echo, Reverb, Filter };
+
 class Engine;
 
 class Engine : public SourceConsumer {
@@ -73,10 +78,20 @@ private:
      * it skipped, so the overlap starts on music instead of dead air. */
     int64_t consumeIncomingSilence(SourceSlot &candidate, int32_t sampleRate, size_t channels);
     /* How strongly the two decks' low bands clash (0 = none, up to `kBassSwapMax`), measured from
-     * the outgoing block and the head of the incoming prefetch buffer. */
+     * the outgoing block and the head of the incoming prefetch buffer. Writes the head's peak
+     * sample into `incomingPeak` when it is given: the level half of the exit planner, whose
+     * outgoing half is the deck's own held peak. */
     double measureBassClash(
         const float *outgoing, int32_t outgoingFrames, SourceSlot &candidate, int32_t sampleRate,
-        size_t channels);
+        size_t channels, double *incomingPeak);
+    /* One frame of the armed exit effect on one channel: returns what it adds to the output and
+     * feeds the effect's delay line. `input` is the outgoing lane while the mix runs, and zero
+     * during the ring-out that follows it. */
+    double mixExitEffect(double input, size_t channel);
+    /* The reference player's DJ choice, run on the two facts the engine can measure: the level
+     * difference between the songs (its filter) and, in place of the musical key it has no analysis
+     * for, how much their low bands clash. */
+    static AutoMixExit planExitEffect(double levelDeltaDb, double bassClash);
     /* The overlap, moved onto the outgoing source's beat grid so the mix starts on a beat. */
     int64_t snapOverlapToBeat(
         const SourceSlot &slot, int64_t desiredFrames, int64_t mixStartOutputFrames);
@@ -227,6 +242,26 @@ private:
     std::vector<double> autoMixOutgoingLow_;
     std::vector<double> autoMixIncomingLow_;
     double autoMixBassAmount_ = 0.0;
+    /* The outgoing song's exit: a delay line of its own lane, read back either at the reference
+     * player's taps — three of them, one beat apart, each 0.28 of the previous — or through the
+     * reverb's combs, while the mix runs and for a few beats after it. That ring-out is what lets
+     * the song leave over the incoming one instead of being cut. */
+    std::vector<double> autoMixEcho_;
+    int64_t autoMixEchoCapacity_ = 0;
+    int64_t autoMixEchoIndex_ = 0;
+    int64_t autoMixEchoDelayFrames_ = 0;
+    int64_t autoMixEchoTailFrames_ = 0;
+    int64_t autoMixEchoElapsedFrames_ = 0;
+    bool autoMixEchoActive_ = false;
+    /* Which exit the song takes, and the state the two delay-line exits and the filter need: the
+     * reverb's comb delays and damping, the filter's one-pole per channel, and the outgoing deck's
+     * level as its planner sees it. */
+    AutoMixExit autoMixExit_ = AutoMixExit::Echo;
+    std::vector<int64_t> autoMixReverbDelayFrames_;
+    std::vector<double> autoMixReverbDamp_;
+    double autoMixReverbDampCoef_ = 0.5;
+    std::vector<double> autoMixFilterState_;
+    double autoMixOutgoingPeak_ = 0.0;
     /* Scratch for peeking at the incoming source's head: its silent intro and, when it has no grid
      * yet, its tempo. */
     std::vector<float> autoMixSilenceScratch_;

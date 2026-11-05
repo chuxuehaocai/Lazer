@@ -50,6 +50,33 @@ constexpr double kBeatGridCaptureSeconds = 6.0;
  * overlap is allowed half a beat of slack around it. */
 constexpr double kOverlapMinSeconds = 4.0;
 constexpr double kOverlapMaxSeconds = 8.0;
+/* The reference player's exit echo: three taps one beat apart, each 0.28 of the previous, added
+ * from the outgoing lane. Its planner falls back to the echo when neither its key test nor its
+ * level test picks one of the other two exits, which is where the engine's planner ends up too. */
+constexpr int32_t kEchoTaps = 3;
+constexpr double kEchoGain = 0.28;
+/* How long an exit may ring after the overlap ended, in beats. */
+constexpr int32_t kEchoTailBeats = 3;
+/* The reverb: three combs at incommensurate delays, so their repeats never line up into a rhythm,
+ * with damped feedback so the tail darkens as it decays and rings on after the song is gone. */
+constexpr int32_t kReverbCombs = 3;
+constexpr double kReverbCombSeconds[kReverbCombs] = {0.0237, 0.0311, 0.0413};
+constexpr double kReverbCombWeight = 0.7;
+/* Feedback of 0.94 against the damping below is a couple of seconds of tail, which is what the
+ * exit is for: the song is gone and the wash is still there. */
+constexpr double kReverbFeedback = 0.94;
+constexpr double kReverbDampCutoffHz = 3500.0;
+/* The planner's two thresholds: a low-band clash under a third means the two songs are bright
+ * enough that a reverb tail will not smear them into each other, and five decibels is the level
+ * difference the reference filters on. */
+constexpr double kReverbClashMax = 0.35;
+constexpr double kFilterLevelDeltaDb = 5.0;
+/* The exit filter sweeps from a passthrough to this cutoff across the overlap. */
+constexpr double kFilterClosedHz = 220.0;
+/* How long the outgoing deck's peak is held for the planner. The other side of the comparison is a
+ * second of the incoming song's head, and a song's own beats are half a second apart at 120 BPM: a
+ * shorter hold would read the gap between two of them as a quiet song. */
+constexpr double kOutgoingPeakHoldSeconds = 4.0;
 
 bool doPOutputApplies(int32_t dsdOutputMode, const StreamDescription &source) noexcept {
     return dsdOutputMode == LazerAudioDsdOutputRequireDoP && source.dsd && source.rawDsd &&
@@ -398,6 +425,18 @@ int32_t Engine::open(
     autoMixIncomingGainTarget_ = 1.0;
     autoMixLimiterGain_ = 1.0;
     autoMixBassAmount_ = 0.0;
+    autoMixEchoActive_ = false;
+    autoMixExit_ = AutoMixExit::Echo;
+    autoMixEchoTailFrames_ = 0;
+    autoMixEchoElapsedFrames_ = 0;
+    autoMixEchoIndex_ = 0;
+    autoMixEchoDelayFrames_ = 0;
+    autoMixEchoCapacity_ = 0;
+    autoMixEcho_.clear();
+    autoMixReverbDelayFrames_.clear();
+    autoMixReverbDamp_.clear();
+    autoMixFilterState_.clear();
+    autoMixOutgoingPeak_ = 0.0;
     autoMixOutgoingLow_.clear();
     autoMixIncomingLow_.clear();
     autoMixSilenceScratch_.clear();
@@ -1585,7 +1624,7 @@ void Engine::resetTimelineForSeek() {
 
 double Engine::measureBassClash(
     const float *outgoing, int32_t outgoingFrames, SourceSlot &candidate, int32_t sampleRate,
-    size_t channels) {
+    size_t channels, double *incomingPeak) {
     if (outgoing == nullptr || outgoingFrames <= 0 || sampleRate <= 0 || channels == 0) return 0.0;
     const double lowAlpha = 1.0 - std::exp(
         -2.0 * 3.14159265358979323846 * kBassSwapCutoffHz / static_cast<double>(sampleRate));
@@ -1602,8 +1641,11 @@ double Engine::measureBassClash(
     }
     double incomingTotal = 0.0;
     double incomingLow = 0.0;
+    double incomingHeadPeak = 0.0;
+    /* A second of head, not a quarter: the planner's level reading has to hold a beat, or a gap
+     * between two of them reads as a silent song. */
     const int64_t headFrames = std::min<int64_t>(
-        std::max<int64_t>(static_cast<int64_t>(sampleRate) / 4, 1),
+        std::max<int64_t>(static_cast<int64_t>(sampleRate), 1),
         std::max<int64_t>(candidate.pcm != nullptr ? candidate.pcm->queuedFrames() : 0, 0));
     const int64_t capacityFrames = static_cast<int64_t>(autoMixSilenceScratch_.size() / channels);
     const int32_t peekFrames = static_cast<int32_t>(std::min<int64_t>(headFrames, capacityFrames));
@@ -1615,6 +1657,7 @@ double Engine::measureBassClash(
                 const double value = autoMixSilenceScratch_[
                     static_cast<size_t>(frame) * channels + channel];
                 incomingTotal += value * value;
+                incomingHeadPeak = std::max(incomingHeadPeak, std::abs(value));
                 double &state = autoMixIncomingLow_[channel];
                 state += lowAlpha * (value - state);
                 incomingLow += state * state;
@@ -1627,7 +1670,72 @@ double Engine::measureBassClash(
         incomingTotal > 0.0 ? incomingLow / incomingTotal : 0.0;
     const double clash = std::min(1.0, std::sqrt(std::max(outgoingFraction, 0.0) *
         std::max(incomingFraction, 0.0)) * kBassSwapClashScale);
+    if (incomingPeak != nullptr) *incomingPeak = incomingHeadPeak;
     return std::clamp(kBassSwapScale * clash, 0.0, kBassSwapMax);
+}
+
+AutoMixExit Engine::planExitEffect(double levelDeltaDb, double bassClash) {
+    /* The reference's DJ planner picks a beat repeat for the fastest, most confident grids, a
+     * reverb for two songs in the same key, a filter for two songs whose levels differ, and an
+     * echo otherwise. The engine has no key analysis, so the key test runs on the closest fact it
+     * does measure: a low-band clash means the two songs already fight where a reverb tail would
+     * smear them into each other, which is when the tail is the wrong exit. Its repeat is not
+     * ported: there is nothing to repeat with.
+     *
+     * The order is the reference's: the reverb is decided first, then the filter, then the echo. */
+    if (bassClash <= kReverbClashMax) return AutoMixExit::Reverb;
+    if (levelDeltaDb > kFilterLevelDeltaDb) return AutoMixExit::Filter;
+    return AutoMixExit::Echo;
+}
+
+double Engine::mixExitEffect(double input, size_t channel) {
+    if (autoMixEchoCapacity_ <= 0) return 0.0;
+    const size_t offset = channel * static_cast<size_t>(autoMixEchoCapacity_);
+    const size_t write = static_cast<size_t>(autoMixEchoIndex_);
+    if (autoMixExit_ == AutoMixExit::Reverb &&
+        autoMixReverbDelayFrames_.size() == static_cast<size_t>(kReverbCombs) &&
+        channel < autoMixReverbDamp_.size()) {
+        /* Three combs read out of the one line at incommensurate delays, their sum damped and fed
+         * back in: the line's own content is what makes the tail a wash rather than a pattern. */
+        double sum = 0.0;
+        double weight = 1.0;
+        double total = 0.0;
+        for (int32_t comb = 0; comb < kReverbCombs; ++comb) {
+            const int64_t delay = autoMixReverbDelayFrames_[static_cast<size_t>(comb)];
+            if (delay <= 0 || delay >= autoMixEchoCapacity_) continue;
+            int64_t read = autoMixEchoIndex_ - delay;
+            if (read < 0) read += autoMixEchoCapacity_;
+            sum += weight * autoMixEcho_[offset + static_cast<size_t>(read)];
+            total += weight;
+            weight *= kReverbCombWeight;
+        }
+        const double wet = total > 0.0 ? sum / total : 0.0;
+        double &damp = autoMixReverbDamp_[channel];
+        damp += autoMixReverbDampCoef_ * (wet - damp);
+        autoMixEcho_[offset + write] = input + kReverbFeedback * damp;
+        return wet;
+    }
+    /* The echo: the outgoing lane written into the line unchanged, and the reference's taps read
+     * back out of it. The reference adds them from the unmodified lane, so they do not fade with
+     * the crossfade and the song can ring out over the incoming one. */
+    autoMixEcho_[offset + write] = input;
+    double wet = 0.0;
+    double tapGain = kEchoGain;
+    for (int32_t tap = 1; tap <= kEchoTaps; ++tap) {
+        const int64_t delay = autoMixEchoDelayFrames_ * tap;
+        if (delay > 0 && delay < autoMixEchoCapacity_) {
+            int64_t read = autoMixEchoIndex_ - delay;
+            if (read < 0) read += autoMixEchoCapacity_;
+            wet += tapGain * autoMixEcho_[offset + static_cast<size_t>(read)];
+        }
+        tapGain *= kEchoGain;
+    }
+    if (autoMixEchoDelayFrames_ > 0) {
+        /* Wet over the first beat, so the first readable tap arrives as a tail, not as a step. */
+        wet *= std::min(1.0, static_cast<double>(autoMixEchoElapsedFrames_) /
+            static_cast<double>(autoMixEchoDelayFrames_));
+    }
+    return wet;
 }
 
 void Engine::captureBeatGridLocked(const float *samples, int32_t frames, size_t channels) {
@@ -1944,21 +2052,92 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
                              * mixed frame: the outgoing side from this block, the incoming side from
                              * the head of its prefetch buffer. Measuring it later would hand the low
                              * end over in one direction only whenever the overlap is short. */
+                            double incomingPeak = 0.0;
                             autoMixBassAmount_ = measureBassClash(
                                 autoMixScratch_.data(), frames, *candidate, rate,
-                                static_cast<size_t>(channels));
+                                static_cast<size_t>(channels), &incomingPeak);
+                            /* The exit the outgoing song takes, chosen from the two facts the
+                             * engine measures: how much the two low bands clash and how far
+                             * apart the two songs sit in level. The taps are one beat of the
+                             * outgoing song apart, so the effect needs a beat: the reference
+                             * player only chooses one in its DJ mode, which needs boundary
+                             * beats too. */
+                            const int64_t exitBeat = source_->grid.beatFrames();
+                            autoMixEchoActive_ = source_->grid.valid && exitBeat > 0;
+                            autoMixEchoTailFrames_ = 0;
+                            autoMixEchoElapsedFrames_ = 0;
+                            autoMixEchoIndex_ = 0;
+                            if (autoMixEchoActive_) {
+                                /* A peak with a floor, so silence on one side is a level difference
+                                 * rather than a ratio of zero. */
+                                const double outgoingDb = 20.0 *
+                                    std::log10(std::max(autoMixOutgoingPeak_, 1.0e-6));
+                                const double incomingDb =
+                                    20.0 * std::log10(std::max(incomingPeak, 1.0e-6));
+                                autoMixExit_ = planExitEffect(
+                                    std::abs(outgoingDb - incomingDb), autoMixBassAmount_);
+                                autoMixEchoDelayFrames_ = exitBeat;
+                                autoMixEchoCapacity_ =
+                                    exitBeat * kEchoTaps + std::max<int32_t>(rate, 1);
+                                autoMixEcho_.assign(
+                                    static_cast<size_t>(autoMixEchoCapacity_) *
+                                        static_cast<size_t>(channels), 0.0);
+                                autoMixReverbDelayFrames_.assign(kReverbCombs, 0);
+                                for (int32_t comb = 0; comb < kReverbCombs; ++comb) {
+                                    autoMixReverbDelayFrames_[static_cast<size_t>(comb)] =
+                                        std::max<int64_t>(1, static_cast<int64_t>(
+                                            kReverbCombSeconds[comb] * rate));
+                                }
+                                autoMixReverbDamp_.assign(static_cast<size_t>(channels), 0.0);
+                                autoMixReverbDampCoef_ = 1.0 - std::exp(
+                                    -2.0 * 3.14159265358979323846 * kReverbDampCutoffHz /
+                                    std::max<int32_t>(rate, 1));
+                                autoMixFilterState_.assign(static_cast<size_t>(channels), 0.0);
+                            } else {
+                                autoMixExit_ = AutoMixExit::Echo;
+                                autoMixEchoDelayFrames_ = 0;
+                                autoMixEchoCapacity_ = 0;
+                                autoMixEcho_.clear();
+                                autoMixReverbDelayFrames_.clear();
+                                autoMixReverbDamp_.clear();
+                                autoMixFilterState_.clear();
+                            }
                             raise(LazerAudioEventTrackMixStarted, 0, renderPositionMillis());
                         }
                         mixing = true;
                         incomingReplayGain = candidate->replayGainLinear;
                         mixedStartFrame = candidate->overlapFrames.load(std::memory_order_acquire);
                         mixedLengthFrames = candidate->overlapLengthFrames;
+                        if (autoMixEchoActive_ && autoMixEchoCapacity_ > 0 &&
+                            autoMixExit_ != AutoMixExit::Filter) {
+                            /* The ring-out is the point of the two delay-line exits: the outgoing
+                             * song has ended, its line has not, so a few beats of it play over the
+                             * incoming song. A filter has no line and nothing to ring out with. */
+                            autoMixEchoTailFrames_ = autoMixEchoDelayFrames_ * kEchoTailBeats;
+                        }
                         candidate->pcm->consumeFrames(frames);
                         candidate->overlapFrames.fetch_add(frames, std::memory_order_release);
                     }
                 }
             }
         }
+    }
+    if (!mixing) {
+        /* The exit planner needs the outgoing deck's level at the moment the overlap starts and
+         * cannot look backwards through audio it has already rendered, so the deck's peak is held
+         * for a few seconds of its own blocks. Measured before the mix overwrites the block, and
+         * only while the deck plays alone: the mix would otherwise feed the planner the incoming
+         * song as if it were the outgoing one. */
+        const size_t levelSamples = static_cast<size_t>(frames) *
+            static_cast<size_t>(std::max(outputSession_.target.channels, 1));
+        double blockPeak = 0.0;
+        for (size_t sample = 0; sample < levelSamples; ++sample) {
+            blockPeak = std::max(blockPeak, std::abs(static_cast<double>(samples[sample])));
+        }
+        const double holdSeconds = std::max<double>(
+            static_cast<double>(outputSession_.target.sampleRate), 1.0) * kOutgoingPeakHoldSeconds;
+        autoMixOutgoingPeak_ = std::max(blockPeak,
+            autoMixOutgoingPeak_ * std::exp(-static_cast<double>(frames) / holdSeconds));
     }
     if (replayGainCurrentLinear_ != 1.0 || replayGainTargetLinear_ != 1.0) {
         const size_t channels = static_cast<size_t>(std::max(outputSession_.target.channels, 1));
@@ -2029,6 +2208,9 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
         }
         const double gainStep = 1.0 / std::max(
             static_cast<double>(outputSession_.target.sampleRate) * 0.05, 1.0);
+        const double filterClosedAlpha = 1.0 - std::exp(
+            -2.0 * 3.14159265358979323846 * kFilterClosedHz /
+            std::max<double>(outputSession_.target.sampleRate, 1.0));
         const double lowAlpha = 1.0 - std::exp(-2.0 * 3.14159265358979323846 *
             kBassSwapCutoffHz / std::max<double>(outputSession_.target.sampleRate, 1.0));
         for (int32_t frame = 0; frame < frames; ++frame) {
@@ -2064,8 +2246,30 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
                     outgoing - outgoingLow * autoMixBassAmount_ * outgoingSwap;
                 const double incomingLane =
                     incoming - incomingLow * autoMixBassAmount_ * incomingSwap;
+                double lane = outgoingLane;
+                if (autoMixEchoActive_ && autoMixExit_ == AutoMixExit::Filter &&
+                    channel < autoMixFilterState_.size()) {
+                    /* The exit filter: the outgoing lane's low-pass closes across the overlap, so
+                     * the song leaves muffled instead of being cut. The coefficient runs from a
+                     * passthrough to the closed cutoff, which sweeps the cutoff exponentially. */
+                    double &state = autoMixFilterState_[channel];
+                    state += std::pow(filterClosedAlpha, progress) * (outgoingLane - state);
+                    lane = state;
+                }
+                double echo = 0.0;
+                if (autoMixEchoActive_ && autoMixEchoCapacity_ > 0 &&
+                    autoMixExit_ != AutoMixExit::Filter) {
+                    echo = mixExitEffect(outgoingLane, channel);
+                }
                 samples[sample] = static_cast<float>(
-                    outgoingLane * outgoingGain + incomingLane * incomingGain);
+                    lane * outgoingGain + incomingLane * incomingGain + echo);
+            }
+            if (autoMixEchoActive_ && autoMixEchoCapacity_ > 0) {
+                /* The line is a frame clock, not a block clock: the taps read it a beat back, so
+                 * the position has to move with the frame. Advancing it once per block leaves every
+                 * frame of that block writing one slot, and every tap but the last reading zero. */
+                autoMixEchoIndex_ = (autoMixEchoIndex_ + 1) % autoMixEchoCapacity_;
+                autoMixEchoElapsedFrames_ += 1;
             }
         }
         /* Peak guard: two songs at full level can sum past full scale, and a clipped overlap is
@@ -2098,6 +2302,33 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
             }
         }
     }
+    /* An exit's tail outlives the overlap: the source it came from has been promoted away, so it is
+     * mixed into whatever is playing now. */
+    if (!mixing && autoMixEchoActive_ && autoMixEchoTailFrames_ > 0 && autoMixEchoCapacity_ > 0) {
+        const size_t tailChannels =
+            static_cast<size_t>(std::max(outputSession_.target.channels, 1));
+        const int64_t tailLength = std::max<int64_t>(
+            autoMixEchoDelayFrames_ * kEchoTailBeats, 1);
+        /* Frames on the outside, channels within: the line's position is a frame clock, so every
+         * channel of one frame reads and retires the same slot. */
+        for (int32_t frame = 0; frame < frames; ++frame) {
+            const double fade = static_cast<double>(autoMixEchoTailFrames_) /
+                static_cast<double>(tailLength);
+            for (size_t channel = 0; channel < tailChannels; ++channel) {
+                const size_t sample = static_cast<size_t>(frame) * tailChannels + channel;
+                samples[sample] = static_cast<float>(
+                    samples[sample] + mixExitEffect(0.0, channel) * fade);
+            }
+            autoMixEchoIndex_ = (autoMixEchoIndex_ + 1) % autoMixEchoCapacity_;
+            autoMixEchoTailFrames_ -= 1;
+            if (autoMixEchoTailFrames_ <= 0) {
+                autoMixEchoTailFrames_ = 0;
+                autoMixEchoActive_ = false;
+                break;
+            }
+        }
+    }
+
     const double limiterReductionDb = dsp_.process(samples, static_cast<size_t>(frames));
     const size_t sampleCount = static_cast<size_t>(frames) *
         static_cast<size_t>(std::max(outputSession_.target.channels, 1));
