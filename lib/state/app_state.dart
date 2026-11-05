@@ -2192,6 +2192,41 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// platform's index change is then adopted instead of loading a URL again.
   int? _queuedNextIndex;
 
+  /// The URL that was handed to the engine for [_queuedNextIndex].
+  ///
+  /// The engine reports the URL it actually crossed into, and comparing the two
+  /// is what proves the mixed-in song is the one this queue scripted instead of a
+  /// successor a racing preparation replaced.
+  String? _queuedNextUrl;
+
+  /// Serialises successor preparations: only the newest one may bind the index.
+  int _prefetchGeneration = 0;
+
+  /// The queue index an audible overlap was mixed out of, so a rollback can
+  /// return to exactly that song (shuffle is not `index - 1`).
+  int? _mixFromIndex;
+
+  /// Forgets the successor the app believes the engine holds.
+  void _clearQueuedNext() {
+    _queuedNextIndex = null;
+    _queuedNextUrl = null;
+  }
+
+  /// Whether the engine really has a successor prepared to cross into.
+  ///
+  /// An engine that cannot answer (a plain single-source backend) keeps the
+  /// app's own belief, which is all it had before.
+  bool get _engineHoldsSuccessor {
+    final QueueAudioEngine? engine = _queueEngine;
+    if (engine is! QueuedSourceReportingAudioEngine) {
+      return _queuedNextIndex != null;
+    }
+    final String? held = (engine as QueuedSourceReportingAudioEngine)
+        .queuedSourceUrl;
+    if (held == null) return false;
+    return _queuedNextUrl == null || held == _queuedNextUrl;
+  }
+
   /// Identifier of the engine queue the appends belong to.
   int? _queueId;
 
@@ -2513,7 +2548,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _realActive = false;
     _position = at;
     // The engine's queue went with the output; the next open builds a fresh one.
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     _queueId = null;
     _flushQualifiedSession();
     notifyListeners();
@@ -2539,7 +2574,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     ++_generation;
     _playing = false;
     _realActive = false;
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     _queueId = null;
     _position = Duration.zero;
     playbackError = null;
@@ -2587,7 +2622,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     trackChangeDirection = direction;
     playbackError = null;
     _queueIndex = index.clamp(0, _queue.length - 1);
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     // A stall belongs to the source that produced it, never to the next track.
     _lastStreamUrl = null;
     _streamRetries = 0;
@@ -2702,6 +2737,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? t = current;
     if (t == null) return;
     final Duration target = t.duration * clampSeekFraction(fraction);
+    // The engine cancels an audible overlap when it seeks. Going back first keeps
+    // the queue position, the shown metadata and the position on the song that is
+    // about to be heard.
+    _leavePresentedMix();
     _position = target;
     _notePlayheadMoved();
     if (_realActive) {
@@ -2727,6 +2766,34 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     // Position-only change: tick lane, not a structural rebuild.
     _tickNotifier.pulse();
+  }
+
+  /// Follows the engine back to the song an audible overlap was mixed out of.
+  ///
+  /// A seek (and any other cancellation) drops the incoming side of a mix while
+  /// the successor stays queued, so the outgoing song is what the listener hears
+  /// again. Without this the queue index would describe a song that is not
+  /// playing, and the next preparation would build a successor for the wrong
+  /// position in the queue.
+  void _leavePresentedMix() {
+    final AudioEngine? engine = audioEngine;
+    if (engine is! MixPresentingAudioEngine ||
+        !(engine as MixPresentingAudioEngine).mixPresented) {
+      return;
+    }
+    final int incoming = _queueIndex;
+    final int? outgoing = _mixFromIndex;
+    _mixFromIndex = null;
+    if (outgoing == null || _queue.length < 2) return;
+    _queueIndex = outgoing.clamp(0, _queue.length - 1);
+    // The song that was being mixed in is still the engine's successor.
+    _queuedNextIndex = incoming.clamp(0, _queue.length - 1);
+    trackChangeDirection = -1;
+    playbackError = null;
+    unawaited(_saveQueue());
+    unawaited(_loadLyrics());
+    unawaited(_loadCurrentArtwork());
+    notifyListeners();
   }
 
   /// Relative seek used by the keyboard shortcuts.
@@ -2829,7 +2896,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (track == null) return;
     final int generation = ++_generation;
     _realActive = false;
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     // A seek that was still being applied belonged to the previous source.
     _clearOptimisticSeek();
     String? url;
@@ -3217,9 +3284,19 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final QueueAudioEngine? engine = _queueEngine;
     final int? queueId = _queueId;
     if (engine == null || queueId == null || _queue.isEmpty) return;
+    // While an overlap is audible the engine's successor is the song being mixed
+    // in. Preparing the one after it now would replace it: the engine refuses a
+    // second successor, and the losing preparation clears the queued reader,
+    // which fades the incoming song back out and leaves the queue a song ahead of
+    // what is heard. The hand-off asks again.
+    if (engine is MixPresentingAudioEngine &&
+        (engine as MixPresentingAudioEngine).mixPresented) {
+      return;
+    }
+    final int generation = ++_prefetchGeneration;
     final int? next = _autoAdvanceIndex();
     if (next == null) {
-      _queuedNextIndex = null;
+      _clearQueuedNext();
       return;
     }
     String? url;
@@ -3231,9 +3308,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {
       url = null;
     }
-    // A track change or a stop while the URL was in flight invalidates this
-    // prefetch: the engine may already hold a different queue.
-    if (queueId != _queueId || !_realActive) return;
+    // A newer preparation, a track change or a stop while the URL was in flight
+    // invalidates this one: the engine may already hold a different successor.
+    if (generation != _prefetchGeneration ||
+        queueId != _queueId ||
+        !_realActive) {
+      return;
+    }
     if (url == null || url.isEmpty) return;
     bool appended;
     try {
@@ -3241,8 +3322,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {
       appended = false;
     }
+    if (generation != _prefetchGeneration) {
+      // Superseded while appending: it must not claim the engine's successor.
+      return;
+    }
     if (!appended || queueId != _queueId) return;
     _queuedNextIndex = next;
+    _queuedNextUrl = url;
   }
 
   /// Crosses into the track the engine already holds next, without reloading.
@@ -3287,9 +3373,34 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _finishPlaySession();
     final int? target = _queuedNextIndex;
     if (!_realActive || !_playing || target == null) return;
-    _queuedNextIndex = null;
+    // The engine reports which URL it crossed into. It must be the URL this app
+    // appended for [target]; anything else means the audible song and the queue
+    // position disagree, which is the "the mix is not what the queue scripted"
+    // report. With one preparation in flight and no replacement during an
+    // overlap this cannot happen, so the log is the assertion that keeps it true.
+    final QueueAudioEngine? queueEngine = _queueEngine;
+    final String? engineUrl = queueEngine is QueuedSourceReportingAudioEngine
+        ? (queueEngine as QueuedSourceReportingAudioEngine).queuedSourceUrl
+        : null;
+    final String? expectedUrl = _queuedNextUrl;
+    if (engineUrl != null && expectedUrl != null && engineUrl != expectedUrl) {
+      debugPrint(
+        'lazer-audio: automix crossed into $engineUrl while the queue scripted '
+        '$expectedUrl for index $target',
+      );
+    }
     trackChangeDirection = 1;
     playbackError = null;
+    // A mix is presented before the hand-off: the audible song is a blend and
+    // the outgoing track is still the engine's active decoder, which is what a
+    // rollback returns to.
+    final AudioEngine? audio = audioEngine;
+    if (audio is MixPresentingAudioEngine &&
+        (audio as MixPresentingAudioEngine).mixPresented) {
+      _mixFromIndex = _queueIndex;
+    } else {
+      _mixFromIndex = null;
+    }
     _queueIndex = target.clamp(0, _queue.length - 1);
     // The hand-off opens a different source; its URL is resolved again by the
     // next prefetch, so a stale one must not be used for a stall recovery.
@@ -3682,7 +3793,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void _failPlayback(String message) {
     _realActive = false;
     _playing = false;
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     _ticker?.cancel();
     playbackError = message;
     unawaited(audioEngine?.stop() ?? Future<void>.value());
@@ -3717,7 +3828,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _deviceRetries++;
       _finishPlaySession();
       _realActive = false;
-      _queuedNextIndex = null;
+      _clearQueuedNext();
       playbackError = null;
       _position = resumeAt;
       _resetStallClock();
@@ -3743,7 +3854,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       final int resumeAt = _position.inMilliseconds;
       _finishPlaySession();
       _realActive = false;
-      _queuedNextIndex = null;
+      _clearQueuedNext();
       playbackError = null;
       _position = Duration(milliseconds: resumeAt);
       if (pathChanged) notifyListeners();
@@ -3850,7 +3961,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _realActive = false;
     // A queued track would have been crossed into by the platform; reaching
     // here means the queue really did run out on this source.
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     final AudioEngine engine = audioEngine!;
     if (_repeat == LoopMode.one) {
       final Track? track = current;
@@ -3932,8 +4043,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           duration > Duration.zero &&
           _position >= duration &&
           // A queued track is crossed into by the platform; ending this source
-          // there is the hand-off, not the end of the queue.
-          _queuedNextIndex == null) {
+          // there is the hand-off, not the end of the queue. The engine's own
+          // answer decides: a preparation that lost its race leaves the app
+          // believing in a hand-off that can never arrive, and waiting for it is
+          // what made a track end in silence.
+          !_engineHoldsSuccessor) {
         _onEngineCompleted();
         return;
       }

@@ -53,6 +53,8 @@ class NativeAudioEngine
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
         RangeSeekAudioEngine,
+        QueuedSourceReportingAudioEngine,
+        MixPresentingAudioEngine,
         SerialQueueAudioEngine,
         AutoMixConfigurableAudioEngine,
         FailureReportingAudioEngine,
@@ -529,7 +531,21 @@ class NativeAudioEngine
   @override
   Future<bool> appendToQueue(int queueId, String url) async {
     if (queueId != _queueId || !_sourceLoaded || _bridge == null) return false;
+    // While an overlap is audible the successor is the song being mixed in.
+    // Preparing another one would replace it — the engine refuses a second
+    // successor, and the preparation that loses that race clears the queued
+    // reader, which fades the incoming song back out. The app asks again once the
+    // hand-off completes.
+    if (_mixPresented) return false;
     _pendingUrls = <String>[url];
+    // Replacing a successor the engine already holds: it keeps exactly one, and
+    // asking for a second fails and clears the queued reader instead — which
+    // would leave the app waiting for a hand-off the engine can no longer make.
+    // Drop the old one first, then prepare the new one.
+    if (_queuedReader != null || _queuedUrl != null) {
+      await _clearQueued();
+      if (queueId != _queueId || !_sourceLoaded || _disposed) return false;
+    }
     // Deliberately not part of the `_operations` chain: preparing the successor
     // reads its first bytes, and a skip pressed meanwhile must not wait for that.
     // A preparation that loses the race releases its own reader (see
@@ -537,6 +553,19 @@ class NativeAudioEngine
     unawaited(_prepareSuccessor(url));
     return true;
   }
+
+  /// The URL this engine has prepared as its successor, or null when it holds
+  /// none.
+  ///
+  /// The app binds a queue index to the URL it appended and reads it back when
+  /// the engine crosses, which is what makes "the mixed-in song is the one the
+  /// queue scripted" checkable.
+  @override
+  String? get queuedSourceUrl => _queuedUrl;
+
+  /// Whether the successor is already audible inside an overlap.
+  @override
+  bool get mixPresented => _mixPresented;
 
   @override
   Future<bool> playQueuedNext() async {
@@ -599,6 +628,11 @@ class NativeAudioEngine
     final int generation = _generation;
     final int? address = _engineAddressOrNull;
     if (address == null || position < Duration.zero) return;
+    // A seek cancels an overlap that is playing: the engine drops the incoming
+    // side and keeps the successor queued, so the outgoing song is what is heard
+    // again and the position is back on its timeline. The app notices the same
+    // thing through [mixPresented] before it asks for the seek.
+    _mixPresented = false;
     final int status = _status(
       await _worker.call(LazerWorkerOp.seek, [
         address,
@@ -1271,9 +1305,12 @@ class NativeAudioEngine
       case lazerAudioEventEnded:
         _finishSource();
       case lazerAudioEventTrackChanged:
-        final bool announced = _mixPresented;
+        // Always announced: the app resolves the crossed-into track from the
+        // index it bound to the prepared URL, so its own position is idempotent,
+        // and this is the event that lets it prepare the successor *after* the
+        // overlap instead of during it.
         _mixPresented = false;
-        _crossIntoSuccessor(positionMillis, announce: !announced);
+        _crossIntoSuccessor(positionMillis);
       case lazerAudioEventTrackMixStarted:
         _announceMix(positionMillis);
       case lazerAudioEventFailed:

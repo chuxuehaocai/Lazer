@@ -117,6 +117,27 @@ abstract interface class QueueAudioEngine {
   Stream<int> get indexStream;
 }
 
+/// Reports the item the engine holds as the successor of the playing source.
+///
+/// The app binds a queue index to the URL it appended; reading that URL back
+/// when the engine crosses is what proves it crossed into the song the queue
+/// scripted rather than a successor a racing preparation replaced, and what tells
+/// the app whether a hand-off can still arrive at all.
+abstract interface class QueuedSourceReportingAudioEngine {
+  /// The URL the engine holds as its next item, or null when it holds none.
+  String? get queuedSourceUrl;
+}
+
+/// Reports an overlap the engine is currently playing.
+///
+/// AutoMix is audible before the hand-off, and the engine can roll the overlap
+/// back — a seek cancels it and returns to the outgoing song. The app has to go
+/// back with it, or its queue position ends up a song ahead of what is heard.
+abstract interface class MixPresentingAudioEngine {
+  /// Whether the engine is overlapping the prepared next item right now.
+  bool get mixPresented;
+}
+
 /// Queue preparation can block the same worker that accepts play commands.
 /// These engines acknowledge play before starting a successor preparation.
 abstract interface class SerialQueueAudioEngine implements QueueAudioEngine {}
@@ -243,6 +264,7 @@ class JustAudioEngine
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
         QueueAudioEngine,
+        QueuedSourceReportingAudioEngine,
         FocusAwareAudioEngine,
         FailureReportingAudioEngine {
   JustAudioEngine({
@@ -376,6 +398,13 @@ class JustAudioEngine
       _currentUrl ?? '',
     )?.scheme.toLowerCase();
     return scheme == 'http' || scheme == 'https';
+  }
+
+  @override
+  String? get queuedSourceUrl {
+    final int? index = _player.currentIndex;
+    if (index == null || index + 1 >= _queueUrls.length) return null;
+    return _queueUrls[index + 1];
   }
 
   @override

@@ -365,4 +365,90 @@ void main() {
 
     await engine.stop();
   }, skip: !Platform.isWindows);
+
+  // AutoMix end to end: the app's successor really is what the engine holds, and
+  // asking for a replacement replaces it instead of dropping it — the failure
+  // mode that made the engine mix in a song the queue had already moved past.
+  test('the built Windows engine holds the successor the app prepared', () async {
+    final LazerAudioAvailability availability = LazerAudioLoader.load(
+      reload: true,
+    );
+    expect(availability.reason, isNull);
+    if (!availability.supportsStreaming) return;
+
+    final Uint8List first = _wav(2000, sampleRate: 22050);
+    final Uint8List second = _wav(2000, sampleRate: 44100);
+    final Uint8List third = _wav(2000, sampleRate: 32000);
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      final Uint8List body = request.uri.path.contains('second')
+          ? second
+          : request.uri.path.contains('third')
+          ? third
+          : first;
+      final String? range = request.headers.value(HttpHeaders.rangeHeader);
+      final int start = range == null
+          ? 0
+          : int.parse(RegExp(r'bytes=(\d+)-').firstMatch(range)!.group(1)!);
+      request.response.statusCode = range == null
+          ? HttpStatus.ok
+          : HttpStatus.partialContent;
+      if (range != null) {
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes $start-${body.length - 1}/${body.length}',
+        );
+      }
+      request.response.contentLength = body.length - start;
+      request.response.add(body.sublist(start));
+      await request.response.close();
+    });
+    addTearDown(() => server.close(force: true));
+
+    final Directory root = await Directory.systemTemp.createTemp(
+      'lazer-native-automix-test',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final AudioStreamCache cache = AudioStreamCache(() async => root);
+    addTearDown(cache.close);
+
+    final String base = 'http://127.0.0.1:${server.port}';
+    final NativeAudioEngine? created = await NativeAudioEngine.create(
+      cache: cache,
+    );
+    expect(created, isNotNull, reason: NativeAudioEngine.lastStartupFailure);
+    final NativeAudioEngine engine = created!;
+    addTearDown(engine.dispose);
+
+    // AutoMix is negotiated when a source opens, so it goes on first.
+    await engine.setAutoMixEnabled(true);
+    final int queueId = await engine.setQueue(<String>['$base/first.wav']);
+    expect(engine.active, isTrue);
+    expect(engine.streamInfo?.sourceSampleRate, 22050);
+    expect(engine.queuedSourceUrl, isNull);
+
+    expect(await engine.appendToQueue(queueId, '$base/second.wav'), isTrue);
+    // The append starts the preparation; the engine holds the successor once it
+    // has decoded its first bytes.
+    for (int attempt = 0; attempt < 500 && engine.queuedSourceUrl == null; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(engine.queuedSourceUrl, '$base/second.wav');
+    expect(engine.mixPresented, isFalse);
+
+    // A second successor replaces the first: the engine keeps one, and the app
+    // must keep reading back what it actually holds.
+    expect(await engine.appendToQueue(queueId, '$base/third.wav'), isTrue);
+    for (int attempt = 0; attempt < 500; attempt++) {
+      if (engine.queuedSourceUrl == '$base/third.wav') break;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(engine.queuedSourceUrl, '$base/third.wav');
+
+    await engine.stop();
+    expect(engine.queuedSourceUrl, isNull);
+  }, skip: !Platform.isWindows);
 }

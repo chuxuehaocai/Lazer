@@ -49,7 +49,11 @@ class _Engine implements AudioEngine {
 }
 
 class _MixQueueEngine extends _Engine
-    implements QueueAudioEngine, AutoMixConfigurableAudioEngine {
+    implements
+        QueueAudioEngine,
+        AutoMixConfigurableAudioEngine,
+        QueuedSourceReportingAudioEngine,
+        MixPresentingAudioEngine {
   final configurations = <bool>[];
   final queueLoads = <String>[];
   final prepared = <String>[];
@@ -58,6 +62,16 @@ class _MixQueueEngine extends _Engine
   bool rejectConfiguration = false;
   bool presented = false;
   bool rejectAppendWhilePresented = false;
+
+  /// The successor the engine holds: it survives the start of an overlap and is
+  /// consumed by the hand-off, exactly like a real second decoder.
+  String? _successor;
+
+  @override
+  String? get queuedSourceUrl => _successor;
+
+  @override
+  bool get mixPresented => presented;
 
   @override
   Future<void> setAutoMixEnabled(bool enabled) async {
@@ -72,6 +86,7 @@ class _MixQueueEngine extends _Engine
   Future<int> setQueue(List<String> urls, {int startIndex = 0}) async {
     loaded = true;
     queueLoads.add(urls[startIndex]);
+    _successor = null;
     return ++_queueId;
   }
 
@@ -81,16 +96,40 @@ class _MixQueueEngine extends _Engine
       return false;
     }
     prepared.add(url);
+    _successor = url;
     return true;
   }
 
   @override
   Future<bool> playQueuedNext() async => false;
 
+  @override
+  Future<void> seek(Duration value) async {
+    // A real engine drops the incoming side of an overlap when it seeks and
+    // keeps the successor queued.
+    presented = false;
+    position = value;
+  }
+
+  /// The overlap starts: the incoming decoder is audible, the outgoing one is
+  /// still the active source until the hand-off.
   void advanceAt(Duration incomingPosition) {
     presented = true;
     position = incomingPosition;
     indexes.add(1);
+  }
+
+  /// The outgoing source ended: the incoming decoder is promoted.
+  void finishMix() {
+    presented = false;
+    _successor = null;
+    indexes.add(1);
+  }
+
+  /// A preparation that lost its race: the successor is gone.
+  void dropSuccessor() {
+    presented = false;
+    _successor = null;
   }
 
   @override
@@ -203,7 +242,11 @@ void main() {
     expect(state.current?.id, '2');
     expect(state.position, const Duration(seconds: 6));
     expect(engine.queueLoads, <String>['url-1']);
-    expect(engine.prepared.last, 'url-3');
+    // Track 3 is prepared by the hand-off, not by the announcement: the engine
+    // refuses a second successor while the prepared one is being mixed in, and
+    // the preparation that loses that race clears the queued reader — which fades
+    // the song that is supposed to be fading *in* back out.
+    expect(engine.prepared, <String>['url-2']);
     expect(state.playing, isTrue);
     state.dispose();
   });
@@ -262,6 +305,95 @@ void main() {
       (await SharedPreferences.getInstance()).getBool('lazer_automix_enabled'),
       isNot(true),
     );
+    state.dispose();
+  });
+
+  testWidgets(
+    'the successor is not replaced while the overlap is audible',
+    (tester) async {
+      final engine = _MixQueueEngine();
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        autoMixEnabled: true,
+      );
+      addTearDown(engine.dispose);
+      state.playQueue(<Track>[_track('1'), _track('2'), _track('3')]);
+      await tester.pump();
+      expect(engine.prepared, <String>['url-2']);
+
+      // The overlap starts. Preparing track 3 now would ask the engine for a
+      // second successor, which fails and clears the queued reader — the song
+      // being mixed in would fade back out.
+      engine.advanceAt(const Duration(seconds: 6));
+      await tester.pump();
+      await tester.pump();
+      expect(state.current?.id, '2');
+
+      // The hand-off completes: the incoming decoder is the active source, so the
+      // successor is prepared then.
+      engine.finishMix();
+      await tester.pump();
+      await tester.pump();
+      expect(state.current?.id, '2');
+      expect(engine.prepared.last, 'url-3');
+      state.dispose();
+    },
+  );
+
+  testWidgets('a seek during the overlap returns to the outgoing song', (
+    tester,
+  ) async {
+    final engine = _MixQueueEngine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      autoMixEnabled: true,
+    );
+    addTearDown(engine.dispose);
+    state.playQueue(<Track>[_track('1'), _track('2'), _track('3')]);
+    await tester.pump();
+    engine.advanceAt(const Duration(seconds: 6));
+    await tester.pump();
+    expect(state.current?.id, '2');
+
+    // The engine cancels the overlap when it seeks, so the outgoing song is what
+    // is heard again: the queue must follow it back instead of running a song
+    // ahead of the audio.
+    state.seek(0.5);
+    await tester.pump();
+    expect(state.current?.id, '1');
+    expect(engine.position, _track('1').duration * 0.5);
+    expect(state.playing, isTrue);
+    // The song that was being mixed in is still the engine's successor.
+    expect(engine.queuedSourceUrl, 'url-2');
+    state.dispose();
+  });
+
+  testWidgets('a dropped successor cannot leave playback waiting for a handoff', (
+    tester,
+  ) async {
+    final engine = _MixQueueEngine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      autoMixEnabled: true,
+    );
+    addTearDown(engine.dispose);
+    state.playQueue(<Track>[_track('1'), _track('2')]);
+    await tester.pump();
+    expect(engine.prepared, <String>['url-2']);
+
+    // The preparation loses its race: the engine holds no successor, so the
+    // hand-off the app expects can never arrive. Reaching the end of the track
+    // must advance the queue instead of standing still in silence.
+    engine.dropSuccessor();
+    engine.position = _track('1').duration;
+    await tester.pump(AppState.playbackInterval);
+    await tester.pump();
+
+    expect(state.current?.id, '2');
+    expect(state.playing, isTrue);
     state.dispose();
   });
 

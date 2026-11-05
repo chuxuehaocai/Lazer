@@ -54,6 +54,8 @@ class AutoMixAudioEngine
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
         QueueAudioEngine,
+        QueuedSourceReportingAudioEngine,
+        MixPresentingAudioEngine,
         FocusAwareAudioEngine,
         SessionPreparingAudioEngine,
         FailureReportingAudioEngine {
@@ -192,6 +194,17 @@ class AutoMixAudioEngine
         Uri.tryParse(_activeUrl ?? '')?.scheme.toLowerCase() ?? '';
     return scheme == 'http' || scheme == 'https';
   }
+
+  /// The URL the second decoder is preparing, or null when there is none.
+  @override
+  String? get queuedSourceUrl {
+    if (_incoming == null || _currentIndex + 1 >= _queueUrls.length) return null;
+    return _queueUrls[_currentIndex + 1];
+  }
+
+  /// Whether the incoming decoder is the one being heard right now.
+  @override
+  bool get mixPresented => _presentedIncoming && _incoming != null;
 
   @override
   Stream<void> get completed => _completed.stream;
