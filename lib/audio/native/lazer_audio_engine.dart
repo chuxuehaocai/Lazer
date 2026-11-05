@@ -57,6 +57,9 @@ class NativeAudioEngine
         FailureReportingAudioEngine,
         FocusAwareAudioEngine,
         SessionPreparingAudioEngine,
+        // AAudio's endpoint is held by this engine, so an interruption has to
+        // close the device instead of parking a stream the platform will take.
+        InterruptionYieldingAudioEngine,
         StreamingBufferHealthAudioEngine {
   NativeAudioEngine._(
     this._api,
@@ -189,8 +192,8 @@ class NativeAudioEngine
   final StreamController<void> _bufferChanges =
       StreamController<void>.broadcast();
   final StreamController<int> _advanced = StreamController<int>.broadcast();
-  final StreamController<String> _failures =
-      StreamController<String>.broadcast();
+  final StreamController<AudioFailure> _failures =
+      StreamController<AudioFailure>.broadcast();
   final StreamController<LazerStreamInfo?> _streamInfos =
       StreamController<LazerStreamInfo?>.broadcast();
 
@@ -255,13 +258,13 @@ class NativeAudioEngine
   Future<void> Function()? prepareSession;
 
   @override
-  Stream<String> get failures => _failures.stream;
+  Stream<AudioFailure> get failures => _failures.stream;
 
   /// Always null: a native session that failed to start never becomes this
   /// object, so its reason travels with the fallback engine instead
   /// (`JustAudioEngine.pendingFailure`).
   @override
-  String? get pendingFailure => null;
+  AudioFailure? get pendingFailure => null;
 
   @override
   Stream<void> get completed => _completed.stream;
@@ -1209,9 +1212,12 @@ class NativeAudioEngine
       case lazerAudioEventTrackMixStarted:
         _announceMix(positionMillis);
       case lazerAudioEventFailed:
-        _reportFailure('playback failed (${_errorName(detail)})');
+        _reportFailure(
+          'playback failed (${_errorName(detail)})',
+          _failureKind(detail),
+        );
       case lazerAudioEventDeviceLost:
-        _reportFailure('the output device was lost');
+        _reportFailure('the output device was lost', AudioFailureKind.device);
       case lazerAudioEventSeekCompleted:
         _pendingSeek = null;
         _position = Duration(milliseconds: positionMillis);
@@ -1231,11 +1237,23 @@ class NativeAudioEngine
     if (!_completed.isClosed) _completed.add(null);
   }
 
-  void _reportFailure(String message) {
+  void _reportFailure(String message, AudioFailureKind kind) {
     if (_completionSent) return;
     _completionSent = true;
-    if (!_failures.isClosed) _failures.add(message);
+    if (!_failures.isClosed) _failures.add(AudioFailure(message, kind));
   }
+
+  /// What an engine error code means for recovery.
+  ///
+  /// A device error is the one the app can answer by opening the output again
+  /// (the endpoint is gone, the source is fine); a source or decode error
+  /// describes the stream itself and would repeat on a reload.
+  AudioFailureKind _failureKind(int code) => switch (code) {
+    lazerAudioErrorDevice => AudioFailureKind.device,
+    lazerAudioErrorDecode => AudioFailureKind.decode,
+    lazerAudioErrorSource => AudioFailureKind.source,
+    _ => AudioFailureKind.unknown,
+  };
 
   /// The engine crossed into the queued successor inside the same output session.
   void _crossIntoSuccessor(int positionMillis, {bool announce = true}) {

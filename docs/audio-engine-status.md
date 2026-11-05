@@ -181,7 +181,7 @@ Total Test time (real) = 47.76 sec
 | 初始化失败回退 just_audio | **已成立** | `lib/audio/engine_factory.dart:59-81`、[2.4 日志] | 见下一行 |
 | 回退原因必须准确上报 | **有缺陷**：`engine_factory.dart:75` 用 `LazerAudioLoader.load().reason` 当原因；当**库能加载但 `lazer_audio_create` 失败**（无可用设备、被其它独占程序占用）时该值为 `null`，UI 只会显示裸 `just_audio` 而没有任何原因。`_nativeUnavailableReason` 还是静态可变字段（`:43`），跨调用残留 | 代码 | 需要区分"库不可用"与"设备初始化失败"两类原因 |
 | UI 可见"当前非 HiFi 路径" | **部分成立**：仅设置页 `lib/widgets/hifi_settings_section.dart:96-118` 显示"原生引擎/兼容引擎"+原因，`lib/widgets/hifi_settings_section.dart:362` 另有"当前使用 just_audio / media_kit，没有独占与 DSP 能力"；**播放器页与全局没有任何指示** | 代码 | 需要最小全局标识 |
-| 运行期设备丢失的降级与上报 | **上报有、降级无**：设备丢失 → `failures` → `AppState._onEngineFailure` → `_failPlayback`，只停播并显示错误文案（`lib/state/app_state.dart:2938-2941`、`2924-2932`）。引擎"每次启动只选一次"（`lib/main.dart:102-115` 注释），运行期不会切到 just_audio | 代码 | 阶段 1 需要明确：降级策略 + UI 标识 |
+| 运行期设备丢失的降级与上报 | **上报有、重开有、降级无**：设备丢失被单独归类（`AudioFailureKind.device`，原生事件 `DeviceLost` 与 `LazerAudioErrorDevice`），`AppState._onEngineFailure` 先按听众所在位置重开输出再续播（`_reopenOutput` → `_startAudio(recovering: true)`，预算 `maxDeviceRetries`），只有重开不成才 `_failPlayback`；轴心点被平台收走时由焦点策略主动让出设备（`PlaybackSession._yieldOutput` → `AppState.suspendForInterruption`），恢复时原位重开。运行期仍不会切到 just_audio | 代码 | 剩余：热切换策略 |
 | 结构化日志（初始化/设备枚举/格式协商：采样率/位深/声道/独占） | **部分成立**：引擎日志经 `lazer_audio_read_log` 每秒 drain 到 Dart（`lib/audio/native/lazer_audio_engine.dart:113-118`）后走 `debugPrint`；格式协商结果可从 `stream_info` 读到（`lib/audio/native/lazer_stream_info.dart`）。但**没有统一的字段化日志**，设备枚举日志散在 `native/lazer-audio/src/device_catalog_*.cpp` | 代码 | 需要三条结构化日志 |
 | 最小集成测试播放已知 WAV 验证选中原生引擎 | **工具已有、不在 CI**：`tool/native_engine_smoke.dart`、`tool/native_bundle_check.dart`、样例 `build/native-audio/testdata/tone441.wav` 等 | 代码 | 应把 bundle 检查纳入门禁 |
 
@@ -473,8 +473,7 @@ UI：`test/audio/audio_engine_path_test.dart` 断言原生路径下标识不渲�
 
 ### 10.2 本阶段**没有**做的事（诚实边界）
 
-* 运行期**热切换**到 just_audio 未实现：设备丢失时只上报并停播（`app_state.dart:2950-2967`），
-  引擎仍在下次启动时重新选择。热切换要改 `AppState` 持有引擎的方式，留待后续阶段。
+* 运行期**热切换**到 just_audio 仍未实现：设备丢失时先重开输出并按听众所在位置续播，重开不成才停播报错（`_reopenOutput`，预算 `maxDeviceRetries`）；引擎仍在下次启动时重新选择。热切换要改 `AppState` 持有引擎的方式，留待后续阶段。
 * Linux / macOS 的 CI 断言未加：本地只能验证 Windows 产物；Linux 的 AppImage 步骤已有启动
   冒烟，但"选中原生引擎"的断言需要先在本机验证过再上 CI。
 * 阶段 1 未改 DSD、EQ、limiter 的任何行为（符合约束）。
