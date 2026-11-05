@@ -57,6 +57,12 @@ const List<int> lazerAudioDefaultDspStageOrder = <int>[
 const int lazerAudioReaderEof = -1;
 const int lazerAudioReaderIoError = -2;
 
+/// What a reader demand is for (`lazer_bridge_reader_set_demand_listener`): the
+/// decoder is parked on this byte (`read`), or a seek landed here and the reader
+/// is waiting for the download to cover it (`seek`).
+const int lazerBridgeDemandRead = 0;
+const int lazerBridgeDemandSeek = 1;
+
 /// `LazerAudioError`.
 const int lazerAudioOk = 0;
 const int lazerAudioErrorInvalidArgument = -1;
@@ -168,6 +174,16 @@ typedef LazerAudioLengthNative = Int64 Function(Pointer<Void> context);
 
 /// Close/cancel callbacks: `void (*)(void *context)`.
 typedef LazerAudioVoidNative = Void Function(Pointer<Void> context);
+
+/// Reader demand callback: `void (*)(void *context, int64_t offset, int32_t kind)`.
+///
+/// The bridge calls it from the engine's decode thread when the cache file does
+/// not hold the byte the engine is waiting for, so the downloader can fetch that
+/// range. It is asynchronous by nature (`NativeCallable.listener`).
+typedef LazerBridgeDemandNative =
+    Void Function(Pointer<Void> context, Int64 offset, Int32 kind);
+typedef LazerBridgeDemandDart =
+    void Function(Pointer<Void> context, int offset, int kind);
 
 /// Event callback: `void (*)(void *context, int32_t event, int32_t detail,
 /// int64_t position_millis)`. Raised on engine threads, never on the caller's.

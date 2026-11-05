@@ -17,6 +17,7 @@
 // The growing-file contract itself is covered by `tool/native_bridge_check.dart`
 // (which drives the C callbacks the way the engine does) and by
 // `tool/native_cache_checks.dart` (the downloader's own behaviour).
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -210,6 +211,157 @@ void main() {
     );
     expect(landed, lessThan(const Duration(seconds: 55)));
     expect(engine.streamFailed, isFalse);
+
+    await engine.stop();
+  }, skip: !Platform.isWindows);
+
+  // The report this test exists for: "没有缓存好的歌没法直接跳转到指定位置".
+  // A track whose download has only reached its first bytes must still jump to a
+  // position far ahead of that, which means the reader has to ask the downloader
+  // for that byte range and the demuxer has to accept the answer.
+  test('the built Windows engine seeks past what was downloaded', () async {
+    final LazerAudioAvailability availability = LazerAudioLoader.load(
+      reload: true,
+    );
+    expect(availability.reason, isNull);
+    if (!availability.supportsStreaming) return;
+
+    final Uint8List body = _wav(60000);
+    // Enough of the track for the engine's probe to open the source, and far
+    // less than the position the seek asks for.
+    final int prefixBytes = 3 * 1024 * 1024;
+    final List<String?> ranges = <String?>[];
+    final Completer<void> releaseFirst = Completer<void>();
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      final String? range = request.headers.value(HttpHeaders.rangeHeader);
+      ranges.add(range);
+      final int start = range == null
+          ? 0
+          : int.parse(RegExp(r'bytes=(\d+)-').firstMatch(range)!.group(1)!);
+      try {
+        if (ranges.length == 1) {
+          // A slow linear download: it delivers a prefix and then stalls, which
+          // is the state of every track that is still being cached.
+          request.response.bufferOutput = false;
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes 0-${body.length - 1}/${body.length}',
+          );
+          request.response.add(body.sublist(0, prefixBytes));
+          await request.response.flush();
+          await releaseFirst.future;
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes $start-${body.length - 1}/${body.length}',
+        );
+        request.response.contentLength = body.length - start;
+        request.response.add(body.sublist(start));
+        await request.response.close();
+      } catch (_) {
+        // The client abandons the stalled body when it seeks away from it.
+      }
+    });
+    addTearDown(() {
+      if (!releaseFirst.isCompleted) releaseFirst.complete();
+      return server.close(force: true);
+    });
+
+    final Directory root = await Directory.systemTemp.createTemp(
+      'lazer-native-range-seek-test',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final AudioStreamCache cache = AudioStreamCache(() async => root);
+    addTearDown(cache.close);
+
+    final String url = 'http://127.0.0.1:${server.port}/growing.wav';
+    final AudioStreamEntry entry = await cache.open(
+      url,
+      expectedBytes: body.length,
+    );
+    // Wait for the stalled prefix rather than for a wall-clock guess.
+    for (int attempt = 0; attempt < 500 && entry.prefixEnd < prefixBytes; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(entry.prefixEnd, prefixBytes, reason: 'the prefix landed');
+    expect(entry.complete, isFalse, reason: 'most of the track is not cached');
+
+    final NativeAudioEngine? created = await NativeAudioEngine.create(
+      cache: cache,
+    );
+    expect(created, isNotNull, reason: NativeAudioEngine.lastStartupFailure);
+    final NativeAudioEngine engine = created!;
+    addTearDown(engine.dispose);
+
+    await engine.setQueue(<String>[url]);
+    expect(engine.duration, const Duration(seconds: 60));
+    expect(
+      engine.seekServesAnyPosition,
+      isTrue,
+      reason: 'a server that honours ranges lets the reader fetch a seek target',
+    );
+
+    // Fifty seconds in: far past the 128 KiB that landed.
+    const Duration target = Duration(seconds: 50);
+    final Stopwatch elapsed = Stopwatch()..start();
+    await engine.seek(target);
+    // The demuxer asks the reader for the byte offset of the target, the reader
+    // asks the downloader, and the downloader restarts the request there. Waiting
+    // for the second request is what proves the whole chain ran.
+    while (ranges.length < 2 && elapsed.elapsed < const Duration(seconds: 10)) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(
+      ranges.length,
+      greaterThan(1),
+      reason: 'the seek restarted the download at the requested offset',
+    );
+    expect(
+      entry.windowStart,
+      greaterThan(prefixBytes),
+      reason: 'the redirected window starts past the cached prefix',
+    );
+    expect(
+      entry.windowFileStart,
+      greaterThanOrEqualTo(entry.prefixEnd),
+      reason: 'the window is appended after the prefix, never over it',
+    );
+    expect(
+      entry.readableEndAt(target.inMilliseconds * body.length ~/ 60000),
+      isNot(-1),
+      reason: 'the requested byte range became readable',
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    expect(
+      engine.position,
+      greaterThan(const Duration(seconds: 45)),
+      reason: 'the engine landed at the requested position',
+    );
+    expect(engine.streamFailed, isFalse);
+
+    // Playing is not required for the seek, and a headless host has no endpoint;
+    // when there is one, the clock must move on from the fetched range.
+    try {
+      await engine.play();
+      final Duration before = engine.position;
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      expect(
+        engine.position,
+        greaterThan(before),
+        reason: 'the decoder keeps playing from the fetched region',
+      );
+    } catch (_) {
+      // No output device: the seek itself is what this test is about.
+    }
 
     await engine.stop();
   }, skip: !Platform.isWindows);

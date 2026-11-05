@@ -577,6 +577,77 @@ class LazerAudioBridgeApi {
         int Function(Pointer<Void>)
       >('lazer_bridge_reader_bytes_available');
 
+  /// Publishes which byte ranges of the track the cache file holds, and whether
+  /// the server honours a `Range` request.
+  ///
+  /// Additive: an older bridge keeps treating the file as one growing prefix, so
+  /// a seek past the download waits for the linear download instead.
+  late final void Function(Pointer<Void>, int, int, int, int, int)? readerSetWindow =
+      _optional<
+        void Function(Pointer<Void>, int, int, int, int, int)
+      >(
+        () => _library.lookupFunction<
+          Void Function(Pointer<Void>, Int64, Int64, Int64, Int64, Int32),
+          void Function(Pointer<Void>, int, int, int, int, int)
+        >('lazer_bridge_reader_set_window'),
+      );
+
+  /// Installs the callback that fetches a byte the reader is waiting for.
+  late final void Function(
+    Pointer<Void>,
+    Pointer<NativeFunction<LazerBridgeDemandNative>>,
+    Pointer<Void>,
+  )?
+  readerSetDemandListener =
+      _optional<
+        void Function(
+          Pointer<Void>,
+          Pointer<NativeFunction<LazerBridgeDemandNative>>,
+          Pointer<Void>,
+        )
+      >(
+        () => _library.lookupFunction<
+          Void Function(
+            Pointer<Void>,
+            Pointer<NativeFunction<LazerBridgeDemandNative>>,
+            Pointer<Void>,
+          ),
+          void Function(
+            Pointer<Void>,
+            Pointer<NativeFunction<LazerBridgeDemandNative>>,
+            Pointer<Void>,
+          )
+        >('lazer_bridge_reader_set_demand_listener'),
+      );
+
+  /// Announces the track's size once the download learns it.
+  ///
+  /// A demuxer turns a seek's timestamp into the byte offset this reader is
+  /// asked for through the source length, so an unknown length is what makes
+  /// seeking a streaming track fail outright.
+  late final void Function(Pointer<Void>, int)? readerSetLength = _optional<
+    void Function(Pointer<Void>, int)
+  >(
+    () => _library.lookupFunction<
+      Void Function(Pointer<Void>, Int64),
+      void Function(Pointer<Void>, int)
+    >('lazer_bridge_reader_set_length'),
+  );
+
+  /// Whether this bridge can serve bytes the download has not reached yet: the
+  /// engine can then seek anywhere the server allows a range request.
+  bool get supportsRangedSeek =>
+      readerSetWindow != null && readerSetDemandListener != null;
+
+  /// Looks a symbol up and returns null when this bridge does not export it.
+  T? _optional<T>(T Function() lookup) {
+    try {
+      return lookup();
+    } on ArgumentError {
+      return null;
+    }
+  }
+
   /// Addresses of the five callbacks the engine invokes on its own threads.
   ///
   /// These are ordinary exported C functions, so they are taken with

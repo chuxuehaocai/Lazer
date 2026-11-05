@@ -31,6 +31,17 @@ abstract interface class SeekBoundaryReportingAudioEngine {
   bool get seekIsLimitedByBuffer;
 }
 
+/// Optional capability: this engine serves a seek anywhere in a network track.
+///
+/// A source whose download is restarted at the requested byte offset can jump to
+/// a position it has not downloaded yet, so the seek rail must not clamp to the
+/// buffered fraction even though [SeekBoundaryReportingAudioEngine] still reports
+/// how much of the track is cached (which the rail paints as the buffer bar).
+abstract interface class RangeSeekAudioEngine {
+  /// Whether the current source can be seeked outside its downloaded range.
+  bool get seekServesAnyPosition;
+}
+
 /// Optional capability: what a network source's download is doing right now.
 ///
 /// A CDN that never sends `Content-Length` (chunked transfer, a proxied CDN, an

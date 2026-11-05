@@ -52,6 +52,7 @@ class NativeAudioEngine
         StartupBufferReportingAudioEngine,
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
+        RangeSeekAudioEngine,
         SerialQueueAudioEngine,
         AutoMixConfigurableAudioEngine,
         FailureReportingAudioEngine,
@@ -335,6 +336,21 @@ class NativeAudioEngine
 
   @override
   bool get seekIsLimitedByBuffer => _activeEntry?.complete == false;
+
+  /// Whether a seek may land outside the downloaded range.
+  ///
+  /// True for a local file and for a network source whose server honours a
+  /// `Range` request: the download restarts at the requested offset, so the rail
+  /// does not have to be clamped to what is already cached. A source with no
+  /// announced length, or one whose server ignored the range, keeps the buffer
+  /// limit because nothing can fetch past what has landed.
+  @override
+  bool get seekServesAnyPosition {
+    final AudioStreamEntry? entry = _activeEntry;
+    if (entry == null) return true;
+    if (entry.complete) return true;
+    return entry.rangeSupported && (entry.expectedBytes ?? 0) > 0;
+  }
 
   @override
   Duration get bufferedPosition {
@@ -804,16 +820,22 @@ class NativeAudioEngine
             'cannot be opened',
           );
         }
+        // The size arrives with the response headers. A demuxer needs it to turn
+        // a seek's timestamp into a byte offset, so the reader is created with it
+        // when it is known by now.
+        final int? length = await entry.expectedLengthWithin(sourceLengthWait);
+        if (generation != _generation || _disposed) return;
         reader = NativeStreamReader.create(
           bridge,
           path: entry.file.path,
-          expectedBytes: entry.expectedBytes,
+          expectedBytes: length ?? entry.expectedBytes,
         );
         if (reader == null) {
           throw StateError('the reader bridge rejected ${entry.file.path}');
         }
         final NativeStreamReader sourceReader = reader;
         final AudioStreamEntry sourceEntry = entry;
+        _connectEntry(sourceEntry, sourceReader);
         entry.bindReader(
           appended: () {
             sourceReader.notifyAppended();
@@ -956,9 +978,12 @@ class NativeAudioEngine
     try {
       entry = await _cacheEntryFor(url);
       final String path = entry?.file.path ?? _localPath(url);
-      final int? expectedBytes =
-          entry?.expectedBytes ??
-          (entry == null ? await File(path).length() : null);
+      final int? expectedBytes = entry == null
+          ? await File(path).length()
+          // A successor is decoded ahead of its audible boundary, so waiting for
+          // the announced size costs nothing the mix needs.
+          : await entry.expectedLengthWithin(successorLengthWait) ??
+                entry.expectedBytes;
       if (generation != _queueGeneration || !_sourceLoaded || _disposed) return;
       // Repeat-one and adjacent copies of the same URL share one growing
       // download. It currently has one reader callback pair: rebinding it here
@@ -983,6 +1008,7 @@ class NativeAudioEngine
       // the cache's unawaited download future.
       final NativeStreamReader queuedReader = reader;
       final AudioStreamEntry? queuedEntry = entry;
+      if (queuedEntry != null) _connectEntry(queuedEntry, queuedReader);
       entry?.bindReader(
         appended: () {
           queuedReader.notifyAppended();
@@ -1119,6 +1145,45 @@ class NativeAudioEngine
     _queuedEntry?.cancel();
     _queuedEntry = null;
   }
+
+  /// Connects a cache entry to the reader the engine reads it through.
+  ///
+  /// The entry owns two things the reader cannot work out by itself: which byte
+  /// ranges the cache file actually holds (a redirected download leaves a gap,
+  /// and serving that gap's zeroes as audio would be silent corruption), and how
+  /// to fetch a byte the engine is waiting for. Both are published again by
+  /// `bindReader`, so the ranges are in place before the engine opens the source.
+  void _connectEntry(AudioStreamEntry entry, NativeStreamReader reader) {
+    void publishRanges() {
+      reader.setWindow(
+        prefixEnd: entry.prefixEnd,
+        windowStart: entry.windowStart,
+        windowEnd: entry.windowEnd,
+        windowFileStart: entry.windowFileStart,
+        rangeSupported: entry.rangeSupported,
+      );
+      final int? total = entry.expectedBytes;
+      if (total != null && total > 0) reader.setLength(total);
+    }
+
+    entry.onRangeChanged = publishRanges;
+    reader.setDemandListener((int offset, int kind) {
+      logAudioPathEvent('stream.demand', <String, Object?>{
+        'offset': offset,
+        'kind': kind == lazerBridgeDemandSeek ? 'seek' : 'read',
+        'cached': entry.downloadedBytes,
+      });
+      unawaited(entry.ensureRange(offset, seek: kind == lazerBridgeDemandSeek));
+    });
+  }
+
+  /// How long an open waits for the track's size before letting the decoder
+  /// start anyway. The size is what a demuxer turns a seek into, so it is worth
+  /// a short wait; a server that never announces one must not delay playback.
+  static const Duration sourceLengthWait = Duration(seconds: 3);
+
+  /// How long a successor preparation waits for the same fact.
+  static const Duration successorLengthWait = Duration(seconds: 5);
 
   /// Resolves the cache entry for [url], or null for a local file.
   Future<AudioStreamEntry?> _cacheEntryFor(String url) async {

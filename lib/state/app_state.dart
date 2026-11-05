@@ -2357,8 +2357,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Seeking can move through buffered audio, but never past it.
   /// Keep the current playhead reachable if a backend reports a shorter buffer.
+  ///
+  /// An engine that fetches the requested byte range ([RangeSeekAudioEngine]) is
+  /// not bounded by the buffer at all: the rail stays open for the whole track
+  /// while [bufferedFraction] keeps painting how much is cached.
   double get seekLimitFraction {
     if (!_seekLimitedByBuffer) return 1;
+    final AudioEngine? engine = audioEngine;
+    if (engine is RangeSeekAudioEngine &&
+        (engine as RangeSeekAudioEngine).seekServesAnyPosition) {
+      return 1;
+    }
     final double buffered = bufferedFraction;
     final double played = progress;
     return buffered > played ? buffered : played;

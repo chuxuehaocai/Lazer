@@ -50,6 +50,25 @@ class _Bridge implements LazerAudioBridgeApi {
       (handle, failed) => finished[handle.address] = failed;
   @override
   void Function(Pointer<Void>) get readerDestroy => (_) {};
+  /// The ranges the engine published for each reader, and the sizes it announced.
+  final windows = <int, List<int>>{};
+  final lengths = <int, int>{};
+  @override
+  void Function(Pointer<Void>, int, int, int, int, int)? get readerSetWindow =>
+      (handle, prefix, start, end, fileStart, supported) =>
+          windows[handle.address] = <int>[prefix, start, end, fileStart, supported];
+  @override
+  void Function(Pointer<Void>, int)? get readerSetLength =>
+      (handle, bytes) => lengths[handle.address] = bytes;
+  /// Left unimplemented on purpose: the engine then treats this as a bridge
+  /// without the demand protocol, which is what these queue tests exercise.
+  @override
+  void Function(
+    Pointer<Void>,
+    Pointer<NativeFunction<LazerBridgeDemandNative>>,
+    Pointer<Void>,
+  )?
+  get readerSetDemandListener => null;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

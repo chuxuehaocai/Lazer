@@ -59,4 +59,28 @@ if(LAZER_AUDIO_BRIDGE_BUILD_PROBES)
         set_property(TARGET lazer-audio-abi-layout PROPERTY
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
+
+    # The reader's own contract: written ranges, holes, demands, and seeking out
+    # of the downloaded region. Compiles the reader source directly so the probe
+    # needs neither FFmpeg nor a shared-library load path.
+    add_executable(lazer-audio-bridge-ranged-reader-probe
+        tools/ranged_reader_probe.cpp
+        src/growing_reader.cpp)
+    target_compile_features(lazer-audio-bridge-ranged-reader-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-bridge-ranged-reader-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-bridge-ranged-reader-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-bridge-ranged-reader-probe PRIVATE
+            /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(lazer-audio-bridge-ranged-reader-probe PRIVATE
+            -Wall -Wextra)
+    endif()
+    add_test(NAME lazer-audio-bridge-ranged-reader
+        COMMAND $<TARGET_FILE:lazer-audio-bridge-ranged-reader-probe>)
+    set_tests_properties(lazer-audio-bridge-ranged-reader PROPERTIES TIMEOUT 60)
 endif()

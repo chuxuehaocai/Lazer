@@ -36,7 +36,15 @@ class _BufferedNetworkEngine
         BufferedAudioEngine,
         StartupBufferReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
+        RangeSeekAudioEngine,
         StreamingBufferHealthAudioEngine {
+  _BufferedNetworkEngine({this.seekServesAnyPosition = false});
+
+  /// Whether this engine fetches the byte range a seek asks for. A native
+  /// engine whose server honours `Range` does; a plain HTTP player does not.
+  @override
+  final bool seekServesAnyPosition;
+
   @override
   bool active = false;
 
@@ -163,6 +171,37 @@ void main() {
       expect(state.precisePosition, _track.duration * 0.75);
       expect(state.position, _track.duration * 0.75);
       expect(state.seekInFlight, isFalse);
+    },
+  );
+
+  test(
+    'a stream whose engine fetches the requested range seeks anywhere in the track',
+    () async {
+      final engine = _BufferedNetworkEngine(seekServesAnyPosition: true);
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        startupByteTarget: 0,
+        startupBufferTarget: Duration.zero,
+      );
+      addTearDown(state.dispose);
+      state.playQueue(<Track>[_track]);
+      await Future<void>.delayed(Duration.zero);
+      expect(state.audioReady, isTrue);
+
+      // Twenty seconds in, with 75 % of the track on disk. The rail still paints
+      // how much is cached...
+      engine.position = const Duration(seconds: 20);
+      engine.buffered = _track.duration * 0.75;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(state.bufferedFraction, closeTo(0.75, 1e-9));
+      expect(state.seekLimitFraction, 1.0);
+
+      // ...but a seek past the cached part reaches the engine instead of being
+      // clamped to it: the download restarts at the requested offset.
+      state.seek(0.9);
+      expect(state.position, _track.duration * 0.9);
+      expect(engine.seekRequests, <Duration>[_track.duration * 0.9]);
     },
   );
 

@@ -460,6 +460,230 @@ Future<List<String>> verifyAudioStreamCache(Directory root) async {
     }
   }
 
+  // 9. A seek into a part of the track the linear download has not reached
+  //    restarts the request at that offset, so the engine reads the region it
+  //    asked for instead of waiting for a whole linear pass. The bytes between
+  //    the prefix and the new window are a gap nobody wrote, and the ranges
+  //    published to the reader must say so.
+  {
+    final Uint8List payload = Uint8List.fromList(
+      List<int>.generate(4 * 1024 * 1024, (int index) => index & 0xff),
+    );
+    final int prefixBytes = 64 * 1024;
+    final Completer<void> releaseFirst = Completer<void>();
+    final List<String?> ranges = <String?>[];
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      final String? range = request.headers.value(HttpHeaders.rangeHeader);
+      ranges.add(range);
+      final int start = range == null
+          ? 0
+          : int.parse(RegExp(r'bytes=(\d+)-').firstMatch(range)!.group(1)!);
+      try {
+        if (ranges.length == 1) {
+          // The first pass stalls after a short prefix, the way a download that
+          // is slower than the listener leaves the cache.
+          request.response.bufferOutput = false;
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes 0-${payload.length - 1}/${payload.length}',
+          );
+          request.response.add(payload.sublist(0, prefixBytes));
+          await request.response.flush();
+          await releaseFirst.future;
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes $start-${payload.length - 1}/${payload.length}',
+        );
+        request.response.contentLength = payload.length - start;
+        request.response.add(payload.sublist(start));
+        await request.response.close();
+      } catch (_) {
+        // The client abandons the stalled body when it redirects; the server
+        // side of that disconnect is not what this check is about.
+      }
+    });
+    final Directory directory = Directory('${root.path}/ranged');
+    await directory.create(recursive: true);
+    final AudioStreamCache cache = AudioStreamCache(() async => directory);
+    final String url = 'http://${server.address.host}:${server.port}/seek.flac';
+    try {
+      final AudioStreamEntry entry = await cache.open(
+        url,
+        expectedBytes: payload.length,
+      );
+      await _waitFor(
+        () => entry.prefixEnd >= prefixBytes,
+        const Duration(seconds: 5),
+      );
+      expect('the stalled prefix landed', entry.prefixEnd >= prefixBytes, true);
+      expect('the announced length is known', entry.lengthKnown, true);
+
+      // A seek well past the download, the way the engine asks for one.
+      final int target = 3 * 1024 * 1024;
+      const int windowStart = 3 * 1024 * 1024 - AudioStreamEntry.seekPrerollBytes;
+      await entry.ensureRange(target, seek: true);
+      await _waitFor(
+        () => ranges.length > 1,
+        const Duration(seconds: 5),
+      );
+      expect('the seek redirected the download', ranges.last, 'bytes=$windowStart-');
+      expect('the window starts at the request', entry.windowStart, windowStart);
+      expect(
+        'the gap between the ranges is not readable',
+        entry.readableEndAt(entry.prefixEnd),
+        -1,
+      );
+      await _waitFor(
+        () => entry.readableEndAt(target) > target,
+        const Duration(seconds: 10),
+      );
+      expect(
+        'the requested region became readable',
+        entry.readableEndAt(target) > target,
+        true,
+      );
+      final Uint8List onDisk = await entry.file.readAsBytes();
+      final int fileOffset = entry.windowFileStart + (target - entry.windowStart);
+      expect(
+        'the redirected window holds the track bytes',
+        _sameBytes(
+          Uint8List.sublistView(onDisk, fileOffset, fileOffset + 4096),
+          Uint8List.sublistView(payload, target, target + 4096),
+        ),
+        true,
+      );
+
+      // A byte inside the prefix needs no request at all.
+      final int before = ranges.length;
+      await entry.ensureRange(1024, seek: true);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect('a cached byte is served without a request', ranges.length, before);
+
+      // The gap is remembered on disk, so a later launch cannot mistake the file
+      // for a track that starts at byte zero.
+      final File marker = File('${entry.file.path}.head');
+      expect('the gap is recorded next to the file', await marker.exists(), true);
+      expect(
+        'the marker holds the prefix end',
+        int.tryParse((await marker.readAsString()).trim()),
+        entry.prefixEnd,
+      );
+      final AudioStreamEntry reopened = await cache.open(
+        url,
+        expectedBytes: payload.length,
+        force: true,
+      );
+      await _waitFor(
+        () => reopened.prefixEnd >= prefixBytes,
+        const Duration(seconds: 5),
+      );
+      expect(
+        'a reopened entry keeps the recorded prefix',
+        reopened.prefixEnd >= prefixBytes,
+        true,
+      );
+      expect(
+        'a reopened entry restarts its window after the prefix',
+        reopened.windowFileStart >= prefixBytes,
+        true,
+      );
+      expect(
+        'the prefix is readable after the reopen',
+        reopened.readableEndAt(prefixBytes - 1),
+        reopened.prefixEnd,
+      );
+
+      if (!releaseFirst.isCompleted) releaseFirst.complete();
+      expect('the redirected bytes are past the announced end', target < payload.length, true);
+    } finally {
+      if (!releaseFirst.isCompleted) releaseFirst.complete();
+      cache.close();
+      await server.close(force: true);
+    }
+  }
+
+  // 10. A server that ignores the range restarts the body at zero, which the
+  //     cache must survive without doubling the prefix or claiming a window it
+  //     never wrote: out-of-range seeks are clamped from then on.
+  {
+    final Uint8List payload = Uint8List.fromList(
+      List<int>.generate(2 * 1024 * 1024, (int index) => (index * 7) & 0xff),
+    );
+    final int prefixBytes = 32 * 1024;
+    final Completer<void> releaseFirst = Completer<void>();
+    final List<String?> ranges = <String?>[];
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      final String? range = request.headers.value(HttpHeaders.rangeHeader);
+      ranges.add(range);
+      try {
+        if (ranges.length == 1) {
+          // The first request is honoured as a range...
+          request.response.bufferOutput = false;
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes 0-${payload.length - 1}/${payload.length}',
+          );
+          request.response.add(payload.sublist(0, prefixBytes));
+          await request.response.flush();
+          await releaseFirst.future;
+          await request.response.close();
+          return;
+        }
+        // ...and every later one is answered with the whole body from zero.
+        request.response.statusCode = HttpStatus.ok;
+        request.response.contentLength = payload.length;
+        request.response.add(payload);
+        await request.response.close();
+      } catch (_) {
+        // See the ranged check: the abandoned body is expected.
+      }
+    });
+    final Directory directory = Directory('${root.path}/no-redirect');
+    await directory.create(recursive: true);
+    final AudioStreamCache cache = AudioStreamCache(() async => directory);
+    try {
+      final AudioStreamEntry entry = await cache.open(
+        'http://${server.address.host}:${server.port}/flat.mp3',
+        expectedBytes: payload.length,
+      );
+      await _waitFor(
+        () => entry.prefixEnd >= prefixBytes,
+        const Duration(seconds: 5),
+      );
+      // Far enough past the prefix that the redirect starts inside the track
+      // rather than at its beginning.
+      await entry.ensureRange(3 * 1024 * 1024 ~/ 2, seek: true);
+      await _waitFor(
+        () => entry.complete,
+        const Duration(seconds: 15),
+      );
+      expect('a range-less server is remembered', entry.rangeSupported, false);
+      expect('the restarted body landed from zero', entry.windowStart, 0);
+      expect('the file is the track once', entry.complete, true);
+      final Uint8List onDisk = await entry.file.readAsBytes();
+      expect('the file is not a doubled prefix', onDisk.length, payload.length);
+      expect('the restarted file holds the track', _sameBytes(onDisk, payload), true);
+    } finally {
+      if (!releaseFirst.isCompleted) releaseFirst.complete();
+      cache.close();
+      await server.close(force: true);
+    }
+  }
+
   return failures;
 }
 
