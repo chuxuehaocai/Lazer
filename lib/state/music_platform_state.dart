@@ -101,6 +101,7 @@ class _MusicPlatformState {
     state._finishPlaySession();
     await state._flushPlayUploads();
     await state.listenTogether.leave();
+    state._finishListening();
     state.pause();
     state._realActive = false;
     state._clearQueuedNext();

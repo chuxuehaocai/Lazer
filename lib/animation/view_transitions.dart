@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 
 import '../widgets/retained_content_switcher.dart';
 import '../widgets/cover_transition.dart';
+import '../navigation/system_back_gesture.dart';
 import 'apple_spring.dart';
 import 'motion_snapshot.dart';
 
@@ -176,18 +177,40 @@ class ApplePageRoute<T> extends MaterialPageRoute<T> {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    if (MediaQuery.disableAnimationsOf(context)) return child;
-    return LayoutBuilder(
-      builder: (context, box) => _PageEdgeGesture(
-        route: this,
-        width: box.maxWidth,
-        child: _SpringPageSurface(
-          animation: animation,
-          secondaryAnimation: secondaryAnimation,
-          child: child,
-        ),
-      ),
+    final android = Theme.of(context).platform == TargetPlatform.android;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      return ReducedMotionBackGesture(route: this, child: child);
+    }
+    final page = AnimatedBuilder(
+      animation: navigator!.userGestureInProgressNotifier,
+      builder: (context, _) {
+        final systemBack =
+            android && popGestureInProgress && _gestureNavigator == null;
+        final page = LayoutBuilder(
+          builder: (context, box) => _PageEdgeGesture(
+            route: this,
+            width: box.maxWidth,
+            child: _SpringPageSurface(
+              animation: systemBack ? kAlwaysCompleteAnimation : animation,
+              secondaryAnimation: systemBack
+                  ? kAlwaysDismissedAnimation
+                  : secondaryAnimation,
+              child: child,
+            ),
+          ),
+        );
+        if (!android) return page;
+        return const PredictiveBackFullscreenPageTransitionsBuilder()
+            .buildTransitions(
+              this,
+              context,
+              systemBack ? animation : kAlwaysCompleteAnimation,
+              secondaryAnimation,
+              page,
+            );
+      },
     );
+    return page;
   }
 }
 

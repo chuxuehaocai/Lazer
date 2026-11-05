@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 
 import '../navigation/pull_down_to_close.dart';
+import '../navigation/system_back_gesture.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import 'now_playing_page.dart';
@@ -23,6 +25,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
 
   final AppState state;
   final ValueNotifier<bool> _settled = ValueNotifier(false);
+  NavigatorState? _systemGestureNavigator;
 
   @override
   AnimationController createAnimationController() =>
@@ -51,6 +54,12 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
 
   @override
   void dispose() {
+    final nav = _systemGestureNavigator;
+    if (nav != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _releaseSystemGesture(nav),
+      );
+    }
     animation?.removeStatusListener(_onStatus);
     _settled.dispose();
     super.dispose();
@@ -154,6 +163,52 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   }
 
   @override
+  void handleStartBackGesture({double progress = 0}) {
+    _systemGestureNavigator = navigator;
+    super.handleStartBackGesture(progress: progress);
+  }
+
+  @override
+  void handleCommitBackGesture() {
+    final nav = navigator!;
+    if (isCurrent) nav.pop();
+    // TransitionRoute's default commit restarts at upperBound. This player's
+    // physical spring is unbounded, so its upperBound is infinity. Continue
+    // from the finite finger position instead.
+    _releaseSystemGestureWhenSettled(nav);
+  }
+
+  @override
+  void handleCancelBackGesture() {
+    final nav = navigator!;
+    if (isCurrent) controller!.animateWith(createSimulation(forward: true));
+    _releaseSystemGestureWhenSettled(nav);
+  }
+
+  void _releaseSystemGestureWhenSettled(NavigatorState nav) {
+    if (controller!.isAnimating) {
+      late AnimationStatusListener release;
+      release = (status) {
+        if (status != AnimationStatus.completed &&
+            status != AnimationStatus.dismissed) {
+          return;
+        }
+        controller?.removeStatusListener(release);
+        _releaseSystemGesture(nav);
+      };
+      controller!.addStatusListener(release);
+    } else {
+      _releaseSystemGesture(nav);
+    }
+  }
+
+  void _releaseSystemGesture(NavigatorState nav) {
+    if (_systemGestureNavigator != nav) return;
+    _systemGestureNavigator = null;
+    if (nav.mounted && nav.userGestureInProgress) nav.didStopUserGesture();
+  }
+
+  @override
   bool get opaque => true;
 
   @override
@@ -194,30 +249,62 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    if (MediaQuery.disableAnimationsOf(context)) return child;
+    final platform = Theme.of(context).platform;
+    final mobile =
+        platform == TargetPlatform.iOS || platform == TargetPlatform.android;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      return ReducedMotionBackGesture(route: this, child: child);
+    }
     // Timed motion curves the controller itself. A drag and its released
     // continuation consequently share the exact same visible coordinate.
     final physical = controller!.view;
     return AnimatedBuilder(
-      animation: physical,
+      animation: Listenable.merge([
+        physical,
+        navigator!.userGestureInProgressNotifier,
+      ]),
       child: MotionSnapshot(animation: physical, child: child),
       builder: (BuildContext context, Widget? child) {
-        final double travelled = physical.value;
+        final systemBack = mobile && popGestureInProgress && !_dragging;
+        final double travelled = systemBack ? 1 : physical.value;
         // The page is still mounted for the reverse transition. Pause its
         // ambient and lyric tickers so the compositor can move one stable
         // layer offscreen without also repainting the full player each frame.
         final bool tickersEnabled =
             !_dragging && physical.status == AnimationStatus.completed;
-        return Stack(
+        final page = Stack(
           fit: StackFit.expand,
           children: [
             if (travelled > 1) const ColoredBox(color: Colors.black),
             FractionalTranslation(
-              translation: Offset(0, 1 - travelled),
+              translation: Offset(
+                0,
+                MediaQuery.disableAnimationsOf(context) ? 0 : 1 - travelled,
+              ),
               child: TickerMode(enabled: tickersEnabled, child: child!),
             ),
           ],
         );
+        if (platform == TargetPlatform.android) {
+          return const PredictiveBackFullscreenPageTransitionsBuilder()
+              .buildTransitions(
+                this,
+                context,
+                systemBack ? animation : kAlwaysCompleteAnimation,
+                secondaryAnimation,
+                page,
+              );
+        }
+        if (platform == TargetPlatform.iOS) {
+          return const CupertinoPageTransitionsBuilder().buildTransitions(
+            this,
+            context,
+            systemBack ? animation : kAlwaysCompleteAnimation,
+            secondaryAnimation,
+            page,
+          );
+        }
+        return page;
       },
     );
   }

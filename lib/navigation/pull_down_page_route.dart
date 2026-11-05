@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/cupertino.dart'
-    show CupertinoFullscreenDialogTransition;
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 
 import '../animation/apple_spring.dart';
+import 'system_back_gesture.dart';
 
 /// A vertical page transition with a platform-independent top-edge back drag.
 /// The route animation exposes the actual previous page during the gesture.
@@ -159,6 +159,9 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      return ReducedMotionBackGesture(route: this, child: child);
+    }
     final platform = Theme.of(context).platform;
     final isMobilePlatform =
         platform == TargetPlatform.iOS || platform == TargetPlatform.android;
@@ -171,12 +174,7 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
       builder: (context, child) {
         final systemBack = popGestureInProgress && !_pulling;
         if (systemBack && platform == TargetPlatform.iOS) {
-          return CupertinoFullscreenDialogTransition(
-            primaryRouteAnimation: animation,
-            secondaryRouteAnimation: secondaryAnimation,
-            linearTransition: true,
-            child: child!,
-          );
+          return child!;
         }
         final progress = animation.value;
         return SlideTransition(
@@ -216,6 +214,17 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
         ),
       ),
     );
+    if (platform == TargetPlatform.iOS) {
+      return const CupertinoPageTransitionsBuilder().buildTransitions(
+        this,
+        context,
+        popGestureInProgress && !_pulling
+            ? animation
+            : kAlwaysCompleteAnimation,
+        secondaryAnimation,
+        interactive,
+      );
+    }
     if (platform != TargetPlatform.android) return interactive;
     // Android's system edge back remains available alongside the app gesture.
     return const PredictiveBackFullscreenPageTransitionsBuilder()

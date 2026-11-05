@@ -33,6 +33,7 @@ import '../widgets/song_comments_view.dart';
 import 'background.dart';
 import 'login.dart';
 import '../navigation/pull_down_to_close.dart';
+import '../navigation/system_back_gesture.dart';
 import '../player/now_playing_page.dart';
 import '../player/player_page_motion.dart';
 import 'pages.dart';
@@ -78,6 +79,8 @@ class _BrowseLocation {
     this.artistSongs = false,
     this.artistReleases,
     this.savedAlbums = false,
+    this.comments = false,
+    this.localMusic = false,
   });
 
   final String key;
@@ -89,11 +92,18 @@ class _BrowseLocation {
   final bool artistSongs;
   final AlbumReleaseGroup? artistReleases;
   final bool savedAlbums;
+  final bool comments;
+  final bool localMusic;
 }
 
 class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   _AppSection _section = _AppSection.home;
   final List<_BrowseLocation> _browseHistory = <_BrowseLocation>[];
+  final ValueNotifier<double?> _backProgress = ValueNotifier(null);
+  String? _backTarget;
+  String? _backSource;
+  bool _backPlayer = false;
+  bool _backCommitted = false;
   Object? _railCollectionsSource;
   List<Playlist> _railPlaylistCache = const <Playlist>[];
   Playlist? _playlist;
@@ -177,6 +187,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     // browse page live until the player actually starts moving.
     _nowPlayingMotion.animateBack(0, duration: Duration.zero);
     state.addListener(_onAppStateChanged);
+    _backProgress.addListener(_onBackProgress);
     // The first frame is not a switch: only a change from here on is one.
     _shownContentKey = _contentKey;
     // Linear on purpose: the pull writes straight into the controller value,
@@ -367,6 +378,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     _updateTimer?.cancel();
     state.removeListener(_onAppStateChanged);
     _playerSettled.dispose();
+    _backProgress.dispose();
     _repaint.dispose();
     _nowPlayingMotion
       ..removeStatusListener(_onNowPlayingStatus)
@@ -384,6 +396,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     setState(() {
       _section = section;
       _playlist = null;
+      _album = null;
       _artist = null;
       _chart = null;
       _artistSongs = false;
@@ -413,7 +426,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   /// 音乐库 → 本地音乐. It keeps the library section selected so the rail still
   /// reads as the current place, while the content pane swaps to the page.
   void _openLocalMusic() {
-    _browseHistory.clear();
+    _rememberBrowseLocation();
     cancelCoverTransitions();
     setState(() {
       _section = _AppSection.library;
@@ -547,13 +560,15 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         artistSongs: _artistSongs,
         artistReleases: _artistReleases,
         savedAlbums: _savedAlbums,
+        comments: _comments,
+        localMusic: _localMusic,
       ),
     );
     if (_browseHistory.length > 8) _browseHistory.removeAt(1);
   }
 
   void _backToRoot() {
-    if (!_comments && !_localMusic && _browseHistory.isNotEmpty) {
+    if (_browseHistory.isNotEmpty) {
       final identity = _chart != null
           ? 'chart:${_chart!.id}'
           : _playlist != null
@@ -569,8 +584,8 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         _chart = previous.chart;
         _artistSongs = previous.artistSongs;
         _artistReleases = previous.artistReleases;
-        _comments = false;
-        _localMusic = false;
+        _comments = previous.comments;
+        _localMusic = previous.localMusic;
         _savedAlbums = previous.savedAlbums;
       });
       return;
@@ -593,6 +608,11 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
 
   void _toggleComments() {
     if (!state.supportsMusic(MusicCapability.comments)) return;
+    if (_comments) {
+      _backToRoot();
+      return;
+    }
+    _rememberBrowseLocation();
     setState(() {
       _comments = !_comments;
       if (_comments) {
@@ -697,6 +717,73 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       return;
     }
     if (_section != _AppSection.home) _select(_AppSection.home);
+  }
+
+  bool _canStartSystemBack() =>
+      mounted &&
+      (ModalRoute.of(context)?.isCurrent ?? false) &&
+      !TvOverlayStack.instance.hasOpen &&
+      !largeScreenModeOf(context) &&
+      (_nowPlayingOpen
+          ? _nowPlayingSettled && _playerPull.canStart
+          : !_contentSwitching &&
+                (_hasOpenDetail || _section != _AppSection.home));
+
+  void _startSystemBack() {
+    _backSource = _contentKey;
+    _backPlayer = _nowPlayingOpen;
+    _backCommitted = false;
+    if (_backPlayer) {
+      _nowPlayingMotion.stop();
+      _playerSettled.value = false;
+      _coveredShellStale = true;
+    }
+    setState(() {
+      _backTarget = _backPlayer
+          ? null
+          : _browseHistory.isNotEmpty
+          ? _browseHistory.last.key
+          : '$activePlatformContentKey:section:home';
+    });
+    state.browseTransitionChanged(true);
+  }
+
+  void _onBackProgress() {
+    final progress = _backProgress.value;
+    if (_backPlayer &&
+        progress != null &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      _nowPlayingMotion.value = (1 - progress).clamp(.001, 1.0);
+    }
+    if (progress == null) {
+      if (_backPlayer && !_backCommitted && _nowPlayingOpen) {
+        _nowPlayingMotion.value = 1;
+        _playerSettled.value = true;
+      }
+      // Keep the target until the committed content update has been built.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _backTarget = null);
+      });
+      state.browseTransitionChanged(false);
+    }
+  }
+
+  void _commitSystemBack() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? false) ||
+        TvOverlayStack.instance.hasOpen ||
+        _contentKey != _backSource ||
+        _nowPlayingOpen != _backPlayer) {
+      _backCommitted = false;
+      return;
+    }
+    _backCommitted = true;
+    if (_backPlayer) {
+      // The gesture already moved the player completely offscreen. Retire it
+      // at that endpoint instead of starting another close spring at .001.
+      _nowPlayingMotion.animateBack(0, duration: Duration.zero);
+    } else {
+      _handleBack();
+    }
   }
 
   // -- build ----------------------------------------------------------------
@@ -836,67 +923,73 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
           // the shell it covers the browse tree and the player overlay, which
           // is exactly the region a remote has to cross.
           return TvTraversalScope(
-            child: PopScope<void>(
-              // Back is handled in-app while a page or the player is open; at
-              // the browse root it keeps the platform's default (leave the app).
-              canPop:
-                  !TvOverlayStack.instance.hasOpen &&
-                  !_nowPlayingOpen &&
-                  !_hasOpenDetail &&
-                  _section == _AppSection.home,
-              onPopInvokedWithResult: (bool didPop, void _) {
-                if (!didPop) _handleBack();
-              },
-              child: Semantics(
-                key: const ValueKey<String>('app-semantics-root'),
-                container: true,
-                label: 'Lazer',
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: <Widget>[
-                    ExcludeSemantics(
-                      excluding: _nowPlayingOpen,
-                      child: ExcludeFocus(
+            child: SystemBackGesture(
+              canStart: _canStartSystemBack,
+              progress: _backProgress,
+              onStart: _startSystemBack,
+              onCommit: _commitSystemBack,
+              child: PopScope<void>(
+                // Back is handled in-app while a page or the player is open; at
+                // the browse root it keeps the platform's default (leave the app).
+                canPop:
+                    !TvOverlayStack.instance.hasOpen &&
+                    !_nowPlayingOpen &&
+                    !_hasOpenDetail &&
+                    _section == _AppSection.home,
+                onPopInvokedWithResult: (bool didPop, void _) {
+                  if (!didPop) _handleBack();
+                },
+                child: Semantics(
+                  key: const ValueKey<String>('app-semantics-root'),
+                  container: true,
+                  label: 'Lazer',
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
+                      ExcludeSemantics(
                         excluding: _nowPlayingOpen,
-                        child: TickerMode(
-                          enabled: !_nowPlayingOpen,
-                          child: MotionSnapshot(
-                            animation: _nowPlayingMotion,
-                            child: shell,
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (_nowPlayingOpen)
-                      Positioned.fill(
-                        child: AnimatedBuilder(
-                          animation: _nowPlayingMotion,
-                          builder: (context, child) => Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              // Keep the browse page hidden under an upward
-                              // overshoot without painting a black layer over
-                              // the player's own album canvas.
-                              if (_nowPlayingMotion.value > 1)
-                                const ColoredBox(color: Colors.black),
-                              child!,
-                            ],
-                          ),
-                          child: SlideTransition(
-                            position: _nowPlayingSlide,
-                            // The settle flag only shapes the wrappers below, and
-                            // they take the page as a prebuilt child: flipping it
-                            // rebuilds a handful of widgets instead of the whole
-                            // player on the frame the entrance lands.
-                            child: ValueListenableBuilder<bool>(
-                              valueListenable: _playerSettled,
-                              builder: _playerOverlay,
-                              child: _playerPageWidget(),
+                        child: ExcludeFocus(
+                          excluding: _nowPlayingOpen,
+                          child: TickerMode(
+                            enabled: !_nowPlayingOpen,
+                            child: MotionSnapshot(
+                              animation: _nowPlayingMotion,
+                              child: shell,
                             ),
                           ),
                         ),
                       ),
-                  ],
+                      if (_nowPlayingOpen)
+                        Positioned.fill(
+                          child: AnimatedBuilder(
+                            animation: _nowPlayingMotion,
+                            builder: (context, child) => Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                // Keep the browse page hidden under an upward
+                                // overshoot without painting a black layer over
+                                // the player's own album canvas.
+                                if (_nowPlayingMotion.value > 1)
+                                  const ColoredBox(color: Colors.black),
+                                child!,
+                              ],
+                            ),
+                            child: SlideTransition(
+                              position: _nowPlayingSlide,
+                              // The settle flag only shapes the wrappers below, and
+                              // they take the page as a prebuilt child: flipping it
+                              // rebuilds a handful of widgets instead of the whole
+                              // player on the frame the entrance lands.
+                              child: ValueListenableBuilder<bool>(
+                                valueListenable: _playerSettled,
+                                builder: _playerOverlay,
+                                child: _playerPageWidget(),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1599,7 +1692,13 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     final bool largeScreen = largeScreenModeOf(context);
     return RetainedContentSwitcher(
       currentKey: _contentKey,
-      retainKeys: _browseHistory.map((location) => location.key).toSet(),
+      retainKeys: {
+        ..._browseHistory.map((location) => location.key),
+        if (!largeScreen) '$activePlatformContentKey:section:home',
+      },
+      backProgress: _backProgress,
+      backTargetKey: _backTarget,
+      backCommitted: _backCommitted,
       duration: motion ? const Duration(milliseconds: 420) : Duration.zero,
       onTransitionChanged: _onContentTransitionChanged,
       slideFraction: largeScreen ? .012 : .04,

@@ -28,6 +28,7 @@ import '../data/models.dart';
 import '../gateway/gateway.dart';
 import '../gateway/transport.dart';
 import '../lyrics/imported_lyrics_store.dart';
+import '../listening/listening_statistics.dart';
 import '../updates/release_version.dart';
 import '../updates/update_checker.dart';
 import '../utils/background_image.dart';
@@ -141,6 +142,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     DownloadManager? downloadManager,
     ImportedLyricsStore? importedLyrics,
     PlaybackQueueStore? queueStore,
+    ListeningStatisticsController? listeningStatistics,
     UpdateChecker? updateChecker,
     this.audioEngine,
     this._independentPlayback = false,
@@ -161,6 +163,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }) : catalog = catalog ?? Catalog(),
        localLibrary = localLibrary ?? LocalLibrary(),
        _queueStore = queueStore ?? PlaybackQueueStore(),
+       listeningStatistics =
+           listeningStatistics ?? ListeningStatisticsController(),
        updateChecker = updateChecker ?? UpdateChecker() {
     _autoMixEnabled = autoMixEnabled;
     MotionTiming.speed = animationSpeed;
@@ -235,6 +239,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (_presentationDisposed) return;
     checkScheduledPause();
     if (_realActive && audioEngine?.active == true) {
+      _sampleListening();
       _position = precisePosition;
     }
     if (_playing) _ensureTicker();
@@ -1971,6 +1976,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _playUploads.clear();
     unawaited(_persistPlayUploads());
     unawaited(listenTogether.leave());
+    _finishListening();
     pause();
     _stationLoader = null;
     _stationLoading = false;
@@ -2161,6 +2167,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   int _queueRevision = 0;
   List<Track>? _queueSnapshot;
   final PlaybackQueueStore _queueStore;
+  final ListeningStatisticsController listeningStatistics;
+  int _listeningRevision = 0;
+  int? _pendingListeningSeek;
   int _queueActivity = 0;
   List<Track> _recentTracks = <Track>[];
   int _queueIndex = 0;
@@ -2469,6 +2478,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void _replaceQueue(List<Track> tracks, {int startIndex = 0}) {
     checkScheduledPause();
     if (tracks.isEmpty) return;
+    _finishListening(
+      manualTarget: tracks[startIndex.clamp(0, tracks.length - 1)],
+    );
     _finishPlaySession();
     trackChangeDirection = 1;
     _queue = List<Track>.of(tracks);
@@ -2488,6 +2500,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final shouldPlay = !_playing;
     checkScheduledPause();
     if (current == null) return;
+    if (!shouldPlay) {
+      _sampleListening();
+      listeningStatistics.suspend();
+      unawaited(listeningStatistics.flush());
+    }
     _playing = shouldPlay;
     if (_playing) {
       _ensureTicker();
@@ -2520,6 +2537,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void pause() {
     if (!_playing) return;
+    _sampleListening();
+    listeningStatistics.suspend();
+    unawaited(listeningStatistics.flush());
     _playing = false;
     _ticker?.cancel();
     if (_realActive) unawaited(audioEngine!.pause());
@@ -2566,6 +2586,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void stop() {
+    _finishListening();
     _finishPlaySession();
     ++_generation;
     _playing = false;
@@ -2587,6 +2608,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return;
     }
     final int target = _manualNextIndex();
+    _finishListening(manualTarget: _queue[target]);
     // When the following track is already in the engine's queue, jumping to it
     // keeps the decoder running instead of reloading (an audible gap).
     _moveTo(target, direction: 1, gapless: target == _queuedNextIndex);
@@ -2594,12 +2616,51 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void previous() {
     if (_queue.isEmpty) return;
+    if (_position.inSeconds > 3) {
+      _sampleListening();
+      listeningStatistics.suspend();
+    } else {
+      _finishListening(
+        manualTarget: _queue[(_queueIndex - 1 + _queue.length) % _queue.length],
+      );
+    }
     _finishPlaySession();
     playbackError = null;
     // Classic transport behavior: >3s in, "previous" restarts the track.
     if (_position.inSeconds > 3) {
       _position = Duration.zero;
-      if (_realActive) unawaited(audioEngine!.seek(Duration.zero));
+      if (_realActive) {
+        final generation = _generation;
+        final listeningRevision = ++_listeningRevision;
+        _pendingListeningSeek = listeningRevision;
+        unawaited(
+          audioEngine!
+              .seek(Duration.zero)
+              .then((_) {
+                if (_presentationDisposed ||
+                    generation != _generation ||
+                    listeningRevision != _listeningRevision) {
+                  return;
+                }
+                _pendingListeningSeek = null;
+                listeningStatistics.end();
+                if (_playing && current != null) {
+                  listeningStatistics.begin(current!, audioEngine!.position);
+                }
+              })
+              .catchError((Object error) {
+                if (!_presentationDisposed &&
+                    generation == _generation &&
+                    listeningRevision == _listeningRevision) {
+                  _pendingListeningSeek = null;
+                  if (_playing && current != null) {
+                    listeningStatistics.begin(current!, audioEngine!.position);
+                  }
+                }
+                debugPrint('Seek failed: $error');
+              }),
+        );
+      }
     } else {
       final int target = (_queueIndex - 1 + _queue.length) % _queue.length;
       _moveTo(target, direction: -1);
@@ -2614,6 +2675,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// it only has to cross the boundary; otherwise the URL is loaded afresh.
   void _moveTo(int index, {required int direction, bool gapless = false}) {
     if (_queue.isEmpty) return;
+    _finishListening();
     _finishPlaySession();
     trackChangeDirection = direction;
     playbackError = null;
@@ -2650,6 +2712,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await _waitForStationLoad();
     if (_queue.length <= before) await _ensureStationBuffer(force: true);
     if (!_playing || _queue.length <= before) return;
+    _finishListening(manualTarget: _queue[before]);
     _moveTo(before, direction: 1);
   }
 
@@ -2732,6 +2795,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void seek(double fraction) {
     final Track? t = current;
     if (t == null) return;
+    _sampleListening();
+    listeningStatistics.suspend();
     final Duration target = t.duration * clampSeekFraction(fraction);
     // The engine cancels an audible overlap when it seeks. Going back first keeps
     // the queue position, the shown metadata and the position on the song that is
@@ -2746,18 +2811,37 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         ..reset()
         ..start();
       final request = ++_seekRequest;
+      final generation = _generation;
+      final listeningRevision = ++_listeningRevision;
+      _pendingListeningSeek = listeningRevision;
       unawaited(
-        Future<void>.sync(() => audioEngine!.seek(target)).catchError((
-          Object error,
-        ) {
-          if (request == _seekRequest) {
-            // The engine refused the seek: publishing its real position again
-            // is the honest answer, even if that is the pre-seek position.
-            _clearOptimisticSeek();
-            _tickNotifier.pulse();
-          }
-          debugPrint('Seek failed: $error');
-        }),
+        Future<void>.sync(() => audioEngine!.seek(target))
+            .then((_) {
+              if (!_presentationDisposed &&
+                  request == _seekRequest &&
+                  generation == _generation &&
+                  listeningRevision == _listeningRevision) {
+                _pendingListeningSeek = null;
+                if (_playing) listeningStatistics.rebase(audioEngine!.position);
+              }
+            })
+            .catchError((Object error) {
+              if (request == _seekRequest) {
+                // The engine refused the seek: publishing its real position again
+                // is the honest answer, even if that is the pre-seek position.
+                _clearOptimisticSeek();
+                if (!_presentationDisposed &&
+                    generation == _generation &&
+                    listeningRevision == _listeningRevision) {
+                  _pendingListeningSeek = null;
+                  if (_playing) {
+                    listeningStatistics.rebase(audioEngine!.position);
+                  }
+                }
+                _tickNotifier.pulse();
+              }
+              debugPrint('Seek failed: $error');
+            }),
       );
     }
     // Position-only change: tick lane, not a structural rebuild.
@@ -2893,6 +2977,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void playTrackAt(int index) {
     checkScheduledPause();
     if (index < 0 || index >= _queue.length) return;
+    _finishListening(manualTarget: _queue[index]);
     _finishPlaySession();
     trackChangeDirection = index < _queueIndex ? -1 : 1;
     playbackError = null;
@@ -2932,6 +3017,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// it keeps the retry budgets already spent on this source, so a device that
   /// fails every open cannot loop.
   Future<void> _startAudio({Duration? resumeAt, bool recovering = false}) async {
+    _sampleListening();
+    ++_listeningRevision;
+    _pendingListeningSeek = null;
+    listeningStatistics.suspend();
     unawaited(_loadCurrentArtwork());
     final AudioEngine? engine = audioEngine;
     final Track? track = current;
@@ -3436,6 +3525,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         '$expectedUrl for index $target',
       );
     }
+    ++_listeningRevision;
+    _pendingListeningSeek = null;
+    listeningStatistics.end();
+    // `_queuedNextIndex` is deliberately left alone: it is this method's own entry
+    // guard, and the hand-off arrives as a *second* index event once the overlap
+    // ends. Clearing it here would make that second event return early and skip the
+    // `_prefetchNext()` at the tail, so the song after the mixed-in one would never
+    // be prepared. `_prefetchNext` overwrites both fields as soon as it lands.
     trackChangeDirection = 1;
     playbackError = null;
     // A mix is presented before the hand-off: the audible song is a blend and
@@ -3458,6 +3555,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _clearOptimisticSeek();
     // The engine has already moved on, so a seek still in flight for the
     // outgoing track must not land on the incoming one.
+    _position = audioEngine?.position ?? Duration.zero;
+    if (current != null) listeningStatistics.begin(current!, _position);
     ++_seekRequest;
     // AutoMix hands off while the incoming track is already audible, so the
     // engine's position — not zero — is what the listener is hearing.
@@ -3610,6 +3709,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     checkScheduledPause();
     if (!_playing) return;
     final generation = _generation;
+    if (_realActive && current != null && _pendingListeningSeek == null) {
+      listeningStatistics.begin(current!, audioEngine!.position);
+    }
     try {
       await audioEngine!.play();
       if (_presentationDisposed) return;
@@ -3838,6 +3940,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _failPlayback(String message) {
+    // The engine may already be stopped on a terminal error. Keep only
+    // progress observed before the failure, never a final fabricated position.
+    ++_listeningRevision;
+    _pendingListeningSeek = null;
+    listeningStatistics.end();
     _realActive = false;
     _playing = false;
     _clearQueuedNext();
@@ -4005,6 +4112,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void _onEngineCompleted() {
     _finishPlaySession();
     if (!_realActive || !_playing) return;
+    _finishListening(completed: true);
     // Consume the terminal state before seeking/loading; some backends emit
     // both a completed event and a final position update for the same source.
     _realActive = false;
@@ -4083,6 +4191,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         _checkStreamStall();
       }
       _position = position;
+      _sampleListening();
       _trackPlaySession(t);
       // A native duration/position is a second completion signal for backends
       // that omit the terminal processing-state event. Never use metadata or
@@ -4114,6 +4223,27 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _bufferPulseTimer = null;
       _tickNotifier.pulse();
     });
+  }
+
+  void _sampleListening({bool completed = false}) {
+    final engine = audioEngine;
+    if (_playing &&
+        _realActive &&
+        !startupBuffering &&
+        engine != null &&
+        (engine.active || completed)) {
+      listeningStatistics.sample(engine.position);
+    }
+  }
+
+  void _finishListening({Track? manualTarget, bool completed = false}) {
+    // A completion can mark the engine inactive before delivering its final
+    // real position; consume that position without estimating a missing tail.
+    _sampleListening(completed: completed);
+    ++_listeningRevision;
+    _pendingListeningSeek = null;
+    if (manualTarget != null) listeningStatistics.recordSkipTo(manualTarget);
+    listeningStatistics.end();
   }
 
   /// Accumulates how much of [track] was actually heard.
@@ -4387,6 +4517,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _sampleListening();
+    listeningStatistics.dispose();
     _pauseSchedule.dispose();
     _musicPlatforms.cancelPending();
     catalog.connections.close();

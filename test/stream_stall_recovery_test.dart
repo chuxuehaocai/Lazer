@@ -179,7 +179,10 @@ void main() {
       engine.streamStalled = true;
       engine.restartable = true;
       await _until(() => engine.restarts > 0);
-      // The recovery reload is asynchronous; give it the tick that publishes it.
+      // The recovery reload is asynchronous. Wait for the seek it ends in rather
+      // than for the stall flag to clear, which the reload itself does part-way
+      // through and so can let the assertions below run ahead of the seek.
+      await _until(() => engine.lastSeek != null);
       await _until(() => state.streamStalled == false);
 
       expect(
