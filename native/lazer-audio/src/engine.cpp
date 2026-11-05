@@ -1781,7 +1781,11 @@ int64_t Engine::snapOverlapToBeat(
     /* The mix ends where the source ends, so its start is what moves: onto the nearest line of the
      * source's own beat grid, which is the frame count the pump produced from the start. */
     const int64_t snapped = grid.nextBeatAtOrAfter(mixStartOutputFrames - beat / 2);
-    const int64_t snappedFrames = mixStartOutputFrames - snapped;
+    /* `snapped` is the beat line the start moves onto, so the overlap's *length* changes by that
+     * same amount: the mix still ends where the source ends, only its start moved. Returning the
+     * distance instead of the length is what made this a no-op — a value bounded by half a beat can
+     * never fall inside the 4-8 s window the guard below checks it against. */
+    const int64_t snappedFrames = desiredFrames + (mixStartOutputFrames - snapped);
     if (snappedFrames <= 1) return desiredFrames;
     const int32_t rate = outputSession_.target.sampleRate > 0 ? outputSession_.target.sampleRate : 1;
     const double seconds = static_cast<double>(snappedFrames) / rate;
