@@ -638,11 +638,6 @@ class NativeAudioEngine
         '(${bufferedPosition.inMilliseconds} ms is)',
       );
     }
-    // A seek cancels an overlap that is playing: the engine drops the incoming
-    // side and keeps the successor queued, so the outgoing song is what is heard
-    // again and the position is back on its timeline. The app notices the same
-    // thing through [mixPresented] before it asks for the seek.
-    _mixPresented = false;
     final int status = _status(
       await _worker.call(LazerWorkerOp.seek, [
         address,
@@ -652,6 +647,13 @@ class NativeAudioEngine
     if (status != lazerAudioOk || generation != _generation || _disposed) {
       return;
     }
+    // A seek cancels an overlap that is playing: the engine drops the incoming
+    // side and keeps the successor queued, so the outgoing song is what is heard
+    // again and the position is back on its timeline. The app notices the same
+    // thing through [mixPresented] before it asks for the seek. Cleared only once
+    // the engine confirmed the seek: a refused one left the overlap playing, and
+    // the position would then be read from the wrong timeline.
+    _mixPresented = false;
     _position = position;
     // The engine's published position only moves once the decode side applied
     // the seek; reporting the target meanwhile keeps the rail from jumping back.

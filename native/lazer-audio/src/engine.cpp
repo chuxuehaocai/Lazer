@@ -1583,11 +1583,20 @@ bool Engine::isCancelled() const {
 }
 
 void Engine::onSeekApplied() {
+    /* Whether this flush answers a seek the caller asked for. The initial CUE positioning seek of a
+     * queued source applies the same way but nobody is waiting for it, so it is not announced. */
+    const bool requested = requestedSeekTargetMillis_.load(std::memory_order_acquire) >= 0;
     ring_.clearForProducer();
     if (nativeDsdActive_.load(std::memory_order_acquire)) nativeDsdPacker_.reset();
     resetTimelineForSeek();
     seekFlushRequested_.store(false, std::memory_order_release);
     underrunActive_.store(0, std::memory_order_release);
+    if (!requested) return;
+    /* Everything the decoder produced before the target is gone, so the clock now reads the target.
+     * This is the confirmation the caller holds its published position for: `LazerAudioEventSeekCompleted`
+     * is in the ABI for exactly this, and without it the app can only wait out its own hold ceiling,
+     * which is what left the progress bar standing still after a seek. */
+    raise(LazerAudioEventSeekCompleted, 0, currentPositionMillis());
 }
 
 void Engine::resetTimelineForSeek() {
@@ -2372,12 +2381,11 @@ uint64_t Engine::convertToOutput(const float *source, int32_t frames, uint8_t *d
 
 void Engine::pumpLoop() {
     const auto flushForSeek = [this] {
+        /* One implementation for both seek paths: the decode thread reports an applied seek through
+         * `onSeekApplied`, and a seek on a prefetching source is flushed here. Both have to announce
+         * the completion, so the flush lives in one place. */
         if (!seekFlushRequested_.load(std::memory_order_acquire)) return;
-        ring_.clearForProducer();
-        if (nativeDsdActive_.load(std::memory_order_acquire)) nativeDsdPacker_.reset();
-        resetTimelineForSeek();
-        underrunActive_.store(0, std::memory_order_release);
-        seekFlushRequested_.store(false, std::memory_order_release);
+        onSeekApplied();
     };
     for (;;) {
         flushForSeek();
