@@ -74,7 +74,9 @@ constexpr std::chrono::milliseconds kCallSlice(150);
 constexpr std::chrono::seconds kSeekDeadline(12);
 
 /* A cache file that has not produced any bytes for this long is treated as a stalled download so a
- * hung response cannot park the engine's decode thread forever. Dart reports real failures
+ * hung response cannot park the engine's decode thread forever. Measured from the last byte that
+ * landed (`Reader::last_progress`), never from the start of the current call: a read returns after
+ * `kCallSlice` by design, so a per-call deadline is unreachable. Dart reports real failures
  * explicitly long before this. */
 constexpr std::chrono::seconds kStallDeadline(45);
 
@@ -98,6 +100,12 @@ struct Reader {
     bool failed = false;
     bool cancelled = false;
     bool closed = false;
+
+    /* When the download last appended anything. The stall deadline is measured against this and not
+     * against the current call: a read hands control back after `kCallSlice` so the engine can apply
+     * a seek, which means no single call ever stays inside the loop long enough to reach the
+     * deadline, and a hung download would otherwise park the decoder forever. */
+    std::chrono::steady_clock::time_point last_progress = std::chrono::steady_clock::now();
 
 #if defined(_WIN32)
     HANDLE handle = INVALID_HANDLE_VALUE;
@@ -217,6 +225,9 @@ int64_t availableBytes(Reader &reader) {
     if (!openFile(reader)) return -1;
     const int64_t size = fileBytes(reader);
     if (size < 0) return -1;
+    /* A larger file is download progress even when the downloader did not notify, and the stall
+     * deadline is measured from the last byte that actually landed. */
+    if (size > reader.observed_bytes) reader.last_progress = std::chrono::steady_clock::now();
     reader.observed_bytes = size;
     return size;
 }
@@ -246,6 +257,7 @@ LAZER_BRIDGE_API void lazer_bridge_reader_notify(void *handle) {
     auto *reader = static_cast<Reader *>(handle);
     std::lock_guard<std::mutex> lock(reader->mutex);
     reader->revision += 1;
+    reader->last_progress = std::chrono::steady_clock::now();
     reader->changed.notify_all();
 }
 
@@ -329,7 +341,7 @@ LAZER_BRIDGE_API int32_t lazer_bridge_reader_read(
         if (available < 0) {
             /* The cache file is created by the downloader before the engine opens the source, so a
              * missing handle is a transient race: wait for the next notification. */
-            if (std::chrono::steady_clock::now() - started_at > kStallDeadline) {
+            if (std::chrono::steady_clock::now() - reader->last_progress > kStallDeadline) {
                 return kReaderIoError;
             }
             reader->changed.wait_for(lock, kWaitSlice);
@@ -350,7 +362,9 @@ LAZER_BRIDGE_API int32_t lazer_bridge_reader_read(
         }
         if (reader->finished) return reader->failed ? kReaderIoError : kReaderEof;
         if (reader->failed) return kReaderIoError;
-        if (std::chrono::steady_clock::now() - started_at > kStallDeadline) {
+        /* Measured from the last byte that landed, not from this call: the slice return below hands
+         * control back long before a per-call deadline could expire. */
+        if (std::chrono::steady_clock::now() - reader->last_progress > kStallDeadline) {
             return kReaderIoError;
         }
         /* Nothing past the read position yet: wait one slice for the downloader, then hand control
