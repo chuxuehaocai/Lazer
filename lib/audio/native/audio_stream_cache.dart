@@ -66,6 +66,10 @@ class AudioStreamEntry {
   RandomAccessFile? _sink;
   Completer<void>? _done;
 
+  /// When the download last moved, for the stall report. Set on every chunk and
+  /// on every wait, so a reader can tell "slow" from "dead".
+  DateTime _lastProgressAt = DateTime.now();
+
   /// Bytes currently readable from the file.
   int get downloadedBytes => _downloadedBytes;
 
@@ -77,11 +81,29 @@ class AudioStreamEntry {
 
   bool get cancelled => _cancelled;
 
-  /// Downloaded fraction, 0 when the server never announced a length.
-  double get progress {
+  /// Whether the server announced a total size. When it did not, [progress] is
+  /// unmeasurable rather than zero: the bytes are still arriving.
+  bool get lengthKnown => (expectedBytes ?? 0) > 0;
+
+  /// Whether the download has neither moved for [threshold] nor finished.
+  ///
+  /// A response that trickles a byte per minute still resets this, which is the
+  /// honest answer: bytes are arriving, just slowly.
+  bool stalledFor(Duration threshold, {DateTime? now}) {
+    if (_complete || _cancelled || _failure != null) return false;
+    return (now ?? DateTime.now()).difference(_lastProgressAt) >= threshold;
+  }
+
+  /// Downloaded fraction, or null when the server never announced a length.
+  ///
+  /// Returning null keeps "cannot be measured" apart from "nothing landed": a
+  /// caller that treats an unmeasurable stream as 0 % hides a fully downloaded
+  /// chunked response behind an empty buffer bar, and one that treats it as
+  /// 100 % lets the seek rail run past what the reader can actually serve.
+  double? get progress {
     if (_complete) return 1;
     final int? total = expectedBytes;
-    if (total == null || total <= 0) return 0;
+    if (total == null || total <= 0) return null;
     return (_downloadedBytes / total).clamp(0, 1);
   }
 
@@ -128,6 +150,7 @@ class AudioStreamEntry {
     if (announced != null && announced > 0 && position == announced) {
       _downloadedBytes = position;
       _complete = true;
+      _lastProgressAt = DateTime.now();
       return;
     }
     if (announced != null && announced > 0 && position > announced) {
@@ -177,6 +200,7 @@ class AudioStreamEntry {
       sink.writeFromSync(chunk);
       position += chunk.length;
       _downloadedBytes = position;
+      _lastProgressAt = DateTime.now();
       onAppended?.call();
     }
     if (_cancelled) return;
@@ -185,6 +209,7 @@ class AudioStreamEntry {
       throw const FileSystemException('audio download ended early');
     }
     _complete = true;
+    _lastProgressAt = DateTime.now();
   }
 
   /// Total size from `Content-Length`, or from `Content-Range` when resuming.
@@ -231,11 +256,20 @@ class AudioStreamCache {
   ///
   /// The file exists by the time this returns, so the engine's reader can open it
   /// immediately; the bytes arrive afterwards.
-  Future<AudioStreamEntry> open(String url, {int? expectedBytes}) async {
+  ///
+  /// [force] starts a new download even when the cached entry exists — including
+  /// one whose download already failed. The fresh entry resumes from the bytes
+  /// already on disk, so recovering a dead download does not refetch the part
+  /// that did arrive.
+  Future<AudioStreamEntry> open(
+    String url, {
+    int? expectedBytes,
+    bool force = false,
+  }) async {
     if (_closed) throw StateError('the audio cache is closed');
     final int key = _cacheKey(url);
     final AudioStreamEntry? existing = _entries[key];
-    if (existing != null) {
+    if (existing != null && !force) {
       if (!existing.complete && !existing.cancelled) return existing;
       // A finished or cancelled download is restarted from what is on disk.
       existing.expectedBytes ??= expectedBytes;

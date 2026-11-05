@@ -56,7 +56,8 @@ class NativeAudioEngine
         AutoMixConfigurableAudioEngine,
         FailureReportingAudioEngine,
         FocusAwareAudioEngine,
-        SessionPreparingAudioEngine {
+        SessionPreparingAudioEngine,
+        StreamingBufferHealthAudioEngine {
   NativeAudioEngine._(
     this._api,
     this._bridge,
@@ -222,7 +223,7 @@ class NativeAudioEngine
 
   /// When [_pendingSeek] was issued, so a `SeekCompleted` event that never
   /// arrives (a seek while paused, or a dropped callback) cannot pin the reported
-  /// position forever.
+  /// position forever. See [seekHoldCeiling].
   int _pendingSeekAtMicros = 0;
 
   /// Successor preparations still inside the worker, drained before `destroy`:
@@ -278,24 +279,19 @@ class NativeAudioEngine
   Duration get position => _readPosition();
 
   Duration _readPosition() {
-    final Duration? pending = _pendingSeek;
-    if (pending != null) {
-      final Duration age = Duration(
-        microseconds:
-            DateTime.now().microsecondsSinceEpoch - _pendingSeekAtMicros,
-      );
-      if (age < const Duration(seconds: 2)) return pending;
-      _pendingSeek = null;
-    }
     final int? address = _engineAddressOrNull;
-    if (address == null) return _position;
+    if (address == null) {
+      return _pendingSeek ?? _position;
+    }
     final Pointer<LazerAudioSnapshot> snapshot = _snapshotBuffer ??=
         calloc<LazerAudioSnapshot>();
     if (_api.snapshot(Pointer<Void>.fromAddress(address), snapshot) !=
         lazerAudioOk) {
-      return _position;
+      return _pendingSeek ?? _position;
     }
     final int millis = snapshot.ref.positionMillis;
+    // A presented mix runs on the outgoing track's timeline, so the snapshot is
+    // not the time the listener hears for the track the app now shows.
     if (_mixPresented) {
       _position = Duration(
         milliseconds: (millis - _mixStartOutgoingMillis).clamp(0, 1 << 30),
@@ -305,8 +301,28 @@ class NativeAudioEngine
     if (millis >= 0) _position = Duration(milliseconds: millis);
     final int total = snapshot.ref.durationMillis;
     if (total > 0) _duration = Duration(milliseconds: total);
+    final Duration? pending = _pendingSeek;
+    if (pending != null) {
+      final Duration age = Duration(
+        microseconds:
+            DateTime.now().microsecondsSinceEpoch - _pendingSeekAtMicros,
+      );
+      // Hold the requested target until the engine confirms the seek, because
+      // until then the snapshot still describes the position *before* the jump.
+      // A short hold — this used to be two seconds — is what made a slow seek
+      // (or one into a region the decoder has to wait for) look like playback
+      // had jumped back to where the reader was still working.
+      if (age < seekHoldCeiling) return pending;
+      _pendingSeek = null;
+    }
     return _position;
   }
+
+  /// Longest a requested seek target is published before the snapshot wins.
+  ///
+  /// The hold itself ends on `SeekCompleted`; this only bounds a callback that
+  /// never arrives — a seek while paused, or a seek superseded by another.
+  static const Duration seekHoldCeiling = Duration(seconds: 15);
 
   @override
   Duration? get duration {
@@ -326,7 +342,12 @@ class NativeAudioEngine
     if (total == null || total == Duration.zero) {
       return _position;
     }
-    final Duration buffered = total * entry.progress;
+    final double? progress = entry.progress;
+    // No announced length: the buffered position is unmeasurable, not zero. The
+    // download bytes still exist, so the rail paints the playhead and the
+    // startup path uses `streamedBytes` instead of this fraction.
+    if (progress == null) return _position;
+    final Duration buffered = total * progress;
     return buffered > _position ? buffered : _position;
   }
 
@@ -337,9 +358,77 @@ class NativeAudioEngine
     if (entry != null &&
         !entry.complete &&
         (_duration == null || (entry.expectedBytes ?? 0) <= 0)) {
+      // Both the length and the negotiated duration are still unknown, so there
+      // is nothing to compare against: let the caller wait on streamed bytes.
       return null;
     }
     return bufferedPosition;
+  }
+
+  /// Bytes of the current network source that have landed on disk.
+  @override
+  int? get streamedBytes => _activeEntry?.downloadedBytes;
+
+  /// Whether the download feeding the current source ended in failure.
+  @override
+  bool get streamFailed => _activeEntry?.failure != null;
+
+  /// Whether no byte of the current download has landed for long enough that
+  /// the reader is about to give up. Deliberately longer than the downloader's
+  /// own no-data timeout (20 s), so the terminal failure is reported first and
+  /// this only catches a download that is alive but delivering nothing.
+  static const Duration streamStallTimeout = Duration(seconds: 25);
+
+  @override
+  bool get streamStalled =>
+      _activeEntry?.stalledFor(streamStallTimeout) ?? false;
+
+  /// Unblocks the decoder of a dead download by releasing the reader that is
+  /// parked on it, then starts that download again from the bytes already on
+  /// disk. Returns true when there was something to restart, in which case the
+  /// caller is expected to reload the source so a fresh reader is bound.
+  ///
+  /// A decoder parked in `read` cannot be woken from Dart: the native reader
+  /// only leaves that call on new bytes, its own stall deadline, or a close.
+  /// Restarting therefore goes through [stop], which closes the reader on the
+  /// worker thread — the same serialised path a track change uses.
+  @override
+  bool restartStream() {
+    final int? address = _engineAddressOrNull;
+    final AudioStreamEntry? entry = _activeEntry;
+    final bool dead = streamFailed || streamStalled;
+    if (address == null || entry == null) return false;
+    if (!dead) {
+      // The download is alive; only the watchdog clock needs resetting, which a
+      // plain reopen of the same entry does without touching the reader.
+      unawaited(
+        _serialize(() async {
+          try {
+            await _cache.open(entry.url);
+          } catch (_) {
+            // A cache that refuses to reopen leaves the running download alone.
+          }
+        }),
+      );
+      return false;
+    }
+    _sourceLoaded = false;
+    _completionSent = false;
+    unawaited(
+      _serialize(() async {
+        await stop();
+        try {
+          await _cache.open(
+            entry.url,
+            expectedBytes: entry.expectedBytes,
+            force: true,
+          );
+        } catch (error) {
+          debugPrint('lazer-audio: restarting the stream failed: $error');
+        }
+      }),
+    );
+    return true;
   }
 
   int? get _engineAddressOrNull => _engineAddress == 0 ? null : _engineAddress;
