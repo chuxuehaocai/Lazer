@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/physics.dart';
 
 import '../animation/apple_spring.dart';
@@ -17,6 +18,9 @@ class RetainedContentSwitcher extends StatefulWidget {
     this.slideFraction = .04,
     this.expand = true,
     this.onTransitionChanged,
+    this.backProgress,
+    this.backTargetKey,
+    this.backCommitted = false,
   });
 
   final String currentKey;
@@ -26,6 +30,9 @@ class RetainedContentSwitcher extends StatefulWidget {
   final double slideFraction;
   final bool expand;
   final ValueChanged<bool>? onTransitionChanged;
+  final ValueListenable<double?>? backProgress;
+  final String? backTargetKey;
+  final bool backCommitted;
 
   @override
   State<RetainedContentSwitcher> createState() =>
@@ -108,6 +115,26 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
       );
       return;
     }
+    if (oldWidget.backTargetKey == widget.currentKey && widget.backCommitted) {
+      // The interactive preview already painted the complete return. Keep
+      // those exact retained elements and finish without a second transition.
+      _transitionGeneration++;
+      _motion.stop();
+      _pages[widget.currentKey]!.page = widget.page;
+      _pages.removeWhere(
+        (key, _) =>
+            key != widget.currentKey && !widget.retainKeys.contains(key),
+      );
+      for (final item in _pages.entries) {
+        item.value
+          ..from = item.key == widget.currentKey ? 1 : 0
+          ..to = item.key == widget.currentKey ? 1 : 0
+          ..spring = null
+          ..parkedView = null;
+      }
+      widget.onTransitionChanged?.call(false);
+      return;
+    }
     final focus = FocusManager.instance.primaryFocus;
     final focusedContext = focus?.context;
     var insideOldPage = false;
@@ -184,19 +211,38 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
   }
 
   @override
-  Widget build(BuildContext context) => CoverTransitionViewport(
+  Widget build(BuildContext context) {
+    final progress = widget.backProgress;
+    if (progress == null) return _stack(null);
+    return ValueListenableBuilder<double?>(
+      valueListenable: progress,
+      builder: (context, value, _) => _stack(value),
+    );
+  }
+
+  Widget _stack(double? backProgress) => CoverTransitionViewport(
     child: Stack(
       fit: widget.expand ? StackFit.expand : StackFit.loose,
       alignment: Alignment.topCenter,
       children: <Widget>[
-        for (final item in _pages.entries) _page(item.key, item.value),
+        for (final item in _pages.entries)
+          if (backProgress == null ||
+              item.key != widget.currentKey && item.key != widget.backTargetKey)
+            _page(item.key, item.value, backProgress),
+        if (backProgress != null) ...[
+          if (_pages[widget.backTargetKey] case final target?)
+            _page(widget.backTargetKey!, target, backProgress),
+          _page(widget.currentKey, _pages[widget.currentKey]!, backProgress),
+        ],
       ],
     ),
   );
 
-  Widget _page(String key, _RetainedPage entry) {
+  Widget _page(String key, _RetainedPage entry, double? backProgress) {
     final current = key == widget.currentKey;
-    final parked = !current && !entry.transitioning;
+    final preview =
+        backProgress != null && (current || key == widget.backTargetKey);
+    final parked = !current && !entry.transitioning && !preview;
     // The child page was already retained; retain its inactive wrappers too.
     // They have no changing inputs while parked. Inherited theme/size changes
     // still reach their dependent elements, and revealing the page replaces
@@ -212,29 +258,68 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
         : AlwaysStoppedAnimation<double>(entry.to);
     final view = Offstage(
       key: ValueKey<String>(key),
-      offstage: !current && !entry.transitioning,
+      offstage: parked,
       child: TickerMode(
-        enabled: current && !entry.transitioning,
+        enabled: current && !entry.transitioning && !preview,
         child: IgnorePointer(
           ignoring: !current,
           child: ExcludeFocus(
             excluding: !current,
             child: ExcludeSemantics(
               excluding: !current,
-              child: FadeTransition(
-                opacity: animation.drive(_ClampedPageOpacity()),
-                child: SlideTransition(
-                  position: animation.drive(
-                    Tween<Offset>(
-                      begin: Offset(0, widget.slideFraction),
-                      end: Offset.zero,
+              child: FractionalTranslation(
+                translation: !preview || MediaQuery.disableAnimationsOf(context)
+                    ? Offset.zero
+                    : Theme.of(context).platform == TargetPlatform.iOS
+                    ? Offset(
+                        (current ? backProgress : -.3 * (1 - backProgress)) *
+                            (Directionality.of(context) == TextDirection.rtl
+                                ? -1
+                                : 1),
+                        0,
+                      )
+                    : Offset(current ? .035 * backProgress : 0, 0),
+                child: Transform.scale(
+                  scale:
+                      preview &&
+                          current &&
+                          Theme.of(context).platform ==
+                              TargetPlatform.android &&
+                          !MediaQuery.disableAnimationsOf(context)
+                      ? 1 - .08 * backProgress
+                      : 1,
+                  child: FadeTransition(
+                    opacity: preview
+                        ? current &&
+                                  Theme.of(context).platform ==
+                                      TargetPlatform.android &&
+                                  !MediaQuery.disableAnimationsOf(context)
+                              ? AlwaysStoppedAnimation(
+                                  ((1 - backProgress) / .25).clamp(0.0, 1.0),
+                                )
+                              : kAlwaysCompleteAnimation
+                        : animation.drive(_ClampedPageOpacity()),
+                    child: SlideTransition(
+                      position: preview
+                          ? const AlwaysStoppedAnimation(Offset.zero)
+                          : animation.drive(
+                              Tween<Offset>(
+                                begin: Offset(0, widget.slideFraction),
+                                end: Offset.zero,
+                              ),
+                            ),
+                      child: ColoredBox(
+                        color: preview
+                            ? Theme.of(context).colorScheme.surface
+                            : Colors.transparent,
+                        child: MotionSnapshot(
+                          animation: entry.transitioning
+                              ? _motion
+                              : kAlwaysCompleteAnimation,
+                          child: RepaintBoundary(child: entry.page),
+                        ),
+                      ),
                     ),
-                  ),
-                  child: MotionSnapshot(
-                    animation: entry.transitioning
-                        ? _motion
-                        : kAlwaysCompleteAnimation,
-                    child: RepaintBoundary(child: entry.page),
                   ),
                 ),
               ),

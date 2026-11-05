@@ -1,4 +1,5 @@
 import '../animation/apple_spring.dart';
+import '../animation/view_transitions.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -20,6 +21,7 @@ import '../widgets/interaction_feedback.dart';
 import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/ui_scaling.dart';
 import 'login.dart';
+import 'listening_statistics_page.dart';
 import 'page_utils.dart';
 import 'widgets.dart';
 
@@ -99,6 +101,32 @@ class AppLibraryPage extends StatelessWidget {
                         state: state,
                         onOpen: onOpenLocalMusic,
                         importer: localImporter,
+                      ),
+                      const SizedBox(height: 12),
+                      AppleGroupedCard(
+                        margin: EdgeInsets.zero,
+                        child: AppleListTile(
+                          key: const ValueKey('open-listening-statistics'),
+                          title: context.tr('听歌统计'),
+                          subtitle: context.tr('听歌时长、习惯与切歌记录'),
+                          leading: AppleIconTile(
+                            icon: Icons.insights_rounded,
+                            color: AppleSemanticColors.of(context).accent,
+                          ),
+                          showChevron: true,
+                          onTap: () => unawaited(
+                            Navigator.of(context).push<void>(
+                              ApplePageRoute<void>(
+                                settings: const RouteSettings(
+                                  name: '/listening-statistics',
+                                ),
+                                builder: (_) => AppListeningStatisticsPage(
+                                  statistics: state.listeningStatistics,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                       if (mine.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 30),
