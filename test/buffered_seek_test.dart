@@ -36,14 +36,12 @@ class _BufferedNetworkEngine
         BufferedAudioEngine,
         StartupBufferReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
-        RangeSeekAudioEngine,
+        SeekRangeReportingAudioEngine,
         StreamingBufferHealthAudioEngine {
-  _BufferedNetworkEngine({this.seekServesAnyPosition = false});
-
-  /// Whether this engine fetches the byte range a seek asks for. A native
-  /// engine whose server honours `Range` does; a plain HTTP player does not.
+  /// Whether a seek past the buffered part is refused: the download is the only
+  /// source of bytes, so a position it has not reached cannot be reached.
   @override
-  final bool seekServesAnyPosition;
+  bool canSeekTo(Duration position) => position <= bufferedPosition;
 
   @override
   bool active = false;
@@ -175,9 +173,9 @@ void main() {
   );
 
   test(
-    'a stream whose engine fetches the requested range seeks anywhere in the track',
+    'a seek past the buffer is refused by the engine and the rail snaps back',
     () async {
-      final engine = _BufferedNetworkEngine(seekServesAnyPosition: true);
+      final engine = _BufferedNetworkEngine();
       final state = AppState(
         catalog: _Catalog(),
         audioEngine: engine,
@@ -189,19 +187,21 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(state.audioReady, isTrue);
 
-      // Twenty seconds in, with 75 % of the track on disk. The rail still paints
-      // how much is cached...
       engine.position = const Duration(seconds: 20);
       engine.buffered = _track.duration * 0.75;
       await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect(state.bufferedFraction, closeTo(0.75, 1e-9));
-      expect(state.seekLimitFraction, 1.0);
+      expect(state.seekLimitFraction, closeTo(0.75, 1e-9));
 
-      // ...but a seek past the cached part reaches the engine instead of being
-      // clamped to it: the download restarts at the requested offset.
+      // The engine is the one that knows how far its download has reached: a
+      // position inside the cached part is seekable, one past it is not.
+      expect(engine.canSeekTo(_track.duration * 0.5), isTrue);
+      expect(engine.canSeekTo(_track.duration * 0.9), isFalse);
+
+      // The rail clamps to the cached part, and the request that reaches the
+      // engine is the clamped one — never the unreachable position.
       state.seek(0.9);
-      expect(state.position, _track.duration * 0.9);
-      expect(engine.seekRequests, <Duration>[_track.duration * 0.9]);
+      expect(state.position, _track.duration * 0.75);
+      expect(engine.seekRequests, <Duration>[_track.duration * 0.75]);
     },
   );
 

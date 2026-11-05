@@ -2393,16 +2393,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Seeking can move through buffered audio, but never past it.
   /// Keep the current playhead reachable if a backend reports a shorter buffer.
   ///
-  /// An engine that fetches the requested byte range ([RangeSeekAudioEngine]) is
-  /// not bounded by the buffer at all: the rail stays open for the whole track
-  /// while [bufferedFraction] keeps painting how much is cached.
+  /// The download is the only source of bytes, so the part of a streaming track
+  /// that has not landed is not reachable: the rail stops at it and the buffer bar
+  /// shows how far that is. A local file, or a fully downloaded stream, is open
+  /// end to end.
   double get seekLimitFraction {
     if (!_seekLimitedByBuffer) return 1;
-    final AudioEngine? engine = audioEngine;
-    if (engine is RangeSeekAudioEngine &&
-        (engine as RangeSeekAudioEngine).seekServesAnyPosition) {
-      return 1;
-    }
     final double buffered = bufferedFraction;
     final double played = progress;
     return buffered > played ? buffered : played;
@@ -2796,6 +2792,51 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
   }
 
+  /// How long a resume waits for the download to reach its position.
+  ///
+  /// A streaming source can only be seeked inside what has landed, so resuming at
+  /// a position (after a device reopen or a recovered download) means waiting for
+  /// the download to cover it. The bound keeps a download that never gets there
+  /// from holding the resume open forever.
+  static const Duration resumeBufferWait = Duration(seconds: 25);
+
+  /// Seeks to [target] once the engine can reach it, waiting for the buffer when
+  /// the source is still downloading.
+  ///
+  /// Returns false when the position never became reachable (the download failed,
+  /// stopped, or the wait expired), so the caller can report that the resume was
+  /// dropped instead of pretending the position was kept.
+  Future<bool> _seekWhenReachable(Duration target, int generation) async {
+    final AudioEngine? engine = audioEngine;
+    if (engine == null) return false;
+    if (target <= Duration.zero) return true;
+    final SeekRangeReportingAudioEngine? range =
+        engine is SeekRangeReportingAudioEngine
+        ? engine as SeekRangeReportingAudioEngine
+        : null;
+    if (range == null || range.canSeekTo(target)) {
+      await engine.seek(target);
+      return true;
+    }
+    final DateTime deadline = DateTime.now().add(resumeBufferWait);
+    while (generation == _generation &&
+        _realActive &&
+        !DateTime.now().isAfter(deadline)) {
+      final StreamingBufferHealthAudioEngine? health =
+          engine is StreamingBufferHealthAudioEngine
+          ? engine as StreamingBufferHealthAudioEngine
+          : null;
+      if (health != null && health.streamFailed) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (generation != _generation || !_realActive) return false;
+      if (range.canSeekTo(target)) {
+        await engine.seek(target);
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Relative seek used by the keyboard shortcuts.
   void seekBy(Duration delta) {
     final Track? t = current;
@@ -2939,7 +2980,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       await engine.setVolume(_volume);
       if (resumeAt != null && resumeAt > Duration.zero) {
         try {
-          await engine.seek(resumeAt);
+          // Waits for the download to cover the position: a streaming source is
+          // not seekable past what has landed.
+          await _seekWhenReachable(resumeAt, generation);
         } catch (_) {
           // A source that cannot seek still plays; only the position is lost.
         }
@@ -3935,7 +3978,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       await engine.setVolume(_volume);
       if (resume > Duration.zero) {
         try {
-          await engine.seek(resume);
+          // The replacement source starts its download from the beginning, so the
+          // resume waits until the buffer covers where the listener was.
+          await _seekWhenReachable(resume, generation);
         } catch (_) {
           // A source that cannot seek still plays; only the position is lost.
         }

@@ -46,10 +46,10 @@ ABI_SYMBOLS = [
 ]
 
 # The reader bridge is what makes network sources playable; it is linked with
-# the engine, so its absence would silently downgrade streaming. The window,
-# length and demand entries are what let a seek reach a part of a track the
-# download has not reached yet, so they are required for the same reason: Dart
-# looks them up and treats a missing symbol as "this bridge cannot do that".
+# the engine, so its absence would silently downgrade streaming. The length entry
+# is what lets a demuxer turn a seek into a byte offset at all, so it is required
+# for the same reason: Dart looks it up and treats a missing symbol as "this
+# bridge cannot report the source length".
 BRIDGE_SYMBOLS = [
     "lazer_bridge_reader_create",
     "lazer_bridge_reader_notify",
@@ -61,9 +61,7 @@ BRIDGE_SYMBOLS = [
     "lazer_bridge_reader_close",
     "lazer_bridge_reader_cancel",
     "lazer_bridge_reader_destroy",
-    "lazer_bridge_reader_set_window",
     "lazer_bridge_reader_set_length",
-    "lazer_bridge_reader_set_demand_listener",
 ]
 
 

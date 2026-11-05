@@ -2,21 +2,15 @@
 //
 // The engine cannot open an HTTP URL itself (its C ABI takes a path or a byte
 // reader), so streaming works the way the master branch does it: download into a
-// cache file while the engine reads it through the bridge's blocking reader.
+// cache file while the engine reads it through the bridge's blocking reader. The
+// file is the buffer — a read for a byte range that has not landed yet waits for
+// the download instead of failing, which is also what makes seek-before-downloaded
+// behave like a slow file rather than a short one.
 //
-// The file is the buffer, and it does not have to be a prefix. A seek into a part
-// of the track the linear download has not reached makes the download restart its
-// request at that byte offset (`Range:`) and append what it fetches to the cache
-// file, so the engine reads the region it asked for instead of waiting for a
-// whole linear pass. That leaves the file holding two ranges of the *track*:
-//
-//   [0, prefixEnd)                     at file offset 0
-//   [windowStart, windowEnd)           at file offset windowFileStart
-//
-// with a gap between them that nobody wrote. The entry publishes both ranges to
-// the reader (which maps a track offset to a file offset through
-// `lazer_bridge_reader_set_window`) and answers a demand for a byte in the gap by
-// fetching it, so a gap is never served as silence.
+// The download is the only source of bytes: nothing here fetches a range on
+// demand, so what the player may seek to is decided by how much of the track has
+// landed. The entry publishes that size as soon as the response announces it,
+// because a demuxer can only turn a seek's timestamp into a byte offset with it.
 //
 // Only the file and the download live here; the reader lifecycle belongs to
 // `NativeStreamReader` and the transport to `NativeAudioEngine`.
@@ -56,122 +50,48 @@ class AudioStreamEntry {
   void Function()? onAppended;
 
   /// Called once when the download ends, with whether it failed.
-  void Function(bool finished)? onFinished;
+  void Function(bool failed)? onFinished;
 
-  /// Called whenever the written ranges move, so the reader can be told which
-  /// track offsets it may serve without waiting.
-  void Function()? onRangeChanged;
-
-  /// How much of the track is fetched *before* a seek target, so a demuxer that
-  /// steps back to a frame boundary finds its bytes already in the window.
-  static const int seekPrerollBytes = 512 * 1024;
-
-  /// How far past the downloaded window a read may ask for bytes before the
-  /// download is redirected. A read at the frontier is the ordinary streaming
-  /// case (the running download is about to deliver it); a read well past it is
-  /// a demuxer jumping somewhere, which is worth a fresh request.
-  static const int frontierSlackBytes = 1024 * 1024;
+  /// Called when the track's total size becomes known, so the reader can report it
+  /// to the engine's demuxer.
+  void Function()? onLengthKnown;
 
   /// A reader can attach after the HTTP response already finished. Replay the
   /// current state so its first blocking read never waits for a lost event.
   void bindReader({
     required void Function() appended,
     required void Function(bool failed) finished,
-    void Function()? ranges,
   }) {
     onAppended = appended;
     onFinished = finished;
-    onRangeChanged = ranges;
     appended();
-    onRangeChanged?.call();
-    if (complete || _cancelled || _failure != null) finished(!complete);
+    onLengthKnown?.call();
+    if (_complete || _cancelled || _failure != null) finished(!_complete);
   }
 
   int _downloadedBytes = 0;
+  bool _complete = false;
   bool _cancelled = false;
-  bool _allBytesPresent = false;
-  bool _rangeSupported = true;
   Object? _failure;
   RandomAccessFile? _sink;
-  HttpClient? _client;
   Completer<void>? _done;
 
-  /// The range written from byte zero, contiguous by construction.
-  int _prefixEnd = 0;
-
-  /// The range a redirected download is filling, in track coordinates, and where
-  /// it starts in the file. [_windowMapped] is false while the download is the
-  /// plain linear one, whose bytes run to the end of the file.
-  int _windowStart = 0;
-  int _windowEnd = 0;
-  int _windowFileStart = 0;
-  bool _windowMapped = false;
-
-  /// Bytes written by the response being read.
-  int _windowWritten = 0;
-
-  /// A redirect asked for while a response was being read. The download loop
-  /// abandons the body and restarts at this offset.
-  int? _pendingWindowStart;
-  Completer<void>? _redirectApplied;
-
-  /// The body of the window being written, and the completion of that write.
-  StreamSubscription<List<int>>? _body;
-  Completer<bool>? _bodyDone;
+  /// When the download last moved, for the stall report. Set on every chunk and
+  /// on every wait, so a reader can tell "slow" from "dead".
+  DateTime _lastProgressAt = DateTime.now();
 
   /// Completed once the track's size is known or provably unknowable (the body
   /// started arriving without a `Content-Length`), so a caller can wait for the
   /// one fact a demuxer needs before it opens the source.
   final Completer<void> _lengthResolved = Completer<void>();
 
-  /// When the download last moved, for the stall report. Set on every chunk and
-  /// on every wait, so a reader can tell "slow" from "dead".
-  DateTime _lastProgressAt = DateTime.now();
-
-  /// Bytes of the track currently readable from the file.
+  /// Bytes currently readable from the file.
   int get downloadedBytes => _downloadedBytes;
 
-  /// End (exclusive) of the range written from byte zero.
-  int get prefixEnd => _prefixEnd;
+  /// Whether every announced byte arrived.
+  bool get complete => _complete;
 
-  /// Start of the range a redirected download is filling.
-  int get windowStart => _windowStart;
-
-  /// End (exclusive) of that range, or [prefixEnd] while the download is the
-  /// plain linear one.
-  int get windowEnd => _windowMapped ? _windowEnd : _prefixEnd;
-
-  /// Where the window's first byte sits in the file.
-  int get windowFileStart => _windowFileStart;
-
-  /// Whether the window is a redirected segment rather than the linear tail.
-  bool get windowMapped => _windowMapped;
-
-  /// False once the server has been seen ignoring a `Range` request: the cache
-  /// then only ever grows linearly, and a seek past the download cannot be
-  /// served until the linear pass gets there.
-  bool get rangeSupported => _rangeSupported;
-
-  /// Whether every byte of the track is on disk, in one run without a gap.
-  ///
-  /// This is what lets the reader end the stream; a file that holds the whole
-  /// track except a gap is *not* complete, because the gap still has to be
-  /// fetched on demand.
-  bool get complete {
-    final int? total = _totalLength;
-    if (total != null && _prefixEnd >= total) return true;
-    if (!_allBytesPresent) return false;
-    if (total == null) return !_windowMapped || _windowStart <= _prefixEnd;
-    // Everything arrived, and the appended window closes the track's tail.
-    return _windowMapped && _windowStart <= _prefixEnd && windowEnd >= total;
-  }
-
-  int? get _totalLength {
-    final int? total = expectedBytes;
-    return total != null && total > 0 ? total : null;
-  }
-
-  /// Whether the download stopped, or null while it is running or finished cleanly.
+  /// Why the download stopped, or null while it is running or finished cleanly.
   Object? get failure => _failure;
 
   bool get cancelled => _cancelled;
@@ -185,7 +105,7 @@ class AudioStreamEntry {
   /// A response that trickles a byte per minute still resets this, which is the
   /// honest answer: bytes are arriving, just slowly.
   bool stalledFor(Duration threshold, {DateTime? now}) {
-    if (_allBytesPresent || _cancelled || _failure != null) return false;
+    if (_complete || _cancelled || _failure != null) return false;
     return (now ?? DateTime.now()).difference(_lastProgressAt) >= threshold;
   }
 
@@ -196,9 +116,9 @@ class AudioStreamEntry {
   /// chunked response behind an empty buffer bar, and one that treats it as
   /// 100 % lets the seek rail run past what the reader can actually serve.
   double? get progress {
-    if (complete) return 1;
-    final int? total = _totalLength;
-    if (total == null) return null;
+    if (_complete) return 1;
+    final int? total = expectedBytes;
+    if (total == null || total <= 0) return null;
     return (_downloadedBytes / total).clamp(0, 1);
   }
 
@@ -208,41 +128,6 @@ class AudioStreamEntry {
   /// The reader asks for the length, so an announced size is reported even while
   /// the file is still growing; a growing file then looks like a slow source.
   int? get lengthHint => expectedBytes;
-
-  /// Exclusive end of the readable range that contains [offset], or -1 when the
-  /// offset is in the gap between the prefix and the window.
-  int readableEndAt(int offset) {
-    if (offset < _prefixEnd) return _prefixEnd;
-    final int end = windowEnd;
-    if (_windowMapped && offset >= _windowStart && offset < end) return end;
-    return -1;
-  }
-
-  /// Fetches the bytes around [offset] when the cache does not hold them.
-  ///
-  /// The reader calls this on a demand: the engine's decoder is parked on a byte
-  /// that is neither in the written prefix nor in the window. `seek` marks a
-  /// demand that came from a seek, which is always worth a fresh request; a read
-  /// just past the frontier is the ordinary streaming case and must not restart
-  /// the download it is already waiting for.
-  Future<void> ensureRange(int offset, {required bool seek}) async {
-    if (offset < 0 || _cancelled || _failure != null) return;
-    if (readableEndAt(offset) > offset) return;
-    if (_allBytesPresent || !_rangeSupported) return;
-    final int? total = _totalLength;
-    if (total != null && offset >= total) return;
-    final int end = windowEnd;
-    // A read at (or just past) the frontier is the ordinary streaming case: the
-    // running download is about to deliver it. Only a demand that is well beyond
-    // it — a demuxer jumping somewhere — is worth a fresh request.
-    if (!seek && offset >= end && offset - end <= frontierSlackBytes) return;
-    final int start = math.max(0, offset - seekPrerollBytes);
-    if (_windowMapped && start >= _windowStart && start < end) {
-      // The running download is already fetching this neighbourhood.
-      return;
-    }
-    await _redirect(start);
-  }
 
   /// Waits for the download to announce the track's size, or for [timeout].
   ///
@@ -266,13 +151,14 @@ class AudioStreamEntry {
   }
 
   void _resolveLength() {
-    if (!_lengthResolved.isCompleted) _lengthResolved.complete();
+    if (_lengthResolved.isCompleted) return;
+    _lengthResolved.complete();
+    onLengthKnown?.call();
   }
 
   void cancel() {
-    if (_cancelled || _allBytesPresent) return;
+    if (_cancelled || _complete) return;
     _cancelled = true;
-    _unblockRedirect();
     final Completer<void>? pending = _done;
     if (pending != null && !pending.isCompleted) pending.complete();
     onFinished?.call(true);
@@ -284,10 +170,9 @@ class AudioStreamEntry {
   Future<void> download(HttpClient client) async {
     final Completer<void> done = Completer<void>();
     _done = done;
-    _client = client;
     bool failed = false;
     try {
-      await _run();
+      await _run(client);
     } catch (error) {
       failed = true;
       _failure = error;
@@ -302,96 +187,37 @@ class AudioStreamEntry {
     }
   }
 
-  Future<void> _run() async {
-    await _resumeFromDisk();
-    if (_allBytesPresent) return;
-    while (!_cancelled) {
-      final int? pending = _pendingWindowStart;
-      final bool reachedEnd = await _downloadWindow(
-        pending ?? _windowStart,
-        // A pending redirect always starts a fresh segment; continuing the file
-        // is the plain linear pass.
-        mapped: pending != null,
-      );
-      if (_cancelled) return;
-      if (!reachedEnd) continue;
-      _allBytesPresent = true;
-      _lastProgressAt = DateTime.now();
-      if (complete) await _deleteMarker();
-      return;
-    }
-  }
-
-  /// Picks up whatever a previous launch left in the cache file.
-  ///
-  /// A redirected download appends its bytes after the prefix, and those bytes
-  /// belong to another part of the track: the marker records where the prefix
-  /// ends so the segments of an earlier session are dropped instead of being
-  /// mistaken for the track's beginning.
-  Future<void> _resumeFromDisk() async {
+  Future<void> _run(HttpClient client) async {
     final bool existed = await file.exists();
-    final int length = existed ? await file.length() : 0;
-    final int? announced = _totalLength;
-    if (announced != null && length >= announced) {
-      _downloadedBytes = length;
-      _prefixEnd = math.min(length, announced);
-      _allBytesPresent = true;
+    int position = existed ? await file.length() : 0;
+    final int? announced = expectedBytes;
+    if (announced != null && announced > 0 && position == announced) {
+      _downloadedBytes = position;
+      _complete = true;
+      _lastProgressAt = DateTime.now();
       _resolveLength();
       return;
     }
-    final int? marked = await _readMarker();
-    if (marked != null && marked < length) {
-      // Drop the appended segments: they are not the track's prefix. The ranges
-      // published below are what correctness depends on, so a platform that does
-      // not honour this truncate only leaves the file larger than it needs to be.
-      final RandomAccessFile handle = await file.open(mode: FileMode.append);
-      try {
-        await handle.truncate(marked);
-      } finally {
-        await handle.close();
-      }
-      _prefixEnd = marked;
-    } else {
-      _prefixEnd = length;
-    }
-    _windowStart = _prefixEnd;
-    _windowEnd = _prefixEnd;
-    _windowFileStart = _prefixEnd;
-    _windowMapped = false;
-    _downloadedBytes = _prefixEnd;
-    if (_prefixEnd > 0 && announced == null) {
+    if (position > 0 && announced == null) {
       // A cache file left by a previous launch is its own length; the entry was
       // re-opened without the size the provider passed the first time.
-      expectedBytes = _prefixEnd;
+      expectedBytes = position;
     }
-    await _deleteMarker();
-  }
-
-  /// Runs one HTTP request writing the track from [start], appending its body to
-  /// the cache file. [mapped] marks a redirected window, whose bytes belong to
-  /// [start] rather than continuing the prefix.
-  ///
-  /// Returns true when the body ended at the end of the track, false when a
-  /// redirect interrupted it (the caller loops with the new window start).
-  Future<bool> _downloadWindow(int start, {required bool mapped}) async {
-    final HttpClient? client = _client;
-    if (client == null) throw StateError('the audio cache has no HTTP client');
-    _windowStart = start;
-    _windowEnd = start;
-    _windowMapped = mapped;
-    _windowWritten = 0;
-    _pendingWindowStart = null;
-    await _openSink();
-    _notifyRanges();
-    // The demand that asked for this window can stop waiting: the download is
-    // now fetching the bytes it needs.
-    _unblockRedirect();
+    if (announced != null && announced > 0 && position > announced) {
+      // The file is longer than the track claims to be (a changed variant or a
+      // stale partial file): start over rather than resuming past the end.
+      _sink = await file.open(mode: FileMode.write);
+      position = 0;
+    } else {
+      _sink = await file.open(mode: FileMode.append);
+    }
+    _downloadedBytes = position;
 
     final HttpClientRequest request = await client.getUrl(Uri.parse(url));
     request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-    // Asking for a range from the start tells us whether the server honours one
-    // at all; a server that answers 200 keeps the plain linear download.
-    request.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-');
+    if (position > 0) {
+      request.headers.set(HttpHeaders.rangeHeader, 'bytes=$position-');
+    }
     final HttpClientResponse response = await request.close();
     if (response.statusCode != HttpStatus.ok &&
         response.statusCode != HttpStatus.partialContent) {
@@ -400,138 +226,50 @@ class AudioStreamEntry {
         uri: Uri.parse(url),
       );
     }
-    final bool ranged = response.statusCode == HttpStatus.partialContent;
-    if (!ranged) _rangeSupported = false;
-    if (start > 0 && !ranged) {
-      // The server ignores the range and restarts the body at zero. Nothing it
-      // sends can be appended where the prefix is, so the file is rewritten from
-      // the start instead of holding the same bytes twice. Opening it in write
-      // mode is what truncates it: an append handle's truncate is not honoured on
-      // every platform, and the body that follows is written sequentially anyway.
-      _rangeSupported = false;
+    // A server that ignores the range restarts the body at zero, so the partial
+    // file has to be truncated or the bytes would be prepended twice.
+    final bool appending =
+        position > 0 && response.statusCode == HttpStatus.partialContent;
+    if (position > 0 && !appending) {
       await _sink?.close();
       _sink = await file.open(mode: FileMode.write);
-      _windowStart = 0;
-      _windowEnd = 0;
-      _windowFileStart = 0;
-      _windowMapped = false;
-      _windowWritten = 0;
-      _prefixEnd = 0;
+      position = 0;
       _downloadedBytes = 0;
-      _notifyRanges();
     }
-    final int? total = _totalBytes(response, _windowStart);
+    final int? total = _totalBytes(response, position);
     if (total != null) {
       expectedBytes = total;
       _resolveLength();
     }
 
-    final bool reachedEnd = await _pumpBody(response);
-    if (reachedEnd) {
-      final int? expected = _totalLength;
-      if (expected != null && windowEnd < expected) {
-        throw const FileSystemException('audio download ended early');
-      }
+    await for (final List<int> chunk in response.timeout(
+      const Duration(seconds: 20),
+    )) {
+      if (_cancelled) return;
+      if (chunk.isEmpty) continue;
+      final RandomAccessFile sink = _sink ??= await file.open(
+        mode: FileMode.append,
+      );
+      // Body bytes without a response length: the server never announced a total,
+      // so nothing is gained by waiting for one.
+      _resolveLength();
+      sink.writeFromSync(chunk);
+      position += chunk.length;
+      _downloadedBytes = position;
+      _lastProgressAt = DateTime.now();
+      onAppended?.call();
     }
-    return reachedEnd;
-  }
-
-  /// Writes the response body into the file, stopping early when a redirect
-  /// arrives. Returns true when the whole body was consumed.
-  Future<bool> _pumpBody(HttpClientResponse response) {
-    final Completer<bool> finished = Completer<bool>();
-    _bodyDone = finished;
-    void complete(bool value) {
-      if (!finished.isCompleted) finished.complete(value);
+    if (_cancelled) return;
+    final int? expected = expectedBytes;
+    if (expected != null && expected > 0 && position < expected) {
+      throw const FileSystemException('audio download ended early');
     }
-
-    late StreamSubscription<List<int>> subscription;
-    subscription = response
-        .timeout(const Duration(seconds: 20))
-        .listen(
-          (List<int> chunk) {
-            if (_cancelled || _pendingWindowStart != null) {
-              // A demand arrived for a region this request cannot reach, or the
-              // track is gone: drop the body and let the loop move on.
-              unawaited(subscription.cancel());
-              complete(false);
-              return;
-            }
-            if (chunk.isEmpty) return;
-            // Body bytes without a response length: the server never announced a
-            // total, so nothing is gained by waiting for one.
-            _resolveLength();
-            final RandomAccessFile? sink = _sink;
-            if (sink == null) return;
-            sink.writeFromSync(chunk);
-            _windowWritten += chunk.length;
-            if (_windowMapped) {
-              _windowEnd = _windowStart + _windowWritten;
-            } else {
-              // The linear download's bytes continue the track from byte zero.
-              _prefixEnd = _windowFileStart + _windowWritten;
-            }
-            _downloadedBytes = math.max(_downloadedBytes, windowEnd);
-            _lastProgressAt = DateTime.now();
-            onAppended?.call();
-          },
-          onError: (Object error, StackTrace stack) {
-            complete(false);
-            if (!finished.isCompleted) finished.completeError(error, stack);
-          },
-          onDone: () => complete(true),
-          cancelOnError: true,
-        );
-    _body = subscription;
-    return finished.future.whenComplete(() {
-      if (identical(_bodyDone, finished)) {
-        _body = null;
-        _bodyDone = null;
-      }
-    });
-  }
-
-  /// Abandons the running request in favour of a window at [start].
-  Future<void> _redirect(int start) async {
-    final int? total = _totalLength;
-    final int target = total == null ? start : math.min(start, math.max(0, total - 1));
-    if (_windowMapped && target == _windowStart && _windowWritten == 0) return;
-    // The appended body belongs to another part of the track, so the prefix is
-    // frozen where the linear pass stopped, and the marker records that before
-    // the new segment is written.
-    if (!_windowMapped) _prefixEnd = _windowFileStart + _windowWritten;
-    _pendingWindowStart = target;
-    await _persistMarker();
-    final Completer<void> applied = _redirectApplied ??= Completer<void>();
-    final Completer<bool>? body = _bodyDone;
-    if (body != null && !body.isCompleted) body.complete(false);
-    await _body?.cancel();
-    // The loop itself is the only writer: wait for it to open the new segment so
-    // the next demand sees a consistent range instead of racing this one.
-    await applied.future.timeout(const Duration(seconds: 5), onTimeout: () {});
-  }
-
-  void _unblockRedirect() {
-    final Completer<void>? applied = _redirectApplied;
-    _redirectApplied = null;
-    if (applied != null && !applied.isCompleted) applied.complete();
-  }
-
-  /// Opens the file for appending and records where this window starts in it.
-  Future<void> _openSink() async {
-    await _sink?.close();
-    final RandomAccessFile sink = await file.open(mode: FileMode.append);
-    _windowFileStart = await sink.length();
-    _sink = sink;
-  }
-
-  void _notifyRanges() {
-    _downloadedBytes = math.max(_downloadedBytes, windowEnd);
-    onRangeChanged?.call();
+    _complete = true;
+    _lastProgressAt = DateTime.now();
   }
 
   /// Total size from `Content-Length`, or from `Content-Range` when resuming.
-  int? _totalBytes(HttpClientResponse response, int start) {
+  int? _totalBytes(HttpClientResponse response, int position) {
     final String? range = response.headers.value(
       HttpHeaders.contentRangeHeader,
     );
@@ -541,39 +279,8 @@ class AudioStreamEntry {
       if (total != null && total > 0) return total;
     }
     final int length = response.contentLength;
-    if (length > 0) return start + length;
+    if (length > 0) return position + length;
     return null;
-  }
-
-  /// The marker records where the contiguous prefix ends once a download has
-  /// been redirected, because the file then also holds bytes from elsewhere in
-  /// the track.
-  File get _markerFile => File('${file.path}.head');
-
-  Future<void> _persistMarker() async {
-    try {
-      await _markerFile.writeAsString('$_prefixEnd', flush: true);
-    } catch (error) {
-      developer.log('writing the cache marker failed: $error', name: 'lazer-audio');
-    }
-  }
-
-  Future<int?> _readMarker() async {
-    try {
-      if (!await _markerFile.exists()) return null;
-      return int.tryParse((await _markerFile.readAsString()).trim());
-    } catch (error) {
-      developer.log('reading the cache marker failed: $error', name: 'lazer-audio');
-      return null;
-    }
-  }
-
-  Future<void> _deleteMarker() async {
-    try {
-      if (await _markerFile.exists()) await _markerFile.delete();
-    } catch (error) {
-      developer.log('removing the cache marker failed: $error', name: 'lazer-audio');
-    }
   }
 }
 
@@ -696,8 +403,6 @@ class AudioStreamCache {
       entry.cancel();
       try {
         if (await entry.file.exists()) await entry.file.delete();
-        final File marker = File('${entry.file.path}.head');
-        if (await marker.exists()) await marker.delete();
       } catch (error) {
         developer.log('eviction failed: $error', name: 'lazer-audio');
       }

@@ -31,15 +31,19 @@ abstract interface class SeekBoundaryReportingAudioEngine {
   bool get seekIsLimitedByBuffer;
 }
 
-/// Optional capability: this engine serves a seek anywhere in a network track.
+/// Optional capability: an engine that knows which positions it can reach.
 ///
-/// A source whose download is restarted at the requested byte offset can jump to
-/// a position it has not downloaded yet, so the seek rail must not clamp to the
-/// buffered fraction even though [SeekBoundaryReportingAudioEngine] still reports
-/// how much of the track is cached (which the rail paints as the buffer bar).
-abstract interface class RangeSeekAudioEngine {
-  /// Whether the current source can be seeked outside its downloaded range.
-  bool get seekServesAnyPosition;
+/// Engines whose seek parks a decoder on the source (the native engine reads
+/// through a growing file) can only reach what the download has landed, and they
+/// are the ones that answer this. A player that simply hands the seek to its
+/// platform does not implement it: there the rail's buffer limit is a UI policy,
+/// not a rule the engine enforces.
+abstract interface class SeekRangeReportingAudioEngine {
+  /// Whether the current source can be seeked to [position] right now.
+  ///
+  /// True for local files and fully downloaded streams; for a growing stream it
+  /// follows how much of the track has landed.
+  bool canSeekTo(Duration position);
 }
 
 /// Optional capability: what a network source's download is doing right now.
@@ -406,6 +410,7 @@ class JustAudioEngine
     if (index == null || index + 1 >= _queueUrls.length) return null;
     return _queueUrls[index + 1];
   }
+
 
   @override
   Stream<void> get completed => _completed.stream;

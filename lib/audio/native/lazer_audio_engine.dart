@@ -52,7 +52,7 @@ class NativeAudioEngine
         StartupBufferReportingAudioEngine,
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
-        RangeSeekAudioEngine,
+        SeekRangeReportingAudioEngine,
         QueuedSourceReportingAudioEngine,
         MixPresentingAudioEngine,
         SerialQueueAudioEngine,
@@ -339,19 +339,19 @@ class NativeAudioEngine
   @override
   bool get seekIsLimitedByBuffer => _activeEntry?.complete == false;
 
-  /// Whether a seek may land outside the downloaded range.
+  /// Whether [position] is inside the part of the current source that has landed.
   ///
-  /// True for a local file and for a network source whose server honours a
-  /// `Range` request: the download restarts at the requested offset, so the rail
-  /// does not have to be clamped to what is already cached. A source with no
-  /// announced length, or one whose server ignored the range, keeps the buffer
-  /// limit because nothing can fetch past what has landed.
+  /// A streaming source is seeked only within its downloaded range: the download
+  /// is the only source of bytes, so asking the engine for a position it cannot
+  /// serve would park the decoder until the download catches up and then land
+  /// somewhere else. A local file, or a fully downloaded stream, is seekable
+  /// everywhere.
   @override
-  bool get seekServesAnyPosition {
+  bool canSeekTo(Duration position) {
     final AudioStreamEntry? entry = _activeEntry;
     if (entry == null) return true;
     if (entry.complete) return true;
-    return entry.rangeSupported && (entry.expectedBytes ?? 0) > 0;
+    return position <= bufferedPosition;
   }
 
   @override
@@ -628,6 +628,16 @@ class NativeAudioEngine
     final int generation = _generation;
     final int? address = _engineAddressOrNull;
     if (address == null || position < Duration.zero) return;
+    if (!canSeekTo(position)) {
+      // Outside what the download has landed: the reader would park the decoder
+      // until the download catches up and then land somewhere else, which is worse
+      // than refusing. The caller reports it and the rail snaps back to its real
+      // position.
+      throw StateError(
+        'lazer-audio: ${position.inMilliseconds} ms is not downloaded yet '
+        '(${bufferedPosition.inMilliseconds} ms is)',
+      );
+    }
     // A seek cancels an overlap that is playing: the engine drops the incoming
     // side and keeps the successor queued, so the outgoing song is what is heard
     // again and the position is back on its timeline. The app notices the same
@@ -1182,33 +1192,14 @@ class NativeAudioEngine
 
   /// Connects a cache entry to the reader the engine reads it through.
   ///
-  /// The entry owns two things the reader cannot work out by itself: which byte
-  /// ranges the cache file actually holds (a redirected download leaves a gap,
-  /// and serving that gap's zeroes as audio would be silent corruption), and how
-  /// to fetch a byte the engine is waiting for. Both are published again by
-  /// `bindReader`, so the ranges are in place before the engine opens the source.
+  /// The only fact the reader needs from the entry is the track's total size: a
+  /// demuxer turns a seek's timestamp into a byte offset through it, and the size
+  /// arrives with the response headers — after the reader exists.
   void _connectEntry(AudioStreamEntry entry, NativeStreamReader reader) {
-    void publishRanges() {
-      reader.setWindow(
-        prefixEnd: entry.prefixEnd,
-        windowStart: entry.windowStart,
-        windowEnd: entry.windowEnd,
-        windowFileStart: entry.windowFileStart,
-        rangeSupported: entry.rangeSupported,
-      );
+    entry.onLengthKnown = () {
       final int? total = entry.expectedBytes;
       if (total != null && total > 0) reader.setLength(total);
-    }
-
-    entry.onRangeChanged = publishRanges;
-    reader.setDemandListener((int offset, int kind) {
-      logAudioPathEvent('stream.demand', <String, Object?>{
-        'offset': offset,
-        'kind': kind == lazerBridgeDemandSeek ? 'seek' : 'read',
-        'cached': entry.downloadedBytes,
-      });
-      unawaited(entry.ensureRange(offset, seek: kind == lazerBridgeDemandSeek));
-    });
+    };
   }
 
   /// How long an open waits for the track's size before letting the decoder

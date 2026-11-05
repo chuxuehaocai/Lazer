@@ -215,11 +215,10 @@ void main() {
     await engine.stop();
   }, skip: !Platform.isWindows);
 
-  // The report this test exists for: "没有缓存好的歌没法直接跳转到指定位置".
-  // A track whose download has only reached its first bytes must still jump to a
-  // position far ahead of that, which means the reader has to ask the downloader
-  // for that byte range and the demuxer has to accept the answer.
-  test('the built Windows engine seeks past what was downloaded', () async {
+  // A streaming source is seeked only inside what has landed: the download is the
+  // only source of bytes, so a position it has not reached is refused instead of
+  // parking the decoder there.
+  test('the built Windows engine refuses a seek past the download', () async {
     final LazerAudioAvailability availability = LazerAudioLoader.load(
       reload: true,
     );
@@ -227,8 +226,7 @@ void main() {
     if (!availability.supportsStreaming) return;
 
     final Uint8List body = _wav(60000);
-    // Enough of the track for the engine's probe to open the source, and far
-    // less than the position the seek asks for.
+    // Enough of the track for the engine's probe, far less than the seek target.
     final int prefixBytes = 3 * 1024 * 1024;
     final List<String?> ranges = <String?>[];
     final Completer<void> releaseFirst = Completer<void>();
@@ -267,7 +265,7 @@ void main() {
         request.response.add(body.sublist(start));
         await request.response.close();
       } catch (_) {
-        // The client abandons the stalled body when it seeks away from it.
+        // The client abandons the stalled body when the test ends.
       }
     });
     addTearDown(() {
@@ -276,7 +274,7 @@ void main() {
     });
 
     final Directory root = await Directory.systemTemp.createTemp(
-      'lazer-native-range-seek-test',
+      'lazer-native-seek-refusal-test',
     );
     addTearDown(() => root.delete(recursive: true));
     final AudioStreamCache cache = AudioStreamCache(() async => root);
@@ -287,11 +285,13 @@ void main() {
       url,
       expectedBytes: body.length,
     );
-    // Wait for the stalled prefix rather than for a wall-clock guess.
-    for (int attempt = 0; attempt < 500 && entry.prefixEnd < prefixBytes; attempt++) {
+    for (int attempt = 0;
+        attempt < 500 && entry.downloadedBytes < prefixBytes;
+        attempt++) {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
-    expect(entry.prefixEnd, prefixBytes, reason: 'the prefix landed');
+    expect(entry.downloadedBytes >= prefixBytes, isTrue,
+        reason: 'the stalled prefix landed');
     expect(entry.complete, isFalse, reason: 'most of the track is not cached');
 
     final NativeAudioEngine? created = await NativeAudioEngine.create(
@@ -303,65 +303,34 @@ void main() {
 
     await engine.setQueue(<String>[url]);
     expect(engine.duration, const Duration(seconds: 60));
-    expect(
-      engine.seekServesAnyPosition,
-      isTrue,
-      reason: 'a server that honours ranges lets the reader fetch a seek target',
-    );
 
-    // Fifty seconds in: far past the 128 KiB that landed.
+    // Fifty seconds in is far past the cached part: the engine refuses it and
+    // asks the download for nothing.
     const Duration target = Duration(seconds: 50);
-    final Stopwatch elapsed = Stopwatch()..start();
-    await engine.seek(target);
-    // The demuxer asks the reader for the byte offset of the target, the reader
-    // asks the downloader, and the downloader restarts the request there. Waiting
-    // for the second request is what proves the whole chain ran.
-    while (ranges.length < 2 && elapsed.elapsed < const Duration(seconds: 10)) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
-    expect(
-      ranges.length,
-      greaterThan(1),
-      reason: 'the seek restarted the download at the requested offset',
-    );
-    expect(
-      entry.windowStart,
-      greaterThan(prefixBytes),
-      reason: 'the redirected window starts past the cached prefix',
-    );
-    expect(
-      entry.windowFileStart,
-      greaterThanOrEqualTo(entry.prefixEnd),
-      reason: 'the window is appended after the prefix, never over it',
-    );
-    expect(
-      entry.readableEndAt(target.inMilliseconds * body.length ~/ 60000),
-      isNot(-1),
-      reason: 'the requested byte range became readable',
-    );
-
-    await Future<void>.delayed(const Duration(milliseconds: 800));
+    expect(engine.canSeekTo(target), isFalse);
+    await expectLater(engine.seek(target), throwsStateError);
     expect(
       engine.position,
-      greaterThan(const Duration(seconds: 45)),
-      reason: 'the engine landed at the requested position',
+      lessThan(const Duration(seconds: 20)),
+      reason: 'a refused seek does not publish the unreachable target',
+    );
+
+    // A position inside the cached part still moves the demuxer.
+    const Duration reachable = Duration(seconds: 1);
+    expect(engine.canSeekTo(reachable), isTrue);
+    await engine.seek(reachable);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(
+      engine.position,
+      lessThan(const Duration(seconds: 5)),
+      reason: 'the reachable seek stayed near its target',
     );
     expect(engine.streamFailed, isFalse);
-
-    // Playing is not required for the seek, and a headless host has no endpoint;
-    // when there is one, the clock must move on from the fetched range.
-    try {
-      await engine.play();
-      final Duration before = engine.position;
-      await Future<void>.delayed(const Duration(milliseconds: 600));
-      expect(
-        engine.position,
-        greaterThan(before),
-        reason: 'the decoder keeps playing from the fetched region',
-      );
-    } catch (_) {
-      // No output device: the seek itself is what this test is about.
-    }
+    expect(
+      ranges.length,
+      1,
+      reason: 'no seek asked the download for another range',
+    );
 
     await engine.stop();
   }, skip: !Platform.isWindows);

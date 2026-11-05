@@ -29,8 +29,9 @@ class IosAudioExportsTest(unittest.TestCase):
         self.assertEqual(set(VERIFY.BRIDGE_SYMBOLS), required)
         # Every reader entry point the Dart side binds, including the ones it
         # treats as optional: the gate is what proves the shipped image exports
-        # them, so a build cannot silently ship a bridge without range seeking.
-        self.assertEqual(len(required), 13)
+        # them, so a build cannot silently ship a bridge that cannot report the
+        # source length (which is what makes seeking a stream work at all).
+        self.assertEqual(len(required), 11)
 
     def test_executable_rejects_each_missing_required_symbol(self):
         with tempfile.TemporaryDirectory() as directory:

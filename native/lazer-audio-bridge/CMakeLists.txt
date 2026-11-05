@@ -60,27 +60,27 @@ if(LAZER_AUDIO_BRIDGE_BUILD_PROBES)
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
 
-    # The reader's own contract: written ranges, holes, demands, and seeking out
-    # of the downloaded region. Compiles the reader source directly so the probe
-    # needs neither FFmpeg nor a shared-library load path.
-    add_executable(lazer-audio-bridge-ranged-reader-probe
-        tools/ranged_reader_probe.cpp
+    # The reader's own contract: what it serves, when it hands control back, and
+    # what a seek past the download does. Compiles the reader source directly so
+    # the probe needs neither FFmpeg nor a shared-library load path.
+    add_executable(lazer-audio-bridge-seek-policy-probe
+        tools/seek_policy_probe.cpp
         src/growing_reader.cpp)
-    target_compile_features(lazer-audio-bridge-ranged-reader-probe PRIVATE cxx_std_20)
+    target_compile_features(lazer-audio-bridge-seek-policy-probe PRIVATE cxx_std_20)
     if(WIN32)
-        target_compile_definitions(lazer-audio-bridge-ranged-reader-probe PRIVATE
+        target_compile_definitions(lazer-audio-bridge-seek-policy-probe PRIVATE
             UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     endif()
     if(MSVC)
-        set_property(TARGET lazer-audio-bridge-ranged-reader-probe PROPERTY
+        set_property(TARGET lazer-audio-bridge-seek-policy-probe PROPERTY
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-        target_compile_options(lazer-audio-bridge-ranged-reader-probe PRIVATE
+        target_compile_options(lazer-audio-bridge-seek-policy-probe PRIVATE
             /W4 /permissive- /EHsc)
     else()
-        target_compile_options(lazer-audio-bridge-ranged-reader-probe PRIVATE
+        target_compile_options(lazer-audio-bridge-seek-policy-probe PRIVATE
             -Wall -Wextra)
     endif()
-    add_test(NAME lazer-audio-bridge-ranged-reader
-        COMMAND $<TARGET_FILE:lazer-audio-bridge-ranged-reader-probe>)
-    set_tests_properties(lazer-audio-bridge-ranged-reader PROPERTIES TIMEOUT 60)
+    add_test(NAME lazer-audio-bridge-seek-policy
+        COMMAND $<TARGET_FILE:lazer-audio-bridge-seek-policy-probe>)
+    set_tests_properties(lazer-audio-bridge-seek-policy PROPERTIES TIMEOUT 60)
 endif()
