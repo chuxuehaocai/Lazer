@@ -1,3 +1,4 @@
+#include "beat_grid.h"
 #include "engine.h"
 #include "pcm_output.h"
 #include "queued_pcm_buffer.h"
@@ -42,6 +43,13 @@ constexpr double kBassSwapCutoffHz = 180.0;
 constexpr double kBassSwapMax = 0.85;
 constexpr double kBassSwapScale = 0.75;
 constexpr double kBassSwapClashScale = 3.0;
+/* How much of a source is analysed for its beat grid. Several seconds carry enough beats for a
+ * tempo, and the pump sees them on their way to the ring anyway. */
+constexpr double kBeatGridCaptureSeconds = 6.0;
+/* The musical range the reference player's natural mode keeps its overlap in; a beat-snapped
+ * overlap is allowed half a beat of slack around it. */
+constexpr double kOverlapMinSeconds = 4.0;
+constexpr double kOverlapMaxSeconds = 8.0;
 
 bool doPOutputApplies(int32_t dsdOutputMode, const StreamDescription &source) noexcept {
     return dsdOutputMode == LazerAudioDsdOutputRequireDoP && source.dsd && source.rawDsd &&
@@ -201,6 +209,15 @@ struct Engine::SourceSlot final : SourceConsumer {
     std::atomic<int64_t> overlapFrames{0};
     std::atomic<bool> overlapStarted{false};
     int64_t overlapLengthFrames = 0;
+    /* Tempo and beat phase of this source's own audio, estimated from the first seconds the pump
+     * decodes it: the transition places the mix on this source's beats. */
+    lazer_audio::BeatGrid grid;
+    std::vector<float> gridCapture;
+    int64_t gridCaptureFrames = 0;
+    /* How far into the source the analysed head started: a grid measured from a peeked head is
+     * anchored at the read position, not at the file's first sample. */
+    int64_t gridOriginFrames = 0;
+    bool gridAnalysed = false;
     /* The incoming song's silent intro, skipped at the start of the overlap. It is not mix progress
      * (which `overlapFrames` counts), but it is part of this source's own position. */
     int64_t skippedIntroFrames = 0;
@@ -695,10 +712,10 @@ int32_t Engine::configurePipeline() {
     convertScratch_.assign(static_cast<size_t>(wantedFrames) * frameBytes, 0);
     autoMixScratch_.assign(static_cast<size_t>(wantedFrames) *
         static_cast<size_t>(std::max(target.channels, 1)), 0.0f);
-    /* Enough of the incoming source's head to look for its silent intro in one peek (the
-     * prefetch buffer holds at least the overlap, which is longer than this scan). */
+    /* Enough of the incoming source's head for one peek: its silent intro, and a beat grid when the
+     * pump has not analysed that source itself (the prefetch buffer holds at least the overlap). */
     autoMixSilenceScratch_.assign(
-        static_cast<size_t>(kSilenceScanSeconds * std::max(target.sampleRate, 1)) *
+        static_cast<size_t>(kBeatGridCaptureSeconds * std::max(target.sampleRate, 1)) *
         static_cast<size_t>(std::max(target.channels, 1)), 0.0f);
     const size_t queuedScratchFrames = std::max(kRenderBlockFrames,
         static_cast<size_t>(std::max(outputSession_.bufferFrames, 1)));
@@ -1613,6 +1630,76 @@ double Engine::measureBassClash(
     return std::clamp(kBassSwapScale * clash, 0.0, kBassSwapMax);
 }
 
+void Engine::captureBeatGridLocked(const float *samples, int32_t frames, size_t channels) {
+    if (source_ == nullptr || samples == nullptr || frames <= 0 || channels == 0) return;
+    const int32_t rate = outputSession_.target.sampleRate;
+    if (rate <= 0) return;
+    SourceSlot &slot = *source_;
+    if (slot.gridAnalysed) return;
+    const int64_t windowFrames = static_cast<int64_t>(kBeatGridCaptureSeconds * rate);
+    const int64_t remaining = windowFrames - slot.gridCaptureFrames;
+    if (remaining <= 0) return;
+    const int32_t take = static_cast<int32_t>(std::min<int64_t>(remaining, frames));
+    const size_t sampleCount = static_cast<size_t>(take) * channels;
+    if (slot.gridCapture.empty()) {
+        slot.gridCapture.reserve(static_cast<size_t>(windowFrames) * channels);
+    }
+    slot.gridCapture.insert(slot.gridCapture.end(), samples, samples + sampleCount);
+    slot.gridCaptureFrames += take;
+    if (slot.gridCaptureFrames >= windowFrames) {
+        slot.grid = lazer_audio::estimateBeatGrid(slot.gridCapture.data(), slot.gridCaptureFrames, rate,
+            static_cast<int32_t>(channels));
+        slot.gridAnalysed = true;
+        /* The buffer has done its job: the grid is a handful of numbers from here on. */
+        slot.gridCapture.clear();
+        slot.gridCapture.shrink_to_fit();
+    }
+}
+
+int64_t Engine::snapOverlapToBeat(
+    const SourceSlot &slot, int64_t desiredFrames, int64_t mixStartOutputFrames) {
+    const lazer_audio::BeatGrid &grid = slot.grid;
+    const int64_t beat = grid.beatFrames();
+    if (!grid.valid || beat <= 0 || desiredFrames <= 1) return desiredFrames;
+    /* The mix ends where the source ends, so its start is what moves: onto the nearest line of the
+     * source's own beat grid, which is the frame count the pump produced from the start. */
+    const int64_t snapped = grid.nextBeatAtOrAfter(mixStartOutputFrames - beat / 2);
+    const int64_t snappedFrames = mixStartOutputFrames - snapped;
+    if (snappedFrames <= 1) return desiredFrames;
+    const int32_t rate = outputSession_.target.sampleRate > 0 ? outputSession_.target.sampleRate : 1;
+    const double seconds = static_cast<double>(snappedFrames) / rate;
+    const double slack = static_cast<double>(beat) / rate;
+    if (seconds < kOverlapMinSeconds - slack || seconds > kOverlapMaxSeconds + slack) {
+        return desiredFrames;
+    }
+    return snappedFrames;
+}
+
+int64_t Engine::beatPhaseSkipFrames(const SourceSlot &incoming, int64_t consumedFrames,
+    const SourceSlot &outgoing, int64_t mixStartOutputFrames) {
+    const int64_t beatIn = incoming.grid.beatFrames();
+    if (!incoming.grid.valid || beatIn <= 0) return 0;
+    const int64_t beatOut = outgoing.grid.beatFrames();
+    /* The outgoing song is the reference: its period is what the incoming song's beats are lined up
+     * with, and the shift never has to be longer than one of them. */
+    const int64_t period =
+        outgoing.grid.valid && beatOut > 0 ? beatOut : beatIn;
+    int64_t phaseOut = 0;
+    if (outgoing.grid.valid && beatOut > 0) {
+        /* How far the mix starts past the outgoing song's last beat line. Both anchors are measured
+         * against their own grid: a grid's zero is wherever its analysis found the first beat. */
+        phaseOut =
+            ((mixStartOutputFrames - outgoing.grid.firstBeatFrame) % beatOut + beatOut) % beatOut;
+    }
+    /* Consuming `shift` more frames makes the incoming song's next beat line land exactly where the
+     * outgoing song's next one is. The incoming grid's own frame zero sits at its origin, so the
+     * frames already consumed since then come off the shift. */
+    const int64_t anchor = incoming.grid.firstBeatFrame + incoming.gridOriginFrames;
+    const int64_t shift =
+        ((anchor - consumedFrames + phaseOut) % period + period) % period;
+    return shift;
+}
+
 int64_t Engine::consumeIncomingSilence(SourceSlot &candidate, int32_t sampleRate, size_t channels) {
     if (candidate.pcm == nullptr || sampleRate <= 0 || channels == 0) return 0;
     const int64_t frameFrames = std::max<int64_t>(sampleRate / 50, 1);
@@ -1759,8 +1846,14 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
             const int64_t exactIncoming = candidate->source.totalOutputFrames();
             const int64_t incomingFrames = exactIncoming > 0 ? exactIncoming :
                 candidate->source.description().durationMillis * rate / 1000;
-            const int64_t desiredFrames = std::min({
+            int64_t desiredFrames = std::min({
                 static_cast<int64_t>(duration) * rate / 1000, totalFrames / 2, incomingFrames / 2});
+            /* Put the mix's start on a beat of the outgoing song: that is where a listener hears
+             * the transition happen, and it is what lines the incoming song's beats up with it. */
+            if (source_->grid.valid) {
+                const int64_t mixStart = source_->producedOutputFrames + remainingFrames - desiredFrames;
+                desiredFrames = snapOverlapToBeat(*source_, desiredFrames, mixStart);
+            }
             const bool started = candidate->overlapStarted.load(std::memory_order_acquire);
             if (!started && desiredFrames > 1 && remainingFrames > desiredFrames &&
                 remainingFrames - desiredFrames < frames) {
@@ -1796,8 +1889,50 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
                             /* Start on music: the incoming song's silent intro is dead air in the
                              * middle of the transition, so it is consumed before the first mixed
                              * frame and counted in the successor's own position. */
-                            const int64_t skipped = consumeIncomingSilence(
+                            int64_t skipped = consumeIncomingSilence(
                                 *candidate, rate, static_cast<size_t>(channels));
+                            /* The incoming song's tempo and beat phase, if the pump has not already
+                             * measured this source (a successor is prepared, never played, so it has
+                             * no grid of its own yet). */
+                            if (!candidate->gridAnalysed && !candidate->grid.valid) {
+                                const int64_t headFrames = std::min<int64_t>(
+                                    std::max<int64_t>(candidate->pcm->queuedFrames(), 0),
+                                    static_cast<int64_t>(kBeatGridCaptureSeconds * rate));
+                                const int32_t peekFrames = static_cast<int32_t>(std::min<int64_t>(
+                                    headFrames,
+                                    static_cast<int64_t>(autoMixSilenceScratch_.size() / channels)));
+                                if (peekFrames > 0) {
+                                    const int32_t peeked = candidate->pcm->peekFrames(
+                                        reinterpret_cast<uint8_t *>(autoMixSilenceScratch_.data()),
+                                        peekFrames);
+                                    if (peeked > 0) {
+                                        candidate->grid = lazer_audio::estimateBeatGrid(
+                                            autoMixSilenceScratch_.data(), peeked, rate,
+                                            static_cast<int32_t>(channels));
+                                        candidate->gridOriginFrames = skipped;
+                                    }
+                                }
+                                candidate->gridAnalysed = true;
+                            }
+                            /* Line the incoming song's beat phase up with the beat the outgoing song
+                             * is on, by starting it later within its own bar. Without this the two
+                             * grids can sit half a beat apart for the whole overlap. */
+                            if (source_->grid.valid && candidate->grid.valid && skipped >= 0) {
+                                const int64_t mixStartOutput = source_->producedOutputFrames +
+                                    (remainingFrames - candidate->overlapLengthFrames);
+                                const int64_t phaseSkip = beatPhaseSkipFrames(
+                                    *candidate, skipped, *source_, mixStartOutput);
+                                if (phaseSkip > 0) {
+                                    const int64_t available = std::max<int64_t>(
+                                        candidate->pcm->queuedFrames(), 0);
+                                    const int32_t consume = static_cast<int32_t>(
+                                        std::min<int64_t>(phaseSkip, available));
+                                    if (consume > 0) {
+                                        candidate->pcm->consumeFrames(consume);
+                                        skipped += consume;
+                                    }
+                                }
+                            }
                             if (skipped > 0) {
                                 candidate->skippedIntroFrames = skipped;
                                 const int32_t refilled = candidate->pcm->peekFrames(
@@ -1973,6 +2108,8 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
         {
             std::lock_guard sourceGuard(sourceMutex_);
             if (source_ != nullptr) source_->producedOutputFrames += written;
+            captureBeatGridLocked(samples, frames,
+                static_cast<size_t>(std::max(outputSession_.target.channels, 1)));
         }
         acceptedFrames_.fetch_add(written, std::memory_order_release);
         int32_t peakHold = outputPeakMilliDbfs_.load(std::memory_order_relaxed);

@@ -66,6 +66,8 @@ private:
     void onSeekApplied() override;
 
     void pumpLoop();
+    /* Feeds the first seconds of the active source into its beat grid. */
+    void captureBeatGridLocked(const float *samples, int32_t frames, size_t channels);
     void renderLoop();
     /* Consumes the incoming source's silent intro from its prefetch buffer and returns the frames
      * it skipped, so the overlap starts on music instead of dead air. */
@@ -75,6 +77,13 @@ private:
     double measureBassClash(
         const float *outgoing, int32_t outgoingFrames, SourceSlot &candidate, int32_t sampleRate,
         size_t channels);
+    /* The overlap, moved onto the outgoing source's beat grid so the mix starts on a beat. */
+    int64_t snapOverlapToBeat(
+        const SourceSlot &slot, int64_t desiredFrames, int64_t mixStartOutputFrames);
+    /* Extra frames to skip at the head of the incoming source so that its beat lines fall where the
+     * outgoing source's do at the moment the mix starts. */
+    int64_t beatPhaseSkipFrames(const SourceSlot &incoming, int64_t consumedFrames,
+        const SourceSlot &outgoing, int64_t mixStartOutputFrames);
     int32_t configurePipeline();
     /* True while the float DSP/volume chain is actually on the signal path. */
     [[nodiscard]] bool dspInPath() const;
@@ -218,7 +227,8 @@ private:
     std::vector<double> autoMixOutgoingLow_;
     std::vector<double> autoMixIncomingLow_;
     double autoMixBassAmount_ = 0.0;
-    /* Scratch for scanning the incoming source's head for silence. */
+    /* Scratch for peeking at the incoming source's head: its silent intro and, when it has no grid
+     * yet, its tempo. */
     std::vector<float> autoMixSilenceScratch_;
 
     std::wstring deviceId_;

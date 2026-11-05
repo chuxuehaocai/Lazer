@@ -246,6 +246,7 @@ else()
 endif()
 
 add_library(lazer-audio ${LAZER_AUDIO_LIBRARY_TYPE}
+    src/beat_grid.cpp
     src/common.cpp
     src/dff_dsf_reader.cpp
     src/engine.cpp
@@ -312,6 +313,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # Engine sources directly and supplies its own fake platform-output factory.
     add_executable(lazer-audio-engine-gapless-probe
         tools/lazer_audio_engine_gapless_probe.cpp
+        src/beat_grid.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
         src/engine.cpp
@@ -345,6 +347,29 @@ if(LAZER_AUDIO_BUILD_PROBE)
     enable_testing()
     add_test(NAME lazer-audio-engine-gapless
         COMMAND $<TARGET_FILE:lazer-audio-engine-gapless-probe>)
+
+    # Tempo and beat phase from PCM: the engine's stand-in for the reference player's analysed
+    # beat grid, and the only thing the transition planner needs from it.
+    add_executable(lazer-audio-beat-grid-probe
+        tools/lazer_audio_beat_grid_probe.cpp
+        src/beat_grid.cpp)
+    target_include_directories(lazer-audio-beat-grid-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src")
+    target_compile_features(lazer-audio-beat-grid-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-beat-grid-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-beat-grid-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-beat-grid-probe PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(lazer-audio-beat-grid-probe PRIVATE -Wall -Wextra)
+    endif()
+    add_test(NAME lazer-audio-beat-grid
+        COMMAND $<TARGET_FILE:lazer-audio-beat-grid-probe>)
 
     # The bit-perfect claim and the three facts it is derived from (ABI v25). Captures the engine's
     # real output bytes through a fake fixed-period endpoint, so it proves byte-exactness without a

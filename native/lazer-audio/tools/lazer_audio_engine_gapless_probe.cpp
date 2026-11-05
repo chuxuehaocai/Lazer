@@ -118,6 +118,42 @@ double probeOutgoingLane(double marker, double progress) {
         (1.0 - kProbeBassAmount * probeOutgoingSwap(progress));
 }
 
+/* A click track: the marker, gated into short bursts every half second (120 BPM), starting at
+ * `firstClickSeconds`. Used to give the transition planner a beat to align to. */
+std::vector<uint8_t> makeClickTrack(bool rightChannel, double firstClickSeconds, int32_t seconds) {
+    std::vector<uint8_t> wave = makeChannelMarkerWaveAt(rightChannel, 8192, kSampleRate, seconds);
+    const int64_t frames = static_cast<int64_t>(seconds) * kSampleRate;
+    constexpr double kBeatSeconds = 0.5;
+    constexpr double kBurstSeconds = 0.05;
+    for (int64_t frame = 0; frame < frames; ++frame) {
+        const double at = static_cast<double>(frame) / kSampleRate;
+        const double phase = std::fmod(at - firstClickSeconds, kBeatSeconds);
+        if (phase >= 0.0 && phase < kBurstSeconds) continue;
+        const size_t offset = 44 + static_cast<size_t>(frame) * kFrameBytes;
+        for (int32_t byte = 0; byte < kFrameBytes && offset + byte < wave.size(); ++byte) {
+            wave[offset + byte] = 0;
+        }
+    }
+    return wave;
+}
+
+/* The frames where a channel's marker starts, which is where a click is. */
+std::vector<int64_t> markerOnsets(const std::vector<uint8_t> &bytes, int32_t channel,
+    int64_t from, int64_t to) {
+    std::vector<int64_t> onsets;
+    bool inside = false;
+    for (int64_t frame = std::max<int64_t>(from, 0); frame < to; ++frame) {
+        const size_t offset = static_cast<size_t>(frame) * kFrameBytes + channel * 2;
+        if (offset + 1 >= bytes.size()) break;
+        const int16_t value = static_cast<int16_t>(static_cast<uint16_t>(bytes[offset]) |
+            (static_cast<uint16_t>(bytes[offset + 1]) << 8));
+        const bool loud = std::abs(value) > 2000;
+        if (loud && !inside) onsets.push_back(frame);
+        inside = loud;
+    }
+    return onsets;
+}
+
 double probeIncomingLane(double marker, double progress, double correction) {
     return marker * correction * std::sin(progress * 1.57079632679489661923) *
         (1.0 - kProbeBassAmount * probeIncomingSwap(progress));
@@ -1652,6 +1688,85 @@ int runAutoMixSilentIntroCase() {
     return 0;
 }
 
+
+/* Two songs at the same tempo whose bars start at different moments. The planner has to start the
+ * incoming one on its own beat *and* in phase with the outgoing one: without that the two kick
+ * patterns fight for the whole overlap, which is the one thing a beat-aligned transition is for. */
+int runAutoMixBeatAlignCase() {
+    MemoryReader first(makeClickTrack(false, 0.0, 12));
+    MemoryReader second(makeClickTrack(true, 0.25, 12));
+    const auto firstReader = asReader(first);
+    const auto secondReaderRef = asReader(second);
+    ProbeEvents events;
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.device.buffer_millis = 120;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return fail("beat-align engine creation failed");
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 12'000};
+    if (engine->setAutoMix(3'000) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+        engine->queueReader(1, secondReaderRef, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("beat-align session did not start");
+    }
+    bool ended = false;
+    {
+        std::unique_lock guard(events.mutex);
+        ended = events.changed.wait_for(guard, std::chrono::seconds(40), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                events.events.end();
+        });
+    }
+    engine->destroy();
+    if (!ended) return fail("beat-align session failed to end");
+
+    /* The overlap is the last three seconds of a twelve second track. */
+    constexpr int64_t overlap = kSampleRate * 3;
+    const int64_t start = kSampleRate * 9;
+    std::lock_guard guard(capture->mutex);
+    const std::vector<int64_t> outgoing = markerOnsets(capture->bytes, 0, start,
+        start + overlap * 3 / 5);
+    const std::vector<int64_t> incoming = markerOnsets(capture->bytes, 1, start,
+        start + overlap * 3 / 5);
+    if (outgoing.size() < 3 || incoming.size() < 3) {
+        std::cerr << "FAIL: not enough clicks in the overlap: " << outgoing.size() << " and "
+            << incoming.size() << "\n";
+        return fail("the beat-align session did not place clicks in the overlap");
+    }
+    const int64_t tolerance = kSampleRate / 32;  /* 31 ms, about three analysis hops */
+    int64_t entryError = INT64_MAX;
+    int64_t worst = 0;
+    for (size_t index = 0; index < incoming.size(); ++index) {
+        int64_t nearest = INT64_MAX;
+        for (int64_t other : outgoing) nearest = std::min(nearest, std::abs(other - incoming[index]));
+        worst = std::max(worst, nearest);
+        if (index == 0) entryError = nearest;
+    }
+    if (entryError > tolerance) {
+        std::cerr << "FAIL: the incoming song's first click is " << entryError
+            << " frames from the outgoing song's nearest one\n";
+        return fail("the incoming song did not enter on the outgoing song's beat");
+    }
+    /* Both songs' tempos are estimated from a few seconds, so their grids drift apart by a few tens
+     * of milliseconds across the overlap; holding them together for its whole length is what the
+     * reference player's rate matching is for, and the engine does not resample the decks. */
+    if (worst > tolerance * 4) {
+        std::cerr << "FAIL: the two grids drift " << worst << " frames apart across the overlap\n";
+        return fail("the incoming song's beats drifted off the outgoing song's");
+    }
+    std::cout << "PASS: AutoMix entered the incoming song on the outgoing song's beat (entry off by "
+        << entryError << " frames, worst " << worst << ")\n";
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && std::string(argv[1]) == "--automix-slow") return runAutoMixSlowSuccessorCase();
     if (runExistingFastGaplessCase() != 0) return 1;
@@ -1659,6 +1774,7 @@ int main(int argc, char **argv) {
     if (runAutoMixOverlapCase(true) != 0) return 1;
     if (runAutoMixLevelMatchCase() != 0) return 1;
     if (runAutoMixSilentIntroCase() != 0) return 1;
+    if (runAutoMixBeatAlignCase() != 0) return 1;
     if (runAutoMixCancelAndSeekCase() != 0) return 1;
     if (runAutoMixSlowSuccessorCase() != 0) return 1;
     if (runUnderrunRecoveryCase() != 0) return 1;
