@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../state/app_state.dart';
 import 'audio_engine.dart';
+import 'automix_audio_engine.dart';
 
 /// Owns optional OS audio focus, without replacing the playback engine.
 class PlaybackSession {
@@ -90,10 +91,12 @@ class PlaybackSession {
         !state.independentPlayback &&
         defaultTargetPlatform == TargetPlatform.android) {
       final attributes = session.androidAudioAttributes;
-      // Only the just_audio path owns Android audio attributes; the native engine
-      // has its own output backend and ignores them.
+      // The compatibility decoders own Android audio attributes; the native
+      // engine has its own output backend and ignores them.
       if (attributes != null && engine is JustAudioEngine) {
         await (engine as JustAudioEngine).applyAudioAttributes(attributes);
+      } else if (attributes != null && engine is AutoMixAudioEngine) {
+        await (engine as AutoMixAudioEngine).applyAudioAttributes(attributes);
       }
     }
     _session = session;

@@ -19,6 +19,9 @@ Future<void> main(List<String> arguments) async {
     if (!availability.supportsStreaming) {
       throw StateError(availability.reason ?? 'Reader bridge missing');
     }
+    if (availability.api!.setAutoMix == null) {
+      throw StateError('Bundled audio engine has no overlap mixer');
+    }
     stdout.writeln(availability.api!.buildInformation());
     final worker = await LazerAudioWorker.spawn().timeout(
       const Duration(seconds: 15),
@@ -32,7 +35,19 @@ Future<void> main(List<String> arguments) async {
       if (handle is! int || handle == 0) {
         throw StateError('Native engine creation failed');
       }
-      await worker.call(LazerWorkerOp.destroy, [handle]);
+      try {
+        for (final duration in [8000, 0]) {
+          final status = await worker.call(LazerWorkerOp.setAutoMix, [
+            handle,
+            duration,
+          ]);
+          if (status != 0) {
+            throw StateError('Could not configure overlap mixer: $status');
+          }
+        }
+      } finally {
+        await worker.call(LazerWorkerOp.destroy, [handle]);
+      }
     } finally {
       await worker.close();
     }

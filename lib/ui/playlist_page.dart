@@ -723,15 +723,21 @@ class AppPlaylistHeader extends StatelessWidget {
         children: <Widget>[artwork, const SizedBox(height: 18), info],
       );
     }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        artwork,
-        const SizedBox(width: 24),
-        Expanded(
-          child: SizedBox(height: coverSize, child: info),
-        ),
-      ],
+    // The desktop column keeps its transport row on the cover's bottom edge
+    // when the metadata fits. A very long playlist name grows the title to two
+    // lines and can make the column taller than the artwork; the old fixed
+    // `SizedBox(height: coverSize)` then overflowed at the bottom. Intrinsic
+    // height lets the row take the taller of the cover and the text block while
+    // `Spacer` still pins short metadata to the cover's bottom edge.
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Align(alignment: Alignment.topLeft, child: artwork),
+          const SizedBox(width: 24),
+          Expanded(child: info),
+        ],
+      ),
     );
   }
 }

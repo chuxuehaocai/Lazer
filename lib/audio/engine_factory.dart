@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
 import 'audio_engine.dart';
+import 'automix_audio_engine.dart';
 import 'native/audio_path_log.dart';
 import 'native/engine_selection.dart';
 import 'native/lazer_audio_engine.dart';
@@ -41,7 +42,7 @@ class AudioEngineSelection {
   final NativeAudioEngine? native;
 
   /// Non-null when `just_audio`/media_kit is driving playback.
-  final JustAudioEngine? platform;
+  final AudioEngine? platform;
 
   bool get isNative => native != null;
 
@@ -59,6 +60,7 @@ class AudioEngineSelection {
 /// indistinguishable from a native session for the listener.
 Future<AudioEngineSelection> createAudioEngine({
   bool preferNative = true,
+  bool autoMixEnabled = false,
   LazerDeviceSettings deviceSettings = const LazerDeviceSettings(),
 }) async {
   AudioEnginePathDecision decision = planAudioEnginePath(
@@ -74,6 +76,9 @@ Future<AudioEngineSelection> createAudioEngine({
         deviceSettings: deviceSettings,
       );
       if (native != null) {
+        if (native.supportsAutoMix) {
+          await native.setAutoMixEnabled(autoMixEnabled);
+        }
         logAudioPathEvent('select', <String, Object?>{
           'path': 'native',
           'fallback': null,
@@ -124,10 +129,10 @@ Future<AudioEngineSelection> createAudioEngine({
   );
   JustAudioMediaKit.ensureInitialized();
   JustAudioMediaKit.prefetchPlaylist = true;
-  final JustAudioEngine platform = JustAudioEngine(
-    // Reported through `FailureReportingAudioEngine`, the same abstraction the
-    // native engine uses for its terminal failures, so the UI has one source
-    // for "this session is not on the HiFi path, and here is why".
+  // Keep both decoders available so the setting also works when enabled during
+  // playback; this remains the system backend, independent of engine choice.
+  final AudioEngine platform = AutoMixAudioEngine(
+    enabled: autoMixEnabled,
     fallbackNotice: decision.notice,
   );
   return AudioEngineSelection(

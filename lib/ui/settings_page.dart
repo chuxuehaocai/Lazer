@@ -101,6 +101,8 @@ class _SettingsOverview extends StatelessWidget {
           key: const PageStorageKey('settings-overview-scroll'),
           padding: EdgeInsets.fromLTRB(inset, 8, inset, 36),
           children: <Widget>[
+            Column(
+              children: <Widget>[
             const ApplePageTitle(
               title: '设置',
               subtitle: '外观、界面和账户。',
@@ -490,6 +492,14 @@ class _SettingsOverview extends StatelessWidget {
                     value: state.independentPlayback,
                     onChanged: (bool value) =>
                         unawaited(state.setIndependentPlayback(value)),
+                  ),
+                  _AppSwitchRow(
+                    key: const ValueKey('auto-mix'),
+                    label: '自动混音',
+                    subtitle: state.autoMixError ?? '在当前歌曲结束前平滑衔接下一首',
+                    value: state.autoMixEnabled,
+                    onChanged: (bool value) =>
+                        unawaited(state.setAutoMixEnabled(value)),
                   ),
                   AppleListTile(
                     padding: SettingsSpacing.rowPadding,
@@ -885,6 +895,8 @@ class _SettingsOverview extends StatelessWidget {
                 ],
               ),
             ),
+            ],
+          ),
           ],
         ),
       ),

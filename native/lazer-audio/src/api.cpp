@@ -138,6 +138,11 @@ int32_t lazer_audio_set_volume(LazerAudioEngine engine, double volume) {
     return handle(engine)->setVolume(volume);
 }
 
+int32_t lazer_audio_set_automix(LazerAudioEngine engine, int32_t duration_millis) {
+    if (engine == nullptr) return LazerAudioErrorInvalidArgument;
+    return handle(engine)->setAutoMix(duration_millis);
+}
+
 int32_t lazer_audio_set_dsp(LazerAudioEngine engine, const LazerAudioDspConfig *dsp) {
     if (engine == nullptr) return LazerAudioErrorInvalidArgument;
     if (dsp == nullptr) {

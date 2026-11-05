@@ -177,6 +177,7 @@ abstract final class LazerWorkerOp {
   static const int play = 10;
   static const int pause = 11;
   static const int seek = 12;
+  static const int setAutoMix = 13;
 }
 
 /// The owning side of the worker isolate.
@@ -369,6 +370,15 @@ Object? _execute(LazerAudioApi api, int op, List<Object?> params) {
       return api.pause(Pointer<Void>.fromAddress(params[0] as int));
     case LazerWorkerOp.seek:
       return api.seek(
+        Pointer<Void>.fromAddress(params[0] as int),
+        params[1] as int,
+      );
+    case LazerWorkerOp.setAutoMix:
+      final configure = api.setAutoMix;
+      if (configure == null) {
+        throw UnsupportedError('This audio engine has no overlap mixer.');
+      }
+      return configure(
         Pointer<Void>.fromAddress(params[0] as int),
         params[1] as int,
       );

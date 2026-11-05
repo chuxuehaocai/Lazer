@@ -29,13 +29,13 @@ class IosAudioExportsTest(unittest.TestCase):
         self.assertEqual(set(VERIFY.BRIDGE_SYMBOLS), required)
         self.assertEqual(len(required), 10)
 
-    def test_executable_rejects_each_missing_reader_symbol(self):
+    def test_executable_rejects_each_missing_required_symbol(self):
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory) / "Runner"
             binary.touch()
             all_symbols = set(VERIFY.ABI_SYMBOLS + VERIFY.BRIDGE_SYMBOLS)
             with patch.object(VERIFY, "run", return_value="architecture: arm64"):
-                for symbol in VERIFY.BRIDGE_SYMBOLS:
+                for symbol in sorted(all_symbols):
                     with self.subTest(symbol=symbol):
                         with patch.object(
                             VERIFY, "exported_symbols", return_value=all_symbols - {symbol}

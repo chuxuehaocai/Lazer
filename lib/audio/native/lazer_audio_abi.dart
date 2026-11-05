@@ -94,6 +94,7 @@ const int lazerAudioEventSeekCompleted = 3;
 const int lazerAudioEventDeviceLost = 4;
 const int lazerAudioEventBufferProgress = 5;
 const int lazerAudioEventTrackChanged = 6;
+const int lazerAudioEventTrackMixStarted = 7;
 
 /// `LazerAudioLogLevel`.
 const int lazerAudioLogDebug = 0;

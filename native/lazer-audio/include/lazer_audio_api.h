@@ -94,6 +94,8 @@ typedef enum LazerAudioEvent {
     LazerAudioEventBufferProgress = 5,
     /* The next queued source has reached the output boundary in the current session. */
     LazerAudioEventTrackChanged = 6,
+    /* The incoming source has started contributing samples to an AutoMix overlap. */
+    LazerAudioEventTrackMixStarted = 7,
 } LazerAudioEvent;
 
 /* The caller owns the byte stream: it may be a growing HTTP cache file whose reads block until more
@@ -605,7 +607,8 @@ LAZER_AUDIO_API void LAZER_AUDIO_CALL lazer_audio_output_device_catalog_destroy(
 /* Prepare one successor reader for the current output session. queue_generation must increase
  * monotonically for each queue/cancel request and rejects late in-flight requests. The engine decodes it using the
  * already-negotiated output format and appends its PCM to the current session when the active source
- * ends. Its sample rate must match the active source; a different-rate track must reopen and
+ * ends. Its sample rate must match the active source unless AutoMix is enabled (then it is
+ * resampled to the existing device clock); a different-rate direct track must reopen and
  * renegotiate output. Only one successor may be queued at a time. In bit-perfect mode it must exactly
  * match the active session's PCM format. Once opened, the engine decodes it on a background worker
  * into a bounded PCM prebuffer. A blocking reader must supply `cancel`; it may run concurrently with
@@ -634,6 +637,14 @@ LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_clear_queued_reader(
  * Bounded to the last 128 entries. Older libraries may omit this export. */
 LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_read_log(
     LazerAudioEngine engine, int32_t *out_level, char *message, uint32_t capacity);
+
+/* Optional additive extension. Zero disables AutoMix; 1..30000 sets the maximum overlap in
+ * milliseconds. Successor PCM is mixed into the outgoing tail before its EOF, on the same output
+ * device and clock. Enable before open to select the float PCM pipeline even for direct-output
+ * preferences; changing an already-open direct pipeline takes effect on the next open. A started
+ * overlap completes when disabled so neither track suffers a discontinuous gain change. */
+LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_set_automix(
+    LazerAudioEngine engine, int32_t duration_millis);
 
 #ifdef __cplusplus
 }

@@ -63,11 +63,14 @@ struct Engine::SourceSlot final : SourceConsumer {
         source.close();
     }
 
-    void configurePrefetch(int32_t sampleRate, int32_t periodFrames, int32_t frameBytes) {
+    void configurePrefetch(int32_t sampleRate, int32_t periodFrames, int32_t frameBytes,
+        int32_t bufferedOverlapFrames = 0) {
         const size_t rate = static_cast<size_t>(std::max(sampleRate, 1));
         const size_t period = static_cast<size_t>(std::max(periodFrames, 1));
-        const size_t capacity = std::max(rate, period * 4);
-        const size_t watermark = std::min(capacity, std::max(rate / 4, period * 2));
+        const size_t overlap = static_cast<size_t>(std::max(bufferedOverlapFrames, 0));
+        const size_t cushion = std::max(rate / 4, period * 2);
+        const size_t capacity = std::max({rate, period * 4, overlap + cushion});
+        const size_t watermark = std::min(capacity, overlap + cushion);
         pcm = std::make_unique<QueuedPcmBuffer>(capacity, watermark,
             static_cast<size_t>(std::max(frameBytes, 1)));
     }
@@ -176,6 +179,12 @@ struct Engine::SourceSlot final : SourceConsumer {
     AudioSource source;
     uint64_t queueGeneration = 0;
     double replayGainLinear = 1.0;
+    /* Pump-owned source-clock accounting, including an incoming prefix already used in a mix. */
+    int64_t producedOutputFrames = 0;
+    std::atomic<int64_t> overlapFrames{0};
+    std::atomic<bool> overlapStarted{false};
+    int64_t overlapLengthFrames = 0;
+    int64_t presentationOffsetFrames = 0;
     std::unique_ptr<QueuedPcmBuffer> pcm;
     std::thread prefetchThread;
     std::mutex prefetchThreadMutex;
@@ -333,6 +342,7 @@ int32_t Engine::open(
     pendingPresentationReady_.store(false, std::memory_order_release);
     pendingPresentationSeek_.store(false, std::memory_order_release);
     seekFlushRequested_.store(false, std::memory_order_release);
+    requestedSeekTargetMillis_.store(-1, std::memory_order_release);
     exclusiveInFlightAudioFrames_.store(0, std::memory_order_release);
     outputPeakMilliDbfs_.store(-120'000, std::memory_order_release);
     limiterGainReductionMilliDb_.store(0, std::memory_order_release);
@@ -341,6 +351,9 @@ int32_t Engine::open(
     underrunActive_.store(0, std::memory_order_release);
     underrunFrames_.store(0, std::memory_order_release);
     streamStarted_ = false;
+    cancelledOverlapGain_.store(-1.0, std::memory_order_release);
+    overlapRecoveryGain_ = 1.0;
+    overlapRecoveryFrames_ = 0;
     lastError_.clear();
     lastErrorCode_.store(LazerAudioOk, std::memory_order_release);
     bitPerfectActive_ = false;
@@ -415,12 +428,13 @@ int32_t Engine::open(
         return result;
     }
 
-    const bool requireDoP = doPOutputApplies(
+    const bool autoMix = autoMixMillis_.load(std::memory_order_acquire) > 0;
+    const bool requireDoP = !autoMix && doPOutputApplies(
         device_.dsd_output_mode, currentSource().description());
-    const bool requireNativeDsd = nativeDsdOutputApplies(
+    const bool requireNativeDsd = !autoMix && nativeDsdOutputApplies(
         device_.dsd_output_mode, currentSource().description());
     if (safeParams.replay_gain_db != 0.0 &&
-        (device_.bit_perfect != 0 || requireDoP || requireNativeDsd)) {
+        ((!autoMix && device_.bit_perfect != 0) || requireDoP || requireNativeDsd)) {
         setErrorLocked("ReplayGain changes samples and is unavailable in bit-perfect or direct DSD mode",
             LazerAudioErrorUnsupported);
         currentSource().close();
@@ -434,7 +448,7 @@ int32_t Engine::open(
         publishTerminal(LazerAudioEventFailed, LazerAudioErrorInvalidArgument, 0);
         return LazerAudioErrorInvalidArgument;
     }
-    if ((device_.bit_perfect != 0 || requireDoP || requireNativeDsd) &&
+    if (((!autoMix && device_.bit_perfect != 0) || requireDoP || requireNativeDsd) &&
         volume_.load(std::memory_order_acquire) < 0.999999) {
         setErrorLocked("set software volume to 100% and use the DAC volume for direct output",
             LazerAudioErrorUnsupported);
@@ -459,7 +473,7 @@ int32_t Engine::open(
     }
     request.exclusive = device_.exclusive != 0 || requireDoP || requireNativeDsd;
     request.bufferMillis = device_.buffer_millis > 0 ? device_.buffer_millis : 120;
-    request.bitPerfect = device_.bit_perfect != 0;
+    request.bitPerfect = !autoMix && device_.bit_perfect != 0;
     request.requireDoP = requireDoP;
     request.requireNativeDsd = requireNativeDsd;
     request.desired.sampleRate = currentSource().description().sampleRate;
@@ -506,8 +520,9 @@ int32_t Engine::configurePipeline() {
     const TargetFormat &target = outputSession_.target;
     /* Every early return below leaves the previous session's answer behind otherwise. */
     formatMatchesSource_ = false;
-    const bool requireDoP = doPOutputApplies(device_.dsd_output_mode, description);
-    const bool requireNativeDsd = nativeDsdOutputApplies(device_.dsd_output_mode, description);
+    const bool autoMix = autoMixMillis_.load(std::memory_order_acquire) > 0;
+    const bool requireDoP = !autoMix && doPOutputApplies(device_.dsd_output_mode, description);
+    const bool requireNativeDsd = !autoMix && nativeDsdOutputApplies(device_.dsd_output_mode, description);
     if (requireDoP != outputSession_.doP || requireNativeDsd != outputSession_.nativeDsd) {
         lastError_ = requireDoP
             ? "the selected output did not initialize the required DoP carrier format"
@@ -580,12 +595,14 @@ int32_t Engine::configurePipeline() {
         exactContainer &&
         (target.bitsPerSample == 16 || target.bitsPerSample == 24 || target.bitsPerSample == 32);
     if (!outputSession_.doP && !outputSession_.nativeDsd &&
+        autoMixMillis_.load(std::memory_order_acquire) == 0 &&
         device_.bit_perfect != 0 && !exactPcmFormat) {
         lastError_ = "bit-perfect output requires exact mono or stereo lossless integer PCM format";
         return LazerAudioErrorUnsupported;
     }
     if (!outputSession_.doP && !outputSession_.nativeDsd) {
-        dspBypassed_ = device_.bit_perfect != 0 && outputSession_.exclusive && exactPcmFormat;
+        dspBypassed_ = autoMixMillis_.load(std::memory_order_acquire) == 0 &&
+            device_.bit_perfect != 0 && outputSession_.exclusive && exactPcmFormat;
     }
     if (outputSession_.doP) {
         /* DoP words are an encoded DSD bitstream. They must reach the carrier untouched, with
@@ -646,6 +663,8 @@ int32_t Engine::configurePipeline() {
         producerPausedForRing_ = false;
     }
     convertScratch_.assign(static_cast<size_t>(wantedFrames) * frameBytes, 0);
+    autoMixScratch_.assign(static_cast<size_t>(wantedFrames) *
+        static_cast<size_t>(std::max(target.channels, 1)), 0.0f);
     const size_t queuedScratchFrames = std::max(kRenderBlockFrames,
         static_cast<size_t>(std::max(outputSession_.bufferFrames, 1)));
     if (outputSession_.nativeDsd) {
@@ -654,7 +673,10 @@ int32_t Engine::configurePipeline() {
         queuedPcmScratch_.assign(queuedScratchFrames * wordBytes * rawFrameBytes, 0);
         nativeDsdScratch_.assign(queuedScratchFrames * frameBytes, 0);
     } else {
-        queuedPcmScratch_.assign(static_cast<size_t>(queuedScratchFrames) * frameBytes, 0);
+        const int32_t stagedFrameBytes = dspBypassed_ || outputSession_.doP
+            ? frameBytes : floatTarget_.frameBytes();
+        queuedPcmScratch_.assign(queuedScratchFrames *
+            static_cast<size_t>(std::max(stagedFrameBytes, 1)), 0);
         nativeDsdScratch_.clear();
     }
     replayGainCurrentLinear_ = source_->replayGainLinear;
@@ -704,7 +726,8 @@ int32_t Engine::queueReader(
         const uint64_t currentQueueGeneration = queueGeneration_.load(std::memory_order_acquire);
         if (queueGeneration <= currentQueueGeneration) return LazerAudioErrorState;
         generation = sessionGeneration_.load(std::memory_order_acquire);
-        dsdOutputMode = device_.dsd_output_mode;
+        dsdOutputMode = autoMixMillis_.load(std::memory_order_acquire) > 0
+            ? LazerAudioDsdOutputConvertToPcm : device_.dsd_output_mode;
         requireDoP = dopActive_.load(std::memory_order_acquire);
         requireNativeDsd = nativeDsdActive_.load(std::memory_order_acquire);
         target = requireDoP || dspBypassed_ ? outputSession_.target : floatTarget_;
@@ -809,7 +832,8 @@ int32_t Engine::queueReader(
     } else {
         /* Keep the active device clock for the whole session. A different-rate successor must go
          * through the normal stop/open path so exclusive output can renegotiate before that track. */
-        if (preparedDescription.sampleRate != activeDescription.sampleRate) {
+        if (autoMixMillis_.load(std::memory_order_acquire) == 0 &&
+            preparedDescription.sampleRate != activeDescription.sampleRate) {
             abandonPreparation();
             return LazerAudioErrorUnsupported;
         }
@@ -852,8 +876,10 @@ int32_t Engine::queueReader(
         if (preparingSource_ != prepared || nextSource_ != nullptr) {
             return LazerAudioErrorState;
         }
+        const int32_t overlapFrames = static_cast<int32_t>(
+            static_cast<int64_t>(autoMixMillis_.load(std::memory_order_acquire)) * target.sampleRate / 1000);
         prepared->configurePrefetch(target.sampleRate, outputSession_.bufferFrames,
-            target.frameBytes());
+            target.frameBytes(), overlapFrames);
         if (!prepared->startPrefetch()) {
             preparingSource_.reset();
             return LazerAudioErrorNoMemory;
@@ -877,6 +903,14 @@ int32_t Engine::clearQueuedReader(uint64_t queueGeneration) {
         queueGeneration_.store(queueGeneration, std::memory_order_release);
         std::lock_guard sourceGuard(sourceMutex_);
         if (nextSource_ != nullptr) {
+            if (nextSource_->overlapStarted.load(std::memory_order_acquire)) {
+                const double progress = std::clamp(
+                    static_cast<double>(nextSource_->overlapFrames.load(std::memory_order_acquire)) /
+                    static_cast<double>(std::max<int64_t>(nextSource_->overlapLengthFrames - 1, 1)),
+                    0.0, 1.0);
+                cancelledOverlapGain_.store(std::cos(progress * 1.57079632679489661923),
+                    std::memory_order_release);
+            }
             retired = std::move(nextSource_);
             result = LazerAudioQueueCleared;
         } else if (preparingSource_ != nullptr && preparingSource_->queueGeneration != 0 &&
@@ -895,8 +929,19 @@ int32_t Engine::clearQueuedReader(uint64_t queueGeneration) {
     if (retired != nullptr) {
         retired->cancel();
         retired->joinPrefetch();
+        /* A pump may still retain the slot while abandoning a boundary wait. Close installed
+         * readers synchronously before returning: their caller is now free to release context. */
+        if (retired->prefetchStarted) retired->source.close();
     }
     retired.reset();
+    if (result == LazerAudioQueueAlreadyActive) {
+        /* Publication of the new slot precedes destruction of the old one so reader callbacks
+         * never run under sourceMutex_. Its caller may free that old context after AlreadyActive. */
+        std::unique_lock retirementGuard(sourceRetirementMutex_);
+        sourceRetirementChanged_.wait(retirementGuard, [this] {
+            return !sourceRetirementPending_.load(std::memory_order_acquire);
+        });
+    }
     return result;
 }
 
@@ -923,7 +968,17 @@ int32_t Engine::tryStartQueuedSource(bool &started, std::string &error) {
 
     /* The render thread knows the old stream has reached its boundary and must not pad a partial
      * fixed period while the queued decoder reaches its PCM watermark. No engine mutex is held. */
-    const bool ready = candidate->pcm != nullptr && candidate->pcm->waitUntilReady();
+    bool ready = false;
+    if (candidate->pcm != nullptr) {
+        if (candidate->overlapStarted.load(std::memory_order_acquire)) {
+            /* The initial watermark includes the entire overlap. Those frames have already been
+             * rendered with A; requiring that watermark again would pause at EOF to refill it. */
+            candidate->pcm->waitForDataOrFinish();
+            ready = !candidate->pcm->isCancelled() && candidate->pcm->queuedFrames() > 0;
+        } else {
+            ready = candidate->pcm->waitUntilReady();
+        }
+    }
     if (!ready) {
         std::lock_guard sourceGuard(sourceMutex_);
         if (nextSource_ != candidate || cancelled_.load(std::memory_order_acquire)) {
@@ -957,13 +1012,18 @@ int32_t Engine::tryStartQueuedSource(bool &started, std::string &error) {
             return LazerAudioOk;
         }
         presentationDescription_ = source_->source.description();
-        presentationSeekTargetMillis_ = source_->source.seekTargetMillis();
+        presentationSeekTargetMillis_ = source_->source.seekTargetMillis() +
+            source_->presentationOffsetFrames * 1000 / outputSession_.target.sampleRate;
         presentationBufferedPercent_ = static_cast<int32_t>(
             source_->source.bufferedFraction() * 100.0);
         retired = std::move(source_);
+        sourceRetirementPending_.store(true, std::memory_order_release);
         source_ = std::move(nextSource_);
+        source_->presentationOffsetFrames = source_->overlapFrames.load(std::memory_order_acquire);
+        source_->producedOutputFrames = source_->presentationOffsetFrames;
         replayGainTargetLinear_ = source_->replayGainLinear;
-        if (std::abs(replayGainTargetLinear_ - replayGainCurrentLinear_) < 1.0e-12) {
+        if (source_->presentationOffsetFrames > 0 ||
+            std::abs(replayGainTargetLinear_ - replayGainCurrentLinear_) < 1.0e-12) {
             replayGainCurrentLinear_ = replayGainTargetLinear_;
             replayGainRampRemainingFrames_ = 0;
         } else {
@@ -971,7 +1031,8 @@ int32_t Engine::tryStartQueuedSource(bool &started, std::string &error) {
                 1, static_cast<int64_t>(outputSession_.target.sampleRate) * 5 / 1000);
         }
         pendingPresentationDescription_ = source_->source.description();
-        pendingPresentationSeekTargetMillis_ = source_->source.seekTargetMillis();
+        pendingPresentationSeekTargetMillis_ = source_->source.seekTargetMillis() +
+            source_->presentationOffsetFrames * 1000 / outputSession_.target.sampleRate;
         /* Mirror for the render thread, which commits it at the audible seam without a lock. */
         pendingPresentation_.publish(source_->source.description(),
             pendingPresentationSeekTargetMillis_);
@@ -982,9 +1043,21 @@ int32_t Engine::tryStartQueuedSource(bool &started, std::string &error) {
             ++boundaryFrame;
         }
         pendingTrackChangedFrame_.store(boundaryFrame, std::memory_order_release);
-        pendingPresentationReady_.store(true, std::memory_order_release);
     }
+    /* pumpLoop still owns an outgoing-slot reference until this call returns. Close it explicitly;
+     * waiting for the final shared_ptr destructor would let TrackChanged outlive its reader. */
+    retired->cancel();
+    retired->joinPrefetch();
+    retired->source.close();
     retired.reset();
+    {
+        std::lock_guard retirementGuard(sourceRetirementMutex_);
+        sourceRetirementPending_.store(false, std::memory_order_release);
+    }
+    sourceRetirementChanged_.notify_all();
+    /* An event permits the caller to release the outgoing reader too, so the render-side seam
+     * must remain unpublished until its close callback has completed. */
+    pendingPresentationReady_.store(true, std::memory_order_release);
     log_.write(LazerAudioLogDebug,
         "successor source activated at output frame=" + std::to_string(boundaryFrame));
     started = true;
@@ -1099,20 +1172,38 @@ int32_t Engine::seek(int64_t positionMillis) {
     if (state_.load(std::memory_order_acquire) == LazerAudioStateIdle) {
         return LazerAudioErrorState;
     }
-    std::lock_guard sourceGuard(sourceMutex_);
-    if (source_ == nullptr) return LazerAudioErrorState;
-    if (pendingPresentationReady_.load(std::memory_order_acquire) &&
-        pendingTrackChangedFrame_.load(std::memory_order_acquire) >= 0) {
-        /* source_ is the decoder-active source. If it is B but the audible seam has not been
-         * crossed, keep B's presentation event pending and rebase it after the seek flush. */
-        pendingPresentationSeek_.store(true, std::memory_order_release);
+    std::shared_ptr<SourceSlot> active;
+    std::shared_ptr<SourceSlot> incoming;
+    {
+        std::lock_guard sourceGuard(sourceMutex_);
+        active = source_;
+        if (active == nullptr) return LazerAudioErrorState;
+        if (nextSource_ != nullptr && nextSource_->overlapStarted.load(std::memory_order_acquire)) {
+            incoming = nextSource_;
+        }
+        if (pendingPresentationReady_.load(std::memory_order_acquire) &&
+            pendingTrackChangedFrame_.load(std::memory_order_acquire) >= 0) {
+            /* source_ is the decoder-active source. If it is B but the audible seam has not been
+             * crossed, keep B's presentation event pending and rebase it after the seek flush. */
+            pendingPresentationSeek_.store(true, std::memory_order_release);
+        }
     }
     /* Seeking invalidates the current starvation episode. Keep the session total cumulative. */
     underrunActive_.store(0, std::memory_order_release);
     const int64_t position = std::max<int64_t>(0, positionMillis);
-    if (source_->prefetchStarted) source_->requestSeek(position);
+    requestedSeekTargetMillis_.store(position, std::memory_order_release);
+    /* Never hold sourceMutex_ while waiting for a consumer: the queued pump owns its consumer
+     * mutex while accept() publishes source metadata. Keep the slot alive with shared ownership. */
+    if (incoming != nullptr) {
+        incoming->requestSeek(incoming->source.seekTargetMillis());
+        std::lock_guard consumerGuard(incoming->consumerMutex);
+        incoming->overlapFrames.store(0, std::memory_order_release);
+        incoming->overlapStarted.store(false, std::memory_order_release);
+        incoming->overlapLengthFrames = 0;
+    }
+    if (active->prefetchStarted) active->requestSeek(position);
     else {
-        currentSource().requestSeek(position);
+        active->source.requestSeek(position);
         seekFlushRequested_.store(true, std::memory_order_release);
     }
     return LazerAudioOk;
@@ -1129,6 +1220,12 @@ int32_t Engine::setVolume(double volume) {
     }
     volume_.store(clamped, std::memory_order_release);
     volumeDirty_.store(true, std::memory_order_release);
+    return LazerAudioOk;
+}
+
+int32_t Engine::setAutoMix(int32_t durationMillis) {
+    if (durationMillis < 0 || durationMillis > 30'000) return LazerAudioErrorInvalidArgument;
+    autoMixMillis_.store(durationMillis, std::memory_order_release);
     return LazerAudioOk;
 }
 
@@ -1343,7 +1440,8 @@ int64_t Engine::currentPositionMillisLocked() const {
     if (source_ == nullptr) return 0;
     const bool transitionPending = pendingTrackChangedFrame_.load(std::memory_order_acquire) >= 0;
     const int64_t seekTarget = transitionPending
-        ? presentationSeekTargetMillis_ : currentSource().seekTargetMillis();
+        ? presentationSeekTargetMillis_ : currentSource().seekTargetMillis() +
+            (rate > 0 ? source_->presentationOffsetFrames * 1000 / rate : 0);
     if (rate <= 0) return seekTarget;
     const int64_t rendered = renderedFrames_.load(std::memory_order_acquire);
     const int64_t trackStart = trackStartOutputFrame_.load(std::memory_order_acquire);
@@ -1406,6 +1504,19 @@ void Engine::resetTimelineForSeek() {
     trackStartOutputFrame_.store(0, std::memory_order_release);
     exclusiveInFlightAudioFrames_.store(0, std::memory_order_release);
     std::lock_guard sourceGuard(sourceMutex_);
+    if (source_ != nullptr) {
+        source_->producedOutputFrames = 0;
+        source_->presentationOffsetFrames = 0;
+    }
+    const int64_t requestedSeek = requestedSeekTargetMillis_.exchange(-1, std::memory_order_acq_rel);
+    if (requestedSeek >= 0) {
+        if (pendingPresentationReady_.load(std::memory_order_acquire)) {
+            pendingPresentationSeekTargetMillis_ = requestedSeek;
+            pendingPresentation_.seekTargetMillis.store(requestedSeek, std::memory_order_release);
+        } else {
+            activePresentation_.seekTargetMillis.store(requestedSeek, std::memory_order_release);
+        }
+    }
     if (pendingPresentationSeek_.load(std::memory_order_acquire) &&
         pendingPresentationReady_.load(std::memory_order_acquire)) {
         /* Frame zero is before the first post-seek sample. Wait for one rendered B frame so the
@@ -1505,6 +1616,65 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
     /* The block arrives as float32 at the device clock, so the DSP runs at the rate its filters were
      * designed for and the quantisation to the device depth happens on the way into the ring. */
     float *samples = const_cast<float *>(reinterpret_cast<const float *>(bytes));
+    bool mixing = false;
+    double incomingReplayGain = 1.0;
+    int64_t mixedStartFrame = 0;
+    int64_t mixedLengthFrames = 0;
+    {
+        std::lock_guard sourceGuard(sourceMutex_);
+        const int32_t rate = outputSession_.target.sampleRate;
+        const int32_t channels = outputSession_.target.channels;
+        const int32_t duration = autoMixMillis_.load(std::memory_order_acquire);
+        auto candidate = nextSource_;
+        if (source_ != nullptr && candidate != nullptr && candidate->pcm != nullptr &&
+            rate > 0 && channels > 0 &&
+            (duration > 0 || candidate->overlapStarted.load(std::memory_order_acquire))) {
+            const int64_t exactTotal = source_->source.totalOutputFrames();
+            const int64_t totalFrames = exactTotal > 0 ? exactTotal :
+                source_->source.description().durationMillis * rate / 1000;
+            const int64_t positionFrames = source_->source.seekTargetMillis() * rate / 1000 +
+                source_->producedOutputFrames;
+            const int64_t remainingFrames = totalFrames - positionFrames;
+            const int64_t exactIncoming = candidate->source.totalOutputFrames();
+            const int64_t incomingFrames = exactIncoming > 0 ? exactIncoming :
+                candidate->source.description().durationMillis * rate / 1000;
+            const int64_t desiredFrames = std::min({
+                static_cast<int64_t>(duration) * rate / 1000, totalFrames / 2, incomingFrames / 2});
+            const bool started = candidate->overlapStarted.load(std::memory_order_acquire);
+            if (!started && desiredFrames > 1 && remainingFrames > desiredFrames &&
+                remainingFrames - desiredFrames < frames) {
+                /* Split exactly at the overlap's first frame instead of stepping the gain once
+                 * per decoder block. The next accept starts with outgoing=1, incoming=0. */
+                frames = static_cast<int32_t>(remainingFrames - desiredFrames);
+            } else if (started || (desiredFrames > 1 && remainingFrames > 1 &&
+                    remainingFrames <= desiredFrames)) {
+                std::lock_guard consumerGuard(candidate->consumerMutex);
+                const bool ready = started || candidate->pcm->queuedFrames() >=
+                    candidate->pcm->readyWatermarkFrames() || candidate->pcm->finished();
+                if (ready && !candidate->cancelled.load(std::memory_order_acquire)) {
+                    const int32_t available = candidate->pcm->peekFrames(
+                        reinterpret_cast<uint8_t *>(autoMixScratch_.data()), frames);
+                    if (available == 0 && started && !candidate->pcm->finished()) return 0;
+                    if (available > 0) {
+                        frames = available;
+                        if (!started) {
+                            /* A slow successor can join late. Shorten the overlap to the actual
+                             * remaining tail, preserving full outgoing gain until B is ready. */
+                            candidate->overlapLengthFrames = std::min(desiredFrames, remainingFrames);
+                            candidate->overlapStarted.store(true, std::memory_order_release);
+                            raise(LazerAudioEventTrackMixStarted, 0, renderPositionMillis());
+                        }
+                        mixing = true;
+                        incomingReplayGain = candidate->replayGainLinear;
+                        mixedStartFrame = candidate->overlapFrames.load(std::memory_order_acquire);
+                        mixedLengthFrames = candidate->overlapLengthFrames;
+                        candidate->pcm->consumeFrames(frames);
+                        candidate->overlapFrames.fetch_add(frames, std::memory_order_release);
+                    }
+                }
+            }
+        }
+    }
     if (replayGainCurrentLinear_ != 1.0 || replayGainTargetLinear_ != 1.0) {
         const size_t channels = static_cast<size_t>(std::max(outputSession_.target.channels, 1));
         for (int32_t frame = 0; frame < frames; ++frame) {
@@ -1522,6 +1692,37 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
             }
         }
     }
+    const double recoveryStart = cancelledOverlapGain_.exchange(-1.0, std::memory_order_acq_rel);
+    if (recoveryStart >= 0.0) {
+        overlapRecoveryGain_ = recoveryStart;
+        overlapRecoveryFrames_ = std::max<int64_t>(1, outputSession_.target.sampleRate * 5 / 1000);
+    }
+    if (overlapRecoveryFrames_ > 0) {
+        const size_t channels = static_cast<size_t>(std::max(outputSession_.target.channels, 1));
+        for (int32_t frame = 0; frame < frames && overlapRecoveryFrames_ > 0; ++frame) {
+            overlapRecoveryGain_ += (1.0 - overlapRecoveryGain_) /
+                static_cast<double>(overlapRecoveryFrames_--);
+            for (size_t channel = 0; channel < channels; ++channel) {
+                samples[static_cast<size_t>(frame) * channels + channel] *=
+                    static_cast<float>(overlapRecoveryGain_);
+            }
+        }
+    }
+    if (mixing) {
+        constexpr double halfPi = 1.57079632679489661923;
+        const size_t channels = static_cast<size_t>(std::max(outputSession_.target.channels, 1));
+        for (int32_t frame = 0; frame < frames; ++frame) {
+            const double progress = std::clamp(static_cast<double>(mixedStartFrame + frame) /
+                static_cast<double>(std::max<int64_t>(mixedLengthFrames - 1, 1)), 0.0, 1.0);
+            const double outgoingGain = std::cos(progress * halfPi);
+            const double incomingGain = std::sin(progress * halfPi) * incomingReplayGain;
+            for (size_t channel = 0; channel < channels; ++channel) {
+                const size_t sample = static_cast<size_t>(frame) * channels + channel;
+                samples[sample] = static_cast<float>(samples[sample] * outgoingGain +
+                    autoMixScratch_[sample] * incomingGain);
+            }
+        }
+    }
     const double limiterReductionDb = dsp_.process(samples, static_cast<size_t>(frames));
     const size_t sampleCount = static_cast<size_t>(frames) *
         static_cast<size_t>(std::max(outputSession_.target.channels, 1));
@@ -1529,6 +1730,10 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
     const uint64_t clippedSamples = convertToOutput(samples, frames, convertScratch_.data());
     const int32_t written = ring_.write(convertScratch_.data(), frames);
     if (written > 0) {
+        {
+            std::lock_guard sourceGuard(sourceMutex_);
+            if (source_ != nullptr) source_->producedOutputFrames += written;
+        }
         acceptedFrames_.fetch_add(written, std::memory_order_release);
         int32_t peakHold = outputPeakMilliDbfs_.load(std::memory_order_relaxed);
         while (peakHold < peakMilliDbfs && !outputPeakMilliDbfs_.compare_exchange_weak(
@@ -1585,7 +1790,8 @@ void Engine::pumpLoop() {
         } else {
             const int32_t frameBytes = nativeDsdActive_.load(std::memory_order_acquire)
                 ? std::max(outputSession_.target.channels, 1)
-                : std::max(outputSession_.target.frameBytes(), 1);
+                : std::max(dspBypassed_ || dopActive_.load(std::memory_order_acquire)
+                    ? outputSession_.target.frameBytes() : floatTarget_.frameBytes(), 1);
             const int32_t scratchFrames = static_cast<int32_t>(queuedPcmScratch_.size() /
                 static_cast<size_t>(frameBytes));
             while (!cancelled_.load(std::memory_order_acquire)) {

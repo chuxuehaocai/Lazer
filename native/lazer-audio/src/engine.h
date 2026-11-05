@@ -6,6 +6,7 @@
 #define LAZER_AUDIO_ENGINE_H
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <memory>
@@ -39,6 +40,7 @@ public:
     int32_t stop();
     int32_t seek(int64_t positionMillis);
     int32_t setVolume(double volume);
+    int32_t setAutoMix(int32_t durationMillis);
     int32_t setDsp(const LazerAudioDspConfig &dsp);
     int32_t setDevice(const LazerAudioDeviceConfig &device);
     void snapshot(LazerAudioSnapshot &out);
@@ -99,6 +101,9 @@ private:
     std::mutex lifecycleMutex_;
     /* Protects the active and queued source slots while control/snapshot calls read metadata. */
     mutable std::mutex sourceMutex_;
+    std::mutex sourceRetirementMutex_;
+    std::condition_variable sourceRetirementChanged_;
+    std::atomic<bool> sourceRetirementPending_{false};
     std::atomic<int32_t> state_{LazerAudioStateIdle};
     std::atomic<bool> paused_{true};
     std::atomic<bool> cancelled_{false};
@@ -179,6 +184,10 @@ private:
     std::atomic<double> volume_{1.0};
     std::atomic<bool> volumeDirty_{false};
     std::atomic<int64_t> volumeRampMillis_{200};
+    std::atomic<int32_t> autoMixMillis_{0};
+    std::atomic<double> cancelledOverlapGain_{-1.0};
+    double overlapRecoveryGain_ = 1.0;
+    int64_t overlapRecoveryFrames_ = 0;
 
     std::wstring deviceId_;
     LazerAudioDeviceConfig device_{};
@@ -213,6 +222,7 @@ private:
     std::vector<uint8_t> convertScratch_;
     std::vector<uint8_t> queuedPcmScratch_;
     std::vector<uint8_t> nativeDsdScratch_;
+    std::vector<float> autoMixScratch_;
 
     /* Render-side accounting, reset whenever the producer flushes the ring for a seek. */
     std::atomic<int64_t> renderedFrames_{0};
@@ -224,6 +234,7 @@ private:
     /* A seek into an activated, not-yet-presented successor preserves its output-frame boundary. */
     std::atomic<bool> pendingPresentationSeek_{false};
     std::atomic<bool> seekFlushRequested_{false};
+    std::atomic<int64_t> requestedSeekTargetMillis_{-1};
     std::atomic<bool> endedRaised_{false};
     std::atomic<bool> pumpFinished_{false};
     std::atomic<int32_t> exclusiveInFlightAudioFrames_{0};

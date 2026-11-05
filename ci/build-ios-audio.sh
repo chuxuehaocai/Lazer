@@ -81,6 +81,7 @@ for symbol in \
     lazer_audio_stop \
     lazer_audio_seek \
     lazer_audio_set_volume \
+    lazer_audio_set_automix \
     lazer_audio_set_dsp \
     lazer_audio_set_device \
     lazer_audio_snapshot \

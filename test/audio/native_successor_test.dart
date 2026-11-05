@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 
+import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/audio/native/audio_stream_cache.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_abi.dart';
@@ -22,10 +23,14 @@ class _Api implements LazerAudioApi {
 
 class _Bridge implements LazerAudioBridgeApi {
   int nextHandle = 10;
+  final created = <(String, int, int)>[];
+  final finished = <int, int>{};
   @override
   int Function(Pointer<Uint8>, int, Pointer<Pointer<Void>>) get readerCreate =>
-      (_, _, out) {
-        out.value = Pointer<Void>.fromAddress(nextHandle++);
+      (path, expectedBytes, out) {
+        final handle = nextHandle++;
+        created.add((path.cast<Utf8>().toDartString(), expectedBytes, handle));
+        out.value = Pointer<Void>.fromAddress(handle);
         return lazerAudioOk;
       };
   @override
@@ -41,7 +46,8 @@ class _Bridge implements LazerAudioBridgeApi {
   @override
   void Function(Pointer<Void>) get readerNotify => (_) {};
   @override
-  void Function(Pointer<Void>, int) get readerFinish => (_, _) {};
+  void Function(Pointer<Void>, int) get readerFinish =>
+      (handle, failed) => finished[handle.address] = failed;
   @override
   void Function(Pointer<Void>) get readerDestroy => (_) {};
   @override
@@ -53,6 +59,7 @@ class _Worker implements LazerAudioWorker {
   int clears = 0;
   Completer<void>? delay;
   Completer<void>? openDelay, openStarted;
+  void Function(List<Object?>)? onPreparation;
   @override
   Future<Object?> call(int op, List<Object?> params) async {
     if (op == LazerWorkerOp.clearQueuedReader) clears++;
@@ -62,6 +69,7 @@ class _Worker implements LazerAudioWorker {
     }
     if (op == LazerWorkerOp.queueReader) {
       preparations++;
+      onPreparation?.call(params);
       await delay?.future;
     }
     return lazerAudioOk;
@@ -96,12 +104,14 @@ void main() {
   late NativeAudioEngine engine;
   late _Worker worker;
   late _Cache cache;
+  late _Bridge bridge;
   setUp(() {
     worker = _Worker();
     cache = _Cache();
+    bridge = _Bridge();
     engine = NativeAudioEngine.forTesting(
       api: _Api(),
-      bridge: _Bridge(),
+      bridge: bridge,
       worker: worker,
       cache: cache,
     );
@@ -111,6 +121,47 @@ void main() {
     engine.dispose();
     await _settle();
   });
+
+  test(
+    'a local successor is a complete reader before native preparation',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'lazer-next-local-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/下一首.wav');
+      await file.writeAsBytes(List<int>.generate(512, (index) => index % 256));
+      final preparedContexts = <int>[];
+      worker.onPreparation = (params) {
+        final reader = Pointer<LazerAudioReader>.fromAddress(params[2] as int);
+        preparedContexts.add(reader.ref.context.address);
+        expect(
+          bridge.finished[reader.ref.context.address],
+          0,
+          reason:
+              'the decoder must see clean EOF without waiting for a downloader',
+        );
+      };
+
+      final queue = await engine.setQueue(['first.wav']);
+      expect(await engine.appendToQueue(queue, file.uri.toString()), isTrue);
+      await _settle();
+
+      expect(worker.preparations, 1);
+      expect(bridge.created, hasLength(1));
+      expect(File(bridge.created.single.$1).uri, file.uri);
+      expect(bridge.created.single.$2, await file.length());
+      expect(preparedContexts, <int>[bridge.created.single.$3]);
+      expect(
+        cache.entries,
+        isEmpty,
+        reason: 'local playback needs no network cache',
+      );
+      engine.deliverEventForTesting(lazerAudioEventTrackChanged);
+      await _settle();
+      expect(worker.preparations, 1);
+    },
+  );
 
   test(
     'an appended successor does not prepare itself again at its boundary',

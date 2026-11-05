@@ -101,6 +101,7 @@ Future<void> main() async {
       );
       final Future<AudioEngineSelection> selectionFuture = createAudioEngine(
         preferNative: prefs.getBool('hifi_native_engine') ?? true,
+        autoMixEnabled: prefs.getBool('lazer_automix_enabled') ?? false,
       );
       final bool television = await televisionFuture;
       final watch = await watchFuture;
@@ -153,6 +154,7 @@ Future<void> main() async {
         deviceIsRoundWatch: watch.round,
         independentPlayback:
             prefs.getBool('lazer_independent_playback') ?? false,
+        autoMixEnabled: prefs.getBool('lazer_automix_enabled') ?? false,
         hifiSettings: hifi.settings,
         hifi: hifi,
         // Null on the native engine. Otherwise the player shows this verbatim,

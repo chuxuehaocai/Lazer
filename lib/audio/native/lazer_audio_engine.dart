@@ -23,6 +23,7 @@ library;
 
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
@@ -52,6 +53,7 @@ class NativeAudioEngine
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
         SerialQueueAudioEngine,
+        AutoMixConfigurableAudioEngine,
         FailureReportingAudioEngine,
         FocusAwareAudioEngine,
         SessionPreparingAudioEngine {
@@ -202,6 +204,8 @@ class NativeAudioEngine
   List<String> _pendingUrls = <String>[];
   bool _sourceLoaded = false;
   bool _disposed = false;
+  bool _mixPresented = false;
+  int _mixStartOutgoingMillis = 0;
   bool _shutdownStarted = false;
   bool _completionSent = false;
   double _volume = 1;
@@ -292,6 +296,12 @@ class NativeAudioEngine
       return _position;
     }
     final int millis = snapshot.ref.positionMillis;
+    if (_mixPresented) {
+      _position = Duration(
+        milliseconds: (millis - _mixStartOutgoingMillis).clamp(0, 1 << 30),
+      );
+      return _position;
+    }
     if (millis >= 0) _position = Duration(milliseconds: millis);
     final int total = snapshot.ref.durationMillis;
     if (total > 0) _duration = Duration(milliseconds: total);
@@ -376,6 +386,7 @@ class NativeAudioEngine
   Future<void> setUrl(String url) {
     final int generation = ++_generation;
     _sourceLoaded = false;
+    _mixPresented = false;
     _completionSent = false;
     _pendingUrls = <String>[];
     return _serialize(() async {
@@ -390,6 +401,7 @@ class NativeAudioEngine
     final int queueId = ++_queueId;
     final int generation = ++_generation;
     _sourceLoaded = false;
+    _mixPresented = false;
     _completionSent = false;
     if (urls.isEmpty) {
       _pendingUrls = <String>[];
@@ -503,6 +515,34 @@ class NativeAudioEngine
     await _worker.call(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
   }
 
+  bool get supportsAutoMix => _api.setAutoMix != null;
+
+  /// Configure before opening a source: AutoMix uses two PCM decoders feeding
+  /// the existing output device, including when that device is exclusive.
+  /// An existing source needs reopening to renegotiate its PCM format.
+  @override
+  Future<void> setAutoMixEnabled(bool enabled) async {
+    if (!supportsAutoMix) {
+      if (enabled) {
+        throw UnsupportedError('This audio engine has no overlap mixer.');
+      }
+      return;
+    }
+    final int? address = _engineAddressOrNull;
+    if (address == null) return;
+    final int status = _status(
+      await _worker.call(LazerWorkerOp.setAutoMix, <Object?>[
+        address,
+        enabled ? 8000 : 0,
+      ]),
+    );
+    if (status != lazerAudioOk) {
+      throw StateError(
+        'Could not configure overlap mixing ($status): ${lastError()}',
+      );
+    }
+  }
+
   /// Replaces the output settings for the next opened source.
   ///
   /// Exclusive mode, bit-perfect streaming and DSD policy are negotiated when a
@@ -556,6 +596,7 @@ class NativeAudioEngine
   Future<void> stop() async {
     ++_generation;
     _sourceLoaded = false;
+    _mixPresented = false;
     _completionSent = false;
     _pendingUrls = <String>[];
     _position = Duration.zero;
@@ -822,14 +863,17 @@ class NativeAudioEngine
     NativeStreamReader? reader;
     try {
       entry = await _cacheEntryFor(url);
-      if (entry == null) return;
+      final String path = entry?.file.path ?? _localPath(url);
+      final int? expectedBytes =
+          entry?.expectedBytes ??
+          (entry == null ? await File(path).length() : null);
       if (generation != _queueGeneration || !_sourceLoaded || _disposed) return;
       // Repeat-one and adjacent copies of the same URL share one growing
       // download. It currently has one reader callback pair: rebinding it here
       // would strand the audible reader, and retiring that reader would cancel
       // the successor's download too. Keep this URL pending and reopen it on
       // completion (or manual skip), after the old reader has finished.
-      if (identical(entry, _activeEntry)) {
+      if (entry != null && identical(entry, _activeEntry)) {
         // A different successor may already be prepared (for example before
         // repeat-one was selected). Drop it while keeping this pending repeat.
         await _clearQueued();
@@ -837,8 +881,8 @@ class NativeAudioEngine
       }
       reader = NativeStreamReader.create(
         bridge,
-        path: entry.file.path,
-        expectedBytes: entry.expectedBytes,
+        path: path,
+        expectedBytes: expectedBytes,
       );
       if (reader == null) return;
       // The cache download can finish after this local is transferred to
@@ -846,8 +890,8 @@ class NativeAudioEngine
       // completion callback still signals the bridge instead of throwing from
       // the cache's unawaited download future.
       final NativeStreamReader queuedReader = reader;
-      final AudioStreamEntry queuedEntry = entry;
-      entry.bindReader(
+      final AudioStreamEntry? queuedEntry = entry;
+      entry?.bindReader(
         appended: () {
           queuedReader.notifyAppended();
           if (identical(_activeEntry, queuedEntry)) _emitBufferChange();
@@ -857,6 +901,7 @@ class NativeAudioEngine
           if (identical(_activeEntry, queuedEntry)) _emitBufferChange();
         },
       );
+      if (entry == null) queuedReader.finish();
       final int status = _status(
         await _worker.call(LazerWorkerOp.queueReader, <Object?>[
           address,
@@ -958,10 +1003,20 @@ class NativeAudioEngine
     final int generation = ++_queueGeneration;
     if (address != null && hadQueued == 1) {
       try {
-        await _worker.call(LazerWorkerOp.clearQueuedReader, <Object?>[
-          address,
-          generation,
-        ]);
+        final int result = _status(
+          await _worker.call(LazerWorkerOp.clearQueuedReader, <Object?>[
+            address,
+            generation,
+          ]),
+        );
+        // The native boundary can win before its asynchronous event reaches
+        // Dart. Its reader is now active and must survive until open/stop.
+        if (result == lazerAudioQueueAlreadyActive) {
+          final bool announced = _mixPresented;
+          _mixPresented = false;
+          _crossIntoSuccessor(position.inMilliseconds, announce: !announced);
+          return;
+        }
       } catch (error) {
         debugPrint('lazer-audio: clearing the queued source failed: $error');
       }
@@ -1059,7 +1114,11 @@ class NativeAudioEngine
       case lazerAudioEventEnded:
         _finishSource();
       case lazerAudioEventTrackChanged:
-        _crossIntoSuccessor(positionMillis);
+        final bool announced = _mixPresented;
+        _mixPresented = false;
+        _crossIntoSuccessor(positionMillis, announce: !announced);
+      case lazerAudioEventTrackMixStarted:
+        _announceMix(positionMillis);
       case lazerAudioEventFailed:
         _reportFailure('playback failed (${_errorName(detail)})');
       case lazerAudioEventDeviceLost:
@@ -1090,7 +1149,7 @@ class NativeAudioEngine
   }
 
   /// The engine crossed into the queued successor inside the same output session.
-  void _crossIntoSuccessor(int positionMillis) {
+  void _crossIntoSuccessor(int positionMillis, {bool announce = true}) {
     final NativeStreamReader? successor = _queuedReader;
     if (successor == null) {
       // The boundary was crossed for a successor this isolate did not track (the
@@ -1106,22 +1165,32 @@ class NativeAudioEngine
     _queuedReader = null;
     _queuedEntry = null;
     _queuedUrl = null;
-    _queueIndex++;
+    if (announce) _queueIndex++;
     _position = Duration(milliseconds: positionMillis);
     _pendingSeek = null;
     _completionSent = false;
     _sourceLoaded = true;
+    _mixPresented = false;
     previousReader?.release();
     previousEntry?.cancel();
     _emitBufferChange();
     _publishStreamInfo(readStreamInfo());
-    if (!_advanced.isClosed) _advanced.add(_queueIndex);
+    if (announce && !_advanced.isClosed) _advanced.add(_queueIndex);
     // A multi-URL queue can already hold the following track; the app otherwise
     // appends one in reaction to this event.
     final String? next = _pendingUrls.firstOrNull;
     if (next != null) {
       unawaited(_prepareSuccessor(next));
     }
+  }
+
+  void _announceMix(int outgoingPositionMillis) {
+    if (_mixPresented || _queuedReader == null) return;
+    _mixPresented = true;
+    _mixStartOutgoingMillis = outgoingPositionMillis;
+    _position = Duration.zero;
+    _queueIndex++;
+    if (!_advanced.isClosed) _advanced.add(_queueIndex);
   }
 
   String _errorName(int code) => switch (code) {

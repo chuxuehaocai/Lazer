@@ -105,6 +105,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
     setState(() {
       _url = url;
       _phase = url == null ? _Phase.error : _Phase.waiting;
+      _error = url == null ? state.qrStartError ?? '连接失败，请检查网络后重试。' : null;
     });
     if (url != null) {
       _poll = Timer.periodic(const Duration(seconds: 1), (_) => _tick(url));
@@ -127,6 +128,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
       }
       if (_mode != _Mode.qr) return;
       setState(() {
+        _error = state.qrPollError;
         if (code == 800) {
           _phase = _Phase.expired;
           _poll?.cancel();

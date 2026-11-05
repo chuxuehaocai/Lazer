@@ -171,6 +171,15 @@ class LazerAudioApi {
         int Function(Pointer<Void>, double)
       >('lazer_audio_set_volume');
 
+  /// Additive export: older imported engines can still play normally.
+  late final int Function(Pointer<Void>, int)? setAutoMix = _optional(
+    () =>
+        _library.lookupFunction<
+          Int32 Function(Pointer<Void>, Int32),
+          int Function(Pointer<Void>, int)
+        >('lazer_audio_set_automix'),
+  );
+
   late final int Function(Pointer<Void>, Pointer<LazerAudioDspConfig>) setDsp =
       _library.lookupFunction<
         Int32 Function(Pointer<Void>, Pointer<LazerAudioDspConfig>),

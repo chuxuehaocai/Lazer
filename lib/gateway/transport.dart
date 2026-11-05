@@ -20,6 +20,19 @@ class GatewayHttpException implements Exception {
       'Gateway request to $endpoint failed with HTTP $statusCode.';
 }
 
+/// Network failure before the server returned an HTTP response. The original
+/// socket error is retained only as a local cause; callers receive the safe
+/// endpoint name and can present a useful retry message without leaking URLs.
+class GatewayConnectionException implements Exception {
+  GatewayConnectionException(this.endpoint, this.cause);
+
+  final String endpoint;
+  final Object cause;
+
+  @override
+  String toString() => 'Gateway connection to $endpoint failed.';
+}
+
 /// Successful HTTP response that was not valid JSON.
 class GatewayProtocolException implements Exception {
   GatewayProtocolException(
@@ -147,6 +160,25 @@ class NeteaseTransport {
   void close() => _client.close(force: true);
 
   Future<Map<String, dynamic>> request(
+    String alias,
+    Map<String, String> parameters,
+  ) async {
+    try {
+      return await _request(alias, parameters);
+    } on GatewayConnectionException {
+      rethrow;
+    } on io.SocketException catch (error) {
+      throw GatewayConnectionException(alias, error);
+    } on io.HttpException catch (error) {
+      throw GatewayConnectionException(alias, error);
+    } on TimeoutException catch (error) {
+      throw GatewayConnectionException(alias, error);
+    } on io.HandshakeException catch (error) {
+      throw GatewayConnectionException(alias, error);
+    }
+  }
+
+  Future<Map<String, dynamic>> _request(
     String alias,
     Map<String, String> parameters,
   ) async {

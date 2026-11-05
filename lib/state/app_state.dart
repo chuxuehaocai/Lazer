@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../audio/audio_engine.dart';
+import '../audio/native/lazer_audio_engine.dart' show NativeAudioEngine;
 import '../animation/apple_spring.dart';
 import '../audio/hifi_controller.dart';
 import '../cache/playback_cache.dart';
@@ -143,6 +144,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     UpdateChecker? updateChecker,
     this.audioEngine,
     this._independentPlayback = false,
+    bool autoMixEnabled = false,
     this.enableExternalCharts = false,
     this.deviceIsTelevision = false,
     this.deviceIsWatch = false,
@@ -159,6 +161,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        localLibrary = localLibrary ?? LocalLibrary(),
        _queueStore = queueStore ?? PlaybackQueueStore(),
        updateChecker = updateChecker ?? UpdateChecker() {
+    _autoMixEnabled = autoMixEnabled;
     MotionTiming.speed = animationSpeed;
     if (deviceIsWatch) {
       backgroundMode = AppBackgroundMode.nowPlayingStatic;
@@ -386,6 +389,43 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('lazer_independent_playback', _independentPlayback);
+  }
+
+  /// Overlaps a prepared next song in the selected audio engine.
+  bool _autoMixEnabled = false;
+  bool get autoMixEnabled => _autoMixEnabled;
+  String? autoMixError;
+  Future<void> _autoMixOperations = Future<void>.value();
+
+  Future<void> setAutoMixEnabled(bool value) {
+    final result = _autoMixOperations.then((_) async {
+      if (_autoMixEnabled == value && autoMixError == null) return;
+      final engine = audioEngine;
+      final resumeAt = precisePosition;
+      try {
+        if (engine is AutoMixConfigurableAudioEngine) {
+          await (engine as AutoMixConfigurableAudioEngine).setAutoMixEnabled(
+            value,
+          );
+        }
+        _autoMixEnabled = value;
+        autoMixError = null;
+        // Switching between passthrough/integer and mixed PCM requires the
+        // native decoder to reopen, using the same engine and output device.
+        if (engine is NativeAudioEngine && _realActive && current != null) {
+          await _startAudio(resumeAt: resumeAt);
+        }
+        await (await SharedPreferences.getInstance()).setBool(
+          'lazer_automix_enabled',
+          value,
+        );
+      } catch (_) {
+        autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
+      }
+      if (!_presentationDisposed) notifyListeners();
+    });
+    _autoMixOperations = result.catchError((Object _) {});
+    return result;
   }
 
   /// Tier requested for streaming. Changing it while a track is loaded reloads
@@ -1392,6 +1432,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _pauseSchedule.update(scheduledPause);
       _independentPlayback =
           prefs.getBool('lazer_independent_playback') ?? _independentPlayback;
+      _autoMixEnabled =
+          prefs.getBool('lazer_automix_enabled') ?? _autoMixEnabled;
+      if (audioEngine is AutoMixConfigurableAudioEngine) {
+        try {
+          await (audioEngine as AutoMixConfigurableAudioEngine)
+              .setAutoMixEnabled(_autoMixEnabled);
+        } catch (_) {
+          _autoMixEnabled = false;
+          autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
+        }
+      }
       hapticsEnabled = prefs.getBool('lazer_haptics') ?? true;
       hapticIntensity = (prefs.getDouble('lazer_haptic_intensity') ?? 0.5)
           .clamp(0, 1);
@@ -1791,13 +1842,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<String?> beginQrLogin() async {
     _qrConfirmed = false;
     qrPollError = null;
+    qrStartError = null;
     try {
       if (isNavidrome) await _musicPlatforms.selectNetease();
       final String key = await gateway.createQrKey();
       if (key.isEmpty) return null;
       final String url = await gateway.createQrCodeUrl(key);
       return url.isEmpty ? null : url;
-    } catch (_) {
+    } catch (error) {
+      qrStartError = _friendly(error);
       return null;
     }
   }
@@ -1811,6 +1864,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// sign-in card. Cleared as soon as a poll answers again — a silent 801
   /// fallback used to hide server rejections completely.
   String? qrPollError;
+  String? qrStartError;
 
   /// Polls a QR key: 800 expired, 801 waiting, 802 scanned, 803 confirmed,
   /// 8821 needs a security check on the phone.
@@ -2597,6 +2651,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void toggleShuffle() {
     _shuffle = !_shuffle;
+    _refreshAutoMixQueue();
     notifyListeners();
   }
 
@@ -2614,6 +2669,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _repeat = LoopMode.off;
       _shuffle = true;
     }
+    _refreshAutoMixQueue();
     notifyListeners();
   }
 
@@ -2623,7 +2679,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       LoopMode.all => LoopMode.one,
       LoopMode.one => LoopMode.off,
     };
+    _refreshAutoMixQueue();
     notifyListeners();
+  }
+
+  void _refreshAutoMixQueue() {
+    // A prepared decoder belongs to the old play mode. Rebuild from the current
+    // playhead so repeat/shuffle changes cannot mix the wrong successor.
+    if (_autoMixEnabled && _realActive && current != null) {
+      unawaited(_startAudio(resumeAt: precisePosition));
+    }
   }
 
   void playTrackAt(int index) {
@@ -2923,7 +2988,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     trackChangeDirection = 1;
     playbackError = null;
     _queueIndex = target.clamp(0, _queue.length - 1);
-    _position = Duration.zero;
+    _position = audioEngine?.position ?? Duration.zero;
+    _optimisticSeek = null;
+    ++_seekRequest;
     unawaited(_saveQueue());
     unawaited(_loadLyrics());
     unawaited(_loadCurrentArtwork());
@@ -3688,6 +3755,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     if (error is GatewayHttpException) {
       return '网络请求失败（HTTP ${error.statusCode}）。';
+    }
+    if (error is GatewayConnectionException) {
+      return '连接失败，请检查网络后重试。';
     }
     if (error is GatewayProtocolException) return '服务返回了无法解析的数据。';
     if (error is GatewayServiceException) return '服务暂时拒绝了请求（${error.code}）。';

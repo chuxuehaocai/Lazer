@@ -71,6 +71,12 @@ abstract interface class QueueAudioEngine {
 /// These engines acknowledge play before starting a successor preparation.
 abstract interface class SerialQueueAudioEngine implements QueueAudioEngine {}
 
+/// Mixes a prepared successor into the current source before it finishes.
+/// This changes the decoding/mixing policy without changing the output engine.
+abstract interface class AutoMixConfigurableAudioEngine {
+  Future<void> setAutoMixEnabled(bool enabled);
+}
+
 /// Optional engine capability: failures that happen *after* a source was loaded.
 ///
 /// `just_audio` surfaces those through its own player streams, but an engine

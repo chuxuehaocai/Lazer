@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
@@ -70,6 +71,25 @@ std::vector<uint8_t> makePcm16Wave(int32_t frames, int16_t seed) {
     return bytes;
 }
 
+std::vector<uint8_t> makeChannelMarkerWave(bool rightChannel, int32_t sampleRate = kSampleRate,
+    int32_t seconds = 2) {
+    auto bytes = makePcm16Wave(sampleRate * seconds, 0);
+    for (int shift = 0; shift < 32; shift += 8) {
+        bytes[24 + shift / 8] = static_cast<uint8_t>(sampleRate >> shift);
+        bytes[28 + shift / 8] = static_cast<uint8_t>((sampleRate * kFrameBytes) >> shift);
+    }
+    for (size_t frame = 0; frame < static_cast<size_t>(sampleRate * seconds); ++frame) {
+        const size_t offset = 44 + frame * kFrameBytes;
+        const uint16_t left = rightChannel ? 0 : 8192;
+        const uint16_t right = rightChannel ? 8192 : 0;
+        bytes[offset] = static_cast<uint8_t>(left);
+        bytes[offset + 1] = static_cast<uint8_t>(left >> 8);
+        bytes[offset + 2] = static_cast<uint8_t>(right);
+        bytes[offset + 3] = static_cast<uint8_t>(right >> 8);
+    }
+    return bytes;
+}
+
 std::vector<uint8_t> makeStereoDsf(uint64_t durationMillis) {
     const uint64_t bitCount = static_cast<uint64_t>(kDsdBitRate) * durationMillis / 1000;
     const uint64_t audioBytesPerChannel = bitCount / 8;
@@ -125,7 +145,7 @@ struct MemoryReader {
     explicit MemoryReader(std::vector<uint8_t> value) : bytes(std::move(value)) {}
     std::vector<uint8_t> bytes;
     int64_t position = 0;
-    int closeCount = 0;
+    std::atomic<int> closeCount{0};
 };
 
 /* A seekable WAV reader that blocks after serving a prefix of FFmpeg's synchronous probe. The
@@ -357,6 +377,55 @@ LazerAudioReader asReader(MemoryReader &reader) {
     return LazerAudioReader{readBytes, seekBytes, readerLength, closeReader, &reader, nullptr};
 }
 
+struct SlowSuccessor {
+    MemoryReader input{makeChannelMarkerWave(true, kSampleRate, 20)};
+    const std::thread::id openingThread = std::this_thread::get_id();
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool released = false;
+    bool cancelled = false;
+    int64_t gateAfterBytes = 0;
+    bool releaseRemainder = false;
+};
+
+LazerAudioReader asReader(SlowSuccessor &reader) {
+    return LazerAudioReader{
+        [](void *context, uint8_t *destination, int32_t length) -> int32_t {
+            auto &slow = *static_cast<SlowSuccessor *>(context);
+            std::unique_lock guard(slow.mutex);
+            if (std::this_thread::get_id() != slow.openingThread) {
+                slow.changed.wait(guard, [&] { return slow.released || slow.cancelled; });
+                if (slow.gateAfterBytes > 0) {
+                    slow.changed.wait(guard, [&] {
+                        return slow.input.position < slow.gateAfterBytes ||
+                            slow.releaseRemainder || slow.cancelled;
+                    });
+                    if (!slow.releaseRemainder && slow.input.position < slow.gateAfterBytes) {
+                        length = static_cast<int32_t>(std::min<int64_t>(length,
+                            slow.gateAfterBytes - slow.input.position));
+                    }
+                }
+            }
+            return slow.cancelled ? LAZER_AUDIO_READER_IO_ERROR :
+                readBytes(&slow.input, destination, length);
+        },
+        [](void *context, int64_t position) -> int64_t {
+            auto &slow = *static_cast<SlowSuccessor *>(context);
+            return seekBytes(&slow.input, position);
+        },
+        [](void *context) -> int64_t {
+            return readerLength(&static_cast<SlowSuccessor *>(context)->input);
+        },
+        [](void *context) { closeReader(&static_cast<SlowSuccessor *>(context)->input); },
+        &reader,
+        [](void *context) {
+            auto &slow = *static_cast<SlowSuccessor *>(context);
+            { std::lock_guard guard(slow.mutex); slow.cancelled = true; }
+            slow.changed.notify_all();
+        },
+    };
+}
+
 struct ProbeEvents {
     std::mutex mutex;
     std::condition_variable changed;
@@ -366,11 +435,17 @@ struct ProbeEvents {
     bool releaseTerminalCallback = false;
     int32_t terminalDetail = 0;
     int64_t terminalPositionMillis = 0;
+    const std::atomic<int> *closeBeforeTrackChanged = nullptr;
+    bool readerLifetimeOkay = true;
 };
 
 void onEvent(void *context, int32_t event, int32_t detail, int64_t positionMillis) {
     auto *events = static_cast<ProbeEvents *>(context);
     if (events == nullptr) return;
+    if (event == LazerAudioEventTrackChanged && events->closeBeforeTrackChanged != nullptr &&
+        events->closeBeforeTrackChanged->load(std::memory_order_acquire) != 1) {
+        events->readerLifetimeOkay = false;
+    }
     std::unique_lock guard(events->mutex);
     events->events.push_back(event);
     if (event == LazerAudioEventEnded || event == LazerAudioEventFailed ||
@@ -977,6 +1052,269 @@ int runUnderrunRecoveryCase() {
     return 0;
 }
 
+int runAutoMixOverlapCase(bool resampledSuccessor) {
+    MemoryReader first(makeChannelMarkerWave(false));
+    MemoryReader second(makeChannelMarkerWave(true, resampledSuccessor ? 48'000 : kSampleRate));
+    const auto firstReader = asReader(first);
+    const auto secondReader = asReader(second);
+    ProbeEvents events;
+    events.closeBeforeTrackChanged = &first.closeCount;
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;  // AutoMix selects processed PCM on this same device.
+    config.device.buffer_millis = 120;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return fail("AutoMix engine creation failed");
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 2'000};
+    if (engine->setAutoMix(500) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+        engine->queueReader(1, secondReader, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("AutoMix PCM session did not prepare and start");
+    }
+    bool ended = false;
+    {
+        std::unique_lock guard(events.mutex);
+        ended = events.changed.wait_for(guard, std::chrono::seconds(10), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                events.events.end();
+        });
+    }
+    LazerAudioSnapshot snapshot{};
+    engine->snapshot(snapshot);
+    engine->destroy();
+    if (!ended || snapshot.state != LazerAudioStateStopped) return fail("AutoMix session failed to end");
+    constexpr int64_t overlap = kSampleRate / 2;
+    constexpr int64_t start = kSampleRate * 3 / 2;
+    constexpr int64_t actualFrames = kSampleRate * 4 - overlap;
+    std::lock_guard guard(capture->mutex);
+    if (capture->openCount != 1 || capture->startCount != 1 || capture->closeCount != 1) {
+        return fail("AutoMix reopened or restarted the selected output device");
+    }
+    const int64_t capturedFrames = static_cast<int64_t>(capture->bytes.size() / kFrameBytes);
+    if (capturedFrames < actualFrames || capturedFrames >= actualFrames + kPeriodFrames) {
+        return fail("AutoMix did not consume the incoming prefix exactly once");
+    }
+    const auto sample = [&](int64_t frame, int channel) {
+        const size_t offset = static_cast<size_t>(frame) * kFrameBytes + channel * 2;
+        return static_cast<int16_t>(static_cast<uint16_t>(capture->bytes[offset]) |
+            (static_cast<uint16_t>(capture->bytes[offset + 1]) << 8));
+    };
+    int bothMarkers = 0;
+    for (int64_t frame = 0; frame < actualFrames - 64; ++frame) {
+        const int left = sample(frame, 0);
+        const int right = sample(frame, 1);
+        if (std::abs(left) < 100 && std::abs(right) < 100) return fail("AutoMix inserted a silent gap");
+        if (frame >= start && frame < kSampleRate * 2) {
+            const double phase = static_cast<double>(frame - start) / (overlap - 1);
+            const double expectedLeft = 8192 * std::cos(phase * 1.57079632679489661923);
+            const double expectedRight = 8192 * std::sin(phase * 1.57079632679489661923);
+            if (std::abs(left - expectedLeft) > 5 || std::abs(right - expectedRight) > 5) {
+                return fail("AutoMix output did not follow both equal-power overlap gains");
+            }
+            if (left > 1000 && right > 1000) ++bothMarkers;
+        }
+        if (frame > start && frame < kSampleRate * 2 + 64 &&
+            (std::abs(left - sample(frame - 1, 0)) > 5 ||
+             std::abs(right - sample(frame - 1, 1)) > 5)) {
+            return fail("AutoMix introduced a gain jump at the overlap boundary");
+        }
+    }
+    if (bothMarkers < overlap / 2 || snapshot.underrun_frames != 0 || !events.readerLifetimeOkay ||
+        snapshot.position_millis != 2'000 ||
+        std::count(events.events.begin(), events.events.end(), LazerAudioEventTrackChanged) != 1) {
+        return fail("AutoMix did not present one continuous overlapping transition");
+    }
+    std::cout << "PASS: AutoMix mixed both channel markers for 500 ms on one output session"
+        << (resampledSuccessor ? " across 44100/48000 Hz sources\n" : "\n");
+    return 0;
+}
+
+int runAutoMixCancelAndSeekCase() {
+    MemoryReader first(makeChannelMarkerWave(false));
+    MemoryReader second(makeChannelMarkerWave(true));
+    MemoryReader replacement(makeChannelMarkerWave(true));
+    const auto firstReader = asReader(first);
+    const auto secondReader = asReader(second);
+    const auto replacementReader = asReader(replacement);
+    ProbeEvents events;
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.buffer_millis = 120;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return fail("AutoMix cancellation engine creation failed");
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 2'000};
+    if (engine->setAutoMix(500) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+        engine->queueReader(1, secondReader, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("AutoMix cancellation session did not start");
+    }
+    bool overlapAudible = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard guard(capture->mutex);
+            overlapAudible = capture->bytes.size() / kFrameBytes >
+                static_cast<size_t>(kSampleRate * 8 / 5);
+        }
+        if (overlapAudible) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!overlapAudible || engine->pause() != LazerAudioOk ||
+        engine->clearQueuedReader(2) != LazerAudioQueueCleared || second.closeCount != 1) {
+        engine->destroy();
+        return fail("an overlapping incoming reader was not synchronously cancelled and closed");
+    }
+    size_t pausedFrames = 0;
+    {
+        std::lock_guard guard(capture->mutex);
+        pausedFrames = capture->bytes.size() / kFrameBytes;
+    }
+    if (engine->seek(250) != LazerAudioOk) {
+        engine->destroy();
+        return fail("AutoMix outgoing seek failed after cancelling an overlap");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    bool paused = false;
+    size_t resumeFrames = 0;
+    {
+        std::lock_guard guard(capture->mutex);
+        resumeFrames = capture->bytes.size() / kFrameBytes;
+        paused = resumeFrames <= pausedFrames + kPeriodFrames;
+    }
+    if (!paused || engine->queueReader(3, replacementReader, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("AutoMix paused source did not prepare a replacement and resume");
+    }
+    bool ended = false;
+    {
+        std::unique_lock guard(events.mutex);
+        ended = events.changed.wait_for(guard, std::chrono::seconds(10), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                events.events.end();
+        });
+    }
+    engine->destroy();
+    if (!ended || first.closeCount != 1 || second.closeCount != 1 || replacement.closeCount != 1 ||
+        std::count(events.events.begin(), events.events.end(), LazerAudioEventTrackChanged) != 1 ||
+        std::count(events.events.begin(), events.events.end(), LazerAudioEventFailed) != 0) {
+        return fail("cancel/seek/resume retained an incoming reader or published a stale transition");
+    }
+    {
+        std::lock_guard guard(capture->mutex);
+        constexpr size_t expectedFramesAfterSeek = kSampleRate * 13 / 4;
+        const size_t framesAfterSeek = capture->bytes.size() / kFrameBytes - resumeFrames;
+        if (framesAfterSeek < expectedFramesAfterSeek ||
+            framesAfterSeek >= expectedFramesAfterSeek + kPeriodFrames) {
+            return fail("AutoMix counted pre-seek or cancelled incoming samples in the replacement transition");
+        }
+    }
+    std::cout << "PASS: paused AutoMix cancelled incoming PCM, sought outgoing and mixed a replacement\n";
+    return 0;
+}
+
+int runAutoMixSlowSuccessorCase() {
+    MemoryReader first(makeChannelMarkerWave(false, kSampleRate, 8));
+    SlowSuccessor second;
+    second.gateAfterBytes = 44 + static_cast<int64_t>(kSampleRate * 7 / 2) * kFrameBytes;
+    const auto firstReader = asReader(first);
+    const auto secondReader = asReader(second);
+    ProbeEvents events;
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.buffer_millis = 120;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return fail("slow AutoMix engine creation failed");
+    const LazerAudioOpenParams firstParams{sizeof(LazerAudioOpenParams), 0, 8'000};
+    const LazerAudioOpenParams nextParams{sizeof(LazerAudioOpenParams), 0, 20'000};
+    if (engine->setAutoMix(3'000) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, firstParams) != LazerAudioOk ||
+        engine->queueReader(1, secondReader, nextParams) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("slow AutoMix successor did not prepare");
+    }
+    bool reachedTail = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard guard(capture->mutex);
+            reachedTail = capture->bytes.size() / kFrameBytes >
+                static_cast<size_t>(kSampleRate * 15 / 2);
+        }
+        if (reachedTail) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    bool unchangedOutgoing = reachedTail;
+    size_t outgoingFramesBeforeRelease = 0;
+    {
+        std::lock_guard guard(capture->mutex);
+        outgoingFramesBeforeRelease = capture->bytes.size() / kFrameBytes;
+        /* The first planned overlap frame is A's 5s mark. Everything before it must remain
+         * full-gain even though the successor is still gated behind the network reader. */
+        for (size_t offset = kSampleRate * 4 * kFrameBytes;
+            offset + kFrameBytes <= capture->bytes.size(); offset += kFrameBytes) {
+            if (offset >= static_cast<size_t>(kSampleRate * 5 * kFrameBytes)) break;
+            const int left = static_cast<int16_t>(capture->bytes[offset] |
+                (static_cast<uint16_t>(capture->bytes[offset + 1]) << 8));
+            const int right = static_cast<int16_t>(capture->bytes[offset + 2] |
+                (static_cast<uint16_t>(capture->bytes[offset + 3]) << 8));
+            if (std::abs(left - 8192) > 2 || std::abs(right) > 2) unchangedOutgoing = false;
+        }
+    }
+    { std::lock_guard guard(second.mutex); second.released = true; }
+    second.changed.notify_all();
+    bool handedOff = false;
+    {
+        std::unique_lock guard(events.mutex);
+        handedOff = events.changed.wait_for(guard, std::chrono::seconds(20), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventTrackChanged) !=
+                events.events.end();
+        });
+    }
+    { std::lock_guard guard(second.mutex); second.releaseRemainder = true; }
+    second.changed.notify_all();
+    bool ended = false;
+    {
+        std::unique_lock guard(events.mutex);
+        ended = events.changed.wait_for(guard, std::chrono::seconds(40), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                events.events.end();
+        });
+    }
+    LazerAudioSnapshot snapshot{};
+    engine->snapshot(snapshot);
+    engine->destroy();
+    if (!unchangedOutgoing || !handedOff || !ended || snapshot.underrun_frames != 0 ||
+        std::count(events.events.begin(), events.events.end(), LazerAudioEventTrackChanged) != 1) {
+        std::cerr << "slow successor: unchanged=" << unchangedOutgoing << " handoff=" << handedOff
+            << " ended=" << ended << " underruns=" << snapshot.underrun_frames
+            << " A-frames-before-release=" << outgoingFramesBeforeRelease << '\n';
+        return fail("an unready incoming source faded or stalled the outgoing tail");
+    }
+    std::cout << "PASS: slow successor kept outgoing PCM at full gain until its entire overlap was ready\n";
+    return 0;
+}
+
 int runTerminalPublicationCase() {
     MemoryReader source(makePcm16Wave(kSampleRate, 2'000));
     MemoryReader replacement(makePcm16Wave(128, -2'000));
@@ -1093,8 +1431,13 @@ int runTerminalPublicationCase() {
     return 0;
 }
 
-int main() {
+int main(int argc, char **argv) {
+    if (argc > 1 && std::string(argv[1]) == "--automix-slow") return runAutoMixSlowSuccessorCase();
     if (runExistingFastGaplessCase() != 0) return 1;
+    if (runAutoMixOverlapCase(false) != 0) return 1;
+    if (runAutoMixOverlapCase(true) != 0) return 1;
+    if (runAutoMixCancelAndSeekCase() != 0) return 1;
+    if (runAutoMixSlowSuccessorCase() != 0) return 1;
     if (runUnderrunRecoveryCase() != 0) return 1;
     if (runTerminalPublicationCase() != 0) return 1;
     if (!runGatedCancellationCase(false)) return 1;

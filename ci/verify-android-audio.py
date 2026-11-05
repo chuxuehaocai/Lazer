@@ -19,6 +19,7 @@ ENGINE_EXPORTS = {
     "lazer_audio_open_file_utf8", "lazer_audio_open_reader", "lazer_audio_queue_reader",
     "lazer_audio_clear_queued_reader", "lazer_audio_play", "lazer_audio_pause",
     "lazer_audio_stop", "lazer_audio_seek", "lazer_audio_set_volume",
+    "lazer_audio_set_automix",
     "lazer_audio_set_dsp", "lazer_audio_set_device", "lazer_audio_snapshot",
     "lazer_audio_stream_info", "lazer_audio_last_error", "lazer_audio_build_information",
     "lazer_audio_read_log",
