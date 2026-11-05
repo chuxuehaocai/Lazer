@@ -137,6 +137,17 @@ two different questions, and the app answers them separately:
 | Download failed | `AudioStreamEntry.failure` | Recovery instead of a dead player |
 | No byte for 25 s | `AudioStreamEntry.stalledFor` | Recovery of a parked decoder |
 
+Seeking a streaming source is bounded by what the download has landed: the
+engine answers `canSeekTo` from the buffered fraction and refuses a position past
+it (`SeekRangeReportingAudioEngine`), so the rail stops at the cached part instead
+of asking the decoder for a position it cannot serve yet. Resuming after a device
+reopen or a recovered download waits for the buffer to cover the position
+(`AppState._seekWhenReachable`) rather than seeking into undownloaded bytes, and
+nothing fetches a byte range on demand: the download is the only source of bytes,
+which is why the cache is a single growing prefix whose length is announced to the
+reader as soon as the response reports it (a demuxer needs it to turn a seek into
+a byte offset at all).
+
 A CDN that never announces a length (chunked transfer, an HTTP/2 front end)
 reports `progress == null`, not zero: the bytes are real but the fraction is
 unknown. Starting playback on zero bytes hands the decoder an empty file that
