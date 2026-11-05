@@ -376,6 +376,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # device, and proves the claim goes away when the DSP is in the path or the format is not the
     # source's.
     add_executable(lazer-audio-engine-bit-perfect-probe
+        src/beat_grid.cpp
         tools/lazer_audio_engine_bit_perfect_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
@@ -414,6 +415,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # the case asserts that a producer which keeps up never pads, and that an injected stall is
     # counted, bounded by the stall and recovered from.
     add_executable(lazer-audio-ring-stress-probe
+        src/beat_grid.cpp
         tools/lazer_audio_ring_stress_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
@@ -452,6 +454,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # Validate the Engine's global RequireDoP policy against PCM and raw stereo DSD using a
     # variable-write fake endpoint; no physical audio device is opened.
     add_executable(lazer-audio-engine-dop-probe
+        src/beat_grid.cpp
         tools/lazer_audio_engine_dop_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
@@ -489,6 +492,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
 
     # Exercise the direct Native DSD request/session contract without ALSA hardware.
     add_executable(lazer-audio-engine-native-dsd-probe
+        src/beat_grid.cpp
         tools/lazer_audio_engine_native_dsd_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
@@ -638,6 +642,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # The full matrix executable remains available for manual diagnostics. The focused cases below
     # are registered with hard timeouts so a stalled backend cannot hold the whole CI job open.
     add_executable(lazer-audio-engine-pcm-matrix-probe
+        src/beat_grid.cpp
         tools/lazer_audio_engine_pcm_matrix_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
