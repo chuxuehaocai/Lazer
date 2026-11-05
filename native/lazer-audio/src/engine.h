@@ -189,6 +189,22 @@ private:
     double overlapRecoveryGain_ = 1.0;
     int64_t overlapRecoveryFrames_ = 0;
 
+    /* AutoMix transition accounting, all render-thread only.
+     *
+     * `autoMixOutgoingEnergy_`/`autoMixIncomingEnergy_` accumulate both sides of the overlap for
+     * its first quarter second, which is what the level match is derived from: two songs mastered
+     * at very different loudness must not step the level when they trade places. The match eases
+     * back to unity by the end of the overlap so the hand-off is level-continuous, and
+     * `autoMixLimiterGain_` is the peak envelope that keeps their sum inside full scale. */
+    double autoMixOutgoingEnergy_ = 0.0;
+    double autoMixIncomingEnergy_ = 0.0;
+    int64_t autoMixLevelFrames_ = 0;
+    /* The applied match and the one the measurement asked for: the applied value follows the
+     * target over a few tens of milliseconds so the correction itself never steps. */
+    double autoMixIncomingGain_ = 1.0;
+    double autoMixIncomingGainTarget_ = 1.0;
+    double autoMixLimiterGain_ = 1.0;
+
     std::wstring deviceId_;
     LazerAudioDeviceConfig device_{};
     AudioOutputSession outputSession_{};

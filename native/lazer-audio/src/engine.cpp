@@ -354,6 +354,12 @@ int32_t Engine::open(
     cancelledOverlapGain_.store(-1.0, std::memory_order_release);
     overlapRecoveryGain_ = 1.0;
     overlapRecoveryFrames_ = 0;
+    autoMixOutgoingEnergy_ = 0.0;
+    autoMixIncomingEnergy_ = 0.0;
+    autoMixLevelFrames_ = 0;
+    autoMixIncomingGain_ = 1.0;
+    autoMixIncomingGainTarget_ = 1.0;
+    autoMixLimiterGain_ = 1.0;
     lastError_.clear();
     lastErrorCode_.store(LazerAudioOk, std::memory_order_release);
     bitPerfectActive_ = false;
@@ -1662,6 +1668,13 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
                              * remaining tail, preserving full outgoing gain until B is ready. */
                             candidate->overlapLengthFrames = std::min(desiredFrames, remainingFrames);
                             candidate->overlapStarted.store(true, std::memory_order_release);
+                            /* A new overlap measures its own levels and starts unlimited. */
+                            autoMixOutgoingEnergy_ = 0.0;
+                            autoMixIncomingEnergy_ = 0.0;
+                            autoMixLevelFrames_ = 0;
+                            autoMixIncomingGain_ = 1.0;
+                            autoMixIncomingGainTarget_ = 1.0;
+                            autoMixLimiterGain_ = 1.0;
                             raise(LazerAudioEventTrackMixStarted, 0, renderPositionMillis());
                         }
                         mixing = true;
@@ -1711,15 +1724,87 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
     if (mixing) {
         constexpr double halfPi = 1.57079632679489661923;
         const size_t channels = static_cast<size_t>(std::max(outputSession_.target.channels, 1));
+        /* Level match: the incoming song joins at its measured level relative to the outgoing one,
+         * easing back to unity by the end of the overlap so the hand-off does not step the level.
+         * The two sides are measured over the overlap's first quarter second; that is short enough
+         * to be current and long enough not to follow a single transient. */
+        const int64_t levelWindowFrames = std::max<int64_t>(
+            static_cast<int64_t>(outputSession_.target.sampleRate) / 4, 1);
+        if (autoMixLevelFrames_ < levelWindowFrames) {
+            double outgoingEnergy = 0.0;
+            double incomingEnergy = 0.0;
+            for (int32_t frame = 0; frame < frames; ++frame) {
+                for (size_t channel = 0; channel < channels; ++channel) {
+                    const size_t sample = static_cast<size_t>(frame) * channels + channel;
+                    const double outgoing = samples[sample];
+                    const double incoming = autoMixScratch_[sample];
+                    outgoingEnergy += outgoing * outgoing;
+                    incomingEnergy += incoming * incoming;
+                }
+            }
+            autoMixOutgoingEnergy_ += outgoingEnergy;
+            autoMixIncomingEnergy_ += incomingEnergy;
+            autoMixLevelFrames_ += frames;
+            if (autoMixLevelFrames_ >= levelWindowFrames) {
+                const double measured = static_cast<double>(autoMixLevelFrames_) *
+                    static_cast<double>(channels);
+                const double outgoingRms = std::sqrt(autoMixOutgoingEnergy_ / measured);
+                const double incomingRms = std::sqrt(autoMixIncomingEnergy_ / measured);
+                if (outgoingRms > 1.0e-6 && incomingRms > 1.0e-6) {
+                    autoMixIncomingGainTarget_ = std::clamp(outgoingRms / incomingRms, 0.5, 2.0);
+                }
+            }
+        }
+        const double gainStep = 1.0 / std::max(
+            static_cast<double>(outputSession_.target.sampleRate) * 0.05, 1.0);
         for (int32_t frame = 0; frame < frames; ++frame) {
+            if (autoMixIncomingGain_ < autoMixIncomingGainTarget_) {
+                autoMixIncomingGain_ = std::min(
+                    autoMixIncomingGainTarget_, autoMixIncomingGain_ + gainStep);
+            } else if (autoMixIncomingGain_ > autoMixIncomingGainTarget_) {
+                autoMixIncomingGain_ = std::max(
+                    autoMixIncomingGainTarget_, autoMixIncomingGain_ - gainStep);
+            }
             const double progress = std::clamp(static_cast<double>(mixedStartFrame + frame) /
                 static_cast<double>(std::max<int64_t>(mixedLengthFrames - 1, 1)), 0.0, 1.0);
             const double outgoingGain = std::cos(progress * halfPi);
-            const double incomingGain = std::sin(progress * halfPi) * incomingReplayGain;
+            const double correction = autoMixIncomingGain_ +
+                (1.0 - autoMixIncomingGain_) * progress;
+            const double incomingGain =
+                std::sin(progress * halfPi) * incomingReplayGain * correction;
             for (size_t channel = 0; channel < channels; ++channel) {
                 const size_t sample = static_cast<size_t>(frame) * channels + channel;
                 samples[sample] = static_cast<float>(samples[sample] * outgoingGain +
                     autoMixScratch_[sample] * incomingGain);
+            }
+        }
+        /* Peak guard: two songs at full level can sum past full scale, and a clipped overlap is
+         * the one artefact a listener notices immediately. The envelope takes the block peak down
+         * to the ceiling at once and recovers slowly, relaxing to unity over the first and last
+         * 10 ms of the overlap so neither seam steps. */
+        constexpr double kCeiling = 0.98;
+        const size_t mixedSamples = static_cast<size_t>(frames) * channels;
+        double peak = 0.0;
+        for (size_t sample = 0; sample < mixedSamples; ++sample) {
+            peak = std::max(peak, std::abs(static_cast<double>(samples[sample])));
+        }
+        const double desired = peak > kCeiling ? kCeiling / peak : 1.0;
+        const double rate = std::max<double>(outputSession_.target.sampleRate, 1.0);
+        const double attackStep = 1.0 / std::max(rate * 0.06, 1.0);
+        const double releaseStep = 1.0 / std::max(rate * 0.3, 1.0);
+        const double edgeStep = 1.0 / std::max(rate * 0.01, 1.0);
+        for (int32_t frame = 0; frame < frames; ++frame) {
+            if (desired < autoMixLimiterGain_) {
+                autoMixLimiterGain_ = std::max(desired, autoMixLimiterGain_ - attackStep);
+            } else {
+                autoMixLimiterGain_ = std::min(desired, autoMixLimiterGain_ + releaseStep);
+            }
+            const int64_t index = mixedStartFrame + frame;
+            double gain = std::max(autoMixLimiterGain_, std::max(0.0, 1.0 - index * edgeStep));
+            gain = std::max(gain, std::max(0.0,
+                1.0 - static_cast<double>(mixedLengthFrames - 1 - index) * edgeStep));
+            for (size_t channel = 0; channel < channels; ++channel) {
+                samples[static_cast<size_t>(frame) * channels + channel] *= static_cast<float>(gain);
             }
         }
     }

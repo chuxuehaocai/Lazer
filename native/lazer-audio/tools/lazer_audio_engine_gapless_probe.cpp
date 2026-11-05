@@ -71,8 +71,8 @@ std::vector<uint8_t> makePcm16Wave(int32_t frames, int16_t seed) {
     return bytes;
 }
 
-std::vector<uint8_t> makeChannelMarkerWave(bool rightChannel, int32_t sampleRate = kSampleRate,
-    int32_t seconds = 2) {
+std::vector<uint8_t> makeChannelMarkerWaveAt(bool rightChannel, uint16_t amplitude,
+    int32_t sampleRate = kSampleRate, int32_t seconds = 2) {
     auto bytes = makePcm16Wave(sampleRate * seconds, 0);
     for (int shift = 0; shift < 32; shift += 8) {
         bytes[24 + shift / 8] = static_cast<uint8_t>(sampleRate >> shift);
@@ -80,14 +80,19 @@ std::vector<uint8_t> makeChannelMarkerWave(bool rightChannel, int32_t sampleRate
     }
     for (size_t frame = 0; frame < static_cast<size_t>(sampleRate * seconds); ++frame) {
         const size_t offset = 44 + frame * kFrameBytes;
-        const uint16_t left = rightChannel ? 0 : 8192;
-        const uint16_t right = rightChannel ? 8192 : 0;
+        const uint16_t left = rightChannel ? 0 : amplitude;
+        const uint16_t right = rightChannel ? amplitude : 0;
         bytes[offset] = static_cast<uint8_t>(left);
         bytes[offset + 1] = static_cast<uint8_t>(left >> 8);
         bytes[offset + 2] = static_cast<uint8_t>(right);
         bytes[offset + 3] = static_cast<uint8_t>(right >> 8);
     }
     return bytes;
+}
+
+std::vector<uint8_t> makeChannelMarkerWave(bool rightChannel, int32_t sampleRate = kSampleRate,
+    int32_t seconds = 2) {
+    return makeChannelMarkerWaveAt(rightChannel, 8192, sampleRate, seconds);
 }
 
 std::vector<uint8_t> makeStereoDsf(uint64_t durationMillis) {
@@ -1431,11 +1436,124 @@ int runTerminalPublicationCase() {
     return 0;
 }
 
+/* The transition contract of the reference player this mixer follows: the incoming song joins at
+ * its measured level relative to the outgoing one (not at whatever level it was mastered at), that
+ * match eases back to unity before the hand-off, and the sum of two full-level songs is kept inside
+ * full scale instead of clipping. */
+int runAutoMixLevelMatchCase() {
+    struct Case {
+        uint16_t outgoingMarker;
+        uint16_t incomingMarker;
+        /* Level ratio to the outgoing side, before the clamp the contract allows. */
+        double ratio;
+    };
+    const Case cases[] = {
+        {8192, 2048, 4.0},
+        {2048, 8192, 0.25},
+        {30000, 30000, 1.0},
+    };
+    for (const Case &testCase : cases) {
+        MemoryReader first(makeChannelMarkerWaveAt(false, testCase.outgoingMarker));
+        MemoryReader second(makeChannelMarkerWaveAt(true, testCase.incomingMarker));
+        const auto firstReader = asReader(first);
+        const auto secondReader = asReader(second);
+        ProbeEvents events;
+        events.closeBeforeTrackChanged = &first.closeCount;
+        auto capture = std::make_shared<Capture>();
+        LazerAudioEngineConfig config{};
+        config.abi_version = LAZER_AUDIO_ABI_VERSION;
+        config.struct_size = sizeof(config);
+        config.device.exclusive = 1;
+        config.device.bit_perfect = 1;
+        config.device.buffer_millis = 120;
+        config.events.on_event = onEvent;
+        config.events.context = &events;
+        auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+        if (engine == nullptr) return fail("AutoMix level-match engine creation failed");
+        const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 2'000};
+        if (engine->setAutoMix(500) != LazerAudioOk ||
+            engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+            engine->queueReader(1, secondReader, params) != LazerAudioOk ||
+            engine->play() != LazerAudioOk) {
+            engine->destroy();
+            return fail("AutoMix level-match session did not start");
+        }
+        bool ended = false;
+        {
+            std::unique_lock guard(events.mutex);
+            ended = events.changed.wait_for(guard, std::chrono::seconds(10), [&] {
+                return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                    events.events.end();
+            });
+        }
+        engine->destroy();
+        if (!ended) return fail("AutoMix level-match session failed to end");
+
+        constexpr int64_t overlap = kSampleRate / 2;
+        constexpr int64_t start = kSampleRate * 3 / 2;
+        std::lock_guard guard(capture->mutex);
+        const auto sample = [&](int64_t frame, int channel) {
+            const size_t offset = static_cast<size_t>(frame) * kFrameBytes + channel * 2;
+            return static_cast<int16_t>(static_cast<uint16_t>(capture->bytes[offset]) |
+                (static_cast<uint16_t>(capture->bytes[offset + 1]) << 8));
+        };
+        const double expectedGain = std::clamp(testCase.ratio, 0.5, 2.0);
+        /* Two sources that are already near full scale must not sum past it: the peak guard is
+         * what is under test there, and it folds both sides together, so only the ceiling is
+         * asserted. The quieter pairs keep the guard idle and pin the level match itself. */
+        const bool peakGuardCase = testCase.outgoingMarker >= 20'000;
+        int64_t checked = 0;
+        int64_t limited = 0;
+        for (int64_t frame = start; frame < start + overlap - 32; ++frame) {
+            /* After the measurement window and its ramp the correction is stable, so the shape of
+             * the transition can be compared sample by sample. */
+            const double progress = static_cast<double>(frame - start) / (overlap - 1);
+            if (progress < 0.75) continue;
+            const double left = sample(frame, 0);
+            const double right = sample(frame, 1);
+            if (std::abs(left) >= 32'000 || std::abs(right) >= 32'000) {
+                return fail("AutoMix mixture reached full scale instead of limiting");
+            }
+            if (peakGuardCase) {
+                if (std::abs(left) > 30'000 || std::abs(right) > 30'000) ++limited;
+                continue;
+            }
+            const double outgoing =
+                testCase.outgoingMarker * std::cos(progress * 1.57079632679489661923);
+            const double correction = expectedGain + (1.0 - expectedGain) * progress;
+            const double incoming = testCase.incomingMarker * correction *
+                std::sin(progress * 1.57079632679489661923);
+            if (std::abs(left - outgoing) > 8 || std::abs(right - incoming) > 8) {
+                std::cerr << "FAIL: AutoMix level match at frame " << frame << " progress "
+                    << progress << ": left " << left << " (expected " << outgoing
+                    << "), right " << right << " (expected " << incoming << ")\n";
+                return fail("AutoMix did not match the incoming song's level to the outgoing one");
+            }
+            ++checked;
+        }
+        if (peakGuardCase) {
+            if (limited == 0) return fail("AutoMix peak guard never engaged on two full-scale sources");
+            continue;
+        }
+        if (checked == 0) return fail("AutoMix level match had no stable window to check");
+        /* The match must be gone by the end of the overlap: the hand-off cannot step the level. */
+        const double atHandoff = sample(start + overlap - 1, 1);
+        if (std::abs(atHandoff - testCase.incomingMarker) > 400) {
+            std::cerr << "FAIL: AutoMix hand-off level " << atHandoff << " for an incoming marker of "
+                << testCase.incomingMarker << '\n';
+            return fail("AutoMix left a level step at the hand-off");
+        }
+    }
+    std::cout << "PASS: AutoMix matched the incoming level through the overlap and handed off at unity\n";
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && std::string(argv[1]) == "--automix-slow") return runAutoMixSlowSuccessorCase();
     if (runExistingFastGaplessCase() != 0) return 1;
     if (runAutoMixOverlapCase(false) != 0) return 1;
     if (runAutoMixOverlapCase(true) != 0) return 1;
+    if (runAutoMixLevelMatchCase() != 0) return 1;
     if (runAutoMixCancelAndSeekCase() != 0) return 1;
     if (runAutoMixSlowSuccessorCase() != 0) return 1;
     if (runUnderrunRecoveryCase() != 0) return 1;
