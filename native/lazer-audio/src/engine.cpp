@@ -26,6 +26,23 @@ constexpr size_t kRenderBlockFrames = 960;
 /* How long the producer may stay parked at the high watermark before it tries again regardless. */
 constexpr int32_t kProducerPauseLimitMillis = 50;
 
+/* AutoMix transition contract, ported from the reference player's planner and mixer.
+ *
+ * The incoming song's silent intro is skipped: mixing it against the outgoing tail is dead air in
+ * the middle of a transition. A frame counts as silence only when both its level and its peak are
+ * below the thresholds, and only a run of at least `kSilenceIntroFrames` frames (160 ms) is treated
+ * as an intro — a short dip is not. */
+constexpr double kSilenceFrameDb = -65.0;
+constexpr double kSilenceFramePeak = 0.00018;
+constexpr int64_t kSilenceIntroFrames = 8;
+constexpr double kSilenceScanSeconds = 3.0;
+/* The low end trades between the decks instead of doubling: each deck's one-pole low band is
+ * subtracted while the other one owns the bass. `kBassSwapMax` is the most of it that is taken. */
+constexpr double kBassSwapCutoffHz = 180.0;
+constexpr double kBassSwapMax = 0.85;
+constexpr double kBassSwapScale = 0.75;
+constexpr double kBassSwapClashScale = 3.0;
+
 bool doPOutputApplies(int32_t dsdOutputMode, const StreamDescription &source) noexcept {
     return dsdOutputMode == LazerAudioDsdOutputRequireDoP && source.dsd && source.rawDsd &&
         (source.channels == 1 || source.channels == 2);
@@ -184,6 +201,9 @@ struct Engine::SourceSlot final : SourceConsumer {
     std::atomic<int64_t> overlapFrames{0};
     std::atomic<bool> overlapStarted{false};
     int64_t overlapLengthFrames = 0;
+    /* The incoming song's silent intro, skipped at the start of the overlap. It is not mix progress
+     * (which `overlapFrames` counts), but it is part of this source's own position. */
+    int64_t skippedIntroFrames = 0;
     int64_t presentationOffsetFrames = 0;
     std::unique_ptr<QueuedPcmBuffer> pcm;
     std::thread prefetchThread;
@@ -360,6 +380,10 @@ int32_t Engine::open(
     autoMixIncomingGain_ = 1.0;
     autoMixIncomingGainTarget_ = 1.0;
     autoMixLimiterGain_ = 1.0;
+    autoMixBassAmount_ = 0.0;
+    autoMixOutgoingLow_.clear();
+    autoMixIncomingLow_.clear();
+    autoMixSilenceScratch_.clear();
     lastError_.clear();
     lastErrorCode_.store(LazerAudioOk, std::memory_order_release);
     bitPerfectActive_ = false;
@@ -670,6 +694,11 @@ int32_t Engine::configurePipeline() {
     }
     convertScratch_.assign(static_cast<size_t>(wantedFrames) * frameBytes, 0);
     autoMixScratch_.assign(static_cast<size_t>(wantedFrames) *
+        static_cast<size_t>(std::max(target.channels, 1)), 0.0f);
+    /* Enough of the incoming source's head to look for its silent intro in one peek (the
+     * prefetch buffer holds at least the overlap, which is longer than this scan). */
+    autoMixSilenceScratch_.assign(
+        static_cast<size_t>(kSilenceScanSeconds * std::max(target.sampleRate, 1)) *
         static_cast<size_t>(std::max(target.channels, 1)), 0.0f);
     const size_t queuedScratchFrames = std::max(kRenderBlockFrames,
         static_cast<size_t>(std::max(outputSession_.bufferFrames, 1)));
@@ -1025,7 +1054,8 @@ int32_t Engine::tryStartQueuedSource(bool &started, std::string &error) {
         retired = std::move(source_);
         sourceRetirementPending_.store(true, std::memory_order_release);
         source_ = std::move(nextSource_);
-        source_->presentationOffsetFrames = source_->overlapFrames.load(std::memory_order_acquire);
+        source_->presentationOffsetFrames = source_->overlapFrames.load(std::memory_order_acquire) +
+            source_->skippedIntroFrames;
         source_->producedOutputFrames = source_->presentationOffsetFrames;
         replayGainTargetLinear_ = source_->replayGainLinear;
         if (source_->presentationOffsetFrames > 0 ||
@@ -1204,6 +1234,7 @@ int32_t Engine::seek(int64_t positionMillis) {
         incoming->requestSeek(incoming->source.seekTargetMillis());
         std::lock_guard consumerGuard(incoming->consumerMutex);
         incoming->overlapFrames.store(0, std::memory_order_release);
+        incoming->skippedIntroFrames = 0;
         incoming->overlapStarted.store(false, std::memory_order_release);
         incoming->overlapLengthFrames = 0;
     }
@@ -1535,6 +1566,90 @@ void Engine::resetTimelineForSeek() {
     }
 }
 
+double Engine::measureBassClash(
+    const float *outgoing, int32_t outgoingFrames, SourceSlot &candidate, int32_t sampleRate,
+    size_t channels) {
+    if (outgoing == nullptr || outgoingFrames <= 0 || sampleRate <= 0 || channels == 0) return 0.0;
+    const double lowAlpha = 1.0 - std::exp(
+        -2.0 * 3.14159265358979323846 * kBassSwapCutoffHz / static_cast<double>(sampleRate));
+    double outgoingTotal = 0.0;
+    double outgoingLow = 0.0;
+    for (int32_t frame = 0; frame < outgoingFrames; ++frame) {
+        for (size_t channel = 0; channel < channels; ++channel) {
+            const double value = outgoing[static_cast<size_t>(frame) * channels + channel];
+            outgoingTotal += value * value;
+            double &state = autoMixOutgoingLow_[channel];
+            state += lowAlpha * (value - state);
+            outgoingLow += state * state;
+        }
+    }
+    double incomingTotal = 0.0;
+    double incomingLow = 0.0;
+    const int64_t headFrames = std::min<int64_t>(
+        std::max<int64_t>(static_cast<int64_t>(sampleRate) / 4, 1),
+        std::max<int64_t>(candidate.pcm != nullptr ? candidate.pcm->queuedFrames() : 0, 0));
+    const int64_t capacityFrames = static_cast<int64_t>(autoMixSilenceScratch_.size() / channels);
+    const int32_t peekFrames = static_cast<int32_t>(std::min<int64_t>(headFrames, capacityFrames));
+    if (candidate.pcm != nullptr && peekFrames > 0) {
+        const int32_t peeked = candidate.pcm->peekFrames(
+            reinterpret_cast<uint8_t *>(autoMixSilenceScratch_.data()), peekFrames);
+        for (int32_t frame = 0; frame < peeked; ++frame) {
+            for (size_t channel = 0; channel < channels; ++channel) {
+                const double value = autoMixSilenceScratch_[
+                    static_cast<size_t>(frame) * channels + channel];
+                incomingTotal += value * value;
+                double &state = autoMixIncomingLow_[channel];
+                state += lowAlpha * (value - state);
+                incomingLow += state * state;
+            }
+        }
+    }
+    const double outgoingFraction =
+        outgoingTotal > 0.0 ? outgoingLow / outgoingTotal : 0.0;
+    const double incomingFraction =
+        incomingTotal > 0.0 ? incomingLow / incomingTotal : 0.0;
+    const double clash = std::min(1.0, std::sqrt(std::max(outgoingFraction, 0.0) *
+        std::max(incomingFraction, 0.0)) * kBassSwapClashScale);
+    return std::clamp(kBassSwapScale * clash, 0.0, kBassSwapMax);
+}
+
+int64_t Engine::consumeIncomingSilence(SourceSlot &candidate, int32_t sampleRate, size_t channels) {
+    if (candidate.pcm == nullptr || sampleRate <= 0 || channels == 0) return 0;
+    const int64_t frameFrames = std::max<int64_t>(sampleRate / 50, 1);
+    const int64_t wantedFrames = std::min<int64_t>(
+        static_cast<int64_t>(kSilenceScanSeconds * sampleRate),
+        std::max<int64_t>(candidate.pcm->queuedFrames(), 0));
+    if (wantedFrames < frameFrames * kSilenceIntroFrames) return 0;
+    const int64_t capacityFrames = static_cast<int64_t>(
+        autoMixSilenceScratch_.size() / channels);
+    const int32_t peekFrames = static_cast<int32_t>(
+        std::min<int64_t>(wantedFrames, capacityFrames));
+    if (peekFrames <= 0) return 0;
+    const int32_t peeked = candidate.pcm->peekFrames(
+        reinterpret_cast<uint8_t *>(autoMixSilenceScratch_.data()), peekFrames);
+    if (peeked < frameFrames * kSilenceIntroFrames) return 0;
+    int64_t silentFrames = 0;
+    for (int64_t offset = 0; offset + frameFrames <= peeked; offset += frameFrames) {
+        double energy = 0.0;
+        double peak = 0.0;
+        for (int64_t frame = 0; frame < frameFrames; ++frame) {
+            for (size_t channel = 0; channel < channels; ++channel) {
+                const double value = autoMixSilenceScratch_[
+                    static_cast<size_t>(offset + frame) * channels + channel];
+                energy += value * value;
+                peak = std::max(peak, std::abs(value));
+            }
+        }
+        const double rms = std::sqrt(energy / static_cast<double>(frameFrames * channels));
+        const double db = rms > 0.0 ? 20.0 * std::log10(rms) : -200.0;
+        if (db > kSilenceFrameDb || peak > kSilenceFramePeak) break;
+        silentFrames += frameFrames;
+    }
+    if (silentFrames < frameFrames * kSilenceIntroFrames) return 0;
+    candidate.pcm->consumeFrames(silentFrames);
+    return silentFrames;
+}
+
 int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
     if (frameCount <= 0) return 0;
     /* Producer-side upkeep, done once per accepted block: apply a codec-string commit the render
@@ -1675,6 +1790,28 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
                             autoMixIncomingGain_ = 1.0;
                             autoMixIncomingGainTarget_ = 1.0;
                             autoMixLimiterGain_ = 1.0;
+                            autoMixBassAmount_ = 0.0;
+                            autoMixOutgoingLow_.assign(static_cast<size_t>(channels), 0.0);
+                            autoMixIncomingLow_.assign(static_cast<size_t>(channels), 0.0);
+                            /* Start on music: the incoming song's silent intro is dead air in the
+                             * middle of the transition, so it is consumed before the first mixed
+                             * frame and counted in the successor's own position. */
+                            const int64_t skipped = consumeIncomingSilence(
+                                *candidate, rate, static_cast<size_t>(channels));
+                            if (skipped > 0) {
+                                candidate->skippedIntroFrames = skipped;
+                                const int32_t refilled = candidate->pcm->peekFrames(
+                                    reinterpret_cast<uint8_t *>(autoMixScratch_.data()), frames);
+                                if (refilled <= 0) return 0;
+                                frames = refilled;
+                            }
+                            /* Whether the two songs clash in the bass is decided before the first
+                             * mixed frame: the outgoing side from this block, the incoming side from
+                             * the head of its prefetch buffer. Measuring it later would hand the low
+                             * end over in one direction only whenever the overlap is short. */
+                            autoMixBassAmount_ = measureBassClash(
+                                autoMixScratch_.data(), frames, *candidate, rate,
+                                static_cast<size_t>(channels));
                             raise(LazerAudioEventTrackMixStarted, 0, renderPositionMillis());
                         }
                         mixing = true;
@@ -1757,6 +1894,8 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
         }
         const double gainStep = 1.0 / std::max(
             static_cast<double>(outputSession_.target.sampleRate) * 0.05, 1.0);
+        const double lowAlpha = 1.0 - std::exp(-2.0 * 3.14159265358979323846 *
+            kBassSwapCutoffHz / std::max<double>(outputSession_.target.sampleRate, 1.0));
         for (int32_t frame = 0; frame < frames; ++frame) {
             if (autoMixIncomingGain_ < autoMixIncomingGainTarget_) {
                 autoMixIncomingGain_ = std::min(
@@ -1772,10 +1911,26 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
                 (1.0 - autoMixIncomingGain_) * progress;
             const double incomingGain =
                 std::sin(progress * halfPi) * incomingReplayGain * correction;
+            /* The bass changes hands around the middle of the overlap: the outgoing deck owns the
+             * low end until then, the incoming one from there. */
+            const double outgoingSwap = progress >= 0.5
+                ? 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * (progress - 0.5)) : 0.0;
+            const double incomingSwap = progress < 0.5
+                ? std::sin(2.0 * 3.14159265358979323846 * progress) : 0.0;
             for (size_t channel = 0; channel < channels; ++channel) {
                 const size_t sample = static_cast<size_t>(frame) * channels + channel;
-                samples[sample] = static_cast<float>(samples[sample] * outgoingGain +
-                    autoMixScratch_[sample] * incomingGain);
+                const double outgoing = samples[sample];
+                const double incoming = autoMixScratch_[sample];
+                double &outgoingLow = autoMixOutgoingLow_[channel];
+                double &incomingLow = autoMixIncomingLow_[channel];
+                outgoingLow += lowAlpha * (outgoing - outgoingLow);
+                incomingLow += lowAlpha * (incoming - incomingLow);
+                const double outgoingLane =
+                    outgoing - outgoingLow * autoMixBassAmount_ * outgoingSwap;
+                const double incomingLane =
+                    incoming - incomingLow * autoMixBassAmount_ * incomingSwap;
+                samples[sample] = static_cast<float>(
+                    outgoingLane * outgoingGain + incomingLane * incomingGain);
             }
         }
         /* Peak guard: two songs at full level can sum past full scale, and a clipped overlap is

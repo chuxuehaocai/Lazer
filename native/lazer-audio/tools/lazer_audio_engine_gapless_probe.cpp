@@ -95,6 +95,34 @@ std::vector<uint8_t> makeChannelMarkerWave(bool rightChannel, int32_t sampleRate
     return makeChannelMarkerWaveAt(rightChannel, 8192, sampleRate, seconds);
 }
 
+/* The AutoMix transition contract a probe has to predict, in closed form.
+ *
+ * The two decks cross on an equal-power curve, the incoming one carries the level match
+ * (`correction` eases from the measured gain back to unity by the end of the overlap), and the bass
+ * changes hands around the middle: each deck's low band is taken out while the other one owns it.
+ * `bassAmount` is 0.75 for these fixtures: both are constant-amplitude markers, so all of their
+ * energy sits in the low band and the clash is maximal. */
+constexpr double kProbeBassAmount = 0.75;
+
+double probeOutgoingSwap(double progress) {
+    return progress >= 0.5
+        ? 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * (progress - 0.5)) : 0.0;
+}
+
+double probeIncomingSwap(double progress) {
+    return progress < 0.5 ? std::sin(2.0 * 3.14159265358979323846 * progress) : 0.0;
+}
+
+double probeOutgoingLane(double marker, double progress) {
+    return marker * std::cos(progress * 1.57079632679489661923) *
+        (1.0 - kProbeBassAmount * probeOutgoingSwap(progress));
+}
+
+double probeIncomingLane(double marker, double progress, double correction) {
+    return marker * correction * std::sin(progress * 1.57079632679489661923) *
+        (1.0 - kProbeBassAmount * probeIncomingSwap(progress));
+}
+
 std::vector<uint8_t> makeStereoDsf(uint64_t durationMillis) {
     const uint64_t bitCount = static_cast<uint64_t>(kDsdBitRate) * durationMillis / 1000;
     const uint64_t audioBytesPerChannel = bitCount / 8;
@@ -1118,9 +1146,8 @@ int runAutoMixOverlapCase(bool resampledSuccessor) {
         if (std::abs(left) < 100 && std::abs(right) < 100) return fail("AutoMix inserted a silent gap");
         if (frame >= start && frame < kSampleRate * 2) {
             const double phase = static_cast<double>(frame - start) / (overlap - 1);
-            const double expectedLeft = 8192 * std::cos(phase * 1.57079632679489661923);
-            const double expectedRight = 8192 * std::sin(phase * 1.57079632679489661923);
-            if (std::abs(left - expectedLeft) > 5 || std::abs(right - expectedRight) > 5) {
+            if (std::abs(left - probeOutgoingLane(8192, phase)) > 5 ||
+                std::abs(right - probeIncomingLane(8192, phase, 1.0)) > 5) {
                 return fail("AutoMix output did not follow both equal-power overlap gains");
             }
             if (left > 1000 && right > 1000) ++bothMarkers;
@@ -1131,7 +1158,7 @@ int runAutoMixOverlapCase(bool resampledSuccessor) {
             return fail("AutoMix introduced a gain jump at the overlap boundary");
         }
     }
-    if (bothMarkers < overlap / 2 || snapshot.underrun_frames != 0 || !events.readerLifetimeOkay ||
+    if (bothMarkers < overlap / 4 || snapshot.underrun_frames != 0 || !events.readerLifetimeOkay ||
         snapshot.position_millis != 2'000 ||
         std::count(events.events.begin(), events.events.end(), LazerAudioEventTrackChanged) != 1) {
         return fail("AutoMix did not present one continuous overlapping transition");
@@ -1518,11 +1545,10 @@ int runAutoMixLevelMatchCase() {
                 if (std::abs(left) > 30'000 || std::abs(right) > 30'000) ++limited;
                 continue;
             }
-            const double outgoing =
-                testCase.outgoingMarker * std::cos(progress * 1.57079632679489661923);
+            const double outgoing = probeOutgoingLane(testCase.outgoingMarker, progress);
             const double correction = expectedGain + (1.0 - expectedGain) * progress;
-            const double incoming = testCase.incomingMarker * correction *
-                std::sin(progress * 1.57079632679489661923);
+            const double incoming =
+                probeIncomingLane(testCase.incomingMarker, progress, correction);
             if (std::abs(left - outgoing) > 8 || std::abs(right - incoming) > 8) {
                 std::cerr << "FAIL: AutoMix level match at frame " << frame << " progress "
                     << progress << ": left " << left << " (expected " << outgoing
@@ -1548,12 +1574,91 @@ int runAutoMixLevelMatchCase() {
     return 0;
 }
 
+
+/* The incoming song's silent intro must not be mixed: overlapping dead air with the outgoing tail
+ * is what makes a transition sound like a gap. The reference player's planner starts the incoming
+ * deck after that silence, and so does this mixer. */
+int runAutoMixSilentIntroCase() {
+    /* Eight hundred milliseconds of silence, then the marker, on the right channel. */
+    std::vector<uint8_t> incoming = makeChannelMarkerWaveAt(true, 8192);
+    const size_t firstSample = 44;
+    const size_t silentBytes = static_cast<size_t>(kSampleRate * 800 / 1000) * kFrameBytes;
+    std::fill(incoming.begin() + static_cast<long>(firstSample),
+        incoming.begin() + static_cast<long>(firstSample + silentBytes), 0);
+
+    MemoryReader first(makeChannelMarkerWave(false));
+    MemoryReader secondReader(incoming);
+    const auto firstReader = asReader(first);
+    const auto secondReaderRef = asReader(secondReader);
+    ProbeEvents events;
+    events.closeBeforeTrackChanged = &first.closeCount;
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.device.buffer_millis = 120;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return fail("AutoMix silent-intro engine creation failed");
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 2'000};
+    if (engine->setAutoMix(500) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+        engine->queueReader(1, secondReaderRef, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk) {
+        engine->destroy();
+        return fail("AutoMix silent-intro session did not start");
+    }
+    bool ended = false;
+    {
+        std::unique_lock guard(events.mutex);
+        ended = events.changed.wait_for(guard, std::chrono::seconds(10), [&] {
+            return std::find(events.events.begin(), events.events.end(), LazerAudioEventEnded) !=
+                events.events.end();
+        });
+    }
+    engine->destroy();
+    if (!ended) return fail("AutoMix silent-intro session failed to end");
+
+    constexpr int64_t overlap = kSampleRate / 2;
+    constexpr int64_t start = kSampleRate * 3 / 2;
+    std::lock_guard guard(capture->mutex);
+    const auto sample = [&](int64_t frame, int channel) {
+        const size_t offset = static_cast<size_t>(frame) * kFrameBytes + channel * 2;
+        return static_cast<int16_t>(static_cast<uint16_t>(capture->bytes[offset]) |
+            (static_cast<uint16_t>(capture->bytes[offset + 1]) << 8));
+    };
+    /* A quarter into the overlap the incoming song must already be playing: without the skip its
+     * first 800 ms are silence, which would still cover this frame. */
+    const int64_t probeFrame = start + overlap / 4;
+    const double progress = static_cast<double>(probeFrame - start) / (overlap - 1);
+    const double expectedRight = probeIncomingLane(8192, progress, 1.0);
+    const double right = sample(probeFrame, 1);
+    if (std::abs(right - expectedRight) > 8) {
+        std::cerr << "FAIL: AutoMix incoming at the overlap's quarter: " << right
+            << " (expected " << expectedRight << ")\n";
+        return fail("AutoMix mixed the incoming song's silent intro instead of skipping it");
+    }
+    int64_t quiet = 0;
+    for (int64_t frame = start; frame < start + overlap / 4; ++frame) {
+        if (std::abs(sample(frame, 1)) < 50) ++quiet;
+    }
+    if (quiet > overlap / 8) {
+        return fail("AutoMix left the incoming song silent through the first half of the overlap");
+    }
+    std::cout << "PASS: AutoMix skipped the incoming song's silent intro\n";
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc > 1 && std::string(argv[1]) == "--automix-slow") return runAutoMixSlowSuccessorCase();
     if (runExistingFastGaplessCase() != 0) return 1;
     if (runAutoMixOverlapCase(false) != 0) return 1;
     if (runAutoMixOverlapCase(true) != 0) return 1;
     if (runAutoMixLevelMatchCase() != 0) return 1;
+    if (runAutoMixSilentIntroCase() != 0) return 1;
     if (runAutoMixCancelAndSeekCase() != 0) return 1;
     if (runAutoMixSlowSuccessorCase() != 0) return 1;
     if (runUnderrunRecoveryCase() != 0) return 1;

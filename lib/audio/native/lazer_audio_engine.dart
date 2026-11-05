@@ -672,6 +672,13 @@ class NativeAudioEngine
   /// Configure before opening a source: AutoMix uses two PCM decoders feeding
   /// the existing output device, including when that device is exclusive.
   /// An existing source needs reopening to renegotiate its PCM format.
+  /// The overlap the transition uses, in milliseconds.
+  ///
+  /// The reference player's natural mode picks six seconds (its candidate set is
+  /// 4-8 s), which is long enough to be a real blend and short enough that two
+  /// songs never fight for the floor.
+  static const int autoMixOverlapMillis = 6000;
+
   @override
   Future<void> setAutoMixEnabled(bool enabled) async {
     if (!supportsAutoMix) {
@@ -685,7 +692,7 @@ class NativeAudioEngine
     final int status = _status(
       await _worker.call(LazerWorkerOp.setAutoMix, <Object?>[
         address,
-        enabled ? 8000 : 0,
+        enabled ? autoMixOverlapMillis : 0,
       ]),
     );
     if (status != lazerAudioOk) {

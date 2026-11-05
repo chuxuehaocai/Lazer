@@ -67,6 +67,14 @@ private:
 
     void pumpLoop();
     void renderLoop();
+    /* Consumes the incoming source's silent intro from its prefetch buffer and returns the frames
+     * it skipped, so the overlap starts on music instead of dead air. */
+    int64_t consumeIncomingSilence(SourceSlot &candidate, int32_t sampleRate, size_t channels);
+    /* How strongly the two decks' low bands clash (0 = none, up to `kBassSwapMax`), measured from
+     * the outgoing block and the head of the incoming prefetch buffer. */
+    double measureBassClash(
+        const float *outgoing, int32_t outgoingFrames, SourceSlot &candidate, int32_t sampleRate,
+        size_t channels);
     int32_t configurePipeline();
     /* True while the float DSP/volume chain is actually on the signal path. */
     [[nodiscard]] bool dspInPath() const;
@@ -204,6 +212,14 @@ private:
     double autoMixIncomingGain_ = 1.0;
     double autoMixIncomingGainTarget_ = 1.0;
     double autoMixLimiterGain_ = 1.0;
+    /* The low end is handed over rather than doubled: each deck's one-pole low band
+     * (`kBassSwapCutoffHz`) is subtracted from that deck while the other one owns the bass, by
+     * `autoMixBassAmount_` — the reference player's `bass_handoff`. */
+    std::vector<double> autoMixOutgoingLow_;
+    std::vector<double> autoMixIncomingLow_;
+    double autoMixBassAmount_ = 0.0;
+    /* Scratch for scanning the incoming source's head for silence. */
+    std::vector<float> autoMixSilenceScratch_;
 
     std::wstring deviceId_;
     LazerAudioDeviceConfig device_{};
