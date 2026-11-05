@@ -136,6 +136,28 @@ class _App extends NeteaseGateway {
     ],
     'more': true,
   };
+  // The real sub list answers `{code, data, count, hasMore}`: the album array
+  // lives under `data`, not `albums`.
+  Map<String, dynamic> albumSublistPage = const <String, dynamic>{
+    'code': 200,
+    'count': 34,
+    'data': [
+      {'id': 7, 'name': 'Night', 'size': 2, 'artists': []},
+      {'id': 8, 'name': 'Day'},
+    ],
+    'hasMore': true,
+  };
+  int? sublistLimit;
+  int? sublistOffset;
+  @override
+  Future<Map<String, dynamic>> albumSublist({
+    int limit = 30,
+    int offset = 0,
+  }) async {
+    sublistLimit = limit;
+    sublistOffset = offset;
+    return albumSublistPage;
+  }
   @override
   Future<List<GatewayPlaylist>> userPlaylists(
     int uid, {
@@ -452,4 +474,33 @@ void main() {
       );
     },
   );
+
+  test('收藏的专辑 pages the account collection and needs a session', () async {
+    expect(gateway.supports(MusicCapability.savedAlbums), isTrue);
+    // A guest never reaches the service: the collection belongs to an account.
+    await expectLater(
+      gateway.savedAlbums(),
+      throwsA(isA<MusicGatewayException>()),
+    );
+    expect(legacy.sublistLimit, isNull);
+
+    await gateway.checkSession();
+    final page = await gateway.savedAlbums(limit: 1, offset: 20);
+    expect(legacy.sublistLimit, 1);
+    expect(legacy.sublistOffset, 20);
+    expect(page.items.single.title, 'Night');
+    expect(page.items.single.songCount, 2);
+    // `hasMore` is the service's own answer, not inferred from a full page.
+    expect(page.hasMore, isTrue);
+
+    legacy.albumSublistPage = const <String, dynamic>{
+      'code': 200,
+      'count': 1,
+      'data': [
+        {'id': 7, 'name': 'Night'},
+      ],
+      'hasMore': false,
+    };
+    expect((await gateway.savedAlbums()).hasMore, isFalse);
+  });
 }

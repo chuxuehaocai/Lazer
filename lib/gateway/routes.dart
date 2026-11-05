@@ -342,6 +342,14 @@ NeteaseRequest buildNeteaseRequest(
       );
     case '/album':
       return request('/api/v1/album/${id()}', web: true);
+    case '/album/sublist':
+      return request(
+        '/api/album/sublist',
+        web: true,
+        // `total` is what makes the service answer with `hasMore`, which the
+        // 收藏的专辑 page uses to decide whether another page exists.
+        body: <String, Object?>{...page(), 'total': true},
+      );
     case '/artist/detail':
       return request(
         '/api/artist/head/info/get',

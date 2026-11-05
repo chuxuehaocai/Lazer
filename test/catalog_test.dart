@@ -62,6 +62,50 @@ class _Gateway extends NeteaseGateway {
     };
   }
 
+  /// The real 收藏的专辑 answers `{code, data, count, hasMore}`: every album
+  /// of the collection lives under `data`, never under `albums`.
+  int albumSublistCalls = 0;
+  List<int> albumSublistOffsets = <int>[];
+
+  @override
+  Future<Map<String, dynamic>> albumSublist({
+    int limit = 30,
+    int offset = 0,
+  }) async {
+    albumSublistCalls++;
+    albumSublistOffsets.add(offset);
+    if (failAll) throw const SocketException('offline');
+    if (offset > 0) {
+      return <String, dynamic>{
+        'code': 200,
+        'count': 3,
+        'data': <Map<String, dynamic>>[
+          <String, dynamic>{'id': 3, 'name': 'Third', 'size': 9},
+        ],
+        'hasMore': false,
+      };
+    }
+    return <String, dynamic>{
+      'code': 200,
+      'count': 3,
+      'data': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'id': 1,
+          'name': 'First',
+          'size': 4,
+          'artists': <Map<String, dynamic>>[
+            <String, dynamic>{'id': 9, 'name': 'Artist'},
+          ],
+        },
+        <String, dynamic>{'id': 2, 'name': 'Second'},
+        // No usable reference: the detail page could not open it, so it must
+        // not become a card that does nothing.
+        <String, dynamic>{'id': 0, 'name': 'Broken'},
+      ],
+      'hasMore': true,
+    };
+  }
+
   @override
   Future<List<GatewayPlaylist>> userPlaylists(
     int uid, {
@@ -420,6 +464,58 @@ void main() {
         expect(offline?.tlyric, '[00:00]翻译');
       },
     );
+
+    test(
+      '收藏的专辑 reads the sub list envelope and pages its collection',
+      () async {
+        final gateway = _Gateway();
+        final catalog = Catalog(gateway: gateway, cache: disk);
+        final first = await catalog.savedAlbums(7);
+        // The row without a reference is dropped: nothing could open it.
+        expect(
+          first.albums.map((Album album) => album.title),
+          <String>['First', 'Second'],
+        );
+        expect(first.albums.first.id, '1');
+        expect(first.albums.first.artist, 'Artist');
+        expect(first.albums.first.trackCount, 4);
+        expect(first.albums.first.coverSeed, isNonNegative);
+        // The offset follows the service's page, not the visible list.
+        expect(first.receivedCount, 3);
+        expect(first.total, 3);
+        expect(first.more, isTrue);
+
+        final second = await catalog.savedAlbums(7, offset: 3);
+        expect(second.albums.single.title, 'Third');
+        expect(second.more, isFalse);
+        expect(gateway.albumSublistOffsets, <int>[0, 3]);
+
+        // A signed-out session reads nothing at all.
+        expect((await catalog.savedAlbums(0)).albums, isEmpty);
+        expect(gateway.albumSublistCalls, 2);
+        await expectLater(catalog.savedAlbums(7, offset: -1), throwsArgumentError);
+      },
+    );
+
+    test('a forced read retires every cached page of the collection', () async {
+      final gateway = _Gateway();
+      final catalog = Catalog(gateway: gateway, cache: disk);
+      await catalog.savedAlbums(7);
+      await catalog.savedAlbums(7, offset: 3);
+      expect(gateway.albumSublistCalls, 2);
+
+      // Cached pages: no further reads.
+      await catalog.savedAlbums(7);
+      await catalog.savedAlbums(7, offset: 3);
+      expect(gateway.albumSublistCalls, 2);
+
+      // A refresh must not leave the later pages behind: reading them again is
+      // the whole point of pressing it.
+      await catalog.savedAlbums(7, force: true);
+      await catalog.savedAlbums(7, offset: 3, force: true);
+      expect(gateway.albumSublistCalls, 4);
+      expect(gateway.albumSublistOffsets, <int>[0, 3, 0, 3]);
+    });
 
     test(
       'a fresh playlist is served from memory after the disk snapshot is gone',

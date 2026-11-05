@@ -45,7 +45,7 @@ class _Catalog extends Catalog {
 
 class _Engine implements AudioEngine, FailureReportingAudioEngine {
   final completion = StreamController<void>.broadcast(sync: true);
-  final failure = StreamController<String>.broadcast(sync: true);
+  final failure = StreamController<AudioFailure>.broadcast(sync: true);
   final seekGates = <Completer<void>>[];
   bool holdSeeks = false;
   bool failSeeks = false;
@@ -58,9 +58,9 @@ class _Engine implements AudioEngine, FailureReportingAudioEngine {
   @override
   Stream<void> get completed => completion.stream;
   @override
-  Stream<String> get failures => failure.stream;
+  Stream<AudioFailure> get failures => failure.stream;
   @override
-  String? get pendingFailure => null;
+  AudioFailure? get pendingFailure => null;
   @override
   Future<void> setUrl(String url) async {
     position = Duration.zero;
@@ -292,7 +292,14 @@ void main() {
       h.now = h.now.add(const Duration(seconds: 30));
       await tester.pump(const Duration(seconds: 1));
       expect(h.all.totalDuration, Duration.zero);
-      h.engine.failure.add('device lost');
+      // A source failure, not a device one: the app reopens the output for a lost
+      // device, so only a non-recoverable kind is terminal here.
+      h.engine.failure.add(
+        const AudioFailure(
+          'the source could not be read',
+          AudioFailureKind.source,
+        ),
+      );
       expect(h.state.playing, isFalse);
       expect(h.all.playCount, 0);
       h.catalog.unavailable = true;

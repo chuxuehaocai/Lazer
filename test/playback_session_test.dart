@@ -79,12 +79,16 @@ class _Player implements audio.AudioPlayer {
   final states = StreamController<audio.ProcessingState>.broadcast();
   int plays = 0;
   int pauses = 0;
+  int stops = 0;
+  Duration? sought;
   @override
   Stream<audio.ProcessingState> get processingStateStream => states.stream;
   @override
   audio.ProcessingState get processingState => audio.ProcessingState.ready;
   @override
   Duration position = Duration.zero;
+  @override
+  int? get currentIndex => 0;
   @override
   Duration? get duration => const Duration(seconds: 30);
   @override
@@ -106,13 +110,28 @@ class _Player implements audio.AudioPlayer {
   }
 
   @override
+  Future<void> seek(Duration? position, {int? index}) async {
+    sought = position;
+  }
+
+  @override
   Future<void> setVolume(double volume) async {}
   @override
-  Future<void> stop() async {}
+  Future<void> stop() async {
+    stops++;
+  }
+
   @override
   Future<void> dispose() => states.close();
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A backend that holds the output device itself, like the native engine: an
+/// interruption has to close it rather than park a stream the platform takes.
+class _YieldingEngine extends JustAudioEngine
+    implements InterruptionYieldingAudioEngine {
+  _YieldingEngine({required super.player});
 }
 
 class _Gateway extends NeteaseGateway {
@@ -400,4 +419,77 @@ void main() {
     await session.close();
     await tester.pump();
   });
+
+  testWidgets(
+    'an interruption gives the device back and reopens it at the position',
+    (tester) async {
+      final player = _Player();
+      final engine = _YieldingEngine(player: player);
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        startupByteTarget: 0,
+      );
+      final session = _Session();
+      final policy = PlaybackSession(
+        state,
+        engine,
+        sessionFactory: () async => session,
+      );
+      state.playQueue([_track]);
+      await tester.pump();
+      expect(player.plays, 1);
+      expect(session.activations, [true]);
+
+      // Seven seconds in, a call (or another player) takes the output.
+      player.position = const Duration(seconds: 7);
+      await tester.pump();
+      session.interruptions.add(
+        AudioInterruptionEvent(true, AudioInterruptionType.pause),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(state.playing, isFalse);
+      expect(
+        player.stops,
+        1,
+        reason: 'the device is given back instead of parked in PAUSED',
+      );
+
+      session.interruptions.add(
+        AudioInterruptionEvent(false, AudioInterruptionType.pause),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(state.playing, isTrue);
+      expect(state.playbackError, isNull);
+      expect(
+        player.sought,
+        const Duration(seconds: 7),
+        reason: 'the reopened source resumes where the interruption stopped',
+      );
+      expect(player.plays, 2, reason: 'the reopened device plays again');
+      // The grant is re-asserted on resume (a no-op while the platform still
+      // holds it) and never released: giving the device back is not giving up
+      // audio focus.
+      expect(session.activations, isNotEmpty);
+      expect(session.activations.last, isTrue);
+      expect(
+        session.activations.where((active) => !active),
+        isEmpty,
+        reason: 'a transient interruption keeps the focus grant',
+      );
+
+      policy.close();
+      await policy.settled;
+      state.dispose();
+      engine.dispose();
+      await session.close();
+      await tester.pump();
+    },
+  );
 }
+

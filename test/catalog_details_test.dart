@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/cache/disk_cache.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
+import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 
@@ -212,6 +213,26 @@ void main() {
       expect(Album.fromJson(ep.toJson()).releaseType, 'EP/Single');
     },
   );
+
+  test('a saved-album page survives the disk cache round trip', () {
+    final page = AlbumPage(
+      albums: <Album>[
+        Catalog.albumFromGateway(GatewayAlbum.fromJson(_album(77))),
+      ],
+      more: true,
+      receivedCount: 3,
+      total: 34,
+    );
+    final restored = AlbumPage.fromJson(page.toJson());
+    expect(restored.albums.single.title, page.albums.single.title);
+    expect(restored.albums.single.artist, page.albums.single.artist);
+    expect(restored.more, isTrue);
+    expect(restored.receivedCount, 3);
+    expect(restored.total, 34);
+    // A snapshot written before the collection total was stored still loads.
+    final older = page.toJson()..remove('total');
+    expect(AlbumPage.fromJson(older).total, isNull);
+  });
 
   test('artist songs use the paged endpoint and are cached', () async {
     final gateway = _Gateway();

@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 import '../cache/disk_cache.dart';
 import '../cache/media_cache.dart';
 import '../gateway/gateway.dart';
+import '../gateway/transport.dart' show GatewayServiceException;
 import 'audio_quality.dart';
 import 'billboard.dart';
 import 'biliboard.dart';
@@ -18,6 +19,11 @@ part 'platform_catalog.dart';
 
 /// A local playlist identity for the complete daily recommendation response.
 const String dailyRecommendationsPlaylistId = 'daily-recommendations';
+
+/// Albums read per 收藏的专辑 page. Large enough that a collection of a few
+/// hundred albums opens in a handful of reads, small enough to stay a fast
+/// first paint.
+const int _savedAlbumPageSize = 50;
 
 /// Music returned by the gateway.
 class HomeFeed {
@@ -133,6 +139,11 @@ class Catalog {
   // Keys that a mutation invalidated but whose disk tombstone may not have
   // landed yet. Cache-first reads must skip them even during that window.
   final Set<String> _invalidatedKeys = <String>{};
+
+  /// One generation per account scope for the paginated 收藏的专辑 reads. A
+  /// forced refresh bumps it, which retires every cached page of the
+  /// collection at once instead of only the one key a page happens to hold.
+  final Map<String, int> _savedAlbumGenerations = <String, int>{};
 
   /// The hottest decoded snapshots, in front of the disk cache.
   ///
@@ -1307,6 +1318,70 @@ class Catalog {
     return (await albumDetails(albumId)).tracks;
   }
 
+  /// 收藏的专辑: one page of the albums the signed-in account saved.
+  ///
+  /// [uid] scopes the NetEase collection; a platform connection ignores it and
+  /// reads its own starred albums instead.
+  ///
+  /// Every page is cached under its own key, so [force] cannot expire them one
+  /// by one: it bumps the generation the keys carry instead, which drops the
+  /// whole set at once and keeps a refreshed collection from mixing fresh
+  /// first pages with stale later ones.
+  Future<AlbumPage> savedAlbums(
+    int uid, {
+    int offset = 0,
+    bool force = false,
+  }) async {
+    if (offset < 0) throw ArgumentError.value(offset, 'offset');
+    if (usesPlatformGateway) {
+      return _platform.savedAlbums(activeGateway, offset);
+    }
+    if (uid <= 0) {
+      return const AlbumPage(albums: <Album>[], more: false, receivedCount: 0);
+    }
+    final String scope = '$_scope:$uid';
+    if (force) {
+      _savedAlbumGenerations[scope] =
+          (_savedAlbumGenerations[scope] ?? 0) + 1;
+    }
+    final int generation = _savedAlbumGenerations[scope] ?? 0;
+    final key = 'saved-albums:v3:$scope:$generation:$offset';
+    return _cached(
+      key,
+      const Duration(minutes: 15),
+      AlbumPage.fromJson,
+      (value) => value.toJson(),
+      () async {
+        final payload = await gateway.albumSublist(
+          limit: _savedAlbumPageSize,
+          offset: offset,
+        );
+        final albums = albumSublistAlbums(payload);
+        _online = true;
+        // Only what the detail page can open: an entry without a usable album
+        // reference would render as a card that does nothing.
+        final List<Album> openable = <Album>[];
+        for (final GatewayAlbum album in albums) {
+          final Album value = albumFromGateway(album);
+          if (value.hasReference) openable.add(value);
+        }
+        return AlbumPage(
+          albums: openable,
+          // The marker the route asked for, with the page length as a
+          // backstop: a service that stops sending it must not truncate the
+          // collection at its first page.
+          more:
+              (albumSublistHasMore(payload) ||
+                  albums.length >= _savedAlbumPageSize) &&
+              albums.isNotEmpty,
+          total: albumSublistCount(payload),
+          receivedCount: albums.length,
+        );
+      },
+      failureCooldown: const Duration(seconds: 30),
+    );
+  }
+
   Future<List<Track>> albumTracksFor(String key) async =>
       (await albumDetailsFor(key)).tracks;
 
@@ -1600,7 +1675,12 @@ class Catalog {
         }
       } catch (error) {
         failure ??= error;
-        mayTryUpstream = false;
+        // A refusal is about the account or the song, so hammering every lower
+        // tier would only repeat the same answer. A rate refusal is different:
+        // it has already been retried once inside `_resolveAudioSource`, and a
+        // different rendition is a different request, so the lower tiers are
+        // still worth a try rather than failing the track outright.
+        if (!isRateLimited(error)) mayTryUpstream = false;
         _online = false;
       }
     }
@@ -1609,6 +1689,22 @@ class Catalog {
     return null;
   }
 
+  /// Whether [error] is the service's request-rate refusal.
+  ///
+  /// Holding down "next" is enough to reach it. It is deliberately *not*
+  /// treated as an ordinary failure: it says nothing about the song, so
+  /// playback degrades to another rendition (or a cached file) instead of
+  /// reporting the track as unplayable.
+  static bool isRateLimited(Object? error) =>
+      error is GatewayServiceException && _isRateLimitCode(error.code);
+
+  /// The codes the service uses to say "too many requests".
+  ///
+  /// -460 is the service's "too frequent" code; 406 is the refusal the CDN-side
+  /// endpoints answer with; 429 is the standard one.
+  static bool _isRateLimitCode(int code) =>
+      code == -460 || code == 406 || code == 429;
+
   /// Playback URL for a track, or null when the gateway has none (VIP /
   /// region lock / offline).
   Future<String?> audioUrlFor(
@@ -1616,14 +1712,49 @@ class Catalog {
     AudioQuality quality = AudioQuality.exhigh,
   }) async => (await audioSourceFor(track, quality: quality))?.url;
 
+  /// Resolves one requested tier, retrying it once when the *answer* was a
+  /// request-rate refusal.
+  ///
+  /// A refusal that arrives as an exception is retried by the gateway transport
+  /// itself; here [songUrl] returns normally, so an empty entry carrying the
+  /// refusal code is the signal to wait and ask this same tier again. Retrying
+  /// inside the tier keeps every tier requested exactly once, which is the
+  /// contract the fallback chain is built on.
   Future<AudioSource?> _resolveAudioSource(
     int id,
     AudioQuality requested,
   ) async {
-    final GatewaySongUrl? result = await gateway.songUrl(
-      id,
-      level: requested.level,
-    );
+    for (var attempt = 0; ; attempt++) {
+      final GatewaySongUrl? result = await gateway.songUrl(
+        id,
+        level: requested.level,
+      );
+      final int? code = result?.code;
+      final bool refusedByRate = code != null && _isRateLimitCode(code);
+      final AudioSource? resolved = _audioSourceFrom(result, requested);
+      if (resolved != null) return resolved;
+      if (!refusedByRate || attempt >= _rateLimitAttempts - 1) {
+        if (refusedByRate) {
+          // Still refused after the paced retry: surface it as the service
+          // refusal it is, so the caller degrades instead of blaming the song.
+          throw GatewayServiceException(code, '/song/url/v1');
+        }
+        return null;
+      }
+      // The refusal is a verdict on the request rate, not on the song.
+      await Future<void>.delayed(_rateLimitBackoff);
+    }
+  }
+
+  /// Attempts per tier, and the pause between them, for a rate refusal.
+  static const int _rateLimitAttempts = 2;
+  static const Duration _rateLimitBackoff = Duration(milliseconds: 700);
+
+  /// Maps one gateway answer onto a playable source, or null when there is none.
+  static AudioSource? _audioSourceFrom(
+    GatewaySongUrl? result,
+    AudioQuality requested,
+  ) {
     final String? raw = result?.url;
     if (raw == null || raw.isEmpty) return null;
     final String url = raw.startsWith('http://')

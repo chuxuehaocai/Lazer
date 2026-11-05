@@ -7,6 +7,11 @@
 // the download instead of failing, which is also what makes seek-before-downloaded
 // behave like a slow file rather than a short one.
 //
+// The download is the only source of bytes: nothing here fetches a range on
+// demand, so what the player may seek to is decided by how much of the track has
+// landed. The entry publishes that size as soon as the response announces it,
+// because a demuxer can only turn a seek's timestamp into a byte offset with it.
+//
 // Only the file and the download live here; the reader lifecycle belongs to
 // `NativeStreamReader` and the transport to `NativeAudioEngine`.
 library;
@@ -47,6 +52,10 @@ class AudioStreamEntry {
   /// Called once when the download ends, with whether it failed.
   void Function(bool failed)? onFinished;
 
+  /// Called when the track's total size becomes known, so the reader can report it
+  /// to the engine's demuxer.
+  void Function()? onLengthKnown;
+
   /// A reader can attach after the HTTP response already finished. Replay the
   /// current state so its first blocking read never waits for a lost event.
   void bindReader({
@@ -56,6 +65,7 @@ class AudioStreamEntry {
     onAppended = appended;
     onFinished = finished;
     appended();
+    onLengthKnown?.call();
     if (_complete || _cancelled || _failure != null) finished(!_complete);
   }
 
@@ -65,6 +75,15 @@ class AudioStreamEntry {
   Object? _failure;
   RandomAccessFile? _sink;
   Completer<void>? _done;
+
+  /// When the download last moved, for the stall report. Set on every chunk and
+  /// on every wait, so a reader can tell "slow" from "dead".
+  DateTime _lastProgressAt = DateTime.now();
+
+  /// Completed once the track's size is known or provably unknowable (the body
+  /// started arriving without a `Content-Length`), so a caller can wait for the
+  /// one fact a demuxer needs before it opens the source.
+  final Completer<void> _lengthResolved = Completer<void>();
 
   /// Bytes currently readable from the file.
   int get downloadedBytes => _downloadedBytes;
@@ -77,11 +96,29 @@ class AudioStreamEntry {
 
   bool get cancelled => _cancelled;
 
-  /// Downloaded fraction, 0 when the server never announced a length.
-  double get progress {
+  /// Whether the server announced a total size. When it did not, [progress] is
+  /// unmeasurable rather than zero: the bytes are still arriving.
+  bool get lengthKnown => (expectedBytes ?? 0) > 0;
+
+  /// Whether the download has neither moved for [threshold] nor finished.
+  ///
+  /// A response that trickles a byte per minute still resets this, which is the
+  /// honest answer: bytes are arriving, just slowly.
+  bool stalledFor(Duration threshold, {DateTime? now}) {
+    if (_complete || _cancelled || _failure != null) return false;
+    return (now ?? DateTime.now()).difference(_lastProgressAt) >= threshold;
+  }
+
+  /// Downloaded fraction, or null when the server never announced a length.
+  ///
+  /// Returning null keeps "cannot be measured" apart from "nothing landed": a
+  /// caller that treats an unmeasurable stream as 0 % hides a fully downloaded
+  /// chunked response behind an empty buffer bar, and one that treats it as
+  /// 100 % lets the seek rail run past what the reader can actually serve.
+  double? get progress {
     if (_complete) return 1;
     final int? total = expectedBytes;
-    if (total == null || total <= 0) return 0;
+    if (total == null || total <= 0) return null;
     return (_downloadedBytes / total).clamp(0, 1);
   }
 
@@ -91,6 +128,42 @@ class AudioStreamEntry {
   /// The reader asks for the length, so an announced size is reported even while
   /// the file is still growing; a growing file then looks like a slow source.
   int? get lengthHint => expectedBytes;
+
+  /// Waits for the download to announce the track's size, or for [timeout].
+  ///
+  /// A demuxer needs the source length to turn a seek's timestamp into a byte
+  /// offset, and the size arrives with the response headers — later than the
+  /// point the engine creates its reader. Returns the size when it is known, and
+  /// null when the server never announced one (the body has already started, so
+  /// waiting longer would only delay playback).
+  Future<int?> expectedLengthWithin(Duration timeout) async {
+    final int? known = expectedBytes;
+    if (known != null && known > 0) return known;
+    if (_done == null || _lengthResolved.isCompleted || _cancelled || _failure != null) {
+      // Nothing is downloading, so there is no announcement to wait for.
+      return expectedBytes;
+    }
+    await _lengthResolved.future.timeout(
+      timeout,
+      onTimeout: () => _resolveLength(),
+    );
+    return expectedBytes;
+  }
+
+  void _resolveLength() {
+    if (_lengthResolved.isCompleted) return;
+    _lengthResolved.complete();
+    onLengthKnown?.call();
+  }
+
+  /// Reports a size the response announced, whether or not the wait for it is still running.
+  ///
+  /// [_resolveLength] latches, so a caller that stopped waiting before the headers arrived would
+  /// otherwise never hear about the size at all.
+  void _announceLength() {
+    if (!_lengthResolved.isCompleted) _lengthResolved.complete();
+    onLengthKnown?.call();
+  }
 
   void cancel() {
     if (_cancelled || _complete) return;
@@ -117,6 +190,8 @@ class AudioStreamEntry {
       await _sink?.close();
       _sink = null;
       if (!done.isCompleted) done.complete();
+      // Nobody should keep waiting for a size that is not coming.
+      _resolveLength();
       onFinished?.call(failed || _cancelled);
     }
   }
@@ -128,8 +203,15 @@ class AudioStreamEntry {
     if (announced != null && announced > 0 && position == announced) {
       _downloadedBytes = position;
       _complete = true;
+      _lastProgressAt = DateTime.now();
+      _resolveLength();
       return;
     }
+    // A cache file left by a previous launch is a resume hint, never the track's size: it is exactly
+    // as long as the last session got. Publishing its length as `expectedBytes` told the demuxer the
+    // song ended there — the reader returns EOF at that byte count — and made `progress` report a
+    // partial file as fully downloaded. The size is filled in below, from the response or from a
+    // server that says the range is already satisfied.
     if (announced != null && announced > 0 && position > announced) {
       // The file is longer than the track claims to be (a changed variant or a
       // stale partial file): start over rather than resuming past the end.
@@ -146,6 +228,21 @@ class AudioStreamEntry {
       request.headers.set(HttpHeaders.rangeHeader, 'bytes=$position-');
     }
     final HttpClientResponse response = await request.close();
+    // A range starting past the end means the cache file already holds everything the server has,
+    // which is a finished download rather than a failure. It is also the only way to learn the size
+    // of a fully cached track whose provider never announced one, so it is recorded here: for a file
+    // the server will not serve a byte beyond, the file's length *is* the track's length.
+    if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable && position > 0) {
+      await response.drain<void>();
+      await _sink?.close();
+      _sink = null;
+      _downloadedBytes = position;
+      expectedBytes = position;
+      _complete = true;
+      _lastProgressAt = DateTime.now();
+      _announceLength();
+      return;
+    }
     if (response.statusCode != HttpStatus.ok &&
         response.statusCode != HttpStatus.partialContent) {
       throw HttpException(
@@ -164,7 +261,13 @@ class AudioStreamEntry {
       _downloadedBytes = 0;
     }
     final int? total = _totalBytes(response, position);
-    if (total != null) expectedBytes = total;
+    if (total != null) {
+      expectedBytes = total;
+      // Announce even when the wait for it already expired: `expectedLengthWithin` gives up after a
+      // timeout, and the size that lands afterwards still has to reach the demuxer, which cannot
+      // turn a seek's timestamp into a byte offset without it.
+      _announceLength();
+    }
 
     await for (final List<int> chunk in response.timeout(
       const Duration(seconds: 20),
@@ -174,9 +277,13 @@ class AudioStreamEntry {
       final RandomAccessFile sink = _sink ??= await file.open(
         mode: FileMode.append,
       );
+      // Body bytes without a response length: the server never announced a total,
+      // so nothing is gained by waiting for one.
+      _resolveLength();
       sink.writeFromSync(chunk);
       position += chunk.length;
       _downloadedBytes = position;
+      _lastProgressAt = DateTime.now();
       onAppended?.call();
     }
     if (_cancelled) return;
@@ -185,6 +292,7 @@ class AudioStreamEntry {
       throw const FileSystemException('audio download ended early');
     }
     _complete = true;
+    _lastProgressAt = DateTime.now();
   }
 
   /// Total size from `Content-Length`, or from `Content-Range` when resuming.
@@ -231,11 +339,20 @@ class AudioStreamCache {
   ///
   /// The file exists by the time this returns, so the engine's reader can open it
   /// immediately; the bytes arrive afterwards.
-  Future<AudioStreamEntry> open(String url, {int? expectedBytes}) async {
+  ///
+  /// [force] starts a new download even when the cached entry exists — including
+  /// one whose download already failed. The fresh entry resumes from the bytes
+  /// already on disk, so recovering a dead download does not refetch the part
+  /// that did arrive.
+  Future<AudioStreamEntry> open(
+    String url, {
+    int? expectedBytes,
+    bool force = false,
+  }) async {
     if (_closed) throw StateError('the audio cache is closed');
     final int key = _cacheKey(url);
     final AudioStreamEntry? existing = _entries[key];
-    if (existing != null) {
+    if (existing != null && !force) {
       if (!existing.complete && !existing.cancelled) return existing;
       // A finished or cancelled download is restarted from what is on disk.
       existing.expectedBytes ??= expectedBytes;

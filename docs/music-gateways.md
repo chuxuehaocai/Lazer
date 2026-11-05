@@ -113,12 +113,19 @@ Supported backend operations:
 - Playlist creation with explicit visibility, repeated song additions and removal
   by playlist index, including duplicate song occurrences.
 - Starred songs, star/unstar, original streams and MP3 transcoding requests.
+- Starred albums as the saved-album collection (`getStarred2`).
 - Structured timed lyrics, older lyric endpoint fallback and play scrobbling.
 - Random songs as the provider's recommendation source.
 
 Inspect `supports(MusicCapability...)` before showing provider-specific features.
 Navidrome does not advertise NetEase comments or listen-together capabilities.
 Its random-song feed is not a personalized NetEase recommendation feed.
+
+`收藏的专辑` is available when `savedAlbums` is advertised: NetEase reads
+`/api/album/sublist` for the signed-in account, Navidrome reads the `album` list
+of `getStarred2`. The shared album library hides its entry when the active
+gateway does not advertise the capability. NetEase requires a session; a guest
+fails with an authentication error before the request leaves the device.
 
 Album browsing is available when `browseAlbums` is advertised. NetEase does not
 currently advertise that operation through the new interface. Paging uses
@@ -161,8 +168,9 @@ saved with connection preferences.
 
 `Catalog` keeps the NetEase-specific behavior while delegating provider references
 to the registered owner. Use `albumDetailsFor`, `albumTracksFor`,
-`artistAlbumPageFor` and `artistSongsFor` in shared views; the integer overloads
-remain compatible with NetEase callers. Native song references also route audio,
+`artistAlbumPageFor`, `artistSongsFor` and `savedAlbums` in shared views; the
+integer overloads remain compatible with NetEase callers. Native song references
+also route audio,
 downloads, favorites and lyric requests, including timing offsets, to their owner.
 Qualified listens use the provider's scrobble endpoint.
 

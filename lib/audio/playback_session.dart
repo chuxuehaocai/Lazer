@@ -135,8 +135,10 @@ class PlaybackSession {
       if (_closed || state.independentPlayback || generation != _generation) {
         return;
       }
+      // The device is going away with the route: stop, and never resume on its
+      // own — the listener unplugged on purpose.
       _resume = false;
-      state.pause();
+      _yieldOutput();
     });
     final active = await session.setActive(true);
     if (_closed || state.independentPlayback || generation != _generation) {
@@ -159,15 +161,41 @@ class PlaybackSession {
       _resume =
           state.playing || (_resume && _interruptedTrack == state.current?.id);
       _interruptedTrack = state.current?.id;
-      state.pause();
+      _yieldOutput();
     } else {
       final resume =
           _resume &&
           event.type == AudioInterruptionType.pause &&
           _interruptedTrack == state.current?.id;
       _resume = false;
-      if (resume) state.play();
+      if (resume) _resumeOutput();
     }
+  }
+
+  /// Stops the transport for an interruption, handing the output device back
+  /// when the engine is the one holding it.
+  ///
+  /// A shared-mode Android stream parked in PAUSED still owns the endpoint, and
+  /// the platform hands that endpoint to whoever asked for focus — the stream is
+  /// reclaimed, and the resume that follows starts a device that is already
+  /// gone. Closing it here is what makes "who plays now" the platform's decision:
+  /// the application stops holding audio it is no longer allowed to play, and
+  /// opens the device again when the interruption ends.
+  void _yieldOutput() {
+    if (engine is InterruptionYieldingAudioEngine) {
+      unawaited(state.suspendForInterruption());
+      return;
+    }
+    state.pause();
+  }
+
+  /// Reopens the output at the interrupted position and continues.
+  void _resumeOutput() {
+    if (engine is InterruptionYieldingAudioEngine) {
+      unawaited(state.resumeAfterInterruption());
+      return;
+    }
+    state.play();
   }
 
   void close() {

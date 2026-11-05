@@ -54,6 +54,8 @@ class AutoMixAudioEngine
         BufferChangeReportingAudioEngine,
         SeekBoundaryReportingAudioEngine,
         QueueAudioEngine,
+        QueuedSourceReportingAudioEngine,
+        MixPresentingAudioEngine,
         FocusAwareAudioEngine,
         SessionPreparingAudioEngine,
         FailureReportingAudioEngine {
@@ -91,8 +93,8 @@ class AutoMixAudioEngine
   late final Timer _clock;
   final StreamController<void> _completed = StreamController<void>.broadcast();
   final StreamController<int> _advanced = StreamController<int>.broadcast();
-  final StreamController<String> _failures =
-      StreamController<String>.broadcast();
+  final StreamController<AudioFailure> _failures =
+      StreamController<AudioFailure>.broadcast();
   final StreamController<void> _bufferChanges =
       StreamController<void>.broadcast();
 
@@ -193,6 +195,17 @@ class AutoMixAudioEngine
     return scheme == 'http' || scheme == 'https';
   }
 
+  /// The URL the second decoder is preparing, or null when there is none.
+  @override
+  String? get queuedSourceUrl {
+    if (_incoming == null || _currentIndex + 1 >= _queueUrls.length) return null;
+    return _queueUrls[_currentIndex + 1];
+  }
+
+  /// Whether the incoming decoder is the one being heard right now.
+  @override
+  bool get mixPresented => _presentedIncoming && _incoming != null;
+
   @override
   Stream<void> get completed => _completed.stream;
   @override
@@ -200,9 +213,11 @@ class AutoMixAudioEngine
   @override
   Stream<void> get bufferChanges => _bufferChanges.stream;
   @override
-  Stream<String> get failures => _failures.stream;
+  Stream<AudioFailure> get failures => _failures.stream;
   @override
-  String? get pendingFailure => fallbackNotice;
+  AudioFailure? get pendingFailure => fallbackNotice == null
+      ? null
+      : AudioFailure(fallbackNotice!, AudioFailureKind.unknown);
 
   @override
   Future<void> setUrl(String url) async {
@@ -327,7 +342,11 @@ class AutoMixAudioEngine
           );
         } else if (player == _active && _sourceLoaded) {
           _playing = false;
-          if (!_failures.isClosed) _failures.add('$error\n$stack');
+          if (!_failures.isClosed) {
+            _failures.add(
+              AudioFailure('$error\n$stack', AudioFailureKind.unknown),
+            );
+          }
         }
       }),
     );
@@ -551,7 +570,9 @@ class AutoMixAudioEngine
             if (!_disposed &&
                 generation == _generation &&
                 !_failures.isClosed) {
-              _failures.add('$error\n$stack');
+              _failures.add(
+                AudioFailure('$error\n$stack', AudioFailureKind.unknown),
+              );
             }
           })
           .whenComplete(() {

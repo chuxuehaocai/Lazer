@@ -577,6 +577,29 @@ class LazerAudioBridgeApi {
         int Function(Pointer<Void>)
       >('lazer_bridge_reader_bytes_available');
 
+  /// Announces the track's size once the download learns it.
+  ///
+  /// A demuxer turns a seek's timestamp into the byte offset this reader is
+  /// asked for through the source length, so an unknown length is what makes
+  /// seeking a streaming track fail outright.
+  late final void Function(Pointer<Void>, int)? readerSetLength = _optional<
+    void Function(Pointer<Void>, int)
+  >(
+    () => _library.lookupFunction<
+      Void Function(Pointer<Void>, Int64),
+      void Function(Pointer<Void>, int)
+    >('lazer_bridge_reader_set_length'),
+  );
+
+  /// Looks a symbol up and returns null when this bridge does not export it.
+  T? _optional<T>(T Function() lookup) {
+    try {
+      return lookup();
+    } on ArgumentError {
+      return null;
+    }
+  }
+
   /// Addresses of the five callbacks the engine invokes on its own threads.
   ///
   /// These are ordinary exported C functions, so they are taken with

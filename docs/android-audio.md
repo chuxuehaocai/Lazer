@@ -10,6 +10,28 @@ FFmpeg resamples to the format AAudio actually negotiates. Float PCM is preferre
 flushes it before continuing. Start is asynchronous because some Android
 AudioTrack implementations complete a resume only after the next PCM write.
 
+## Interruptions and a reclaimed endpoint
+
+The endpoint belongs to the platform, not to this stream. When another
+application takes the output — a call, another player, a Bluetooth route change
+or an unplugged headset — AAudio reports the loss through the stream's error
+callback, and Android reclaims the device from the stream, including a stream
+that is only paused. Recording that loss is the callback's whole job: AAudio
+forbids stopping, closing or reopening a stream from inside it, and the callback
+must not block. The backend therefore stores the loss, reports it on the next
+query, write or `start()`, and writes one warning that names the endpoint it
+happened on (`device <id>, <rate> Hz, <channels> ch, float|i16, buffer <n>
+frames`) — Info is not retained in the log the application reads.
+
+Recovery is the control path's job. Audio focus is Android's decision and is
+owned by Dart (`audio_session`, `lib/audio/playback_session.dart`): losing focus
+closes the output so the application stops holding audio it may no longer play,
+and the engine is opened again — at the position it reached — when the
+interruption ends. A loss reported while playing is treated the same way
+(`AudioEngine`'s device failures), and playback only ends in a named error when
+that second open does not come up. Engines whose player owns its own session
+(`just_audio`) keep the plain pause/resume behaviour.
+
 ## Build and package
 
 Install NDK `28.2.13676358`, CMake, Ninja, pkg-config, NASM, Make and a C compiler

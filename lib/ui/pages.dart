@@ -7,6 +7,7 @@ export 'home_pages.dart'
         ChartLoadCard;
 export 'chart_page.dart' show AppChartPage;
 export 'library_page.dart' show AppLibraryPage;
+export 'album_library_page.dart' show AppSavedAlbumsPage;
 export 'listening_statistics_page.dart' show AppListeningStatisticsPage;
 export 'artist_pages.dart'
     show AppArtistPage, AppArtistReleasesPage, AppArtistSongsPage;

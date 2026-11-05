@@ -274,6 +274,7 @@ void main() {
               state: state,
               onOpenPlaylist: (_) {},
               onOpenLocalMusic: () {},
+              onOpenSavedAlbums: () {},
             ),
           ),
         ),

@@ -246,6 +246,7 @@ else()
 endif()
 
 add_library(lazer-audio ${LAZER_AUDIO_LIBRARY_TYPE}
+    src/beat_grid.cpp
     src/common.cpp
     src/dff_dsf_reader.cpp
     src/engine.cpp
@@ -312,6 +313,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # Engine sources directly and supplies its own fake platform-output factory.
     add_executable(lazer-audio-engine-gapless-probe
         tools/lazer_audio_engine_gapless_probe.cpp
+        src/beat_grid.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
         src/engine.cpp
@@ -346,11 +348,35 @@ if(LAZER_AUDIO_BUILD_PROBE)
     add_test(NAME lazer-audio-engine-gapless
         COMMAND $<TARGET_FILE:lazer-audio-engine-gapless-probe>)
 
+    # Tempo and beat phase from PCM: the engine's stand-in for the reference player's analysed
+    # beat grid, and the only thing the transition planner needs from it.
+    add_executable(lazer-audio-beat-grid-probe
+        tools/lazer_audio_beat_grid_probe.cpp
+        src/beat_grid.cpp)
+    target_include_directories(lazer-audio-beat-grid-probe PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/include"
+        "${CMAKE_CURRENT_LIST_DIR}/src")
+    target_compile_features(lazer-audio-beat-grid-probe PRIVATE cxx_std_20)
+    if(WIN32)
+        target_compile_definitions(lazer-audio-beat-grid-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    endif()
+    if(MSVC)
+        set_property(TARGET lazer-audio-beat-grid-probe PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(lazer-audio-beat-grid-probe PRIVATE /W4 /permissive- /EHsc)
+    else()
+        target_compile_options(lazer-audio-beat-grid-probe PRIVATE -Wall -Wextra)
+    endif()
+    add_test(NAME lazer-audio-beat-grid
+        COMMAND $<TARGET_FILE:lazer-audio-beat-grid-probe>)
+
     # The bit-perfect claim and the three facts it is derived from (ABI v25). Captures the engine's
     # real output bytes through a fake fixed-period endpoint, so it proves byte-exactness without a
     # device, and proves the claim goes away when the DSP is in the path or the format is not the
     # source's.
     add_executable(lazer-audio-engine-bit-perfect-probe
+        src/beat_grid.cpp
         tools/lazer_audio_engine_bit_perfect_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
@@ -389,6 +415,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # the case asserts that a producer which keeps up never pads, and that an injected stall is
     # counted, bounded by the stall and recovered from.
     add_executable(lazer-audio-ring-stress-probe
+        src/beat_grid.cpp
         tools/lazer_audio_ring_stress_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
@@ -427,6 +454,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # Validate the Engine's global RequireDoP policy against PCM and raw stereo DSD using a
     # variable-write fake endpoint; no physical audio device is opened.
     add_executable(lazer-audio-engine-dop-probe
+        src/beat_grid.cpp
         tools/lazer_audio_engine_dop_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
@@ -464,6 +492,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
 
     # Exercise the direct Native DSD request/session contract without ALSA hardware.
     add_executable(lazer-audio-engine-native-dsd-probe
+        src/beat_grid.cpp
         tools/lazer_audio_engine_native_dsd_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp
@@ -613,6 +642,7 @@ if(LAZER_AUDIO_BUILD_PROBE)
     # The full matrix executable remains available for manual diagnostics. The focused cases below
     # are registered with hard timeouts so a stalled backend cannot hold the whole CI job open.
     add_executable(lazer-audio-engine-pcm-matrix-probe
+        src/beat_grid.cpp
         tools/lazer_audio_engine_pcm_matrix_probe.cpp
         src/common.cpp
         src/dff_dsf_reader.cpp

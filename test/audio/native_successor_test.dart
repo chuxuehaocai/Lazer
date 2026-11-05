@@ -50,6 +50,11 @@ class _Bridge implements LazerAudioBridgeApi {
       (handle, failed) => finished[handle.address] = failed;
   @override
   void Function(Pointer<Void>) get readerDestroy => (_) {};
+  /// The sizes the engine announced to each reader.
+  final lengths = <int, int>{};
+  @override
+  void Function(Pointer<Void>, int)? get readerSetLength =>
+      (handle, bytes) => lengths[handle.address] = bytes;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -84,9 +89,14 @@ class _Cache extends AudioStreamCache {
   final entries = <String, AudioStreamEntry>{};
   Completer<void>? delay, started;
   @override
-  Future<AudioStreamEntry> open(String url, {int? expectedBytes}) async {
+  Future<AudioStreamEntry> open(
+    String url, {
+    int? expectedBytes,
+    bool force = false,
+  }) async {
     if (started?.isCompleted == false) started!.complete();
     await delay?.future;
+    if (force) entries.remove(url);
     return entries.putIfAbsent(
       url,
       () => AudioStreamEntry(url: url, file: File(url), key: url.hashCode),

@@ -1,4 +1,5 @@
 #include "audio_output.h"
+#include "log_proxy.h"
 #include <aaudio/AAudio.h>
 
 #include <algorithm>
@@ -6,18 +7,22 @@
 #include <deque>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 struct AAudioStreamBuilder {
     int32_t format = AAUDIO_FORMAT_PCM_FLOAT;
     int32_t rate = 0;
     int32_t channels = 2;
+    AAudioStream_errorCallback errorCallback = nullptr;
+    void *errorUserData = nullptr;
 };
 struct AAudioStream {
     int32_t format = AAUDIO_FORMAT_PCM_FLOAT;
     int32_t rate = 48000;
     int32_t channels = 2;
     int32_t buffer = 960;
+    int32_t device = 7;
     int64_t written = 0, read = 0;
     int32_t state = AAUDIO_STREAM_STATE_OPEN;
 };
@@ -30,11 +35,23 @@ int negotiatedRate = 48000, negotiatedChannels = 2;
 bool rejectFloat = false, rejectAll = false, waitDisconnect = false;
 bool resizeFails = false;
 int requestedRate = -1;
+AAudioStream_errorCallback activeErrorCallback = nullptr;
+void *activeErrorUserData = nullptr;
 std::deque<int32_t> writes;
 std::vector<uint8_t> received;
 
 void require(bool value, const char *message) {
     if (!value) throw std::runtime_error(message);
+}
+
+void LAZER_AUDIO_CALL captureLine(void *context, int32_t, const char *message) {
+    auto *lines = static_cast<std::vector<std::string> *>(context);
+    lines->emplace_back(message == nullptr ? std::string() : std::string(message));
+}
+
+size_t countContaining(const std::vector<std::string> &lines, const char *needle) {
+    return static_cast<size_t>(std::count_if(lines.begin(), lines.end(),
+        [needle](const std::string &line) { return line.find(needle) != std::string::npos; }));
 }
 
 void defaults() {
@@ -44,6 +61,8 @@ void defaults() {
     negotiatedChannels = 2;
     rejectFloat = rejectAll = waitDisconnect = resizeFails = false;
     requestedRate = -1;
+    activeErrorCallback = nullptr;
+    activeErrorUserData = nullptr;
     writes.clear();
     received.clear();
 }
@@ -153,6 +172,51 @@ void unsupportedPolicies() {
     }
     require(openAttempts == 0, "unsupported policies opened a mixed endpoint");
 }
+
+/* The endpoint belongs to the platform, not to this stream: another player, a call, an unplugged
+ * headset or a route change takes it away, and AAudio reports that through the error callback
+ * before any write can fail. The backend has to turn that into an immediate, named, once-only
+ * record — and a fresh open has to come up connected again. */
+void reclaimedEndpointIsReported() {
+    using namespace lazer::audio;
+    defaults();
+    auto output = createPlatformAudioOutput();
+    AudioOutputRequest request;
+    StreamDescription source;
+    source.sampleRate = 48000;
+    source.channels = 2;
+    AudioOutputSession session;
+    std::string error;
+    std::vector<std::string> lines;
+    LogProxy log;
+    log.install({&captureLine, &lines});
+    require(output->open(request, source, session, error, &log) == LazerAudioOk, "open failed");
+    require(activeErrorCallback != nullptr, "the platform error callback was not registered");
+    require(session.description.find("device 7") != std::string::npos,
+        "the session record does not name the endpoint");
+    require(countContaining(lines, "device 7") == 1, "the opened endpoint was not logged once");
+    require(output->start(error) == LazerAudioOk, "start failed");
+
+    // The platform reclaims the endpoint while the stream is live.
+    activeErrorCallback(active, activeErrorUserData, AAUDIO_ERROR_DISCONNECTED);
+    require(output->queuedFrames(error) < 0 &&
+        error.find("AAUDIO_ERROR_DISCONNECTED") != std::string::npos,
+        "a reclaimed endpoint was not reported before a write failed");
+    std::array<uint8_t, 16> bytes{};
+    require(output->write(bytes.data(), 4, error) < 0, "a reclaimed endpoint accepted a write");
+    require(output->writableFrames(error) < 0, "a reclaimed endpoint still reported writable frames");
+    require(output->start(error) < 0, "a reclaimed endpoint was restarted");
+    require(countContaining(lines, "disconnected") == 1,
+        "the disconnect record was repeated or missing");
+    output->close();
+
+    // A stream opened after the loss is a new one: it must not inherit the record.
+    require(output->open(request, source, session, error, &log) == LazerAudioOk, "reopen failed");
+    require(output->queuedFrames(error) == 0 && error.empty(), "a retired loss poisoned the new stream");
+    require(output->start(error) == LazerAudioOk, "resume after reopen failed");
+    output->close();
+    require(builders == 0 && streams == 0, "reclaim handling leaked resources");
+}
 } // namespace
 
 aaudio_result_t AAudio_createStreamBuilder(AAudioStreamBuilder **builder) {
@@ -175,6 +239,11 @@ void AAudioStreamBuilder_setSharingMode(AAudioStreamBuilder *, aaudio_sharing_mo
 void AAudioStreamBuilder_setPerformanceMode(AAudioStreamBuilder *, aaudio_performance_mode_t) {}
 void AAudioStreamBuilder_setChannelCount(AAudioStreamBuilder *builder, int32_t channels) { builder->channels = channels; }
 void AAudioStreamBuilder_setSampleRate(AAudioStreamBuilder *builder, int32_t rate) { builder->rate = rate; }
+void AAudioStreamBuilder_setErrorCallback(AAudioStreamBuilder *builder,
+    AAudioStream_errorCallback callback, void *userData) {
+    builder->errorCallback = callback;
+    builder->errorUserData = userData;
+}
 aaudio_result_t AAudioStreamBuilder_openStream(AAudioStreamBuilder *builder, AAudioStream **stream) {
     ++openAttempts;
     // Some implementations may return an allocated stream on failure.
@@ -185,6 +254,8 @@ aaudio_result_t AAudioStreamBuilder_openStream(AAudioStreamBuilder *builder, AAu
     active->rate = negotiatedRate;
     active->channels = negotiatedChannels;
     requestedRate = builder->rate;
+    activeErrorCallback = builder->errorCallback;
+    activeErrorUserData = builder->errorUserData;
     return rejectAll || (rejectFloat && builder->format == AAUDIO_FORMAT_PCM_FLOAT)
         ? AAUDIO_ERROR_INVALID_FORMAT : AAUDIO_OK;
 }
@@ -200,6 +271,7 @@ aaudio_format_t AAudioStream_getFormat(AAudioStream *stream) { return stream->fo
 int32_t AAudioStream_getBufferCapacityInFrames(AAudioStream *) { return 960; }
 int32_t AAudioStream_getBufferSizeInFrames(AAudioStream *stream) { return stream->buffer; }
 int32_t AAudioStream_getFramesPerBurst(AAudioStream *) { return 192; }
+int32_t AAudioStream_getDeviceId(AAudioStream *stream) { return stream->device; }
 int32_t AAudioStream_setBufferSizeInFrames(AAudioStream *stream, int32_t frames) {
     if (resizeFails) return AAUDIO_ERROR_DISCONNECTED;
     return stream->buffer = frames;
@@ -234,13 +306,22 @@ aaudio_result_t AAudioStream_write(AAudioStream *stream, const void *bytes, int3
     stream->written += accepted;
     return accepted;
 }
-const char *AAudio_convertResultToText(aaudio_result_t) { return "fake AAudio error"; }
+const char *AAudio_convertResultToText(aaudio_result_t result) {
+    switch (result) {
+        case AAUDIO_OK: return "AAUDIO_OK";
+        case AAUDIO_ERROR_DISCONNECTED: return "AAUDIO_ERROR_DISCONNECTED";
+        case AAUDIO_ERROR_TIMEOUT: return "AAUDIO_ERROR_TIMEOUT";
+        case AAUDIO_ERROR_INVALID_FORMAT: return "AAUDIO_ERROR_INVALID_FORMAT";
+        default: return "fake AAudio error";
+    }
+}
 
 int main() {
     try {
         lifecycle();
         failuresAndFallback();
         unsupportedPolicies();
+        reclaimedEndpointIsReported();
         std::cout << "AAudio backend contract: all checks passed\n";
         return 0;
     } catch (const std::exception &error) {

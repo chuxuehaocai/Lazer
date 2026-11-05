@@ -27,7 +27,11 @@ class IosAudioExportsTest(unittest.TestCase):
         )
         required = set(re.findall(r"'(lazer_bridge_reader_\w+)'", dart))
         self.assertEqual(set(VERIFY.BRIDGE_SYMBOLS), required)
-        self.assertEqual(len(required), 10)
+        # Every reader entry point the Dart side binds, including the ones it
+        # treats as optional: the gate is what proves the shipped image exports
+        # them, so a build cannot silently ship a bridge that cannot report the
+        # source length (which is what makes seeking a stream work at all).
+        self.assertEqual(len(required), 11)
 
     def test_executable_rejects_each_missing_required_symbol(self):
         with tempfile.TemporaryDirectory() as directory:

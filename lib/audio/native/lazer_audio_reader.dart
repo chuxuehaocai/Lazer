@@ -73,6 +73,15 @@ class NativeStreamReader {
   /// Bytes the cache file holds right now, or -1 before it exists.
   int get bytesAvailable => _bridge.readerBytesAvailable(_handle);
 
+  /// Announces the track's total size once the download learns it.
+  ///
+  /// The engine passes it to the demuxer as the source length, which is how a
+  /// demuxer turns a seek's timestamp into a byte offset.
+  void setLength(int expectedBytes) {
+    if (_released || expectedBytes <= 0) return;
+    _bridge.readerSetLength?.call(_handle, expectedBytes);
+  }
+
   /// The downloader appended bytes: wake a blocked read.
   void notifyAppended() {
     if (_released) return;

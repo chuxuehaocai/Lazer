@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../data/catalog.dart';
 import '../data/models.dart';
+import '../gateway/music_models.dart';
 import '../l10n/app_localizations.dart';
 import '../local/local_music_import.dart';
 import '../local/local_music_page.dart';
@@ -34,6 +35,7 @@ class AppLibraryPage extends StatelessWidget {
     required this.state,
     required this.onOpenPlaylist,
     required this.onOpenLocalMusic,
+    required this.onOpenSavedAlbums,
     this.localImporter = const LocalMusicImporter(),
   });
 
@@ -41,11 +43,16 @@ class AppLibraryPage extends StatelessWidget {
   final ValueChanged<Playlist> onOpenPlaylist;
   final VoidCallback onOpenLocalMusic;
 
+  /// 音乐库 → 收藏的专辑: the account's saved albums have their own page, so
+  /// someone looking for an album does not have to read through playlists.
+  final VoidCallback onOpenSavedAlbums;
+
   /// Lets tests hand in a fake chooser; production uses the system picker.
   final LocalMusicImporter localImporter;
 
   @override
   Widget build(BuildContext context) {
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final UserCollections collections = state.collections;
     final List<Playlist> mine = _arrangePlaylists(
       uniquePlaylists(<Playlist>[
@@ -102,6 +109,25 @@ class AppLibraryPage extends StatelessWidget {
                         onOpen: onOpenLocalMusic,
                         importer: localImporter,
                       ),
+                      if (state.supportsMusic(MusicCapability.savedAlbums)) ...[
+                        const SizedBox(height: 12),
+                        AppleGroupedCard(
+                          margin: EdgeInsets.zero,
+                          child: AppleListTile(
+                            key: const ValueKey<String>('open-saved-albums'),
+                            title: context.tr('收藏的专辑'),
+                            subtitle: state.isGuest
+                                ? context.tr('登录后同步收藏的专辑')
+                                : context.tr('按专辑浏览你的收藏'),
+                            leading: AppleIconTile(
+                              icon: Icons.album_rounded,
+                              color: apple.accent,
+                            ),
+                            showChevron: true,
+                            onTap: onOpenSavedAlbums,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       AppleGroupedCard(
                         margin: EdgeInsets.zero,

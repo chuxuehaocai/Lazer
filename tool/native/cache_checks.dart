@@ -241,7 +241,292 @@ Future<List<String>> verifyAudioStreamCache(Directory root) async {
     }
   }
 
+  // 6. A server that never announces a length: while the response is still
+  //    open the fraction is unmeasurable, not zero. Reporting 0 % here is what
+  //    made the buffer bar look empty for a downloaded chunked response.
+  {
+    final Completer<void> gate = Completer<void>();
+    final int half = 32 * 1024;
+    final List<int> payload = List<int>.generate(
+      half * 2,
+      (int index) => index & 0xff,
+    );
+    final Completer<void> bodyHeld = Completer<void>();
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      // Writing without setting `contentLength` makes the server use chunked
+      // transfer encoding: no length is announced, exactly like a CDN that
+      // streams a rendition it has not sized up front.
+      request.response.bufferOutput = false;
+      request.response.add(payload.sublist(0, half));
+      await request.response.flush();
+      if (!bodyHeld.isCompleted) bodyHeld.complete();
+      await gate.future;
+      request.response.add(payload.sublist(half));
+      await request.response.close();
+    });
+    final AudioStreamCache cache = await cacheAt('unknown-length');
+    try {
+      final AudioStreamEntry entry = await cache.open(
+        'http://${server.address.host}:${server.port}/chunked.mp3',
+      );
+      await bodyHeld.future;
+      await _waitFor(
+        () => entry.downloadedBytes > 0,
+        const Duration(seconds: 5),
+      );
+      expect(
+        'length-less download bytes while open',
+        entry.downloadedBytes,
+        half,
+      );
+      expect(
+        'length-less download is unmeasurable (no announced total)',
+        entry.progress,
+        null,
+      );
+      expect('length-less download knows no length', entry.lengthKnown, false);
+      expect('length-less download is not complete', entry.complete, false);
+
+      gate.complete();
+      await entry.done;
+      expect('length-less download completes', entry.complete, true);
+      expect(
+        'a finished download is whole',
+        await entry.file.length(),
+        payload.length,
+      );
+      expect(
+        'a finished download reports complete (file fully readable)',
+        entry.progress,
+        1.0,
+      );
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      cache.close();
+      await server.close(force: true);
+    }
+  }
+
+  // 7. A download that stops delivering is reported as stalled, and a finished
+  //    one never is. This is what lets the player recover a parked decoder
+  //    instead of waiting out the reader's own 45 s deadline.
+  //
+  //    The body is deliberately larger than the client's read buffer: a small
+  //    response is buffered whole by `HttpClient` and would never look like a
+  //    partial read, which is a property of the test client, not of the cache.
+  {
+    final Completer<void> gate = Completer<void>();
+    final List<int> payload = List<int>.generate(
+      1024 * 1024,
+      (int index) => index & 0xff,
+    );
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      request.response.contentLength = payload.length + 4;
+      request.response.add(payload);
+      await request.response.flush();
+      await gate.future;
+      request.response.add(<int>[9, 9, 9, 9]);
+      await request.response.close();
+    });
+    final AudioStreamCache cache = await cacheAt('stall');
+    try {
+      final AudioStreamEntry entry = await cache.open(
+        'http://${server.address.host}:${server.port}/slow.mp3',
+      );
+      // The response is deliberately held open, so wait for the bytes rather
+      // than for a wall-clock guess.
+      await _waitFor(
+        () => entry.downloadedBytes > 0,
+        const Duration(seconds: 10),
+      );
+      expect('a live download has bytes', entry.downloadedBytes > 0, true);
+      expect(
+        'a live download is not stalled',
+        entry.stalledFor(const Duration(seconds: 5)),
+        false,
+      );
+      await _waitFor(
+        () => entry.stalledFor(const Duration(milliseconds: 30)),
+        const Duration(seconds: 5),
+      );
+      expect(
+        'a silent download is stalled',
+        entry.stalledFor(const Duration(milliseconds: 30)),
+        true,
+      );
+      gate.complete();
+      await entry.done;
+      expect('a finished download is not stalled', entry.complete, true);
+      expect(
+        'stall clears when the download finishes',
+        entry.stalledFor(const Duration(milliseconds: 1)),
+        false,
+      );
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      cache.close();
+      await server.close(force: true);
+    }
+  }
+
+  // 8. `open(force: true)` — the recovery path — starts a new entry over the
+  //    same file and resumes from the bytes already on disk, so a dead download
+  //    is not refetched from the beginning.
+  {
+    final List<int> payload = List<int>.generate(
+      4096,
+      (int index) => index & 0xff,
+    );
+    final List<String?> ranges = <String?>[];
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      final String? range = request.headers.value(HttpHeaders.rangeHeader);
+      ranges.add(range);
+      final int start = range == null
+          ? 0
+          : int.parse(RegExp(r'bytes=(\d+)-').firstMatch(range)!.group(1)!);
+      request.response.statusCode = range == null
+          ? HttpStatus.ok
+          : HttpStatus.partialContent;
+      if (range != null) {
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes $start-${payload.length - 1}/${payload.length}',
+        );
+      }
+      request.response.contentLength = payload.length - start;
+      request.response.add(payload.sublist(start));
+      await request.response.close();
+    });
+    final AudioStreamCache cache = await cacheAt('force-reopen');
+    try {
+      final String url =
+          'http://${server.address.host}:${server.port}/again.mp3';
+      final AudioStreamEntry first = await cache.open(
+        url,
+        expectedBytes: payload.length,
+      );
+      await first.done;
+      expect(
+        'first download completes',
+        await first.file.length(),
+        payload.length,
+      );
+
+      // Truncate the way a download that died mid-track leaves the file, then
+      // take the recovery path.
+      await first.file.writeAsBytes(payload.sublist(0, 1024), flush: true);
+      final AudioStreamEntry second = await cache.open(
+        url,
+        expectedBytes: payload.length,
+        force: true,
+      );
+      expect(
+        'a forced reopen makes a new entry',
+        identical(first, second),
+        false,
+      );
+      await second.done;
+      expect(
+        'the restart resumes at the file size',
+        ranges.last,
+        'bytes=1024-',
+      );
+      final Uint8List resumed = await second.file.readAsBytes();
+      expect(
+        'the resumed file is the whole track',
+        resumed.length,
+        payload.length,
+      );
+      expect(
+        'the resumed file is not a doubled prefix',
+        _sameBytes(resumed, Uint8List.fromList(payload)),
+        true,
+      );
+    } finally {
+      cache.close();
+      await server.close(force: true);
+    }
+  }
+
+  // 9. A resume against a server that ignores the range restarts the body at zero;
+  //    the cache must rewrite the file from the start instead of appending the
+  //    bytes it already has a second time.
+  {
+    final Uint8List payload = Uint8List.fromList(
+      List<int>.generate(64 * 1024, (int index) => (index * 3) & 0xff),
+    );
+    final int partial = 8 * 1024;
+    final List<String?> ranges = <String?>[];
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      final String? range = request.headers.value(HttpHeaders.rangeHeader);
+      ranges.add(range);
+      // Every response is the whole track from zero, range or not.
+      request.response.statusCode = HttpStatus.ok;
+      request.response.contentLength = payload.length;
+      request.response.add(payload);
+      await request.response.close();
+    });
+    final Directory directory = Directory('${root.path}/resume-no-range');
+    await directory.create(recursive: true);
+    final AudioStreamCache cache = AudioStreamCache(() async => directory);
+    try {
+      final String url =
+          'http://${server.address.host}:${server.port}/flat.flac';
+      final AudioStreamEntry first = await cache.open(
+        url,
+        expectedBytes: payload.length,
+      );
+      await first.done;
+      first.cancel();
+      // Leave a short partial file behind, the way a download that died does.
+      await first.file.writeAsBytes(payload.sublist(0, partial), flush: true);
+      // The recovery path: a new entry over the same file, resuming from the
+      // bytes already on disk.
+      final AudioStreamEntry resumed = await cache.open(
+        url,
+        expectedBytes: payload.length,
+        force: true,
+      );
+      await resumed.done;
+      expect('the ignored range was still requested', ranges.last, 'bytes=$partial-');
+      final Uint8List bytes = await resumed.file.readAsBytes();
+      expect('a range-less resume rewrites the file', bytes.length, payload.length);
+      expect('a range-less resume holds the track once', _sameBytes(bytes, payload), true);
+    } finally {
+      cache.close();
+      await server.close(force: true);
+    }
+  }
+
   return failures;
+}
+
+/// Waits until [condition] holds, or gives up after [timeout].
+///
+/// Used where the assertion is about *when* something happened rather than
+/// about a wall-clock delay this check can rely on.
+Future<void> _waitFor(bool Function() condition, Duration timeout) async {
+  final DateTime deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) return;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
 }
 
 bool _sameBytes(Uint8List left, Uint8List right) {

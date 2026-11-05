@@ -91,6 +91,7 @@ Widget _library(
         state: state,
         onOpenPlaylist: onOpen ?? (Playlist playlist) {},
         onOpenLocalMusic: () {},
+        onOpenSavedAlbums: () {},
       ),
     ),
   ),
@@ -166,6 +167,7 @@ void main() {
 
   testWidgets('the second lift is as visible as the first', (tester) async {
     final AppState state = await _signedIn(tester);
+    tester.view.physicalSize = const Size(390, 1400);
     await state.setPlaylistColumns(2);
     await tester.pumpWidget(_library(state));
     await tester.pump();
@@ -218,6 +220,7 @@ void main() {
     tester,
   ) async {
     final AppState state = await _signedIn(tester);
+    tester.view.physicalSize = const Size(390, 1400);
     await state.setPlaylistColumns(2);
     final List<Playlist> opened = <Playlist>[];
     await tester.pumpWidget(_library(state, onOpen: opened.add));
@@ -273,6 +276,7 @@ void main() {
     tester,
   ) async {
     final AppState state = await _signedIn(tester);
+    tester.view.physicalSize = const Size(390, 1400);
     await state.setPlaylistColumns(2);
     await tester.pumpWidget(_library(state));
     await tester.pump();
@@ -331,6 +335,7 @@ void main() {
     tester,
   ) async {
     final AppState state = await _signedIn(tester);
+    tester.view.physicalSize = const Size(390, 1400);
     await state.setPlaylistColumns(2);
     await tester.pumpWidget(_library(state));
     await tester.pump();

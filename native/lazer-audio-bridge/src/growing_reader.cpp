@@ -8,6 +8,13 @@
  * value). So the blocking byte source lives here, next to the engine, and Dart
  * only appends to the cache file and signals progress.
  *
+ * The download is the only source of bytes: a read or seek past what has landed
+ * waits for the download instead of fetching a range of its own, and a seek that
+ * the download never reaches clamps to the end of what exists. Deciding whether a
+ * position may be seeked to at all belongs to the caller, which knows how much of
+ * the track is cached; what this reader guarantees is that no read ever returns
+ * bytes nobody wrote.
+ *
  * Nothing here knows about the engine: it exports plain C functions with exactly
  * the signatures the engine calls, plus the accessors Dart uses to build the
  * reader struct. That keeps this library independent of the engine's headers and
@@ -55,8 +62,21 @@ constexpr int32_t kReaderIoError = -2;
  * "nothing yet" repeatedly instead of failing. */
 constexpr std::chrono::milliseconds kWaitSlice(20);
 
+/* Longest a single read parks the engine's decode thread before answering "nothing yet" (0). The
+ * engine's pump loop can then apply a seek that arrived while this call was waiting, which is what
+ * makes seeking out of a starved region possible at all: a call that blocks until the download
+ * catches up also blocks every seek behind it. The engine re-issues the read. */
+constexpr std::chrono::milliseconds kCallSlice(150);
+
+/* How long a seek waits for the download to reach its target before clamping to what exists. The
+ * caller keeps publishing the requested target meanwhile, so this only bounds a seek that cannot
+ * be satisfied at all; a shorter wait than the read deadline makes that visible sooner. */
+constexpr std::chrono::seconds kSeekDeadline(12);
+
 /* A cache file that has not produced any bytes for this long is treated as a stalled download so a
- * hung response cannot park the engine's decode thread forever. Dart reports real failures
+ * hung response cannot park the engine's decode thread forever. Measured from the last byte that
+ * landed (`Reader::last_progress`), never from the start of the current call: a read returns after
+ * `kCallSlice` by design, so a per-call deadline is unreachable. Dart reports real failures
  * explicitly long before this. */
 constexpr std::chrono::seconds kStallDeadline(45);
 
@@ -80,6 +100,12 @@ struct Reader {
     bool failed = false;
     bool cancelled = false;
     bool closed = false;
+
+    /* When the download last appended anything. The stall deadline is measured against this and not
+     * against the current call: a read hands control back after `kCallSlice` so the engine can apply
+     * a seek, which means no single call ever stays inside the loop long enough to reach the
+     * deadline, and a hung download would otherwise park the decoder forever. */
+    std::chrono::steady_clock::time_point last_progress = std::chrono::steady_clock::now();
 
 #if defined(_WIN32)
     HANDLE handle = INVALID_HANDLE_VALUE;
@@ -199,6 +225,9 @@ int64_t availableBytes(Reader &reader) {
     if (!openFile(reader)) return -1;
     const int64_t size = fileBytes(reader);
     if (size < 0) return -1;
+    /* A larger file is download progress even when the downloader did not notify, and the stall
+     * deadline is measured from the last byte that actually landed. */
+    if (size > reader.observed_bytes) reader.last_progress = std::chrono::steady_clock::now();
     reader.observed_bytes = size;
     return size;
 }
@@ -228,6 +257,7 @@ LAZER_BRIDGE_API void lazer_bridge_reader_notify(void *handle) {
     auto *reader = static_cast<Reader *>(handle);
     std::lock_guard<std::mutex> lock(reader->mutex);
     reader->revision += 1;
+    reader->last_progress = std::chrono::steady_clock::now();
     reader->changed.notify_all();
 }
 
@@ -259,6 +289,22 @@ LAZER_BRIDGE_API void lazer_bridge_reader_destroy(void *handle) {
     delete reader;
 }
 
+/* Announces the track's total size once the download learns it.
+ *
+ * The engine reports this to a demuxer as the source length, and a demuxer is what turns a seek's
+ * timestamp into the byte offset this reader is asked for: without a length, seeking a format whose
+ * index does not carry byte offsets fails outright. The size usually arrives with the response
+ * headers, which is later than the reader's creation, so it is pushed here rather than being a
+ * constructor argument only. */
+LAZER_BRIDGE_API void lazer_bridge_reader_set_length(void *handle, int64_t expected_bytes) {
+    if (handle == nullptr || expected_bytes <= 0) return;
+    auto *reader = static_cast<Reader *>(handle);
+    std::lock_guard<std::mutex> lock(reader->mutex);
+    reader->expected_bytes = expected_bytes;
+    reader->revision += 1;
+    reader->changed.notify_all();
+}
+
 LAZER_BRIDGE_API int64_t lazer_bridge_reader_bytes_available(void *handle) {
     if (handle == nullptr) return -1;
     auto *reader = static_cast<Reader *>(handle);
@@ -287,11 +333,15 @@ LAZER_BRIDGE_API int32_t lazer_bridge_reader_read(
     for (;;) {
         std::unique_lock<std::mutex> lock(reader->mutex);
         if (reader->cancelled || reader->closed) return kReaderIoError;
+        /* Past the announced end there is nothing left, whatever the file holds. */
+        if (reader->expected_bytes > 0 && reader->read_position >= reader->expected_bytes) {
+            return reader->failed ? kReaderIoError : kReaderEof;
+        }
         const int64_t available = availableBytes(*reader);
         if (available < 0) {
             /* The cache file is created by the downloader before the engine opens the source, so a
              * missing handle is a transient race: wait for the next notification. */
-            if (std::chrono::steady_clock::now() - started_at > kStallDeadline) {
+            if (std::chrono::steady_clock::now() - reader->last_progress > kStallDeadline) {
                 return kReaderIoError;
             }
             reader->changed.wait_for(lock, kWaitSlice);
@@ -312,13 +362,16 @@ LAZER_BRIDGE_API int32_t lazer_bridge_reader_read(
         }
         if (reader->finished) return reader->failed ? kReaderIoError : kReaderEof;
         if (reader->failed) return kReaderIoError;
-        if (std::chrono::steady_clock::now() - started_at > kStallDeadline) {
+        /* Measured from the last byte that landed, not from this call: the slice return below hands
+         * control back long before a per-call deadline could expire. */
+        if (std::chrono::steady_clock::now() - reader->last_progress > kStallDeadline) {
             return kReaderIoError;
         }
-        /* Nothing past the read position yet. Block for one wait slice and retry: returning 0
-         * ("no bytes right now") is legal too, but waiting keeps the downloader's wake-ups from
-         * spinning the engine's decode thread. */
+        /* Nothing past the read position yet: wait one slice for the downloader, then hand control
+         * back with "nothing yet" (0) so the engine can answer a seek that arrived meanwhile
+         * instead of waiting here until the download catches up. */
         reader->changed.wait_for(lock, kWaitSlice);
+        if (std::chrono::steady_clock::now() - started_at > kCallSlice) return 0;
     }
 }
 
@@ -336,15 +389,20 @@ LAZER_BRIDGE_API int64_t lazer_bridge_reader_seek(void *context, int64_t positio
             reader->changed.wait_for(lock, kWaitSlice);
             continue;
         }
-        if (target <= available) {
+        if (target <= available ||
+            (reader->expected_bytes > 0 && target >= reader->expected_bytes)) {
+            /* A target at the end of the download, or at the announced end of the track, is a legal
+             * "seek to the end": the next read reports EOF. */
             reader->read_position = target;
             return target;
         }
         /* Seeking past the downloaded region waits for the download instead of clamping, so the
-         * demuxer sees a slow file rather than a short one. A finished or failed download clamps to
-         * what exists, which the engine treats as the end of the stream. */
+         * demuxer sees a slow file rather than a short one. A finished or failed download, or a
+         * target this download never reaches, clamps to what exists, which the engine treats as
+         * the end of the stream. Callers that must not land somewhere else decide that before
+         * asking. */
         if (reader->finished || reader->failed ||
-            std::chrono::steady_clock::now() - started_at > kStallDeadline) {
+            std::chrono::steady_clock::now() - started_at > kSeekDeadline) {
             reader->read_position = available;
             return available;
         }

@@ -78,6 +78,7 @@ class _BrowseLocation {
     this.chart,
     this.artistSongs = false,
     this.artistReleases,
+    this.savedAlbums = false,
     this.comments = false,
     this.localMusic = false,
   });
@@ -90,6 +91,7 @@ class _BrowseLocation {
   final MusicChart? chart;
   final bool artistSongs;
   final AlbumReleaseGroup? artistReleases;
+  final bool savedAlbums;
   final bool comments;
   final bool localMusic;
 }
@@ -111,6 +113,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   ArtistRef? _artist;
   MusicChart? _chart;
   bool _localMusic = false;
+  bool _savedAlbums = false;
   bool _artistSongs = false;
   AlbumReleaseGroup? _artistReleases;
   bool _comments = false;
@@ -400,6 +403,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _artistReleases = null;
       _comments = false;
       _localMusic = false;
+      _savedAlbums = false;
     });
   }
 
@@ -415,6 +419,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _artistReleases = null;
       _comments = false;
       _localMusic = false;
+      _savedAlbums = false;
     });
   }
 
@@ -426,6 +431,26 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     setState(() {
       _section = _AppSection.library;
       _localMusic = true;
+      _savedAlbums = false;
+      _playlist = null;
+      _album = null;
+      _artist = null;
+      _chart = null;
+      _artistSongs = false;
+      _artistReleases = null;
+      _comments = false;
+    });
+  }
+
+  /// 音乐库 → 收藏的专辑. Same shape as 本地音乐: the library stays the current
+  /// section and the content pane becomes the album page.
+  void _openSavedAlbums() {
+    _browseHistory.clear();
+    cancelCoverTransitions();
+    setState(() {
+      _section = _AppSection.library;
+      _savedAlbums = true;
+      _localMusic = false;
       _playlist = null;
       _album = null;
       _artist = null;
@@ -462,6 +487,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _artistSongs = false;
       _artistReleases = null;
       _localMusic = false;
+      _savedAlbums = false;
       _playlist = Playlist(
         id: album.id,
         name: album.title,
@@ -490,6 +516,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _album = null;
       _comments = false;
       _localMusic = false;
+      _savedAlbums = false;
     });
   }
 
@@ -510,6 +537,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _artistReleases = null;
       _comments = false;
       _localMusic = false;
+      _savedAlbums = false;
     });
   }
 
@@ -531,6 +559,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         chart: _chart,
         artistSongs: _artistSongs,
         artistReleases: _artistReleases,
+        savedAlbums: _savedAlbums,
         comments: _comments,
         localMusic: _localMusic,
       ),
@@ -557,6 +586,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         _artistReleases = previous.artistReleases;
         _comments = previous.comments;
         _localMusic = previous.localMusic;
+        _savedAlbums = previous.savedAlbums;
       });
       return;
     }
@@ -572,6 +602,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _chart = null;
       _comments = false;
       _localMusic = false;
+      _savedAlbums = false;
     });
   }
 
@@ -669,7 +700,8 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       _artist != null ||
       _chart != null ||
       _comments ||
-      _localMusic;
+      _localMusic ||
+      _savedAlbums;
 
   /// A remote's Back button is the only navigation affordance a television
   /// has. It closes the player, then detail pages, then returns to 发现; only
@@ -1085,6 +1117,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       onOpenChart: _openChart,
       onOpenLikes: () => _select(_AppSection.likes),
       onOpenLocalMusic: _openLocalMusic,
+      onOpenSavedAlbums: _openSavedAlbums,
       onPlayTracks: (List<Track> tracks, int index) =>
           state.playQueue(tracks, startIndex: index),
     );
@@ -1101,6 +1134,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
       );
     }
     if (_localMusic) return LargeScreenLocalMusicPage(state: state);
+    if (_savedAlbums) return LargeScreenSavedAlbumsPage(state: state);
     final MusicChart? chart = _chart;
     if (chart != null) return LargeScreenChartPage(state: state, chart: chart);
     final ArtistRef? artist = _artist;
@@ -1357,7 +1391,8 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         _artist != null ||
         _chart != null ||
         _comments ||
-        _localMusic;
+        _localMusic ||
+        _savedAlbums;
     return SizedBox(
       height: 64,
       child: Padding(
@@ -1395,7 +1430,8 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         _artist != null ||
         _chart != null ||
         _comments ||
-        _localMusic;
+        _localMusic ||
+        _savedAlbums;
     return SizedBox(
       height: 50,
       child: Padding(
@@ -1448,6 +1484,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   String get _pageTitle {
     if (_comments) return '评论'; // i18n:key
     if (_localMusic) return '本地音乐'; // i18n:key
+    if (_savedAlbums) return '收藏的专辑'; // i18n:key
     if (_chart != null) return _chart!.title;
     if (_playlist != null) return _playlist!.name;
     if (_artist != null) {
@@ -1674,6 +1711,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   String get _pageContentKey {
     if (_comments) return 'comments';
     if (_localMusic) return 'local-music';
+    if (_savedAlbums) return 'saved-albums';
     if (_chart != null) return 'chart:${_chart!.id}';
     if (_artist != null) {
       final String view = _artistSongs
@@ -1722,6 +1760,9 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
     if (_localMusic) {
       return LocalMusicPage(state: state);
     }
+    if (_savedAlbums) {
+      return AppSavedAlbumsPage(state: state);
+    }
     final ArtistRef? artist = _artist;
     if (artist != null) {
       if (_artistSongs) {
@@ -1763,6 +1804,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
         state: state,
         onOpenPlaylist: _openPlaylist,
         onOpenLocalMusic: _openLocalMusic,
+        onOpenSavedAlbums: _openSavedAlbums,
       ),
       _AppSection.likes => AppLikesPage(state: state),
       _AppSection.settings => AppSettingsPage(

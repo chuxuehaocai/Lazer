@@ -11,6 +11,11 @@ using aaudio_performance_mode_t = int32_t;
 struct AAudioStream;
 struct AAudioStreamBuilder;
 
+/* The audio service reports a lost endpoint through this callback; it is the only notification
+ * that arrives before the next write fails. Mirrors the NDK signature. */
+typedef void (*AAudioStream_errorCallback)(
+    AAudioStream *stream, void *userData, aaudio_result_t error);
+
 constexpr int32_t AAUDIO_OK = 0;
 constexpr int32_t AAUDIO_ERROR_DISCONNECTED = -899;
 constexpr int32_t AAUDIO_ERROR_TIMEOUT = -885;
@@ -38,6 +43,7 @@ void AAudioStreamBuilder_setSharingMode(AAudioStreamBuilder *, aaudio_sharing_mo
 void AAudioStreamBuilder_setPerformanceMode(AAudioStreamBuilder *, aaudio_performance_mode_t);
 void AAudioStreamBuilder_setChannelCount(AAudioStreamBuilder *, int32_t);
 void AAudioStreamBuilder_setSampleRate(AAudioStreamBuilder *, int32_t);
+void AAudioStreamBuilder_setErrorCallback(AAudioStreamBuilder *, AAudioStream_errorCallback, void *);
 aaudio_result_t AAudioStreamBuilder_openStream(AAudioStreamBuilder *, AAudioStream **);
 aaudio_result_t AAudioStream_close(AAudioStream *);
 int32_t AAudioStream_getSampleRate(AAudioStream *);
@@ -46,6 +52,7 @@ aaudio_format_t AAudioStream_getFormat(AAudioStream *);
 int32_t AAudioStream_getBufferCapacityInFrames(AAudioStream *);
 int32_t AAudioStream_getBufferSizeInFrames(AAudioStream *);
 int32_t AAudioStream_getFramesPerBurst(AAudioStream *);
+int32_t AAudioStream_getDeviceId(AAudioStream *);
 int32_t AAudioStream_setBufferSizeInFrames(AAudioStream *, int32_t);
 aaudio_result_t AAudioStream_requestStart(AAudioStream *);
 aaudio_result_t AAudioStream_requestPause(AAudioStream *);

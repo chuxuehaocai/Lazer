@@ -157,6 +157,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.artworkSeedLoader = albumSeedForCover,
     this.startupBufferTarget = startupBuffer,
     this.startupBufferDeadline = startupBufferTimeout,
+    this.startupByteTarget = startupBytes,
     this.navidromeFactory,
     this.scheduledPauseClock = DateTime.now,
   }) : catalog = catalog ?? Catalog(),
@@ -197,7 +198,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // A launch-time downgrade happened before this constructor could subscribe,
     // so the stream cannot deliver it: take it from the engine (or from the
     // selection the app was built with) and keep it as a standing notice.
-    hifiPathNotice = reporter?.pendingFailure ?? hifiPathNotice;
+    hifiPathNotice = reporter?.pendingFailure?.message ?? hifiPathNotice;
     _bufferSubscription = engine is BufferChangeReportingAudioEngine
         ? (engine as BufferChangeReportingAudioEngine).bufferChanges.listen(
             (_) => _onBufferChanged(),
@@ -529,7 +530,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   StreamSubscription<void>? _completionSubscription;
   StreamSubscription<void>? _bufferSubscription;
   StreamSubscription<int>? _indexSubscription;
-  StreamSubscription<String>? _failureSubscription;
+  StreamSubscription<AudioFailure>? _failureSubscription;
   Timer? _bufferPulseTimer;
   static const playbackInterval = Duration(milliseconds: 100);
   bool hapticsEnabled = true;
@@ -2200,6 +2201,41 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// platform's index change is then adopted instead of loading a URL again.
   int? _queuedNextIndex;
 
+  /// The URL that was handed to the engine for [_queuedNextIndex].
+  ///
+  /// The engine reports the URL it actually crossed into, and comparing the two
+  /// is what proves the mixed-in song is the one this queue scripted instead of a
+  /// successor a racing preparation replaced.
+  String? _queuedNextUrl;
+
+  /// Serialises successor preparations: only the newest one may bind the index.
+  int _prefetchGeneration = 0;
+
+  /// The queue index an audible overlap was mixed out of, so a rollback can
+  /// return to exactly that song (shuffle is not `index - 1`).
+  int? _mixFromIndex;
+
+  /// Forgets the successor the app believes the engine holds.
+  void _clearQueuedNext() {
+    _queuedNextIndex = null;
+    _queuedNextUrl = null;
+  }
+
+  /// Whether the engine really has a successor prepared to cross into.
+  ///
+  /// An engine that cannot answer (a plain single-source backend) keeps the
+  /// app's own belief, which is all it had before.
+  bool get _engineHoldsSuccessor {
+    final QueueAudioEngine? engine = _queueEngine;
+    if (engine is! QueuedSourceReportingAudioEngine) {
+      return _queuedNextIndex != null;
+    }
+    final String? held = (engine as QueuedSourceReportingAudioEngine)
+        .queuedSourceUrl;
+    if (held == null) return false;
+    return _queuedNextUrl == null || held == _queuedNextUrl;
+  }
+
   /// Identifier of the engine queue the appends belong to.
   int? _queueId;
 
@@ -2235,23 +2271,48 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   int _optimisticSeekGeneration = 0;
   int _seekRequest = 0;
   final Stopwatch _optimisticSeekClock = Stopwatch();
+
+  /// Longest a seek target is published before the engine's own clock wins.
+  ///
+  /// The hold normally ends when the engine reports a position that agrees with
+  /// the target. This is the backstop for a seek the demuxer never applies (a
+  /// dead download, a source that cannot seek) so the rail cannot be pinned
+  /// forever by a stale request.
+  static const Duration _optimisticSeekCeiling = Duration(seconds: 20);
+
+  /// Whether a seek has been requested and not yet seen in the engine's clock.
+  bool get seekInFlight => _optimisticSeek != null;
+
+  /// The position the rail is showing, which for a seek being applied is the
+  /// target rather than where the engine's clock still is.
   Duration get precisePosition {
     final bool active = _realActive && audioEngine?.active == true;
-    final actual = active ? audioEngine!.position : _position;
-    final pending = _optimisticSeek;
-    if (pending != null) {
-      final acknowledged =
-          active &&
-          (actual - pending).abs() <= const Duration(milliseconds: 500);
-      if (_optimisticSeekGeneration == _generation &&
-          !acknowledged &&
-          _optimisticSeekClock.elapsed < const Duration(seconds: 3)) {
-        return pending;
-      }
-      _optimisticSeek = null;
-      _optimisticSeekClock.stop();
+    final Duration actual = active ? audioEngine!.position : _position;
+    final Duration? pending = _optimisticSeek;
+    if (pending == null) return actual;
+    if (_optimisticSeekGeneration != _generation) {
+      _clearOptimisticSeek();
+      return actual;
     }
+    // Until the demuxer applies the seek the engine keeps reporting the position
+    // it had *before* the jump. Publishing that value snaps the rail back, and
+    // when the seek ran from near the start of the track it reads as "从头开始".
+    // The target is therefore published until the engine's clock agrees with it,
+    // or the ceiling expires.
+    final bool landed =
+        active && (actual - pending).abs() <= const Duration(milliseconds: 500);
+    if (!landed && _optimisticSeekClock.elapsed < _optimisticSeekCeiling) {
+      return pending;
+    }
+    _clearOptimisticSeek();
     return actual;
+  }
+
+  void _clearOptimisticSeek() {
+    _optimisticSeek = null;
+    _optimisticSeekClock
+      ..reset()
+      ..stop();
   }
 
   bool get playing => _playing;
@@ -2260,9 +2321,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ///
   /// A track still filling its startup buffer is not ready: the system media
   /// controls read this to report `loading` instead of a track that looks
-  /// playing while the playhead stands at zero.
+  /// playing while the playhead stands at zero. A stream whose download died
+  /// underneath the decoder reports the same thing, because from the listener's
+  /// side nothing is moving either.
   bool get audioReady =>
-      _realActive && !startupBuffering && (audioEngine?.active ?? false);
+      _realActive && !buffering && (audioEngine?.active ?? false);
   int get queueIndex => _queueIndex;
   bool get shuffle => _shuffle;
   LoopMode get repeat => _repeat;
@@ -2317,13 +2380,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// The now-playing seek rail paints this behind the played fraction. The
   /// plain [AudioEngine] contract carries no buffer information, so engines
   /// without [BufferedAudioEngine] fall back to the playhead.
+  ///
+  /// The playhead is always included: a backend whose reported buffer trails
+  /// the position (a source that ran out of its local file, say) must not make
+  /// the region already played look unbuffered.
   double get bufferedFraction {
     final Track? t = current;
     final int duration = t?.duration.inMilliseconds ?? 0;
     if (duration <= 0) return 0;
     if (audioEngine == null) return 0;
     if (!_seekLimitedByBuffer) return 1;
-    final AudioEngine? engine = audioEngine;
+    final AudioEngine engine = audioEngine!;
     final Duration playhead = precisePosition;
     final Duration buffered = engine is BufferedAudioEngine
         ? (engine as BufferedAudioEngine).bufferedPosition
@@ -2334,6 +2401,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Seeking can move through buffered audio, but never past it.
   /// Keep the current playhead reachable if a backend reports a shorter buffer.
+  ///
+  /// The download is the only source of bytes, so the part of a streaming track
+  /// that has not landed is not reachable: the rail stops at it and the buffer bar
+  /// shows how far that is. A local file, or a fully downloaded stream, is open
+  /// end to end.
   double get seekLimitFraction {
     if (!_seekLimitedByBuffer) return 1;
     final double buffered = bufferedFraction;
@@ -2475,13 +2547,51 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
   }
 
+  /// Gives the output device back to the platform, keeping the place in the track.
+  ///
+  /// Audio focus loss, a phone call, another application starting playback or an
+  /// unplugged route all mean the platform has handed the endpoint to someone
+  /// else. Pausing alone would leave the engine holding it — a shared-mode AAudio
+  /// stream parked in PAUSED still owns the device, and the platform reclaims it,
+  /// which is the disconnect the app then fails on. The source is dropped here
+  /// and opened again by [resumeAfterInterruption] (or by the next play) at the
+  /// position below, so the output is only held while it may be played.
+  Future<void> suspendForInterruption() async {
+    if (!_realActive) return;
+    final Duration at = precisePosition;
+    _playing = false;
+    _ticker?.cancel();
+    _realActive = false;
+    _position = at;
+    // The engine's queue went with the output; the next open builds a fresh one.
+    _clearQueuedNext();
+    _queueId = null;
+    _flushQualifiedSession();
+    notifyListeners();
+    final AudioEngine? engine = audioEngine;
+    if (engine != null) await engine.stop();
+  }
+
+  /// Opens the output again and continues where [suspendForInterruption] stopped.
+  ///
+  /// Only meaningful for an engine that yielded the device: it is a fresh open at
+  /// the interrupted position, not a resume of a stream that was parked.
+  Future<void> resumeAfterInterruption() async {
+    if (current == null || _playing) return;
+    playbackError = null;
+    _playing = true;
+    _ensureTicker();
+    notifyListeners();
+    await _reopenOutput(_position, '播放中断，请重试。');
+  }
+
   void stop() {
     _finishListening();
     _finishPlaySession();
     ++_generation;
     _playing = false;
     _realActive = false;
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     _queueId = null;
     _position = Duration.zero;
     playbackError = null;
@@ -2570,7 +2680,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     trackChangeDirection = direction;
     playbackError = null;
     _queueIndex = index.clamp(0, _queue.length - 1);
-    _queuedNextIndex = null;
+    _clearQueuedNext();
+    // A stall belongs to the source that produced it, never to the next track.
+    _lastStreamUrl = null;
+    _streamRetries = 0;
+    _streamRetryTrack = -1;
+    _clearStreamStall(quiet: true);
+    // A pending seek belonged to the previous source: keeping it would publish
+    // that track's position on the new one.
+    _clearOptimisticSeek();
     unawaited(_saveQueue());
     _position = Duration.zero;
     unawaited(_loadLyrics());
@@ -2680,7 +2798,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _sampleListening();
     listeningStatistics.suspend();
     final Duration target = t.duration * clampSeekFraction(fraction);
+    // The engine cancels an audible overlap when it seeks. Going back first keeps
+    // the queue position, the shown metadata and the position on the song that is
+    // about to be heard.
+    _leavePresentedMix();
     _position = target;
+    _notePlayheadMoved();
     if (_realActive) {
       _optimisticSeek = target;
       _optimisticSeekGeneration = _generation;
@@ -2704,7 +2827,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             })
             .catchError((Object error) {
               if (request == _seekRequest) {
-                _optimisticSeek = null;
+                // The engine refused the seek: publishing its real position again
+                // is the honest answer, even if that is the pre-seek position.
+                _clearOptimisticSeek();
                 if (!_presentationDisposed &&
                     generation == _generation &&
                     listeningRevision == _listeningRevision) {
@@ -2721,6 +2846,80 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     // Position-only change: tick lane, not a structural rebuild.
     _tickNotifier.pulse();
+  }
+
+  /// Follows the engine back to the song an audible overlap was mixed out of.
+  ///
+  /// A seek (and any other cancellation) drops the incoming side of a mix while
+  /// the successor stays queued, so the outgoing song is what the listener hears
+  /// again. Without this the queue index would describe a song that is not
+  /// playing, and the next preparation would build a successor for the wrong
+  /// position in the queue.
+  void _leavePresentedMix() {
+    final AudioEngine? engine = audioEngine;
+    if (engine is! MixPresentingAudioEngine ||
+        !(engine as MixPresentingAudioEngine).mixPresented) {
+      return;
+    }
+    final int incoming = _queueIndex;
+    final int? outgoing = _mixFromIndex;
+    _mixFromIndex = null;
+    if (outgoing == null || _queue.length < 2) return;
+    _queueIndex = outgoing.clamp(0, _queue.length - 1);
+    // The song that was being mixed in is still the engine's successor.
+    _queuedNextIndex = incoming.clamp(0, _queue.length - 1);
+    trackChangeDirection = -1;
+    playbackError = null;
+    unawaited(_saveQueue());
+    unawaited(_loadLyrics());
+    unawaited(_loadCurrentArtwork());
+    notifyListeners();
+  }
+
+  /// How long a resume waits for the download to reach its position.
+  ///
+  /// A streaming source can only be seeked inside what has landed, so resuming at
+  /// a position (after a device reopen or a recovered download) means waiting for
+  /// the download to cover it. The bound keeps a download that never gets there
+  /// from holding the resume open forever.
+  static const Duration resumeBufferWait = Duration(seconds: 25);
+
+  /// Seeks to [target] once the engine can reach it, waiting for the buffer when
+  /// the source is still downloading.
+  ///
+  /// Returns false when the position never became reachable (the download failed,
+  /// stopped, or the wait expired), so the caller can report that the resume was
+  /// dropped instead of pretending the position was kept.
+  Future<bool> _seekWhenReachable(Duration target, int generation) async {
+    final AudioEngine? engine = audioEngine;
+    if (engine == null) return false;
+    if (target <= Duration.zero) return true;
+    final SeekRangeReportingAudioEngine? range =
+        engine is SeekRangeReportingAudioEngine
+        ? engine as SeekRangeReportingAudioEngine
+        : null;
+    if (range == null || range.canSeekTo(target)) {
+      await engine.seek(target);
+      return true;
+    }
+    final DateTime deadline = DateTime.now().add(resumeBufferWait);
+    // Every caller is opening a source, so playback has not started yet and `_realActive` is still
+    // false: waiting on it would skip the loop entirely and drop the resume. What bounds the wait is
+    // the load being superseded, which is what `generation` reports.
+    while (generation == _generation && !DateTime.now().isAfter(deadline)) {
+      final StreamingBufferHealthAudioEngine? health =
+          engine is StreamingBufferHealthAudioEngine
+          ? engine as StreamingBufferHealthAudioEngine
+          : null;
+      if (health != null && health.streamFailed) return false;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (generation != _generation) return false;
+      if (range.canSeekTo(target)) {
+        await engine.seek(target);
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Relative seek used by the keyboard shortcuts.
@@ -2813,7 +3012,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ///
   /// [resumeAt] is used when the stream has to be re-resolved for the same
   /// track — switching audio quality keeps the playhead where it was.
-  Future<void> _startAudio({Duration? resumeAt}) async {
+  ///
+  /// [recovering] marks a reload this app started because the output was lost:
+  /// it keeps the retry budgets already spent on this source, so a device that
+  /// fails every open cannot loop.
+  Future<void> _startAudio({Duration? resumeAt, bool recovering = false}) async {
     _sampleListening();
     ++_listeningRevision;
     _pendingListeningSeek = null;
@@ -2824,7 +3027,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (track == null) return;
     final int generation = ++_generation;
     _realActive = false;
-    _queuedNextIndex = null;
+    _clearQueuedNext();
+    // A seek that was still being applied belonged to the previous source.
+    _clearOptimisticSeek();
     String? url;
     try {
       url = await _trackUrl(
@@ -2864,13 +3069,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (generation != _generation) return;
       await engine.setVolume(_volume);
       if (resumeAt != null && resumeAt > Duration.zero) {
+        bool reached = false;
         try {
-          await engine.seek(resumeAt);
+          // Waits for the download to cover the position: a streaming source is
+          // not seekable past what has landed.
+          reached = await _seekWhenReachable(resumeAt, generation);
         } catch (_) {
           // A source that cannot seek still plays; only the position is lost.
         }
         if (generation != _generation) return;
-        _position = resumeAt;
+        // Publishing a resume position the engine never took leaves the rail on a
+        // place the decoder never reached, so the position follows the outcome.
+        _position = reached ? resumeAt : Duration.zero;
       }
     } catch (error) {
       if (generation == _generation) _failPlayback('音频加载失败，请重试。');
@@ -2879,6 +3089,21 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (generation != _generation) return;
     _queueId = queueId;
     _realActive = true;
+    // Remembered so a dead download can be reloaded from the position the
+    // listener was at, instead of leaving a parked player on screen.
+    _lastStreamUrl = _isNetworkStream(url) ? url : null;
+    if (!recovering) {
+      // A load the listener asked for starts the recovery budgets over. A
+      // recovery reload does not: the budget it already spent is what keeps a
+      // device that fails every open from looping forever.
+      _streamRetries = 0;
+      _streamRetryTrack = _queueIndex;
+      _deviceRetries = 0;
+    }
+    _clearStreamStall(quiet: true);
+    // A fresh source opens a fresh no-progress window: without a running clock
+    // the watchdog would never reach its threshold while the playhead stands.
+    _resetStallClock();
     unawaited(_recordCurrentLocally());
     unawaited(_ensureStationBuffer());
     if (_playing) unawaited(_startWhenBuffered(generation, url));
@@ -2900,12 +3125,31 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// and the ordinary streaming path takes over.
   static const Duration startupBufferTimeout = Duration(seconds: 25);
 
+  /// Bytes that must have landed before an unmeasurable stream is started.
+  ///
+  /// A CDN that never announces a length has no fraction to wait for, but it
+  /// still has bytes. Starting on zero of them hands the decoder an empty file
+  /// and parks it in a read that only the reader's own stall deadline ends,
+  /// which is the "切歌之后卡住不动" report. This is the byte equivalent of
+  /// [startupBuffer]: about ten seconds of 320 kbps audio.
+  static const int startupBytes = 256 * 1024;
+
   /// How often the startup buffer is polled while waiting for it.
   static const Duration _startupBufferPoll = Duration(milliseconds: 120);
+
+  /// How often a playing stream is checked for a stalled download.
+  ///
+  /// The engine owns the threshold itself: it watches the downloader's byte
+  /// counter and reports `streamStalled` once no byte has landed for long
+  /// enough. This is only the poll rate.
+  static const Duration _stallPoll = Duration(seconds: 1);
 
   /// Overridable in tests, which cannot wait out the shipped ten seconds.
   final Duration startupBufferTarget;
   final Duration startupBufferDeadline;
+
+  /// Byte target for a stream whose length the server never announces.
+  final int startupByteTarget;
 
   /// The load whose opening seconds are still being downloaded, if any.
   ///
@@ -2916,6 +3160,21 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Whether the current track is held back while its opening seconds arrive.
   bool get startupBuffering =>
       _bufferingGeneration != null && _bufferingGeneration == _generation;
+
+  /// Whether playback is parked on a stream that stopped delivering bytes.
+  ///
+  /// Distinct from [startupBuffering]: the source is open and the transport
+  /// says "playing", but no data is arriving, so the UI has to say so instead
+  /// of showing a playhead that never moves.
+  bool get streamStalled =>
+      _stalledGeneration != null && _stalledGeneration == _generation;
+
+  bool get buffering => startupBuffering || streamStalled;
+
+  int? _stalledGeneration;
+  final Stopwatch _positionClock = Stopwatch();
+  int _streamRetries = 0;
+  int _streamRetryTrack = -1;
 
   /// Whether [url] is a stream this launch has not cached yet.
   ///
@@ -2947,7 +3206,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return;
     }
     final Duration? reported = _bufferedAhead(buffer);
-    if (reported == null || reported >= startupBufferTarget) {
+    final int? landed = _streamedBytes(engine);
+    if (_startupBufferReady(engine, reported, landed)) {
       await _resumeAudio();
       return;
     }
@@ -2962,12 +3222,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         checkScheduledPause();
         if (!_playing) return;
         final Duration? buffered = _bufferedAhead(buffer);
-        // A backend that cannot answer is started at once: waiting on silence
-        // is worse than the stutter this lead time exists to avoid.
-        if (buffered == null) break;
-        final Duration? total = engine.duration ?? current?.duration;
-        if (buffered >= startupBufferTarget ||
-            (total != null && total > Duration.zero && buffered >= total) ||
+        final int? bytes = _streamedBytes(engine);
+        if (buffered == null && bytes == null) {
+          // A backend that can answer neither question is started at once:
+          // waiting on silence is worse than the stutter this lead time exists
+          // to avoid.
+          break;
+        }
+        if (_startupBufferReady(engine, buffered, bytes) ||
             clock.elapsed >= startupBufferDeadline) {
           break;
         }
@@ -2981,6 +3243,45 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     if (_presentationDisposed || generation != _generation) return;
     if (_playing) await _resumeAudio();
+  }
+
+  /// Whether the startup wait is satisfied.
+  ///
+  /// Two independent questions, because a stream may answer only one of them:
+  /// a time-based lead when the engine can measure it, and a byte lead when it
+  /// cannot. A stream that cannot be measured *and* has delivered nothing is
+  /// the one case that must not start.
+  bool _startupBufferReady(
+    AudioEngine engine,
+    Duration? buffered,
+    int? landed,
+  ) {
+    // The byte target is matched exactly: a caller that sets it to zero (or a
+    // build with no byte signal at all) keeps the historical behaviour of
+    // starting as soon as the fraction is known to be sufficient.
+    if (landed != null && landed >= startupByteTarget) return true;
+    if (buffered == null) return false;
+    if (buffered >= startupBufferTarget) return true;
+    final Duration? total = engine.duration ?? current?.duration;
+    if (total != null && total > Duration.zero && buffered >= total) {
+      return true;
+    }
+    // Bytes are the only signal left when the fraction is unmeasurable, so an
+    // unmeasurable stream waits for them instead of starting on an empty file.
+    return false;
+  }
+
+  /// Bytes of the current network source that have landed, when the engine can
+  /// report them.
+  static int? _streamedBytes(AudioEngine engine) {
+    try {
+      if (engine is StreamingBufferHealthAudioEngine) {
+        return (engine as StreamingBufferHealthAudioEngine).streamedBytes;
+      }
+    } catch (_) {
+      // A test double that only answers transport is not a streaming engine.
+    }
+    return null;
   }
 
   /// How much [engine] has buffered ahead of the playhead, or null when it
@@ -2998,6 +3299,118 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
+  /// Watches a playing stream for a download that stopped delivering.
+  ///
+  /// A parked decode thread cannot report progress, and the app's own position
+  /// clock simply stops with it — which is exactly the "播放器没法播放" state.
+  /// Two signals are checked, both from the downloader rather than the audio
+  /// clock: an already-failed download, and the engine's own no-byte stall flag
+  /// ([StreamingBufferHealthAudioEngine.streamStalled]). Either one ends the
+  /// parked read through the engine's restart path and reloads the source from
+  /// the position the listener was at, instead of leaving a dead player on
+  /// screen.
+  void _checkStreamStall() {
+    if (!_playing || !_realActive) return;
+    final AudioEngine? engine = audioEngine;
+    if (engine is! StreamingBufferHealthAudioEngine) return;
+    final int track = _streamRetryTrack;
+    if (track != _queueIndex) {
+      // A different track: this stream has not failed yet.
+      _streamRetryTrack = _queueIndex;
+      _streamRetries = 0;
+    }
+    final StreamingBufferHealthAudioEngine health =
+        engine as StreamingBufferHealthAudioEngine;
+    final bool failed = health.streamFailed;
+    final bool stalled = health.streamStalled;
+    final bool wasStalled = _stalledGeneration == _generation;
+    if (!failed && !stalled) {
+      _clearStreamStall();
+      return;
+    }
+    // A finite number of recoveries per track: a CDN that is genuinely down must
+    // end in a named error, not an endless reload loop.
+    if (_streamRetries >= maxStreamRetries) {
+      _clearStreamStall(quiet: true);
+      _failPlayback('网络不佳，无法继续播放这首歌曲。');
+      return;
+    }
+    if (!wasStalled) {
+      _stalledGeneration = _generation;
+      notifyListeners();
+    }
+    if (!health.restartStream()) {
+      // Nothing to restart (a local source, or a download that is still alive):
+      // the next check re-reads the state instead of reloading the track.
+      return;
+    }
+    final String? streamUrl = _lastStreamUrl;
+    if (streamUrl == null) return;
+    // Counted before the reload starts so the next check cannot overlap it.
+    _streamRetries++;
+    // Held at the position the rail is showing — for a seek still being applied,
+    // the target — so the reload resumes where the listener was, not where the
+    // decode thread had got to.
+    final Duration resumeAt = precisePosition;
+    _resetStallClock();
+    _realActive = false;
+    playbackError = null;
+    _position = resumeAt;
+    unawaited(() async {
+      if (!await _reloadStream(streamUrl) &&
+          _playing &&
+          !_presentationDisposed) {
+        _failPlayback('网络不佳，播放已中断。');
+      }
+    }());
+  }
+
+  /// Drops the stalled flag. [quiet] skips the notification when the caller is
+  /// already about to notify (a reload path), so one state change repaints once.
+  ///
+  /// The "no progress" window is restarted by [notePlayheadMoved] or by an
+  /// explicit [_resetStallClock] where the playhead cannot be the yardstick
+  /// (a fresh source, or a seek), never here: clearing the flag while the
+  /// playhead is standing still is exactly the state the watchdog must keep
+  /// measuring.
+  void _clearStreamStall({bool quiet = false}) {
+    if (_stalledGeneration != null) {
+      _stalledGeneration = null;
+      if (!quiet && !_presentationDisposed) notifyListeners();
+    }
+  }
+
+  /// Restarts the "no progress" window without touching the stalled flag.
+  void _resetStallClock() {
+    _positionClock
+      ..reset()
+      ..start();
+  }
+
+  /// The playhead advanced, so this source is delivering: a stall state is
+  /// stale and the window starts again.
+  void _notePlayheadMoved() {
+    _resetStallClock();
+    _clearStreamStall(quiet: true);
+  }
+
+  /// The URL the current source was opened with, for a stall recovery reload.
+  String? _lastStreamUrl;
+
+  /// How many times one track may be recovered from a dead download before the
+  /// failure is reported instead.
+  static const int maxStreamRetries = 2;
+
+  /// How many times one track may be reopened after the platform reclaimed the
+  /// output before the failure is reported instead. Mirrors [maxStreamRetries]:
+  /// a device that refuses every open must end in a named error, not a loop. A
+  /// recovery reload does not reset the budget it spent — only a load the
+  /// listener asked for does.
+  static const int maxDeviceRetries = 2;
+
+  /// Device reopens spent on the current source; cleared by a requested load.
+  int _deviceRetries = 0;
+
   /// Hands the track that follows the current one to the engine, so the
   /// platform can cross into it while the decoder is still running.
   ///
@@ -3007,9 +3420,19 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final QueueAudioEngine? engine = _queueEngine;
     final int? queueId = _queueId;
     if (engine == null || queueId == null || _queue.isEmpty) return;
+    // While an overlap is audible the engine's successor is the song being mixed
+    // in. Preparing the one after it now would replace it: the engine refuses a
+    // second successor, and the losing preparation clears the queued reader,
+    // which fades the incoming song back out and leaves the queue a song ahead of
+    // what is heard. The hand-off asks again.
+    if (engine is MixPresentingAudioEngine &&
+        (engine as MixPresentingAudioEngine).mixPresented) {
+      return;
+    }
+    final int generation = ++_prefetchGeneration;
     final int? next = _autoAdvanceIndex();
     if (next == null) {
-      _queuedNextIndex = null;
+      _clearQueuedNext();
       return;
     }
     String? url;
@@ -3021,9 +3444,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {
       url = null;
     }
-    // A track change or a stop while the URL was in flight invalidates this
-    // prefetch: the engine may already hold a different queue.
-    if (queueId != _queueId || !_realActive) return;
+    // A newer preparation, a track change or a stop while the URL was in flight
+    // invalidates this one: the engine may already hold a different successor.
+    if (generation != _prefetchGeneration ||
+        queueId != _queueId ||
+        !_realActive) {
+      return;
+    }
     if (url == null || url.isEmpty) return;
     bool appended;
     try {
@@ -3031,8 +3458,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {
       appended = false;
     }
+    if (generation != _prefetchGeneration) {
+      // Superseded while appending: it must not claim the engine's successor.
+      return;
+    }
     if (!appended || queueId != _queueId) return;
     _queuedNextIndex = next;
+    _queuedNextUrl = url;
   }
 
   /// Crosses into the track the engine already holds next, without reloading.
@@ -3061,6 +3493,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // that leaves their output paused even though the app is still in the
     // playing state. Calling play is harmless for engines that preserved
     // playback and is required for engines that reopened the source.
+    _lastStreamUrl = null;
+    _streamRetries = 0;
+    _streamRetryTrack = -1;
+    _clearStreamStall(quiet: true);
     unawaited(_resumeAudio());
     if (engine is! SerialQueueAudioEngine) unawaited(_prefetchNext());
   }
@@ -3073,17 +3509,58 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _finishPlaySession();
     final int? target = _queuedNextIndex;
     if (!_realActive || !_playing || target == null) return;
+    // The engine reports which URL it crossed into. It must be the URL this app
+    // appended for [target]; anything else means the audible song and the queue
+    // position disagree, which is the "the mix is not what the queue scripted"
+    // report. With one preparation in flight and no replacement during an
+    // overlap this cannot happen, so the log is the assertion that keeps it true.
+    final QueueAudioEngine? queueEngine = _queueEngine;
+    final String? engineUrl = queueEngine is QueuedSourceReportingAudioEngine
+        ? (queueEngine as QueuedSourceReportingAudioEngine).queuedSourceUrl
+        : null;
+    final String? expectedUrl = _queuedNextUrl;
+    if (engineUrl != null && expectedUrl != null && engineUrl != expectedUrl) {
+      debugPrint(
+        'lazer-audio: automix crossed into $engineUrl while the queue scripted '
+        '$expectedUrl for index $target',
+      );
+    }
     ++_listeningRevision;
     _pendingListeningSeek = null;
     listeningStatistics.end();
-    _queuedNextIndex = null;
+    // `_queuedNextIndex` is deliberately left alone: it is this method's own entry
+    // guard, and the hand-off arrives as a *second* index event once the overlap
+    // ends. Clearing it here would make that second event return early and skip the
+    // `_prefetchNext()` at the tail, so the song after the mixed-in one would never
+    // be prepared. `_prefetchNext` overwrites both fields as soon as it lands.
     trackChangeDirection = 1;
     playbackError = null;
+    // A mix is presented before the hand-off: the audible song is a blend and
+    // the outgoing track is still the engine's active decoder, which is what a
+    // rollback returns to.
+    final AudioEngine? audio = audioEngine;
+    if (audio is MixPresentingAudioEngine &&
+        (audio as MixPresentingAudioEngine).mixPresented) {
+      _mixFromIndex = _queueIndex;
+    } else {
+      _mixFromIndex = null;
+    }
     _queueIndex = target.clamp(0, _queue.length - 1);
+    // The hand-off opens a different source; its URL is resolved again by the
+    // next prefetch, so a stale one must not be used for a stall recovery.
+    _lastStreamUrl = null;
+    _streamRetries = 0;
+    _streamRetryTrack = -1;
+    _clearStreamStall(quiet: true);
+    _clearOptimisticSeek();
+    // The engine has already moved on, so a seek still in flight for the
+    // outgoing track must not land on the incoming one.
     _position = audioEngine?.position ?? Duration.zero;
     if (current != null) listeningStatistics.begin(current!, _position);
-    _optimisticSeek = null;
     ++_seekRequest;
+    // AutoMix hands off while the incoming track is already audible, so the
+    // engine's position — not zero — is what the listener is hearing.
+    _position = audioEngine?.position ?? Duration.zero;
     unawaited(_saveQueue());
     unawaited(_loadLyrics());
     unawaited(_loadCurrentArtwork());
@@ -3470,7 +3947,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     listeningStatistics.end();
     _realActive = false;
     _playing = false;
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     _ticker?.cancel();
     playbackError = message;
     unawaited(audioEngine?.stop() ?? Future<void>.value());
@@ -3483,7 +3960,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// decode error both leave the user with no audio, and both are worth naming.
   /// A terminal failure also ends the HiFi promise for this session — the output
   /// that produced it is gone — so the path notice says so.
-  void _onEngineFailure(String message) {
+  void _onEngineFailure(AudioFailure failure) {
+    final String message = failure.message;
     final bool pathChanged =
         hifiPathNotice == null && audioEngine is FailureReportingAudioEngine;
     if (pathChanged) {
@@ -3493,7 +3971,142 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (pathChanged) notifyListeners();
       return;
     }
+    // A lost output device is not a property of the source. The platform took the
+    // endpoint back — another application asked for the output, the route changed,
+    // a call came in — and the same track plays again on a fresh open at the
+    // position the listener was at. Opening it again here is what turns "the
+    // player is stuck until the next track" into a gap of one output session.
+    if (failure.kind == AudioFailureKind.device &&
+        _deviceRetries < maxDeviceRetries) {
+      final Duration resumeAt = precisePosition;
+      _deviceRetries++;
+      _finishPlaySession();
+      _realActive = false;
+      _clearQueuedNext();
+      playbackError = null;
+      _position = resumeAt;
+      _resetStallClock();
+      if (pathChanged) notifyListeners();
+      unawaited(_reopenOutput(resumeAt, message));
+      return;
+    }
+    // A stream whose download died reaches the app here first: the reader
+    // reports the I/O error long before the app's own no-byte watchdog would
+    // notice, and a network recovery is possible while the rest of the session
+    // is not at fault. Everything else (device lost, decode error) keeps the
+    // existing terminal behaviour.
+    final AudioEngine? engine = audioEngine;
+    final StreamingBufferHealthAudioEngine? health =
+        engine is StreamingBufferHealthAudioEngine
+        ? engine as StreamingBufferHealthAudioEngine
+        : null;
+    if (_realActive &&
+        health != null &&
+        health.streamFailed &&
+        _lastStreamUrl != null &&
+        _streamRetries < maxStreamRetries) {
+      final int resumeAt = _position.inMilliseconds;
+      _finishPlaySession();
+      _realActive = false;
+      _clearQueuedNext();
+      playbackError = null;
+      _position = Duration(milliseconds: resumeAt);
+      if (pathChanged) notifyListeners();
+      unawaited(_recoverFailedStream(message));
+      return;
+    }
     _failPlayback(message);
+  }
+
+  /// Opens the output again after the platform reclaimed it, at [resumeAt].
+  ///
+  /// The load path is the same one a quality switch uses: the current track is
+  /// resolved again and the playhead is restored through the fresh open, so a
+  /// re-opened device never restarts the track from the beginning. [message] is
+  /// the device failure to report when the output still does not come up and the
+  /// listener still wants this track; a load that fails reports its own text, and
+  /// a track the listener replaced is left alone.
+  Future<void> _reopenOutput(Duration resumeAt, String message) async {
+    final String? targetId = current?.id;
+    await _startAudio(resumeAt: resumeAt, recovering: true);
+    if (_presentationDisposed || current?.id != targetId) return;
+    if (!_realActive && _playing) _failPlayback(message);
+  }
+
+  /// Reloads the current network source after its download died, resuming at the
+  /// position the listener was at. Gives up with the engine's own message when
+  /// the reload itself fails.
+  Future<void> _recoverFailedStream(String message) async {
+    final String? url = _lastStreamUrl;
+    final AudioEngine? engine = audioEngine;
+    if (url == null || engine is! StreamingBufferHealthAudioEngine) {
+      _failPlayback(message);
+      return;
+    }
+    final StreamingBufferHealthAudioEngine health =
+        engine as StreamingBufferHealthAudioEngine;
+    // Unblocks the parked decode thread and restarts the download from the
+    // bytes already on disk.
+    health.restartStream();
+    final bool reloaded = await _reloadStream(url);
+    if (!reloaded) _failPlayback(message);
+  }
+
+  /// Opens [url] again at the position the rail is showing, routing through the
+  /// queue engine the way the normal load path does.
+  ///
+  /// Returns false when the source could not be reopened (the caller decides
+  /// whether that is a terminal failure). A newer generation — a track change or
+  /// a stop — makes the result irrelevant and also reports true, so the caller
+  /// does not fail a track the listener already replaced.
+  Future<bool> _reloadStream(String url) async {
+    final AudioEngine? engine = audioEngine;
+    if (engine == null) return false;
+    final QueueAudioEngine? queueEngine = _queueEngine;
+    final int generation = ++_generation;
+    // The position as the rail sees it: while a seek is being applied that is
+    // the target. A source replaced at that moment stopped before it could
+    // publish the new position, so resuming from the live value is what stops a
+    // dead download from dropping the listener back to where the decode thread
+    // had got to — which, right after a jump, is the beginning of the track.
+    final Duration resume = precisePosition;
+    // The reload is not a stall: the no-progress window starts again once the
+    // replacement source is playing.
+    _resetStallClock();
+    try {
+      int? queueId;
+      if (queueEngine != null) {
+        try {
+          queueId = await queueEngine.setQueue(<String>[url]);
+        } catch (_) {
+          // The platform refused a queue: fall back to the single-source path.
+          queueId = null;
+        }
+      }
+      if (generation != _generation) return true;
+      if (queueId == null) await engine.setUrl(url);
+      if (generation != _generation) return true;
+      await engine.setVolume(_volume);
+      if (resume > Duration.zero) {
+        try {
+          // The replacement source starts its download from the beginning, so the
+          // resume waits until the buffer covers where the listener was.
+          await _seekWhenReachable(resume, generation);
+        } catch (_) {
+          // A source that cannot seek still plays; only the position is lost.
+        }
+      }
+      if (generation != _generation) return true;
+      _queueId = queueId;
+      _realActive = true;
+      _clearStreamStall(quiet: true);
+      _clearOptimisticSeek();
+      if (_playing) await _startWhenBuffered(generation, url);
+      return true;
+    } catch (error) {
+      debugPrint('Reloading the stream failed: $error');
+      return false;
+    }
   }
 
   void _onEngineCompleted() {
@@ -3505,7 +4118,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _realActive = false;
     // A queued track would have been crossed into by the platform; reaching
     // here means the queue really did run out on this source.
-    _queuedNextIndex = null;
+    _clearQueuedNext();
     final AudioEngine engine = audioEngine!;
     if (_repeat == LoopMode.one) {
       final Track? track = current;
@@ -3568,7 +4181,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? t = current;
     if (t == null || !_playing) return;
     if (_realActive) {
-      _position = audioEngine!.position;
+      final Duration position = audioEngine!.position;
+      if (position != _position) {
+        _notePlayheadMoved();
+      } else if (_positionClock.elapsed >= _stallPoll) {
+        _positionClock
+          ..reset()
+          ..start();
+        _checkStreamStall();
+      }
+      _position = position;
       _sampleListening();
       _trackPlaySession(t);
       // A native duration/position is a second completion signal for backends
@@ -3579,8 +4201,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           duration > Duration.zero &&
           _position >= duration &&
           // A queued track is crossed into by the platform; ending this source
-          // there is the hand-off, not the end of the queue.
-          _queuedNextIndex == null) {
+          // there is the hand-off, not the end of the queue. The engine's own
+          // answer decides: a preparation that lost its race leaves the app
+          // believing in a hand-off that can never arrive, and waiting for it is
+          // what made a track end in silence.
+          !_engineHoldsSuccessor) {
         _onEngineCompleted();
         return;
       }
@@ -3884,6 +4509,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return '连接失败，请检查网络后重试。';
     }
     if (error is GatewayProtocolException) return '服务返回了无法解析的数据。';
+    if (Catalog.isRateLimited(error)) return '操作过于频繁，请稍后再试。';
     if (error is GatewayServiceException) return '服务暂时拒绝了请求（${error.code}）。';
     if (error is ArgumentError) return error.message?.toString() ?? '输入无效。';
     return '连接失败，请检查网络后重试。';

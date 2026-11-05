@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/audio/automix_audio_engine.dart';
 
 /// Matches just_audio's play contract: the Future stays pending until stopped.
@@ -127,7 +128,7 @@ class _Fixture {
   late final AutoMixAudioEngine engine;
   late int queueId;
   final List<int> indexes = <int>[];
-  final List<String> failures = <String>[];
+  final List<AudioFailure> failures = <AudioFailure>[];
 
   Future<void> load() async {
     engine.indexStream.listen(indexes.add);
