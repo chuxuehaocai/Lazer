@@ -183,7 +183,9 @@ class _AppPlaylistCardState extends State<AppPlaylistCard> {
               children: <Widget>[
                 AnimatedScale(
                   scale: raised ? 1.018 : 1,
-                  duration: const Duration(milliseconds: 180),
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 180),
                   curve: const AppleSpringCurve(),
                   child: Stack(
                     children: <Widget>[
@@ -196,13 +198,20 @@ class _AppPlaylistCardState extends State<AppPlaylistCard> {
                           radius: 12,
                         ),
                       ),
-                      if (raised)
-                        Positioned(
-                          right: 8,
-                          bottom: 8,
+                      // The badge fades with the raise. It used to be mounted
+                      // only `if (raised)` and already at opacity 1, so its
+                      // AnimatedOpacity could never interpolate anything: the
+                      // badge appeared on the first hovered frame instead of
+                      // fading in.
+                      Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: IgnorePointer(
                           child: AnimatedOpacity(
-                            opacity: 1,
-                            duration: const Duration(milliseconds: 140),
+                            opacity: raised ? 1 : 0,
+                            duration: MediaQuery.disableAnimationsOf(context)
+                                ? Duration.zero
+                                : const Duration(milliseconds: 140),
                             child: Container(
                               width: 32,
                               height: 32,
@@ -221,6 +230,7 @@ class _AppPlaylistCardState extends State<AppPlaylistCard> {
                             ),
                           ),
                         ),
+                      ),
                     ],
                   ),
                 ),
