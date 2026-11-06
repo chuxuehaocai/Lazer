@@ -240,8 +240,16 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
 
   Widget _page(String key, _RetainedPage entry, double? backProgress) {
     final current = key == widget.currentKey;
+    // A preview needs a destination. The player's back gesture reports progress
+    // with no target key, because it dismisses the player overlay rather than a
+    // browse page: the browse stack underneath is the backdrop the player is
+    // uncovering, so it must keep its own animation, position and opacity. The
+    // `current` disjunct alone used to make it a preview, which slid it a full
+    // width on iOS and faded it out on Android while the player came down.
     final preview =
-        backProgress != null && (current || key == widget.backTargetKey);
+        backProgress != null &&
+        widget.backTargetKey != null &&
+        (current || key == widget.backTargetKey);
     final parked = !current && !entry.transitioning && !preview;
     // The child page was already retained; retain its inactive wrappers too.
     // They have no changing inputs while parked. Inherited theme/size changes
