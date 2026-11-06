@@ -58,19 +58,34 @@ class AppleSpring {
   Duration get duration => MotionTiming.scale(_baseDuration);
 
   SpringSimulation simulation(double from, double to, {double velocity = 0}) =>
-      SpringSimulation(
-        SpringDescription.withDurationAndBounce(
-          duration: duration,
-          bounce: bounce,
-        ),
-        from,
-        to,
-        velocity,
-        // A normalized page coordinate settles below a tenth of a pixel for
-        // a 1000-pixel viewport before releasing its ticker and snapshots.
-        tolerance: const Tolerance(distance: .0001, velocity: .001),
-        snapToEnd: true,
-      );
+      _simulation(from, to, duration: duration, velocity: velocity);
+
+  /// The same spring at its base duration, deliberately ignoring
+  /// [MotionTiming]. A critically damped spring is time-scale invariant, so
+  /// this is what a speed-independent *shape* such as [AppleSpringCurve] needs:
+  /// the animation-speed preference belongs to each call site's own `duration`,
+  /// which reads [duration] and is therefore already scaled.
+  SpringSimulation _unscaledSimulation(double from, double to) =>
+      _simulation(from, to, duration: _baseDuration, velocity: 0);
+
+  SpringSimulation _simulation(
+    double from,
+    double to, {
+    required Duration duration,
+    required double velocity,
+  }) => SpringSimulation(
+    SpringDescription.withDurationAndBounce(
+      duration: duration,
+      bounce: bounce,
+    ),
+    from,
+    to,
+    velocity,
+    // A normalized page coordinate settles below a tenth of a pixel for
+    // a 1000-pixel viewport before releasing its ticker and snapshots.
+    tolerance: const Tolerance(distance: .0001, velocity: .001),
+    snapToEnd: true,
+  );
 }
 
 extension AppleSpringController on AnimationController {
@@ -100,11 +115,30 @@ extension AppleSpringController on AnimationController {
 class AppleSpringCurve extends Curve {
   const AppleSpringCurve();
 
-  // Sample two perceived durations of a critically damped spring. The tail is
-  // nearly stationary; normalizing it makes the adapter's endpoints exact.
-  static final SpringSimulation _unit = AppleSpring.smooth.simulation(0, 1);
-  static final double _end = _unit.x(1);
+  // Two perceived durations of a critically damped spring. Its tail is nearly
+  // stationary by then, so normalizing by that endpoint makes the curve's
+  // endpoints exact.
+  //
+  // The window is expressed as a multiple of the spring's own duration rather
+  // than as a fixed number of seconds. Sampling a fixed second instead only
+  // coincides with "two perceived durations" at 1x: at 2x the spring has long
+  // settled inside that second, so the curve jumps to ~1 in the first fifth of
+  // its domain, and at 0.5x it lags. A critically damped spring is time-scale
+  // invariant, so this window yields one universal shape for every speed -- and
+  // the global speed keeps acting through each caller's `duration`, which reads
+  // the scaled [AppleSpring.duration].
+  static final SpringSimulation _unit = AppleSpring.smooth._unscaledSimulation(
+    0,
+    1,
+  );
+  static final double _window =
+      2 *
+      AppleSpring.smooth._baseDuration.inMicroseconds /
+      Duration.microsecondsPerSecond;
 
   @override
-  double transformInternal(double t) => (_unit.x(t) / _end).clamp(0.0, 1.0);
+  double transformInternal(double t) {
+    final double time = t * _window;
+    return (_unit.x(time) / _unit.x(_window)).clamp(0.0, 1.0);
+  }
 }

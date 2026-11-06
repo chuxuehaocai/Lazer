@@ -90,7 +90,6 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
       onChangeStart: _start,
       onChangeEnd: _end,
     );
-    final bool tv = TvScope.isActive(context);
     // Material sliders spend the up/down keys on their value. Those keys must
     // always leave the rail instead: a remote's d-pad moves to the row above
     // or below, not scrubs the song. The wrapper is unconditional so a build
@@ -121,7 +120,12 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
         clipBehavior: Clip.none,
         children: <Widget>[
           ExcludeFocus(child: slider),
-          if (tv && _focused)
+          // The wrapper is a focus stop on every platform that has a keyboard
+          // (see the note above), so the ring follows focus rather than TvScope:
+          // gating it on `tv` left a desktop user tabbing onto the rail and
+          // nudging the playhead with the arrow keys with nothing to show where
+          // focus was.
+          if (_focused)
             Positioned.fill(
               child: IgnorePointer(
                 child: TvFocusOutline(borderRadius: BorderRadius.circular(8)),

@@ -417,10 +417,21 @@ class _LyricViewportState extends State<LyricViewport>
       }
       if (_offset == previous) _velocity = 0;
     }
+    // `_lines`, `_hasWordTimings` and the row springs still describe the
+    // previous song while this one is loading or has no lyrics at all, because
+    // `build` short-circuits before `_layout` can refresh them. Without this
+    // test the engine keeps a full-rate ticker -- and a native playhead read
+    // every frame -- for the whole track while the pane only shows a spinner or
+    // "纯音乐".
+    final bool sheetIsLive =
+        widget.state.lyrics.isNotEmpty &&
+        identical(_sourceLines, widget.state.lyrics);
     var moving =
-        _manual && _velocity.abs() > 5 ||
-        widget.state.playing && (_hasWordTimings || _activeInterlude) ||
-        interludesMoving;
+        (_manual && _velocity.abs() > 5) ||
+        (sheetIsLive &&
+            widget.state.playing &&
+            (_hasWordTimings || _activeInterlude)) ||
+        (sheetIsLive && interludesMoving);
     var positionsChanged = presenceChanged;
     var emphasisChanged = false;
     for (var i = 0; i < _ys.length; i++) {
@@ -1116,6 +1127,7 @@ class _LyricViewportState extends State<LyricViewport>
                         (released.sign == _dragCarry.sign
                             ? ScrollMotion.carriedVelocity(
                                 _dragCarry,
+                                retention: widget.state.scrollRetention,
                                 acceleration: widget.state.scrollAcceleration,
                               )
                             : 0);

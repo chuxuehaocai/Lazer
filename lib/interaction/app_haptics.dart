@@ -20,10 +20,18 @@ class AppHaptics {
       return;
     }
     final now = _now();
-    if (!boundary &&
-        _last != null &&
-        now.difference(_last!) < Duration(milliseconds: detent ? 35 : 60)) {
-      return;
+    final DateTime? last = _last;
+    if (!boundary && last != null) {
+      final Duration since = now.difference(last);
+      // A wall clock that steps backwards -- a DST fall-back, an NTP correction
+      // or a manual change -- makes `since` negative. Reading that as "too
+      // soon" would reject every later pulse and never refresh `_last`, so no
+      // haptic would fire until the clock caught up again: a backwards step
+      // resets the throttle instead.
+      if (!since.isNegative &&
+          since < Duration(milliseconds: detent ? 35 : 60)) {
+        return;
+      }
     }
     _last = now;
     final Map<String, Object> impact = <String, Object>{
