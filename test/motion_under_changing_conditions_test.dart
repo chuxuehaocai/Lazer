@@ -137,4 +137,57 @@ void main() {
     expect(find.text('b'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('a switch cut short by the switcher being replaced still ends', (
+    tester,
+  ) async {
+    final reports = <bool>[];
+    var page = 'a';
+    var withSwitcher = true;
+    late StateSetter update;
+
+    Widget layout() => MaterialApp(
+      home: StatefulBuilder(
+        builder: (context, setState) {
+          update = setState;
+          return Column(
+            children: <Widget>[
+              if (withSwitcher)
+                Expanded(
+                  child: RetainedContentSwitcher(
+                    currentKey: page,
+                    retainKeys: const <String>{},
+                    onTransitionChanged: reports.add,
+                    page: SizedBox.expand(child: Text(page)),
+                  ),
+                )
+              else
+                const Expanded(child: Text('another layout')),
+            ],
+          );
+        },
+      ),
+    );
+
+    await tester.pumpWidget(layout());
+    update(() => page = 'b');
+    await tester.pump();
+    expect(reports, <bool>[true], reason: 'the switch has to start');
+
+    // A layout-mode change or a resize across the breakpoint moves the content
+    // to a different place in the tree, so this element is replaced outright.
+    withSwitcher = false;
+    await tester.pumpWidget(layout());
+    await tester.pump();
+
+    expect(
+      reports,
+      <bool>[true, false],
+      reason:
+          'an interrupted switch still owes an end report; without it the '
+          'shell stays "switching" forever, freezing the ambient backdrop',
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 }

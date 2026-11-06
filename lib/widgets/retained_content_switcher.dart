@@ -55,9 +55,17 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     with SingleTickerProviderStateMixin {
   final Map<String, _RetainedPage> _pages = <String, _RetainedPage>{};
   int _transitionGeneration = 0;
+  bool _reportedMoving = false;
   late final AnimationController _motion = AnimationController.unbounded(
     vsync: this,
   )..addStatusListener(_status);
+
+  /// Every transition report goes through here so [dispose] knows whether a
+  /// `false` is still owed.
+  void _report(bool moving) {
+    _reportedMoving = moving;
+    widget.onTransitionChanged?.call(moving);
+  }
 
   @override
   void initState() {
@@ -87,7 +95,7 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
         entry.spring = null;
       }
     });
-    widget.onTransitionChanged?.call(false);
+    _report(false);
     final completedKey = widget.currentKey;
     final focus = _pages[completedKey]?.lastFocus;
     if (focus != null) {
@@ -132,7 +140,7 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
           ..spring = null
           ..parkedView = null;
       }
-      widget.onTransitionChanged?.call(false);
+      _report(false);
       return;
     }
     final focus = FocusManager.instance.primaryFocus;
@@ -176,7 +184,7 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
         entry.from = entry.to;
         entry.spring = null;
       }
-      widget.onTransitionChanged?.call(false);
+      _report(false);
     } else {
       final response = AppleSpring(duration: widget.duration);
       final epoch = _motion.value;
@@ -200,12 +208,27 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
           _motion.animateWith(clock);
         }
       });
-      widget.onTransitionChanged?.call(true);
+      _report(true);
     }
   }
 
   @override
   void dispose() {
+    // The shell replaces this element outright when a layout-mode change or a
+    // resize across the breakpoint puts the content at a different place in the
+    // tree. The completion that would have reported the end of the switch never
+    // runs then, and the shell's switching flag is only ever set, never
+    // cleared: it freezes the ambient backdrop's TickerMode, disables the
+    // content back gesture and drops every structural state report until the
+    // next navigation. Owe the report and pay it after the frame, so no
+    // listener is notified from inside an unmount.
+    if (_reportedMoving) {
+      _reportedMoving = false;
+      final report = widget.onTransitionChanged;
+      if (report != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => report(false));
+      }
+    }
     _motion.dispose();
     super.dispose();
   }
