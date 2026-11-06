@@ -161,7 +161,9 @@ class _SongCommentsViewState extends State<SongCommentsView> {
             ),
             AnimatedSize(
               curve: const AppleSpringCurve(),
-              duration: AppMotion.standard,
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : AppMotion.standard,
               alignment: Alignment.topLeft,
               child: _comments.loginRequired
                   ? Align(
@@ -509,7 +511,9 @@ class _CommentRow extends StatelessWidget {
                         AnimatedSwitcher(
                           switchInCurve: const AppleSpringCurve(),
                           switchOutCurve: const AppleSpringCurve(),
-                          duration: AppMotion.quick,
+                          duration: MediaQuery.disableAnimationsOf(context)
+                              ? Duration.zero
+                              : AppMotion.quick,
                           transitionBuilder:
                               (Widget child, Animation<double> animation) =>
                                   ScaleTransition(
