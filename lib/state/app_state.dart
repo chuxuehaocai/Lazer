@@ -1703,6 +1703,33 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _restorePlaybackSnapshot(initialQueueActivity),
       _restoreCatalogSession(),
     ]);
+    unawaited(_refreshMissingArtwork());
+  }
+
+  Future<void> _refreshMissingArtwork() async {
+    // Start after both playback records and plugin sessions are restored.
+    // Keep requests bounded and independent from playback and queue order.
+    final restored = <String, Track>{
+      for (final track in _recentTracks) track.id: track,
+    };
+    final selected = current;
+    if (selected != null) restored[selected.id] = selected;
+    final tracks = restored.values
+        .where((track) => track.coverUrl?.trim().isNotEmpty != true)
+        .toList();
+    var next = 0;
+    Future<void> worker() async {
+      while (!_presentationDisposed && next < tracks.length) {
+        final track = tracks[next++];
+        if (MusicId.tryParse(track.id) case final reference?) {
+          await _musicPlatforms.hydrate(track, reference);
+        }
+      }
+    }
+
+    await Future.wait([
+      for (var i = 0; i < math.min(4, tracks.length); i++) worker(),
+    ]);
   }
 
   Future<void> _restorePlaybackSnapshot(int initialQueueActivity) async {

@@ -294,7 +294,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('音乐库'));
+    await tester.tap(find.byTooltip('音乐库'));
     await tester.pumpAndSettle();
     final Finder entry = find.byKey(
       const ValueKey<String>('open-saved-albums'),

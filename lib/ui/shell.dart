@@ -27,6 +27,7 @@ import '../updates/update_dialog.dart';
 import '../utils/artwork.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/artwork_image.dart';
+import '../widgets/capsule_navigation_bar.dart';
 import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/retained_content_switcher.dart';
@@ -44,8 +45,8 @@ import 'widgets.dart';
 /// The app shell, rebuilt around Apple's adaptive navigation model.
 ///
 /// Desktop gets a translucent source-list sidebar, a content toolbar and the
-/// full transport, while phones get an inline navigation bar, the iOS tab bar
-/// and a floating mini-player. Both compositions share one content tree, one
+/// full transport, while phones get a compact toolbar and floating capsules
+/// for navigation and playback. Both compositions share one content tree, one
 /// search page and one set of playback controls, so switching layouts never
 /// loses context.
 class AppShell extends StatefulWidget {
@@ -857,6 +858,12 @@ class _AppShellState extends State<AppShell>
           final Widget shell = reuseShell
               ? cachedShell
               : Scaffold(
+                  // Keep the page visible around the capsules. Scaffold exposes
+                  // their height as bottom padding for each scroll view's tail.
+                  extendBody: compact && !largeScreen,
+                  bottomNavigationBar: compact && !largeScreen
+                      ? _mobileBottomBar()
+                      : null,
                   backgroundColor: sharedBackground
                       ? Colors.transparent
                       : canvas,
@@ -903,7 +910,7 @@ class _AppShellState extends State<AppShell>
                         child: largeScreen
                             ? _largeScreenLayout(apple)
                             : compact
-                            ? _compactLayout(apple, compactBar: compactBar)
+                            ? _compactLayout(apple)
                             : _desktopLayout(apple, compactBar: compactBar),
                       ),
                     ],
@@ -1169,60 +1176,78 @@ class _AppShellState extends State<AppShell>
     };
   }
 
-  Widget _compactLayout(AppleSemanticColors apple, {required bool compactBar}) {
+  Widget _compactLayout(AppleSemanticColors apple) {
     return Column(
       children: <Widget>[
         _mobileToolbar(apple),
         Expanded(child: RepaintBoundary(child: _content())),
-        if (state.current != null)
-          RepaintBoundary(
-            child: AppPlayerBar(
-              state: state,
-              compact: true,
-              comments: _comments,
-              onComments: _toggleComments,
-              onOpen: _openNowPlaying,
-            ),
-          ),
-        AppleGlass(
-          borderRadius: BorderRadius.zero,
-          blurSigma: 16,
-          color: apple.glass,
-          border: Border(top: BorderSide(color: apple.separator, width: .5)),
-          child: NavigationBar(
-            selectedIndex: _section.index,
-            onDestinationSelected: (int index) =>
-                _select(_AppSection.values[index]),
-            destinations: <NavigationDestination>[
-              NavigationDestination(
-                icon: const Icon(Icons.home_outlined),
-                selectedIcon: const Icon(Icons.home_rounded),
-                label: context.tr('主页'),
-              ),
-              NavigationDestination(
-                icon: const Icon(Icons.search_outlined),
-                selectedIcon: const Icon(Icons.search_rounded),
-                label: context.tr('搜索'),
-              ),
-              NavigationDestination(
-                icon: const Icon(Icons.library_music_outlined),
-                selectedIcon: const Icon(Icons.library_music_rounded),
-                label: context.tr('音乐库'),
-              ),
-              NavigationDestination(
-                icon: const Icon(Icons.favorite_border_rounded),
-                selectedIcon: const Icon(Icons.favorite_rounded),
-                label: context.tr('我喜欢'),
-              ),
-              NavigationDestination(
-                icon: const Icon(Icons.settings_outlined),
-                selectedIcon: const Icon(Icons.settings_rounded),
-                label: context.tr('设置'),
+      ],
+    );
+  }
+
+  Widget _mobileBottomBar() {
+    // This surface floats over the page. Only AppleGlass paints a background;
+    // its clip leaves the gutters and the gap between capsules transparent.
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+      child: Center(
+        heightFactor: 1,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (state.current != null) ...<Widget>[
+                RepaintBoundary(
+                  child: AppPlayerBar(
+                    state: state,
+                    compact: true,
+                    floating: true,
+                    comments: _comments,
+                    onComments: _toggleComments,
+                    onOpen: _openNowPlaying,
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              CapsuleNavigationBar(
+                selectedIndex: _section.index,
+                onDestinationSelected: (int index) =>
+                    _select(_AppSection.values[index]),
+                destinations: <NavigationDestination>[
+                  NavigationDestination(
+                    icon: const Icon(Icons.home_outlined),
+                    selectedIcon: const Icon(Icons.home_rounded),
+                    label: context.tr('主页'),
+                  ),
+                  NavigationDestination(
+                    icon: const Icon(Icons.search_outlined),
+                    selectedIcon: const Icon(Icons.search_rounded),
+                    label: context.tr('搜索'),
+                  ),
+                  NavigationDestination(
+                    icon: const Icon(Icons.library_music_outlined),
+                    selectedIcon: const Icon(Icons.library_music_rounded),
+                    label: context.tr('音乐库'),
+                  ),
+                  NavigationDestination(
+                    icon: const Icon(Icons.favorite_border_rounded),
+                    selectedIcon: const Icon(Icons.favorite_rounded),
+                    label: context.tr('我喜欢'),
+                  ),
+                  NavigationDestination(
+                    icon: const Icon(Icons.settings_outlined),
+                    selectedIcon: const Icon(Icons.settings_rounded),
+                    label: context.tr('设置'),
+                  ),
+                ],
               ),
             ],
           ),
         ),
-      ],
+      ),
     );
   }
 

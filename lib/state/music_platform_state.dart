@@ -119,6 +119,7 @@ class _MusicPlatformState {
       state._collectionsGeneration++;
       unawaited(state.refreshHome());
     }
+    unawaited(state._refreshMissingArtwork());
     unawaited(_save());
     state.notifyListeners();
   }
@@ -271,6 +272,7 @@ class _MusicPlatformState {
       if (request != _request || state._presentationDisposed) return;
       _activate(key);
       await _save();
+      unawaited(state._refreshMissingArtwork());
       unawaited(state.refreshHome());
     } finally {
       busy = false;
@@ -358,6 +360,7 @@ class _MusicPlatformState {
     }
     if (refresh) {
       await _save();
+      unawaited(state._refreshMissingArtwork());
       unawaited(state.refreshHome());
     }
   }
@@ -600,9 +603,14 @@ class _MusicPlatformState {
   }
 
   Future<void> hydrate(Track track, MusicId id) async {
+    if (state._presentationDisposed ||
+        state._metadataPending.contains(track.id)) {
+      return;
+    }
     state._metadataPending.add(track.id);
     try {
       final owner = state.catalog.connections.resolve(id);
+      if (owner.user == null) return;
       final namespace = owner.cacheNamespace;
       final value = await owner.song(id);
       if (state._presentationDisposed ||
@@ -611,18 +619,43 @@ class _MusicPlatformState {
         return;
       }
       final updated = state.catalog.trackFromMusicSong(value);
+      Track merge(Track entry) => Track(
+        id: entry.id,
+        title: entry.title.isEmpty ? updated.title : entry.title,
+        artist: entry.artist.isEmpty ? updated.artist : entry.artist,
+        artists: updated.artists.isEmpty ? entry.artists : updated.artists,
+        album: entry.album.isEmpty ? updated.album : entry.album,
+        albumId: updated.albumId > 0 ? updated.albumId : entry.albumId,
+        albumKey: updated.albumKey ?? entry.albumKey,
+        duration: entry.duration > Duration.zero
+            ? entry.duration
+            : updated.duration,
+        coverSeed: entry.coverSeed,
+        accent: entry.accent,
+        coverUrl: updated.coverUrl ?? entry.coverUrl,
+        translatedTitle: updated.translatedTitle ?? entry.translatedTitle,
+        localPath: entry.localPath,
+      );
+      final queueChanged = state._queue.any((entry) => entry.id == track.id);
+      final recentChanged = state._recentTracks.any(
+        (entry) => entry.id == track.id,
+      );
       state._queue = [
         for (final entry in state._queue)
-          if (entry.id == track.id)
-            updated.copyWith(localPath: entry.localPath)
-          else
-            entry,
+          if (entry.id == track.id) merge(entry) else entry,
+      ];
+      state._recentTracks = [
+        for (final entry in state._recentTracks)
+          if (entry.id == track.id) merge(entry) else entry,
       ];
       state._metadataLoaded.add(track.id);
-      state._markQueueChanged();
-      unawaited(state.refreshArtworkSeed());
-      unawaited(state._saveQueue());
-      if (!state._presentationDisposed) state.notifyListeners();
+      if (queueChanged) {
+        state._markQueueChanged();
+        unawaited(state.refreshArtworkSeed());
+        unawaited(state._saveQueue());
+      }
+      if (recentChanged) unawaited(state._saveRecentTracks());
+      if (queueChanged || recentChanged) state.notifyListeners();
     } catch (_) {
       // Metadata can retry when the account is reconnected.
     } finally {

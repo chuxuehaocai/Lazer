@@ -126,7 +126,12 @@ class _AppArtistPageState extends State<AppArtistPage>
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1180),
         child: ListView(
-          padding: EdgeInsets.fromLTRB(inset, 20, inset, 42),
+          padding: EdgeInsets.fromLTRB(
+            inset,
+            20,
+            inset,
+            42 + MediaQuery.paddingOf(context).bottom,
+          ),
           children: <Widget>[
             _ArtistHero(
               artist: artist,
@@ -619,7 +624,11 @@ class _AppArtistReleasesPageState extends State<AppArtistReleasesPage>
                   },
                 ),
               ),
-            const SliverToBoxAdapter(child: SizedBox(height: 36)),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 36 + MediaQuery.paddingOf(context).bottom,
+              ),
+            ),
           ],
         ),
       ),
@@ -759,7 +768,11 @@ class _AppArtistSongsPageState extends State<AppArtistSongsPage>
                   ),
                 ),
               ),
-            const SliverToBoxAdapter(child: SizedBox(height: 36)),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 36 + MediaQuery.paddingOf(context).bottom,
+              ),
+            ),
           ],
         ),
       ),

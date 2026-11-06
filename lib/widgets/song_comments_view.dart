@@ -264,11 +264,11 @@ class _SongCommentsViewState extends State<SongCommentsView> {
                               ],
                               SliverToBoxAdapter(
                                 child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
+                                  padding: EdgeInsets.fromLTRB(
                                     20,
                                     16,
                                     20,
-                                    32,
+                                    32 + MediaQuery.paddingOf(context).bottom,
                                   ),
                                   child: Center(
                                     child: _comments.loadingMore

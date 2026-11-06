@@ -2,6 +2,7 @@
 library;
 
 import '../gateway/music_models.dart';
+import '../utils/artwork.dart';
 
 /// One row of the listener's play record, as returned by the gateway.
 ///
@@ -48,7 +49,9 @@ class ArtistRef {
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
-    'coverUrl': platformKey == null ? coverUrl : null,
+    'coverUrl': platformKey == null
+        ? coverUrl
+        : persistableArtworkUrl(coverUrl),
     if (platformKey != null) 'platformKey': platformKey,
   };
   factory ArtistRef.fromJson(Map<String, dynamic> json) => ArtistRef(
@@ -101,7 +104,7 @@ class Track {
       albumId > 0 ||
       MusicId.tryParse(albumIdentity)?.kind == MusicEntityKind.album;
   String? get persistedCoverUrl =>
-      MusicId.tryParse(id) == null ? coverUrl : null;
+      MusicId.tryParse(id) == null ? coverUrl : persistableArtworkUrl(coverUrl);
   bool get isServiceTrack =>
       int.tryParse(id) != null ||
       MusicId.tryParse(id)?.kind == MusicEntityKind.song;
@@ -187,7 +190,9 @@ class Playlist {
     'trackIds': trackIds,
     'coverSeed': coverSeed,
     'description': description,
-    'coverUrl': MusicId.tryParse(id) == null ? coverUrl : null,
+    'coverUrl': MusicId.tryParse(id) == null
+        ? coverUrl
+        : persistableArtworkUrl(coverUrl),
     'trackCount': trackCount,
   };
 
@@ -425,7 +430,9 @@ class Album {
     'note': note,
     'accent': accent,
     'trackCount': trackCount,
-    'coverUrl': MusicId.tryParse(id) == null ? coverUrl : null,
+    'coverUrl': MusicId.tryParse(id) == null
+        ? coverUrl
+        : persistableArtworkUrl(coverUrl),
     'artists': artists.map((artist) => artist.toJson()).toList(),
     'releaseType': releaseType,
     'subType': subType,

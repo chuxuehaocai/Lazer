@@ -101,7 +101,12 @@ class _SettingsOverview extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 760),
         child: ListView(
           key: const PageStorageKey('settings-overview-scroll'),
-          padding: EdgeInsets.fromLTRB(inset, 8, inset, 36),
+          padding: EdgeInsets.fromLTRB(
+            inset,
+            8,
+            inset,
+            36 + MediaQuery.paddingOf(context).bottom,
+          ),
           children: <Widget>[
             Column(
               children: <Widget>[

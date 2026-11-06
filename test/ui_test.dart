@@ -16,6 +16,7 @@ import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/detail_requests.dart';
 import 'package:lazer_nextgen/widgets/apple_ui.dart';
+import 'package:lazer_nextgen/widgets/capsule_navigation_bar.dart';
 
 const Track _track = Track(
   id: '1939575649',
@@ -576,8 +577,8 @@ void main() {
     addTearDown(state.dispose);
     await tester.pumpWidget(_legacyApp(state));
     await tester.pumpAndSettle();
-    expect(find.byType(NavigationBar), findsOneWidget);
-    expect(find.text('音乐库'), findsOneWidget);
+    expect(find.byType(CapsuleNavigationBar), findsOneWidget);
+    expect(find.byTooltip('音乐库'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

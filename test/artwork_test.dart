@@ -8,6 +8,27 @@ const cover =
     'https://p1.music.126.net/Xgxfl8qPlwjRIoBDI-cPrg==/109951173819308049.jpg?param=1024y1024';
 
 void main() {
+  test('public covers survive snapshots while signed URLs are renewed', () {
+    expect(persistableArtworkUrl(cover), cover);
+    expect(
+      persistableArtworkUrl('https://images.test/album.jpg'),
+      'https://images.test/album.jpg',
+    );
+    expect(
+      persistableArtworkUrl('file:///music/cover.jpg'),
+      'file:///music/cover.jpg',
+    );
+    for (final url in [
+      'https://images.test/album.jpg?token=private',
+      'http://localhost/rest/getCoverArt.view?id=cover&t=private&s=salt',
+      'https://images.test/album.jpg?X-Amz-Signature=private',
+      'https://user:private@images.test/album.jpg',
+      'https://images.test/album.jpg#private',
+    ]) {
+      expect(persistableArtworkUrl(url), isNull);
+    }
+  });
+
   test('CDN alternatives preserve the image path and remove resize only', () {
     final urls = artworkCandidates(cover);
     expect(urls.first, cover);

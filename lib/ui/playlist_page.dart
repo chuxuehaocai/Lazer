@@ -305,7 +305,10 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
     final double top = 12 + header + tops[index];
     final double bottom = top + heights[index];
     final double viewTop = _scroll.offset;
-    final double viewBottom = viewTop + _scroll.position.viewportDimension;
+    final double viewBottom =
+        viewTop +
+        _scroll.position.viewportDimension -
+        MediaQuery.paddingOf(context).bottom;
     return bottom <= viewTop || top >= viewBottom;
   }
 
@@ -326,7 +329,9 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
     final double header = _headerKey.currentContext?.size?.height ?? 0;
     final double top = 12 + header + tops[index];
     final double extent = heights[index];
-    final double viewport = _scroll.position.viewportDimension;
+    final double viewport =
+        _scroll.position.viewportDimension -
+        MediaQuery.paddingOf(context).bottom;
     final double target = (top - (viewport - extent) / 2).clamp(
       0.0,
       _scroll.position.maxScrollExtent,
@@ -462,14 +467,18 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
                   ),
                 // Leave room for the floating locate button so the last row
                 // can scroll clear of it.
-                const SliverToBoxAdapter(child: SizedBox(height: 88)),
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 88 + MediaQuery.paddingOf(context).bottom,
+                  ),
+                ),
               ],
             ),
             if (_selecting && tracks != null)
               Positioned(
                 left: 12,
                 right: 12,
-                bottom: 18,
+                bottom: 18 + MediaQuery.paddingOf(context).bottom,
                 child: TrackBatchBar(
                   selectedCount: _selected.length,
                   totalCount: tracks.map((track) => track.id).toSet().length,
@@ -496,7 +505,7 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
               ),
             Positioned(
               right: 18,
-              bottom: 18,
+              bottom: 18 + MediaQuery.paddingOf(context).bottom,
               child: ValueListenableBuilder<bool>(
                 valueListenable: _showLocate,
                 builder: (BuildContext context, bool show, Widget? _) {

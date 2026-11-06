@@ -305,6 +305,9 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
                   gap: gap,
                   inset: inset,
                 ),
+                SliverToBoxAdapter(
+                  child: SizedBox(height: MediaQuery.paddingOf(context).bottom),
+                ),
               ],
             );
           },

@@ -31,6 +31,7 @@ class AppPlayerBar extends StatefulWidget {
     super.key,
     required this.state,
     this.compact = false,
+    this.floating = false,
     this.comments = false,
     required this.onOpen,
     this.onComments,
@@ -38,8 +39,11 @@ class AppPlayerBar extends StatefulWidget {
 
   final AppState state;
 
-  /// Phone presentation: cover, title and three buttons, 64 dp tall.
+  /// Compact presentation: cover, title and transport controls.
   final bool compact;
+
+  /// A separate capsule surface for the mobile shell's compact player.
+  final bool floating;
 
   /// Whether the comments pane is open in the shell.
   final bool comments;
@@ -102,6 +106,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
     }
     if (oldWidget.state != widget.state ||
         oldWidget.compact != widget.compact ||
+        oldWidget.floating != widget.floating ||
         oldWidget.comments != widget.comments ||
         oldWidget.onOpen != widget.onOpen ||
         oldWidget.onComments != widget.onComments) {
@@ -123,21 +128,35 @@ class _AppPlayerBarState extends State<AppPlayerBar>
     if (widget.compact) {
       final AppleSemanticColors apple = AppleSemanticColors.of(context);
       return AppleGlass(
-        borderRadius: BorderRadius.zero,
+        borderRadius: widget.floating
+            ? BorderRadius.circular(999)
+            : BorderRadius.zero,
         blurSigma: 16,
         color: apple.glassStrong,
-        border: Border(top: BorderSide(color: apple.separator, width: .5)),
-        child: SizedBox(
-          height: 60,
+        border: widget.floating
+            ? Border.all(color: apple.separator, width: .5)
+            : Border(top: BorderSide(color: apple.separator, width: .5)),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: widget.floating ? 56 : 60,
+            maxHeight: widget.floating ? double.infinity : 60,
+          ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: widget.floating ? 6 : 0,
+            ),
             child: Row(
               children: [
                 Expanded(
                   child: _NowPlayingTile(
                     track: track,
                     onTap: track == null ? null : widget.onOpen,
-                    artworkSize: 42,
+                    artworkSize: widget.floating ? 36 : 42,
+                    showTranslation: !widget.floating,
+                    borderRadius: BorderRadius.circular(
+                      widget.floating ? 999 : 14,
+                    ),
                   ),
                 ),
                 _CompactIcon(
@@ -146,6 +165,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                       : Icons.play_arrow_rounded,
                   tooltip: state.playing ? '暂停' : '播放',
                   iconSize: 27,
+                  size: widget.floating ? 44 : 30,
                   onPressed: track == null ? null : state.togglePlay,
                 ),
                 const SizedBox(width: 2),
@@ -153,6 +173,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                   icon: Icons.skip_next_rounded,
                   tooltip: '下一首',
                   iconSize: 25,
+                  size: widget.floating ? 44 : 30,
                   onPressed: track == null ? null : state.next,
                 ),
               ],
@@ -289,6 +310,8 @@ class _NowPlayingTile extends StatefulWidget {
     required this.track,
     this.onTap,
     required this.artworkSize,
+    this.showTranslation = true,
+    this.borderRadius = const BorderRadius.all(Radius.circular(14)),
   });
 
   final Track? track;
@@ -297,6 +320,8 @@ class _NowPlayingTile extends StatefulWidget {
   /// remote should skip it instead of parking focus on a dead target.
   final VoidCallback? onTap;
   final double artworkSize;
+  final bool showTranslation;
+  final BorderRadius borderRadius;
 
   @override
   State<_NowPlayingTile> createState() => _NowPlayingTileState();
@@ -322,13 +347,13 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
       child: TvTapTarget(
         onTap: widget.onTap,
         onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: widget.borderRadius,
         focusScale: 1.004,
         child: GestureDetector(
           onTap: widget.onTap,
           behavior: HitTestBehavior.opaque,
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: widget.borderRadius,
             child: ColoredBox(
               color: highlighted
                   ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
@@ -364,8 +389,9 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
                                     style: theme.textTheme.titleSmall,
                                   ),
                                 ),
-                          if (track?.translatedTitle?.trim().isNotEmpty ??
-                              false)
+                          if (widget.showTranslation &&
+                              (track?.translatedTitle?.trim().isNotEmpty ??
+                                  false))
                             Text(
                               track!.translatedTitle!,
                               maxLines: 1,
@@ -396,7 +422,7 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
   }
 }
 
-/// `CompactIconButton`: a 30 dp hit target with an 18 dp icon.
+/// A compact transport button; mobile capsules use a larger touch target.
 class _CompactIcon extends StatelessWidget {
   const _CompactIcon({
     required this.icon,
@@ -404,6 +430,7 @@ class _CompactIcon extends StatelessWidget {
     this.onPressed,
     this.selected = false,
     this.iconSize = 18,
+    this.size = 30,
     this.focusNode,
   });
 
@@ -412,17 +439,18 @@ class _CompactIcon extends StatelessWidget {
   final VoidCallback? onPressed;
   final bool selected;
   final double iconSize;
+  final double size;
   final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     return SizedBox.square(
-      dimension: 30,
+      dimension: size,
       child: IconButton(
         focusNode: focusNode,
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+        constraints: BoxConstraints.tightFor(width: size, height: size),
         iconSize: iconSize,
         visualDensity: VisualDensity.compact,
         tooltip: context.tr(tooltip),

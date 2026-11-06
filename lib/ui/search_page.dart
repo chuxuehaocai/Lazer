@@ -166,6 +166,7 @@ class _AppSearchPageState extends State<AppSearchPage>
   }
 
   Widget _body(double inset) {
+    final double bottomInset = MediaQuery.paddingOf(context).bottom;
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -228,7 +229,12 @@ class _AppSearchPageState extends State<AppSearchPage>
               key: ValueKey(_tab),
               child: switch (_tab) {
                 _SearchTab.songs => ListView.builder(
-                  padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
+                  padding: EdgeInsets.fromLTRB(
+                    inset,
+                    0,
+                    inset,
+                    28 + bottomInset,
+                  ),
                   itemCount: results.tracks.length,
                   itemBuilder: (BuildContext context, int i) {
                     final Track track = results.tracks[i];
@@ -249,7 +255,12 @@ class _AppSearchPageState extends State<AppSearchPage>
                   },
                 ),
                 _SearchTab.albums => ListView.builder(
-                  padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
+                  padding: EdgeInsets.fromLTRB(
+                    inset,
+                    0,
+                    inset,
+                    28 + bottomInset,
+                  ),
                   itemCount: results.albums.length,
                   itemBuilder: (BuildContext context, int i) {
                     final Album album = results.albums[i];
@@ -270,7 +281,12 @@ class _AppSearchPageState extends State<AppSearchPage>
                   },
                 ),
                 _SearchTab.artists => ListView.builder(
-                  padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
+                  padding: EdgeInsets.fromLTRB(
+                    inset,
+                    0,
+                    inset,
+                    28 + bottomInset,
+                  ),
                   itemCount: results.artists.length,
                   itemBuilder: (BuildContext context, int i) {
                     final ArtistRef artist = results.artists[i];
@@ -298,7 +314,12 @@ class _AppSearchPageState extends State<AppSearchPage>
                     return CustomScrollView(
                       slivers: <Widget>[
                         SliverPadding(
-                          padding: EdgeInsets.fromLTRB(inset, 0, inset, 28),
+                          padding: EdgeInsets.fromLTRB(
+                            inset,
+                            0,
+                            inset,
+                            28 + bottomInset,
+                          ),
                           sliver: AppPlaylistRowsSliver(
                             playlists: results.playlists,
                             layout: grid,

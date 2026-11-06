@@ -278,7 +278,11 @@ class _AppHomePageState extends State<AppHomePage>
                 ]),
               ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 28)),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: 28 + MediaQuery.paddingOf(context).bottom,
+              ),
+            ),
           ],
         ),
       ),

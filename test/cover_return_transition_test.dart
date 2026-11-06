@@ -688,7 +688,7 @@ void main() {
         );
         await tester.pump();
         if (library) {
-          await tester.tap(find.text('音乐库').last);
+          await tester.tap(find.byTooltip('音乐库'));
           await _settle(tester);
         }
         final root = find.byType(library ? AppLibraryPage : AppHomePage);

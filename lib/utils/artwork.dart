@@ -7,6 +7,45 @@
 /// small cache entry instead of the full-resolution original.
 library;
 
+/// Keeps public artwork in snapshots without persisting signed request URLs.
+/// Unknown query parameters are resolved again through the owning gateway.
+String? persistableArtworkUrl(String? raw) {
+  final value = raw?.trim() ?? '';
+  final uri = Uri.tryParse(value.startsWith('//') ? 'https:$value' : value);
+  if (uri == null || uri.userInfo.isNotEmpty || uri.hasFragment) return null;
+  if (uri.scheme == 'file') return value;
+  if ((uri.scheme != 'http' && uri.scheme != 'https') || uri.host.isEmpty) {
+    return null;
+  }
+  const publicParameters = {
+    'param',
+    'w',
+    'h',
+    'width',
+    'height',
+    'size',
+    'quality',
+    'q',
+    'fit',
+    'crop',
+    'format',
+    'fm',
+    'auto',
+    'dpr',
+    'id',
+    'coverid',
+    'imageid',
+    'v',
+    'version',
+  };
+  if (uri.queryParameters.keys.any(
+    (key) => !publicParameters.contains(key.toLowerCase()),
+  )) {
+    return null;
+  }
+  return value;
+}
+
 /// Matches an existing `param=<w>y<h>` resize directive.
 final RegExp _paramSize = RegExp(r'([?&]param=)\d+y\d+', caseSensitive: false);
 

@@ -108,12 +108,7 @@ Future<void> _settleSwitch(WidgetTester tester) async {
 }
 
 Future<void> _openSearch(WidgetTester tester) async {
-  await tester.tap(
-    find.descendant(
-      of: find.byType(NavigationBar),
-      matching: find.byIcon(Icons.search_outlined),
-    ),
-  );
+  await tester.tap(find.byTooltip('搜索'));
 }
 
 class _StatusTrackedAnimation extends AlwaysStoppedAnimation<double> {

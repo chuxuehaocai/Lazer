@@ -19,6 +19,7 @@ import 'package:lazer_nextgen/audio/hifi_controller.dart';
 import 'package:lazer_nextgen/plugins/plugin_manager.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/hifi_settings.dart';
+import 'package:lazer_nextgen/state/playback_queue_store.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/login.dart';
 import 'package:lazer_nextgen/ui/settings_page.dart';
@@ -279,6 +280,91 @@ void main() {
         expect(restored.musicAccounts.keys, ['beta:fixture.multiple']);
         await restored.selectMusicConnection('beta:fixture.multiple');
         expect(restored.activeMusicSignedIn, isTrue);
+      } finally {
+        restored.dispose();
+      }
+    },
+  );
+
+  test(
+    'restored Lua records recover covers without playing either platform',
+    () async {
+      final plugins = manager();
+      await plugins.importZip(
+        _package(
+          source: _musicSource.replaceFirst(
+            'artists={},durationMs=180000}',
+            'artists={},durationMs=180000,coverUrl="https://images.test/"..platform..".jpg"}',
+          ),
+        ),
+      );
+      final first = state(plugins);
+      await first.bootstrap();
+      await first.signInWithCookie('alpha-fixture');
+      await first.selectMusicConnection('beta:fixture.multiple');
+      await first.signInWithCookie('beta-fixture');
+      final tracks = [
+        for (final gateway in plugins.gateways)
+          Track(
+            id: gateway
+                .id(MusicEntityKind.song, '${gateway.provider.id}-song')
+                .cacheKey,
+            title: '${gateway.provider.id} cached title',
+            artist: 'Cached artist',
+            album: 'Cached album',
+            translatedTitle: 'Cached translation',
+            duration: const Duration(minutes: 3),
+            coverSeed: 7,
+          ),
+      ];
+      first.dispose();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        playbackQueueKey,
+        jsonEncode({
+          'index': 1,
+          'tracks': tracks.map((track) => track.toJson()).toList(),
+        }),
+      );
+      await prefs.setString(
+        'lazer_recent_tracks_v1',
+        jsonEncode(tracks.map((track) => track.toJson()).toList()),
+      );
+      final engine = _Engine();
+      final restored = AppState(
+        pluginManager: manager(),
+        audioEngine: engine,
+        artworkSeedLoader: (_) async => null,
+      );
+      try {
+        await restored.bootstrap();
+        await _waitFor(
+          () =>
+              restored.recentTracks.length == 2 &&
+              restored.recentTracks.every((track) => track.coverUrl != null),
+        );
+        expect(restored.recentTracks.map((track) => track.coverUrl), [
+          'https://images.test/alpha.jpg',
+          'https://images.test/beta.jpg',
+        ]);
+        expect(
+          restored.queue.map((track) => track.id),
+          tracks.map((track) => track.id),
+        );
+        expect(restored.current!.id, tracks.last.id);
+        expect(restored.current!.coverUrl, 'https://images.test/beta.jpg');
+        expect(
+          restored.recentTracks.first.translatedTitle,
+          'Cached translation',
+        );
+        expect(restored.recentTracks.first.artist, 'Cached artist');
+        expect(restored.playing, isFalse);
+        expect(engine.urls, isEmpty);
+        await _waitFor(
+          () => prefs
+              .getString('lazer_recent_tracks_v1')!
+              .contains('https://images.test/alpha.jpg'),
+        );
       } finally {
         restored.dispose();
       }

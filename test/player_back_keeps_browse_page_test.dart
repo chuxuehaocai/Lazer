@@ -69,7 +69,7 @@ Future<void> _openPlayer(WidgetTester tester) async {
     ),
   );
   await _settle(tester);
-  await tester.tap(find.text('音乐库').last);
+  await tester.tap(find.byTooltip('音乐库'));
   await _settle(tester);
   expect(find.byType(AppLibraryPage), findsOneWidget);
   await tester.tap(

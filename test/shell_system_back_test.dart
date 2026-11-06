@@ -70,7 +70,7 @@ Future<AppState> _openLibrary(WidgetTester tester, {bool track = false}) async {
     ),
   );
   await _settle(tester);
-  await tester.tap(find.text('音乐库').last);
+  await tester.tap(find.byTooltip('音乐库'));
   await _settle(tester);
   expect(find.byType(AppLibraryPage), findsOneWidget);
   return state;
@@ -130,7 +130,7 @@ void main() {
       );
       await _settle(tester);
       expect(find.text('Navigation album'), findsWidgets);
-      await tester.tap(find.text('主页').last);
+      await tester.tap(find.byTooltip('主页'));
       await _settle(tester);
       expect(find.byType(AppHomePage), findsOneWidget);
       final back = tester.widget<SystemBackGesture>(

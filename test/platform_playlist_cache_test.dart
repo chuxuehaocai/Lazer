@@ -40,6 +40,7 @@ class _Gateway extends MusicGateway {
   MusicSong songAt(int index) => MusicSong(
     id: id(MusicEntityKind.song, 'song-${index == 204 ? 0 : index}'),
     title: '${user!.name} song $index v$version',
+    coverUrl: 'https://images.test/song-$index.jpg',
     artists: [],
     duration: const Duration(minutes: 3),
   );
@@ -167,6 +168,10 @@ void main() {
       final restarted = catalog(offline);
       final stored = await restarted.cachedPlaylistTracks(offline.playlistKey);
       expect(stored!.map((track) => track.id), tracks.map((track) => track.id));
+      expect(
+        stored.map((track) => track.coverUrl),
+        tracks.map((track) => track.coverUrl),
+      );
       expect(
         (await restarted.playlistTracks(offline.playlistKey)).first.title,
         tracks.first.title,

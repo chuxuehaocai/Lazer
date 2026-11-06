@@ -239,7 +239,12 @@ class _AppChartPageState extends State<AppChartPage>
                   ),
                 ),
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(inset, 0, inset, 100),
+                  padding: EdgeInsets.fromLTRB(
+                    inset,
+                    0,
+                    inset,
+                    100 + MediaQuery.paddingOf(context).bottom,
+                  ),
                   sliver: SliverList.separated(
                     itemCount: chart.entries.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 2),
@@ -292,7 +297,7 @@ class _AppChartPageState extends State<AppChartPage>
               Positioned(
                 left: 12,
                 right: 12,
-                bottom: 18,
+                bottom: 18 + MediaQuery.paddingOf(context).bottom,
                 child: TrackBatchBar(
                   selectedCount: _selected.length,
                   totalCount: tracks.map((track) => track.id).toSet().length,

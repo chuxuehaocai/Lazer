@@ -80,7 +80,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.tap(find.text('音乐库').last);
+    await tester.tap(find.byTooltip('音乐库'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
