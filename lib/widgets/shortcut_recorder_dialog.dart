@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'spring_buttons.dart';
 import 'package:flutter/material.dart';
 import '../animation/apple_modal.dart';
@@ -50,7 +51,8 @@ class _ShortcutRecorderDialog extends StatefulWidget {
       _ShortcutRecorderDialogState();
 }
 
-class _ShortcutRecorderDialogState extends State<_ShortcutRecorderDialog> {
+class _ShortcutRecorderDialogState extends State<_ShortcutRecorderDialog>
+    with BuildSafeState<_ShortcutRecorderDialog> {
   final FocusNode _focus = FocusNode(debugLabel: 'media-shortcut-recorder');
   MediaShortcutBinding? _candidate;
   MediaShortcutAction? _conflict;

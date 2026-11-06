@@ -10,6 +10,7 @@ import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../theme/font_preferences.dart';
 import '../widgets/apple_ui.dart';
+import '../widgets/build_safe_state.dart';
 import '../widgets/catalog_links.dart';
 import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
@@ -32,7 +33,8 @@ class AppSavedAlbumsPage extends StatefulWidget {
   State<AppSavedAlbumsPage> createState() => _AppSavedAlbumsPageState();
 }
 
-class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage> {
+class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
+    with BuildSafeState<AppSavedAlbumsPage> {
   /// How many further pages a filter may read on its own.
   ///
   /// Walking a whole collection to answer a query is what the service reads as
@@ -313,8 +315,9 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage> {
 
   /// The header count: the whole collection while browsing, the matches while
   /// a filter is narrowing it.
-  String _subtitle(List<Album> shown) =>
-      _query.trim().isEmpty ? '${_total ?? _albums.length} 张' : '${shown.length} 张';
+  String _subtitle(List<Album> shown) => _query.trim().isEmpty
+      ? '${_total ?? _albums.length} 张'
+      : '${shown.length} 张';
 
   List<Widget> _body({
     required bool guest,
@@ -381,9 +384,7 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage> {
           padding: EdgeInsets.symmetric(horizontal: inset),
           sliver: SliverToBoxAdapter(
             child: AppNotice(
-              message: _filterTruncated
-                  ? '没有找到匹配的专辑，试试更精确的关键词'
-                  : '没有找到匹配的专辑',
+              message: _filterTruncated ? '没有找到匹配的专辑，试试更精确的关键词' : '没有找到匹配的专辑',
             ),
           ),
         ),

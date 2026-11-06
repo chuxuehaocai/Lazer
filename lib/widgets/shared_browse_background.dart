@@ -1,3 +1,5 @@
+import '../state/build_safe_notifier.dart';
+import 'build_safe_state.dart';
 import 'package:flutter/material.dart';
 
 import '../ui/background.dart';
@@ -30,7 +32,8 @@ class SharedBrowseBackground extends StatefulWidget {
   State<SharedBrowseBackground> createState() => _SharedBrowseBackgroundState();
 }
 
-class _SharedBrowseBackgroundState extends State<SharedBrowseBackground> {
+class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
+    with BuildSafeState<SharedBrowseBackground> {
   late Object _signature;
   late Listenable _motion;
 
@@ -143,8 +146,8 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground> {
 }
 
 class BrowseNavigationObserver extends NavigatorObserver {
-  final ValueNotifier<bool> moving = ValueNotifier(false);
-  final ValueNotifier<bool> rootVisible = ValueNotifier(true);
+  final ValueNotifier<bool> moving = BuildSafeValueNotifier(false);
+  final ValueNotifier<bool> rootVisible = BuildSafeValueNotifier(true);
   final List<Route<dynamic>> _routes = [];
   final Map<Animation<double>, AnimationStatusListener> _listeners = {};
   final Set<Animation<double>> _active = {};

@@ -1,3 +1,4 @@
+import '../state/build_safe_notifier.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 
@@ -24,7 +25,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   NowPlayingRoute({required this.state});
 
   final AppState state;
-  final ValueNotifier<bool> _settled = ValueNotifier(false);
+  final ValueNotifier<bool> _settled = BuildSafeValueNotifier(false);
   NavigatorState? _systemGestureNavigator;
 
   @override

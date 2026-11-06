@@ -1,3 +1,4 @@
+import 'build_safe_notifier.dart';
 import 'package:flutter/foundation.dart';
 
 import '../data/models.dart';
@@ -7,9 +8,10 @@ import '../data/models.dart';
 /// request bus keeps every one of those call sites free of shell plumbing: they
 /// publish the album, the shell picks it up and loads the playlist pipeline
 /// with it.
-final ValueNotifier<Album?> albumDetailRequest = ValueNotifier<Album?>(null);
-
-/// Artist links use the same right-hand detail slot as playlists and albums.
-final ValueNotifier<ArtistRef?> artistDetailRequest = ValueNotifier<ArtistRef?>(
+final ValueNotifier<Album?> albumDetailRequest = BuildSafeValueNotifier<Album?>(
   null,
 );
+
+/// Artist links use the same right-hand detail slot as playlists and albums.
+final ValueNotifier<ArtistRef?> artistDetailRequest =
+    BuildSafeValueNotifier<ArtistRef?>(null);

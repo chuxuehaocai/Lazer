@@ -10,6 +10,7 @@
 // are shown as they are, never as "supported".
 library;
 
+import '../state/build_safe_notifier.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -50,7 +51,7 @@ class HifiStatus {
 }
 
 /// Owns the HiFi settings for the running app.
-class HifiController extends ChangeNotifier {
+class HifiController extends ChangeNotifier with BuildSafeNotifier {
   HifiController(
     this._settings, {
     required this.engine,

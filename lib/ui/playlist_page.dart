@@ -1,3 +1,5 @@
+import '../state/build_safe_notifier.dart';
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
@@ -26,6 +28,16 @@ class AppLikesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!state.hasNetworkProvider) {
+      return AppNotice(
+        message: '切换到音乐平台后查看喜欢的音乐。',
+        icon: Icons.favorite_border_rounded,
+        action: SpringFilledButton(
+          onPressed: () => unawaited(showAppLoginDialog(context, state)),
+          child: const TrText('音乐平台'),
+        ),
+      );
+    }
     if (state.isGuest) {
       return AppNotice(
         message: '登录后查看喜欢的音乐。',
@@ -67,10 +79,11 @@ class AppPlaylistPage extends StatefulWidget {
   State<AppPlaylistPage> createState() => _AppPlaylistPageState();
 }
 
-class _AppPlaylistPageState extends State<AppPlaylistPage> {
+class _AppPlaylistPageState extends State<AppPlaylistPage>
+    with BuildSafeState<AppPlaylistPage> {
   final ScrollController _scroll = ScrollController();
   final GlobalKey _headerKey = GlobalKey();
-  final ValueNotifier<bool> _showLocate = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _showLocate = BuildSafeValueNotifier<bool>(false);
   bool _refreshScheduled = false;
   List<Track>? _tracks;
   String? _note;

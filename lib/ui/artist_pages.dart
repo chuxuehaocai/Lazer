@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
@@ -39,7 +40,8 @@ class AppArtistPage extends StatefulWidget {
   State<AppArtistPage> createState() => _AppArtistPageState();
 }
 
-class _AppArtistPageState extends State<AppArtistPage> {
+class _AppArtistPageState extends State<AppArtistPage>
+    with BuildSafeState<AppArtistPage> {
   ArtistDetails? _details;
   final List<Album> _albums = <Album>[];
   String? _error;
@@ -406,7 +408,8 @@ class AppArtistReleasesPage extends StatefulWidget {
   State<AppArtistReleasesPage> createState() => _AppArtistReleasesPageState();
 }
 
-class _AppArtistReleasesPageState extends State<AppArtistReleasesPage> {
+class _AppArtistReleasesPageState extends State<AppArtistReleasesPage>
+    with BuildSafeState<AppArtistReleasesPage> {
   List<Album>? _albums;
   String? _error;
   bool _loading = false;
@@ -637,7 +640,8 @@ class AppArtistSongsPage extends StatefulWidget {
   State<AppArtistSongsPage> createState() => _AppArtistSongsPageState();
 }
 
-class _AppArtistSongsPageState extends State<AppArtistSongsPage> {
+class _AppArtistSongsPageState extends State<AppArtistSongsPage>
+    with BuildSafeState<AppArtistSongsPage> {
   List<Track>? _tracks;
   String? _error;
   int _requestSerial = 0;

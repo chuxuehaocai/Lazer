@@ -8,6 +8,7 @@
 /// are the single place where those sizes are decided.
 library;
 
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 
 import 'dart:async';
@@ -319,7 +320,8 @@ class LargeScreenFeatureCard extends StatefulWidget {
   State<LargeScreenFeatureCard> createState() => _LargeScreenFeatureCardState();
 }
 
-class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard> {
+class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard>
+    with BuildSafeState<LargeScreenFeatureCard> {
   bool _focused = false;
   final GlobalKey _coverKey = GlobalKey();
 
@@ -449,7 +451,8 @@ class LargeScreenMediaCard extends StatefulWidget {
   State<LargeScreenMediaCard> createState() => _LargeScreenMediaCardState();
 }
 
-class _LargeScreenMediaCardState extends State<LargeScreenMediaCard> {
+class _LargeScreenMediaCardState extends State<LargeScreenMediaCard>
+    with BuildSafeState<LargeScreenMediaCard> {
   bool _focused = false;
   final GlobalKey _coverKey = GlobalKey();
 
@@ -676,7 +679,8 @@ class LargeScreenTrackRow extends StatefulWidget {
   State<LargeScreenTrackRow> createState() => _LargeScreenTrackRowState();
 }
 
-class _LargeScreenTrackRowState extends State<LargeScreenTrackRow> {
+class _LargeScreenTrackRowState extends State<LargeScreenTrackRow>
+    with BuildSafeState<LargeScreenTrackRow> {
   bool _focused = false;
   late final FocusNode _focusNode = FocusNode(onKeyEvent: _onKeyEvent);
   Timer? _holdTimer;

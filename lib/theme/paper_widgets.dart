@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'package:lazer_nextgen/theme/app_palette.dart';
 import '../l10n/app_localizations.dart';
 import '../tv/tv_mode.dart';
@@ -113,7 +114,8 @@ class IvoryButton extends StatefulWidget {
   State<IvoryButton> createState() => _IvoryButtonState();
 }
 
-class _IvoryButtonState extends State<IvoryButton> {
+class _IvoryButtonState extends State<IvoryButton>
+    with BuildSafeState<IvoryButton> {
   bool _hovering = false;
 
   @override
@@ -205,7 +207,8 @@ class OutlinedButton2 extends StatefulWidget {
   State<OutlinedButton2> createState() => _OutlinedButton2State();
 }
 
-class _OutlinedButton2State extends State<OutlinedButton2> {
+class _OutlinedButton2State extends State<OutlinedButton2>
+    with BuildSafeState<OutlinedButton2> {
   bool _hovering = false;
 
   @override
@@ -299,7 +302,8 @@ class TextLinkButton extends StatefulWidget {
   State<TextLinkButton> createState() => _TextLinkButtonState();
 }
 
-class _TextLinkButtonState extends State<TextLinkButton> {
+class _TextLinkButtonState extends State<TextLinkButton>
+    with BuildSafeState<TextLinkButton> {
   bool _hovering = false;
 
   @override

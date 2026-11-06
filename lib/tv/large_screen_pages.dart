@@ -7,6 +7,7 @@
 /// go through the same [AppState] the rest of the app uses.
 library;
 
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 
 import 'dart:async';
@@ -141,7 +142,8 @@ class LargeScreenHomePage extends StatefulWidget {
   State<LargeScreenHomePage> createState() => _LargeScreenHomePageState();
 }
 
-class _LargeScreenHomePageState extends State<LargeScreenHomePage> {
+class _LargeScreenHomePageState extends State<LargeScreenHomePage>
+    with BuildSafeState<LargeScreenHomePage> {
   bool _startingStation = false;
 
   AppState get _state => widget.state;
@@ -558,7 +560,8 @@ class LargeScreenLibraryPage extends StatefulWidget {
   State<LargeScreenLibraryPage> createState() => _LargeScreenLibraryPageState();
 }
 
-class _LargeScreenLibraryPageState extends State<LargeScreenLibraryPage> {
+class _LargeScreenLibraryPageState extends State<LargeScreenLibraryPage>
+    with BuildSafeState<LargeScreenLibraryPage> {
   late LargeScreenLibraryFilter _filter = widget.initialFilter;
   AppState? _cachedState;
   UserCollections? _cachedCollections;
@@ -787,7 +790,8 @@ class _RailButton extends StatefulWidget {
   State<_RailButton> createState() => _RailButtonState();
 }
 
-class _RailButtonState extends State<_RailButton> {
+class _RailButtonState extends State<_RailButton>
+    with BuildSafeState<_RailButton> {
   bool _focused = false;
 
   @override
@@ -1138,7 +1142,8 @@ class LargeScreenCollectionPage extends StatefulWidget {
       _LargeScreenCollectionPageState();
 }
 
-class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage> {
+class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage>
+    with BuildSafeState<LargeScreenCollectionPage> {
   List<Track>? _tracks;
   String? _note;
   String? _error;
@@ -1434,7 +1439,8 @@ class LargeScreenArtistPage extends StatefulWidget {
   State<LargeScreenArtistPage> createState() => _LargeScreenArtistPageState();
 }
 
-class _LargeScreenArtistPageState extends State<LargeScreenArtistPage> {
+class _LargeScreenArtistPageState extends State<LargeScreenArtistPage>
+    with BuildSafeState<LargeScreenArtistPage> {
   ArtistDetails? _details;
   List<Album> _albums = const <Album>[];
   String? _error;
@@ -1652,7 +1658,8 @@ class LargeScreenChartPage extends StatefulWidget {
   State<LargeScreenChartPage> createState() => _LargeScreenChartPageState();
 }
 
-class _LargeScreenChartPageState extends State<LargeScreenChartPage> {
+class _LargeScreenChartPageState extends State<LargeScreenChartPage>
+    with BuildSafeState<LargeScreenChartPage> {
   late MusicChart _chart = widget.chart;
   bool _matching = false;
   int _serial = 0;
@@ -1908,7 +1915,8 @@ class LargeScreenSearchPage extends StatefulWidget {
   State<LargeScreenSearchPage> createState() => _LargeScreenSearchPageState();
 }
 
-class _LargeScreenSearchPageState extends State<LargeScreenSearchPage> {
+class _LargeScreenSearchPageState extends State<LargeScreenSearchPage>
+    with BuildSafeState<LargeScreenSearchPage> {
   final TextEditingController _controller = TextEditingController();
   SearchResults _results = SearchResults.empty;
   _SearchKind _kind = _SearchKind.songs;

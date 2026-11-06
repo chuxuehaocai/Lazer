@@ -374,7 +374,7 @@ void main() {
   );
 
   test(
-    'switching retains NetEase credentials and clears prior playback and views',
+    'switching retains independent accounts and the playing source',
     () async {
       final server = _Server();
       final state = _state(server, engine: _Engine());
@@ -394,7 +394,8 @@ void main() {
       expect(state.isNavidrome, isFalse);
       expect(state.user.name, 'Net listener');
       expect(state.gateway.sessionCookie, 'MUSIC_U=fixture');
-      expect(state.current, isNull);
+      expect(state.current?.id, song.id);
+      expect(state.queue, hasLength(1));
       await state.selectMusicConnection(native);
       expect(state.user.name, 'alice');
       await state.signOut();

@@ -138,4 +138,28 @@ void main() {
     expect(saved['tracks'][0]['title'], 'Song 10');
     expect(saved['tracks'][0]['durationMs'], 180000);
   });
+
+  test(
+    'local files and remote references survive the same queue snapshot',
+    () async {
+      final local = Track(
+        id: 'local:fixture',
+        title: 'Local',
+        artist: '',
+        album: '',
+        duration: const Duration(minutes: 3),
+        coverSeed: 0,
+        localPath: '/music/local.flac',
+      );
+      final store = PlaybackQueueStore();
+      await store.save([track('10'), local], 1, 1);
+      final snapshot = await store.load();
+      expect(snapshot!.tracks.map((track) => track.id), [
+        '10',
+        'local:fixture',
+      ]);
+      expect(snapshot.tracks.last.localPath, local.localPath);
+      expect(snapshot.index, 1);
+    },
+  );
 }

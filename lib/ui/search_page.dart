@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
@@ -39,7 +40,8 @@ class AppSearchPage extends StatefulWidget {
   State<AppSearchPage> createState() => _AppSearchPageState();
 }
 
-class _AppSearchPageState extends State<AppSearchPage> {
+class _AppSearchPageState extends State<AppSearchPage>
+    with BuildSafeState<AppSearchPage> {
   final TextEditingController _search = TextEditingController();
   SearchResults? _results;
   _SearchTab _tab = _SearchTab.songs;

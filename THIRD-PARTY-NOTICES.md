@@ -147,3 +147,12 @@ Flutter emits the dependency notices used by the application in
 packages, including the Flutter packages, `dbus` (MPL-2.0), Pointy Castle,
 and the MIT/BSD/Apache-licensed packages in `pubspec.lock`. Those package
 licenses remain separate from the Lazer license above.
+
+## LuaDardo Plus
+
+`third_party/lua_dardo_plus` vendors the published LuaDardo Plus 0.3.1 pure Dart
+Lua VM under Apache-2.0. The full upstream license is retained at
+`third_party/lua_dardo_plus/LICENSE`; local changes are listed in
+`third_party/lua_dardo_plus/LAZER_PATCHES.md`.
+
+Upstream: <https://gitlab.com/aa22396584/LuaDardo>.

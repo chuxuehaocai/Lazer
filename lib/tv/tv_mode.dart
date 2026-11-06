@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -300,7 +301,7 @@ class TvTapTarget extends StatefulWidget {
 }
 
 class _TvTapTargetState extends State<TvTapTarget>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, BuildSafeState<TvTapTarget> {
   bool _focused = false;
   bool _reduceMotion = false;
   late final AnimationController _focus = AnimationController.unbounded(
@@ -469,7 +470,8 @@ class TvFocusHighlight extends StatefulWidget {
   State<TvFocusHighlight> createState() => _TvFocusHighlightState();
 }
 
-class _TvFocusHighlightState extends State<TvFocusHighlight> {
+class _TvFocusHighlightState extends State<TvFocusHighlight>
+    with BuildSafeState<TvFocusHighlight> {
   final FocusNode _watcher = FocusNode(
     debugLabel: 'tv-focus-highlight',
     canRequestFocus: false,

@@ -1,198 +1,94 @@
 # Music gateways
 
-## Current scope
+The default connection is local music. Installed and enabled Lua ZIP plugins
+supply the available streaming platforms. Platform names, login methods and
+capabilities come from the plugin's `describe` response; the application does
+not use a fixed NetEase/Navidrome list for platform selection.
 
-The provider-neutral gateway layer and the experimental Navidrome backend are
-integrated into the shared desktop, phone and large-screen UI. Open Music platform
-from Settings or the account menu to add a server or select an existing connection.
-Navidrome uses the existing home, search, library, album, artist and player views.
+## Runtime flow
 
-Server addresses, usernames and selected connection are restored on launch.
-Navidrome credentials remain in memory; opening the application again requires
-signing in to that server. Switching platforms retains each live connection's
-session and clears the previous playback queue and detail view. Signing out of
-Navidrome leaves the independent NetEase session intact.
+1. `PluginManager` restores enabled ZIP plugins and starts an isolated VM for
+   each plugin. Its `describe` operation may return multiple providers.
+2. Each provider becomes a `LuaMusicGateway`. Calls receive `args.platform`;
+   IDs include provider, connection and entity type.
+3. The client restores each provider's session through `session`, then restores
+   the selected connection. Every connection keeps its own signed-in account;
+   local playback can retain the last account in the account display.
+4. Importing or enabling a plugin registers its providers immediately. Updating,
+   disabling or uninstalling a plugin detaches all of its providers. Local
+   playback is retained when an unrelated plugin changes.
 
-## Layout
+`MusicGateway` and `MusicId` are the shared model boundary. `platform_catalog.dart`
+maps those values into the existing home, search, library, album, artist, lyrics
+and player views. Old Dart adapter classes are retained for the legacy test
+harness; normal application startup selects `LocalMusicGateway` and only
+registers streaming providers from installed Lua plugins.
 
-| File | Responsibility |
-| --- | --- |
-| `music_gateway.dart` | Protocol-neutral catalogue, account and playback boundary |
-| `music_models.dart` | Opaque, namespaced IDs and typed music values |
-| `gateway_registry.dart` | Independent connections, active selection and ID routing |
-| `netease_music_gateway.dart` | New interface backed by the existing NetEase implementation |
-| `navidrome_gateway.dart` | Experimental Subsonic/OpenSubsonic adapter |
-| `navidrome_transport.dart` | Authentication, HTTP, media URLs and safe transport failures |
-| `netease_gateway.dart`, `music_models_compat.dart` | Existing NetEase API and compatibility models |
-| `gateway.dart` | Compatibility exports; existing imports continue to work |
-| `../data/platform_catalog.dart` | Maps provider values into shared UI models |
-| `../state/music_platform_state.dart` | Connect/select, account state and native playback actions |
-| `../ui/navidrome_login_fields.dart` | Shared server login form |
-| `../animation/view_transitions.dart` | Nonlinear form, tab and desktop route transitions |
+## Authentication
 
-New consumers should use `MusicGateway` and `MusicId`. The NetEase-specific API is
-retained to keep the running application compatible while consumers migrate.
+Supported login modes are declared as `qr`, `sms`, `password` and `cookie`.
+The chooser renders only those declared by its active plugin. Without a
+streaming plugin it offers plugin management instead of a service login.
 
-## Connect and select
+Session credentials are stored inside that plugin's data directory through
+`host.storage_*`; they are not put in connection preferences. Connection
+preferences store only the selected source and last account identity. Selecting
+local music keeps all platform sessions. `AppState.musicAccounts` exposes the
+signed-in accounts by connection key; `activeMusicSignedIn` describes the current
+source, while the account display may retain the last account in local mode.
+`signOut(connectionKey: ...)` logs out only that connection and removes its remote
+queue items; accounts and locally available files from other sources remain.
 
-```dart
-import 'package:lazer_nextgen/gateway/gateway.dart';
+Browsing source selection preserves playback. Queue entries carry their own
+`MusicId`, so streaming, metadata, favorites and scrobbling resolve the owning
+gateway regardless of the selected source. A late login or metadata response
+cannot overwrite another connection's account or content. Login generation
+checks prevent an earlier request from reviving a logged-out account.
 
-final connections = GatewayRegistry();
-final navidrome = NavidromeGateway(
-  serverUrl: 'https://music.example/navidrome',
-  username: username,
-);
-await navidrome.login(password);
-connections.add(navidrome, select: true);
+## Playlist snapshots
 
-final netease = NeteaseMusicGateway(connectionId: 'netease-main');
-connections.add(netease);
-await netease.loginWithCookie(cookie);
+Platform collections and complete playlist contents use the shared memory LRU,
+request coalescing and disk snapshots. Keys include provider, connection and
+account, including when opening a playlist from an inactive source. Cold views
+paint stored content before requesting an update; expired data remains an offline
+fallback. Explicit refresh and mutations invalidate both layers, and a changed
+account during pagination cannot populate the previous account's snapshot.
 
-final active = connections.active!;
-final results = await active.search('Nocturne', limit: 20);
-if (results.songs.items.isNotEmpty) {
-  final song = results.songs.items.first;
-  final owner = connections.resolve(song.id);
-  final source = await owner.stream(song.id);
-  // Pass source.uri to the audio engine. Do not log signed media URLs.
-}
+An owned playlist marked `isFavorites` is the canonical liked collection. Its
+remote ID and name (for example, `<username>喜欢的音乐`) remain intact and it is
+removed from the regular created/subscribed lists. Providers without a real
+favorites playlist get one synthetic collection. Favorites mutations invalidate
+both canonical and synthetic playlist snapshots. The library also excludes owned
+playlists from its public recommendation shelf.
 
-connections.select(GatewayRegistry.keyOf(netease));
-// Saved song IDs still resolve to their original connection.
-connections.close();
-```
+QR URLs are opaque to the client. The adapter remembers the plugin's key/URL
+pair and routes polling back to the same provider. After code 803, it waits
+for the account to become available before reporting login success; a spent
+key is not polled again during this wait. Changing platforms invalidates late
+responses. Creating a QR session preserves any existing authenticated account.
 
-When wrapping an existing NetEase gateway, pass
-`NeteaseMusicGateway(connectionId: ..., gateway: existingGateway)`.
-Closing that wrapper leaves the borrowed gateway and its session intact. Calling
-`clearSession()` explicitly signs out the borrowed gateway.
+## NetEase plugin and verification
 
-For QR/SMS login, the existing NetEase-specific methods remain on the adapter's
-`api` (`NeteaseGateway`) instance.
-After they finish, call `checkSession()` on the new adapter to adopt the profile.
-The provider-neutral API has no cookie, phone-number or QR-code assumptions.
+Source: `E:/projects/lazer_ncm/netease-cloud`.
+Importable package: `E:/projects/lazer_ncm/dist/lazer.netease-1.0.1.zip`.
+Navidrome has no Lua package yet and is not advertised by this plugin.
 
-## IDs, accounts and caching
+The NetEase service protocol, request paths, cookies, AES/RSA envelopes and
+response mapping are implemented in Lua. The host supplies general HTTP,
+cryptographic, cookie-header and storage primitives. The bundled Dart Lua VM
+includes a nested async-call fix so host requests can occur inside helper
+functions, loops and protected calls without replaying requests.
 
-`MusicId` includes provider, connection, entity kind and the original remote ID.
-Navidrome connection identity includes the canonical server root and username.
-Different servers and accounts can use identical remote IDs without colliding.
-Reverse proxy path prefixes are preserved; a trailing `/rest/` is accepted.
+`test/lua_plugin_test.dart` covers asynchronous requests and recovery;
+`test/lua_platform_integration_test.dart` covers multiple Lua providers, dynamic
+login controls, import/toggle/update/uninstall and startup session restoration.
 
-Serialize references with `MusicId.toJson()` and restore them with
-`MusicId.fromJson()`. Shared models store the encoded reference in string IDs;
-artist links use `ArtistRef.platformKey` and track album links use `Track.albumKey`.
-The queue serializer preserves these references and removes signed artwork URLs.
-Do not hash remote IDs into fake NetEase integer IDs or call
-`int.parse()` on provider-neutral IDs.
+`tool/verify_lua_gateway.dart` is an opt-in live check. It reads a plugin ZIP
+and a Cookie file supplied as command arguments, records only PASS/FAIL, tests
+QR creation and polling, catalogue endpoints, full favorites pagination, actual
+media bytes, restart login and local logout. `tool/verify_lua_gateway_app_test.dart`
+also verifies import, library loading, selection and restart through `AppState`.
+Both use a temporary data directory and delete it when finished. They do not
+bundle credentials or copy the Cookie file into source or the ZIP.
 
-Use `gateway.cacheNamespace` and `MusicId.cacheKey` for account/catalogue and
-media cache identity. These are key helpers, not a replacement cache store.
-Never use a bare song ID, username alone or signed stream URL as the cache key.
-Route playback, downloads, metadata and favorites through
-`connections.resolve(song.id)`, not through the currently selected platform.
-
-Navidrome requests that complete after sign-out or session replacement are
-rejected. A rejected login preserves the previous valid session.
-Home snapshots with signed artwork are fetched per connection rather than saved
-as persistent catalogue JSON. Audio-cache keys include the complete song reference.
-
-## Experimental Navidrome
-
-`MusicProvider.navidrome.experimental` is `true`. Show a visible, localized
-"Experimental" badge beside Navidrome in the platform list, login form and active
-account details. NetEase's flag is `false`.
-
-Supported backend operations:
-
-- Username/password login, session verification and explicit session restoration.
-- Search for songs, albums, artists and accessible playlists.
-- Album browsing, album tracks, artist albums and complete playlist contents.
-- Playlist creation with explicit visibility, repeated song additions and removal
-  by playlist index, including duplicate song occurrences.
-- Starred songs, star/unstar, original streams and MP3 transcoding requests.
-- Starred albums as the saved-album collection (`getStarred2`).
-- Structured timed lyrics, older lyric endpoint fallback and play scrobbling.
-- Random songs as the provider's recommendation source.
-
-Inspect `supports(MusicCapability...)` before showing provider-specific features.
-Navidrome does not advertise NetEase comments or listen-together capabilities.
-Its random-song feed is not a personalized NetEase recommendation feed.
-
-`收藏的专辑` is available when `savedAlbums` is advertised: NetEase reads
-`/api/album/sublist` for the signed-in account, Navidrome reads the `album` list
-of `getStarred2`. The shared album library hides its entry when the active
-gateway does not advertise the capability. NetEase requires a session; a guest
-fails with an authentication error before the request leaves the device.
-
-Album browsing is available when `browseAlbums` is advertised. NetEase does not
-currently advertise that operation through the new interface. Paging uses
-`MusicPage.nextOffset`; a full 500-album page can require one final empty read.
-
-Navidrome album/artist/playlist detail endpoints return complete collections;
-the adapter slices those responses locally. Playlist search filters the
-accessible playlist list because Subsonic search does not include playlists.
-Playlist contents retain ordering and duplicates.
-
-NetEase can only remove playlist entries by song ID. The new adapter rejects
-positional deletion involving duplicate song IDs before changing the playlist.
-
-## Session and URL handling
-
-The password is used to derive the Subsonic token and is not retained by the
-adapter. `session.toJson()` still contains a reusable credential: if persistence
-is needed, save it in OS secure storage, not SharedPreferences, logs, catalogue
-snapshots or queue JSON. Restore it with `NavidromeSession.fromJson()` followed
-by `restoreSession()`, which verifies it before adoption.
-
-HTTPS is the default. For an intentionally configured local HTTP server, create
-the gateway with `allowInsecureHttp: true`; use the same option when decoding a
-saved HTTP session. Playback and artwork URLs preserve the configured scheme and
-proxy prefix. Do not pass them through NetEase helpers that rewrite HTTP to HTTPS
-or add NetEase CDN resize parameters.
-
-API credentials are sent in form POST bodies. Redirects are rejected. Media
-URLs carry the token required by Subsonic and must be treated as credentials.
-Transport errors retain only a safe endpoint/status/code, not the response body,
-password, token or original client exception text. Responses are bounded and
-requests have timeouts.
-
-## Shared UI integration
-
-The Settings row, account-menu entry and shared login dialog expose platform
-selection. The Navidrome form and active account display a localized Experimental
-badge. Saved connections can be selected from the same dialog. Passwords are not
-saved with connection preferences.
-
-`Catalog` keeps the NetEase-specific behavior while delegating provider references
-to the registered owner. Use `albumDetailsFor`, `albumTracksFor`,
-`artistAlbumPageFor`, `artistSongsFor` and `savedAlbums` in shared views; the
-integer overloads remain compatible with NetEase callers. Native song references
-also route audio,
-downloads, favorites and lyric requests, including timing offsets, to their owner.
-Qualified listens use the provider's scrobble endpoint.
-
-Navidrome original quality requests the server file without transcoding. The
-shared quality controls use platform-appropriate descriptions. NetEase charts,
-comments and listen-together controls are omitted on Navidrome. Random discovery
-and shuffled favorites use the server's own collection.
-
-Forms and search-result categories share spring fade/slide transitions. Desktop
-routes use the same motion system. Shell, player and embedded-settings nonlinear
-transitions are retained, with reduced-motion behavior covered by UI tests.
-
-## Verification
-
-Gateway tests cover protocol forms, opaque IDs, routing, session replacement,
-metadata, pagination, playlist mutations, favorites, stream quality, lyrics,
-scrobbles, error redaction and transport behavior. A loopback HTTP server checks
-actual form encoding and playable signed media requests without external accounts.
-
-Existing catalogue, cache, audio-quality, lyric, QR/SMS login, comments and
-play-upload tests provide compatibility coverage for the NetEase file extraction.
-Shared UI tests cover server login, album/artist navigation, platform switching,
-late account responses, signed-out restoration, queue metadata, playback, timed
-lyrics, favorites and qualified scrobbles. No real Navidrome server credentials
-were supplied; deployment-specific server behavior still requires verification.
+References retain provider, connection and entity type. Route playback, downloads, metadata and favorites through `connections.resolve(id)`. Never coerce opaque IDs to integers or persist signed media URLs.

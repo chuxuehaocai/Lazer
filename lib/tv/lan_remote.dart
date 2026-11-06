@@ -1,3 +1,4 @@
+import '../state/build_safe_notifier.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -14,7 +15,7 @@ import '../widgets/settings_row.dart';
 import 'tv_mode.dart';
 
 /// An opt-in remote, running only while the large-screen surface is active.
-class LanRemoteController extends ChangeNotifier {
+class LanRemoteController extends ChangeNotifier with BuildSafeNotifier {
   LanRemoteController(
     this.state, {
     this.bindAddress,

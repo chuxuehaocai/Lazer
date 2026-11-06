@@ -1,3 +1,5 @@
+import '../state/build_safe_notifier.dart';
+import 'build_safe_state.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -223,7 +225,7 @@ class CoverTransitionSource extends StatefulWidget {
 class _CoverTransitionSourceState extends State<CoverTransitionSource> {
   final GlobalKey _capture = GlobalKey();
   bool _active = true;
-  late final ValueNotifier<bool> _hidden = ValueNotifier<bool>(
+  late final ValueNotifier<bool> _hidden = BuildSafeValueNotifier<bool>(
     _hiddenSources.contains(widget.key),
   );
   void _register() {
@@ -501,7 +503,8 @@ class CoverTransitionTarget extends StatefulWidget {
   State<CoverTransitionTarget> createState() => _CoverTransitionTargetState();
 }
 
-class _CoverTransitionTargetState extends State<CoverTransitionTarget> {
+class _CoverTransitionTargetState extends State<CoverTransitionTarget>
+    with BuildSafeState<CoverTransitionTarget> {
   final GlobalKey _destination = GlobalKey();
   OverlayEntry? _flight;
   bool _flying = false;

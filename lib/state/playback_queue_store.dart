@@ -112,6 +112,7 @@ String _encodeTracks(List<Track> tracks) => jsonEncode([
       'coverSeed': track.coverSeed,
       'accent': track.accent,
       'coverUrl': track.persistedCoverUrl,
+      if (track.id.startsWith('local:')) 'localPath': track.localPath,
     },
 ]);
 
@@ -135,8 +136,10 @@ PlaybackQueueSnapshot? _decodeQueue(String raw) {
   for (final item in json['tracks'] as List) {
     if (item is! Map<String, dynamic>) continue;
     final id = item['id'] as String? ?? '';
+    final localPath = item['localPath'] as String?;
     if (int.tryParse(id) == null &&
-        MusicId.tryParse(id)?.kind != MusicEntityKind.song) {
+        MusicId.tryParse(id)?.kind != MusicEntityKind.song &&
+        !(id.startsWith('local:') && localPath?.isNotEmpty == true)) {
       continue;
     }
     tracks.add(
@@ -155,6 +158,7 @@ PlaybackQueueSnapshot? _decodeQueue(String raw) {
         albumKey: item['albumKey'] as String?,
         coverUrl: item['coverUrl'] as String?,
         translatedTitle: item['translatedTitle'] as String?,
+        localPath: localPath,
       ),
     );
   }

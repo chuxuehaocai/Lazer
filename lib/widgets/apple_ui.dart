@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -259,7 +260,8 @@ class AppleListTile extends StatefulWidget {
   State<AppleListTile> createState() => _AppleListTileState();
 }
 
-class _AppleListTileState extends State<AppleListTile> {
+class _AppleListTileState extends State<AppleListTile>
+    with BuildSafeState<AppleListTile> {
   bool _focused = false;
 
   @override

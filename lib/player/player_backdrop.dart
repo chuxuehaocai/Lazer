@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -54,7 +55,8 @@ class AlbumBlurFlow extends StatefulWidget {
   State<AlbumBlurFlow> createState() => _AlbumBlurFlowState();
 }
 
-class _AlbumBlurFlowState extends State<AlbumBlurFlow> {
+class _AlbumBlurFlowState extends State<AlbumBlurFlow>
+    with BuildSafeState<AlbumBlurFlow> {
   List<Color> _colors = albumFlowColors(kAlbumDefaultSeed);
   int _generation = 0;
 

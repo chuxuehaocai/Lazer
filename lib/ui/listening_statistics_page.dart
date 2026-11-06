@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -21,17 +22,23 @@ class AppListeningStatisticsPage extends StatefulWidget {
       _AppListeningStatisticsPageState();
 }
 
-class _AppListeningStatisticsPageState
-    extends State<AppListeningStatisticsPage> {
+class _AppListeningStatisticsPageState extends State<AppListeningStatisticsPage>
+    with BuildSafeState<AppListeningStatisticsPage> {
   ListeningRange _range = ListeningRange.last7Days;
 
   @override
   Widget build(BuildContext context) {
-    final apple = AppleSemanticColors.of(context);
     final inset = pageInset(context);
     return Scaffold(
-      backgroundColor: apple.groupedBackground,
-      appBar: AppBar(title: const TrText('听歌统计')),
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        title: const TrText('听歌统计'),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+      ),
       body: SafeArea(
         top: false,
         child: AnimatedBuilder(
@@ -301,7 +308,8 @@ class _HourlyCard extends StatefulWidget {
   State<_HourlyCard> createState() => _HourlyCardState();
 }
 
-class _HourlyCardState extends State<_HourlyCard> {
+class _HourlyCardState extends State<_HourlyCard>
+    with BuildSafeState<_HourlyCard> {
   int? _selected;
   bool _focused = false;
 

@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -52,7 +53,8 @@ class AppPlayerBar extends StatefulWidget {
 
 typedef _PlayerBarSignature = (Track?, bool, bool, bool, LoopMode, double);
 
-class _AppPlayerBarState extends State<AppPlayerBar> {
+class _AppPlayerBarState extends State<AppPlayerBar>
+    with BuildSafeState<AppPlayerBar> {
   late _PlayerBarSignature _signature;
   Widget? _bar;
   AppState get state => widget.state;
@@ -300,7 +302,8 @@ class _NowPlayingTile extends StatefulWidget {
   State<_NowPlayingTile> createState() => _NowPlayingTileState();
 }
 
-class _NowPlayingTileState extends State<_NowPlayingTile> {
+class _NowPlayingTileState extends State<_NowPlayingTile>
+    with BuildSafeState<_NowPlayingTile> {
   bool _hovering = false;
   bool _focused = false;
 
@@ -479,7 +482,7 @@ class _SeekRow extends StatefulWidget {
   State<_SeekRow> createState() => _SeekRowState();
 }
 
-class _SeekRowState extends State<_SeekRow> {
+class _SeekRowState extends State<_SeekRow> with BuildSafeState<_SeekRow> {
   double? _drag;
 
   @override
@@ -590,7 +593,8 @@ class AppThinSeekBar extends StatefulWidget {
   State<AppThinSeekBar> createState() => _AppThinSeekBarState();
 }
 
-class _AppThinSeekBarState extends State<AppThinSeekBar> {
+class _AppThinSeekBarState extends State<AppThinSeekBar>
+    with BuildSafeState<AppThinSeekBar> {
   double? _drag;
   bool _focused = false;
   Timer? _nudgeTimer;
@@ -809,7 +813,8 @@ class _VerticalVolumeBar extends StatefulWidget {
   State<_VerticalVolumeBar> createState() => _VerticalVolumeBarState();
 }
 
-class _VerticalVolumeBarState extends State<_VerticalVolumeBar> {
+class _VerticalVolumeBarState extends State<_VerticalVolumeBar>
+    with BuildSafeState<_VerticalVolumeBar> {
   double? _drag;
   bool _focused = false;
 
@@ -944,7 +949,8 @@ class _VolumeButton extends StatefulWidget {
   State<_VolumeButton> createState() => _VolumeButtonState();
 }
 
-class _VolumeButtonState extends State<_VolumeButton> {
+class _VolumeButtonState extends State<_VolumeButton>
+    with BuildSafeState<_VolumeButton> {
   final OverlayPortalController _portal = OverlayPortalController();
   final LayerLink _link = LayerLink();
   final FocusNode _buttonFocus = FocusNode(debugLabel: 'volume-button');
@@ -1142,7 +1148,8 @@ class AppQueueButton extends StatefulWidget {
   State<AppQueueButton> createState() => _AppQueueButtonState();
 }
 
-class _AppQueueButtonState extends State<AppQueueButton> {
+class _AppQueueButtonState extends State<AppQueueButton>
+    with BuildSafeState<AppQueueButton> {
   final OverlayPortalController _portal = OverlayPortalController();
   final LayerLink _link = LayerLink();
   final FocusNode _buttonFocus = FocusNode(debugLabel: 'queue-button');

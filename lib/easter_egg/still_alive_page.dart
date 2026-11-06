@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -31,7 +32,7 @@ class StillAlivePage extends StatefulWidget {
 }
 
 class _StillAlivePageState extends State<StillAlivePage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, BuildSafeState<StillAlivePage> {
   static const _amber = Color(0xffffbc63);
   static const _background = Colors.black;
   final _score = StillAliveScore.original;

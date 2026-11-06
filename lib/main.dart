@@ -1,3 +1,4 @@
+import 'widgets/build_safe_state.dart';
 import 'dart:async';
 import 'storage/app_storage.dart';
 import 'animation/apple_spring.dart';
@@ -212,7 +213,7 @@ typedef _RootUiSignature = (
   FontPreferences,
 );
 
-class _LazerAppState extends State<LazerApp> {
+class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   AppState get _state => widget.state;
   bool _rootRebuildScheduled = false;
   late _RootUiSignature _rootUi;

@@ -1,3 +1,4 @@
+import '../state/build_safe_notifier.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 import 'dart:io';
@@ -54,7 +55,7 @@ Future<LocalScanResult?> scanMusicFolder(
   Directory root, {
   bool rememberRoot = true,
 }) async {
-  final ValueNotifier<int> found = ValueNotifier<int>(0);
+  final ValueNotifier<int> found = BuildSafeValueNotifier<int>(0);
   bool stop = false;
   final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
   unawaited(

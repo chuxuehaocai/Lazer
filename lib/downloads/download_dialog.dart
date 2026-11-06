@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:io';
 
@@ -160,7 +161,8 @@ class _DownloadDialog extends StatefulWidget {
   State<_DownloadDialog> createState() => _DownloadDialogState();
 }
 
-class _DownloadDialogState extends State<_DownloadDialog> {
+class _DownloadDialogState extends State<_DownloadDialog>
+    with BuildSafeState<_DownloadDialog> {
   late AudioQuality _quality = widget.state.downloadQuality;
   String? _directory;
   late bool _createFolder =

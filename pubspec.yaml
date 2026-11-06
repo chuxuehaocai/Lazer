@@ -38,8 +38,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   window_manager: ^0.5.2
 
-  # Gateway (ported from the Lazer KMP shared module): NetEase weapi/eapi
-  # protocol, session cookies, and the real catalogue behind the UI.
+  # Shared HTTP/crypto primitives for Lua providers and legacy test adapters.
   crypto: ^3.0.6
   encrypt: ^5.0.3
   http: ^1.2.2
@@ -65,6 +64,11 @@ dependencies:
   # registrant also references it, so it must be on the release classpath.
   integration_test:
     sdk: flutter
+  # Includes the nested async CALL fix required by Lua Gateway HTTP.
+  lua_dardo_plus:
+    path: third_party/lua_dardo_plus
+  archive: ^4.6.0
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:

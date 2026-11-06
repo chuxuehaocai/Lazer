@@ -77,8 +77,9 @@ class _SpringPressState extends State<SpringPress>
     _pressed = pressed;
     // Material may update disabled/selected state while it builds. Defer a
     // retarget from that phase so no ancestor is dirtied during child build.
-    if (SchedulerBinding.instance.schedulerPhase ==
-        SchedulerPhase.persistentCallbacks) {
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks) {
       if (_retargetScheduled) return;
       _retargetScheduled = true;
       SchedulerBinding.instance.addPostFrameCallback((_) {

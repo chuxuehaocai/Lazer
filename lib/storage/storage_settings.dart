@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,7 +24,7 @@ class StorageSettings extends StatefulWidget {
 }
 
 class _StorageSettingsState extends State<StorageSettings>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, BuildSafeState<StorageSettings> {
   AppStorage get storage => widget.storage ?? AppStorage.shared;
   bool _granted = false, _busy = false;
 

@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import 'haptic_seek_slider.dart';
@@ -22,7 +23,7 @@ class PlayerSeekBar extends StatefulWidget {
 }
 
 class _PlayerSeekBarState extends State<PlayerSeekBar>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, BuildSafeState<PlayerSeekBar> {
   bool _grabbing = false;
 
   @override

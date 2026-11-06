@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
@@ -190,7 +191,8 @@ class NowPlayingPage extends StatefulWidget {
   State<NowPlayingPage> createState() => _NowPlayingPageState();
 }
 
-class _NowPlayingPageState extends State<NowPlayingPage> {
+class _NowPlayingPageState extends State<NowPlayingPage>
+    with BuildSafeState<NowPlayingPage> {
   bool _lyricsMode = false;
   bool _controlsVisible = true;
   // Defaults to the non-destructive branch: a semantics-driven tap never
@@ -1063,7 +1065,8 @@ class _ControlIcon extends StatefulWidget {
   State<_ControlIcon> createState() => _ControlIconState();
 }
 
-class _ControlIconState extends State<_ControlIcon> {
+class _ControlIconState extends State<_ControlIcon>
+    with BuildSafeState<_ControlIcon> {
   bool _hovering = false;
   bool _focused = false;
 

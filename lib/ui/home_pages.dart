@@ -1,3 +1,5 @@
+import '../state/build_safe_notifier.dart';
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
@@ -59,7 +61,8 @@ class AppHomePage extends StatefulWidget {
   State<AppHomePage> createState() => _AppHomePageState();
 }
 
-class _AppHomePageState extends State<AppHomePage> {
+class _AppHomePageState extends State<AppHomePage>
+    with BuildSafeState<AppHomePage> {
   bool _startingStation = false;
 
   Future<void> _playStation(Future<List<Track>> Function() load) async {
@@ -431,7 +434,8 @@ class _PagedHorizontalShelf extends StatefulWidget {
   State<_PagedHorizontalShelf> createState() => _PagedHorizontalShelfState();
 }
 
-class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf> {
+class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf>
+    with BuildSafeState<_PagedHorizontalShelf> {
   final ScrollController _controller = ScrollController(
     keepScrollOffset: false,
   );
@@ -604,7 +608,7 @@ class _MovingCoverMosaicState extends State<_MovingCoverMosaic>
   // controller still wakes the UI isolate on every display vsync (165+ times
   // a second on high-refresh screens) even if its listener only publishes a
   // value every 33 ms.
-  final ValueNotifier<double> _phase = ValueNotifier<double>(0);
+  final ValueNotifier<double> _phase = BuildSafeValueNotifier<double>(0);
   final Stopwatch _clock = Stopwatch();
   Timer? _timer;
   Duration _lastAdvance = Duration.zero;

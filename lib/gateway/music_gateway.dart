@@ -45,17 +45,19 @@ abstract class MusicGateway {
     }
   }
 
-  Future<MusicUser?> checkSession();
-  void clearSession();
-  void close();
+  Future<MusicUser?> checkSession() => Future.value(user);
+  void clearSession() {}
+  void close() {}
 
   Future<MusicSearchResult> search(
     String query, {
     int limit = 30,
     int offset = 0,
-  });
-  Future<MusicSong> song(MusicId id);
-  Future<MusicAlbum> album(MusicId id);
+  }) => Future.error(MusicUnsupportedException(provider.id, 'search'));
+  Future<MusicSong> song(MusicId id) =>
+      Future.error(MusicUnsupportedException(provider.id, 'song'));
+  Future<MusicAlbum> album(MusicId id) =>
+      Future.error(MusicUnsupportedException(provider.id, 'album'));
   Future<MusicPage<MusicAlbum>> albums({
     MusicAlbumSort sort = MusicAlbumSort.newest,
     int limit = 30,
@@ -65,48 +67,62 @@ abstract class MusicGateway {
     MusicId id, {
     int limit = 100,
     int offset = 0,
-  });
-  Future<MusicArtist> artist(MusicId id);
+  }) => Future.error(MusicUnsupportedException(provider.id, 'albumSongs'));
+  Future<MusicArtist> artist(MusicId id) =>
+      Future.error(MusicUnsupportedException(provider.id, 'artist'));
   Future<MusicPage<MusicAlbum>> artistAlbums(
     MusicId id, {
     int limit = 30,
     int offset = 0,
-  });
+  }) => Future.error(MusicUnsupportedException(provider.id, 'artistAlbums'));
+  Future<MusicPage<MusicPlaylist>> playlists({
+    int limit = 30,
+    int offset = 0,
+  }) => Future.error(MusicUnsupportedException(provider.id, 'playlists'));
+  Future<MusicPlaylist> playlist(MusicId id) =>
+      Future.error(MusicUnsupportedException(provider.id, 'playlist'));
 
-  /// Albums the account saved to its collection (NetEase 收藏的专辑).
-  ///
-  /// Distinct from [albums], which browses everything the provider holds.
-  /// Adapters without a saved-album view leave this unsupported.
+  /// Albums saved to the account collection.
   Future<MusicPage<MusicAlbum>> savedAlbums({int limit = 30, int offset = 0}) =>
-      Future.error(MusicUnsupportedException(provider.id, 'savedAlbums'));
-
-  Future<MusicPage<MusicPlaylist>> playlists({int limit = 30, int offset = 0});
-  Future<MusicPlaylist> playlist(MusicId id);
+      Future.error(MusicUnsupportedException(provider.id, "savedAlbums"));
   Future<MusicPage<MusicSong>> playlistSongs(
     MusicId id, {
     int limit = 100,
     int offset = 0,
-  });
-  Future<MusicPlaylist> createPlaylist(String name, {bool isPublic = false});
-  Future<void> addToPlaylist(MusicId playlist, List<MusicId> songs);
+  }) => Future.error(MusicUnsupportedException(provider.id, 'playlistSongs'));
+  Future<MusicPlaylist> createPlaylist(String name, {bool isPublic = false}) =>
+      Future.error(MusicUnsupportedException(provider.id, 'createPlaylist'));
+  Future<void> addToPlaylist(MusicId playlist, List<MusicId> songs) =>
+      Future.error(MusicUnsupportedException(provider.id, 'addToPlaylist'));
 
   /// Positional removal preserves duplicate songs in a playlist.
   /// Throws [MusicUnsupportedException] before mutating if an upstream only
   /// supports deletion by song ID and cannot preserve duplicate occurrences.
-  Future<void> removeFromPlaylist(MusicId playlist, List<int> indexes);
-  Future<MusicPage<MusicSong>> favorites({int limit = 100, int offset = 0});
-  Future<void> setFavorite(MusicId song, bool favorite);
+  Future<void> removeFromPlaylist(MusicId playlist, List<int> indexes) =>
+      Future.error(
+        MusicUnsupportedException(provider.id, 'removeFromPlaylist'),
+      );
+  Future<MusicPage<MusicSong>> favorites({int limit = 100, int offset = 0}) =>
+      Future.error(MusicUnsupportedException(provider.id, 'favorites'));
+  Future<void> setFavorite(MusicId song, bool favorite) =>
+      Future.error(MusicUnsupportedException(provider.id, 'setFavorite'));
   Future<MusicStream> stream(
     MusicId song, {
     MusicStreamQuality quality = MusicStreamQuality.original,
-  });
-  Future<List<MusicLyrics>> lyrics(MusicId song);
+  }) => Future.error(MusicUnsupportedException(provider.id, 'stream'));
+  Future<List<MusicLyrics>> lyrics(MusicId song) =>
+      Future.error(MusicUnsupportedException(provider.id, 'lyrics'));
   Future<void> scrobble(
     MusicId song, {
     required Duration played,
     bool submission = true,
     DateTime? time,
-  });
+  }) => Future.error(MusicUnsupportedException(provider.id, 'scrobble'));
+
+  Future<MusicPage<MusicPlayRecord>> playStats({
+    int limit = 100,
+    int offset = 0,
+  }) => Future.error(MusicUnsupportedException(provider.id, 'playStats'));
 
   Future<MusicPage<MusicSong>> recommendations({int limit = 30}) =>
       Future.error(MusicUnsupportedException(provider.id, 'recommendations'));

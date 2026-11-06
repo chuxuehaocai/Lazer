@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'package:flutter/material.dart';
 
 import '../animation/apple_spring.dart';
@@ -35,7 +36,7 @@ class _CoverPlate {
 }
 
 class _AnimatedTrackCoverState extends State<AnimatedTrackCover>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, BuildSafeState<AnimatedTrackCover> {
   final List<_CoverPlate> _plates = [];
   late _CoverPlate _current;
   bool _reduced = false;

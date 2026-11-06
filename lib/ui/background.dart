@@ -1,3 +1,5 @@
+import '../state/build_safe_notifier.dart';
+import '../widgets/build_safe_state.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -32,7 +34,7 @@ class AlbumFlowConfiguration {
 /// player. Hidden, static and paused surfaces detach and consume no frames.
 final albumFlowClock = _AlbumFlowClock();
 
-class _AlbumFlowClock extends ChangeNotifier {
+class _AlbumFlowClock extends ChangeNotifier with BuildSafeNotifier {
   late final _AlbumFlowTicker _ticker = _AlbumFlowTicker(_advance);
   final Map<VoidCallback, Duration> _subscribers = {};
   Duration _completed = Duration.zero;
@@ -250,6 +252,8 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     duration: albumFlowConfiguration.paletteTransition,
     value: 1,
   );
+  // Private to CustomPainter.repaint: this only dirties paint, never widgets.
+  // Palette updates during build must reach the canvas in the current frame.
   final ValueNotifier<int> _frames = ValueNotifier<int>(0);
   bool _flowClockAttached = false;
   double _nextFrameUs = 0;
@@ -1412,7 +1416,8 @@ class AppAlbumBackdrop extends StatefulWidget {
   State<AppAlbumBackdrop> createState() => _AppAlbumBackdropState();
 }
 
-class _AppAlbumBackdropState extends State<AppAlbumBackdrop> {
+class _AppAlbumBackdropState extends State<AppAlbumBackdrop>
+    with BuildSafeState<AppAlbumBackdrop> {
   List<Color> _colors = albumFlowColors(kAlbumDefaultSeed);
   int _generation = 0;
 

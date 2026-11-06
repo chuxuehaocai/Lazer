@@ -1,3 +1,4 @@
+import '../state/build_safe_notifier.dart';
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -230,7 +231,7 @@ class ReducedMotionBackGesture extends StatefulWidget {
 }
 
 class _ReducedMotionBackGestureState extends State<ReducedMotionBackGesture> {
-  final ValueNotifier<double?> _progress = ValueNotifier(null);
+  final ValueNotifier<double?> _progress = BuildSafeValueNotifier(null);
   @override
   void dispose() {
     _progress.dispose();

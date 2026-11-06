@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
@@ -123,7 +124,8 @@ class LyricImageDialog extends StatefulWidget {
   State<LyricImageDialog> createState() => _LyricImageDialogState();
 }
 
-class _LyricImageDialogState extends State<LyricImageDialog> {
+class _LyricImageDialogState extends State<LyricImageDialog>
+    with BuildSafeState<LyricImageDialog> {
   final _imageKey = GlobalKey();
   final _previewScroll = ScrollController();
   ImageProvider? _artwork;
@@ -520,7 +522,8 @@ class _SaveImageButton extends StatefulWidget {
   State<_SaveImageButton> createState() => _SaveImageButtonState();
 }
 
-class _SaveImageButtonState extends State<_SaveImageButton> {
+class _SaveImageButtonState extends State<_SaveImageButton>
+    with BuildSafeState<_SaveImageButton> {
   bool _pressed = false;
 
   void _press(bool value) {

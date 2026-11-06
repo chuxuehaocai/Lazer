@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'spring_buttons.dart';
 import 'dart:async';
 
@@ -91,7 +92,8 @@ class _AddToPlaylistDialog extends StatefulWidget {
   State<_AddToPlaylistDialog> createState() => _AddToPlaylistDialogState();
 }
 
-class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog> {
+class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
+    with BuildSafeState<_AddToPlaylistDialog> {
   final TextEditingController _name = TextEditingController();
   bool _creating = false;
   bool _private = false;

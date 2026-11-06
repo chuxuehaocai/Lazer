@@ -1,3 +1,5 @@
+import '../state/build_safe_notifier.dart';
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
 import 'package:lazer_nextgen/theme/app_palette.dart';
@@ -45,15 +47,18 @@ class LyricViewport extends StatefulWidget {
 }
 
 class _LyricViewportState extends State<LyricViewport>
-    with TickerProviderStateMixin, WidgetsBindingObserver {
+    with
+        TickerProviderStateMixin,
+        WidgetsBindingObserver,
+        BuildSafeState<LyricViewport> {
   Ticker? _ticker;
   late final AnimationController _blur = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 320),
     value: widget.state.lyricBlurEnabled ? 1 : 0,
   );
-  final ValueNotifier<int> _frames = ValueNotifier(0);
-  final ValueNotifier<int> _emphasisFrames = ValueNotifier(0);
+  final ValueNotifier<int> _frames = BuildSafeValueNotifier(0);
+  final ValueNotifier<int> _emphasisFrames = BuildSafeValueNotifier(0);
   final Stopwatch _wall = Stopwatch()..start();
   List<LyricLine> _lines = [];
   List<LyricLine>? _sourceLines;
@@ -637,6 +642,8 @@ class _LyricViewportState extends State<LyricViewport>
       for (final notifier in _rowFrames) {
         notifier.dispose();
       }
+      // These listeners only repaint word/interlude CustomPainters. Keep them
+      // synchronous; the widget-building frame lanes above are build safe.
       _rowFrames = [
         for (var i = 0; i < _lines.length; i++) ValueNotifier<int>(0),
       ];

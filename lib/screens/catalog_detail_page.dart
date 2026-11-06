@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
@@ -37,7 +38,8 @@ class CatalogDetailPage extends StatefulWidget {
   State<CatalogDetailPage> createState() => _CatalogDetailPageState();
 }
 
-class _CatalogDetailPageState extends State<CatalogDetailPage> {
+class _CatalogDetailPageState extends State<CatalogDetailPage>
+    with BuildSafeState<CatalogDetailPage> {
   ArtistDetails? _artist;
   AlbumDetails? _album;
   final _albums = <Album>[];

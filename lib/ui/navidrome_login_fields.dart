@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../widgets/spring_buttons.dart';
 import 'package:flutter/material.dart';
 
@@ -19,7 +20,8 @@ class NavidromeLoginFields extends StatefulWidget {
   State<NavidromeLoginFields> createState() => _NavidromeLoginFieldsState();
 }
 
-class _NavidromeLoginFieldsState extends State<NavidromeLoginFields> {
+class _NavidromeLoginFieldsState extends State<NavidromeLoginFields>
+    with BuildSafeState<NavidromeLoginFields> {
   final _server = TextEditingController();
   final _username = TextEditingController();
   final _password = TextEditingController();

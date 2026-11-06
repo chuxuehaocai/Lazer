@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
@@ -41,7 +42,8 @@ class WindowTitleArea extends StatefulWidget {
   State<WindowTitleArea> createState() => _WindowTitleAreaState();
 }
 
-class _WindowTitleAreaState extends State<WindowTitleArea> with WindowListener {
+class _WindowTitleAreaState extends State<WindowTitleArea>
+    with WindowListener, BuildSafeState<WindowTitleArea> {
   bool _maximized = false;
   bool _fullScreen = false;
   bool _focused = true;
@@ -256,7 +258,8 @@ class _CaptionButton extends StatefulWidget {
   State<_CaptionButton> createState() => _CaptionButtonState();
 }
 
-class _CaptionButtonState extends State<_CaptionButton> {
+class _CaptionButtonState extends State<_CaptionButton>
+    with BuildSafeState<_CaptionButton> {
   bool _hovering = false;
   bool _pressing = false;
 

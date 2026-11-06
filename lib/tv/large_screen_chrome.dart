@@ -8,6 +8,7 @@
 /// everywhere on the screen.
 library;
 
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 
 import 'dart:async';
@@ -177,7 +178,7 @@ class _NavChip extends StatefulWidget {
   State<_NavChip> createState() => _NavChipState();
 }
 
-class _NavChipState extends State<_NavChip> {
+class _NavChipState extends State<_NavChip> with BuildSafeState<_NavChip> {
   bool _focused = false;
 
   @override
@@ -478,7 +479,8 @@ class _TransportGlyph extends StatefulWidget {
   State<_TransportGlyph> createState() => _TransportGlyphState();
 }
 
-class _TransportGlyphState extends State<_TransportGlyph> {
+class _TransportGlyphState extends State<_TransportGlyph>
+    with BuildSafeState<_TransportGlyph> {
   bool _focused = false;
 
   @override

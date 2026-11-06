@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/physics.dart';
@@ -52,7 +53,9 @@ class _RetainedPage {
 }
 
 class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
-    with SingleTickerProviderStateMixin {
+    with
+        SingleTickerProviderStateMixin,
+        BuildSafeState<RetainedContentSwitcher> {
   final Map<String, _RetainedPage> _pages = <String, _RetainedPage>{};
   int _transitionGeneration = 0;
   bool _reportedMoving = false;

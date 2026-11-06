@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
@@ -192,7 +193,8 @@ class _FontFamilyCard extends StatefulWidget {
   State<_FontFamilyCard> createState() => _FontFamilyCardState();
 }
 
-class _FontFamilyCardState extends State<_FontFamilyCard> {
+class _FontFamilyCardState extends State<_FontFamilyCard>
+    with BuildSafeState<_FontFamilyCard> {
   bool _busy = false;
 
   void _showImportError() {

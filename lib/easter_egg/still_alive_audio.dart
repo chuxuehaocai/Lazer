@@ -1,3 +1,4 @@
+import '../state/build_safe_notifier.dart';
 import 'dart:async';
 
 import 'package:audio_session/audio_session.dart';
@@ -63,7 +64,9 @@ abstract interface class StillAliveAudioBackend {
 ///
 /// Decoder reports anchor a monotonic clock. Callers may read [position] at
 /// their animation cadence without creating a second periodic audio timer.
-class StillAliveAudio extends ChangeNotifier implements StillAlivePlayback {
+class StillAliveAudio extends ChangeNotifier
+    with BuildSafeNotifier
+    implements StillAlivePlayback {
   StillAliveAudio({
     StillAliveAudioBackend Function()? backendFactory,
     Duration Function()? clock,

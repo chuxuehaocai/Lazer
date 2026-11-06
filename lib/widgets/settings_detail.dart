@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'package:flutter/material.dart';
 import '../animation/view_transitions.dart';
 import 'package:flutter/services.dart';
@@ -46,7 +47,7 @@ class SettingsDetailHost extends StatefulWidget {
 }
 
 class _SettingsDetailHostState extends State<SettingsDetailHost>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, BuildSafeState<SettingsDetailHost> {
   final _storage = PageStorageBucket();
   late final _transition = AnimationController(
     vsync: this,

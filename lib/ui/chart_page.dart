@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'dart:async';
 
 import 'dart:math' as math;
@@ -26,7 +27,8 @@ class AppChartPage extends StatefulWidget {
   State<AppChartPage> createState() => _AppChartPageState();
 }
 
-class _AppChartPageState extends State<AppChartPage> {
+class _AppChartPageState extends State<AppChartPage>
+    with BuildSafeState<AppChartPage> {
   MusicChart? _chart;
   bool _loading = true;
   bool _matching = false;

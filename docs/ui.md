@@ -194,6 +194,28 @@ Scrolling after Back immediately returns the cover and text to the live card.
 
 ## Verification
 
+UI updates can originate in a sibling's `initState`, a synchronous image
+callback, focus handling or layout while retained pages are still mounted.
+Use `BuildSafeState<T>` on app-owned `State` classes that call `setState`,
+`BuildSafeNotifier` on shared `ChangeNotifier` models, and
+`BuildSafeValueNotifier<T>` for app-owned values observed by widgets. These
+helpers apply state/value mutations synchronously, then coalesce rebuilds or
+notifications until the end of the frame when called during build/layout/paint
+or frame microtasks. Pointer events and animation ticks keep their immediate
+updates. Deferred callbacks check disposal before touching listeners or widgets;
+ordinary `setState` lifecycle and async-callback assertions remain enabled.
+Private signals used exclusively by `CustomPainter.repaint` keep synchronous
+notifications so paint can pick up palette and word changes in the same frame.
+
+Initial work that synchronously notifies shared controllers should start in a
+post-frame callback, with `mounted` and controller identity checked first.
+Detach old listeners in `didUpdateWidget` when a controller can change and in
+`dispose` when the widget leaves. A fixed delay, an unconditional post-frame
+`setState`, or suppressing `FlutterError` can hide ordering bugs or leave a
+permanent frame loop. Regression tests cover sibling updates, notification
+coalescing, disposal, animation timing, retained HiFi sections and importing a
+real Lua ZIP through the settings UI.
+
 `flutter analyze` and the full widget/unit suite cover the desktop layout at
 800–1920 px, compact layout down to 320 px, the Apple player theme, lyric
 interaction, queue/comments sheets, sign-in and persistence.

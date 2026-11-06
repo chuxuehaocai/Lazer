@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../widgets/spring_buttons.dart';
 import '../storage/app_storage.dart';
 import '../storage/storage_settings.dart';
@@ -43,6 +44,7 @@ import 'font_settings_page.dart';
 import 'shortcut_settings_page.dart';
 import 'scheduled_pause_settings.dart';
 import '../widgets/music_provider_badge.dart';
+import 'plugin_manager_page.dart';
 
 /// A single-column, inset-grouped Settings page, following the iOS Settings
 /// information architecture rather than a desktop form grid.
@@ -796,9 +798,7 @@ class _SettingsOverview extends StatelessWidget {
                     minHeight: SettingsSpacing.rowMinHeight,
                     key: const ValueKey('music-platform-settings'),
                     title: context.tr('音乐平台'),
-                    subtitle: state.isNavidrome
-                        ? 'Navidrome'
-                        : context.tr('网易云音乐'),
+                    subtitle: state.musicProvider.name,
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -826,7 +826,7 @@ class _SettingsOverview extends StatelessWidget {
                             child: const TrText('退出登录'),
                           ),
                   ),
-                  if (!state.isNavidrome)
+                  if (!state.isNavidrome && (state.isGuest || state.isLegacyProvider))
                     _AppSettingRow(
                       label: '导出 Cookie',
                       subtitle: state.isGuest
@@ -842,6 +842,24 @@ class _SettingsOverview extends StatelessWidget {
                       ),
                     ),
                 ],
+              ),
+            ),
+            const _AppSectionLabel('扩展'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: AppleListTile(
+                padding: SettingsSpacing.rowPadding,
+                minHeight: SettingsSpacing.rowMinHeight,
+                key: const ValueKey('open-plugin-manager'),
+                title: context.tr('插件管理'),
+                subtitle: context.tr('导入 ZIP、启用或卸载 Lua 音乐平台'),
+                leading: const AppleIconTile(icon: Icons.extension_rounded),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => SettingsDetailHost.open(
+                  context,
+                  page: (_) => PluginManagerPage(state: state),
+                  view: (_) => PluginManagerView(state: state),
+                ),
               ),
             ),
             const _AppSectionLabel('关于'),
@@ -1079,7 +1097,8 @@ class _AudioDeviceDialog extends StatefulWidget {
   State<_AudioDeviceDialog> createState() => _AudioDeviceDialogState();
 }
 
-class _AudioDeviceDialogState extends State<_AudioDeviceDialog> {
+class _AudioDeviceDialogState extends State<_AudioDeviceDialog>
+    with BuildSafeState<_AudioDeviceDialog> {
   late Future<AudioDeviceReport> _report = AudioDeviceReport.collect();
 
   @override
@@ -1563,7 +1582,8 @@ class _AppAccentDialog extends StatefulWidget {
   State<_AppAccentDialog> createState() => _AppAccentDialogState();
 }
 
-class _AppAccentDialogState extends State<_AppAccentDialog> {
+class _AppAccentDialogState extends State<_AppAccentDialog>
+    with BuildSafeState<_AppAccentDialog> {
   static const List<Color> _presets = <Color>[
     AppleColors.musicRed,
     AppleColors.systemPink,

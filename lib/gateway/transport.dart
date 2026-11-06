@@ -144,25 +144,33 @@ class NeteaseTransport {
   NeteaseTransport({
     this.userAgent = 'Lazer',
     this.requestTimeout = const Duration(seconds: 30),
+    this.enabled = true,
     io.HttpClient? client,
     DateTime Function()? clock,
   }) : _client =
-           client ?? (io.HttpClient()..connectionTimeout = requestTimeout),
+           enabled
+           ? (client ?? (io.HttpClient()..connectionTimeout = requestTimeout))
+           : null,
        _clock = clock ?? DateTime.now;
 
   final String userAgent;
   final Duration requestTimeout;
-  final io.HttpClient _client;
+  /// Kept for migration tools that need to explicitly disable legacy I/O.
+  final bool enabled;
+  final io.HttpClient? _client;
   final DateTime Function() _clock;
 
   String? cookie;
 
-  void close() => _client.close(force: true);
+  void close() => _client?.close(force: true);
 
   Future<Map<String, dynamic>> request(
     String alias,
     Map<String, String> parameters,
   ) async {
+    if (!enabled) {
+      throw GatewayConnectionException('built-in-gateway-disabled', 'Lua plugins provide music network access.');
+    }
     try {
       return await _request(alias, parameters);
     } on GatewayConnectionException {
@@ -433,7 +441,7 @@ class NeteaseTransport {
         ? route.path.substring(5)
         : route.path;
     final String requestPath = plain ? route.path : upstreamPath;
-    final io.HttpClientRequest request = await _client
+    final io.HttpClientRequest request = await _client!
         .postUrl(Uri.parse('$endpoint$requestPath'))
         .timeout(requestTimeout);
     request.headers.set(io.HttpHeaders.acceptHeader, 'application/json');
@@ -523,7 +531,7 @@ class NeteaseTransport {
       route.path,
       route.payload.map((key, value) => MapEntry(key, value.toString())),
     );
-    final request = await _client.getUrl(uri).timeout(requestTimeout);
+    final request = await _client!.getUrl(uri).timeout(requestTimeout);
     request.headers.set(io.HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(io.HttpHeaders.userAgentHeader, userAgent);
     request.headers.set('Referer', 'https://music.163.com/');
@@ -539,7 +547,7 @@ class NeteaseTransport {
     String alias,
   ) async {
     final Uri uri = Uri.https('music.163.com', route.path);
-    final request = await _client.postUrl(uri).timeout(requestTimeout);
+    final request = await _client!.postUrl(uri).timeout(requestTimeout);
     request.headers.set(io.HttpHeaders.acceptHeader, 'application/json');
     request.headers.set(io.HttpHeaders.userAgentHeader, userAgent);
     request.headers.set('Referer', 'https://music.163.com/');

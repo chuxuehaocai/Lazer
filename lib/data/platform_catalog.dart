@@ -72,12 +72,24 @@ class _PlatformCatalog {
 
   Future<HomeFeed> home(MusicGateway gateway) async {
     if (gateway.user == null) {
-      throw const MusicGatewayException('navidrome', 'session', code: 40);
+      throw MusicGatewayException(gateway.provider.id, 'session', code: 40);
     }
     final values = await Future.wait<Object>([
-      gateway.albums(limit: 18),
-      gateway.recommendations(limit: 16),
-      gateway.playlists(limit: 18),
+      gateway.supports(MusicCapability.browseAlbums)
+          ? gateway.albums(limit: 18)
+          : Future.value(
+              MusicPage<MusicAlbum>(const [], offset: 0, hasMore: false),
+            ),
+      gateway.supports(MusicCapability.recommendations)
+          ? gateway.recommendations(limit: 16)
+          : Future.value(
+              MusicPage<MusicSong>(const [], offset: 0, hasMore: false),
+            ),
+      gateway.supports(MusicCapability.playlists)
+          ? gateway.playlists(limit: 18)
+          : Future.value(
+              MusicPage<MusicPlaylist>(const [], offset: 0, hasMore: false),
+            ),
     ]);
     final albums = (values[0] as MusicPage<MusicAlbum>).items
         .map(album)
@@ -112,35 +124,64 @@ class _PlatformCatalog {
   }
 
   Future<UserCollections> collections(MusicGateway gateway) async {
-    if (gateway.user == null) return UserCollections.empty;
-    final lists = await all(
-      (offset) => gateway.playlists(limit: 100, offset: offset),
-    );
-    final favorites = await all(
-      (offset) => gateway.favorites(limit: 100, offset: offset),
-    );
+    final account = gateway.user;
+    if (account == null) return UserCollections.empty;
+    final lists = !gateway.supports(MusicCapability.playlists)
+        ? <MusicPlaylist>[]
+        : await all((offset) => gateway.playlists(limit: 100, offset: offset));
+    final favorites = !gateway.supports(MusicCapability.favorites)
+        ? <MusicSong>[]
+        : await all((offset) => gateway.favorites(limit: 100, offset: offset));
+    if (gateway.user?.id != account.id) {
+      throw StateError('Music account changed.');
+    }
+    final unique = {for (final list in lists) list.id: list};
+    final personal = unique.values
+        .where(
+          (list) =>
+              list.isFavorites &&
+              (list.writable || list.owner == account.id.value),
+        )
+        .firstOrNull;
+    final favoriteIds = favorites.map((song) => song.id.cacheKey).toList();
+    final liked = personal == null ? null : playlist(personal);
     return UserCollections(
-      liked: Playlist(
-        id: gateway.id(MusicEntityKind.playlist, favoritesKey).cacheKey,
-        name: '喜欢的音乐',
-        trackIds: favorites.map((song) => song.id.cacheKey).toList(),
-        coverSeed: 0,
-        coverUrl: favorites.firstOrNull?.coverUrl,
-        trackCount: favorites.length,
-      ),
-      created: lists.where((list) => list.writable).map(playlist).toList(),
-      subscribed: lists.where((list) => !list.writable).map(playlist).toList(),
+      liked: liked == null && !gateway.supports(MusicCapability.favorites)
+          ? null
+          : Playlist(
+              id:
+                  liked?.id ??
+                  gateway.id(MusicEntityKind.playlist, favoritesKey).cacheKey,
+              name: liked?.name ?? '${account.name}喜欢的音乐',
+              description: liked?.description ?? '',
+              trackIds: favoriteIds,
+              coverSeed: liked?.coverSeed ?? 0,
+              coverUrl: liked?.coverUrl ?? favorites.firstOrNull?.coverUrl,
+              trackCount: gateway.supports(MusicCapability.favorites)
+                  ? favorites.length
+                  : liked!.trackCount,
+            ),
+      created: unique.values
+          .where((list) => list.writable && list.id != personal?.id)
+          .map(playlist)
+          .toList(),
+      subscribed: unique.values
+          .where((list) => !list.writable && list.id != personal?.id)
+          .map(playlist)
+          .toList(),
     );
   }
 
   Future<List<Track>> playlistTracks(String key) async {
     final id = reference(key, MusicEntityKind.playlist);
     final gateway = owner(id);
+    final account = gateway.user?.id;
     final songs = await all(
       (offset) => id.value == favoritesKey
           ? gateway.favorites(limit: 100, offset: offset)
           : gateway.playlistSongs(id, limit: 100, offset: offset),
     );
+    if (gateway.user?.id != account) throw StateError('Music account changed.');
     return songs.map(track).toList();
   }
 

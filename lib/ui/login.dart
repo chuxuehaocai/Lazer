@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
@@ -14,6 +15,7 @@ import '../updates/open_external.dart';
 import '../widgets/music_provider_badge.dart';
 import '../gateway/gateway.dart';
 import 'navidrome_login_fields.dart';
+import 'plugin_manager_page.dart';
 
 /// Present the sign-in card in the Apple sheet language.
 Future<void> showAppLoginDialog(BuildContext context, AppState state) {
@@ -46,7 +48,8 @@ class _AppLoginDialog extends StatefulWidget {
   State<_AppLoginDialog> createState() => _AppLoginDialogState();
 }
 
-class _AppLoginDialogState extends State<_AppLoginDialog> {
+class _AppLoginDialogState extends State<_AppLoginDialog>
+    with BuildSafeState<_AppLoginDialog> {
   /// Seconds before another SMS code may be requested.
   static const int _resendCooldown = 60;
 
@@ -54,7 +57,14 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
   static final RegExp _phonePattern = RegExp(r'^1\d{10}$');
 
   _Mode _mode = _Mode.qr;
-  late bool _navidrome = state.isNavidrome;
+  late bool _navidrome = state.isNavidrome && !state.isLuaProvider;
+  Set<String> get _methods => state.musicAuthenticationMethods;
+  bool _supports(_Mode mode) => _methods.contains(switch (mode) {
+    _Mode.qr => 'qr',
+    _Mode.sms => 'sms',
+    _Mode.password => 'password',
+    _Mode.cookie => 'cookie',
+  });
   bool _navBusy = false;
   _Phase _phase = _Phase.creating;
   String? _url;
@@ -83,11 +93,12 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
   @override
   void initState() {
     super.initState();
-    if (!_navidrome) unawaited(_start());
+    _mode = _Mode.values.where(_supports).firstOrNull ?? _Mode.cookie;
+    if (!_navidrome && _mode == _Mode.qr) unawaited(_start());
   }
 
   Future<void> _start() async {
-    if (_navidrome) return;
+    if (_navidrome || !_supports(_Mode.qr)) return;
     final int generation = ++_qrGeneration;
     _poll?.cancel();
     setState(() {
@@ -95,11 +106,13 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
       _url = null;
       _error = null;
     });
+    final owner = state.activeConnectionKey;
     final String? url = await state.beginQrLogin();
     if (!mounted ||
         _navidrome ||
         _mode != _Mode.qr ||
-        generation != _qrGeneration) {
+        generation != _qrGeneration ||
+        owner != state.activeConnectionKey) {
       return;
     }
     setState(() {
@@ -116,9 +129,16 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
   Future<void> _tick(String url) async {
     if (_polling || !mounted || _navidrome || _mode != _Mode.qr) return;
     _polling = true;
+    final generation = _qrGeneration;
+    final owner = state.activeConnectionKey;
     try {
       final int code = await state.pollQrLogin(url);
-      if (!mounted || _navidrome) return;
+      if (!mounted ||
+          _navidrome ||
+          generation != _qrGeneration ||
+          owner != state.activeConnectionKey) {
+        return;
+      }
       if (code == 803) {
         // The poll may confirm after the card switched to another tab; the
         // session is already adopted, so close it from here as well.
@@ -126,7 +146,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
         Navigator.of(context).maybePop();
         return;
       }
-      if (_mode != _Mode.qr) return;
+      if (_mode != _Mode.qr && _supports(_Mode.qr)) return;
       setState(() {
         _error = state.qrPollError;
         if (code == 800) {
@@ -151,6 +171,28 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
       _notice = null;
     });
     if (mode == _Mode.qr) unawaited(_start());
+  }
+
+  Future<void> _selectConnection(String? key) async {
+    if (key == null || _submitting || _navBusy) return;
+    _poll?.cancel();
+    _qrGeneration++;
+    setState(() {
+      _navBusy = true;
+      _url = null;
+      _error = null;
+    });
+    try {
+      await state.selectMusicConnection(key);
+      if (!mounted) return;
+      setState(() {
+        _navidrome = state.isNavidrome && !state.isLuaProvider;
+        _mode = _Mode.values.where(_supports).firstOrNull ?? _Mode.cookie;
+      });
+      if (_mode == _Mode.qr) unawaited(_start());
+    } finally {
+      if (mounted) setState(() => _navBusy = false);
+    }
   }
 
   void _switchPlatform(bool navidrome) {
@@ -289,7 +331,8 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
   }
 
   Future<void> _openForgotPassword() async {
-    const String url = 'https://music.163.com/#/forgetpassword';
+    final url = state.musicForgotPasswordUrl;
+    if (url == null) return;
     final bool opened = await openExternalUrl(url);
     if (!opened && mounted) {
       setState(() => _error = '无法打开浏览器，请手动访问 $url'); // i18n:key
@@ -357,17 +400,39 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
                   ),
                 ],
               ),
-              SegmentedButton<bool>(
-                selected: {_navidrome},
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: false, label: TrText('网易云音乐')),
-                  ButtonSegment(value: true, label: Text('Navidrome')),
+              DropdownButtonFormField<String>(
+                key: ValueKey('login-platform-${state.activeConnectionKey}'),
+                initialValue: state.activeConnectionKey,
+                isExpanded: true,
+                decoration: InputDecoration(labelText: context.tr('音乐平台')),
+                items: [
+                  for (final gateway in state.availableMusicPlatforms)
+                    DropdownMenuItem(
+                      value: GatewayRegistry.keyOf(gateway),
+                      child: Text(
+                        '${gateway.provider.name}${state.musicAccounts.containsKey(GatewayRegistry.keyOf(gateway)) ? ' · 已登录' : ''}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                 ],
-                onSelectionChanged: _navBusy || _submitting
-                    ? null
-                    : (values) => _switchPlatform(values.single),
+                onChanged: _submitting || _navBusy ? null : _selectConnection,
               ),
+              if (state.navidromeFactory != null && !state.isLuaProvider)
+                SegmentedButton<bool>(
+                  selected: {_navidrome},
+                  showSelectedIcon: false,
+                  segments: <ButtonSegment<bool>>[
+                    const ButtonSegment(value: false, label: TrText('网易云音乐')),
+                    if (state.navidromeAvailable)
+                      const ButtonSegment(
+                        value: true,
+                        label: Text('Navidrome'),
+                      ),
+                  ],
+                  onSelectionChanged: _navBusy || _submitting
+                      ? null
+                      : (values) => _switchPlatform(values.single),
+                ),
               if (_navidrome)
                 const Padding(
                   padding: EdgeInsets.only(top: 10),
@@ -376,90 +441,78 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
                     child: ExperimentalMusicBadge(),
                   ),
                 ),
-              if (state.musicConnections.length > 1)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey(
-                      'login-connections-${state.activeConnectionKey}',
-                    ),
-                    initialValue: state.activeConnectionKey,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      labelText: context.tr('已保存的连接'),
-                    ),
-                    items: [
-                      for (final gateway in state.musicConnections)
-                        DropdownMenuItem(
-                          value: GatewayRegistry.keyOf(gateway),
-                          child: Text(
-                            gateway is NavidromeGateway
-                                ? 'Navidrome · ${gateway.username} @ ${gateway.server.authority}${gateway.server.path}'
-                                : context.tr('网易云音乐'),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: _navBusy || _submitting
-                        ? null
-                        : (key) async {
-                            if (key == null) return;
-                            _poll?.cancel();
-                            _qrGeneration++;
-                            await state.selectMusicConnection(key);
-                            if (!mounted) return;
-                            setState(() => _navidrome = state.isNavidrome);
-                            if (!_navidrome && _mode == _Mode.qr) {
-                              unawaited(_start());
-                            }
-                          },
-                  ),
-                ),
               const SizedBox(height: 12),
-              if (!_navidrome)
+              if (!_navidrome && _methods.isNotEmpty)
                 Text(
-                  context.tr(switch (_mode) {
-                    _Mode.qr => '使用网易云音乐 App 扫描二维码登录。',
-                    _Mode.sms => '使用手机号和短信验证码登录。',
-                    _Mode.password => '使用手机号或邮箱和密码登录。',
-                    _Mode.cookie => '粘贴浏览器里网易云音乐的登录 Cookie。',
-                  }),
+                  context.tr(
+                    state.musicLoginHint ??
+                        switch (_mode) {
+                          _Mode.qr => '使用音乐平台 App 扫描二维码登录。',
+                          _Mode.sms => '使用手机号和短信验证码登录。',
+                          _Mode.password => '使用手机号或邮箱和密码登录。',
+                          _Mode.cookie => '粘贴音乐平台的登录 Cookie。',
+                        },
+                  ),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: apple.secondaryLabel,
                   ),
                 ),
               const SizedBox(height: 18),
-              ViewTransitionSwitcher(
-                expand: false,
-                child: KeyedSubtree(
-                  key: ValueKey(
-                    _navidrome
-                        ? 'navidrome-${state.activeConnectionKey}'
-                        : _mode.name,
+              if (_methods.isEmpty && !_navidrome)
+                Column(
+                  children: [
+                    TrText(
+                      state.musicProvider.id == 'local'
+                          ? '本地音乐无需登录，其他平台的账号会继续保留。'
+                          : '安装并启用音乐平台插件后即可登录。',
+                    ),
+                    const SizedBox(height: 12),
+                    SpringFilledButton(
+                      onPressed: () {
+                        final navigator = Navigator.of(context);
+                        navigator.pop();
+                        navigator.push(
+                          ApplePageRoute<void>(
+                            builder: (_) => PluginManagerPage(state: state),
+                          ),
+                        );
+                      },
+                      child: const TrText('插件管理'),
+                    ),
+                  ],
+                )
+              else
+                ViewTransitionSwitcher(
+                  expand: false,
+                  child: KeyedSubtree(
+                    key: ValueKey(
+                      _navidrome
+                          ? 'navidrome-${state.activeConnectionKey}'
+                          : _mode.name,
+                    ),
+                    child: _navidrome
+                        ? NavidromeLoginFields(
+                            state: state,
+                            onConnected: () => Navigator.of(context).maybePop(),
+                            onBusy: (busy) => setState(() => _navBusy = busy),
+                          )
+                        : Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (_mode == _Mode.sms)
+                                ..._smsFields(theme, apple)
+                              else if (_mode == _Mode.password)
+                                ..._passwordFields(theme, apple)
+                              else if (_mode == _Mode.cookie)
+                                ..._cookieFields(theme)
+                              else
+                                ..._qrFields(theme),
+                              ..._modeLinks(),
+                            ],
+                          ),
                   ),
-                  child: _navidrome
-                      ? NavidromeLoginFields(
-                          state: state,
-                          onConnected: () => Navigator.of(context).maybePop(),
-                          onBusy: (busy) => setState(() => _navBusy = busy),
-                        )
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (_mode == _Mode.sms)
-                              ..._smsFields(theme, apple)
-                            else if (_mode == _Mode.password)
-                              ..._passwordFields(theme, apple)
-                            else if (_mode == _Mode.cookie)
-                              ..._cookieFields(theme)
-                            else
-                              ..._qrFields(theme),
-                            ..._modeLinks(),
-                          ],
-                        ),
                 ),
-              ),
             ],
           ),
         ),
@@ -502,6 +555,15 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
                 ),
         ),
       ),
+      if (_error != null) ...[
+        const SizedBox(height: 10),
+        Text(
+          _error!,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.error,
+          ),
+        ),
+      ],
       const SizedBox(height: 14),
       Center(
         child: TrText(
@@ -669,12 +731,13 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
             : const TrText('登录'),
       ),
       const SizedBox(height: 2),
-      Center(
-        child: SpringTextButton(
-          onPressed: _submitting ? null : _openForgotPassword,
-          child: const TrText('忘记密码？'),
+      if (state.musicForgotPasswordUrl != null)
+        Center(
+          child: SpringTextButton(
+            onPressed: _submitting ? null : _openForgotPassword,
+            child: const TrText('忘记密码？'),
+          ),
         ),
-      ),
     ];
   }
 
@@ -686,7 +749,9 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
         maxLines: 5,
         autofocus: true,
         style: theme.textTheme.bodySmall?.copyWith(height: 1.5),
-        decoration: const InputDecoration(hintText: 'MUSIC_U=…  __csrf=…'),
+        decoration: InputDecoration(
+          hintText: state.musicCookieHint ?? context.tr('登录 Cookie'),
+        ),
       ),
       if (_error != null) ...<Widget>[
         const SizedBox(height: 8),
@@ -716,22 +781,22 @@ class _AppLoginDialogState extends State<_AppLoginDialog> {
       Wrap(
         alignment: WrapAlignment.center,
         children: <Widget>[
-          if (_mode != _Mode.qr)
+          if (_mode != _Mode.qr && _supports(_Mode.qr))
             SpringTextButton(
               onPressed: () => _switchMode(_Mode.qr),
               child: const TrText('扫码登录'),
             ),
-          if (_mode != _Mode.sms)
+          if (_mode != _Mode.sms && _supports(_Mode.sms))
             SpringTextButton(
               onPressed: () => _switchMode(_Mode.sms),
               child: const TrText('短信验证码登录'),
             ),
-          if (_mode != _Mode.password)
+          if (_mode != _Mode.password && _supports(_Mode.password))
             SpringTextButton(
               onPressed: () => _switchMode(_Mode.password),
               child: const TrText('密码登录'),
             ),
-          if (_mode != _Mode.cookie)
+          if (_mode != _Mode.cookie && _supports(_Mode.cookie))
             SpringTextButton(
               onPressed: () => _switchMode(_Mode.cookie),
               child: const TrText('使用 Cookie 登录'),

@@ -8,7 +8,7 @@ import 'package:crypto/crypto.dart';
 import '../cache/disk_cache.dart';
 import '../cache/media_cache.dart';
 import '../gateway/gateway.dart';
-import '../gateway/transport.dart' show GatewayServiceException;
+import '../gateway/transport.dart';
 import 'audio_quality.dart';
 import 'billboard.dart';
 import 'biliboard.dart';
@@ -104,18 +104,30 @@ class Catalog {
     DiskCache? cache,
     BiliboardClient? charts,
     BillboardClient? billboard,
-  }) : gateway = gateway ?? NeteaseGateway(),
+  }) : _legacyInjected = gateway != null,
+       gateway =
+           gateway ??
+           NeteaseGateway(transport: NeteaseTransport(enabled: false)),
        cache = cache ?? DiskCache.shared,
        charts = charts ?? BiliboardClient(),
        billboard = billboard ?? BillboardClient(),
        audioCache = AudioCache(disk: cache);
 
   final NeteaseGateway gateway;
+  final bool _legacyInjected;
   late final GatewayRegistry connections = GatewayRegistry()
-    ..add(NeteaseMusicGateway(connectionId: 'netease', gateway: gateway));
+    ..add(
+      _legacyInjected
+          ? NeteaseMusicGateway(connectionId: 'netease', gateway: gateway)
+          : LocalMusicGateway(),
+    );
   late final _PlatformCatalog _platform = _PlatformCatalog(this);
   MusicGateway get activeGateway => connections.active!;
-  bool get usesPlatformGateway => activeGateway.provider.id != 'netease';
+
+  /// The built-in compatibility adapter is kept only for migrations and
+  /// tests. All installed Lua providers, including a NetEase replacement,
+  /// travel through the provider-neutral model boundary.
+  bool get usesPlatformGateway => activeGateway is! NeteaseMusicGateway;
   Track trackFromMusicSong(MusicSong song) => _platform.track(song);
   Playlist playlistFromMusicPlaylist(MusicPlaylist playlist) =>
       _platform.playlist(playlist);
@@ -187,7 +199,20 @@ class Catalog {
   // Versioned so collections cached before ownership was read from
   // `subscribed`/`creator` cannot keep every own playlist in the subscribed
   // shelf.
-  String _collectionsKey(int uid) => 'collections:v2:$_scope:$uid';
+  String _collectionsKey(int uid, {MusicGateway? connection}) {
+    final owner = connection ?? activeGateway;
+    return owner is NeteaseMusicGateway
+        ? 'collections:v2:$_scope:$uid'
+        : 'collections:v3:${owner.cacheNamespace}';
+  }
+
+  String _playlistKey(String playlistId) {
+    final reference = MusicId.tryParse(playlistId);
+    final namespace = reference == null
+        ? _scope
+        : _platform.owner(reference).cacheNamespace;
+    return 'playlist-v2:$namespace:$playlistId';
+  }
 
   Future<T> _cached<T extends Object>(
     String key,
@@ -347,14 +372,12 @@ class Catalog {
         _home?.daily.isNotEmpty == true ? _home!.daily : _home?.quick,
       );
     }
-    if (MusicId.tryParse(playlistId) != null) {
-      return Future.value(null);
-    }
-    if ((int.tryParse(playlistId) ?? 0) <= 0) {
+    if (MusicId.tryParse(playlistId) == null &&
+        (int.tryParse(playlistId) ?? 0) <= 0) {
       return Future<List<Track>?>.value(null);
     }
     return _storedSnapshot<List<Track>>(
-      'playlist-v2:$_scope:$playlistId',
+      _playlistKey(playlistId),
       (json) => _decodeTracks(json['tracks']),
     );
   }
@@ -368,10 +391,32 @@ class Catalog {
           _decodeCollections,
         );
 
-  Future<void> invalidatePlaylist(String id) =>
-      _expire('playlist-v2:$_scope:$id');
+  Future<void> invalidatePlaylist(String id) => _expire(_playlistKey(id));
 
   Future<void> invalidateCollections(int uid) => _expire(_collectionsKey(uid));
+
+  Future<void> invalidatePlatformCollections(MusicGateway owner) =>
+      _expire(_collectionsKey(0, connection: owner));
+
+  Future<void> invalidatePlatformFavorites(
+    MusicGateway owner, {
+    String? playlistId,
+  }) async {
+    final namespace = owner.cacheNamespace;
+    final collectionsKey = _collectionsKey(0, connection: owner);
+    final stored = await _storedSnapshot(collectionsKey, _decodeCollections);
+    final ids = {
+      owner
+          .id(MusicEntityKind.playlist, _PlatformCatalog.favoritesKey)
+          .cacheKey,
+      ?stored?.liked?.id,
+      ?playlistId,
+    };
+    await Future.wait([
+      for (final id in ids) _expire('playlist-v2:$namespace:$id'),
+      _expire(collectionsKey),
+    ]);
+  }
 
   Future<List<Track>> refreshPlaylist(String id) async {
     await invalidatePlaylist(id);
@@ -406,9 +451,15 @@ class Catalog {
   Future<HomeFeed?> loadHome({int? userId}) async {
     final epoch = _platformEpoch;
     final selected = usesPlatformGateway ? activeGateway : null;
+    if (selected is LocalMusicGateway) {
+      _home = null;
+      _homeError = '导入音乐平台插件，或在资料库播放本地音乐。';
+      return null;
+    }
     if (selected != null && selected.user == null) {
       _home = null;
-      _homeError = '请登录 Navidrome 服务器。'; // i18n:key
+      _homeError =
+          '请登录 ${selected.provider.name}${selected is LuaMusicGateway ? '。' : ' 服务器。'}'; // i18n:key
       return null;
     }
     _homeError = null;
@@ -800,6 +851,17 @@ class Catalog {
   /// trip (and a full upload flush) on every visit, which stalled the library.
   Future<List<TrackPlayStat>> playStats(int uid, {bool force = false}) async {
     if (uid <= 0) return const <TrackPlayStat>[];
+    if (activeGateway is LuaMusicGateway) {
+      final page = await activeGateway.playStats(limit: 100, offset: 0);
+      return [
+        for (final record in page.items)
+          TrackPlayStat(
+            songId: record.song.id.cacheKey,
+            playCount: record.playCount,
+            duration: record.song.duration,
+          ),
+      ];
+    }
     final key = 'play-stats:$_scope:$uid';
     if (force) await _expire(key);
     return _cached(
@@ -1147,16 +1209,16 @@ class Catalog {
               ? _home!.daily
               : _home?.quick ?? const <Track>[],
         )
-      : MusicId.tryParse(playlistId) != null
-      ? _platform.playlistTracks(playlistId)
       : _cached(
-          'playlist-v2:$_scope:$playlistId',
+          _playlistKey(playlistId),
           const Duration(minutes: 10),
           (json) => _decodeTracks(json['tracks']),
           (tracks) => {
             'tracks': tracks.map((track) => track.toJson()).toList(),
           },
-          () => _playlistTracks(playlistId),
+          () => MusicId.tryParse(playlistId) != null
+              ? _platform.playlistTracks(playlistId)
+              : _playlistTracks(playlistId),
         );
 
   /// Fetches the complete playlist in stable 500-song pages.
@@ -1263,7 +1325,7 @@ class Catalog {
   /// The signed-in user's own collections: liked songs, created playlists,
   /// subscribed playlists. Errors propagate to the profile view.
   Future<UserCollections> userCollections(int uid) => usesPlatformGateway
-      ? _platform.collections(activeGateway)
+      ? platformCollections(activeGateway)
       : uid <= 0
       ? Future.value(UserCollections.empty)
       : _cached(
@@ -1273,6 +1335,17 @@ class Catalog {
           _encodeCollections,
           () => _userCollections(uid),
         );
+
+  Future<UserCollections> platformCollections(MusicGateway owner) {
+    if (owner.user == null) return Future.value(UserCollections.empty);
+    return _cached(
+      _collectionsKey(0, connection: owner),
+      const Duration(minutes: 5),
+      _decodeCollections,
+      _encodeCollections,
+      () => _platform.collections(owner),
+    );
+  }
 
   Future<UserCollections> _userCollections(int uid) async {
     if (uid <= 0) return UserCollections.empty;
@@ -1341,8 +1414,7 @@ class Catalog {
     }
     final String scope = '$_scope:$uid';
     if (force) {
-      _savedAlbumGenerations[scope] =
-          (_savedAlbumGenerations[scope] ?? 0) + 1;
+      _savedAlbumGenerations[scope] = (_savedAlbumGenerations[scope] ?? 0) + 1;
     }
     final int generation = _savedAlbumGenerations[scope] ?? 0;
     final key = 'saved-albums:v3:$scope:$generation:$offset';

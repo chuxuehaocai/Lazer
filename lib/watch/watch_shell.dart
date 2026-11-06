@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -23,7 +24,8 @@ class WatchShell extends StatefulWidget {
   State<WatchShell> createState() => _WatchShellState();
 }
 
-class _WatchShellState extends State<WatchShell> {
+class _WatchShellState extends State<WatchShell>
+    with BuildSafeState<WatchShell> {
   int _tab = 0;
   List<Track>? _openedTracks;
   String _title = '';
@@ -992,7 +994,8 @@ class _WatchProgress extends StatefulWidget {
   State<_WatchProgress> createState() => _WatchProgressState();
 }
 
-class _WatchProgressState extends State<_WatchProgress> {
+class _WatchProgressState extends State<_WatchProgress>
+    with BuildSafeState<_WatchProgress> {
   double? _scrubbing;
 
   @override

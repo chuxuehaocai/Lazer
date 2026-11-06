@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'package:flutter/material.dart';
 import '../animation/apple_spring.dart';
 
@@ -141,7 +142,8 @@ class AppPlaylistCard extends StatefulWidget {
   State<AppPlaylistCard> createState() => _AppPlaylistCardState();
 }
 
-class _AppPlaylistCardState extends State<AppPlaylistCard> {
+class _AppPlaylistCardState extends State<AppPlaylistCard>
+    with BuildSafeState<AppPlaylistCard> {
   final GlobalKey _coverKey = GlobalKey();
   bool _hovering = false;
   bool _focused = false;
@@ -310,7 +312,8 @@ class AppTrackRow extends StatefulWidget {
   State<AppTrackRow> createState() => _AppTrackRowState();
 }
 
-class _AppTrackRowState extends State<AppTrackRow> {
+class _AppTrackRowState extends State<AppTrackRow>
+    with BuildSafeState<AppTrackRow> {
   bool _hovering = false;
   bool _focused = false;
 
@@ -573,7 +576,8 @@ class AppRailItem extends StatefulWidget {
   State<AppRailItem> createState() => _AppRailItemState();
 }
 
-class _AppRailItemState extends State<AppRailItem> {
+class _AppRailItemState extends State<AppRailItem>
+    with BuildSafeState<AppRailItem> {
   bool _hovering = false;
   bool _focused = false;
 
@@ -674,7 +678,8 @@ class AppArtistTrackCard extends StatefulWidget {
   State<AppArtistTrackCard> createState() => _AppArtistTrackCardState();
 }
 
-class _AppArtistTrackCardState extends State<AppArtistTrackCard> {
+class _AppArtistTrackCardState extends State<AppArtistTrackCard>
+    with BuildSafeState<AppArtistTrackCard> {
   bool _hover = false;
   @override
   Widget build(BuildContext context) {

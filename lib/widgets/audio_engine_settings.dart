@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'spring_buttons.dart';
 import 'dart:async';
 
@@ -18,7 +19,8 @@ class AudioEngineSettings extends StatefulWidget {
   State<AudioEngineSettings> createState() => _AudioEngineSettingsState();
 }
 
-class _AudioEngineSettingsState extends State<AudioEngineSettings> {
+class _AudioEngineSettingsState extends State<AudioEngineSettings>
+    with BuildSafeState<AudioEngineSettings> {
   bool _importing = false;
   String? _error;
 

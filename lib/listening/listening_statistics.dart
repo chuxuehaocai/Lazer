@@ -1,3 +1,4 @@
+import '../state/build_safe_notifier.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -60,7 +61,8 @@ class ListeningStatisticsSnapshot {
 /// sampling until their command settles; unexpected jumps beyond elapsed real
 /// time are discarded. Pausing and changing quality preserve a play, whereas a
 /// completed replay starts a new one. One second of heard audio qualifies a play.
-class ListeningStatisticsController extends ChangeNotifier {
+class ListeningStatisticsController extends ChangeNotifier
+    with BuildSafeNotifier {
   ListeningStatisticsController({
     DateTime Function()? now,
     Future<String?> Function()? read,

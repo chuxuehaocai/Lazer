@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -96,10 +97,11 @@ class _BrowseLocation {
   final bool localMusic;
 }
 
-class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
+class _AppShellState extends State<AppShell>
+    with TickerProviderStateMixin, BuildSafeState<AppShell> {
   _AppSection _section = _AppSection.home;
   final List<_BrowseLocation> _browseHistory = <_BrowseLocation>[];
-  final ValueNotifier<double?> _backProgress = ValueNotifier(null);
+  final ValueNotifier<double?> _backProgress = BuildSafeValueNotifier(null);
   String? _backTarget;
   String? _backSource;
   bool _backPlayer = false;
@@ -125,7 +127,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   /// Whether the player's entrance has finished. A notifier rather than a field
   /// so the album flow can follow it on its own: flipping a plain field would
   /// rebuild the whole player on the frame the entrance lands.
-  final ValueNotifier<bool> _playerSettled = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _playerSettled = BuildSafeValueNotifier<bool>(true);
   bool get _nowPlayingSettled => _playerSettled.value;
 
   /// The player page widget, built once per opening and handed to the tree
@@ -172,7 +174,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   bool? _coveredShellLargeScreen;
 
   AppState get state => widget.state;
-  late String _connectionKey = state.activeConnectionKey;
+  late String _connectionKey = state.activeContentKey;
 
   @override
   void initState() {
@@ -273,10 +275,10 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   /// is held back and folded into the rebuild that ends the switch.
   void _onAppStateChanged() {
     if (!mounted) return;
-    if (_connectionKey != state.activeConnectionKey) {
+    if (_connectionKey != state.activeContentKey) {
       _browseHistory.clear();
       cancelCoverTransitions();
-      _connectionKey = state.activeConnectionKey;
+      _connectionKey = state.activeContentKey;
       _playlist = null;
       _album = null;
       _artist = null;
@@ -1597,7 +1599,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   Widget _accountRow(AppleSemanticColors apple) {
     final String name = state.isGuest ? context.tr('游客') : state.user.name;
     final String detail = state.isNavidrome
-        ? 'Navidrome · ${context.tr('实验性')}'
+        ? '${state.musicProvider.name} · ${context.tr('实验性')}'
         : state.isGuest
         ? context.tr('登录以同步资料库')
         : context.tr(state.user.vipLabel ?? '普通用户');
@@ -1707,7 +1709,7 @@ class _AppShellState extends State<AppShell> with TickerProviderStateMixin {
   }
 
   String get _contentKey => '$activePlatformContentKey:$_pageContentKey';
-  String get activePlatformContentKey => state.activeConnectionKey;
+  String get activePlatformContentKey => state.activeContentKey;
   String get _pageContentKey {
     if (_comments) return 'comments';
     if (_localMusic) return 'local-music';
@@ -1830,7 +1832,8 @@ class _ToolbarButton extends StatefulWidget {
   State<_ToolbarButton> createState() => _ToolbarButtonState();
 }
 
-class _ToolbarButtonState extends State<_ToolbarButton> {
+class _ToolbarButtonState extends State<_ToolbarButton>
+    with BuildSafeState<_ToolbarButton> {
   bool _hovering = false;
 
   @override
@@ -2020,7 +2023,8 @@ class _RailPlaylist extends StatefulWidget {
   State<_RailPlaylist> createState() => _RailPlaylistState();
 }
 
-class _RailPlaylistState extends State<_RailPlaylist> {
+class _RailPlaylistState extends State<_RailPlaylist>
+    with BuildSafeState<_RailPlaylist> {
   bool _hovering = false;
   bool _focused = false;
 

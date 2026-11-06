@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart' show Colors;
 import 'package:flutter_test/flutter_test.dart';
@@ -199,6 +200,87 @@ Track _track(String id) => Track(
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets(
+    'shuffle prefetch and engine handoffs follow one non-repeating round',
+    (tester) async {
+      final engine = _QueueEngine();
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        shuffleRandom: Random(27),
+      );
+      addTearDown(state.dispose);
+      state.toggleShuffle();
+      state.playQueue([for (var i = 0; i < 8; i++) _track('$i')]);
+      await tester.pump();
+      final visited = {state.current!.id};
+      for (var i = 0; i < 7; i++) {
+        final prepared = engine.appends.last;
+        if (i.isEven) {
+          state.next();
+        } else {
+          engine.crossIntoNext();
+        }
+        await tester.pump();
+        expect('url-${state.current!.id}', prepared);
+        expect(visited.add(state.current!.id), isTrue);
+      }
+      expect(visited, hasLength(8));
+      state.pause();
+      await tester.pump();
+    },
+  );
+
+  testWidgets('radio order does not overwrite the preferred playlist mode', (
+    tester,
+  ) async {
+    final state = AppState(catalog: _Catalog(), audioEngine: _QueueEngine());
+    addTearDown(state.dispose);
+    state.toggleShuffle();
+    state.playStationQueue([
+      _track('1'),
+      _track('2'),
+    ], loadMore: () async => []);
+    await tester.pump();
+    expect(state.shuffle, isFalse);
+    state.playQueue([_track('3'), _track('4')]);
+    await tester.pump();
+    expect(state.shuffle, isTrue);
+    expect(state.repeat, LoopMode.off);
+    state.pause();
+    await tester.pump();
+  });
+
+  testWidgets(
+    'changing mode replaces a successor prepared under the previous mode',
+    (tester) async {
+      final engine = _QueueEngine();
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        shuffleRandom: Random(7),
+      );
+      addTearDown(state.dispose);
+      state.playQueue([for (var i = 0; i < 8; i++) _track('$i')]);
+      await tester.pump();
+      expect(engine.appends.last, 'url-1');
+      state.toggleShuffle();
+      await tester.pump();
+      final shuffled = engine.appends.last;
+      state.next();
+      await tester.pump();
+      expect('url-${state.current!.id}', shuffled);
+      state.cycleRepeat();
+      await tester.pump();
+      final sequential = engine.appends.last;
+      state.next();
+      await tester.pump();
+      expect('url-${state.current!.id}', sequential);
+      state.pause();
+      await tester.pump();
+    },
+  );
 
   testWidgets(
     'platform queues prefetch even when play lasts until completion',

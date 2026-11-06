@@ -1,3 +1,4 @@
+import '../widgets/build_safe_state.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
@@ -74,7 +75,8 @@ class LocalMusicCard extends StatefulWidget {
   State<LocalMusicCard> createState() => _LocalMusicCardState();
 }
 
-class _LocalMusicCardState extends State<LocalMusicCard> {
+class _LocalMusicCardState extends State<LocalMusicCard>
+    with BuildSafeState<LocalMusicCard> {
   bool _busy = false;
 
   Future<void> _import() async {
@@ -202,7 +204,8 @@ class _LocalPageTracks {
   final int bytes;
 }
 
-class _LocalMusicPageState extends State<LocalMusicPage> {
+class _LocalMusicPageState extends State<LocalMusicPage>
+    with BuildSafeState<LocalMusicPage> {
   bool _busy = false;
   LocalLibrary? _cachedLibrary;
   int? _cachedRevision;

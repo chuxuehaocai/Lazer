@@ -8,6 +8,17 @@ The browse shell and settings live in `lib/ui/` and use `buildAppleTheme` from
 
 ## Player modules
 
+Playback mode is saved independently of the queue and restored on startup.
+Opening another player layout or changing browsing sources preserves it. Radio
+queues temporarily use recommendation order; returning to a normal playlist
+restores the previous mode. Explicit mode changes replace that preference.
+
+Shuffle uses randomly permuted rounds, visits each queue position once per
+round, and avoids repeating the current song at a round boundary. Prefetching
+only peeks at the reserved successor; Next and engine handoffs consume it.
+Cancelling an overlap keeps its prepared song as the next candidate. Local and
+remote tracks can share a persisted queue without storing signed media URLs.
+
 | Module | Responsibility |
 | --- | --- |
 | `lib/player/now_playing_page.dart` | Adaptive page, artwork, lyrics, transport, queue and comments |

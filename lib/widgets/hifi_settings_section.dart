@@ -8,6 +8,7 @@
 // of being reported as "enabled".
 library;
 
+import 'build_safe_state.dart';
 import 'spring_buttons.dart';
 
 import 'dart:async';
@@ -41,23 +42,36 @@ class HifiSettingsSection extends StatefulWidget {
   State<HifiSettingsSection> createState() => _HifiSettingsSectionState();
 }
 
-class _HifiSettingsSectionState extends State<HifiSettingsSection> {
+class _HifiSettingsSectionState extends State<HifiSettingsSection>
+    with BuildSafeState<HifiSettingsSection> {
   HifiController? _controller;
-  bool _loaded = false;
-
-  HifiController? get _hifi => widget.state.hifi;
 
   @override
   void initState() {
     super.initState();
-    _controller = _hifi;
-    if (_controller != null) {
-      _controller!.addListener(_changed);
-      if (!_loaded) {
-        _loaded = true;
-        unawaited(_controller!.refreshDevices());
+    _bindController();
+  }
+
+  @override
+  void didUpdateWidget(covariant HifiSettingsSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _bindController();
+  }
+
+  void _bindController() {
+    final controller = widget.state.hifi;
+    if (identical(controller, _controller)) return;
+    _controller?.removeListener(_changed);
+    _controller = controller;
+    if (controller == null) return;
+    controller.addListener(_changed);
+    // Other retained sections can share this controller. Start discovery once
+    // this section is mounted, after their build scopes have also completed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(_controller, controller)) {
+        unawaited(controller.refreshDevices());
       }
-    }
+    });
   }
 
   @override

@@ -4,14 +4,184 @@ class _MusicPlatformState {
   _MusicPlatformState(this.state);
   final AppState state;
   SessionUser neteaseUser = SessionUser.guest;
-  final Set<String> liked = {};
+  // A selected connection is a content source, not a global logout. Keep the
+  // account snapshot for every connection so local playback can coexist with
+  // signed-in platform accounts.
+  final Map<String, SessionUser> _sessions = <String, SessionUser>{};
+  final Map<String, UserCollections> _collectionsByAccount = {};
+  final Map<String, Set<String>> _likesByAccount = {};
+  String? _lastSessionKey;
+  Set<String> get liked => likesFor(state.catalog.activeGateway);
+  Set<String> likesFor(MusicGateway gateway) =>
+      _likesByAccount.putIfAbsent(gateway.cacheNamespace, () => <String>{});
+  void rememberCollections(MusicGateway gateway, UserCollections value) {
+    _collectionsByAccount[gateway.cacheNamespace] = value;
+    likesFor(gateway)
+      ..clear()
+      ..addAll(value.liked?.trackIds ?? const []);
+  }
+
+  bool isLiked(String key) {
+    final id = MusicId.tryParse(key);
+    if (id == null) return false;
+    try {
+      return likesFor(state.catalog.connections.resolve(id)).contains(key);
+    } catch (_) {
+      return false;
+    }
+  }
+
   bool busy = false;
   int _request = 0;
   static const _configKey = 'lazer_music_connections_v1';
   static const _selectedKey = 'lazer_music_connection';
+  static const _lastAccountKey = 'lazer_last_music_account';
 
   void cancelPending() {
     _request++;
+  }
+
+  MusicGateway? get lastSessionGateway {
+    final key = _lastSessionKey;
+    if (key == null) return null;
+    for (final gateway in state.musicConnections) {
+      if (GatewayRegistry.keyOf(gateway) == key &&
+          _sessionFor(key, gateway) != null) {
+        return gateway;
+      }
+    }
+    return null;
+  }
+
+  void rememberActiveSession() {
+    final current = state.user;
+    if (current.isGuest || state.catalog.activeGateway is LocalMusicGateway) {
+      return;
+    }
+    final key = state.activeConnectionKey;
+    _sessions[key] = current;
+    if (state.catalog.activeGateway is NeteaseMusicGateway) {
+      neteaseUser = current;
+    }
+    _lastSessionKey = key;
+  }
+
+  void forgetActiveSession() {
+    final key = state.catalog.activeGateway is LocalMusicGateway
+        ? _lastSessionKey
+        : state.activeConnectionKey;
+    if (key == null) return;
+    _sessions.remove(key);
+    if (_lastSessionKey == key) _lastSessionKey = _sessions.keys.lastOrNull;
+  }
+
+  SessionUser? _sessionFor(String key, MusicGateway gateway) {
+    if (gateway is NeteaseMusicGateway && !neteaseUser.isGuest) {
+      return neteaseUser;
+    }
+    final account = gateway.user;
+    if (account == null) {
+      _sessions.remove(key);
+      return null;
+    }
+    final remembered = _sessions[key];
+    if (remembered?.handle == account.id.cacheKey) return remembered;
+    return SessionUser(
+      name: account.name,
+      handle: account.id.cacheKey,
+      method: AuthMethod.password,
+      detail: gateway.provider.name,
+      userId: int.tryParse(account.id.value) ?? 1,
+      avatarUrl: account.avatarUrl,
+    );
+  }
+
+  Map<String, SessionUser> get accounts {
+    final result = <String, SessionUser>{};
+    for (final gateway in state.musicConnections) {
+      final key = GatewayRegistry.keyOf(gateway);
+      final account = _sessionFor(key, gateway);
+      if (account != null) result[key] = account;
+    }
+    return Map.unmodifiable(result);
+  }
+
+  void adoptLogin(MusicGateway gateway, SessionUser account) {
+    final key = GatewayRegistry.keyOf(gateway);
+    _sessions[key] = account;
+    _lastSessionKey = key;
+    if (identical(gateway, state.catalog.activeGateway) ||
+        state.catalog.activeGateway is LocalMusicGateway) {
+      state.catalog.selectConnection(state.activeConnectionKey);
+      state._user = account;
+      state.collections = UserCollections.empty;
+      state._collectionsPending = null;
+      state._collectionsGeneration++;
+      unawaited(state.refreshHome());
+    }
+    unawaited(_save());
+    state.notifyListeners();
+  }
+
+  Future<void> signOut(MusicGateway owner) async {
+    final key = GatewayRegistry.keyOf(owner);
+    final namespace = owner.cacheNamespace;
+    cancelPending();
+    _sessions.remove(key);
+    _collectionsByAccount.remove(namespace);
+    _likesByAccount.remove(namespace);
+    if (_lastSessionKey == key) _lastSessionKey = null;
+    await removeConnectionPlayback(owner);
+    try {
+      if (owner is LuaMusicGateway) {
+        await owner.logout();
+      } else {
+        owner.clearSession();
+      }
+    } catch (_) {
+      owner.clearSession();
+    }
+    if (state._presentationDisposed) return;
+    if (identical(state.catalog.activeGateway, owner) ||
+        state.catalog.activeGateway is LocalMusicGateway) {
+      _activate(state.activeConnectionKey);
+      unawaited(state.refreshHome());
+    }
+    await _save();
+    state.notifyListeners();
+  }
+
+  Future<void> removeConnectionPlayback(MusicGateway owner) async {
+    bool owned(Track track) {
+      if (track.localPath != null) return false;
+      final id = MusicId.tryParse(track.id);
+      return id != null &&
+          id.provider == owner.provider.id &&
+          id.connection == owner.connectionId;
+    }
+
+    final retained = state._queue.where((track) => !owned(track)).toList();
+    if (retained.length == state._queue.length) return;
+    final playing = state.current;
+    final position = state.precisePosition;
+    if (playing == null || owned(playing)) {
+      await _resetPlayback();
+      state._queue = retained;
+      state._queueIndex = 0;
+    } else {
+      final removedBefore = state._queue
+          .take(state._queueIndex)
+          .where(owned)
+          .length;
+      state._queue = retained;
+      state._queueIndex -= removedBefore;
+      state._queuedNextIndex = null;
+      if (state._realActive && state._playing) {
+        unawaited(state._startAudio(resumeAt: position));
+      }
+    }
+    state._markQueueChanged();
+    await state._saveQueue();
   }
 
   Future<void> selectNetease() => select(
@@ -34,6 +204,7 @@ class _MusicPlatformState {
     state.notifyListeners();
     NavidromeGateway? candidate;
     try {
+      rememberActiveSession();
       candidate =
           state.navidromeFactory?.call(server, username, allowHttp) ??
           NavidromeGateway(
@@ -47,12 +218,9 @@ class _MusicPlatformState {
         return const AuthOutcome(false, error: '连接已取消。'); // i18n:key
       }
       final key = GatewayRegistry.keyOf(candidate);
-      await _resetPlayback();
-      if (request != _request) {
-        candidate.close();
-        return const AuthOutcome(false, error: '连接已取消。'); // i18n:key
+      if (state.catalog.activeGateway is NeteaseMusicGateway) {
+        neteaseUser = state.user;
       }
-      if (!state.isNavidrome) neteaseUser = state.user;
       final registry = state.catalog.connections;
       if (registry.connections.any(
         (gateway) => GatewayRegistry.keyOf(gateway) == key,
@@ -85,9 +253,22 @@ class _MusicPlatformState {
     busy = true;
     state.notifyListeners();
     try {
-      if (!state.isNavidrome) neteaseUser = state.user;
-      await _resetPlayback();
-      if (request != _request) return;
+      rememberActiveSession();
+      if (state.catalog.activeGateway is NeteaseMusicGateway) {
+        neteaseUser = state.user;
+      }
+      await state.listenTogether.leave();
+      final target = state.musicConnections.firstWhere(
+        (value) => GatewayRegistry.keyOf(value) == key,
+      );
+      if (target is LuaMusicGateway && target.user == null) {
+        try {
+          await target.checkSession();
+        } catch (_) {
+          /* Preserve the last known account while offline. */
+        }
+      }
+      if (request != _request || state._presentationDisposed) return;
       _activate(key);
       await _save();
       unawaited(state.refreshHome());
@@ -96,6 +277,92 @@ class _MusicPlatformState {
       if (!state._presentationDisposed) state.notifyListeners();
     }
   }
+
+  Future<void> beforePluginChange(String pluginId) async {
+    final registry = state.catalog.connections;
+    final owned = registry.connections
+        .where(
+          (gateway) =>
+              gateway is LuaMusicGateway && gateway.pluginId == pluginId,
+        )
+        .toList();
+    final wasActive = owned.contains(registry.active);
+    final keys = owned.map(GatewayRegistry.keyOf).toSet();
+    final ownsPlayback = state._queue.any((track) {
+      final id = MusicId.tryParse(track.id);
+      return id != null &&
+          keys.contains(
+            '${Uri.encodeComponent(id.provider)}:${Uri.encodeComponent(id.connection)}',
+          );
+    });
+    cancelPending();
+    for (final gateway in owned) {
+      final key = GatewayRegistry.keyOf(gateway);
+      _sessions.remove(key);
+      if (_lastSessionKey == key) _lastSessionKey = null;
+    }
+    if (ownsPlayback) {
+      for (final gateway in owned) {
+        await removeConnectionPlayback(gateway);
+      }
+    }
+    for (final gateway in owned) {
+      registry.remove(GatewayRegistry.keyOf(gateway), close: false);
+    }
+    if ((wasActive || state.catalog.activeGateway is LocalMusicGateway) &&
+        registry.active != null) {
+      _activate(GatewayRegistry.keyOf(registry.active!));
+    }
+  }
+
+  Future<void> synchronizePlugins({bool refresh = true}) async {
+    if (state._presentationDisposed) return;
+    final registry = state.catalog.connections;
+    final activeKey = state.activeConnectionKey;
+    final fresh = <MusicGateway>[];
+    for (final gateway in state.pluginManager.gateways) {
+      final previous = registry.connections
+          .where(
+            (value) =>
+                GatewayRegistry.keyOf(value) == GatewayRegistry.keyOf(gateway),
+          )
+          .firstOrNull;
+      if (identical(previous, gateway)) continue;
+      if (previous != null) {
+        registry.remove(GatewayRegistry.keyOf(previous), close: false);
+      }
+      registry.add(gateway);
+      fresh.add(gateway);
+    }
+    await Future.wait([
+      for (final gateway in fresh)
+        () async {
+          try {
+            await gateway.checkSession();
+          } catch (_) {
+            /* Offline credentials remain in plugin storage. */
+          }
+        }(),
+    ]);
+    if (state._presentationDisposed) return;
+    var selected = activeKey;
+    if (refresh &&
+        fresh.isNotEmpty &&
+        state.catalog.activeGateway is LocalMusicGateway) {
+      selected = GatewayRegistry.keyOf(fresh.first);
+    }
+    if (registry.connections.any(
+      (value) => GatewayRegistry.keyOf(value) == selected,
+    )) {
+      _activate(selected);
+    }
+    if (refresh) {
+      await _save();
+      unawaited(state.refreshHome());
+    }
+  }
+
+  Future<void> saveSelection() => _save();
 
   Future<void> _resetPlayback() async {
     state._finishPlaySession();
@@ -132,19 +399,44 @@ class _MusicPlatformState {
   void _activate(String key) {
     state.catalog.selectConnection(key);
     final gateway = state.catalog.activeGateway;
-    final user = gateway.user;
-    state._user = gateway.provider.id == 'netease'
-        ? neteaseUser
-        : user == null
-        ? SessionUser.guest
-        : SessionUser(
-            name: user.name,
-            handle: user.id.cacheKey,
-            method: AuthMethod.password,
-            detail: 'Navidrome',
-            userId: 1,
-          );
-    state.collections = UserCollections.empty;
+    SessionUser? session;
+    if (gateway is LocalMusicGateway) {
+      // Local playback has no account, but selecting it must not turn the
+      // application-wide account into a logout. Keep the last signed-in
+      // account visible until the user explicitly signs out.
+      final last = lastSessionGateway;
+      session = last == null
+          ? null
+          : _sessionFor(GatewayRegistry.keyOf(last), last);
+      if (session == null) {
+        for (final candidate in state.musicConnections) {
+          if (candidate is LocalMusicGateway) continue;
+          final candidateKey = GatewayRegistry.keyOf(candidate);
+          final restored = _sessionFor(candidateKey, candidate);
+          if (restored != null && !restored.isGuest) {
+            _sessions[candidateKey] = restored;
+            _lastSessionKey = candidateKey;
+            session = restored;
+            break;
+          }
+        }
+      }
+    } else {
+      session = _sessionFor(key, gateway);
+    }
+    if (session != null && !session.isGuest) {
+      state._user = session;
+      if (gateway is! LocalMusicGateway) {
+        _sessions[key] = session;
+        _lastSessionKey = key;
+      }
+    } else {
+      state._user = SessionUser.guest;
+    }
+    state.collections =
+        _collectionsByAccount[gateway.cacheNamespace] ?? UserCollections.empty;
+    state._qrConfirmed = false;
+    state._collectionsGeneration++;
     state.collectionsLoading = false;
     state.collectionsError = null;
     state._collectionsPending = null;
@@ -153,19 +445,21 @@ class _MusicPlatformState {
     state.playStatsLoading = false;
     state.discoveryCharts = const [];
     state.discoveryChartsError = null;
-    state.playbackError = null;
-    state.likeError = null;
     state.notifyListeners();
   }
 
   Future<void> restore() async {
-    neteaseUser = state.user;
+    if (state.catalog.activeGateway is NeteaseMusicGateway) {
+      neteaseUser = state.user;
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
+      _lastSessionKey = prefs.getString(_lastAccountKey);
       final saved = jsonDecode(prefs.getString(_configKey) ?? '[]');
       if (saved is List) {
         for (final config in saved.whereType<Map<String, dynamic>>()) {
           try {
+            if (state.navidromeFactory == null) continue;
             final gateway =
                 state.navidromeFactory?.call(
                   config['server'] as String,
@@ -183,7 +477,11 @@ class _MusicPlatformState {
           }
         }
       }
-      final selected = prefs.getString(_selectedKey);
+      final selected =
+          prefs.getString(_selectedKey) ??
+          (state.pluginManager.gateways.isEmpty
+              ? null
+              : GatewayRegistry.keyOf(state.pluginManager.gateways.first));
       if (selected != null &&
           state.musicConnections.any(
             (gateway) => GatewayRegistry.keyOf(gateway) == selected,
@@ -209,6 +507,11 @@ class _MusicPlatformState {
         ]),
       );
       await prefs.setString(_selectedKey, state.activeConnectionKey);
+      if (_lastSessionKey != null) {
+        await prefs.setString(_lastAccountKey, _lastSessionKey!);
+      } else {
+        await prefs.remove(_lastAccountKey);
+      }
     } catch (_) {}
   }
 
@@ -232,27 +535,64 @@ class _MusicPlatformState {
       throw ArgumentError('歌曲和歌单必须属于同一个音乐平台账号。'); // i18n:key
     }
     final gateway = state.catalog.connections.resolve(playlist);
-    if (playlist.value == '__lazer_favorites__') {
+    if (gateway.user == null) {
+      throw StateError('Sign in to add songs to a playlist.');
+    }
+    final namespace = gateway.cacheNamespace;
+    final favorites = _collectionsByAccount[namespace]?.liked;
+    if (playlist.value == '__lazer_favorites__' ||
+        favorites?.id == playlistKey) {
       await gateway.setFavorite(song, true);
-      liked.add(song.cacheKey);
+      likesFor(gateway).add(song.cacheKey);
+      await state.catalog.invalidatePlatformFavorites(
+        gateway,
+        playlistId: playlistKey,
+      );
     } else {
       await gateway.addToPlaylist(playlist, [song]);
+      await state.catalog.invalidatePlaylist(playlistKey);
+      await state.catalog.invalidatePlatformCollections(gateway);
     }
-    await state.refreshCollections(force: true);
+    await _reloadCollections(gateway, namespace);
+  }
+
+  Future<void> _reloadCollections(
+    MusicGateway gateway,
+    String namespace,
+  ) async {
+    _collectionsByAccount.remove(namespace);
+    if (gateway.cacheNamespace != namespace || state._presentationDisposed) {
+      return;
+    }
+    if (identical(state.catalog.activeGateway, gateway)) {
+      await state.refreshCollections();
+    } else {
+      final value = await state.catalog.platformCollections(gateway);
+      if (gateway.cacheNamespace == namespace) {
+        rememberCollections(gateway, value);
+      }
+    }
   }
 
   Future<void> toggleLike() async {
     final key = state.current?.id;
     final id = MusicId.tryParse(key ?? '');
     if (id == null) return;
-    final gateway = state.catalog.connections.resolve(id);
-    if (gateway.user == null) return;
-    final favorite = !liked.contains(key);
     try {
+      final gateway = state.catalog.connections.resolve(id);
+      if (gateway.user == null) return;
+      final namespace = gateway.cacheNamespace;
+      final favorites = likesFor(gateway);
+      final favorite = !favorites.contains(key);
       await gateway.setFavorite(id, favorite);
-      favorite ? liked.add(key!) : liked.remove(key);
+      if (gateway.cacheNamespace != namespace) return;
+      favorite ? favorites.add(key!) : favorites.remove(key);
       state.likeError = null;
-      await state.refreshCollections(force: true);
+      await state.catalog.invalidatePlatformFavorites(
+        gateway,
+        playlistId: _collectionsByAccount[namespace]?.liked?.id,
+      );
+      await _reloadCollections(gateway, namespace);
     } catch (_) {
       state.likeError = '收藏失败，请稍后重试。'; // i18n:key
     }
@@ -260,11 +600,16 @@ class _MusicPlatformState {
   }
 
   Future<void> hydrate(Track track, MusicId id) async {
-    final request = _request;
     state._metadataPending.add(track.id);
     try {
-      final value = await state.catalog.connections.resolve(id).song(id);
-      if (state._presentationDisposed || request != _request) return;
+      final owner = state.catalog.connections.resolve(id);
+      final namespace = owner.cacheNamespace;
+      final value = await owner.song(id);
+      if (state._presentationDisposed ||
+          owner.cacheNamespace != namespace ||
+          !identical(state.catalog.connections.resolve(id), owner)) {
+        return;
+      }
       final updated = state.catalog.trackFromMusicSong(value);
       state._queue = [
         for (final entry in state._queue)

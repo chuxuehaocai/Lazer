@@ -37,8 +37,16 @@ mixin BuildSafeNotifier on ChangeNotifier {
         _buildSafeScheduled = false;
         if (!_buildSafeDisposed) super.notifyListeners();
       });
+      SchedulerBinding.instance.ensureVisualUpdate();
       return;
     }
     super.notifyListeners();
   }
+}
+
+/// Preserves synchronous value reads and equality checks while keeping
+/// ValueListenableBuilder and other consumers safe during sibling builds.
+class BuildSafeValueNotifier<T> extends ValueNotifier<T>
+    with BuildSafeNotifier {
+  BuildSafeValueNotifier(super.value);
 }

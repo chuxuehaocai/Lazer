@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import 'package:flutter/material.dart';
 
@@ -171,7 +172,7 @@ class TrackRow extends StatefulWidget {
   State<TrackRow> createState() => _TrackRowState();
 }
 
-class _TrackRowState extends State<TrackRow> {
+class _TrackRowState extends State<TrackRow> with BuildSafeState<TrackRow> {
   bool _hovered = false;
 
   @override

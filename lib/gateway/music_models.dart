@@ -278,3 +278,9 @@ class MusicLyrics {
   final String? wordByWord;
   final String? translation;
 }
+
+class MusicPlayRecord {
+  const MusicPlayRecord({required this.song, required this.playCount});
+  final MusicSong song;
+  final int playCount;
+}

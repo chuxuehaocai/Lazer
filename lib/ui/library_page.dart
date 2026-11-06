@@ -1,3 +1,5 @@
+import '../state/build_safe_notifier.dart';
+import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../animation/view_transitions.dart';
 import '../widgets/spring_buttons.dart';
@@ -62,9 +64,10 @@ class AppLibraryPage extends StatelessWidget {
       ]),
       state.playlistOrder,
     );
+    final mineIds = mine.map((playlist) => playlist.id).toSet();
     final List<Playlist> publicLists = uniquePlaylists(
       state.home?.playlists ?? const <Playlist>[],
-    );
+    ).where((playlist) => !mineIds.contains(playlist.id)).toList();
     final double inset = pageInset(context);
     return Center(
       child: ConstrainedBox(
@@ -302,7 +305,7 @@ class _PlaylistRowsSliver extends StatefulWidget {
 }
 
 class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, BuildSafeState<_PlaylistRowsSliver> {
   /// One key per card, so the lift can measure the box it has to settle into.
   final Map<String, GlobalKey> _boxes = <String, GlobalKey>{};
 
@@ -349,7 +352,7 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   final Map<String, double> _heights = <String, double>{};
 
   /// Where the lifted card is right now, in global coordinates.
-  final ValueNotifier<Rect?> _flight = ValueNotifier<Rect?>(null);
+  final ValueNotifier<Rect?> _flight = BuildSafeValueNotifier<Rect?>(null);
   Rect? _settleFrom;
   Rect? _settleTo;
   Offset _grab = Offset.zero;

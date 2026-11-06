@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import 'package:flutter/material.dart';
 
@@ -153,7 +154,7 @@ class _QueueRow extends StatefulWidget {
   State<_QueueRow> createState() => _QueueRowState();
 }
 
-class _QueueRowState extends State<_QueueRow> {
+class _QueueRowState extends State<_QueueRow> with BuildSafeState<_QueueRow> {
   bool _hovering = false;
   bool _focused = false;
 
@@ -295,7 +296,8 @@ class _PlayingBars extends StatefulWidget {
   State<_PlayingBars> createState() => _PlayingBarsState();
 }
 
-class _PlayingBarsState extends State<_PlayingBars> {
+class _PlayingBarsState extends State<_PlayingBars>
+    with BuildSafeState<_PlayingBars> {
   int _step = 0;
 
   @override

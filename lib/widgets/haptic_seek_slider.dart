@@ -1,3 +1,4 @@
+import 'build_safe_state.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -13,7 +14,7 @@ class HapticSeekSlider extends StatefulWidget {
 }
 
 class _HapticSeekSliderState extends State<HapticSeekSlider>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, BuildSafeState<HapticSeekSlider> {
   /// A D-pad step on the seek rail, in fractional track length.
   static const double _step = .02;
 

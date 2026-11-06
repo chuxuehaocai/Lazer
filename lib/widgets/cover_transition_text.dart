@@ -35,7 +35,8 @@ final Map<String, Map<CoverTextRole, _CoverTransitionTextState>> _targetText =
     {};
 final Map<String, Set<CoverTextRole>> _hiddenTargetText = {};
 
-class _CoverTransitionTextState extends State<CoverTransitionText> {
+class _CoverTransitionTextState extends State<CoverTransitionText>
+    with BuildSafeState<CoverTransitionText> {
   bool _hidden = false, _scheduled = false, _active = true;
 
   Map<CoverTextRole, _CoverTransitionTextState> _registry(
