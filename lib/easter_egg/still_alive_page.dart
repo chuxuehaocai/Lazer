@@ -234,7 +234,16 @@ class _StillAlivePageState extends State<StillAlivePage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _active = state == AppLifecycleState.resumed;
+    // `inactive` means the view is still visible but has no input focus, which
+    // on desktop is delivered as soon as another window is clicked. Suspending
+    // the visuals there froze the typing, the cursor blink and the credits
+    // while the terminal was on screen, and refocusing then jumped the whole
+    // unfocused interval in one frame. Only real invisibility suspends the
+    // visuals. Audio keeps running in every state either way.
+    _active =
+        state != AppLifecycleState.paused &&
+        state != AppLifecycleState.hidden &&
+        state != AppLifecycleState.detached;
     // Keep audio and the scheduled music start running in the background.
     // Only visual polling is suspended; returning samples the live playhead.
     if (_active) _readFrame();
