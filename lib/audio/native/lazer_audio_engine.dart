@@ -216,6 +216,8 @@ class NativeAudioEngine
   bool _shutdownStarted = false;
   bool _completionSent = false;
   double _volume = 1;
+  double _appliedVolume = 1;
+  int _volumeGeneration = 0;
 
   AudioStreamEntry? _activeEntry;
   NativeStreamReader? _activeReader;
@@ -663,10 +665,42 @@ class NativeAudioEngine
 
   @override
   Future<void> setVolume(double volume) async {
-    _volume = volume.clamp(0, 1);
+    final double clamped = volume.clamp(0, 1);
+    final int generation = ++_volumeGeneration;
+    _volume = clamped;
     final int? address = _engineAddressOrNull;
     if (address == null) return;
-    await _worker.call(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
+    try {
+      await _setWorkerVolume(address, clamped);
+    } catch (error) {
+      if (generation == _volumeGeneration) {
+        if (error is AudioVolumeUnsupportedException) {
+          _appliedVolume = error.effectiveVolume;
+          _volume = error.effectiveVolume;
+        } else {
+          _volume = _appliedVolume;
+        }
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _setWorkerVolume(int address, double volume) async {
+    final int status = _status(
+      await _worker.call(LazerWorkerOp.setVolume, <Object?>[address, volume]),
+    );
+    if (status != lazerAudioOk) {
+      if (status == lazerAudioErrorUnsupported) {
+        throw AudioVolumeUnsupportedException(
+          effectiveVolume: 1,
+          message: 'Could not set software volume ($status): ${lastError()}',
+        );
+      }
+      throw StateError(
+        'Could not set software volume ($status): ${lastError()}',
+      );
+    }
+    _appliedVolume = volume;
   }
 
   bool get supportsAutoMix => _api.setAutoMix != null;
@@ -909,8 +943,22 @@ class NativeAudioEngine
       );
       if (status != lazerAudioOk) {
         reader?.release();
+        final String detail = lastError();
+        if (status == lazerAudioErrorUnsupported &&
+            _volume < 0.999999 &&
+            detail.contains('set software volume to 100%')) {
+          // Direct / bit-perfect modes cannot attenuate in software. Opening at
+          // the requested low gain is refused by the engine before playback, so
+          // publish the effective value instead of leaving a misleading slider.
+          _volume = 1;
+          _appliedVolume = 1;
+          throw AudioVolumeUnsupportedException(
+            effectiveVolume: 1,
+            message: 'Could not open with software volume ($status): $detail',
+          );
+        }
         throw StateError(
-          'lazer-audio could not open $url ($status): ${lastError()}',
+          'lazer-audio could not open $url ($status): $detail',
         );
       }
       // The engine just accepted this source, so whatever was active before is
@@ -1009,7 +1057,7 @@ class NativeAudioEngine
       ...message,
       _deviceSettings.deviceToken,
     ]);
-    await _worker.call(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
+    await _setWorkerVolume(address, _volume);
   }
 
   /// Prepares [url] as the successor inside the running output session.

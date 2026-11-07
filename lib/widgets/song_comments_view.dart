@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../data/models.dart';
 import '../data/song_comments.dart';
+import '../gateway/gateway.dart';
 import '../l10n/app_localizations.dart';
 import '../ui/login.dart';
 import '../state/app_state.dart';
@@ -38,11 +39,26 @@ class _SongCommentsViewState extends State<SongCommentsView> {
   final ScrollController _scroll = ScrollController();
   late int _accountId;
   SongCommentsController get _comments => widget.controller;
+  int get _songAccountId => _comments.musicGateway == null
+      ? widget.state.user.userId
+      : int.tryParse(_comments.musicGateway?.user?.id.value ?? '') ?? 0;
+  bool get _signedIn => _comments.musicGateway == null
+      ? widget.state.signedIn
+      : _comments.musicGateway!.user != null;
+
+  Future<void> _login() async {
+    final owner = _comments.musicGateway;
+    if (owner != null) {
+      await widget.state.selectMusicConnection(GatewayRegistry.keyOf(owner));
+      if (!mounted) return;
+    }
+    if (mounted) await showAppLoginDialog(context, widget.state);
+  }
 
   @override
   void initState() {
     super.initState();
-    _accountId = widget.state.user.userId;
+    _accountId = _songAccountId;
     widget.state.addListener(_accountChanged);
     _scroll.addListener(_maybeLoadMore);
     _scheduleBind();
@@ -51,9 +67,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
   void _scheduleBind() => WidgetsBinding.instance.addPostFrameCallback((_) {
     if (!mounted) return;
     if (_scroll.hasClients) _scroll.jumpTo(0);
-    unawaited(
-      _comments.openSong(widget.track.id, accountId: widget.state.user.userId),
-    );
+    unawaited(_comments.openSong(widget.track.id, accountId: _songAccountId));
   });
 
   @override
@@ -71,7 +85,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
   }
 
   void _accountChanged() {
-    final int id = widget.state.user.userId;
+    final int id = _songAccountId;
     if (id == _accountId) return;
     _accountId = id;
     _scheduleBind();
@@ -87,13 +101,10 @@ class _SongCommentsViewState extends State<SongCommentsView> {
   }
 
   Future<void> _like(int id) async {
-    if (!widget.state.signedIn) {
-      await showAppLoginDialog(context, widget.state);
-      if (!mounted || !widget.state.signedIn) return;
-      await _comments.openSong(
-        widget.track.id,
-        accountId: widget.state.user.userId,
-      );
+    if (!_signedIn) {
+      await _login();
+      if (!mounted || !_signedIn) return;
+      await _comments.openSong(widget.track.id, accountId: _songAccountId);
       if (!mounted) return;
     }
     await _comments.toggleLike(id);
@@ -101,10 +112,8 @@ class _SongCommentsViewState extends State<SongCommentsView> {
 
   Future<void> _loginAgain() async {
     final SessionUser previous = widget.state.user;
-    await showAppLoginDialog(context, widget.state);
-    if (!mounted ||
-        !widget.state.signedIn ||
-        identical(previous, widget.state.user)) {
+    await _login();
+    if (!mounted || !_signedIn || identical(previous, widget.state.user)) {
       return;
     }
     _comments.dismissActionError();
@@ -354,7 +363,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
     child: _CommentRow(
       comment: comment,
       pending: _comments.isLiking(comment.id),
-      signedIn: widget.state.signedIn,
+      signedIn: _signedIn,
       onLike: () => unawaited(_like(comment.id)),
     ),
   );
@@ -535,7 +544,9 @@ class _CommentRow extends StatelessWidget {
                         AnimatedSwitcher(
                           switchInCurve: const AppleSpringCurve(),
                           switchOutCurve: const AppleSpringCurve(),
-                          duration: AppMotion.quick,
+                          duration: MediaQuery.disableAnimationsOf(context)
+                              ? Duration.zero
+                              : AppMotion.quick,
                           child: Text(
                             MaterialLocalizations.of(
                               context,

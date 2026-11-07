@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
@@ -240,10 +241,12 @@ struct CapturedSession {
 
 /* Opens the same source once with the given device policy and reports what the engine claimed. */
 bool runSession(int32_t forcedSampleRate, bool bitPerfect, double dspPreampDb,
-    int32_t expectedSetDspResult, CapturedSession &out, std::string &failure) {
+    int32_t expectedSetDspResult, double initialVolume, CapturedSession &out,
+    std::string &failure, double volumeAfterOpen = -1.0,
+    int32_t sourceFrames = kSourceFrames, int32_t settleAfterOpenMillis = 0) {
     constexpr int32_t sampleRate = 44'100;
     constexpr int32_t bits = 16;
-    MemoryReader source(makePcmWave(kSourceFrames, sampleRate, bits));
+    MemoryReader source(makePcmWave(sourceFrames, sampleRate, bits));
     LazerAudioReader reader = asReader(source);
     auto capture = std::make_shared<Capture>();
 
@@ -262,12 +265,31 @@ bool runSession(int32_t forcedSampleRate, bool bitPerfect, double dspPreampDb,
         failure = "Engine::create failed";
         return false;
     }
+    /* Match the app's required ordering: install user gain before open starts its producer thread. */
+    const int32_t volumeResult = engine->setVolume(initialVolume);
+    if (volumeResult != LazerAudioOk) {
+        failure = "setVolume returned " + std::to_string(volumeResult) + " error=" + engine->lastError();
+        engine->destroy();
+        return false;
+    }
     const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 0, 0, 0};
     const int32_t openResult = engine->open(nullptr, &reader, params);
     if (openResult != LazerAudioOk) {
         failure = "open failed code=" + std::to_string(openResult) + " error=" + engine->lastError();
         engine->destroy();
         return false;
+    }
+    if (settleAfterOpenMillis > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(settleAfterOpenMillis));
+    }
+    if (volumeAfterOpen >= 0.0) {
+        const int32_t updateResult = engine->setVolume(volumeAfterOpen);
+        if (updateResult != LazerAudioOk) {
+            failure = "setVolume after open returned " + std::to_string(updateResult) +
+                " error=" + engine->lastError();
+            engine->destroy();
+            return false;
+        }
     }
 
     LazerAudioDspConfig dsp{};
@@ -313,7 +335,7 @@ std::vector<uint8_t> sourceBytes(int32_t frames, int32_t sampleRate, int32_t bit
 bool runBitExactCase() {
     CapturedSession session;
     std::string failure;
-    if (!runSession(0, true, 0.0, LazerAudioOk, session, failure)) {
+    if (!runSession(0, true, 0.0, LazerAudioOk, 1.0, session, failure)) {
         std::cerr << "FAIL: bit-exact session: " << failure << "\n";
         return false;
     }
@@ -344,7 +366,7 @@ bool runBitExactCase() {
 bool runDspInvalidatesCase() {
     CapturedSession session;
     std::string failure;
-    if (!runSession(0, false, 6.0, LazerAudioOk, session, failure)) {
+    if (!runSession(0, false, 6.0, LazerAudioOk, 1.0, session, failure)) {
         std::cerr << "FAIL: DSP session: " << failure << "\n";
         return false;
     }
@@ -376,7 +398,7 @@ bool runDspInvalidatesCase() {
 bool runFormatMismatchCase() {
     CapturedSession session;
     std::string failure;
-    if (!runSession(48'000, false, 0.0, LazerAudioOk, session, failure)) {
+    if (!runSession(48'000, false, 0.0, LazerAudioOk, 1.0, session, failure)) {
         std::cerr << "FAIL: mismatched-format session: " << failure << "\n";
         return false;
     }
@@ -398,7 +420,7 @@ bool runFormatMismatchCase() {
 bool runBitPerfectRefusesDspCase() {
     CapturedSession session;
     std::string failure;
-    if (!runSession(0, true, 6.0, LazerAudioErrorUnsupported, session, failure)) {
+    if (!runSession(0, true, 6.0, LazerAudioErrorUnsupported, 1.0, session, failure)) {
         std::cerr << "FAIL: bit-perfect DSP refusal: " << failure << "\n";
         return false;
     }
@@ -416,6 +438,161 @@ bool runBitPerfectRefusesDspCase() {
     return true;
 }
 
+/* Capture the actual PCM emitted by Engine, including the first sample after an open. */
+bool runFirstBlockVolumeCase() {
+    constexpr double gains[]{0.0, 0.01, 0.1, 0.5, 1.0};
+    constexpr int64_t sourceFirstSample = -8192; // frame 0 of makePcmWave(), left channel, 16-bit.
+    constexpr int64_t tolerance = 2; // TPDF quantization can move a sample by at most two LSBs.
+    for (const double gain : gains) {
+        CapturedSession session;
+        std::string failure;
+        if (!runSession(0, false, 0.0, LazerAudioOk, gain, session, failure)) {
+            std::cerr << "FAIL: first-block volume at " << gain << ": " << failure << "\n";
+            return false;
+        }
+        if (session.bytes.size() < 2) {
+            std::cerr << "FAIL: first-block volume captured no PCM sample\n";
+            return false;
+        }
+        const uint16_t packed = static_cast<uint16_t>(session.bytes[0]) |
+            static_cast<uint16_t>(static_cast<uint16_t>(session.bytes[1]) << 8);
+        const int64_t actual = packed < 0x8000
+            ? static_cast<int64_t>(packed)
+            : static_cast<int64_t>(packed) - 0x1'0000;
+        const int64_t expected = static_cast<int64_t>(std::llround(
+            static_cast<double>(sourceFirstSample) * gain));
+        if (std::abs(static_cast<int64_t>(actual) - expected) > tolerance) {
+            std::cerr << "FAIL: first PCM sample at gain " << gain << " was " << actual
+                << ", expected " << expected << " from the first frame\n";
+            return false;
+        }
+    }
+    CapturedSession changedDuringLoad;
+    std::string failure;
+    if (!runSession(0, false, 0.0, LazerAudioOk, 0.5, changedDuringLoad, failure, 0.1)) {
+        std::cerr << "FAIL: volume changed after open: " << failure << "\n";
+        return false;
+    }
+    if (changedDuringLoad.bytes.size() < 2) {
+        std::cerr << "FAIL: volume changed after open captured no PCM sample\n";
+        return false;
+    }
+    const uint16_t packed = static_cast<uint16_t>(changedDuringLoad.bytes[0]) |
+        static_cast<uint16_t>(static_cast<uint16_t>(changedDuringLoad.bytes[1]) << 8);
+    const int64_t actual = packed < 0x8000
+        ? static_cast<int64_t>(packed)
+        : static_cast<int64_t>(packed) - 0x1'0000;
+    const int64_t expected = static_cast<int64_t>(std::llround(
+        static_cast<double>(sourceFirstSample) * 0.1));
+    if (std::abs(actual - expected) > tolerance) {
+        std::cerr << "FAIL: first PCM sample after loading-time gain change was " << actual
+            << ", expected " << expected << "\n";
+        return false;
+    }
+    CapturedSession shortSource;
+    if (!runSession(0, false, 0.0, LazerAudioOk, 0.5, shortSource, failure,
+            0.1, 100, 20)) {
+        std::cerr << "FAIL: gain refresh after a short source reached EOF: " << failure << "\n";
+        return false;
+    }
+    if (shortSource.bytes.size() < 2) {
+        std::cerr << "FAIL: short source refresh captured no PCM sample\n";
+        return false;
+    }
+    const uint16_t shortPacked = static_cast<uint16_t>(shortSource.bytes[0]) |
+        static_cast<uint16_t>(static_cast<uint16_t>(shortSource.bytes[1]) << 8);
+    const int64_t shortActual = shortPacked < 0x8000
+        ? static_cast<int64_t>(shortPacked)
+        : static_cast<int64_t>(shortPacked) - 0x1'0000;
+    if (std::abs(shortActual - expected) > tolerance) {
+        std::cerr << "FAIL: short source first sample after gain refresh was " << shortActual
+            << ", expected " << expected << "\n";
+        return false;
+    }
+    std::cout << "PASS: captured Engine output starts at requested gain for mute, 1%, 10%, 50%, and unity\n";
+    std::cout << "PASS: a gain change after open refreshes the prebuffer before the first output frame\n";
+    std::cout << "PASS: a finished short source restarts its producer to refresh the first output frame\n";
+    return true;
+}
+
+/* Manual next/open reuses the Engine object. Its next output session must keep the same user gain
+ * even after the old stream and its platform output have been stopped and recreated. */
+bool runReopenAtCurrentVolumeCase() {
+    constexpr double gain = 0.1;
+    constexpr int64_t sourceFirstSample = -2'097'152; // First left-channel sample of a 24-bit fixture.
+    constexpr int64_t tolerance = 2;
+    const auto failReopen = [](const std::string &reason) {
+        std::cerr << "FAIL: " << reason << "\n";
+        return false;
+    };
+    MemoryReader first(makePcmWave(kPeriodFrames, 44'100, 16));
+    /* A manual format-changing next track must use the same gain after rebuilding the pipeline. */
+    MemoryReader second(makePcmWave(kPeriodFrames, 96'000, 24));
+    const LazerAudioReader firstReader = asReader(first);
+    const LazerAudioReader secondReader = asReader(second);
+    auto capture = std::make_shared<Capture>();
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.buffer_millis = 60;
+    config.events.on_event = onEvent;
+    config.events.context = capture.get();
+    Engine *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return failReopen("reopen volume engine creation failed");
+
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 0, 0, 0};
+    if (engine->setVolume(gain) != LazerAudioOk ||
+        engine->open(nullptr, &firstReader, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk ||
+        !waitForEnded(capture, std::chrono::seconds(5))) {
+        std::cerr << "FAIL: first source did not finish in the reopen volume case: "
+            << engine->lastError() << "\n";
+        engine->destroy();
+        return false;
+    }
+    if (engine->stop() != LazerAudioOk) {
+        engine->destroy();
+        return failReopen("first source could not stop before manual reopen");
+    }
+    size_t secondSourceOffset = 0;
+    {
+        std::lock_guard guard(capture->mutex);
+        secondSourceOffset = capture->bytes.size();
+        capture->events.clear();
+    }
+    if (engine->open(nullptr, &secondReader, params) != LazerAudioOk ||
+        engine->play() != LazerAudioOk ||
+        !waitForEnded(capture, std::chrono::seconds(5))) {
+        std::cerr << "FAIL: second source did not finish after manual reopen: "
+            << engine->lastError() << "\n";
+        engine->destroy();
+        return false;
+    }
+    engine->stop();
+    engine->destroy();
+
+    std::lock_guard guard(capture->mutex);
+    if (capture->openCount != 2 || capture->target.sampleRate != 96'000 ||
+        capture->target.bitsPerSample != 24 || secondSourceOffset + 3 > capture->bytes.size()) {
+        return failReopen("format-changing manual reopen did not produce two complete output sessions");
+    }
+    const uint32_t packed = static_cast<uint32_t>(capture->bytes[secondSourceOffset]) |
+        (static_cast<uint32_t>(capture->bytes[secondSourceOffset + 1]) << 8) |
+        (static_cast<uint32_t>(capture->bytes[secondSourceOffset + 2]) << 16);
+    const int64_t actual = packed < 0x80'0000
+        ? static_cast<int64_t>(packed)
+        : static_cast<int64_t>(packed) - 0x100'0000;
+    const int64_t expected = static_cast<int64_t>(std::llround(sourceFirstSample * gain));
+    if (std::abs(actual - expected) > tolerance) {
+        std::cerr << "FAIL: first PCM sample after reopening the same Engine was " << actual
+            << ", expected " << expected << "\n";
+        return false;
+    }
+    std::cout << "PASS: reopening the same Engine at 96 kHz/24-bit preserves the 10% first-frame gain\n";
+    return true;
+}
+
 }  // namespace
 
 namespace lazer::audio {
@@ -424,6 +601,7 @@ std::unique_ptr<AudioOutput> createPlatformAudioOutput() { return nullptr; }
 
 int main() {
     const bool ok = runBitExactCase() && runDspInvalidatesCase() && runFormatMismatchCase() &&
-        runBitPerfectRefusesDspCase();
+        runBitPerfectRefusesDspCase() && runFirstBlockVolumeCase() &&
+        runReopenAtCurrentVolumeCase();
     return ok ? 0 : 1;
 }

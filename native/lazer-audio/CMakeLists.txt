@@ -889,6 +889,34 @@ if(LAZER_AUDIO_BUILD_PROBE)
             VERBATIM)
     endif()
 
+    if(WIN32)
+        # Opt-in real-endpoint integration tool. It captures shared-mode output through WASAPI
+        # loopback and is intentionally not registered with CTest because it plays a quiet tone.
+        add_executable(lazer-audio-wasapi-loopback-probe
+            tools/lazer_audio_wasapi_loopback_probe.cpp)
+        target_include_directories(lazer-audio-wasapi-loopback-probe PRIVATE
+            "${CMAKE_CURRENT_LIST_DIR}/include")
+        target_link_libraries(lazer-audio-wasapi-loopback-probe PRIVATE lazer-audio ole32)
+        target_compile_features(lazer-audio-wasapi-loopback-probe PRIVATE cxx_std_20)
+        target_compile_definitions(lazer-audio-wasapi-loopback-probe PRIVATE
+            UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+        if(MSVC)
+            set_property(TARGET lazer-audio-wasapi-loopback-probe PROPERTY
+                MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+            target_compile_options(lazer-audio-wasapi-loopback-probe PRIVATE /W4 /permissive- /EHsc)
+        endif()
+        add_custom_command(TARGET lazer-audio-wasapi-loopback-probe POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:lazer-audio>"
+                    "$<TARGET_FILE_DIR:lazer-audio-wasapi-loopback-probe>"
+            VERBATIM)
+        if(LAZER_FFMPEG_RUNTIME_FILES)
+            add_custom_command(TARGET lazer-audio-wasapi-loopback-probe POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${LAZER_FFMPEG_RUNTIME_FILES}
+                        "$<TARGET_FILE_DIR:lazer-audio-wasapi-loopback-probe>"
+                VERBATIM)
+        endif()
+    endif()
+
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
         # This probe exercises Native DSD/DoP negotiation and the real AlsaOutput lifecycle over a
         # test-only ALSA null PCM, plus an explicit --loopback mode for snd-aloop digital capture.

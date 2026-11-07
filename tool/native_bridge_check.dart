@@ -77,21 +77,39 @@ Future<int> _readInWorker(
   String libraryPath,
   int readerAddress,
   int length,
+  Completer<void> started,
 ) async {
   final ReceivePort replies = ReceivePort();
-  await Isolate.spawn<(String, int, int, SendPort)>((
-    (String, int, int, SendPort) message,
+  final ReceivePort startedReplies = ReceivePort();
+  await Isolate.spawn<(String, int, int, SendPort, SendPort)>((
+    (String, int, int, SendPort, SendPort) message,
   ) {
-    final (String path, int address, int size, SendPort reply) = message;
+    final (
+      String path,
+      int address,
+      int size,
+      SendPort reply,
+      SendPort startedReply,
+    ) = message;
     final DynamicLibrary library = DynamicLibrary.open(path);
     final _ReadDart read = library.lookupFunction<_ReadNative, _ReadDart>(
       'lazer_bridge_reader_read',
     );
     final Pointer<Uint8> buffer = calloc<Uint8>(size);
+    startedReply.send(null);
     final int count = read(Pointer<Void>.fromAddress(address), buffer, size);
     reply.send(count);
     calloc.free(buffer);
-  }, (libraryPath, readerAddress, length, replies.sendPort));
+  }, (
+    libraryPath,
+    readerAddress,
+    length,
+    replies.sendPort,
+    startedReplies.sendPort,
+  ));
+  await startedReplies.first;
+  started.complete();
+  startedReplies.close();
   final Object? result = await replies.first;
   replies.close();
   return result! as int;
@@ -128,8 +146,15 @@ Future<void> main() async {
   final int address = reader.address;
 
   // 1. Nothing on disk yet: a read must block until bytes land, not report EOF.
-  final Future<int> blocked = _readInWorker(libraryPath, address, 8);
-  await Future<void>.delayed(const Duration(milliseconds: 150));
+  final Completer<void> firstReadStarted = Completer<void>();
+  final Future<int> blocked = _readInWorker(
+    libraryPath,
+    address,
+    8,
+    firstReadStarted,
+  );
+  await firstReadStarted.future;
+  await Future<void>.delayed(const Duration(milliseconds: 50));
   final RandomAccessFile sink = await file.open(mode: FileMode.append);
   sink.writeFromSync(<int>[1, 2, 3, 4]);
   await sink.flush();
@@ -200,11 +225,14 @@ Future<void> main() async {
   );
   final Pointer<Void> stalledReader = stalledOut.value;
   calloc.free(stalledOut);
+  final Completer<void> stalledReadStarted = Completer<void>();
   final Future<int> cancelled = _readInWorker(
     libraryPath,
     stalledReader.address,
     4,
+    stalledReadStarted,
   );
+  await stalledReadStarted.future;
   await Future<void>.delayed(const Duration(milliseconds: 100));
   cancel(stalledReader);
   _expect('cancel interrupts a blocked read', await cancelled, _ioError);

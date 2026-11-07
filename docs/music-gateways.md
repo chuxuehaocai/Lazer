@@ -69,8 +69,7 @@ responses. Creating a QR session preserves any existing authenticated account.
 
 ## NetEase plugin and verification
 
-Source: `E:/projects/lazer_ncm/netease-cloud`.
-Importable package: `E:/projects/lazer_ncm/dist/lazer.netease-1.0.1.zip`.
+Lua plugin source: `plugins/lazer.netease`. Build the importable package with `dart run tool/package_netease_lua.dart`; it writes `dist/lazer.netease-1.0.3.zip`. CI publishes the ZIP as `Lazer-NetEase-Lua`.
 Navidrome has no Lua package yet and is not advertised by this plugin.
 
 The NetEase service protocol, request paths, cookies, AES/RSA envelopes and

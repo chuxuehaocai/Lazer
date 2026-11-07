@@ -105,4 +105,6 @@ end
 
 导入流程会先验证路径、大小、清单和 Lua 入口，再在临时目录启动 VM。启动成功后才替换旧版本；失败会保留旧版本。停用、更新或卸载前客户端会停止该插件的请求和关联播放会话。插件不应把 Cookie、令牌或签名音频 URL 写入日志、返回错误文本或长期缓存；会话凭据只能放在 `host.storage_*` 中。
 
-网易云 Gateway 的完整示例位于 `E:\projects\lazer_ncm\netease-cloud`，可直接使用 `E:\projects\lazer_ncm\dist\lazer.netease-1.0.1.zip` 导入。Navidrome 暂不随插件包提供实现。
+评论能力由插件声明 `comments`。`comments({id,limit,offset})` 返回 `{total,more,hot,latest}`，每条评论包含 `id`、`content`、`author`、`userId`、`avatarUrl`、`time`（毫秒）、`liked`、`likedCount`、`location` 和 `replies`（`author/content`）。`setCommentLiked({id,commentId,liked})` 执行点赞或取消。播放器仅在当前歌曲所属的已启用 Lua 插件声明该能力时显示评论入口；评论请求及登录身份都路由至该插件。
+
+网易云音乐 Lua 插件源码位于 `plugins/lazer.netease`。在仓库根目录运行 `dart run tool/package_netease_lua.dart`，再导入 `dist/lazer.netease-1.0.3.zip`。Navidrome 暂不随插件包提供实现。

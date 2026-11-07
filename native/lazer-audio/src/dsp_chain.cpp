@@ -352,12 +352,13 @@ void Convolver::process(float *interleaved, size_t frameCount) noexcept {
     }
 }
 
-void DspChain::configureFormat(PcmFormat format) {
+void DspChain::configureFormat(PcmFormat format, double initialVolume) {
     format_ = format;
     sections_.clear();
     applyPendingConfig();
     volume_.configure(format_.sampleRate, rampMillis_);
-    volume_.reset(1.0);
+    /* A new source must inherit the user's gain before its first decoded block is rendered. */
+    volume_.reset(std::clamp(initialVolume, 0.0, 1.0));
     reset();
 }
 
@@ -399,13 +400,17 @@ void DspChain::requestConfig(const LazerAudioDspConfig &config) {
         }
         pendingOrder_.push_back(static_cast<Stage>(value));
     }
-    pendingDirty_ = true;
+    pendingDirty_.store(true, std::memory_order_release);
 }
 
 void DspChain::setVolume(double volume, int32_t rampMillis) {
     rampMillis_ = std::max(rampMillis, 1);
     volume_.configure(format_.sampleRate > 0 ? format_.sampleRate : 44100, rampMillis_);
     volume_.setTarget(std::clamp(volume, 0.0, 1.0));
+}
+
+void DspChain::setVolumeImmediately(double volume) noexcept {
+    volume_.reset(std::clamp(volume, 0.0, 1.0));
 }
 
 void DspChain::reset() noexcept {
@@ -442,7 +447,10 @@ void DspChain::applyOrder(const std::vector<Stage> &order) {
 }
 
 void DspChain::applyPendingConfig() {
+    if (!pendingDirty_.load(std::memory_order_acquire)) return;
+
     std::vector<LazerAudioEqBand> bands;
+    std::vector<Stage> order;
     double preampDb = 0.0;
     bool limiterEnabled = false;
     double limiterThresholdDb = -1.0;
@@ -452,8 +460,9 @@ void DspChain::applyPendingConfig() {
     int32_t tapChannels = 0;
     {
         std::lock_guard guard(pendingMutex_);
-        if (!pendingDirty_) return;
+        if (!pendingDirty_.load(std::memory_order_relaxed)) return;
         bands = pendingBands_;
+        order = pendingOrder_;
         preampDb = pendingPreampDb_;
         limiterEnabled = pendingLimiterEnabled_;
         limiterThresholdDb = pendingLimiterThresholdDb_;
@@ -461,7 +470,7 @@ void DspChain::applyPendingConfig() {
         taps = pendingTaps_;
         tapFrames = pendingTapFrames_;
         tapChannels = pendingTapChannels_;
-        pendingDirty_ = false;
+        pendingDirty_.store(false, std::memory_order_release);
     }
 
     preampLinear_ = std::pow(10.0, preampDb / 20.0);
@@ -509,17 +518,18 @@ void DspChain::applyPendingConfig() {
         /* Zero frames and invalid or mismatched IRs disable a previously active stage too. */
         convolver_.clear();
     }
-    applyOrder(pendingOrder_);
+    applyOrder(order);
 }
 
 double DspChain::process(float *interleaved, size_t frameCount) {
     if (interleaved == nullptr || frameCount == 0 || !format_.isValid()) return 0.0;
     applyPendingConfig();
     const size_t channels = static_cast<size_t>(format_.channels);
-    const std::vector<Stage> order = activeOrder();
-
     double reduction = 0.0;
-    for (const Stage stage : order) {
+    /* Keep the render path allocation-free: activeOrder() returns a convenient copy for
+     * diagnostics, but the processing loop can iterate the immutable session order directly. */
+    const std::vector<Stage> &order = order_;
+    const auto processStage = [this, interleaved, frameCount, channels, &reduction](Stage stage) {
         switch (stage) {
             case Stage::Preamp:
                 if (preampLinear_ == 1.0) break;
@@ -562,6 +572,15 @@ double DspChain::process(float *interleaved, size_t frameCount) {
                 convolver_.process(interleaved, frameCount);
                 break;
         }
+    };
+
+    const auto processStages = [&processStage](const auto &stages) {
+        for (const Stage stage : stages) processStage(stage);
+    };
+    if (order.empty()) {
+        processStages(kDefaultOrder);
+    } else {
+        processStages(order);
     }
     lastReductionDb_ = reduction;
     return reduction;

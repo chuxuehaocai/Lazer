@@ -632,12 +632,16 @@ class _AppThinSeekBarState extends State<AppThinSeekBar>
 
   void _seekTo(double dx, double width) {
     if (widget.onSeek == null || width <= 0) return;
+    _nudgeTimer?.cancel();
+    _nudgeTimer = null;
     final double fraction = _limit(dx / width);
     setState(() => _drag = fraction);
     widget.onSeek!(fraction);
   }
 
   void _finish() {
+    _nudgeTimer?.cancel();
+    _nudgeTimer = null;
     final double? fraction = _drag;
     if (fraction == null) return;
     widget.onSeekCommit?.call(fraction);

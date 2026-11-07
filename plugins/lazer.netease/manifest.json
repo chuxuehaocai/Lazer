@@ -1,0 +1,31 @@
+{
+  "id": "lazer.netease",
+  "name": "网易云音乐",
+  "version": "1.0.3",
+  "description": "基于 Lazer 网易云 Gateway 协议实现的 Lua 音乐平台。",
+  "author": "Lazer",
+  "entry": "main.lua",
+  "apiVersion": 1,
+  "provider": "netease",
+  "capabilities": [
+    "search",
+    "browseAlbums",
+    "savedAlbums",
+    "playlists",
+    "editPlaylists",
+    "favorites",
+    "lyrics",
+    "scrobble",
+    "recommendations",
+    "comments"
+  ],
+  "auth": ["qr", "cookie", "password", "sms"],
+  "permissions": {
+    "network": [
+      "music.163.com",
+      "interfacepc.music.163.com",
+      "clientlog.music.163.com"
+    ],
+    "storage": true
+  }
+}

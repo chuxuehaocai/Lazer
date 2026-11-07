@@ -28,7 +28,9 @@ class VolumeControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: state,
+    // Preview drags update only this narrow listenable; notifying AppState on
+    // every pointer move would rebuild unrelated player and shell surfaces.
+    animation: Listenable.merge([state, state.volumeListenable]),
     builder: (context, _) {
       final color = onDark ? context.colors.onPlayer : context.colors.slateDark;
       return LayoutBuilder(

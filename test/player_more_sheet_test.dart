@@ -88,40 +88,41 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('更多 opens the song sheet with details and every action', (
-    tester,
-  ) async {
-    final AppState state = await _pumpPlayer(tester);
-    await _openMore(tester);
+  testWidgets(
+    '更多 opens details and available actions without unloaded plugin comments',
+    (tester) async {
+      final AppState state = await _pumpPlayer(tester);
+      await _openMore(tester);
 
-    expect(_inSheet(find.text('歌曲详情')), findsOneWidget);
-    expect(_inSheet(find.text('专辑')), findsOneWidget);
-    expect(_inSheet(find.text('Test album')), findsOneWidget);
-    expect(_inSheet(find.text('时长')), findsOneWidget);
-    expect(_inSheet(find.text('3:00')), findsOneWidget);
-    expect(_inSheet(find.text('音质')), findsOneWidget);
-    expect(_inSheet(find.text(state.playbackQuality.label)), findsOneWidget);
-    expect(_inSheet(find.text('来源')), findsOneWidget);
-    expect(_inSheet(find.text('在线播放')), findsOneWidget);
+      expect(_inSheet(find.text('歌曲详情')), findsOneWidget);
+      expect(_inSheet(find.text('专辑')), findsOneWidget);
+      expect(_inSheet(find.text('Test album')), findsOneWidget);
+      expect(_inSheet(find.text('时长')), findsOneWidget);
+      expect(_inSheet(find.text('3:00')), findsOneWidget);
+      expect(_inSheet(find.text('音质')), findsOneWidget);
+      expect(_inSheet(find.text(state.playbackQuality.label)), findsOneWidget);
+      expect(_inSheet(find.text('来源')), findsOneWidget);
+      expect(_inSheet(find.text('在线播放')), findsOneWidget);
 
-    for (final String action in <String>[
-      '歌词',
-      '创建一起听',
-      '保存封面',
-      '在 osu! 中搜索',
-      '添加到歌单',
-      '下载歌曲',
-      '查看评论',
-      '播放队列',
-    ]) {
-      expect(
-        _inSheet(find.text(action)),
-        findsOneWidget,
-        reason: '$action is missing',
-      );
-    }
-    expect(tester.takeException(), isNull);
-  });
+      for (final String action in <String>[
+        '歌词',
+        '创建一起听',
+        '保存封面',
+        '在 osu! 中搜索',
+        '添加到歌单',
+        '下载歌曲',
+        '播放队列',
+      ]) {
+        expect(
+          _inSheet(find.text(action)),
+          findsOneWidget,
+          reason: '$action is missing',
+        );
+      }
+      expect(_inSheet(find.text('查看评论')), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('the together action opens creation and shows an existing room', (
     tester,

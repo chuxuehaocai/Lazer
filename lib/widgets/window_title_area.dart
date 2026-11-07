@@ -185,7 +185,9 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
                         : kWindowCaptionButtonWidth * 3 + 12,
                   ),
                   child: AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 140),
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 140),
                     style: titleStyle,
                     child: Text(
                       kWindowTitle,

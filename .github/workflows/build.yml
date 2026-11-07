@@ -45,6 +45,13 @@ jobs:
       - run: flutter pub get --enforce-lockfile
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub --reporter expanded
+      - name: Package the NetEase Lua provider
+        run: dart run tool/package_netease_lua.dart
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: Lazer-NetEase-Lua
+          path: dist/lazer.netease-*.zip
+          if-no-files-found: error
       - run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
       - name: Test platform output contracts without hardware
         run: |

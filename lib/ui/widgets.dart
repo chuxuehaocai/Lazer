@@ -353,7 +353,9 @@ class _AppTrackRowState extends State<AppTrackRow>
                       );
                     }),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 120),
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
             decoration: BoxDecoration(
@@ -602,7 +604,9 @@ class _AppRailItemState extends State<AppRailItem>
           onTap: feedbackAction(context, widget.onTap),
           behavior: HitTestBehavior.opaque,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 140),
             height: 30,
             padding: const EdgeInsets.symmetric(horizontal: 9),
             decoration: BoxDecoration(
@@ -694,7 +698,9 @@ class _AppArtistTrackCardState extends State<AppArtistTrackCard>
           borderRadius: BorderRadius.circular(10),
           onTap: feedbackAction(context, widget.onTap),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 120),
             height: 66,
             padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(

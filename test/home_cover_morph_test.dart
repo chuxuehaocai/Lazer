@@ -50,9 +50,10 @@ class _HarnessState extends State<_Harness> {
     null => 'morph-fixture',
   };
 
-  void back() {
-    returnCoverTransition(identity);
+  bool back() {
+    final started = returnCoverTransition(identity);
     setState(() => opened = false);
+    return started;
   }
 
   Widget _root() => Stack(
@@ -283,6 +284,42 @@ void main() {
     expect(debugCoverSnapshotCount, 0);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'reduced-motion takeoff resets the blend before a later animated return',
+    (tester) async {
+      final state = await mount(tester, harness: const _Harness(reduced: true));
+      state.enter();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(_forward), findsNothing);
+
+      await tester.pumpWidget(const _Harness(reduced: false));
+      await tester.pump();
+      final target = find.byType(CoverTransitionTarget);
+      final bounds = tester.getRect(target);
+      final before = _sample(
+        await _pixels(tester, state.screen),
+        bounds.center,
+      );
+
+      expect(MediaQuery.disableAnimationsOf(tester.element(target)), isFalse);
+      expect(
+        find.byType(CoverTransitionSource, skipOffstage: false),
+        findsOneWidget,
+      );
+      expect(state.back(), isTrue);
+      await tester.pump();
+      expect(find.byKey(_return), findsOneWidget);
+      _near(
+        _sample(await _pixels(tester, state.screen), bounds.center),
+        before,
+      );
+      await tester.pumpAndSettle();
+      expect(debugCoverSnapshotCount, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('rapid reopen paints the returning composition immediately', (
     tester,

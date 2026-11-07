@@ -1,4 +1,5 @@
 import 'music_models.dart';
+import '../data/song_comments.dart';
 
 export 'music_models.dart';
 
@@ -112,6 +113,13 @@ abstract class MusicGateway {
   }) => Future.error(MusicUnsupportedException(provider.id, 'stream'));
   Future<List<MusicLyrics>> lyrics(MusicId song) =>
       Future.error(MusicUnsupportedException(provider.id, 'lyrics'));
+  Future<SongCommentPage> comments(
+    MusicId song, {
+    int limit = 20,
+    int offset = 0,
+  }) => Future.error(MusicUnsupportedException(provider.id, 'comments'));
+  Future<void> setCommentLiked(MusicId song, int commentId, bool liked) =>
+      Future.error(MusicUnsupportedException(provider.id, 'setCommentLiked'));
   Future<void> scrobble(
     MusicId song, {
     required Duration played,

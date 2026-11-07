@@ -198,11 +198,12 @@ public:
     static constexpr std::array<Stage, 5> kDefaultOrder{
         Stage::Preamp, Stage::Eq, Stage::Crossfeed, Stage::Limiter, Stage::Volume};
 
-    void configureFormat(PcmFormat format);
+    void configureFormat(PcmFormat format, double initialVolume = 1.0);
     /* Safe from the caller's thread: the request is copied and the audio thread installs it at the
      * next block boundary. */
     void requestConfig(const LazerAudioDspConfig &config);
     void setVolume(double volume, int32_t rampMillis);
+    void setVolumeImmediately(double volume) noexcept;
     void reset() noexcept;
 
     /* Returns the limiter's gain reduction in dB for the block, or 0 when the limiter is off. */
@@ -228,7 +229,7 @@ private:
     Crossfeed::Specification pendingCrossfeed_;
     /* Empty means "the engine's default order". */
     std::vector<Stage> pendingOrder_;
-    bool pendingDirty_ = false;
+    std::atomic<bool> pendingDirty_{false};
 
     PcmFormat format_{};
     std::vector<EqSection> sections_;

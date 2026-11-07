@@ -564,6 +564,34 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       : value.bitrateLabel;
   List<MusicGateway> get musicConnections => catalog.connections.connections;
 
+  /// Comment UI belongs to the playing song's enabled plugin, independently
+  /// of the source currently selected in the library.
+  LuaMusicGateway? commentsGatewayFor(Track? track) {
+    if (track == null || !track.isServiceTrack) return null;
+    final reference = MusicId.tryParse(track.id);
+    if (reference != null) {
+      try {
+        final owner = catalog.connections.resolve(reference);
+        return owner is LuaMusicGateway &&
+                owner.supports(MusicCapability.comments)
+            ? owner
+            : null;
+      } catch (_) {
+        return null;
+      }
+    }
+    if ((int.tryParse(track.id) ?? 0) <= 0) return null;
+    // Old playback snapshots contain unqualified NetEase IDs.
+    return musicConnections
+        .whereType<LuaMusicGateway>()
+        .where(
+          (owner) =>
+              owner.provider.id == 'netease' &&
+              owner.supports(MusicCapability.comments),
+        )
+        .firstOrNull;
+  }
+
   /// Signed-in accounts are independent from the selected catalogue source.
   Map<String, SessionUser> get musicAccounts => _musicPlatforms.accounts;
   bool get activeMusicSignedIn =>
@@ -601,15 +629,35 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double hapticIntensity = 0.5;
   ThemeMode themeMode = ThemeMode.system;
   double _volume = 1;
+  final ValueNotifier<double> _volumeListenable = BuildSafeValueNotifier(1);
   double _unmutedVolume = 1;
+  double _lastAppliedVolume = 1;
+  double _lastAppliedUnmutedVolume = 1;
+  int _volumeRequestGeneration = 0;
+  Future<void> _volumeOperations = Future<void>.value();
   double get volume => _volume;
+  ValueListenable<double> get volumeListenable => _volumeListenable;
+
+  void _setVolumeValue(double value) {
+    _volume = value;
+    _volumeListenable.value = value;
+  }
 
   Future<void> setVolume(double value) async {
     if (!value.isFinite) return;
-    _volume = value.clamp(0, 1);
+    _setVolumeValue(value.clamp(0, 1));
+    final double requested = _volume;
+    final int generation = ++_volumeRequestGeneration;
     if (_volume > 0) _unmutedVolume = _volume;
     notifyListeners();
-    await audioEngine?.setVolume(_volume);
+    try {
+      await _applyVolumeToEngine(requested, requestGeneration: generation);
+    } catch (error) {
+      if (generation != _volumeRequestGeneration) return;
+      _restoreVolumeAfterFailure(error);
+      notifyListeners();
+      rethrow;
+    }
     // Persist the latest value even when several drag updates are in flight.
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('lazer_volume', _volume);
@@ -621,9 +669,79 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Callers persist once on release with [setVolume].
   void previewVolume(double value) {
     if (!value.isFinite) return;
-    _volume = value.clamp(0, 1);
+    _setVolumeValue(value.clamp(0, 1));
+    final double requested = _volume;
+    final int generation = ++_volumeRequestGeneration;
     if (_volume > 0) _unmutedVolume = _volume;
-    unawaited(audioEngine?.setVolume(_volume) ?? Future<void>.value());
+    unawaited(_previewVolume(requested, generation));
+  }
+
+  Future<void> _previewVolume(double requested, int generation) async {
+    try {
+      await _applyVolumeToEngine(requested, requestGeneration: generation);
+    } catch (error) {
+      if (generation != _volumeRequestGeneration) return;
+      debugPrint('Audio volume preview failed: $error');
+      _restoreVolumeAfterFailure(error);
+      notifyListeners();
+    }
+  }
+
+  void _restoreVolumeAfterFailure(Object error) {
+    if (error is AudioVolumeUnsupportedException) {
+      _setVolumeValue(error.effectiveVolume);
+      _unmutedVolume = error.effectiveVolume;
+      _lastAppliedVolume = error.effectiveVolume;
+      _lastAppliedUnmutedVolume = error.effectiveVolume;
+      return;
+    }
+    _setVolumeValue(_lastAppliedVolume);
+    _unmutedVolume = _lastAppliedUnmutedVolume;
+  }
+
+  Future<void> _applyVolumeToEngine(
+    double volume, {
+    AudioEngine? engine,
+    int? requestGeneration,
+  }) async {
+    engine ??= audioEngine;
+    if (engine == null) return;
+    final AudioEngine targetEngine = engine;
+    final Future<void> operation = _volumeOperations.then((_) async {
+      // Slider drags can enqueue faster than a platform channel responds. Skip
+      // obsolete pending gains so only the newest requested value reaches it.
+      if (requestGeneration != null &&
+          requestGeneration != _volumeRequestGeneration) {
+        return;
+      }
+      await targetEngine.setVolume(volume);
+      if (identical(audioEngine, targetEngine)) {
+        _lastAppliedVolume = volume;
+        if (volume > 0) _lastAppliedUnmutedVolume = volume;
+      }
+    });
+    _volumeOperations = operation.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {},
+    );
+    await operation;
+  }
+
+  Future<bool> _applyCurrentVolumeBeforeOpen(
+    AudioEngine engine,
+    int generation,
+  ) async {
+    var volumeGeneration = _volumeRequestGeneration;
+    do {
+      volumeGeneration = _volumeRequestGeneration;
+      await _applyVolumeToEngine(
+        _volume,
+        engine: engine,
+        requestGeneration: volumeGeneration,
+      );
+      if (generation != _generation) return false;
+    } while (volumeGeneration != _volumeRequestGeneration);
+    return true;
   }
 
   Future<void> toggleMute() => setVolume(_volume > 0 ? 0 : _unmutedVolume);
@@ -1614,7 +1732,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       MotionTiming.speed = animationSpeed;
       autoDpiScale = prefs.getBool('lazer_auto_dpi_scale') ?? true;
-      _volume = (prefs.getDouble('lazer_volume') ?? 1).clamp(0, 1);
+      _setVolumeValue((prefs.getDouble('lazer_volume') ?? 1).clamp(0, 1));
       _unmutedVolume =
           (prefs.getDouble('lazer_unmuted_volume') ??
                   (_volume > 0 ? _volume : 1))
@@ -1699,7 +1817,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await Future.wait<void>(<Future<void>>[
       localLibrary.load(),
       playbackCache.load(),
-      audioEngine?.setVolume(_volume) ?? Future<void>.value(),
+      _applyVolumeToEngine(_volume),
       _restorePlaybackSnapshot(initialQueueActivity),
       _restoreCatalogSession(),
     ]);
@@ -3358,6 +3476,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final QueueAudioEngine? queueEngine = _queueEngine;
     int? queueId;
     try {
+      // Native engines begin decoding and filling their output ring during
+      // setUrl/setQueue. Install the gain before opening the source so the first
+      // rendered block cannot be queued at the engine's default unity volume.
+      if (!await _applyCurrentVolumeBeforeOpen(engine, generation)) return;
       if (queueEngine != null) {
         try {
           queueId = await queueEngine.setQueue(<String>[url]);
@@ -3373,7 +3495,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (generation != _generation) return;
       if (queueId == null) await engine.setUrl(url);
       if (generation != _generation) return;
-      await engine.setVolume(_volume);
+      await _applyVolumeToEngine(_volume, engine: engine);
       if (resumeAt != null && resumeAt > Duration.zero) {
         bool reached = false;
         try {
@@ -3389,7 +3511,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         _position = reached ? resumeAt : Duration.zero;
       }
     } catch (error) {
-      if (generation == _generation) _failPlayback('音频加载失败，请重试。');
+      if (generation == _generation) {
+        if (error is AudioVolumeUnsupportedException) {
+          _restoreVolumeAfterFailure(error);
+          notifyListeners();
+        }
+        _failPlayback('音频加载失败，请重试。');
+      }
       return;
     }
     if (generation != _generation) return;
@@ -4381,6 +4509,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // replacement source is playing.
     _resetStallClock();
     try {
+      if (!await _applyCurrentVolumeBeforeOpen(engine, generation)) return true;
       int? queueId;
       if (queueEngine != null) {
         try {
@@ -4393,7 +4522,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (generation != _generation) return true;
       if (queueId == null) await engine.setUrl(url);
       if (generation != _generation) return true;
-      await engine.setVolume(_volume);
+      await _applyVolumeToEngine(_volume, engine: engine);
       if (resume > Duration.zero) {
         try {
           // The replacement source starts its download from the beginning, so the
@@ -4412,6 +4541,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return true;
     } catch (error) {
       debugPrint('Reloading the stream failed: $error');
+      if (generation == _generation &&
+          error is AudioVolumeUnsupportedException) {
+        _restoreVolumeAfterFailure(error);
+        notifyListeners();
+      }
       return false;
     }
   }
@@ -4860,6 +4994,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _bufferPulseTimer?.cancel();
     _ticker?.cancel();
     _tickNotifier.dispose();
+    _volumeListenable.dispose();
     if (_ownsDownloadManager) downloadManager.dispose();
     playbackCache.dispose();
     super.dispose();

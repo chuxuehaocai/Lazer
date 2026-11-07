@@ -1,5 +1,6 @@
 import '../plugins/lua_plugin_runtime.dart';
 import 'music_gateway.dart';
+import '../data/song_comments.dart';
 
 /// Provider-neutral adapter for a Lua plugin. A plugin returns JSON-shaped
 /// values; this class is deliberately the only place that turns them into
@@ -329,6 +330,71 @@ class LuaMusicGateway extends MusicGateway {
     offset,
     limit,
   );
+  @override
+  Future<MusicPage<MusicAlbum>> savedAlbums({
+    int limit = 30,
+    int offset = 0,
+  }) async => _page(
+    await _call('savedAlbums', {'limit': limit, 'offset': offset}),
+    _album,
+    offset,
+    limit,
+  );
+
+  @override
+  Future<SongCommentPage> comments(
+    MusicId song, {
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    validatePage(limit, offset);
+    final raw = Map.from(
+      await _call('comments', {
+        'id': remoteId(song, MusicEntityKind.song),
+        'limit': limit,
+        'offset': offset,
+      }),
+    );
+    List<SongComment> parse(Object? values) => [
+      for (final item in _list(values).whereType<Map>())
+        SongComment(
+          id: (item['id'] as num).toInt(),
+          content: _string(item['content']),
+          author: _string(item['author']),
+          userId: (item['userId'] as num?)?.toInt() ?? 0,
+          avatarUrl: item['avatarUrl'] as String?,
+          time: (item['time'] as num?)?.toInt() ?? 0,
+          location: item['location'] as String?,
+          liked: item['liked'] == true,
+          likedCount: (item['likedCount'] as num?)?.toInt() ?? 0,
+          replies: [
+            for (final reply in _list(item['replies']).whereType<Map>())
+              CommentReply(
+                author: _string(reply['author']),
+                content: _string(reply['content']),
+              ),
+          ],
+        ),
+    ];
+    final latest = parse(raw['latest']);
+    return SongCommentPage(
+      total: (raw['total'] as num?)?.toInt() ?? 0,
+      more: raw['more'] == true,
+      hot: parse(raw['hot']),
+      latest: latest,
+      receivedCount: latest.length,
+    );
+  }
+
+  @override
+  Future<void> setCommentLiked(MusicId song, int commentId, bool liked) async {
+    await _call('setCommentLiked', {
+      'id': remoteId(song, MusicEntityKind.song),
+      'commentId': commentId,
+      'liked': liked,
+    });
+  }
+
   @override
   Future<void> setFavorite(MusicId song, bool favorite) async {
     await _call('setFavorite', {

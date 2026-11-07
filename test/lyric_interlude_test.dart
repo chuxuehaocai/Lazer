@@ -6,19 +6,22 @@ import 'package:lazer_nextgen/lyrics/lyric_document.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
+import 'package:lazer_nextgen/widgets/timed_lyric_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _Playback extends AppState {
   Duration playhead = Duration.zero;
   Duration trackDuration = const Duration(seconds: 14);
   bool isPlaying = false;
-  _Playback() {
-    lyrics = const [
-      LyricLine(Duration.zero, 'Before'),
-      LyricLine(Duration(seconds: 3), ''),
-      LyricLine(Duration(seconds: 10), 'After'),
-      LyricLine(Duration(seconds: 12), 'Last'),
-    ];
+  _Playback({List<LyricLine>? lines}) {
+    lyrics =
+        lines ??
+        const [
+          LyricLine(Duration.zero, 'Before'),
+          LyricLine(Duration(seconds: 3), ''),
+          LyricLine(Duration(seconds: 10), 'After'),
+          LyricLine(Duration(seconds: 12), 'Last'),
+        ];
   }
   void report(int milliseconds) {
     playhead = Duration(milliseconds: milliseconds);
@@ -141,6 +144,35 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('long lyric sheet paints and retargets only nearby rows', (
+    tester,
+  ) async {
+    final lines = [
+      for (var i = 0; i < 4000; i++)
+        LyricLine(Duration(seconds: i * 2), 'Line $i'),
+    ];
+    final state = _Playback(lines: lines)
+      ..trackDuration = const Duration(seconds: 8000);
+    state.report(6000000);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(),
+        home: Scaffold(body: LyricViewport(state: state)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Line 3000'), findsOneWidget);
+    expect(find.byType(TimedLyricText).evaluate().length, lessThan(80));
+    state.report(6002000);
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.text('Line 3001'), findsOneWidget);
+    expect(find.byType(TimedLyricText).evaluate().length, lessThan(80));
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('duration arriving later creates the inferred trailing passage', (
     tester,

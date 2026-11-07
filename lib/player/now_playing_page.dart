@@ -9,6 +9,7 @@ import '../animation/apple_modal.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../data/models.dart';
+import '../gateway/music_gateway.dart';
 import '../downloads/download_dialog.dart';
 import 'player_backdrop.dart';
 import '../l10n/app_localizations.dart';
@@ -207,6 +208,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   DesktopNowPlayingPane _desktopPane = DesktopNowPlayingPane.lyrics;
   final GlobalKey _backdropKey = GlobalKey();
   late SongCommentsController _commentsController;
+  MusicGateway? _commentsGateway;
   Timer? _hideTimer;
   final Set<int> _activeControlPointers = {};
 
@@ -244,7 +246,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   void initState() {
     super.initState();
     widget.state.playerPresentationChanged(true);
-    _commentsController = SongCommentsController(widget.state.gateway);
+    _commentsGateway = widget.state.commentsGatewayFor(widget.state.current);
+    _commentsController = SongCommentsController.forMusicGateway(
+      _commentsGateway,
+    );
     widget.state.addListener(_preferencesChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(widget.state.ensureCurrentLyrics());
@@ -264,6 +269,14 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       widget.state.lyrics.isNotEmpty;
 
   void _preferencesChanged() {
+    final owner = widget.state.commentsGatewayFor(widget.state.current);
+    if (!identical(owner, _commentsGateway)) {
+      _commentsController.dispose();
+      _commentsGateway = owner;
+      _commentsController = SongCommentsController.forMusicGateway(owner);
+      if (owner == null) _desktopPane = DesktopNowPlayingPane.lyrics;
+      if (mounted) setState(() {});
+    }
     if (_themeSeed != widget.state.accentSeed ||
         _themeFonts != widget.state.fontPreferences) {
       _themeSeed = widget.state.accentSeed;
@@ -390,7 +403,11 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   Future<void> _openComments() async {
     final track = widget.state.current;
-    if (track == null || _commentsOpen) return;
+    if (track == null ||
+        _commentsOpen ||
+        widget.state.commentsGatewayFor(track) == null) {
+      return;
+    }
     _commentsOpen = true;
     _hideTimer?.cancel();
     await showSongComments(
@@ -426,7 +443,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       oldWidget.state.removeListener(_preferencesChanged);
       widget.state.addListener(_preferencesChanged);
       _commentsController.dispose();
-      _commentsController = SongCommentsController(widget.state.gateway);
+      _commentsGateway = widget.state.commentsGatewayFor(widget.state.current);
+      _commentsController = SongCommentsController.forMusicGateway(
+        _commentsGateway,
+      );
     }
   }
 
@@ -1309,7 +1329,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 label: context.tr('下载歌曲'),
                 onTap: onDownload,
               ),
-              if (!state.isNavidrome)
+              if (state.commentsGatewayFor(track) != null)
                 _MoreAction(
                   icon: Icons.chat_bubble_outline_rounded,
                   label: context.tr('查看评论'),

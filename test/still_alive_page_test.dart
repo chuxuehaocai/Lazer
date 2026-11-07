@@ -251,6 +251,51 @@ void main() {
     },
   );
 
+  testWidgets('visual polling follows reduced motion and route TickerMode', (
+    tester,
+  ) async {
+    final audio = _Playback();
+    final reducedMotion = ValueNotifier(false);
+    final routeVisible = ValueNotifier(true);
+    addTearDown(reducedMotion.dispose);
+    addTearDown(routeVisible.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<bool>(
+          valueListenable: reducedMotion,
+          builder: (context, reduced, _) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
+            child: ValueListenableBuilder<bool>(
+              valueListenable: routeVisible,
+              child: StillAlivePage(playback: audio),
+              builder: (context, visible, child) =>
+                  TickerMode(enabled: visible, child: child!),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    final dynamic pageState = tester.state(find.byType(StillAlivePage));
+    expect(pageState.debugPollInterval, const Duration(milliseconds: 33));
+    expect(pageState.debugIsPolling, isTrue);
+
+    reducedMotion.value = true;
+    await tester.pump();
+    expect(pageState.debugPollInterval, const Duration(seconds: 1));
+    expect(pageState.debugIsPolling, isTrue);
+
+    routeVisible.value = false;
+    await tester.pump();
+    expect(pageState.debugIsPolling, isFalse);
+    routeVisible.value = true;
+    await tester.pump();
+    expect(pageState.debugIsPolling, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'music waits for 7.1 seconds and personnel uses its separate 9.3 second start',
     (tester) async {

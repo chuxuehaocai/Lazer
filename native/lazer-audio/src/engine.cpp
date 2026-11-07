@@ -172,7 +172,7 @@ struct Engine::SourceSlot final : SourceConsumer {
         }
     }
 
-    void requestSeek(int64_t positionMillis) {
+    void requestSeek(int64_t positionMillis, bool flushSession = false) {
         bool restartFinishedPrefetch = false;
         {
             std::lock_guard guard(consumerMutex);
@@ -185,7 +185,9 @@ struct Engine::SourceSlot final : SourceConsumer {
                  * the just-discarded, finished queue for the end of the whole session. */
                 restartFinishedPrefetch = pcm->resetForRestart();
             }
-            if (owner != nullptr) owner->seekFlushRequested_.store(true, std::memory_order_release);
+            if (flushSession) {
+                sessionSeekPending.store(true, std::memory_order_release);
+            }
         }
         if (restartFinishedPrefetch) {
             std::lock_guard guard(prefetchThreadMutex);
@@ -218,11 +220,18 @@ struct Engine::SourceSlot final : SourceConsumer {
             /* A queued source's initial CUE seek positions its private decoder before the track
              * boundary. It must not flush the active source's output ring. User seeks on an
              * activated queued source already request the session flush in requestSeek(). */
-            std::lock_guard guard(consumerMutex);
-            pcm->discardAll();
+            bool flushSession = false;
+            {
+                std::lock_guard guard(consumerMutex);
+                pcm->discardAll();
+                flushSession = sessionSeekPending.exchange(false, std::memory_order_acq_rel);
+            }
+            if (flushSession && owner != nullptr) owner->onSeekApplied();
             return;
         }
-        if (owner != nullptr) owner->onSeekApplied();
+        if (owner != nullptr) {
+            owner->onSeekApplied();
+        }
     }
 
     LogProxy log;
@@ -235,6 +244,7 @@ struct Engine::SourceSlot final : SourceConsumer {
     int64_t producedOutputFrames = 0;
     std::atomic<int64_t> overlapFrames{0};
     std::atomic<bool> overlapStarted{false};
+    std::atomic<bool> sessionSeekPending{false};
     int64_t overlapLengthFrames = 0;
     /* Tempo and beat phase of this source's own audio, estimated from the first seconds the pump
      * decodes it: the transition places the mix on this source's beats. */
@@ -406,6 +416,12 @@ int32_t Engine::open(
     pendingPresentationReady_.store(false, std::memory_order_release);
     pendingPresentationSeek_.store(false, std::memory_order_release);
     seekFlushRequested_.store(false, std::memory_order_release);
+    volumeRefreshPending_.store(false, std::memory_order_release);
+    volumeRefreshSeekApplied_.store(false, std::memory_order_release);
+    seekFlushReady_.store(false, std::memory_order_release);
+    volumeRefreshGeneration_.store(0, std::memory_order_release);
+    volumeRefreshAppliedGeneration_.store(0, std::memory_order_release);
+    volumeImmediate_.store(false, std::memory_order_release);
     requestedSeekTargetMillis_.store(-1, std::memory_order_release);
     exclusiveInFlightAudioFrames_.store(0, std::memory_order_release);
     outputPeakMilliDbfs_.store(-120'000, std::memory_order_release);
@@ -714,8 +730,9 @@ int32_t Engine::configurePipeline() {
             lastError_ = currentSource().lastError();
             return result;
         }
-        dsp_.configureFormat(outputSession_.engineFormat);
-        dsp_.setVolume(volume_.load(std::memory_order_acquire),
+        const double initialVolume = volume_.load(std::memory_order_acquire);
+        dsp_.configureFormat(outputSession_.engineFormat, initialVolume);
+        dsp_.setVolume(initialVolume,
             static_cast<int32_t>(volumeRampMillis_.load(std::memory_order_acquire)));
     }
 
@@ -1170,7 +1187,85 @@ bool Engine::currentSourceEnded() const {
 }
 
 int32_t Engine::play() {
-    std::lock_guard lifecycleGuard(lifecycleMutex_);
+    /* A gain change while Ready asks the producer to discard its old-gain prebuffer and decode
+     * again from the current position. Wait without holding lifecycleMutex_; the fixed ceiling also
+     * bounds calls arriving through the serialized worker while a source seek is slow. */
+    constexpr auto kSeekFlushTimeout = std::chrono::seconds(5);
+    const auto seekFlushDeadline = std::chrono::steady_clock::now() + kSeekFlushTimeout;
+    std::unique_lock lifecycleGuard(lifecycleMutex_, std::defer_lock);
+    for (;;) {
+        while (volumeRefreshPending_.load(std::memory_order_acquire) &&
+            !cancelled_.load(std::memory_order_acquire)) {
+            const int32_t waitingState = state_.load(std::memory_order_acquire);
+            if (waitingState == LazerAudioStateFailed || waitingState == LazerAudioStateStopped ||
+                waitingState == LazerAudioStateIdle) {
+                const int32_t error = lastErrorCode_.load(std::memory_order_acquire);
+                return error == LazerAudioOk ? LazerAudioErrorState : error;
+            }
+            if (std::chrono::steady_clock::now() >= seekFlushDeadline) {
+                lifecycleGuard.lock();
+                if (cancelled_.load(std::memory_order_acquire)) {
+                    lifecycleGuard.unlock();
+                    return LazerAudioErrorCancelled;
+                }
+                if (!volumeRefreshPending_.load(std::memory_order_acquire)) {
+                    lifecycleGuard.unlock();
+                    continue;
+                }
+                const int32_t timeoutState = state_.load(std::memory_order_acquire);
+                if (timeoutState == LazerAudioStateFailed || timeoutState == LazerAudioStateStopped ||
+                    timeoutState == LazerAudioStateIdle) {
+                    const int32_t error = lastErrorCode_.load(std::memory_order_acquire);
+                    lifecycleGuard.unlock();
+                    return error == LazerAudioOk ? LazerAudioErrorState : error;
+                }
+                setError("the initial audio buffer did not refresh before playback",
+                    LazerAudioErrorSource);
+                publishTerminal(LazerAudioEventFailed, LazerAudioErrorSource,
+                    currentPositionMillis());
+                return LazerAudioErrorSource;
+            }
+            if (pumpFinished_.load(std::memory_order_acquire)) {
+                /* Short sources may finish decoding before the caller changes volume. A completed
+                 * producer can still honor the refresh by seeking and pumping the source again. */
+                lifecycleGuard.lock();
+                const int32_t restartState = state_.load(std::memory_order_acquire);
+                if (restartState == LazerAudioStateFailed || restartState == LazerAudioStateStopped ||
+                    restartState == LazerAudioStateIdle) {
+                    const int32_t error = lastErrorCode_.load(std::memory_order_acquire);
+                    lifecycleGuard.unlock();
+                    return error == LazerAudioOk ? LazerAudioErrorState : error;
+                }
+                if (volumeRefreshPending_.load(std::memory_order_acquire) &&
+                    pumpFinished_.load(std::memory_order_acquire)) {
+                    if (pumpThread_.joinable()) pumpThread_.join();
+                    if (cancelled_.load(std::memory_order_acquire)) {
+                        lifecycleGuard.unlock();
+                        return LazerAudioErrorCancelled;
+                    }
+                    pumpFinished_.store(false, std::memory_order_release);
+                    try {
+                        pumpThread_ = std::thread([this] { pumpLoop(); });
+                    } catch (...) {
+                        pumpFinished_.store(true, std::memory_order_release);
+                        lifecycleGuard.unlock();
+                        setError("could not restart the audio producer for the gain refresh",
+                            LazerAudioErrorNoMemory);
+                        publishTerminal(LazerAudioEventFailed, LazerAudioErrorNoMemory,
+                            currentPositionMillis());
+                        return LazerAudioErrorNoMemory;
+                    }
+                }
+                lifecycleGuard.unlock();
+            }
+            sleepIdle();
+        }
+        if (cancelled_.load(std::memory_order_acquire)) return LazerAudioErrorCancelled;
+        lifecycleGuard.lock();
+        if (!volumeRefreshPending_.load(std::memory_order_acquire)) break;
+        lifecycleGuard.unlock();
+    }
+
     const int32_t currentState = state_.load(std::memory_order_acquire);
     if (currentState == LazerAudioStateIdle || currentState == LazerAudioStatePreparing ||
         currentState == LazerAudioStateFailed || currentState == LazerAudioStateStopped) {
@@ -1261,6 +1356,16 @@ int32_t Engine::stop() {
 }
 
 int32_t Engine::seek(int64_t positionMillis) {
+    std::lock_guard lifecycleGuard(lifecycleMutex_);
+    std::lock_guard refreshGuard(volumeRefreshMutex_);
+    if (volumeRefreshPending_.load(std::memory_order_acquire)) {
+        volumeRefreshSeekApplied_.store(false, std::memory_order_release);
+        volumeRefreshAppliedGeneration_.store(0, std::memory_order_release);
+    }
+    return seekLocked(positionMillis);
+}
+
+int32_t Engine::seekLocked(int64_t positionMillis) {
     if (state_.load(std::memory_order_acquire) == LazerAudioStateIdle) {
         return LazerAudioErrorState;
     }
@@ -1284,6 +1389,8 @@ int32_t Engine::seek(int64_t positionMillis) {
     underrunActive_.store(0, std::memory_order_release);
     const int64_t position = std::max<int64_t>(0, positionMillis);
     requestedSeekTargetMillis_.store(position, std::memory_order_release);
+    seekFlushReady_.store(false, std::memory_order_release);
+    seekFlushRequested_.store(true, std::memory_order_release);
     /* Never hold sourceMutex_ while waiting for a consumer: the queued pump owns its consumer
      * mutex while accept() publishes source metadata. Keep the slot alive with shared ownership. */
     if (incoming != nullptr) {
@@ -1294,15 +1401,13 @@ int32_t Engine::seek(int64_t positionMillis) {
         incoming->overlapStarted.store(false, std::memory_order_release);
         incoming->overlapLengthFrames = 0;
     }
-    if (active->prefetchStarted) active->requestSeek(position);
-    else {
-        active->source.requestSeek(position);
-        seekFlushRequested_.store(true, std::memory_order_release);
-    }
+    if (active->prefetchStarted) active->requestSeek(position, true);
+    else active->source.requestSeek(position);
     return LazerAudioOk;
 }
 
 int32_t Engine::setVolume(double volume) {
+    std::lock_guard lifecycleGuard(lifecycleMutex_);
     const double clamped = std::clamp(volume, 0.0, 1.0);
     if ((bitPerfectActive_.load(std::memory_order_acquire) ||
         dopActive_.load(std::memory_order_acquire) ||
@@ -1311,8 +1416,39 @@ int32_t Engine::setVolume(double volume) {
             LazerAudioErrorUnsupported);
         return LazerAudioErrorUnsupported;
     }
-    volume_.store(clamped, std::memory_order_release);
+    const int32_t currentState = state_.load(std::memory_order_acquire);
+    const bool beforeFirstOutput = currentState == LazerAudioStateReady &&
+        renderedFrames_.load(std::memory_order_acquire) == 0;
+    std::unique_lock refreshGuard(volumeRefreshMutex_, std::defer_lock);
+    if (beforeFirstOutput) refreshGuard.lock();
+    const double previous = volume_.exchange(clamped, std::memory_order_acq_rel);
+    if (beforeFirstOutput && clamped != previous) {
+        volumeRefreshGeneration_.fetch_add(1, std::memory_order_acq_rel);
+        volumeRefreshAppliedGeneration_.store(0, std::memory_order_release);
+        volumeRefreshSeekApplied_.store(false, std::memory_order_release);
+        volumeRefreshPending_.store(true, std::memory_order_release);
+        volumeImmediate_.store(true, std::memory_order_release);
+    }
     volumeDirty_.store(true, std::memory_order_release);
+    if (beforeFirstOutput && clamped != previous) {
+        int64_t refreshPosition = requestedSeekTargetMillis_.load(std::memory_order_acquire);
+        if (refreshPosition < 0) {
+            std::lock_guard sourceGuard(sourceMutex_);
+            refreshPosition = source_ == nullptr ? 0 : source_->source.seekTargetMillis();
+        }
+        const int32_t result = seekLocked(refreshPosition);
+        if (result != LazerAudioOk) {
+            volume_.store(previous, std::memory_order_release);
+            volumeRefreshPending_.store(false, std::memory_order_release);
+            volumeRefreshSeekApplied_.store(false, std::memory_order_release);
+            volumeRefreshAppliedGeneration_.store(0, std::memory_order_release);
+            volumeImmediate_.store(false, std::memory_order_release);
+            seekFlushRequested_.store(false, std::memory_order_release);
+            seekFlushReady_.store(false, std::memory_order_release);
+            volumeDirty_.store(true, std::memory_order_release);
+            return result;
+        }
+    }
     return LazerAudioOk;
 }
 
@@ -1583,19 +1719,54 @@ bool Engine::isCancelled() const {
 }
 
 void Engine::onSeekApplied() {
+    std::lock_guard refreshGuard(volumeRefreshMutex_);
+    if (seekFlushRequested_.load(std::memory_order_acquire)) {
+        seekFlushReady_.store(true, std::memory_order_release);
+    }
+}
+
+void Engine::flushSeekOnPumpThread() {
+    if (!seekFlushRequested_.load(std::memory_order_acquire) ||
+        !seekFlushReady_.load(std::memory_order_acquire)) return;
+    std::unique_lock refreshGuard(volumeRefreshMutex_);
+    if (!seekFlushRequested_.load(std::memory_order_acquire) ||
+        !seekFlushReady_.load(std::memory_order_acquire)) return;
+    bool anotherSeekPending = false;
+    {
+        std::lock_guard sourceGuard(sourceMutex_);
+        anotherSeekPending = source_ != nullptr && source_->source.hasPendingSeek();
+    }
+    if (anotherSeekPending) {
+        seekFlushReady_.store(false, std::memory_order_release);
+        return;
+    }
     /* Whether this flush answers a seek the caller asked for. The initial CUE positioning seek of a
      * queued source applies the same way but nobody is waiting for it, so it is not announced. */
-    const bool requested = requestedSeekTargetMillis_.load(std::memory_order_acquire) >= 0;
+    const bool volumeRefresh = volumeRefreshPending_.load(std::memory_order_acquire);
+    const bool requested = !volumeRefresh &&
+        requestedSeekTargetMillis_.load(std::memory_order_acquire) >= 0;
+    seekFlushReady_.store(false, std::memory_order_release);
+    seekFlushRequested_.store(false, std::memory_order_release);
     ring_.clearForProducer();
     if (nativeDsdActive_.load(std::memory_order_acquire)) nativeDsdPacker_.reset();
     resetTimelineForSeek();
-    seekFlushRequested_.store(false, std::memory_order_release);
     underrunActive_.store(0, std::memory_order_release);
+    if (volumeRefresh) {
+        if (anotherSeekPending) {
+            volumeRefreshAppliedGeneration_.store(0, std::memory_order_release);
+            volumeRefreshSeekApplied_.store(false, std::memory_order_release);
+        } else {
+            volumeRefreshAppliedGeneration_.store(
+                volumeRefreshGeneration_.load(std::memory_order_acquire), std::memory_order_release);
+            volumeRefreshSeekApplied_.store(true, std::memory_order_release);
+        }
+    }
     if (!requested) return;
     /* Everything the decoder produced before the target is gone, so the clock now reads the target.
      * This is the confirmation the caller holds its published position for: `LazerAudioEventSeekCompleted`
      * is in the ABI for exactly this, and without it the app can only wait out its own hold ceiling,
      * which is what left the progress bar standing still after a seek. */
+    refreshGuard.unlock();
     raise(LazerAudioEventSeekCompleted, 0, currentPositionMillis());
 }
 
@@ -1860,6 +2031,9 @@ int64_t Engine::consumeIncomingSilence(SourceSlot &candidate, int32_t sampleRate
 
 int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
     if (frameCount <= 0) return 0;
+    /* Seek callbacks can arrive on the queued decoder thread. The active pump owns all writes and
+     * clears of the output ring, so it applies the flush at this block boundary. */
+    flushSeekOnPumpThread();
     /* Producer-side upkeep, done once per accepted block: apply a codec-string commit the render
      * thread asked for at a frame seam, and republish the end-of-stream flag the render thread reads
      * instead of locking. Both are cheap atomic operations on data the pump thread already owns. */
@@ -1924,8 +2098,13 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
         return static_cast<int32_t>(packed.consumedInputFrames);
     }
     if (volumeDirty_.exchange(false, std::memory_order_acq_rel)) {
-        dsp_.setVolume(volume_.load(std::memory_order_acquire),
-            static_cast<int32_t>(volumeRampMillis_.load(std::memory_order_acquire)));
+        const double volume = volume_.load(std::memory_order_acquire);
+        if (volumeImmediate_.exchange(false, std::memory_order_acq_rel)) {
+            dsp_.setVolumeImmediately(volume);
+        } else {
+            dsp_.setVolume(volume,
+                static_cast<int32_t>(volumeRampMillis_.load(std::memory_order_acquire)));
+        }
     }
     int32_t frames = std::min(frameCount, ring_.writableFrames());
     if (frames <= 0) return 0;
@@ -2349,6 +2528,22 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
     const uint64_t clippedSamples = convertToOutput(samples, frames, convertScratch_.data());
     const int32_t written = ring_.write(convertScratch_.data(), frames);
     if (written > 0) {
+        if (volumeRefreshPending_.load(std::memory_order_acquire) &&
+            volumeRefreshSeekApplied_.load(std::memory_order_acquire)) {
+            const uint64_t refreshGeneration =
+                volumeRefreshGeneration_.load(std::memory_order_acquire);
+            if (refreshGeneration != 0 && volumeRefreshAppliedGeneration_.load(
+                    std::memory_order_acquire) == refreshGeneration) {
+                volumeRefreshPending_.store(false, std::memory_order_release);
+                if (volumeRefreshGeneration_.load(std::memory_order_acquire) != refreshGeneration) {
+                    /* A newer slider value arrived while this block was being published. Keep
+                     * playback gated until its seek and first block have also been applied. */
+                    volumeRefreshPending_.store(true, std::memory_order_release);
+                } else {
+                    volumeRefreshSeekApplied_.store(false, std::memory_order_release);
+                }
+            }
+        }
         {
             std::lock_guard sourceGuard(sourceMutex_);
             if (source_ != nullptr) source_->producedOutputFrames += written;
@@ -2384,15 +2579,8 @@ uint64_t Engine::convertToOutput(const float *source, int32_t frames, uint8_t *d
 }
 
 void Engine::pumpLoop() {
-    const auto flushForSeek = [this] {
-        /* One implementation for both seek paths: the decode thread reports an applied seek through
-         * `onSeekApplied`, and a seek on a prefetching source is flushed here. Both have to announce
-         * the completion, so the flush lives in one place. */
-        if (!seekFlushRequested_.load(std::memory_order_acquire)) return;
-        onSeekApplied();
-    };
     for (;;) {
-        flushForSeek();
+        flushSeekOnPumpThread();
         std::shared_ptr<SourceSlot> active;
         {
             std::lock_guard sourceGuard(sourceMutex_);
@@ -2405,6 +2593,7 @@ void Engine::pumpLoop() {
         std::string sourceError;
         if (!active->prefetchStarted) {
             result = active->source.pump(*this);
+            flushSeekOnPumpThread();
             reachedEof = active->source.reachedEndOfStream();
             sourceError = active->source.lastError();
         } else {
@@ -2415,7 +2604,7 @@ void Engine::pumpLoop() {
             const int32_t scratchFrames = static_cast<int32_t>(queuedPcmScratch_.size() /
                 static_cast<size_t>(frameBytes));
             while (!cancelled_.load(std::memory_order_acquire)) {
-                flushForSeek();
+                flushSeekOnPumpThread();
                 int32_t queued = 0;
                 int32_t accepted = 0;
                 {
@@ -2506,7 +2695,7 @@ void Engine::pumpLoop() {
                  * returning EOF here would otherwise strand its newly decoded PCM. */
                 while (!cancelled_.load(std::memory_order_acquire) &&
                     pendingPresentationReady_.load(std::memory_order_acquire)) {
-                    flushForSeek();
+                    flushSeekOnPumpThread();
                     if (active->pcm->queuedFrames() > 0 || !active->pcm->finished()) break;
                     if (pendingPresentationSeek_.load(std::memory_order_acquire) &&
                         active->pcm->reachedEof() &&

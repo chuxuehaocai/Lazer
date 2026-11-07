@@ -156,7 +156,13 @@ class _WatchShellState extends State<WatchShell>
       _smsTimer?.cancel();
       _smsTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (!mounted || _smsSeconds <= 1) timer.cancel();
-        if (mounted) setState(() => _smsSeconds = math.max(0, _smsSeconds - 1));
+        if (!mounted) return;
+        final seconds = math.max(0, _smsSeconds - 1);
+        if (_tab == 3 && _openedTracks == null) {
+          setState(() => _smsSeconds = seconds);
+        } else {
+          _smsSeconds = seconds;
+        }
       });
     }
   }

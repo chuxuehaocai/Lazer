@@ -3,6 +3,17 @@ import 'dart:async';
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 
+/// A native output rejected software gain, so callers can report the gain that
+/// the active output actually uses instead of restoring a stale PCM-session value.
+class AudioVolumeUnsupportedException extends StateError {
+  AudioVolumeUnsupportedException({
+    required this.effectiveVolume,
+    required String message,
+  }) : super(message);
+
+  final double effectiveVolume;
+}
+
 /// Optional engine capability: how far the current source has buffered.
 ///
 /// Kept separate from [AudioEngine] so engines that cannot answer (and the

@@ -820,7 +820,7 @@ class _DesktopDock extends StatelessWidget {
                               onPressed: () =>
                                   onPaneChanged(DesktopNowPlayingPane.lyrics),
                             ),
-                            if (!state.isNavidrome)
+                            if (state.commentsGatewayFor(state.current) != null)
                               _PaneTab(
                                 key: const ValueKey('desktop-comments'),
                                 label: '评论',
@@ -877,7 +877,10 @@ class _DesktopDock extends StatelessWidget {
                                 icon: AnimatedSwitcher(
                                   switchInCurve: const AppleSpringCurve(),
                                   switchOutCurve: const AppleSpringCurve(),
-                                  duration: const Duration(milliseconds: 180),
+                                  duration:
+                                      MediaQuery.disableAnimationsOf(context)
+                                      ? Duration.zero
+                                      : const Duration(milliseconds: 180),
                                   child: Icon(
                                     state.playing
                                         ? Icons.pause_rounded

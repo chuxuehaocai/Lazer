@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/audio/native/audio_stream_cache.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_abi.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_engine.dart';
@@ -11,6 +12,11 @@ import 'package:lazer_nextgen/audio/native/lazer_audio_library.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_worker.dart';
 
 class _Api implements LazerAudioApi {
+  String errorMessage = 'software volume is unavailable in direct output';
+
+  @override
+  String Function(Pointer<Void>) get lastError => (_) => errorMessage;
+
   @override
   int Function(Pointer<Void>, Pointer<LazerAudioStreamInfo>) get streamInfo =>
       (_, _) => lazerAudioErrorState;
@@ -50,6 +56,7 @@ class _Bridge implements LazerAudioBridgeApi {
       (handle, failed) => finished[handle.address] = failed;
   @override
   void Function(Pointer<Void>) get readerDestroy => (_) {};
+
   /// The sizes the engine announced to each reader.
   final lengths = <int, int>{};
   @override
@@ -62,12 +69,20 @@ class _Bridge implements LazerAudioBridgeApi {
 class _Worker implements LazerAudioWorker {
   int preparations = 0;
   int clears = 0;
+  int volumeStatus = lazerAudioOk;
+  int openFileStatus = lazerAudioOk;
+  final List<double> volumeRequests = <double>[];
   Completer<void>? delay;
   Completer<void>? openDelay, openStarted;
   void Function(List<Object?>)? onPreparation;
   @override
   Future<Object?> call(int op, List<Object?> params) async {
     if (op == LazerWorkerOp.clearQueuedReader) clears++;
+    if (op == LazerWorkerOp.setVolume) {
+      volumeRequests.add((params[1] as num).toDouble());
+      return volumeStatus;
+    }
+    if (op == LazerWorkerOp.openFile) return openFileStatus;
     if (op == LazerWorkerOp.openReader && openDelay != null) {
       if (openStarted?.isCompleted == false) openStarted!.complete();
       await openDelay!.future;
@@ -115,12 +130,14 @@ void main() {
   late _Worker worker;
   late _Cache cache;
   late _Bridge bridge;
+  late _Api api;
   setUp(() {
     worker = _Worker();
     cache = _Cache();
     bridge = _Bridge();
+    api = _Api();
     engine = NativeAudioEngine.forTesting(
-      api: _Api(),
+      api: api,
       bridge: bridge,
       worker: worker,
       cache: cache,
@@ -130,6 +147,52 @@ void main() {
     await engine.stop();
     engine.dispose();
     await _settle();
+  });
+
+  test(
+    'a rejected software volume is reported and a later accepted value applies',
+    () async {
+      worker.volumeStatus = lazerAudioErrorUnsupported;
+      await expectLater(
+        engine.setVolume(0.2),
+        throwsA(
+          isA<AudioVolumeUnsupportedException>().having(
+            (AudioVolumeUnsupportedException error) => error.message,
+            'message',
+            contains('software volume is unavailable in direct output'),
+          ).having(
+            (AudioVolumeUnsupportedException error) => error.effectiveVolume,
+            'effective volume',
+            1,
+          ),
+        ),
+      );
+      worker.volumeStatus = lazerAudioOk;
+      await engine.setVolume(0.5);
+
+      expect(worker.volumeRequests, <double>[0.2, 0.5]);
+    },
+  );
+
+  test('a direct-output open refusal restores its effective software volume', () async {
+    await engine.setVolume(0.2);
+    api.errorMessage =
+        'set software volume to 100% and use the DAC volume for direct output';
+    worker.openFileStatus = lazerAudioErrorUnsupported;
+    await expectLater(
+      engine.setUrl(r'C:\missing-track.flac'),
+      throwsA(
+        isA<AudioVolumeUnsupportedException>().having(
+          (AudioVolumeUnsupportedException error) => error.message,
+          'effective volume',
+          contains('set software volume to 100%'),
+        ),
+      ),
+    );
+
+    worker.openFileStatus = lazerAudioOk;
+    await engine.setVolume(1);
+    expect(worker.volumeRequests, <double>[0.2, 0.2, 1]);
   });
 
   test(

@@ -40,8 +40,11 @@ class _StillAlivePageState extends State<StillAlivePage>
       widget.playback ?? StillAliveAudio(volume: widget.appState?.volume ?? 1);
   late double _volume = widget.appState?.volume ?? 1;
   Timer? _poll;
+  Duration? _pollPeriod;
   Timer? _musicStartTimer;
   bool _active = true;
+  bool _tickerEnabled = true;
+  bool _reduceMotion = false;
   bool _starting = true;
   bool _demo = false;
   bool _prelude = true;
@@ -72,6 +75,14 @@ class _StillAlivePageState extends State<StillAlivePage>
   Duration get _displayDuration => _demo || _audio.duration == null
       ? _score.duration
       : _score.musicStart + _audio.duration!;
+  bool get _visualsEnabled => _active && _tickerEnabled;
+  Duration get _pollInterval => _reduceMotion
+      ? const Duration(seconds: 1)
+      : const Duration(milliseconds: 33);
+  @visibleForTesting
+  Duration get debugPollInterval => _pollInterval;
+  @visibleForTesting
+  bool get debugIsPolling => _poll != null;
 
   void _freezeSequence() {
     _sequenceBase = _sequenceElapsed;
@@ -114,6 +125,24 @@ class _StillAlivePageState extends State<StillAlivePage>
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tickerEnabled = TickerMode.valuesOf(context).enabled;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_tickerEnabled == tickerEnabled && _reduceMotion == reduceMotion) {
+      return;
+    }
+    final wasEnabled = _visualsEnabled;
+    _tickerEnabled = tickerEnabled;
+    _reduceMotion = reduceMotion;
+    if (_visualsEnabled) {
+      _readFrame();
+      if (!wasEnabled) setState(() {});
+    }
+    _syncPolling();
+  }
+
   void _beginPrelude() {
     _musicStartTimer?.cancel();
     _prelude = true;
@@ -147,7 +176,7 @@ class _StillAlivePageState extends State<StillAlivePage>
   void _audioChanged() {
     if (!mounted) return;
     _readFrame();
-    if (_active) setState(() {});
+    if (_visualsEnabled) setState(() {});
     _syncPolling();
   }
 
@@ -159,13 +188,18 @@ class _StillAlivePageState extends State<StillAlivePage>
   }
 
   void _syncPolling() {
-    if (!_active || !_playing) {
+    if (!_visualsEnabled || !_playing) {
       _poll?.cancel();
       _poll = null;
+      _pollPeriod = null;
       return;
     }
-    _poll ??= Timer.periodic(const Duration(milliseconds: 33), (_) {
-      if (!mounted || !_active) return;
+    final interval = _pollInterval;
+    if (_poll != null && _pollPeriod == interval) return;
+    _poll?.cancel();
+    _pollPeriod = interval;
+    _poll = Timer.periodic(interval, (_) {
+      if (!mounted || !_visualsEnabled) return;
       final previous = _frame;
       _readFrame();
       if (_demo && _frame.finished) {
@@ -247,9 +281,9 @@ class _StillAlivePageState extends State<StillAlivePage>
         state != AppLifecycleState.detached;
     // Keep audio and the scheduled music start running in the background.
     // Only visual polling is suspended; returning samples the live playhead.
-    if (_active) _readFrame();
+    if (_visualsEnabled) _readFrame();
     _syncPolling();
-    if (mounted) setState(() {});
+    if (_visualsEnabled && mounted) setState(() {});
   }
 
   @override

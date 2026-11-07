@@ -66,11 +66,18 @@ class _LyricViewportState extends State<LyricViewport>
   List<double> _baseHeights = [];
   List<double> _interludePresence = [];
   List<Duration?> _retainedInterludePositions = [];
+  List<bool> _isInterlude = [];
   bool _hasWordTimings = false;
   List<LyricSpring> _ys = [];
   List<LyricSpring> _scales = [];
+  final List<int> _movingYs = <int>[];
+  final List<int> _movingScales = <int>[];
+  final List<int> _interludeRows = <int>[];
+  int? _scaleTargetIndex;
   List<double> _heights = [];
-  List<double> _prefix = [];
+  List<double> _basePrefix = [];
+  List<double> _prefixAdjustments = [];
+  double _maxBaseHeight = 0;
   double _rowUnit = 0;
   final Map<int, Widget> _rowCache = <int, Widget>{};
   List<ValueNotifier<int>> _rowFrames = const <ValueNotifier<int>>[];
@@ -131,9 +138,14 @@ class _LyricViewportState extends State<LyricViewport>
     // Discard pre-background spring trajectories instead of replaying them.
     _targets(seeking: true, stagger: false);
     if (!_manual) {
-      for (final spring in [..._ys, ..._scales]) {
+      for (final spring in _ys) {
         spring.setPosition(spring.target);
       }
+      for (final spring in _scales) {
+        spring.setPosition(spring.target);
+      }
+      _movingYs.clear();
+      _movingScales.clear();
     }
     _frames.value++;
     _emphasisFrames.value++;
@@ -168,12 +180,24 @@ class _LyricViewportState extends State<LyricViewport>
     }
     final active = _activeAt(position);
     if (active == _active) return;
+    _retainInterludeForExit(_active);
     setState(() {
       _active = active;
       _rowCache.clear();
       _targets();
       _scaleTargets();
     });
+  }
+
+  void _retainInterludeForExit(int row) {
+    if (row < 0 ||
+        row >= _isInterlude.length ||
+        !_isInterlude[row] ||
+        _interludePresence[row] <= 0 ||
+        _interludeRows.contains(row)) {
+      return;
+    }
+    _interludeRows.add(row);
   }
 
   int _activeAt(Duration position) {
@@ -245,6 +269,7 @@ class _LyricViewportState extends State<LyricViewport>
       _velocity = 0;
     }
     if (changed || typographyChanged || active != _active) {
+      if (active != _active) _retainInterludeForExit(_active);
       setState(() {
         _active = active;
         _rowCache.clear();
@@ -287,7 +312,7 @@ class _LyricViewportState extends State<LyricViewport>
   /// the instant a line becomes active.
   double _sigma(int i) {
     if (_rowUnit <= 0 || _blur.value <= 0) return 0;
-    final centre = _ys[i].value + _heights[i] * 0.5;
+    final centre = _rowY(i) + _heights[i] * 0.5;
     final distance = (centre - _size.height * 0.35).abs() / _rowUnit;
     return math.min(5.0, distance * 1.55) * _blur.value;
   }
@@ -321,12 +346,69 @@ class _LyricViewportState extends State<LyricViewport>
   bool get _activeInterlude =>
       _active >= 0 &&
       _active < _lines.length &&
-      _lines[_active].text.trim().isEmpty &&
+      _isInterlude[_active] &&
       _paintPosition < (_lines[_active].end ?? Duration.zero);
 
-  double _presence(int index) => _lines[index].text.trim().isEmpty
+  double _rowY(int index) => _manual
+      ? _prefixAt(index) - _offset + (_heights[index] - _baseHeights[index]) / 2
+      : _ys[index].value;
+
+  void _freezeManualRows() {
+    for (var i = 0; i < _ys.length; i++) {
+      _ys[i].setPosition(_rowY(i));
+    }
+    _movingYs.clear();
+  }
+
+  double _presence(int index) => _isInterlude[index]
       ? Curves.fastOutSlowIn.transform(_interludePresence[index])
       : 1;
+
+  double _prefixAt(int index) {
+    var sum = _basePrefix[index];
+    for (var cursor = index; cursor > 0; cursor -= cursor & -cursor) {
+      sum += _prefixAdjustments[cursor];
+    }
+    return sum;
+  }
+
+  void _addPrefixAdjustment(int index, double delta) {
+    for (
+      var cursor = index + 1;
+      cursor < _prefixAdjustments.length;
+      cursor += cursor & -cursor
+    ) {
+      _prefixAdjustments[cursor] += delta;
+    }
+  }
+
+  int _lowerBoundPrefix(double value) {
+    var low = 0;
+    var high = _lines.length;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      if (_prefixAt(middle) < value) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low;
+  }
+
+  int _upperBoundPrefix(double value) {
+    var low = 0;
+    var high = _lines.length;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      if (_prefixAt(middle) <= value) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low;
+  }
 
   Duration _interludePosition(int index) {
     final end = _lines[index].end ?? _lines[index].time;
@@ -339,26 +421,27 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _rebuildPrefixes() {
-    var sum = 0.0;
+    _basePrefix = List<double>.filled(_baseHeights.length + 1, 0);
+    _prefixAdjustments = List<double>.filled(_baseHeights.length + 1, 0);
+    _maxBaseHeight = 0;
+    var ordinaryHeightSum = 0.0;
+    var ordinaryCount = 0;
     _heights = [
       for (var i = 0; i < _baseHeights.length; i++)
         _baseHeights[i] * _presence(i),
     ];
-    _prefix = [
-      for (final height in _heights)
-        (() {
-          final y = sum;
-          sum += height;
-          return y;
-        })(),
-    ];
-    final ordinaryHeights = [
-      for (var i = 0; i < _baseHeights.length; i++)
-        if (_lines[i].text.trim().isNotEmpty) _baseHeights[i],
-    ];
-    _rowUnit = ordinaryHeights.isEmpty
-        ? 0
-        : ordinaryHeights.reduce((a, b) => a + b) / ordinaryHeights.length;
+    for (var i = 0; i < _baseHeights.length; i++) {
+      final baseHeight = _baseHeights[i];
+      _maxBaseHeight = math.max(_maxBaseHeight, baseHeight);
+      _basePrefix[i + 1] = _basePrefix[i] + baseHeight;
+      if (_isInterlude[i]) {
+        _addPrefixAdjustment(i, _heights[i] - baseHeight);
+      } else {
+        ordinaryHeightSum += baseHeight;
+        ordinaryCount++;
+      }
+    }
+    _rowUnit = ordinaryCount == 0 ? 0 : ordinaryHeightSum / ordinaryCount;
   }
 
   void _tick(Duration elapsed) {
@@ -375,28 +458,40 @@ class _LyricViewportState extends State<LyricViewport>
     if (widget.state.playing) _followLine(_paintPosition);
     var interludesMoving = false;
     var presenceChanged = false;
-    for (var i = 0; i < _interludePresence.length; i++) {
-      if (_lines[i].text.trim().isNotEmpty) continue;
-      final target = i == _active && _activeInterlude ? 1.0 : 0.0;
-      final old = _interludePresence[i];
+    if (_activeInterlude && !_interludeRows.contains(_active)) {
+      _interludeRows.add(_active);
+    }
+    for (var i = _interludeRows.length - 1; i >= 0; i--) {
+      final row = _interludeRows[i];
+      final target = row == _active && _activeInterlude ? 1.0 : 0.0;
+      final old = _interludePresence[row];
       final next = MediaQuery.disableAnimationsOf(context)
           ? target
           : target > old
           ? math.min(target, old + dt / .36)
           : math.max(target, old - dt / .56);
-      _interludePresence[i] = next;
-      presenceChanged = presenceChanged || next != old;
-      interludesMoving = interludesMoving || next != target;
+      if (next != old) {
+        _interludePresence[row] = next;
+        final height = _baseHeights[row] * _presence(row);
+        final delta = height - _heights[row];
+        _heights[row] = height;
+        _addPrefixAdjustment(row, delta);
+        presenceChanged = true;
+      }
+      final isMoving = next != target;
+      interludesMoving = interludesMoving || isMoving;
       if (next != old || next > 0 && widget.state.playing) {
-        _rowFrames[i].value++;
+        _rowFrames[row].value++;
+      }
+      if (!isMoving && !(next > 0 && widget.state.playing)) {
+        _interludeRows.removeAt(i);
       }
     }
     if (presenceChanged) {
-      _rebuildPrefixes();
       if (_manual) {
         _setOffset(_offset);
       } else {
-        _targets(stagger: false);
+        _targets(stagger: false, visibleOnly: true);
       }
     }
     if (_manual && !_dragging && _velocity.abs() > 5 && dt > 0) {
@@ -436,27 +531,35 @@ class _LyricViewportState extends State<LyricViewport>
         (sheetIsLive &&
             widget.state.playing &&
             (_hasWordTimings || _activeInterlude)) ||
-        (sheetIsLive && interludesMoving);
+        (sheetIsLive && interludesMoving) ||
+        _movingYs.isNotEmpty ||
+        _movingScales.isNotEmpty;
     var positionsChanged = presenceChanged;
     var emphasisChanged = false;
-    for (var i = 0; i < _ys.length; i++) {
-      final double y = _ys[i].value;
-      final double scale = _scales[i].value;
-      _ys[i].update(dt);
-      _scales[i].update(dt);
-      positionsChanged =
-          positionsChanged || y != _ys[i].value || scale != _scales[i].value;
-      emphasisChanged = emphasisChanged || scale != _scales[i].value;
-      moving = moving || !_ys[i].arrived || !_scales[i].arrived;
+    for (var i = _movingYs.length - 1; i >= 0; i--) {
+      final spring = _ys[_movingYs[i]];
+      final old = spring.value;
+      spring.update(dt);
+      positionsChanged = positionsChanged || old != spring.value;
+      if (spring.arrived) _movingYs.removeAt(i);
+    }
+    for (var i = _movingScales.length - 1; i >= 0; i--) {
+      final row = _movingScales[i];
+      final spring = _scales[row];
+      final old = spring.value;
+      spring.update(dt);
+      final changed = old != spring.value;
+      positionsChanged = positionsChanged || changed;
+      emphasisChanged = emphasisChanged || changed;
+      if (!spring.arrived) _rowFrames[row].value++;
+      if (spring.arrived) _movingScales.removeAt(i);
     }
     // Only the active word row needs a paint every frame; a row whose scale
     // is still easing needs one for its colour fade. Everything else stays
     // behind its RepaintBoundary even though the outer stack keeps moving.
     final bool wordFrame = widget.state.playing && _hasWordTimings;
-    for (var i = 0; i < _rowFrames.length && i < _scales.length; i++) {
-      if (wordFrame && i == _active || !_scales[i].arrived) {
-        _rowFrames[i].value++;
-      }
+    if (wordFrame && _active >= 0 && _active < _rowFrames.length) {
+      _rowFrames[_active].value++;
     }
     // Word highlights repaint their own boundary. Once positions settle,
     // rebuilding the whole stack every vsync adds layout and semantics work
@@ -467,20 +570,30 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _scaleTargets() {
-    for (var i = 0; i < _scales.length; i++) {
-      _scales[i].setTarget(i == _active ? 100 : 97);
+    final next = _active >= 0 && _active < _scales.length ? _active : null;
+    if (_scaleTargetIndex == next) return;
+    _movingScales.clear();
+    final previous = _scaleTargetIndex;
+    if (previous != null) {
+      final spring = _scales[previous]..setTarget(97);
+      if (!spring.arrived) _movingScales.add(previous);
     }
-    if (_scales.isNotEmpty) _start();
+    if (next != null) {
+      final spring = _scales[next]..setTarget(100);
+      if (!spring.arrived && next != previous) _movingScales.add(next);
+    }
+    _scaleTargetIndex = next;
+    if (_movingScales.isNotEmpty) _start();
   }
 
-  void _targets({bool seeking = false, bool stagger = true}) {
+  void _targets({
+    bool seeking = false,
+    bool stagger = true,
+    bool visibleOnly = false,
+  }) {
     if (_ys.isEmpty || _size.height <= 0 || _manual) return;
     final focus = _active.clamp(0, _lines.length - 1);
-    final anchor = _prefix[focus] - _size.height * 0.35 + _heights[focus] / 2;
-    final positions = [
-      for (var i = 0; i < _lines.length; i++)
-        _prefix[i] - anchor + (_heights[i] - _baseHeights[i]) / 2,
-    ];
+    final anchor = _prefixAt(focus) - _size.height * 0.35 + _heights[focus] / 2;
     // The first and last line have no neighbouring interval, and the upstream
     // policy gives them a soft under-damped spring. On a long sheet every row
     // then kept oscillating at the edges and the 60 fps ticker never settled.
@@ -499,26 +612,64 @@ class _LyricViewportState extends State<LyricViewport>
                 widget.state.position >=
                 (widget.state.current?.duration ?? const Duration(days: 1)),
           );
-    final delays = lyricStaggerDelays(
-      positions,
-      _heights,
-      focus,
-      disabled: seeking || !stagger,
-    );
-    for (var i = 0; i < _ys.length; i++) {
-      _ys[i].setParameters(params);
-      // Rows that are nowhere near the viewport do not need a spring or a
-      // stagger delay: put them at their new position immediately. This is
-      // what keeps the opening and closing seconds of a long lyric sheet from
-      // animating hundreds of invisible rows.
-      final double target = positions[i];
-      final bool nearViewport =
-          target + _heights[i] >= -_size.height * 0.5 &&
-          target <= _size.height * 1.5;
-      if (nearViewport) {
-        _ys[i].setTarget(target, delay: delays[i]);
-      } else {
-        _ys[i].setPosition(target);
+    if (visibleOnly) {
+      final first = _lowerBoundPrefix(
+        anchor - _size.height * .5 - _maxBaseHeight,
+      );
+      final end = _upperBoundPrefix(
+        anchor + _size.height * 1.5 + _maxBaseHeight,
+      );
+      // Existing springs that leave the active window settle at their new
+      // offscreen position without spending another animation frame on them.
+      for (final row in _movingYs) {
+        if (row >= first && row < end) continue;
+        _ys[row].setPosition(
+          _prefixAt(row) - anchor + (_heights[row] - _baseHeights[row]) / 2,
+        );
+      }
+      _movingYs.clear();
+      for (var row = first; row < end; row++) {
+        final double target =
+            _prefixAt(row) - anchor + (_heights[row] - _baseHeights[row]) / 2;
+        final bool nearViewport =
+            target + _heights[row] >= -_size.height * .5 &&
+            target <= _size.height * 1.5;
+        final spring = _ys[row]..setParameters(params);
+        if (nearViewport) {
+          spring.setTarget(target);
+          if (!spring.arrived) _movingYs.add(row);
+        } else {
+          spring.setPosition(target);
+        }
+      }
+    } else {
+      _movingYs.clear();
+      final positions = List<double>.filled(_lines.length, 0);
+      var prefix = 0.0;
+      for (var i = 0; i < _lines.length; i++) {
+        positions[i] = prefix - anchor + (_heights[i] - _baseHeights[i]) / 2;
+        prefix += _heights[i];
+      }
+      final delays = lyricStaggerDelays(
+        positions,
+        _heights,
+        focus,
+        disabled: seeking || !stagger,
+      );
+      for (var i = 0; i < _ys.length; i++) {
+        _ys[i].setParameters(params);
+        // Rows outside the viewport settle immediately. Only the small set
+        // that can paint contributes to the per-vsync spring work.
+        final double target = positions[i];
+        final bool nearViewport =
+            target + _heights[i] >= -_size.height * .5 &&
+            target <= _size.height * 1.5;
+        if (nearViewport) {
+          _ys[i].setTarget(target, delay: delays[i]);
+          if (!_ys[i].arrived) _movingYs.add(i);
+        } else {
+          _ys[i].setPosition(target);
+        }
       }
     }
     _scaleTargets();
@@ -609,8 +760,10 @@ class _LyricViewportState extends State<LyricViewport>
         widget.state.lyrics,
         widget.state.current?.duration ?? Duration.zero,
       );
+      _isInterlude = [for (final line in _lines) line.text.trim().isEmpty];
       _interludePresence = [for (final _ in _lines) 0];
       _retainedInterludePositions = [for (final _ in _lines) null];
+      _interludeRows.clear();
     }
     _hasWordTimings = _lines.any((line) => line.words.isNotEmpty);
     _paintPosition = widget.state.precisePosition;
@@ -621,6 +774,9 @@ class _LyricViewportState extends State<LyricViewport>
       _rowCache.clear();
     }
     if (replaced) {
+      _movingYs.clear();
+      _movingScales.clear();
+      _scaleTargetIndex = null;
       _ys = [
         // The first reveal used to start two screens below the viewport; the
         // whole sheet then travelled that distance on the soft edge spring.
@@ -659,6 +815,7 @@ class _LyricViewportState extends State<LyricViewport>
         for (final spring in _ys) {
           spring.setPosition(spring.target);
         }
+        _movingYs.clear();
       }
     }
   }
@@ -669,7 +826,7 @@ class _LyricViewportState extends State<LyricViewport>
     if (_manual || _ys.isEmpty) return;
     final focus = _active.clamp(0, _lines.length - 1);
     _offset =
-        _prefix[focus] +
+        _prefixAt(focus) +
         (_heights[focus] - _baseHeights[focus]) / 2 -
         _ys[focus].value;
     _manual = true;
@@ -682,14 +839,9 @@ class _LyricViewportState extends State<LyricViewport>
     final min = -_size.height * 0.35 + _heights.first / 2;
     final max = math.max(
       min,
-      _prefix.last - _size.height * 0.35 + _heights.last / 2,
+      _prefixAt(_lines.length - 1) - _size.height * 0.35 + _heights.last / 2,
     );
     _offset = value.clamp(min, max);
-    for (var i = 0; i < _ys.length; i++) {
-      _ys[i].setPosition(
-        _prefix[i] - _offset + (_heights[i] - _baseHeights[i]) / 2,
-      );
-    }
     _frames.value++;
   }
 
@@ -700,6 +852,7 @@ class _LyricViewportState extends State<LyricViewport>
       Duration(milliseconds: (widget.state.lyricResumeSeconds * 1000).round()),
       () {
         if (!mounted || _dragging) return;
+        if (!_selection.active) _freezeManualRows();
         _manual = _selection.active;
         _velocity = 0;
         _targets(seeking: true);
@@ -730,6 +883,7 @@ class _LyricViewportState extends State<LyricViewport>
     final duration = widget.state.current?.duration.inMilliseconds ?? 0;
     if (duration <= 0) return;
     _resume?.cancel();
+    if (_manual) _freezeManualRows();
     _manual = false;
     _velocity = 0;
     widget.state.seek(_lines[index].time.inMilliseconds / duration);
@@ -760,9 +914,7 @@ class _LyricViewportState extends State<LyricViewport>
     unawaited(widget.state.feedback());
     _beginManual();
     // Freeze every row at its painted position, including unfinished springs.
-    for (final spring in _ys) {
-      spring.setPosition(spring.value);
-    }
+    _freezeManualRows();
     _resume?.cancel();
     _dragArmedAt = _wall.elapsedMilliseconds;
     _changeSelection(
@@ -780,7 +932,7 @@ class _LyricViewportState extends State<LyricViewport>
     var distance = double.infinity;
     for (var i = 0; i < _lines.length; i++) {
       if (lyricSelectionKey(_lines[i]) == null) continue;
-      final delta = (_ys[i].value + _heights[i] / 2 - y).abs();
+      final delta = (_rowY(i) + _heights[i] / 2 - y).abs();
       if (delta < distance) {
         distance = delta;
         nearest = i;
@@ -874,7 +1026,7 @@ class _LyricViewportState extends State<LyricViewport>
     final Listenable rowFrames = index < _rowFrames.length
         ? _rowFrames[index]
         : _frames;
-    if (_lines[index].text.trim().isEmpty) {
+    if (_isInterlude[index]) {
       return SizedBox(
         width: _textWidth,
         height: _baseHeights[index],
@@ -972,7 +1124,7 @@ class _LyricViewportState extends State<LyricViewport>
       width: _textWidth,
       height: _baseHeights[index],
       child: Transform.translate(
-        offset: Offset(0, _ys[index].value),
+        offset: Offset(0, _rowY(index)),
         child: Transform.scale(
           scale: _scales[index].value / 100,
           alignment: Alignment.centerLeft,
@@ -1002,11 +1154,18 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   Widget _positionedRows() {
+    final anchor = _manual
+        ? _offset
+        : _prefixAt(_active.clamp(0, _lines.length - 1)) -
+              _size.height * .35 +
+              _heights[_active.clamp(0, _lines.length - 1)] / 2;
+    final first = _lowerBoundPrefix(anchor - 80 - _maxBaseHeight);
+    final end = _upperBoundPrefix(anchor + _size.height + 80 + _maxBaseHeight);
     final visible = <int>{
-      for (var i = 0; i < _lines.length; i++)
-        if ((_lines[i].text.trim().isNotEmpty || _presence(i) > 0) &&
-            _ys[i].value + _baseHeights[i] >= -80 &&
-            _ys[i].value <= _size.height + 80)
+      for (var i = first; i < end; i++)
+        if ((!_isInterlude[i] || _presence(i) > 0) &&
+            _rowY(i) + _baseHeights[i] >= -80 &&
+            _rowY(i) <= _size.height + 80)
           i,
     };
     // Manual browsing may visit an entire long transcript without changing

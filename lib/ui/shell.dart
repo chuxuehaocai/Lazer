@@ -746,7 +746,7 @@ class _AppShellState extends State<AppShell>
           ? null
           : _browseHistory.isNotEmpty
           ? _browseHistory.last.key
-          : '$activePlatformContentKey:section:home';
+          : '$activePlatformContentKey:section:${_hasOpenDetail ? _section.name : _AppSection.home.name}';
     });
     state.browseTransitionChanged(true);
   }
@@ -1721,6 +1721,8 @@ class _AppShellState extends State<AppShell>
       currentKey: _contentKey,
       retainKeys: {
         ..._browseHistory.map((location) => location.key),
+        if (!largeScreen && _savedAlbums)
+          '$activePlatformContentKey:section:library',
         if (!largeScreen) '$activePlatformContentKey:section:home',
       },
       backProgress: _backProgress,
@@ -1878,7 +1880,9 @@ class _ToolbarButtonState extends State<_ToolbarButton>
             behavior: HitTestBehavior.opaque,
             onTap: feedbackAction(context, widget.onPressed),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 120),
               width: 34,
               height: 34,
               decoration: BoxDecoration(
@@ -2069,7 +2073,9 @@ class _RailPlaylistState extends State<_RailPlaylist>
           onTap: feedbackAction(context, widget.onTap),
           behavior: HitTestBehavior.opaque,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 120),
             height: 34,
             margin: const EdgeInsets.only(bottom: 1),
             padding: const EdgeInsets.symmetric(horizontal: 7),

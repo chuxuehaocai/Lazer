@@ -30,6 +30,8 @@ const _track = Track(
 );
 
 class _Catalog extends Catalog {
+  _Catalog({super.gateway});
+
   @override
   Future<String?> audioUrlFor(
     Track track, {
@@ -46,13 +48,17 @@ Future<void> _settle(WidgetTester tester) async {
   }
 }
 
-Future<AppState> _openLibrary(WidgetTester tester, {bool track = false}) async {
+Future<AppState> _openLibrary(
+  WidgetTester tester, {
+  bool track = false,
+  Catalog? catalog,
+}) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final state =
       AppState(
-          catalog: _Catalog(),
+          catalog: catalog ?? _Catalog(),
           listeningStatistics: ListeningStatisticsController(
             read: () async => null,
             write: (_) async {},
@@ -188,6 +194,33 @@ void main() {
       await _settle(tester);
       expect(find.byType(AppHomePage), findsOneWidget);
       expect(find.byType(AppLibraryPage), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+  );
+
+  testWidgets(
+    'saved albums back gesture previews Library, matching its committed route',
+    (tester) async {
+      await _openLibrary(tester, catalog: _Catalog(gateway: NeteaseGateway()));
+      await tester.tap(find.byKey(const ValueKey('open-saved-albums')));
+      await _settle(tester);
+
+      var drag = await tester.startGesture(const Offset(5, 250));
+      await drag.moveBy(const Offset(150, 0));
+      await tester.pump();
+      expect(find.byType(AppLibraryPage), findsOneWidget);
+      await drag.cancel();
+      await _settle(tester);
+      expect(find.byType(AppLibraryPage), findsNothing);
+
+      drag = await tester.startGesture(const Offset(5, 250));
+      await drag.moveBy(const Offset(290, 0));
+      await tester.pump(const Duration(milliseconds: 200));
+      await drag.up();
+      await _settle(tester);
+      expect(find.byType(AppLibraryPage), findsOneWidget);
+      expect(find.byKey(const ValueKey('open-saved-albums')), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),

@@ -106,6 +106,8 @@ private:
     [[nodiscard]] int64_t renderPositionMillis() const noexcept;
     /* Applies the codec-string commit the render thread asked for at a frame seam. Producer side. */
     void applyPendingPresentationCommit();
+    int32_t seekLocked(int64_t positionMillis);
+    void flushSeekOnPumpThread();
     void raise(int32_t event, int32_t detail, int64_t positionMillis);
     void publishTerminal(int32_t event, int32_t detail, int64_t positionMillis);
     void setError(const std::string &text, int32_t code);
@@ -215,6 +217,7 @@ private:
 
     std::atomic<double> volume_{1.0};
     std::atomic<bool> volumeDirty_{false};
+    std::atomic<bool> volumeImmediate_{false};
     std::atomic<int64_t> volumeRampMillis_{200};
     std::atomic<int32_t> autoMixMillis_{0};
     std::atomic<double> cancelledOverlapGain_{-1.0};
@@ -311,6 +314,12 @@ private:
     /* A seek into an activated, not-yet-presented successor preserves its output-frame boundary. */
     std::atomic<bool> pendingPresentationSeek_{false};
     std::atomic<bool> seekFlushRequested_{false};
+    std::atomic<bool> seekFlushReady_{false};
+    std::atomic<bool> volumeRefreshPending_{false};
+    std::atomic<bool> volumeRefreshSeekApplied_{false};
+    std::mutex volumeRefreshMutex_;
+    std::atomic<uint64_t> volumeRefreshGeneration_{0};
+    std::atomic<uint64_t> volumeRefreshAppliedGeneration_{0};
     std::atomic<int64_t> requestedSeekTargetMillis_{-1};
     std::atomic<bool> endedRaised_{false};
     std::atomic<bool> pumpFinished_{false};

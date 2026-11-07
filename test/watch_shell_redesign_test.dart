@@ -641,4 +641,36 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'SMS countdown does not rebuild the watch after leaving Settings',
+    (tester) async {
+      final state = _WatchState(round: false, cover: cover);
+      addTearDown(state.dispose);
+      await mount(tester, state, const Size(192, 192), false);
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pump();
+      await tester.tap(find.text('发送验证码'));
+      await tester.pump();
+      expect(find.text('60 秒后重试'), findsOneWidget);
+
+      var shellBuilds = 0;
+      debugOnRebuildDirtyWidget = (element, _) {
+        if (element.widget is WatchShell) shellBuilds++;
+      };
+      addTearDown(() => debugOnRebuildDirtyWidget = null);
+      await tester.tap(find.byTooltip('返回'));
+      await tester.pump();
+      final buildsAfterNavigation = shellBuilds;
+      for (var second = 0; second < 3; second++) {
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(shellBuilds, buildsAfterNavigation);
+
+      await tester.tap(find.byTooltip('设置'));
+      await tester.pump();
+      expect(find.text('57 秒后重试'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

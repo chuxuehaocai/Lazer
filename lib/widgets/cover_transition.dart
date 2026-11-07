@@ -570,7 +570,13 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget>
           overlayBox is! RenderBox ||
           MediaQuery.disableAnimationsOf(context)) {
         _removeHandoffFlights(widget.identity);
-        setState(() => _flying = false);
+        setState(() {
+          _flying = false;
+          _flightRect = null;
+          _flightBlend = 1;
+          _flightPresentation = null;
+          _textPresentations.clear();
+        });
         _setTargetTextHidden(widget.identity, false);
         _hideSource(origin.sourceKey, false);
         return;
@@ -715,7 +721,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (MediaQuery.disableAnimationsOf(context) && _flying) {
-      _cancelFlight();
+      _cancelFlight(forgetOrigin: false);
     }
   }
 

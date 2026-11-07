@@ -19,6 +19,7 @@ import 'package:lazer_nextgen/widgets/accessible_controls.dart';
 import 'package:lazer_nextgen/widgets/interaction_feedback.dart';
 import 'package:lazer_nextgen/widgets/lyric_image_dialog.dart';
 import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
+import 'package:lazer_nextgen/widgets/volume_control.dart';
 
 const _track = Track(
   id: 'fixture',
@@ -54,6 +55,11 @@ class _Catalog extends Catalog {
 
 class _Engine implements AudioEngine {
   double volume = 1;
+  bool rejectVolume = false;
+  bool rejectUnsupportedVolume = false;
+  Completer<void>? volumeGate;
+  final List<double> volumeRequests = <double>[];
+  final List<String> operations = <String>[];
   @override
   bool active = false;
   @override
@@ -64,6 +70,7 @@ class _Engine implements AudioEngine {
   Stream<void> get completed => const Stream.empty();
   @override
   Future<void> setUrl(String url) async {
+    operations.add('url');
     active = true;
     position = Duration.zero;
     volume = 1;
@@ -71,6 +78,17 @@ class _Engine implements AudioEngine {
 
   @override
   Future<void> setVolume(double value) async {
+    operations.add('volume:$value');
+    volumeRequests.add(value);
+    await volumeGate?.future;
+    if (rejectUnsupportedVolume) {
+      volume = 1;
+      throw AudioVolumeUnsupportedException(
+        effectiveVolume: 1,
+        message: 'software volume is unavailable in direct output',
+      );
+    }
+    if (rejectVolume) throw StateError('software volume is unavailable');
     volume = value;
   }
 
@@ -103,6 +121,40 @@ void main() {
     await (FontLoader(
       'MaterialIcons',
     )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+  });
+
+  testWidgets('volume slider thumb follows its live drag preview', (
+    tester,
+  ) async {
+    final engine = _Engine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    addTearDown(state.dispose);
+    await state.setVolume(.8);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(),
+        home: Scaffold(
+          body: Center(child: VolumeControl(state: state)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final slider = find.descendant(
+      of: find.byType(VolumeControl),
+      matching: find.byType(Slider),
+    );
+    final before = tester.widget<Slider>(slider).value;
+    final gesture = await tester.startGesture(tester.getCenter(slider));
+    await gesture.moveBy(const Offset(-36, 0));
+    await tester.pump();
+    final liveVolume = state.volume;
+    final liveThumb = tester.widget<Slider>(slider).value;
+    await gesture.up();
+    await tester.pump();
+
+    expect(liveVolume, lessThan(before));
+    expect(liveThumb, closeTo(liveVolume, 1e-6));
   });
 
   testWidgets(
@@ -371,6 +423,9 @@ void main() {
       state.playQueue([_track, _next]);
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(engine.volume, volume);
+      final int firstOpen = engine.operations.indexOf('url');
+      expect(firstOpen, greaterThan(0));
+      expect(engine.operations[firstOpen - 1], 'volume:$volume');
       state.next();
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(
@@ -397,6 +452,60 @@ void main() {
       await state.setVolume(-1);
       expect(engine.volume, 0);
       state.pause();
+    },
+  );
+
+  test(
+    'a volume drag skips stale gains waiting behind an audio request',
+    () async {
+      final gate = Completer<void>();
+      final engine = _Engine()..volumeGate = gate;
+      final state = AppState(catalog: _Catalog(), audioEngine: engine);
+      addTearDown(state.dispose);
+
+      state.previewVolume(.5);
+      state.previewVolume(.2);
+      for (var turn = 0; turn < 6; turn++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(engine.volumeRequests, [.2]);
+
+      gate.complete();
+      for (var turn = 0; turn < 6; turn++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(state.volume, .2);
+      expect(engine.volume, .2);
+    },
+  );
+
+  test('a rejected software volume restores the last applied level', () async {
+    final engine = _Engine()..rejectVolume = true;
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    addTearDown(state.dispose);
+
+    await expectLater(state.setVolume(.2), throwsStateError);
+    expect(state.volume, 1);
+
+    state.previewVolume(.1);
+    await Future<void>.delayed(Duration.zero);
+    expect(state.volume, 1);
+    expect(engine.volume, 1);
+  });
+
+  test(
+    'an unsupported direct-output volume restores its effective unity gain',
+    () async {
+      final engine = _Engine();
+      final state = AppState(catalog: _Catalog(), audioEngine: engine);
+      addTearDown(state.dispose);
+
+      await state.setVolume(.5);
+      engine.rejectUnsupportedVolume = true;
+      await expectLater(state.setVolume(.2), throwsStateError);
+
+      expect(state.volume, 1);
+      expect(engine.volume, 1);
     },
   );
 

@@ -223,6 +223,51 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('pointer drag cancels the pending keyboard preview timeout', (
+      tester,
+    ) async {
+      final seeks = <double>[];
+      await tester.pumpWidget(
+        TvScope(
+          active: true,
+          child: MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: 320,
+                  child: AppThinSeekBar(progress: .5, onSeek: seeks.add),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final rail = find.byType(AppThinSeekBar);
+      final node = Focus.of(
+        tester.element(
+          find.descendant(of: rail, matching: find.byType(Semantics)).last,
+        ),
+      );
+      node.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+
+      final bounds = tester.getRect(rail);
+      final start = Offset(bounds.left + bounds.width * .25, bounds.center.dy);
+      final drag = await tester.startGesture(start);
+      await drag.moveBy(Offset(bounds.width * .125, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+
+      expect(seeks.last, closeTo(.375, .01));
+      expect(tester.getSemantics(rail).value, '38%');
+      await drag.up();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('up and down leave the seek rail instead of scrubbing', (
       tester,
     ) async {

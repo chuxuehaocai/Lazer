@@ -4,13 +4,23 @@ import 'package:flutter/foundation.dart';
 import '../data/song_comments.dart';
 import '../gateway/gateway.dart';
 import '../gateway/transport.dart';
+import '../plugins/plugin_manifest.dart';
 import 'build_safe_notifier.dart';
 
 /// Comment requests and optimistic likes have their own notification lane.
 /// Paging and reactions never rebuild playback or depend on its clock.
 class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
-  SongCommentsController(this.gateway);
-  final NeteaseGateway gateway;
+  SongCommentsController(NeteaseGateway gateway)
+    : _legacyGateway = gateway,
+      _musicGateway = null;
+  SongCommentsController.forMusicGateway(MusicGateway? gateway)
+    : _musicGateway = gateway,
+      _legacyGateway = null;
+  final NeteaseGateway? _legacyGateway;
+  final MusicGateway? _musicGateway;
+  MusicGateway? get musicGateway => _musicGateway;
+  MusicId _song(String key) =>
+      MusicId.tryParse(key) ?? _musicGateway!.id(MusicEntityKind.song, key);
   static const pageSize = 20;
   String? trackId;
   int _accountId = 0, _generation = 0, _offset = 0;
@@ -43,6 +53,7 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
   bool _current(int generation) => !_disposed && generation == _generation;
 
   Future<void> openSong(String id, {required int accountId}) {
+    if (_disposed) return Future.value();
     if (trackId == id && _accountId == accountId) {
       if (_opening != null) return _opening!;
       if (_loaded) return Future.value();
@@ -65,7 +76,10 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
     loginRequired = false;
     loadingMore = false;
     hasMore = false;
-    unsupported = (int.tryParse(id) ?? 0) <= 0;
+    unsupported = _legacyGateway != null
+        ? (int.tryParse(id) ?? 0) <= 0
+        : _musicGateway == null ||
+              !_musicGateway.supports(MusicCapability.comments);
     if (unsupported) {
       loading = false;
       _loaded = true;
@@ -93,7 +107,7 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> _load({required bool first}) async {
     final generation = _generation;
-    final songId = int.parse(trackId!);
+    final songId = trackId!;
     if (first) {
       loading = true;
     } else {
@@ -102,13 +116,19 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
     error = null;
     notifyListeners();
     try {
-      final page = SongCommentPage.fromJson(
-        await gateway.songComments(
-          songId,
-          limit: pageSize,
-          offset: first ? 0 : _offset,
-        ),
-      );
+      final page = _musicGateway != null
+          ? await _musicGateway.comments(
+              _song(songId),
+              limit: pageSize,
+              offset: first ? 0 : _offset,
+            )
+          : SongCommentPage.fromJson(
+              await _legacyGateway!.songComments(
+                int.parse(songId),
+                limit: pageSize,
+                offset: first ? 0 : _offset,
+              ),
+            );
       if (!_current(generation)) return;
       if (first) {
         _hot.clear();
@@ -166,12 +186,22 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
     loginRequired = false;
     notifyListeners();
     try {
-      await gateway.setSongCommentLiked(int.parse(trackId!), id, wanted);
+      if (_musicGateway != null) {
+        await _musicGateway.setCommentLiked(_song(trackId!), id, wanted);
+      } else {
+        await _legacyGateway!.setSongCommentLiked(
+          int.parse(trackId!),
+          id,
+          wanted,
+        );
+      }
     } catch (error) {
       if (_current(generation)) {
         _comments[id] = previous;
         if (!wasOverridden) _overriddenLikes.remove(id);
-        loginRequired = error is GatewayServiceException && error.code == 301;
+        loginRequired =
+            error is GatewayServiceException && error.code == 301 ||
+            error is PluginException && error.code == 301;
         actionError = loginRequired ? '登录已失效，请重新登录后点赞。' : '点赞失败，请稍后重试。';
       }
     } finally {

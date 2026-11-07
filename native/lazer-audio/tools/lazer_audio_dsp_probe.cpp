@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <thread>
 #include <vector>
 
 #include "dsp_chain.h"
@@ -101,6 +102,77 @@ bool testSamplePeakCeiling(int32_t sampleRate) {
     return passed;
 }
 
+bool testVolumeInitialization(int32_t sampleRate) {
+    constexpr double kTolerance = 1e-7;
+    const double gains[]{0.0, 0.01, 0.1, 0.5, 1.0};
+    const float input[]{0.5f, -0.25f, 0.75f};
+    bool passed = true;
+    for (const double gain : gains) {
+        lazer::audio::DspChain chain;
+        chain.configureFormat({sampleRate, 1}, gain);
+        float samples[]{input[0], input[1], input[2]};
+        chain.process(samples, 3);
+        for (size_t frame = 0; frame < 3; ++frame) {
+            passed &= expect(std::abs(samples[frame] - input[frame] * gain) <= kTolerance,
+                "new DSP sessions must apply the configured user gain from the first PCM frame");
+        }
+    }
+    if (passed) {
+        std::printf("%d Hz track-open volume initialization: mute through unity has no transient OK\n",
+            sampleRate);
+    }
+    return passed;
+}
+
+bool testImmediateVolumeRefresh() {
+    lazer::audio::DspChain chain;
+    chain.configureFormat({44'100, 1}, 0.5);
+    chain.setVolume(0.5, 200);
+    chain.setVolumeImmediately(0.1);
+    float samples[]{1.0f, 1.0f, 1.0f};
+    chain.process(samples, 3);
+    bool passed = true;
+    for (const float sample : samples) {
+        passed &= expect(std::abs(sample - 0.1f) <= 1e-7f,
+            "a pre-output gain refresh must reach its target on the first sample");
+    }
+    if (passed) std::printf("ready-state volume refresh starts at its target on the first sample OK\n");
+    return passed;
+}
+
+bool testConcurrentConfiguration(int32_t sampleRate) {
+    lazer::audio::DspChain chain;
+    chain.configureFormat({sampleRate, 2}, 0.1);
+    std::atomic<bool> outputFinite{true};
+    std::thread settings([&chain]() {
+        LazerAudioEqBand unusedBand{};
+        LazerAudioDspConfig config{};
+        config.bands = &unusedBand;
+        for (int iteration = 0; iteration < 2'000; ++iteration) {
+            config.stage_count = 1;
+            config.stage_order[0] = iteration % 2 == 0
+                ? LazerAudioDspStagePreamp
+                : LazerAudioDspStageVolume;
+            chain.requestConfig(config);
+        }
+    });
+    float samples[64]{};
+    for (int block = 0; block < 2'000; ++block) {
+        std::fill(samples, samples + 64, 0.25f);
+        chain.process(samples, 32);
+        for (const float sample : samples) {
+            if (!std::isfinite(sample)) outputFinite.store(false, std::memory_order_release);
+        }
+    }
+    settings.join();
+    if (outputFinite.load(std::memory_order_acquire)) {
+        std::printf("%d Hz concurrent DSP configuration handoff: finite output and clean completion OK\n",
+            sampleRate);
+    }
+    return expect(outputFinite.load(std::memory_order_acquire),
+        "concurrent DSP configuration must not corrupt processing state");
+}
+
 bool testTpdfQuantizer() {
     constexpr int32_t kBits = 16;
     constexpr size_t kSampleCount = 200'000;
@@ -194,7 +266,12 @@ bool testIntegerPcmPacking() {
 int main() {
     const bool at44100 = testSamplePeakCeiling(44'100);
     const bool at96000 = testSamplePeakCeiling(96'000);
+    const bool volumeAt44100 = testVolumeInitialization(44'100);
+    const bool volumeAt96000 = testVolumeInitialization(96'000);
+    const bool immediateVolumeRefresh = testImmediateVolumeRefresh();
+    const bool concurrentConfiguration = testConcurrentConfiguration(44'100);
     const bool dither = testTpdfQuantizer();
     const bool packing = testIntegerPcmPacking();
-    return at44100 && at96000 && dither && packing ? 0 : 1;
+    return at44100 && at96000 && volumeAt44100 && volumeAt96000 && immediateVolumeRefresh &&
+        concurrentConfiguration && dither && packing ? 0 : 1;
 }
