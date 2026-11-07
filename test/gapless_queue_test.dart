@@ -232,6 +232,54 @@ void main() {
     },
   );
 
+  testWidgets(
+    'shuffle Previous follows history and Next resumes the shuffled round',
+    (tester) async {
+      final engine = _QueueEngine();
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        shuffleRandom: Random(27),
+      );
+      addTearDown(state.dispose);
+      state.toggleShuffle();
+      state.playQueue([for (var i = 0; i < 8; i++) _track('$i')]);
+      await tester.pump();
+      final history = [state.current!.id];
+      for (var i = 0; i < 3; i++) {
+        state.next();
+        await tester.pump();
+        history.add(state.current!.id);
+      }
+      final pending = engine.appends.last;
+      state.previous();
+      await tester.pump();
+      expect(state.current!.id, history[2]);
+      expect(state.shuffle, isTrue);
+      state.previous();
+      await tester.pump();
+      expect(state.current!.id, history[1]);
+      for (final expected in history.skip(2)) {
+        expect(engine.appends.last, 'url-$expected');
+        state.next();
+        await tester.pump();
+        expect(state.current!.id, expected);
+      }
+      expect(engine.appends.last, pending);
+      final heard = history.toSet();
+      while (heard.length < 8) {
+        final prepared = engine.appends.last;
+        state.next();
+        await tester.pump();
+        expect('url-${state.current!.id}', prepared);
+        expect(heard.add(state.current!.id), isTrue);
+        expect(state.shuffle, isTrue);
+      }
+      state.pause();
+      await tester.pump();
+    },
+  );
+
   testWidgets('radio order does not overwrite the preferred playlist mode', (
     tester,
   ) async {

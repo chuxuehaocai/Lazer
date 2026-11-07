@@ -19,6 +19,7 @@ import 'package:ffi/ffi.dart';
 
 import 'lazer_audio_abi.dart';
 import 'lazer_audio_library.dart';
+import 'engine_selection.dart';
 
 /// One equaliser band, in the shape the ABI takes.
 class LazerEqBandSettings {
@@ -178,6 +179,24 @@ abstract final class LazerWorkerOp {
   static const int pause = 11;
   static const int seek = 12;
   static const int setAutoMix = 13;
+
+  static String describe(int op) => switch (op) {
+    create => 'create',
+    destroy => 'destroy',
+    openFile => 'open_file',
+    openReader => 'open_reader',
+    queueReader => 'queue_reader',
+    clearQueuedReader => 'clear_queued_reader',
+    stop => 'stop',
+    setDevice => 'set_device',
+    setVolume => 'set_volume',
+    setDsp => 'set_dsp',
+    play => 'play',
+    pause => 'pause',
+    seek => 'seek',
+    setAutoMix => 'set_automix',
+    _ => 'unknown',
+  };
 }
 
 /// The owning side of the worker isolate.
@@ -276,7 +295,32 @@ class LazerAudioWorker {
     final Completer<Object?> completer = Completer<Object?>();
     _pending[id] = completer;
     _sendPort.send(<Object?>[id, op, params]);
-    return completer.future;
+    // The UI isolate remains responsive when native probing blocks this worker.
+    // Record that wait without leaking source URLs, tokens or file paths.
+    final clock = Stopwatch()..start();
+    var reported = false;
+    final waiting = Timer(const Duration(seconds: 5), () {
+      reported = true;
+      Zone.current.print(
+        formatAudioPathRecord('worker_wait', {
+          'request': id,
+          'operation': LazerWorkerOp.describe(op),
+          'elapsed_ms': clock.elapsedMilliseconds,
+        }),
+      );
+    });
+    return completer.future.whenComplete(() {
+      waiting.cancel();
+      if (reported) {
+        Zone.current.print(
+          formatAudioPathRecord('worker_resumed', {
+            'request': id,
+            'operation': LazerWorkerOp.describe(op),
+            'elapsed_ms': clock.elapsedMilliseconds,
+          }),
+        );
+      }
+    });
   }
 
   /// Stops the isolate; in-flight calls fail with a `StateError`.

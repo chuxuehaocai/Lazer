@@ -571,6 +571,12 @@ class LazerAudioBridgeApi {
         void Function(Pointer<Void>)
       >('lazer_bridge_reader_destroy');
 
+  late final void Function(Pointer<Void>) readerCancel = _library
+      .lookupFunction<
+        Void Function(Pointer<Void>),
+        void Function(Pointer<Void>)
+      >('lazer_bridge_reader_cancel');
+
   late final int Function(Pointer<Void>) readerBytesAvailable = _library
       .lookupFunction<
         Int64 Function(Pointer<Void>),
@@ -582,14 +588,14 @@ class LazerAudioBridgeApi {
   /// A demuxer turns a seek's timestamp into the byte offset this reader is
   /// asked for through the source length, so an unknown length is what makes
   /// seeking a streaming track fail outright.
-  late final void Function(Pointer<Void>, int)? readerSetLength = _optional<
-    void Function(Pointer<Void>, int)
-  >(
-    () => _library.lookupFunction<
-      Void Function(Pointer<Void>, Int64),
-      void Function(Pointer<Void>, int)
-    >('lazer_bridge_reader_set_length'),
-  );
+  late final void Function(Pointer<Void>, int)? readerSetLength =
+      _optional<void Function(Pointer<Void>, int)>(
+        () =>
+            _library.lookupFunction<
+              Void Function(Pointer<Void>, Int64),
+              void Function(Pointer<Void>, int)
+            >('lazer_bridge_reader_set_length'),
+      );
 
   /// Looks a symbol up and returns null when this bridge does not export it.
   T? _optional<T>(T Function() lookup) {

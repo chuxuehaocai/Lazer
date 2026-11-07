@@ -459,6 +459,9 @@ void main() {
         expect(app.musicAccounts.keys, ['beta:fixture.multiple']);
       } finally {
         app.pause();
+        // Join the last play's cache-history write before deleting its Windows directory.
+        final current = app.current;
+        if (current != null) await app.playbackCache.recordPlayed(current);
         await app.listeningStatistics.flush();
         await app.catalog.cache.settle();
         app.dispose();

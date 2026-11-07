@@ -25,6 +25,9 @@ class _Bridge implements LazerAudioBridgeApi {
   int nextHandle = 10;
   final created = <(String, int, int)>[];
   final finished = <int, int>{};
+  final cancelled = <int>{};
+  final destroyed = <int>{};
+  void Function(int)? onCancel;
   @override
   int Function(Pointer<Uint8>, int, Pointer<Pointer<Void>>) get readerCreate =>
       (path, expectedBytes, out) {
@@ -49,7 +52,15 @@ class _Bridge implements LazerAudioBridgeApi {
   void Function(Pointer<Void>, int) get readerFinish =>
       (handle, failed) => finished[handle.address] = failed;
   @override
-  void Function(Pointer<Void>) get readerDestroy => (_) {};
+  void Function(Pointer<Void>) get readerDestroy =>
+      (handle) => destroyed.add(handle.address);
+  @override
+  void Function(Pointer<Void>) get readerCancel => (handle) {
+    expect(destroyed, isNot(contains(handle.address)));
+    cancelled.add(handle.address);
+    onCancel?.call(handle.address);
+  };
+
   /// The sizes the engine announced to each reader.
   final lengths = <int, int>{};
   @override
@@ -62,12 +73,30 @@ class _Bridge implements LazerAudioBridgeApi {
 class _Worker implements LazerAudioWorker {
   int preparations = 0;
   int clears = 0;
+  final opens = <int>[];
+  bool serialized = false;
+  Future<void> _commands = Future<void>.value();
   Completer<void>? delay;
   Completer<void>? openDelay, openStarted;
+  Completer<void>? stopDelay, stopStarted;
   void Function(List<Object?>)? onPreparation;
   @override
-  Future<Object?> call(int op, List<Object?> params) async {
+  Future<Object?> call(int op, List<Object?> params) {
+    if (!serialized) return _execute(op, params);
+    final result = _commands.then((_) => _execute(op, params));
+    _commands = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
+  }
+
+  Future<Object?> _execute(int op, List<Object?> params) async {
+    if (op == LazerWorkerOp.openFile || op == LazerWorkerOp.openReader) {
+      opens.add(op);
+    }
     if (op == LazerWorkerOp.clearQueuedReader) clears++;
+    if (op == LazerWorkerOp.stop) {
+      if (stopStarted?.isCompleted == false) stopStarted!.complete();
+      await stopDelay?.future;
+    }
     if (op == LazerWorkerOp.openReader && openDelay != null) {
       if (openStarted?.isCompleted == false) openStarted!.complete();
       await openDelay!.future;
@@ -82,6 +111,13 @@ class _Worker implements LazerAudioWorker {
 
   @override
   Future<void> close() async {}
+}
+
+class _FailedEntry extends AudioStreamEntry {
+  _FailedEntry(String url)
+    : super(url: url, file: File(url), key: url.hashCode);
+  @override
+  Object get failure => const HttpException('download failed');
 }
 
 class _Cache extends AudioStreamCache {
@@ -170,6 +206,13 @@ void main() {
       engine.deliverEventForTesting(lazerAudioEventTrackChanged);
       await _settle();
       expect(worker.preparations, 1);
+    },
+  );
+
+  test(
+    'play reports an absent source instead of acknowledging silence',
+    () async {
+      await expectLater(engine.play(), throwsStateError);
     },
   );
 
@@ -356,4 +399,101 @@ void main() {
     engine.deliverEventForTesting(lazerAudioEventTrackChanged);
     expect(await engine.playQueuedNext(), isFalse);
   });
+
+  test(
+    'an old stream restart cannot invalidate the next source load',
+    () async {
+      const failedUrl = 'https://audio.test/failed';
+      cache.entries[failedUrl] = _FailedEntry(failedUrl);
+      await engine.setQueue([failedUrl]);
+      expect(engine.active, isTrue);
+      expect(engine.restartStream(), isTrue);
+      await engine.setQueue(['replacement.wav']);
+      expect(
+        engine.active,
+        isTrue,
+        reason: 'the new source must remain playable',
+      );
+      expect(worker.opens, [LazerWorkerOp.openReader, LazerWorkerOp.openFile]);
+    },
+  );
+
+  test(
+    'replacing a source cancels a blocked successor before joining the worker',
+    () async {
+      worker.serialized = true;
+      final queue = await engine.setQueue(['first.wav']);
+      final started = Completer<int>();
+      worker.delay = Completer<void>();
+      worker.onPreparation = (params) => started.complete(
+        Pointer<LazerAudioReader>.fromAddress(
+          params[2] as int,
+        ).ref.context.address,
+      );
+      bridge.onCancel = (_) {
+        if (!worker.delay!.isCompleted) worker.delay!.complete();
+      };
+      addTearDown(() {
+        if (!worker.delay!.isCompleted) worker.delay!.complete();
+      });
+      await engine.appendToQueue(queue, 'https://audio.test/blocked-next');
+      final handle = await started.future;
+      await engine
+          .setQueue(['replacement.wav'])
+          .timeout(const Duration(seconds: 2));
+      await _settle();
+      expect(bridge.cancelled, contains(handle));
+      expect(bridge.destroyed, contains(handle));
+      expect(engine.active, isTrue);
+      expect(worker.opens.last, LazerWorkerOp.openFile);
+    },
+  );
+
+  test(
+    'replacing a source cancels its blocked native open without freeing it early',
+    () async {
+      worker.serialized = true;
+      worker.openStarted = Completer<void>();
+      worker.openDelay = Completer<void>();
+      bridge.onCancel = (_) {
+        if (!worker.openDelay!.isCompleted) worker.openDelay!.complete();
+      };
+      addTearDown(() {
+        if (!worker.openDelay!.isCompleted) worker.openDelay!.complete();
+      });
+      final old = engine.setQueue(['https://audio.test/blocked-open']);
+      await worker.openStarted!.future;
+      final handle = bridge.created.single.$3;
+      expect(bridge.destroyed, isEmpty);
+      await engine
+          .setQueue(['replacement.wav'])
+          .timeout(const Duration(seconds: 2));
+      await old;
+      expect(bridge.cancelled, contains(handle));
+      expect(bridge.destroyed, contains(handle));
+      expect(engine.active, isTrue);
+    },
+  );
+
+  test(
+    'a pending stop finishes before the following source is opened',
+    () async {
+      await engine.setQueue(['first.wav']);
+      worker.stopDelay = Completer<void>();
+      worker.stopStarted = Completer<void>();
+      addTearDown(() {
+        if (!worker.stopDelay!.isCompleted) worker.stopDelay!.complete();
+      });
+      final stopping = engine.stop();
+      await worker.stopStarted!.future;
+      final loading = engine.setQueue(['replacement.wav']);
+      await _settle();
+      expect(worker.opens, hasLength(1));
+      worker.stopDelay!.complete();
+      await stopping;
+      await loading;
+      expect(worker.opens, hasLength(2));
+      expect(engine.active, isTrue);
+    },
+  );
 }

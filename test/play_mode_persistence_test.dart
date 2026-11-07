@@ -131,6 +131,45 @@ void main() {
   });
 
   test(
+    'going back across shuffled rounds does not consume an unheard song',
+    () {
+      final order = ShuffleOrder(random: Random(27));
+      var current = 0;
+      for (var i = 0; i < 7; i++) {
+        current = order.peek(8, current);
+        order.visit(current);
+      }
+      final previous = current;
+      current = order.peek(8, current);
+      order.visit(current);
+      final firstOfRound = current;
+      expect(order.previous(8, current), previous);
+      order.visit(previous);
+      expect(order.peek(8, previous), firstOfRound);
+      order.visit(firstOfRound);
+      final round = {firstOfRound};
+      for (var i = 0; i < 7; i++) {
+        current = order.peek(8, current);
+        order.visit(current);
+        expect(round.add(current), isTrue);
+      }
+      expect(round, hasLength(8));
+    },
+  );
+
+  test('a cancelled shuffled overlap keeps one forward history entry', () {
+    final order = ShuffleOrder(random: Random(17));
+    final incoming = order.peek(8, 0);
+    order.visit(incoming);
+    order.revisitNext(incoming);
+    expect(order.peek(8, 0), incoming);
+    order.visit(incoming);
+    expect(order.previous(8, incoming), 0);
+    order.visit(0);
+    expect(order.peek(8, 0), incoming);
+  });
+
+  test(
     'initial shuffle choices cover all eligible songs without modulo bias',
     () {
       final counts = List.filled(6, 0);

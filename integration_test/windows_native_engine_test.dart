@@ -60,8 +60,107 @@ Uint8List _uint32(int value) => Uint8List.fromList(<int>[
   (value >> 24) & 0xff,
 ]);
 
+class _WaitingCache extends AudioStreamCache {
+  _WaitingCache(Directory root, this.entry) : super(() async => root);
+  final AudioStreamEntry entry;
+  @override
+  Future<AudioStreamEntry> open(
+    String url, {
+    int? expectedBytes,
+    bool force = false,
+  }) async => entry;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final successor in [false, true]) {
+    test(
+      successor
+          ? 'a blocked native successor cannot hold a later track switch hostage'
+          : 'a blocked native reader cannot hold a later track switch hostage',
+      () async {
+        final root = await Directory.systemTemp.createTemp(
+          'lazer-native-switch-',
+        );
+        addTearDown(() => root.delete(recursive: true));
+        final empty = await File('${root.path}/waiting.audio').writeAsBytes([]);
+        final replacement = await File(
+          '${root.path}/replacement.wav',
+        ).writeAsBytes(_wav(2000));
+        final entry = AudioStreamEntry(
+          url: 'https://fixture.invalid/waiting',
+          file: empty,
+          key: 1,
+          expectedBytes: 500000,
+        );
+        final cache = _WaitingCache(root, entry);
+        addTearDown(cache.close);
+        final created = await NativeAudioEngine.create(cache: cache);
+        expect(
+          created,
+          isNotNull,
+          reason: NativeAudioEngine.lastStartupFailure,
+        );
+        final engine = created!;
+        addTearDown(engine.dispose);
+        var settled = false;
+        Future<Object?> opening = Future.value();
+        if (successor) {
+          final queue = await engine.setQueue([replacement.uri.toString()]);
+          expect(await engine.appendToQueue(queue, entry.url), isTrue);
+        } else {
+          opening = engine
+              .setQueue([entry.url])
+              .then<Object?>(
+                (_) {
+                  settled = true;
+                  return null;
+                },
+                onError: (Object error) {
+                  settled = true;
+                  return error;
+                },
+              );
+        }
+        for (
+          var attempt = 0;
+          attempt < 100 && entry.onAppended == null;
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(entry.onAppended, isNotNull);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(
+          settled,
+          isFalse,
+          reason: 'FFmpeg must still be waiting for the old header',
+        );
+        if (successor) expect(engine.queuedSourceUrl, isNull);
+        await engine
+            .setQueue([replacement.uri.toString()])
+            .timeout(const Duration(seconds: 3));
+        await opening;
+        expect(engine.active, isTrue);
+        expect(engine.streamInfo?.sourceSampleRate, 44100);
+        await engine.play();
+        for (
+          var attempt = 0;
+          attempt < 100 && engine.position < const Duration(milliseconds: 60);
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        expect(
+          engine.position,
+          greaterThanOrEqualTo(const Duration(milliseconds: 60)),
+        );
+        await engine.stop();
+      },
+      skip: !Platform.isWindows,
+    );
+  }
 
   test('the built Windows engine opens a network source', () async {
     final LazerAudioAvailability availability = LazerAudioLoader.load(
@@ -285,13 +384,18 @@ void main() {
       url,
       expectedBytes: body.length,
     );
-    for (int attempt = 0;
-        attempt < 500 && entry.downloadedBytes < prefixBytes;
-        attempt++) {
+    for (
+      int attempt = 0;
+      attempt < 500 && entry.downloadedBytes < prefixBytes;
+      attempt++
+    ) {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
-    expect(entry.downloadedBytes >= prefixBytes, isTrue,
-        reason: 'the stalled prefix landed');
+    expect(
+      entry.downloadedBytes >= prefixBytes,
+      isTrue,
+      reason: 'the stalled prefix landed',
+    );
     expect(entry.complete, isFalse, reason: 'most of the track is not cached');
 
     final NativeAudioEngine? created = await NativeAudioEngine.create(
@@ -402,7 +506,11 @@ void main() {
     expect(await engine.appendToQueue(queueId, '$base/second.wav'), isTrue);
     // The append starts the preparation; the engine holds the successor once it
     // has decoded its first bytes.
-    for (int attempt = 0; attempt < 500 && engine.queuedSourceUrl == null; attempt++) {
+    for (
+      int attempt = 0;
+      attempt < 500 && engine.queuedSourceUrl == null;
+      attempt++
+    ) {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
     expect(engine.queuedSourceUrl, '$base/second.wav');

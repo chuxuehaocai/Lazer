@@ -2913,18 +2913,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void previous() {
     if (_queue.isEmpty) return;
-    if (_position.inSeconds > 3) {
+    final bool restart = _position.inSeconds > 3;
+    final int target = restart
+        ? _queueIndex
+        : _shuffle
+        ? _shuffleOrder.previous(_queue.length, _queueIndex)
+        : (_queueIndex - 1 + _queue.length) % _queue.length;
+    if (restart) {
       _sampleListening();
       listeningStatistics.suspend();
     } else {
-      _finishListening(
-        manualTarget: _queue[(_queueIndex - 1 + _queue.length) % _queue.length],
-      );
+      _finishListening(manualTarget: _queue[target]);
     }
     _finishPlaySession();
     playbackError = null;
     // Classic transport behavior: >3s in, "previous" restarts the track.
-    if (_position.inSeconds > 3) {
+    if (restart) {
       _position = Duration.zero;
       if (_realActive) {
         final generation = _generation;
@@ -2959,7 +2963,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         );
       }
     } else {
-      final int target = (_queueIndex - 1 + _queue.length) % _queue.length;
       _moveTo(target, direction: -1);
     }
     notifyListeners();
@@ -3233,6 +3236,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void toggleShuffle() {
     _shuffle = !_shuffle;
+    _shuffleOrder.reset();
     _savePlayMode();
     _refreshAutoMixQueue();
     notifyListeners();
@@ -3241,6 +3245,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// The single play-mode button: Sequential → ListLoop → SingleLoop →
   /// Shuffle → Sequential.
   void cyclePlayMode() {
+    _shuffleOrder.reset();
     if (_shuffle) {
       _shuffle = false;
       _repeat = LoopMode.off;

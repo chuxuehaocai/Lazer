@@ -10,6 +10,8 @@
 //     through `LazerAudioWorker`, a dedicated isolate;
 //   * `snapshot`/`stream_info`/`last_error` do not block and are called straight
 //     from the UI isolate, so `position` stays synchronous;
+//   * reader cancellation wakes blocked reads outside that worker, without
+//     freeing the callbacks the engine still owns;
 //   * engine events arrive on engine threads through a `NativeCallable.listener`,
 //     which is asynchronous — a terminal event is therefore confirmed against the
 //     snapshot rather than trusted to arrive in order.
@@ -219,6 +221,8 @@ class NativeAudioEngine
 
   AudioStreamEntry? _activeEntry;
   NativeStreamReader? _activeReader;
+  NativeStreamReader? _openingReader;
+  final Set<NativeStreamReader> _preparingReaders = {};
   AudioStreamEntry? _queuedEntry;
   NativeStreamReader? _queuedReader;
   String? _queuedUrl;
@@ -433,11 +437,12 @@ class NativeAudioEngine
       );
       return false;
     }
-    _sourceLoaded = false;
-    _completionSent = false;
+    // Invalidate the old source now. Calling stop inside the queued operation
+    // would invalidate a newer setQueue request that is already waiting on it.
+    final stopped = stop();
     unawaited(
       _serialize(() async {
-        await stop();
+        await stopped;
         try {
           await _cache.open(
             entry.url,
@@ -495,6 +500,7 @@ class NativeAudioEngine
   @override
   Future<void> setUrl(String url) {
     final int generation = ++_generation;
+    _interruptPendingReads();
     _sourceLoaded = false;
     _mixPresented = false;
     _completionSent = false;
@@ -510,6 +516,7 @@ class NativeAudioEngine
   Future<int> setQueue(List<String> urls, {int startIndex = 0}) async {
     final int queueId = ++_queueId;
     final int generation = ++_generation;
+    _interruptPendingReads();
     _sourceLoaded = false;
     _mixPresented = false;
     _completionSent = false;
@@ -574,6 +581,7 @@ class NativeAudioEngine
     final String? next = _queuedUrl ?? _pendingUrls.firstOrNull;
     if (next == null) return false;
     final int generation = ++_generation;
+    _interruptPendingReads();
     return _serialize(() async {
       await _clearQueued();
       if (generation != _generation) return false;
@@ -594,7 +602,10 @@ class NativeAudioEngine
     final int generation = _generation;
     final int request = ++_transportRequest;
     final int? address = _engineAddressOrNull;
-    if (address == null || !_sourceLoaded) return;
+    if (_disposed) return;
+    if (address == null || !_sourceLoaded) {
+      throw StateError('lazer-audio: play requested without a loaded source');
+    }
     // Focus first: starting the device before the session is active is what makes
     // the first second of a track play into a ducked or interrupted stream.
     final Future<bool> Function()? focus = activateSession;
@@ -754,8 +765,9 @@ class NativeAudioEngine
   }
 
   @override
-  Future<void> stop() async {
+  Future<void> stop() {
     ++_generation;
+    _interruptPendingReads();
     _sourceLoaded = false;
     _mixPresented = false;
     _completionSent = false;
@@ -763,6 +775,10 @@ class NativeAudioEngine
     _position = Duration.zero;
     _pendingSeek = null;
     _duration = null;
+    return _serialize(_stopSource);
+  }
+
+  Future<void> _stopSource() async {
     final int? address = _engineAddressOrNull;
     if (address != null) {
       try {
@@ -790,6 +806,7 @@ class NativeAudioEngine
     _drainLogs();
     _disposed = true;
     ++_generation;
+    _interruptPendingReads();
     _sourceLoaded = false;
     final int? address = _engineAddressOrNull;
     // Let the mutation chain and any successor preparation finish (bounded, so a
@@ -849,6 +866,20 @@ class NativeAudioEngine
     return result;
   }
 
+  void _interruptPendingReads() {
+    // Enqueuing this wake-up behind the blocked open/queue would deadlock it.
+    if (_openingReader == null && _preparingReaders.isEmpty) return;
+    logAudioPathEvent('source_cancel', {
+      'generation': _generation,
+      'opening': _openingReader != null,
+      'preparing': _preparingReaders.length,
+    });
+    _openingReader?.cancel();
+    for (final reader in _preparingReaders) {
+      reader.cancel();
+    }
+  }
+
   /// Opens [url] as the audible source; [generation] rejects superseded opens.
   Future<void> _openSource(String url, int generation) async {
     if (generation != _generation || _disposed) return;
@@ -886,6 +917,7 @@ class NativeAudioEngine
         if (reader == null) {
           throw StateError('the reader bridge rejected ${entry.file.path}');
         }
+        _openingReader = reader;
         final NativeStreamReader sourceReader = reader;
         final AudioStreamEntry sourceEntry = entry;
         _connectEntry(sourceEntry, sourceReader);
@@ -919,7 +951,7 @@ class NativeAudioEngine
       _activeEntry = entry;
       _activeReader = reader;
       _emitBufferChange();
-      _sourceLoaded = true;
+      _sourceLoaded = generation == _generation && !_disposed;
       if (generation != _generation) {
         // A newer request arrived while this one was opening. It is queued behind
         // this call on the worker, so the engine still holds *this* source until
@@ -938,6 +970,8 @@ class NativeAudioEngine
       entry?.cancel();
       if (generation == _generation) _sourceLoaded = false;
       rethrow;
+    } finally {
+      if (identical(_openingReader, reader)) _openingReader = null;
     }
   }
 
@@ -958,6 +992,7 @@ class NativeAudioEngine
     for (int index = 0; index < attempts.length; index++) {
       if (generation != _generation || _disposed) return lazerAudioErrorState;
       await _applyOutputSettings(address, dsdOverride: attempts[index]);
+      if (generation != _generation || _disposed) return lazerAudioErrorState;
       status = await _openOnce(address, path, reader);
       if (status == lazerAudioOk) {
         if (index > 0) {
@@ -1028,6 +1063,7 @@ class NativeAudioEngine
     _preparationsInFlight++;
     AudioStreamEntry? entry;
     NativeStreamReader? reader;
+    NativeStreamReader? preparingReader;
     try {
       entry = await _cacheEntryFor(url);
       final String path = entry?.file.path ?? _localPath(url);
@@ -1055,6 +1091,8 @@ class NativeAudioEngine
         expectedBytes: expectedBytes,
       );
       if (reader == null) return;
+      preparingReader = reader;
+      _preparingReaders.add(reader);
       // The cache download can finish after this local is transferred to
       // `_queuedReader` and set to null below. Capture the reader itself so the
       // completion callback still signals the bridge instead of throwing from
@@ -1110,6 +1148,7 @@ class NativeAudioEngine
         await _settleSupersededReader(address, reader, entry);
       }
     } finally {
+      _preparingReaders.remove(preparingReader);
       _preparationsInFlight--;
       if (_preparationsInFlight == 0) {
         for (final Completer<void> idle in _preparationsIdle) {

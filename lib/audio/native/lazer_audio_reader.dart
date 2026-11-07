@@ -60,6 +60,7 @@ class NativeStreamReader {
   final int _readerAddress;
   bool _released = false;
   bool _finished = false;
+  bool _cancelled = false;
 
   /// The `LazerAudioReader` the engine's open/queue call takes. Valid until
   /// [release] runs; the address stays unique after release so a stale handle
@@ -94,6 +95,14 @@ class NativeStreamReader {
     if (_released || _finished) return;
     _finished = true;
     _bridge.readerFinish(_handle, failed ? 1 : 0);
+  }
+
+  /// Wakes a blocked native read without freeing callbacks still in use.
+  /// The owning engine must acknowledge stop/replacement before [release].
+  void cancel() {
+    if (_released || _cancelled) return;
+    _cancelled = true;
+    _bridge.readerCancel(_handle);
   }
 
   /// Frees the native reader and its `LazerAudioReader` struct.
