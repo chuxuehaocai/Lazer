@@ -11,6 +11,7 @@
 | Song-detail responses could reorder favorite and playlist IDs | Pages could show the wrong order | Reorder detail results to requested IDs; cover offset/lookahead and reordered responses |
 | Lyric v1 counters and empty-response handling were incomplete | Missing lyrics could become a false instrumental result | Request v1 version counters at zero, fall back to legacy lyrics, recognize explicit instrumental flags, and leave missing content retryable |
 | Playlist removal used an array instead of serialized track IDs; name validation applied Lua length to a string | Mutation requests could be rejected or fail in the embedded VM | Serialize deletion IDs and use `string.len` for the name guard |
+| Pattern-based trimming did not work in the embedded VM; email login truncated passwords to 16 characters | Blank names/searches were sent upstream; longer passwords could not authenticate | Trim using byte boundaries, normalize formatted phone accounts, and hash the full password; inspect the actual pre-encryption payload in the VM regression |
 
 ## Protocol references
 
@@ -19,7 +20,7 @@ Checked the maintained API implementation's [EAPI encryption](https://github.com
 ## Reproduction and verification
 
 ```powershell
-flutter test --no-pub test/netease_lua_plugin_test.dart test/netease_lua_features_test.dart test/plugin_comments_visibility_test.dart test/song_comments_test.dart
+flutter test --no-pub test/netease_lua_plugin_test.dart test/netease_lua_features_test.dart test/netease_lua_playlist_edit_test.dart test/plugin_comments_visibility_test.dart test/song_comments_test.dart
 dart run tool/smoke_netease_lua.dart
 dart run tool/package_netease_lua.dart
 ```

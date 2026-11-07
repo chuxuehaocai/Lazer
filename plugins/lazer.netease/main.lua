@@ -25,6 +25,33 @@ local function text(value)
   return tostring(value)
 end
 
+-- Avoid pattern-dependent trimming: the embedded interpreter does not
+-- implement all of standard Lua's non-greedy capture substitutions.
+local function trim(value)
+  local value = text(value)
+  local first, last = 1, string.len(value)
+  while first <= last and string.byte(value, first) <= 32 do first = first + 1 end
+  while last >= first and string.byte(value, last) <= 32 do last = last - 1 end
+  return string.sub(value, first, last)
+end
+
+local function phone_account(value)
+  local parts = {}
+  for index = 1, string.len(value) do
+    local char = string.sub(value, index, index)
+    local byte = string.byte(value, index)
+    if byte >= 48 and byte <= 57 or char == "+" and index == 1 then
+      parts[#parts + 1] = char
+    elseif char ~= " " and char ~= "-" then
+      return nil
+    end
+  end
+  local phone = table.concat(parts)
+  if string.sub(phone, 1, 3) == "+86" then phone = string.sub(phone, 4) end
+  if phone == "" then return nil end
+  return phone
+end
+
 local function number(value, fallback)
   local parsed = tonumber(value)
   if parsed == nil then return fallback or 0 end
@@ -529,7 +556,7 @@ local function search_type(query, kind, limit, offset, key)
 end
 
 local function search(args)
-  local query = string.gsub(text(args.query), "^%s*(.-)%s*$", "%1")
+  local query = trim(args.query)
   if query == "" then return { songs = {}, albums = {}, artists = {}, playlists = {} } end
   local limit = math.max(1, math.min(500, number(args.limit, 30)))
   local offset = math.max(0, number(args.offset, 0))
@@ -577,21 +604,20 @@ local function call(operation, args)
     end)
   elseif operation == "loginPassword" then
     return attempt_login(function()
-      local account = string.gsub(text(args.account), "^%s*(.-)%s*$", "%1")
+      local account = trim(args.account)
       local password = text(args.password)
       if account == "" or password == "" then return {} end
       local body
-      if string.match(account, "^%+?%d[%d%- ]+$") then
-        local phone = string.gsub(account, "[%-%s]", "")
+      local phone = phone_account(account)
+      if phone ~= nil then
         body = weapi("/api/w/login/cellphone", {
           type = "1", https = "true", phone = phone, countrycode = "86",
           remember = "true", password = crypto("md5", { text = password })
         }, false)
       else
-        local secret = string.sub(password, 1, 16)
         body = weapi("/api/w/login", {
           type = "0", https = "true", username = account,
-          password = crypto("md5", { text = secret }), rememberLogin = "true"
+          password = crypto("md5", { text = password }), rememberLogin = "true"
         }, false)
       end
       if not logged_in(body) then return {} end
@@ -709,7 +735,7 @@ local function call(operation, args)
     return mapped
   elseif operation == "createPlaylist" then
     require_user()
-    local name = string.gsub(text(args.name), "^%s*(.-)%s*$", "%1")
+    local name = trim(args.name)
     if name == "" or string.len(name) > 120 then error("歌单名称无效", 0) end
     local body = weapi("/api/playlist/create", {
       name = name, privacy = args.isPublic == true and "0" or "10", type = "NORMAL"
