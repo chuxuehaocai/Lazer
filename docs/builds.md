@@ -72,7 +72,7 @@ Release packages exclude FFmpeg source archives, license files and build metadat
 `ci/verify-package-contents.py` checks the staged desktop apps and release archives.
 The iOS verifier also rejects a top-level `Resources` directory, validates the
 bundle identifier and requires a three-part numeric system version. The app's
-displayed beta version still comes from `LAZER_VERSION`.
+displayed release version still comes from `LAZER_VERSION`.
 
 ## Android release signing
 
