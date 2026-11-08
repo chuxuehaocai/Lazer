@@ -17,6 +17,12 @@ class VolumeControl extends StatelessWidget {
   Future<void> _change(BuildContext context, Future<void> action) async {
     try {
       await action;
+      final String? notice = state.takeVolumeNotice();
+      if (notice != null && context.mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(context.tr(notice))));
+      }
     } catch (_) {
       if (context.mounted) {
         ScaffoldMessenger.of(
