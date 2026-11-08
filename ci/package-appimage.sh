@@ -70,6 +70,9 @@ curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
 # type-2 runtime already embedded in the verified linuxdeploy AppImage.
 runtime="$tools/runtime-$arch"
 linuxdeploy="$tools/linuxdeploy-$arch.AppImage"
+# The offset query executes the downloaded AppImage, so make the verified
+# tools executable before invoking either linuxdeploy or its plugins.
+chmod +x "$tools/"*.AppImage "$tools/"*.sh
 runtime_offset="$(APPIMAGE_EXTRACT_AND_RUN=1 "$linuxdeploy" --appimage-offset)"
 [[ "$runtime_offset" =~ ^[1-9][0-9]*$ ]] || {
   echo "Could not determine the linuxdeploy AppImage runtime offset: $runtime_offset" >&2
@@ -84,7 +87,6 @@ head -c "$runtime_offset" "$linuxdeploy" > "$runtime"
 test -s "$runtime"
 chmod 0444 "$runtime"
 export LDAI_RUNTIME_FILE="$runtime"
-chmod +x "$tools/"*.AppImage "$tools/"*.sh
 
 # Retain Flutter's executable-relative data/ and lib/ directories. libmpv is
 # loaded via FFI, so linuxdeploy cannot discover it through DT_NEEDED alone.
