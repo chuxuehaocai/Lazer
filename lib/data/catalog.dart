@@ -201,7 +201,10 @@ class Catalog {
     final namespace = reference == null
         ? _scope
         : _platform.owner(reference).cacheNamespace;
-    return 'playlist-v2:$namespace:$playlistId';
+    // v3 intentionally orphans v2 snapshots written before the Lua playlist
+    // fetch/cache changes. Those old snapshots can hold a partial or stale
+    // track list and must not mask a fresh load after upgrading.
+    return 'playlist-v3:$namespace:$playlistId';
   }
 
   Future<T> _cached<T extends Object>(
@@ -403,7 +406,7 @@ class Catalog {
       ?playlistId,
     };
     await Future.wait([
-      for (final id in ids) _expire('playlist-v2:$namespace:$id'),
+      for (final id in ids) _expire('playlist-v3:$namespace:$id'),
       _expire(collectionsKey),
     ]);
   }

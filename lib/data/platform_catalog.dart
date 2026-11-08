@@ -58,7 +58,10 @@ class _PlatformCatalog {
     trackCount: value.songCount,
   );
 
-  Future<List<T>> all<T>(Future<MusicPage<T>> Function(int offset) load) async {
+  Future<List<T>> all<T>(
+    Future<MusicPage<T>> Function(int offset) load, {
+    int concurrency = 1,
+  }) async {
     final items = <T>[];
     var offset = 0;
     while (true) {
@@ -67,7 +70,30 @@ class _PlatformCatalog {
       if (!page.hasMore || page.items.isEmpty || page.nextOffset <= offset) {
         return items;
       }
-      offset = page.nextOffset;
+      if (concurrency <= 1) {
+        offset = page.nextOffset;
+        continue;
+      }
+      // Fan out the next batch of pages, then append them in request order.
+      // This keeps long playlists from paying one round trip per page while
+      // preserving the provider's ordering and its last-page short read.
+      final pageSize = page.items.length;
+      final nextOffset = page.nextOffset;
+      final pending = <Future<MusicPage<T>>>[
+        for (var i = 0; i < concurrency; i++)
+          load(nextOffset + i * pageSize),
+      ];
+      final pages = await Future.wait(pending);
+      var finished = false;
+      for (final next in pages) {
+        items.addAll(next.items);
+        if (!next.hasMore || next.items.isEmpty) {
+          finished = true;
+          break;
+        }
+      }
+      if (finished) return items;
+      offset = nextOffset + pageSize * concurrency;
     }
   }
 
@@ -194,6 +220,7 @@ class _PlatformCatalog {
       (offset) => id.value == favoritesKey
           ? gateway.favorites(limit: 100, offset: offset)
           : gateway.playlistSongs(id, limit: 100, offset: offset),
+      concurrency: 2,
     );
     if (gateway.user?.id != account) throw StateError('Music account changed.');
     return songs.map(track).toList();

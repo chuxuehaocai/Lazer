@@ -238,7 +238,7 @@ void main() {
       expect(gateway.offsets, [0, 100, 200]);
       await disk.remove(
         CacheBucket.data,
-        'playlist-v2:${gateway.cacheNamespace}:$playlist',
+        'playlist-v3:${gateway.cacheNamespace}:$playlist',
         extension: 'json',
       );
       await catalog.playlistTracks(playlist);
