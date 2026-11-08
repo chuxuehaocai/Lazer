@@ -135,4 +135,38 @@ void main() {
     expect(lines[2].translation, '三');
     expect(lines[3].translation, '四');
   });
+
+  test('applies the LRC offset header to every timestamp', () {
+    final lines = parseLrc('[offset:+500]\n[00:01.00]one\n[00:02.00]two');
+    expect(lines.map((line) => line.text), <String>['one', 'two']);
+    expect(lines.map((line) => line.time.inMilliseconds), <int>[
+      1500,
+      2500,
+    ], reason: 'a positive offset moves the words later');
+  });
+
+  test('a negative LRC offset clamps lines at the start of the song', () {
+    final lines = parseLrc('[offset:-1500]\n[00:01.00]one\n[00:03.00]two');
+    expect(lines.map((line) => line.time.inMilliseconds), <int>[0, 1500]);
+  });
+
+  test(
+    'the offset header itself is not lyric text and is case-insensitive',
+    () {
+      final lines = parseLrc('[OFFSET: 250 ]\n[00:01.00]one');
+      expect(lines.single.text, 'one');
+      expect(lines.single.time, const Duration(milliseconds: 1250));
+    },
+  );
+
+  test('translated lines inherit the source offset', () {
+    final lines = parseLyrics(
+      const GatewayLyrics(
+        lrc: '[offset:1000]\n[00:01.00]one\n[00:02.00]two',
+        tlyric: '[offset:1000]\n[00:01.00]一\n[00:02.00]二',
+      ),
+    );
+    expect(lines.map((line) => line.time.inMilliseconds), <int>[2000, 3000]);
+    expect(lines.map((line) => line.translation), <String?>['一', '二']);
+  });
 }

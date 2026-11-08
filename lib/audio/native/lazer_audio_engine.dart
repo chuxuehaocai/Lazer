@@ -65,7 +65,8 @@ class NativeAudioEngine
         // AAudio's endpoint is held by this engine, so an interruption has to
         // close the device instead of parking a stream the platform will take.
         InterruptionYieldingAudioEngine,
-        StreamingBufferHealthAudioEngine {
+        StreamingBufferHealthAudioEngine,
+        VolumeConstraintAudioEngine {
   NativeAudioEngine._(
     this._api,
     this._bridge,
@@ -152,6 +153,7 @@ class NativeAudioEngine
         // on_log's char* expires when the native callback returns. Dart
         // listeners are asynchronous, so pull owned log copies instead.
         0,
+        deviceSettings.deviceToken,
       ]);
       if (address == null) {
         throw StateError('lazer_audio_create returned no engine');
@@ -674,11 +676,36 @@ class NativeAudioEngine
 
   @override
   Future<void> setVolume(double volume) async {
-    _volume = volume.clamp(0, 1);
+    final double requested = volume.clamp(0, 1);
     final int? address = _engineAddressOrNull;
-    if (address == null) return;
-    await _worker.call(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
+    if (address == null) {
+      _volume = requested;
+      _volumeNotice = null;
+      return;
+    }
+    final int status = _status(
+      await _worker.call(LazerWorkerOp.setVolume, <Object?>[
+        address,
+        requested,
+      ]),
+    );
+    if (status == lazerAudioOk) {
+      _volume = requested;
+      _volumeNotice = null;
+      return;
+    }
+    // Direct output refuses software volume. Keep the engine's real level so
+    // the mixer and the UI agree; the app reports the refusal instead of
+    // persisting a level that is not being played.
+    _volumeNotice = lastError();
   }
+
+  @override
+  double get appliedVolume => _volume;
+
+  @override
+  String? get volumeNotice => _volumeNotice;
+  String? _volumeNotice;
 
   bool get supportsAutoMix => _api.setAutoMix != null;
 
@@ -1039,11 +1066,29 @@ class NativeAudioEngine
   Future<void> _applyOutputSettings(int address, {int? dsdOverride}) async {
     final List<Object?> message = _deviceSettings.toDeviceMessage();
     if (dsdOverride != null) message[5] = dsdOverride;
-    await _worker.call(LazerWorkerOp.setDevice, <Object?>[
-      address,
-      ...message,
-      _deviceSettings.deviceToken,
-    ]);
+    Future<int> apply() async => _status(
+      await _worker.call(LazerWorkerOp.setDevice, <Object?>[
+        address,
+        ...message,
+        _deviceSettings.deviceToken,
+      ]),
+    );
+    int status = await apply();
+    if (status == lazerAudioErrorState) {
+      // A source is still open, and the engine accepts a new device config only
+      // while idle/stopped. Without this stop the previous session's format,
+      // buffer, exclusive mode and DSD policy stayed in force for the rest of
+      // the launch: every settings change after the first track was ignored.
+      await _worker.call(LazerWorkerOp.stop, <Object?>[address]);
+      status = await apply();
+    }
+    if (status != lazerAudioOk) {
+      // Playback can still proceed with the previous output config, but the
+      // mismatch must be visible in the path log rather than implied.
+      debugPrint(
+        'lazer-audio: output settings were not applied ($status): ${lastError()}',
+      );
+    }
     await _worker.call(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
   }
 
@@ -1339,7 +1384,15 @@ class NativeAudioEngine
   }
 
   void _handleEvent(int event, int detail, int positionMillis) {
-    if (_disposed || !_sourceLoaded) return;
+    if (_disposed) return;
+    // Transport events describe the loaded source and are meaningless while a
+    // new one is opening. A failure is not: a lost device or a dead decoder
+    // during that window used to be dropped, leaving the app "playing" with no
+    // output until the next event.
+    final bool terminal =
+        event == lazerAudioEventFailed || event == lazerAudioEventDeviceLost;
+    if (!terminal && !_sourceLoaded) return;
+    if (terminal && _engineAddressOrNull == null) return;
     switch (event) {
       case lazerAudioEventEnded:
         _finishSource();

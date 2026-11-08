@@ -227,8 +227,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   });
 
   Future<void> setScheduledPause(ScheduledPauseSettings value) async {
-    scheduledPause = value;
-    _pauseSchedule.update(value);
+    // "Enabled" describes a schedule, and a schedule with no enabled point can
+    // never fire. Normalising here covers deleting the last point as well as a
+    // stale preference that says enabled with an empty list.
+    final ScheduledPauseSettings next =
+        value.enabled && !value.points.any((point) => point.enabled)
+        ? value.copyWith(enabled: false)
+        : value;
+    scheduledPause = next;
+    _pauseSchedule.update(next);
     notifyListeners();
     await _pauseScheduleWriter.request();
   }
@@ -306,6 +313,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// The normalised version the user asked not to be reminded about again.
   String? skippedUpdateVersion;
 
+  /// The release currently shown by an update dialog, if any.
+  ///
+  /// Two presentation paths exist (the shell's automatic prompt and the
+  /// settings button); this keeps them from stacking the same card twice.
+  String? updateDialogVersion;
+
   /// When the last successful check happened, in milliseconds since epoch.
   int updateCheckedAt = 0;
 
@@ -324,9 +337,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// due, when the newest release was skipped, or when the network failed
   /// ([updateError] then says why). A [manual] check ignores both the daily
   /// cadence and a previous skip, because the user explicitly asked.
-  Future<AppRelease?> checkForUpdates({bool manual = false}) async {
-    if (updateChecking) return null;
-    if (!manual && !autoUpdateCheckDue()) return null;
+  ///
+  /// A manual call made while an automatic check is running joins that request
+  /// instead of returning immediately: "null" used to mean both "no update" and
+  /// "did not check", so the settings button could report "已是最新版本" for a
+  /// comparison that never ran.
+  Future<AppRelease?> checkForUpdates({bool manual = false}) {
+    final Future<AppRelease?>? pending = _updateCheckInFlight;
+    if (pending != null) {
+      return manual ? pending : Future<AppRelease?>.value(null);
+    }
+    if (!manual && !autoUpdateCheckDue()) {
+      return Future<AppRelease?>.value(null);
+    }
+    final Future<AppRelease?> check = _runUpdateCheck(manual: manual);
+    _updateCheckInFlight = check;
+    return check.whenComplete(() {
+      if (identical(_updateCheckInFlight, check)) _updateCheckInFlight = null;
+    });
+  }
+
+  Future<AppRelease?>? _updateCheckInFlight;
+
+  Future<AppRelease?> _runUpdateCheck({required bool manual}) async {
     final ReleaseVersion? current = ReleaseVersion.parse(BuildInfo.version);
     if (current == null) {
       updateError = 'unsupported current version';
@@ -593,11 +626,38 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _volume = value.clamp(0, 1);
     if (_volume > 0) _unmutedVolume = _volume;
     notifyListeners();
-    await audioEngine?.setVolume(_volume);
+    final AudioEngine? engine = audioEngine;
+    await engine?.setVolume(_volume);
+    final VolumeConstraintAudioEngine? limited =
+        engine is VolumeConstraintAudioEngine
+        ? engine as VolumeConstraintAudioEngine
+        : null;
+    if (limited != null) {
+      final double applied = limited.appliedVolume.clamp(0, 1).toDouble();
+      if ((applied - _volume).abs() > .001) {
+        // Direct output owns the level: show what is really playing instead of
+        // persisting a software volume the engine refused.
+        _volume = applied;
+        if (_volume > 0) _unmutedVolume = _volume;
+        volumeNotice = '独占或 DSD 输出时音量由 DAC 控制，软件音量保持 100%。';
+        notifyListeners();
+        return;
+      }
+      volumeNotice = null;
+    }
     // Persist the latest value even when several drag updates are in flight.
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('lazer_volume', _volume);
     await prefs.setDouble('lazer_unmuted_volume', _unmutedVolume);
+  }
+
+  /// The last software-volume refusal, consumed by the volume control.
+  String? volumeNotice;
+
+  String? takeVolumeNotice() {
+    final String? notice = volumeNotice;
+    volumeNotice = null;
+    return notice;
   }
 
   /// Live volume change for a drag in progress: updates the engine and the
@@ -608,7 +668,23 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _volumeRevision++;
     _volume = value.clamp(0, 1);
     if (_volume > 0) _unmutedVolume = _volume;
-    unawaited(audioEngine?.setVolume(_volume) ?? Future<void>.value());
+    final AudioEngine? engine = audioEngine;
+    final double requested = _volume;
+    unawaited(
+      (() async {
+        await engine?.setVolume(requested);
+        if (engine is VolumeConstraintAudioEngine && _volume == requested) {
+          final VolumeConstraintAudioEngine limited =
+              engine as VolumeConstraintAudioEngine;
+          final double applied = limited.appliedVolume.clamp(0, 1).toDouble();
+          if ((applied - requested).abs() > .001) {
+            _volume = applied;
+            if (_volume > 0) _unmutedVolume = _volume;
+            notifyListeners();
+          }
+        }
+      })(),
+    );
   }
 
   Future<void> toggleMute() => setVolume(_volume > 0 ? 0 : _unmutedVolume);
@@ -1633,6 +1709,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         fontPreferences = fontPreferences.withFamily(
           const FontFamilyPreference(),
         );
+        // The imported file is gone: rewrite the preference instead of
+        // retrying (and silently falling back) on every launch.
+        try {
+          await prefs.setString(
+            'lazer_font_preferences',
+            fontPreferences.encode(),
+          );
+        } catch (_) {
+          // Preference storage is unavailable; the in-memory fallback stands.
+        }
       }
       importedEnginePath = prefs.getString('lazer_native_engine_path');
       systemMediaLyrics = prefs.getBool('lazer_system_media_lyrics') ?? true;
@@ -1743,7 +1829,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       discoveryChartsError = null;
       return;
     }
-    if (discoveryChartsLoading) return;
+    if (discoveryChartsLoading) {
+      // A platform switch during a slow chart load used to be dropped, leaving
+      // the new provider with no charts until the next manual retry.
+      _discoveryRefreshQueued = true;
+      return;
+    }
+    final String connection = activeContentKey;
     discoveryChartsLoading = true;
     discoveryChartsError = null;
     notifyListeners();
@@ -1754,6 +1846,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       try {
         final provider = await catalog.providerCharts();
+        if (connection != activeContentKey) {
+          _discoveryRefreshQueued = true;
+          return;
+        }
         if (provider.isNotEmpty) {
           discoveryCharts = _sortDiscoveryCharts(provider);
           notifyListeners();
@@ -1763,6 +1859,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       }
 
       final external = await externalFuture;
+      if (connection != activeContentKey) {
+        _discoveryRefreshQueued = true;
+        return;
+      }
       if (external.isNotEmpty) {
         final ids = discoveryCharts.map((chart) => chart.id).toSet();
         discoveryCharts = _sortDiscoveryCharts(<MusicChart>[
@@ -1772,14 +1872,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       }
       if (discoveryCharts.isEmpty) discoveryChartsError = '暂无榜单数据';
     } catch (_) {
-      if (discoveryCharts.isEmpty) {
+      if (connection == activeContentKey && discoveryCharts.isEmpty) {
         discoveryChartsError = '榜单暂时连接不上';
       }
     } finally {
       discoveryChartsLoading = false;
       notifyListeners();
+      if (_discoveryRefreshQueued) {
+        _discoveryRefreshQueued = false;
+        unawaited(refreshDiscoveryCharts());
+      }
     }
   }
+
+  bool _discoveryRefreshQueued = false;
 
   List<MusicChart> _sortDiscoveryCharts(Iterable<MusicChart> charts) {
     final result = charts.toList();
@@ -2151,6 +2257,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   final ShuffleOrder _shuffleOrder;
   (bool, LoopMode)? _stationPlayMode;
   bool _realActive = false;
+
+  /// Whether the source was closed with a usable position still on the rail.
+  ///
+  /// [suspendForInterruption] and [suspendForRouteLoss] stop the engine but keep
+  /// the playhead, and a failed open stops it too. Play must reopen at that
+  /// position instead of starting the song from zero; a track that ran to its
+  /// end clears the flag because the rail there is a full-length artifact.
+  bool _resumePositionOnOpen = false;
   Future<void>? _audioOpening;
   int _generation = 0;
   int trackChangeDirection = 1;
@@ -2484,6 +2598,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queueIndex = startIndex.clamp(0, tracks.length - 1);
     unawaited(_saveQueue());
     _position = Duration.zero;
+    _resumePositionOnOpen = false;
     playbackError = null;
     unawaited(_loadLyrics());
     _ensureTicker();
@@ -2507,8 +2622,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (_realActive) {
         unawaited(_resumeAudio());
       } else {
-        playbackError = null;
-        unawaited(_startAudio());
+        _openForPlayback();
       }
     } else {
       _ticker?.cancel();
@@ -2525,10 +2639,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (_realActive) {
       unawaited(_resumeAudio());
     } else {
-      playbackError = null;
-      unawaited(_startAudio());
+      _openForPlayback();
     }
     notifyListeners();
+  }
+
+  /// Opens the output for a play request.
+  ///
+  /// When the source was closed underneath the listener (audio focus went to
+  /// another app, the route was lost, the open failed) the rail still shows where
+  /// they were. Reopening at that position is what makes Play continue the song;
+  /// opening at zero and letting the first tick overwrite the rail is the
+  /// "pressing play restarts my track" report.
+  void _openForPlayback() {
+    playbackError = null;
+    final Duration? resumeAt =
+        _resumePositionOnOpen && _position > Duration.zero ? _position : null;
+    _resumePositionOnOpen = false;
+    unawaited(_startAudio(resumeAt: resumeAt));
   }
 
   void pause() {
@@ -2559,6 +2687,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _ticker?.cancel();
     _realActive = false;
     _position = at;
+    _resumePositionOnOpen = at > Duration.zero;
     // The engine's queue went with the output; the next open builds a fresh one.
     _clearQueuedNext();
     _queueId = null;
@@ -2590,6 +2719,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _clearQueuedNext();
     _queueId = null;
     _position = Duration.zero;
+    _resumePositionOnOpen = false;
     playbackError = null;
     _ticker?.cancel();
     unawaited(audioEngine?.stop() ?? Future<void>.value());
@@ -2691,6 +2821,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _clearOptimisticSeek();
     unawaited(_saveQueue());
     _position = Duration.zero;
+    _resumePositionOnOpen = false;
     unawaited(_loadLyrics());
     // Artwork follows the selection even while paused or when the engine
     // crosses directly into its prepared source without calling _startAudio.
@@ -3009,6 +3140,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queueIndex = index;
     unawaited(_saveQueue());
     _position = Duration.zero;
+    _resumePositionOnOpen = false;
     unawaited(_loadLyrics());
     _playing = true;
     unawaited(_startAudio());
@@ -3140,6 +3272,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (generation != _generation) return;
     _queueId = queueId;
     _realActive = true;
+    _resumePositionOnOpen = false;
     // Remembered so a dead download can be reloaded from the position the
     // listener was at, instead of leaving a parked player on screen.
     _lastStreamUrl = _isNetworkStream(url) ? url : null;
@@ -3697,6 +3830,32 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     return _queueStore.save(_queue, _queueIndex, _queueRevision);
   }
 
+  /// Writes the state the next launch restores before the app is backgrounded
+  /// or closed.
+  ///
+  /// Queue and listening writes are fire-and-forget during playback, so the last
+  /// track change can still be in flight when the process goes away. The
+  /// lifecycle hooks await this; [dispose] cannot await, but starting the writes
+  /// there is still better than dropping them.
+  Future<void> flushPersistence() async {
+    if (_presentationDisposed) return;
+    try {
+      await _saveQueue();
+    } catch (_) {
+      // Preferences can be unavailable; the in-memory queue still plays.
+    }
+    try {
+      await listeningStatistics.flush();
+    } catch (_) {
+      // Statistics are best-effort, like the queue.
+    }
+    try {
+      await playbackCache.flushHistory();
+    } catch (_) {
+      // Play history is best-effort too.
+    }
+  }
+
   Future<void> _resumeAudio() async {
     if (_presentationDisposed) return;
     checkScheduledPause();
@@ -3973,6 +4132,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     listeningStatistics.end();
     _realActive = false;
     _playing = false;
+    // A failed open still knows where the listener was; the next Play retries
+    // from there rather than from the beginning of the track.
+    _resumePositionOnOpen = _position > Duration.zero;
     _clearQueuedNext();
     _ticker?.cancel();
     playbackError = message;
@@ -4125,6 +4287,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (generation != _generation) return true;
       _queueId = queueId;
       _realActive = true;
+      _resumePositionOnOpen = false;
       _clearStreamStall(quiet: true);
       _clearOptimisticSeek();
       if (_playing) await _startWhenBuffered(generation, url);
@@ -4152,6 +4315,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         unawaited(playbackCache.recordPlayed(track, quality: playbackQuality));
       }
       _position = Duration.zero;
+      _resumePositionOnOpen = false;
       final generation = _generation;
       unawaited(() async {
         try {
@@ -4176,6 +4340,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return;
     }
     _position = current?.duration ?? Duration.zero;
+    _resumePositionOnOpen = false;
     _playing = false;
     _realActive = false;
     _ticker?.cancel();

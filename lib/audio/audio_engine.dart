@@ -232,6 +232,19 @@ abstract interface class FocusAwareAudioEngine {
 /// inside the player keeps the plain pause/resume behaviour.
 abstract interface class InterruptionYieldingAudioEngine {}
 
+/// An engine that can refuse a software volume change.
+///
+/// Direct output (bit-perfect, DoP or native DSD) owns the level: the stream
+/// must stay untouched, so a request to lower the software volume is rejected.
+/// [appliedVolume] reports the level the engine really runs, which is what the
+/// UI has to show instead of a slider that moves while the audio does not.
+abstract interface class VolumeConstraintAudioEngine {
+  double get appliedVolume;
+
+  /// Why the last level could not be applied, or null when it was.
+  String? get volumeNotice;
+}
+
 /// A backend that must know the OS session category before opening output.
 ///
 /// Preparing a paused source must not request audio focus. In particular,

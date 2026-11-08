@@ -1,3 +1,5 @@
+// i18n:data — the fallback notice strings below are interface keys; the player
+// and the HiFi settings page render them through `context.tr`.
 // Which playback path this launch runs on, and why.
 //
 // `engine_factory.dart` needs Flutter (`debugPrint`) and `just_audio`, so the
@@ -77,13 +79,17 @@ class AudioEnginePathDecision {
     AudioPathFallback.sessionStartupFailed => '原生 HiFi 引擎初始化失败$_detailSuffix',
   };
 
-  /// `：reason`, or nothing when there is no detail.
+  /// ` (reason)`, or nothing when there is no detail.
+  ///
+  /// Plain parentheses keep the appended engine text readable in every locale
+  /// without inventing a translated separator key.
   String get _detailSuffix {
     final String? text = detail;
     if (text == null || text.isEmpty) return '';
     // Callers pass loader/engine text through verbatim; a trailing period would
     // read as the end of the sentence rather than as a parenthetical.
-    return '：${text.trim().replaceAll(RegExp(r'[.\s]+$'), '')}';
+    final String cleaned = text.trim().replaceAll(RegExp(r'[.\s]+$'), '');
+    return ' ($cleaned)';
   }
 
   @override

@@ -57,6 +57,15 @@ void main() {
       expect(ReleaseVersion.parse('v2.x.0'), isNull);
     });
 
+    test('rejects a trailing hyphen and non-canonical numeric identifiers', () {
+      // A trailing hyphen used to parse as the final 2.0.0 and outrank the real
+      // pre-releases; a leading zero made equal versions hash differently.
+      expect(ReleaseVersion.parse('2.0.0-'), isNull);
+      expect(ReleaseVersion.parse('2.0.0-01'), isNull);
+      expect(ReleaseVersion.parse('2.0.0-beta.01'), isNull);
+      expect(ReleaseVersion.parse('2.0.0-1')?.normalized, '2.0.0-1');
+    });
+
     test('compares numeric pre-release identifiers and final releases', () {
       final ReleaseVersion beta2 = ReleaseVersion.parse('2.0.0-beta.2')!;
       final ReleaseVersion beta10 = ReleaseVersion.parse('2.0.0-beta.10')!;

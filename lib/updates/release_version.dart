@@ -33,6 +33,9 @@ final class ReleaseVersion implements Comparable<ReleaseVersion> {
     final int dash = text.indexOf('-');
     final String corePart = dash >= 0 ? text.substring(0, dash) : text;
     final String prePart = dash >= 0 ? text.substring(dash + 1) : '';
+    // A trailing hyphen is not a version: taking it as a final release would
+    // let a malformed tag outrank the real beta it resembles.
+    if (dash >= 0 && prePart.isEmpty) return null;
     final List<String> parts = corePart.split('.');
     if (parts.isEmpty || parts.length > 3) return null;
     final List<int> numbers = <int>[];
@@ -50,6 +53,14 @@ final class ReleaseVersion implements Comparable<ReleaseVersion> {
         : prePart.split('.');
     for (final String identifier in identifiers) {
       if (!_identifier.hasMatch(identifier)) return null;
+      // SemVer forbids leading zeroes in numeric identifiers. Accepting them
+      // made "2.0.0-01" compare equal to "2.0.0-1" while normalising and
+      // hashing differently.
+      if (identifier.length > 1 &&
+          identifier.startsWith('0') &&
+          int.tryParse(identifier) != null) {
+        return null;
+      }
     }
     return ReleaseVersion._(
       numbers[0],
