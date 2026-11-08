@@ -3,7 +3,7 @@
 - 分支：`audit/full-stack-three-round`（基于 `nextgen` @ `6b340ff`）
 - 范围：`lib/`（前端界面 + 状态层 + 数据层 + 音频层）、`native/lazer-audio`（只审 ABI 契约与 Dart 侧调用，不重审 DSP 实现）、`.github/workflows/build.yml` 与 `ci/`
 - 方法：按前端 / 后端 / 跨层三个域并行深读代码，逐条用 `file:line` 溯源；只把能从代码路径复现的缺陷计入结论；修复必须带回归测试
-- 交付：修复 39 项（其中 8 项为高危），新增/改写 12 个测试文件；`flutter analyze` 无问题，`flutter test` 1219+ 全绿；CI 新增 i18n 门禁并加固下载链路
+- 交付：修复 40 项（其中 7 项为高危），新增 4 个测试文件、改写 7 个；`flutter analyze` 无问题，`flutter test` 1220 全绿；CI 新增 i18n 门禁并加固下载链路
 
 ## 基线
 
