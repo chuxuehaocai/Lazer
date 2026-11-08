@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import '../plugins/plugin_market.dart';
 import '../state/app_state.dart';
 import '../updates/release_version.dart';
@@ -11,6 +12,9 @@ import '../widgets/apple_ui.dart';
 import '../widgets/build_safe_state.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/spring_buttons.dart';
+
+String _errorText(Object error) =>
+    error is FormatException ? error.message : '$error';
 
 class PluginMarketPage extends StatelessWidget {
   const PluginMarketPage({super.key, required this.state});
@@ -48,7 +52,7 @@ class _PluginMarketViewState extends State<PluginMarketView>
     final value = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('插件源'),
+        title: Text(context.tr('插件源')),
         content: TextFormField(
           initialValue: source,
           autofocus: true,
@@ -59,11 +63,11 @@ class _PluginMarketViewState extends State<PluginMarketView>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+            child: Text(context.tr('取消')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, source),
-            child: const Text('保存'),
+            child: Text(context.tr('保存')),
           ),
         ],
       ),
@@ -75,7 +79,7 @@ class _PluginMarketViewState extends State<PluginMarketView>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(context.tr(_errorText(error)))));
       }
     }
   }
@@ -94,15 +98,15 @@ class _PluginMarketViewState extends State<PluginMarketView>
           )
           .toList();
       return SettingsDetailScaffold(
-        title: '插件市场',
+        title: context.tr('插件市场'),
         actions: [
           IconButton(
-            tooltip: '插件源',
+            tooltip: context.tr('插件源'),
             onPressed: _editSource,
             icon: const Icon(Icons.dns_outlined),
           ),
           IconButton(
-            tooltip: '刷新',
+            tooltip: context.tr('刷新'),
             onPressed: market.loading ? null : market.refresh,
             icon: const Icon(Icons.refresh_rounded),
           ),
@@ -111,9 +115,9 @@ class _PluginMarketViewState extends State<PluginMarketView>
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
             TextField(
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded),
-                hintText: '搜索插件',
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search_rounded),
+                hintText: context.tr('搜索插件'),
               ),
               onChanged: (value) => setState(() => _query = value),
             ),
@@ -121,7 +125,7 @@ class _PluginMarketViewState extends State<PluginMarketView>
             if (market.error case final error?)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Text(error),
+                child: Text(context.tr(error)),
               ),
             if (!market.loading && entries.isEmpty)
               AppleEmptyState(
@@ -143,7 +147,7 @@ class _PluginMarketViewState extends State<PluginMarketView>
         .where((entry) => entry.manifest.id == plugin.id)
         .firstOrNull;
     final incompatible = plugin.incompatibility(
-      defaultTargetPlatform.name,
+      defaultTargetPlatform.name.toLowerCase(),
       BuildInfo.version,
     );
     final update =
@@ -175,7 +179,7 @@ class _PluginMarketViewState extends State<PluginMarketView>
                 onPressed: widget.state.pluginManager.busy
                     ? null
                     : market.cancelDownload,
-                child: const Text('取消下载'),
+                child: Text(context.tr('取消下载')),
               ),
             ] else
               SpringFilledButton(
@@ -184,12 +188,14 @@ class _PluginMarketViewState extends State<PluginMarketView>
                     ? null
                     : () => market.install(plugin),
                 child: Text(
-                  incompatible ??
-                      (installed == null
-                          ? '安装'
-                          : update
-                          ? '更新'
-                          : '已安装'),
+                  context.tr(
+                    incompatible ??
+                        (installed == null
+                            ? '安装'
+                            : update
+                            ? '更新'
+                            : '已安装'),
+                  ),
                 ),
               ),
           ],

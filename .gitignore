@@ -34,6 +34,11 @@ migrate_working_dir/
 /dist/
 /coverage/
 
+# Local native build outputs
+/lazer-audio.dll
+/lazer-audio-bridge.dll
+third_party/*/pubspec.lock
+
 # Symbolication related
 app.*.symbols
 

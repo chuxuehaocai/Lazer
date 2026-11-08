@@ -277,7 +277,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     if (account.contains('@')) {
       return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(account)
           ? null
-          : '邮箱格式不正确。';
+          : '邮箱格式不正确。'; // i18n:key
     }
     return _phonePattern.hasMatch(account) ? null : '手机号格式不正确。';
   }

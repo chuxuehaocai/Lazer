@@ -1,6 +1,9 @@
 // HiFi output settings, ported from the master branch's shared `LazerEqualizer`
 // and `HiFiAudioModels`.
 //
+// i18n:data — preset names and policy labels are interface keys translated by
+// the settings section through `context.tr`.
+//
 // The semantics are deliberately identical to master, including the hand-rolled
 // one-line encodings: those strings are short, forward-compatible, and a malformed
 // value falls back to a flat curve instead of throwing — which matters because they

@@ -463,7 +463,7 @@ class Catalog {
       _online = false;
       _homeError = error is MusicGatewayException && error.authenticationFailure
           ? '请登录 ${selected.provider.name}${selected is MusicAccountGateway ? '。' : ' 服务器。'}'
-          : '曲库加载失败，请检查网络后重试。';
+          : '曲库加载失败，请检查网络后重试。'; // i18n:key
       return _home = null;
     }
   }

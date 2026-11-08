@@ -1,3 +1,5 @@
+// i18n:data — manifest validation messages are interface keys shown by the
+// plugin UI through `context.tr`.
 import 'dart:convert';
 
 /// The portable, versioned contract shipped at the root of a plugin ZIP.

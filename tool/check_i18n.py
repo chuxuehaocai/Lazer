@@ -43,6 +43,13 @@ KEYED_CALLS = {"tr", "TrText", "_tr", "text"}
 # Project widgets whose String parameters are translated inside their build.
 # Keep this in sync when a widget starts calling context.tr on a parameter.
 TRANSLATING_WIDGETS: dict[str, set[str | None]] = {
+    # lib/widgets/settings_row.dart
+    "SettingsRow": {"label", "subtitle"},
+    # lib/widgets/hifi_settings_section.dart
+    "_SettingRow": {"label", "subtitle"},
+    "_SwitchRow": {"label", "subtitle"},
+    "_WarningRow": {None},
+    "_SectionLabel": {None},
     # lib/widgets/accessible_controls.dart
     "AccessibleIconButton": {"tooltip"},
     "AccessibleTooltip": {"message"},
@@ -479,6 +486,8 @@ SAME_AS_ZH_OK = {
         "管理",
         "色相",
         "配色",
+        "使用",
+        "更新",
         "ID：{id}",
     },
 }

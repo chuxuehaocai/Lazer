@@ -1,3 +1,5 @@
+// i18n:data — platform-support messages are interface keys shown by the plugin
+// UI through `context.tr`.
 import 'plugin_manifest.dart';
 
 /// Web-safe facade. Browser deployments can still inspect plugin metadata;

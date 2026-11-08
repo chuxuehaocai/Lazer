@@ -1,5 +1,8 @@
 // The HiFi output section of the Settings page.
 //
+// i18n:data — every CJK literal below is an interface key rendered through
+// `context.tr` (directly or by SettingsRow).
+//
 // It exists to make the native engine's capabilities reachable without ever
 // overstating them: every row says what the choice does, and the readout at the
 // end shows the format the engine actually negotiated rather than what was asked
@@ -100,6 +103,10 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
     }
     final HifiSettings settings = widget.state.hifiSettings;
     final bool native = hifi.nativeAvailable;
+    final String dspOrder = settings.dspStageOrder
+        .map(dspStageLabel)
+        .map(context.tr)
+        .join(' → ');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -198,8 +205,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
               if (native)
                 _SettingRow(
                   label: 'DSP 链顺序',
-                  subtitle:
-                      '当前：${settings.dspStageOrder.map(dspStageLabel).map(context.tr).join(' → ')}',
+                  subtitle: '当前：$dspOrder',
                   expandControl: true,
                   trailing: SettingsChoice<String>(
                     key: const ValueKey('hifi-dsp-order'),
@@ -385,8 +391,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                   _SettingRow(
                     label: '算法',
                     subtitle:
-                        '延时 ${settings.crossfeed.effectiveDelayMs.toStringAsFixed(2)} ms'
-                        ' · 截止 ${settings.crossfeed.effectiveCutoffHz.round()} Hz',
+                        '延时 ${settings.crossfeed.effectiveDelayMs.toStringAsFixed(2)} ms · 截止 ${settings.crossfeed.effectiveCutoffHz.round()} Hz',
                     expandControl: true,
                     trailing: SettingsChoice<HifiCrossfeedAlgorithm>(
                       key: const ValueKey('hifi-crossfeed-algorithm'),
@@ -440,9 +445,13 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
           : '${settings.outputName}（当前不可用，将回退到系统默认）';
     }
     final StringBuffer buffer = StringBuffer(device.displayName);
-    if (!device.isActive) buffer.write('（未激活）');
+    if (!device.isActive) buffer.write(context.tr('（未激活）'));
     if (device.hardwareVolumeFlags != null) {
-      buffer.write(device.hasHardwareVolume ? ' · 硬件音量' : ' · 无硬件音量');
+      buffer.write(
+        device.hasHardwareVolume
+            ? context.tr(' · 硬件音量')
+            : context.tr(' · 无硬件音量'),
+      );
     }
     return buffer.toString();
   }
@@ -471,14 +480,14 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
 
   String _dsdRatePolicySubtitle(HifiSettings settings) {
     final HifiDsdRatePolicy policy = settings.dsdRatePolicy;
-    return policy.isSupported
-        ? policy.detail
-        : '${policy.detail}（本引擎未实现，选择后仍按 PCM 回退行为播放）';
+    final String detail = policy.detail;
+    return policy.isSupported ? detail : '$detail（本引擎未实现，选择后仍按 PCM 回退行为播放）';
   }
 
   String _normalizationSubtitle(HifiSettings settings) {
     final HifiVolumeNormalization mode = settings.volumeNormalization;
-    return mode.isSupported ? mode.detail : '${mode.detail}（需要测量阶段，本引擎未实现）';
+    final String detail = mode.detail;
+    return mode.isSupported ? detail : '$detail（需要测量阶段，本引擎未实现）';
   }
 
   bool _needsVolumeWarning(HifiSettings settings) =>
@@ -913,6 +922,7 @@ List<SignalPathReadout> signalPathReadouts({
   LazerEngineMetrics? metrics,
 }) {
   final OutputPathState? path = info?.outputPath;
+  final String failing = path?.failingConditions.join('; ') ?? '';
   return <SignalPathReadout>[
     SignalPathReadout('解码格式', info == null ? '未播放' : info.codec),
     SignalPathReadout(
@@ -943,7 +953,7 @@ List<SignalPathReadout> signalPathReadouts({
           ? '—'
           : path.bitPerfect
           ? '是（独占 · 无 DSP · 格式一致）'
-          : '否（${path.failingConditions.join('；')}）',
+          : '否（$failing）',
     ),
     SignalPathReadout('独占', path == null ? '—' : (path.exclusive ? '是' : '否')),
     SignalPathReadout(
@@ -1004,7 +1014,7 @@ class _FormatCard extends StatelessWidget {
                       const SizedBox(width: 12),
                       Flexible(
                         child: Text(
-                          row.value,
+                          context.tr(row.value),
                           textAlign: TextAlign.right,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: apple.label,

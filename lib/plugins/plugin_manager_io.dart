@@ -1,3 +1,5 @@
+// i18n:data — manager status and validation messages are interface keys shown
+// by the plugin manager through `context.tr`.
 import '../state/build_safe_notifier.dart';
 import 'dart:io';
 

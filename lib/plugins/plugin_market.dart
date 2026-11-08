@@ -1,3 +1,5 @@
+// i18n:data — error and compatibility messages are interface keys shown by the
+// plugin market page through `context.tr`.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -183,7 +185,9 @@ class PluginMarket extends ChangeNotifier with BuildSafeNotifier {
       }
       if (!_disposed && request == _request) plugins = entries;
     } catch (failure) {
-      if (!_disposed && request == _request) error = '$failure';
+      if (!_disposed && request == _request) {
+        error = failure is FormatException ? failure.message : '$failure';
+      }
     } finally {
       if (!_disposed && request == _request) {
         loading = false;
@@ -226,7 +230,9 @@ class PluginMarket extends ChangeNotifier with BuildSafeNotifier {
     } on _Cancelled {
       // Cancelling a download must leave the installed version intact.
     } catch (failure) {
-      if (!_disposed && transfer == _download) error = '$failure';
+      if (!_disposed && transfer == _download) {
+        error = failure is FormatException ? failure.message : '$failure';
+      }
     } finally {
       if (!_disposed && transfer == _download) {
         installing = null;

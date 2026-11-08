@@ -1,3 +1,5 @@
+// i18n:data — runtime error messages are interface keys shown by the plugin UI
+// through `context.tr`.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

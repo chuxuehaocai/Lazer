@@ -42,6 +42,12 @@ void main() {
       await tester.pumpWidget(
         LazerApp(state: state, audio: audio, media: media),
       );
+      // The localization tables are loaded through the asset bundle. Give that
+      // real async work one turn before asserting the first frame: the whole
+      // interface sits below Localizations until all delegates have loaded.
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
       await tester.pump();
       var rootBuilds = 0;
       debugOnRebuildDirtyWidget = (element, builtOnce) {

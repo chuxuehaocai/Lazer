@@ -83,14 +83,14 @@ class _AppListeningStatisticsPageState extends State<AppListeningStatisticsPage>
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final skipped = _RankingCard(
-                          title: '最常切走的歌',
-                          subtitle: '按主动切歌次数排序',
+                          title: '最常切走的歌', // i18n:key
+                          subtitle: '按主动切歌次数排序', // i18n:key
                           tracks: data.mostSkipped.take(5).toList(),
                           skipped: true,
                         );
                         final played = _RankingCard(
-                          title: '最常播放的歌',
-                          subtitle: '按播放次数排序',
+                          title: '最常播放的歌', // i18n:key
+                          subtitle: '按播放次数排序', // i18n:key
                           tracks: data.mostPlayed.take(5).toList(),
                           skipped: false,
                         );

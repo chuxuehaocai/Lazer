@@ -885,7 +885,9 @@ class _SettingsOverview extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Lazer是免费开源软件，如果你是付费买了这个播放器的，那么你被骗了。',
+                      context.tr(
+                        'Lazer是免费开源软件，如果你是付费买了这个播放器的，那么你被骗了。',
+                      ),
                       style: theme.textTheme.titleMedium?.copyWith(
                         color: apple.label,
                         fontWeight: FontWeight.w700,

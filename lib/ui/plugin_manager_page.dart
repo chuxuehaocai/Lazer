@@ -15,6 +15,9 @@ import '../widgets/build_safe_state.dart';
 import '../plugins/plugin_package.dart';
 import 'plugin_market_page.dart';
 
+String _errorText(Object error) =>
+    error is FormatException ? error.message : '$error';
+
 class PluginManagerPage extends StatelessWidget {
   const PluginManagerPage({super.key, required this.state});
   final AppState state;
@@ -44,9 +47,9 @@ class _PluginManagerViewState extends State<PluginManagerView>
     setState(() => _picking = true);
     try {
       final file = await openFile(
-        acceptedTypeGroups: const [
+        acceptedTypeGroups: [
           XTypeGroup(
-            label: 'Lazer 插件',
+            label: context.tr('Lazer 插件'),
             extensions: ['zip'],
             mimeTypes: ['application/zip', 'application/x-zip-compressed'],
             uniformTypeIdentifiers: ['public.zip-archive'],
@@ -54,8 +57,10 @@ class _PluginManagerViewState extends State<PluginManagerView>
         ],
       );
       if (file == null || !mounted) return;
-      if (await file.length() > maxPluginArchiveBytes) {
-        throw const FormatException('插件包不能超过 16 MB。');
+      final int length = await file.length();
+      if (!mounted) return;
+      if (length > maxPluginArchiveBytes) {
+        throw FormatException(context.tr('插件包不能超过 16 MB。'));
       }
       await manager.importZip(await file.readAsBytes());
       if (mounted) {
@@ -67,7 +72,7 @@ class _PluginManagerViewState extends State<PluginManagerView>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$error')));
+        ).showSnackBar(SnackBar(content: Text(context.tr(_errorText(error)))));
       }
     } finally {
       if (mounted) setState(() => _picking = false);
@@ -80,7 +85,7 @@ class _PluginManagerViewState extends State<PluginManagerView>
     return AnimatedBuilder(
       animation: Listenable.merge([manager, widget.state]),
       builder: (context, _) => SettingsDetailScaffold(
-        title: '插件管理',
+        title: context.tr('插件管理'),
         actions: [
           SpringTextButton(
             onPressed: () => SettingsDetailHost.open(
@@ -109,7 +114,9 @@ class _PluginManagerViewState extends State<PluginManagerView>
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        '插件以 ZIP 导入。每个插件运行在独立的 Lua 沙箱中，只能访问清单声明的网络域名和存储。',
+                        context.tr(
+                          '插件以 ZIP 导入。每个插件运行在独立的 Lua 沙箱中，只能访问清单声明的网络域名和存储。',
+                        ),
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ),
@@ -240,8 +247,8 @@ class _PluginRow extends StatelessWidget {
                 await manager.uninstall(plugin.manifest.id);
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'remove', child: Text('卸载')),
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'remove', child: Text(context.tr('卸载'))),
             ],
           ),
         ],

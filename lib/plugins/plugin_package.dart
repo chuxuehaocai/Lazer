@@ -1,3 +1,5 @@
+// i18n:data — validation messages are interface keys shown by the plugin UI
+// through `context.tr`.
 import 'dart:convert';
 import 'dart:typed_data';
 

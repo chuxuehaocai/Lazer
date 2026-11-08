@@ -1,3 +1,5 @@
+// i18n:data — platform-support messages are interface keys shown by the plugin
+// manager through `context.tr`.
 import '../state/build_safe_notifier.dart';
 import 'package:flutter/foundation.dart';
 
