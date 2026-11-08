@@ -200,7 +200,9 @@ class _SettingsOverview extends StatelessWidget {
                           ),
                       ],
                       onChanged: (AppSurface? value) {
-                        if (value != null) unawaited(state.setSurface(value));
+                        if (value != null) {
+                          unawaited(state.setSurface(value));
+                        }
                       },
                     ),
                   ),
@@ -219,7 +221,9 @@ class _SettingsOverview extends StatelessWidget {
                           ),
                       ],
                       onChanged: (AppUiMode? value) {
-                        if (value != null) unawaited(state.setUiMode(value));
+                        if (value != null) {
+                          unawaited(state.setUiMode(value));
+                        }
                       },
                     ),
                   ),
@@ -858,7 +862,10 @@ class _SettingsOverview extends StatelessWidget {
                 key: const ValueKey('open-plugin-manager'),
                 title: context.tr('插件管理'),
                 subtitle: context.tr('导入 ZIP、启用或卸载 Lua 音乐平台'),
-                leading: const AppleIconTile(icon: Icons.extension_rounded),
+                leading: AppleIconTile(
+                  icon: Icons.extension_rounded,
+                  color: apple.accent,
+                ),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => SettingsDetailHost.open(
                   context,
