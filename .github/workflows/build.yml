@@ -73,6 +73,10 @@ jobs:
       - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: MSYS
+          # windows-2022 already includes a system MSYS2 installation. Reuse
+          # it so the job does not depend on the flaky GitHub release asset
+          # download during action setup.
+          release: false
           update: true
           path-type: inherit
           install: make nasm diffutils git perl
