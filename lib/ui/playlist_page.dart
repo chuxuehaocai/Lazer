@@ -15,6 +15,7 @@ import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/catalog_links.dart';
+import '../widgets/accessible_controls.dart';
 import '../widgets/cover_transition.dart';
 import '../widgets/track_batch_bar.dart';
 import 'login.dart';
@@ -50,6 +51,17 @@ class AppLikesPage extends StatelessWidget {
     }
     final Playlist? liked = state.collections.liked;
     if (liked == null) {
+      final String? error = state.collectionsError;
+      if (error != null) {
+        return AppNotice(
+          message: error,
+          icon: Icons.wifi_off_rounded,
+          action: SpringFilledButton(
+            onPressed: () => unawaited(state.refreshCollections(force: true)),
+            child: const TrText('重试'),
+          ),
+        );
+      }
       return const Center(child: CircularProgressIndicator());
     }
     return AppPlaylistPage(state: state, playlist: liked, embedded: true);
@@ -404,6 +416,11 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
                           onPlay: tracks == null || tracks.isEmpty
                               ? null
                               : () => widget.state.playQueue(tracks),
+                          onShuffle: tracks == null || tracks.isEmpty
+                              ? null
+                              : () => widget.state.playQueue(
+                                  List<Track>.of(tracks)..shuffle(),
+                                ),
                           onDownload: tracks == null || tracks.isEmpty
                               ? null
                               : () => downloadTracks(
@@ -536,6 +553,7 @@ class AppPlaylistHeader extends StatelessWidget {
     required this.compact,
     required this.onPlay,
     this.onDownload,
+    this.onShuffle,
     this.artist,
     this.artistWidget,
     this.note,
@@ -550,6 +568,10 @@ class AppPlaylistHeader extends StatelessWidget {
   final bool compact;
   final VoidCallback? onPlay;
   final VoidCallback? onDownload;
+
+  /// Starts the same list in a shuffled order. A chart header hides it because
+  /// a chart's order is its meaning.
+  final VoidCallback? onShuffle;
   final Widget? metadata;
   final Widget? cover;
   final String? transitionIdentity;
@@ -723,17 +745,20 @@ class AppPlaylistHeader extends StatelessWidget {
               ),
             ],
             if (showShuffle)
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: apple.fill,
-                  shape: BoxShape.circle,
+              AccessibleIconButton(
+                tooltip: '随机播放',
+                onPressed: onShuffle,
+                icon: const Icon(Icons.shuffle_rounded, size: 19),
+                iconSize: 19,
+                color: onShuffle == null ? apple.tertiaryLabel : apple.accent,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 40,
                 ),
-                child: Icon(
-                  Icons.shuffle_rounded,
-                  size: 19,
-                  color: onPlay == null ? apple.tertiaryLabel : apple.accent,
+                style: IconButton.styleFrom(
+                  backgroundColor: apple.fill,
+                  shape: const CircleBorder(),
                 ),
               ),
           ],

@@ -88,6 +88,31 @@ void main() {
     },
   );
 
+  test(
+    'a television keeps the remote when its density profile is not tv',
+    () async {
+      // The large-screen UI follows the hardware, not the density preference; the
+      // remote must use the same definition or it switches itself off while the
+      // TV layout is still on screen.
+      HttpOverrides.global = null;
+      final state = AppState(deviceIsTelevision: true);
+      await state.setSurface(AppSurface.standard);
+      final remote = LanRemoteController(
+        state,
+        bindAddress: InternetAddress.loopbackIPv4,
+      );
+      addTearDown(() {
+        remote.dispose();
+        state.dispose();
+      });
+      await remote.initialize();
+      await remote.setEnabled(true);
+      await _ready(remote);
+      expect(remote.running, isTrue);
+      expect(state.surface, AppSurface.standard);
+    },
+  );
+
   test('restarts after TV mode changes during address discovery', () async {
     HttpOverrides.global = null;
     final state = AppState()..surface = AppSurface.tv;

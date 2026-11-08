@@ -56,7 +56,15 @@ class AppPlayerBar extends StatefulWidget {
   State<AppPlayerBar> createState() => _AppPlayerBarState();
 }
 
-typedef _PlayerBarSignature = (Track?, bool, bool, bool, LoopMode, double);
+typedef _PlayerBarSignature = (
+  Track?,
+  bool,
+  bool,
+  bool,
+  LoopMode,
+  double,
+  bool,
+);
 
 class _AppPlayerBarState extends State<AppPlayerBar>
     with BuildSafeState<AppPlayerBar> {
@@ -71,6 +79,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
     state.shuffle,
     state.repeat,
     state.volume,
+    state.signedIn,
   );
 
   @override
@@ -216,9 +225,16 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                             icon: state.currentLiked
                                 ? Icons.favorite_rounded
                                 : Icons.favorite_border_rounded,
-                            tooltip: state.currentLiked ? '取消喜欢' : '喜欢',
+                            // The app-level toggle returns silently for a guest;
+                            // a disabled control with a reason beats a heart that
+                            // looks live and does nothing.
+                            tooltip: !state.signedIn
+                                ? '登录后收藏'
+                                : state.currentLiked
+                                ? '取消喜欢'
+                                : '喜欢',
                             selected: state.currentLiked,
-                            onPressed: track == null
+                            onPressed: track == null || !state.signedIn
                                 ? null
                                 : () => unawaited(state.toggleLikeCurrent()),
                           ),

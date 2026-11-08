@@ -204,6 +204,7 @@ class _AppShellState extends State<AppShell>
     albumDetailRequest.addListener(_onAlbumRequest);
     artistDetailRequest.addListener(_onArtistRequest);
     TvOverlayStack.instance.addListener(_onTvOverlayChanged);
+    _announceHifiFallback();
     if (widget.autoCheckUpdates) {
       _updateTimer = Timer(
         const Duration(seconds: 4),
@@ -214,6 +215,25 @@ class _AppShellState extends State<AppShell>
 
   Timer? _updateTimer;
   AppRelease? _pendingUpdate;
+
+  /// Says once why this launch is not on the native HiFi path.
+  ///
+  /// The decision has always carried a notice; until now only the diagnostics
+  /// log saw it, so a fallback was indistinguishable from a HiFi session for a
+  /// listener who never opened the engine settings.
+  void _announceHifiFallback() {
+    final String? notice = state.hifiPathNotice;
+    if (notice == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 8),
+          content: Text(context.tr(notice)),
+        ),
+      );
+    });
+  }
 
   void _scheduleUpdateCheck(Duration delay) {
     _updateTimer?.cancel();
@@ -294,6 +314,11 @@ class _AppShellState extends State<AppShell>
       _comments = false;
       _artistSongs = false;
       _artistReleases = null;
+      // These two are detail pages too. Leaving them open kept the previous
+      // provider's saved albums / local files on screen while the content key
+      // and every new request already pointed at the new provider.
+      _localMusic = false;
+      _savedAlbums = false;
       _coveredShell = null;
     }
     if (_contentSwitching && !_nowPlayingOpen) return;
@@ -751,13 +776,25 @@ class _AppShellState extends State<AppShell>
       _coveredShellStale = true;
     }
     setState(() {
-      _backTarget = _backPlayer
-          ? null
-          : _browseHistory.isNotEmpty
-          ? _browseHistory.last.key
-          : '$activePlatformContentKey:section:home';
+      _backTarget = _backPlayer ? null : _backDestinationKey();
     });
     state.browseTransitionChanged(true);
+  }
+
+  /// The page a committed Back will land on.
+  ///
+  /// The preview has to name the same page the commit builds. Assuming "home"
+  /// when there is no history was wrong for a detail opened from the library:
+  /// Back closes the detail but keeps the section, so the drag previewed one
+  /// page and the release animated another.
+  String _backDestinationKey() {
+    if (_browseHistory.isNotEmpty) return _browseHistory.last.key;
+    final String prefix = activePlatformContentKey;
+    if (_artist != null && (_artistSongs || _artistReleases != null)) {
+      return '$prefix:artist:${_artist!.key}:overview';
+    }
+    if (_hasOpenDetail) return '$prefix:section:${_section.name}';
+    return '$prefix:section:${_AppSection.home.name}';
   }
 
   void _onBackProgress() {

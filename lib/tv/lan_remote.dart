@@ -35,9 +35,15 @@ class LanRemoteController extends ChangeNotifier with BuildSafeNotifier {
   List<String> urls = const [];
   int? get port => _server?.port;
   bool get running => _server != null;
+
+  /// Whether the large-screen presentation is on screen.
+  ///
+  /// This must match [TvScope]: the remote is a television capability, not a
+  /// property of the density profile. Keying it to `surface == tv` alone took
+  /// the remote away from a real TV whose form factor had been set to 标准,
+  /// while the large-screen UI stayed active.
   bool get _active =>
-      state.surface == AppSurface.tv ||
-      (state.surface == AppSurface.auto && state.deviceIsTelevision);
+      state.deviceIsTelevision || state.surface == AppSurface.tv;
 
   static Future<List<InternetAddress>> _localAddresses() async =>
       (await NetworkInterface.list(type: InternetAddressType.IPv4))

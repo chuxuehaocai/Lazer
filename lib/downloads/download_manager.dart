@@ -129,6 +129,14 @@ class DownloadManager extends ChangeNotifier with BuildSafeNotifier {
   bool _disposed = false;
   DateTime _lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// Files this run has already chosen for a queued task.
+  ///
+  /// Two tracks can sanitise to the same file name (the same title by the same
+  /// artist, or two batches that both number their tracks from 01). The second
+  /// task must not wait for the first one's file, see it appear and adopt it as
+  /// its own.
+  final Set<String> _claimedPaths = <String>{};
+
   List<DownloadTask> get tasks => List<DownloadTask>.unmodifiable(_tasks);
   int get activeCount =>
       _tasks.where((DownloadTask task) => task.isActive).length;
@@ -255,21 +263,60 @@ class DownloadManager extends ChangeNotifier with BuildSafeNotifier {
     }
     task.resolvedQuality = source.quality;
     final String extension = audioExtensionFor(source);
-    final File target = File(_targetPath(task, extension));
+    File target = File(_targetPath(task, extension));
+    if (_claimedPaths.contains(target.path)) {
+      target = await _uniqueTarget(task, extension);
+    } else {
+      // Claim before the existence check yields: two queued tasks can
+      // otherwise both see "no file" and start writing the same path.
+      _claimedPaths.add(target.path);
+    }
     if (await target.exists()) {
-      task.path = target.path;
-      task.total = await target.length();
-      task.received = task.total;
-      await _record(task, target);
-      if (task.status != DownloadStatus.canceled) {
-        task.status = DownloadStatus.existing;
+      final LocalTrack? recorded = library?.entryForPath(target.path);
+      if (recorded != null && recorded.track.id == task.track.id) {
+        // This exact track is already here: adopt its file instead of fetching
+        // the same audio again.
+        task.path = target.path;
+        task.total = await target.length();
+        task.received = task.total;
+        await _record(task, target);
+        if (task.status != DownloadStatus.canceled) {
+          task.status = DownloadStatus.existing;
+        }
+        _finishRun();
+        return;
       }
-      _finishRun();
-      return;
+      // The name is taken by another song, or by a file this app does not own.
+      // Never hand that file to this track: playing it would play the wrong
+      // audio, and the local library would overwrite the other entry.
+      target = await _uniqueTarget(task, extension);
+      _claimedPaths.add(target.path);
     }
     task.status = DownloadStatus.downloading;
     _notify(force: true);
     await _download(task, source, target);
+  }
+
+  /// The first free `name (2).ext`, `name (3).ext`, … for [task].
+  Future<File> _uniqueTarget(DownloadTask task, String extension) async {
+    final String base = sanitizeFileName(task.fileBase);
+    for (int copy = 2; copy < 1000; copy++) {
+      final String prefix = base.length > 110 ? base.substring(0, 110) : base;
+      final String name = '$prefix ($copy)';
+      final File candidate = File(_targetPath(task, extension, fileBase: name));
+      if (_claimedPaths.contains(candidate.path)) continue;
+      if (await candidate.exists()) continue;
+      if (library?.entryForPath(candidate.path) != null) continue;
+      return candidate;
+    }
+    final File candidate = File(
+      _targetPath(
+        task,
+        extension,
+        fileBase: '$base (${DateTime.now().microsecondsSinceEpoch})',
+      ),
+    );
+    return candidate;
   }
 
   Future<void> _download(
@@ -392,12 +439,12 @@ class DownloadManager extends ChangeNotifier with BuildSafeNotifier {
     _pump();
   }
 
-  String _targetPath(DownloadTask task, String extension) {
+  String _targetPath(DownloadTask task, String extension, {String? fileBase}) {
     final String separator = Platform.pathSeparator;
     final String folder = task.folderName == null
         ? task.directory
         : '${task.directory}$separator${task.folderName}';
-    return '$folder$separator${sanitizeFileName(task.fileBase)}.$extension';
+    return '$folder$separator${sanitizeFileName(fileBase ?? task.fileBase)}.$extension';
   }
 
   void _notify({bool force = false}) {

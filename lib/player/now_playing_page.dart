@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../animation/apple_modal.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -15,6 +16,7 @@ import 'player_backdrop.dart';
 import '../l10n/app_localizations.dart';
 import '../navigation/pull_down_to_close.dart';
 import '../state/app_state.dart';
+import '../state/media_shortcuts.dart';
 import '../state/song_comments_controller.dart';
 import '../state/ui_preferences.dart';
 import '../theme/app_palette.dart';
@@ -714,137 +716,185 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   @override
-  Widget build(BuildContext context) => Theme(
-    data: _playerTheme(context),
-    child: Scaffold(
-      backgroundColor: Colors.black,
-      body: AnimatedBuilder(
-        animation: widget.state,
-        builder: (context, _) {
-          final Track? track = widget.state.current;
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              _EntranceGatedBackdrop(
-                settled: widget.entranceSettled,
-                builder: (bool settled) => AlbumBlurFlow(
-                  boundaryKey: _backdropKey,
-                  track: track,
-                  // The immersive player owns its canvas: browse-page backdrop
-                  // settings (including "不使用" or a custom picture) must not
-                  // strip the song's album-colour flow from here.
-                  mode: widget.state.playerBackground,
-                  frameRate: widget.state.playerBackgroundFps == 0
-                      ? null
-                      : widget.state.playerBackgroundFps,
-                  solidColor: widget.state.playerBackgroundColor,
-                  imagePath: widget.state.playerBackgroundImagePath,
-                  pageColor: Colors.black,
-                  animationsEnabled: widget.state.playing,
-                  // Reads the live preference: the shell rebuilds this page on
-                  // every state report, so dragging the slider is reflected on
-                  // the next frame instead of on the next opening.
-                  quality: widget.state.playerBackgroundQuality,
-                  // The background belongs to the visible player at every
-                  // point in its spring. Replacing it with the entrance-only
-                  // placeholder made the selected canvas disappear whenever
-                  // the outer status was interrupted or not delivered.
-                  preview: false,
+  Widget build(BuildContext context) => Focus(
+    autofocus: true,
+    onKeyEvent: _onShortcutKey,
+    child: Theme(
+      data: _playerTheme(context),
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: AnimatedBuilder(
+          animation: widget.state,
+          builder: (context, _) {
+            final Track? track = widget.state.current;
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                _EntranceGatedBackdrop(
+                  settled: widget.entranceSettled,
+                  builder: (bool settled) => AlbumBlurFlow(
+                    boundaryKey: _backdropKey,
+                    track: track,
+                    // The immersive player owns its canvas: browse-page backdrop
+                    // settings (including "不使用" or a custom picture) must not
+                    // strip the song's album-colour flow from here.
+                    mode: widget.state.playerBackground,
+                    frameRate: widget.state.playerBackgroundFps == 0
+                        ? null
+                        : widget.state.playerBackgroundFps,
+                    solidColor: widget.state.playerBackgroundColor,
+                    imagePath: widget.state.playerBackgroundImagePath,
+                    pageColor: Colors.black,
+                    animationsEnabled: widget.state.playing,
+                    // Reads the live preference: the shell rebuilds this page on
+                    // every state report, so dragging the slider is reflected on
+                    // the next frame instead of on the next opening.
+                    quality: widget.state.playerBackgroundQuality,
+                    // The background belongs to the visible player at every
+                    // point in its spring. Replacing it with the entrance-only
+                    // placeholder made the selected canvas disappear whenever
+                    // the outer status was interrupted or not delivered.
+                    preview: false,
+                  ),
                 ),
-              ),
-              if (track == null)
-                _EmptyNowPlaying(onBack: _closePage)
-              else
-                LayoutBuilder(
-                  builder: (context, box) {
-                    final bool compact = useCompactLayout(
-                      widget.state.uiMode,
-                      box.maxWidth,
-                    );
-                    if (_desktopLayout != !compact) {
-                      _desktopLayout = !compact;
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) {
-                          _wakeControls();
-                          _armHide();
-                        }
-                      });
-                    }
-                    if (!compact) {
-                      return Stack(
-                        fit: StackFit.expand,
-                        children: <Widget>[
-                          SafeArea(
-                            child: DesktopNowPlaying(
-                              key: const ValueKey('desktop-now-playing'),
-                              state: widget.state,
-                              track: track,
-                              artwork: _cover(track),
-                              lyrics: _settledGate(
-                                LyricViewport(
-                                  state: widget.state,
-                                  backdropKey: _backdropKey,
-                                  onSelectionChanged: _selectionChanged,
-                                ),
-                              ),
-                              comments: SongCommentsView(
+                if (track == null)
+                  _EmptyNowPlaying(onBack: _closePage)
+                else
+                  LayoutBuilder(
+                    builder: (context, box) {
+                      final bool compact = useCompactLayout(
+                        widget.state.uiMode,
+                        box.maxWidth,
+                      );
+                      if (_desktopLayout != !compact) {
+                        _desktopLayout = !compact;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) {
+                            _wakeControls();
+                            _armHide();
+                          }
+                        });
+                      }
+                      if (!compact) {
+                        return Stack(
+                          fit: StackFit.expand,
+                          children: <Widget>[
+                            SafeArea(
+                              child: DesktopNowPlaying(
+                                key: const ValueKey('desktop-now-playing'),
                                 state: widget.state,
                                 track: track,
-                                controller: _commentsController,
+                                artwork: _cover(track),
+                                lyrics: _settledGate(
+                                  LyricViewport(
+                                    state: widget.state,
+                                    backdropKey: _backdropKey,
+                                    onSelectionChanged: _selectionChanged,
+                                  ),
+                                ),
+                                comments: SongCommentsView(
+                                  state: widget.state,
+                                  track: track,
+                                  controller: _commentsController,
+                                ),
+                                queue: PlaybackQueueView(
+                                  state: widget.state,
+                                  showHeader: false,
+                                ),
+                                pane: _desktopPane,
+                                onPaneChanged: _selectDesktopPane,
+                                onBack: _closePage,
+                                onSaveArtwork: () =>
+                                    unawaited(_saveArtwork(track)),
+                                onFullscreen: () =>
+                                    unawaited(_toggleFullscreen()),
+                                controlsVisible: _controlsVisible,
+                                onActivity: _controlsActivity,
+                                onPointerStart: _beginControlPointer,
+                                onPointerEnd: _endControlPointer,
                               ),
-                              queue: PlaybackQueueView(
-                                state: widget.state,
-                                showHeader: false,
-                              ),
-                              pane: _desktopPane,
-                              onPaneChanged: _selectDesktopPane,
-                              onBack: _closePage,
-                              onSaveArtwork: () =>
-                                  unawaited(_saveArtwork(track)),
-                              onFullscreen: () =>
-                                  unawaited(_toggleFullscreen()),
-                              controlsVisible: _controlsVisible,
-                              onActivity: _controlsActivity,
-                              onPointerStart: _beginControlPointer,
-                              onPointerEnd: _endControlPointer,
                             ),
-                          ),
-                          ?_pullDownLayer(box),
-                        ],
+                            ?_pullDownLayer(box),
+                          ],
+                        );
+                      }
+                      return Listener(
+                        behavior: HitTestBehavior.translucent,
+                        onPointerDown: (event) {
+                          _onTouchDown();
+                          _beginControlPointer(event.pointer);
+                        },
+                        onPointerUp: (event) =>
+                            _endControlPointer(event.pointer),
+                        onPointerCancel: (event) =>
+                            _endControlPointer(event.pointer),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: <Widget>[
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              excludeFromSemantics: true,
+                              onTap: compact && _lyricsMode
+                                  ? _stepBackFromLyrics
+                                  : null,
+                              child: SafeArea(child: _mobile(track)),
+                            ),
+                            ?_pullDownLayer(box),
+                          ],
+                        ),
                       );
-                    }
-                    return Listener(
-                      behavior: HitTestBehavior.translucent,
-                      onPointerDown: (event) {
-                        _onTouchDown();
-                        _beginControlPointer(event.pointer);
-                      },
-                      onPointerUp: (event) => _endControlPointer(event.pointer),
-                      onPointerCancel: (event) =>
-                          _endControlPointer(event.pointer),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: <Widget>[
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            excludeFromSemantics: true,
-                            onTap: compact && _lyricsMode
-                                ? _stepBackFromLyrics
-                                : null,
-                            child: SafeArea(child: _mobile(track)),
-                          ),
-                          ?_pullDownLayer(box),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-            ],
-          );
-        },
+                    },
+                  ),
+              ],
+            );
+          },
+        ),
       ),
     ),
   );
+
+  /// The desktop player's one-key actions.
+  ///
+  /// The docs and the transport tooltips have always advertised Q/F/L/C/M/Esc;
+  /// nothing was listening for them. The handler skips text fields and the
+  /// shortcut recorder so typing a search query never toggles the player.
+  KeyEventResult _onShortcutKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (MediaShortcutRecorder.active || _isEditingText() || _selectionOpen) {
+      return KeyEventResult.ignored;
+    }
+    final HardwareKeyboard keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed ||
+        keyboard.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.keyQ:
+        unawaited(_queue());
+      case LogicalKeyboardKey.keyF:
+        unawaited(_toggleFullscreen());
+      case LogicalKeyboardKey.keyL:
+        _toggleLyrics();
+      case LogicalKeyboardKey.keyC:
+        unawaited(_openComments());
+      case LogicalKeyboardKey.keyM:
+        unawaited(widget.state.toggleMute());
+      case LogicalKeyboardKey.escape:
+        _closePage();
+      default:
+        return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
+  bool _isEditingText() {
+    final BuildContext? context = FocusManager.instance.primaryFocus?.context;
+    if (context == null) return false;
+    if (context.widget is EditableText) return true;
+    return context.findAncestorStateOfType<EditableTextState>() != null;
+  }
 
   /// A downward drag from anywhere in the upper half pulls the player away.
   ///

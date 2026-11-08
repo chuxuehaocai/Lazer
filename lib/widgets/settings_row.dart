@@ -62,55 +62,60 @@ class SettingsRow extends StatelessWidget {
         ],
       ],
     );
-    return TvFocusHighlight(
-      borderRadius: BorderRadius.circular(10),
-      child: LayoutBuilder(
-        builder: (BuildContext context, BoxConstraints constraints) {
-          // Use the actual card width: settings can be shown in an inset
-          // pane even when the window itself is much wider.
-          final double textScale =
-              MediaQuery.textScalerOf(context).scale(16) / 16;
-          final bool stacked =
-              constraints.maxWidth < 360 * textScale.clamp(1, 2);
-          final Widget control = expandControl
-              ? SizedBox(width: double.infinity, child: trailing)
-              : trailing;
-          return Container(
-            constraints: const BoxConstraints(
-              minHeight: SettingsSpacing.rowMinHeight,
-            ),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: apple.separator, width: .5),
+    // The label and the control are two pieces of one row. Without merging,
+    // a screen reader reaches the Switch as a bare "on/off" toggle with no
+    // name, which is how every settings switch in the app was announced.
+    return MergeSemantics(
+      child: TvFocusHighlight(
+        borderRadius: BorderRadius.circular(10),
+        child: LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            // Use the actual card width: settings can be shown in an inset
+            // pane even when the window itself is much wider.
+            final double textScale =
+                MediaQuery.textScalerOf(context).scale(16) / 16;
+            final bool stacked =
+                constraints.maxWidth < 360 * textScale.clamp(1, 2);
+            final Widget control = expandControl
+                ? SizedBox(width: double.infinity, child: trailing)
+                : trailing;
+            return Container(
+              constraints: const BoxConstraints(
+                minHeight: SettingsSpacing.rowMinHeight,
               ),
-            ),
-            padding: SettingsSpacing.rowPadding,
-            child: stacked
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      heading,
-                      const SizedBox(height: 8),
-                      Align(alignment: Alignment.centerLeft, child: control),
-                    ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: <Widget>[
-                      Expanded(flex: 4, child: heading),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        flex: controlFlex,
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: control,
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: apple.separator, width: .5),
+                ),
+              ),
+              padding: SettingsSpacing.rowPadding,
+              child: stacked
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        heading,
+                        const SizedBox(height: 8),
+                        Align(alignment: Alignment.centerLeft, child: control),
+                      ],
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: <Widget>[
+                        Expanded(flex: 4, child: heading),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          flex: controlFlex,
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: control,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-          );
-        },
+                      ],
+                    ),
+            );
+          },
+        ),
       ),
     );
   }

@@ -232,6 +232,8 @@ class _DownloadDialogState extends State<_DownloadDialog>
       });
       return;
     }
+    // Do not commit a choice for a dialog that is already gone.
+    if (!mounted) return;
     await widget.state.setDownloadQuality(_quality);
     await widget.state.setDownloadDirectory(directory);
     if (!mounted) return;
@@ -253,138 +255,152 @@ class _DownloadDialogState extends State<_DownloadDialog>
       (Duration sum, Track track) => sum + track.duration,
     );
     final int estimate = _quality.estimatedBytes(total);
-    return AlertDialog(
-      title: TrText(
-        widget.tracks.length == 1 ? '下载歌曲' : '下载 ${widget.tracks.length} 首歌曲',
-      ),
-      content: SizedBox(
-        width: 430,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(
-                context.tr('下载音质'),
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: apple.secondaryLabel,
+    // The probe is a multi-await sequence. When it is running the dialog is
+    // doing work the user cannot cancel (the Cancel button is disabled), so the
+    // route must not be dismissible by a barrier tap, Esc or system back either:
+    // that would dispose the dialog mid-probe and drop the request.
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        title: TrText(
+          widget.tracks.length == 1 ? '下载歌曲' : '下载 ${widget.tracks.length} 首歌曲',
+        ),
+        content: SizedBox(
+          width: 430,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(
+                  context.tr('下载音质'),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: apple.secondaryLabel,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              RadioGroup<AudioQuality>(
-                groupValue: _quality,
-                onChanged: (AudioQuality? value) {
-                  if (_busy || value == null) return;
-                  setState(() => _quality = value);
-                },
-                child: Column(
+                const SizedBox(height: 4),
+                RadioGroup<AudioQuality>(
+                  groupValue: _quality,
+                  onChanged: (AudioQuality? value) {
+                    if (_busy || value == null) return;
+                    setState(() => _quality = value);
+                  },
+                  child: Column(
+                    children: <Widget>[
+                      for (final AudioQuality quality in AudioQuality.values)
+                        RadioListTile<AudioQuality>(
+                          key: ValueKey<String>(
+                            'download-quality-${quality.name}',
+                          ),
+                          value: quality,
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(
+                            '${context.tr(widget.state.audioQualityLabel(quality))}  ${context.tr(widget.state.audioQualityBitrate(quality))}',
+                          ),
+                          subtitle: Text(
+                            context.tr(
+                              widget.state.audioQualityDetail(quality),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Divider(height: 18, color: apple.separator),
+                Row(
                   children: <Widget>[
-                    for (final AudioQuality quality in AudioQuality.values)
-                      RadioListTile<AudioQuality>(
-                        key: ValueKey<String>(
-                          'download-quality-${quality.name}',
-                        ),
-                        value: quality,
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        title: Text(
-                          '${context.tr(widget.state.audioQualityLabel(quality))}  ${context.tr(widget.state.audioQualityBitrate(quality))}',
-                        ),
-                        subtitle: Text(
-                          context.tr(widget.state.audioQualityDetail(quality)),
-                        ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            context.tr('保存到'),
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: apple.secondaryLabel,
+                            ),
+                          ),
+                          Text(
+                            _directory ?? context.tr('正在准备目录…'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_canPickDirectory)
+                      SpringTextButton(
+                        onPressed: _busy ? null : _pickDirectory,
+                        child: TrText('选择…'),
                       ),
                   ],
                 ),
-              ),
-              Divider(height: 18, color: apple.separator),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          context.tr('保存到'),
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: apple.secondaryLabel,
-                          ),
-                        ),
-                        Text(
-                          _directory ?? context.tr('正在准备目录…'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
+                if (widget.folderName != null &&
+                    widget.folderName!.trim().isNotEmpty)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: _createFolder,
+                    title: Text(
+                      context.tr('创建「${widget.folderName!.trim()}」文件夹'),
+                    ),
+                    onChanged: _busy
+                        ? null
+                        : (bool value) => setState(() => _createFolder = value),
+                  ),
+                if (total > Duration.zero)
+                  Text(
+                    context.tr(
+                      '预计占用 ${formatBytes(estimate)}（按 ${_quality.bitrateLabel} 估算）',
+                    ),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: apple.secondaryLabel,
                     ),
                   ),
-                  if (_canPickDirectory)
-                    SpringTextButton(
-                      onPressed: _busy ? null : _pickDirectory,
-                      child: TrText('选择…'),
+                if (_quality.requiresVip)
+                  Text(
+                    context.tr('无损音质需要黑胶会员；无权限时会自动降级。'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: apple.secondaryLabel,
                     ),
+                  ),
+                if (_error != null) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Text(
+                    context.tr(_error!),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
                 ],
-              ),
-              if (widget.folderName != null &&
-                  widget.folderName!.trim().isNotEmpty)
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  value: _createFolder,
-                  title: Text(
-                    context.tr('创建「${widget.folderName!.trim()}」文件夹'),
-                  ),
-                  onChanged: _busy
-                      ? null
-                      : (bool value) => setState(() => _createFolder = value),
-                ),
-              if (total > Duration.zero)
-                Text(
-                  context.tr(
-                    '预计占用 ${formatBytes(estimate)}（按 ${_quality.bitrateLabel} 估算）',
-                  ),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: apple.secondaryLabel,
-                  ),
-                ),
-              if (_quality.requiresVip)
-                Text(
-                  context.tr('无损音质需要黑胶会员；无权限时会自动降级。'),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: apple.secondaryLabel,
-                  ),
-                ),
-              if (_error != null) ...<Widget>[
-                const SizedBox(height: 8),
-                Text(
-                  context.tr(_error!),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.error,
-                  ),
-                ),
               ],
-            ],
+            ),
           ),
         ),
+        actions: <Widget>[
+          SpringTextButton(
+            onPressed: _busy ? null : () => Navigator.of(context).pop(),
+            child: TrText('取消'),
+          ),
+          SpringFilledButton(
+            key: const ValueKey<String>('download-confirm'),
+            // Until the default directory resolves there is nowhere to save to;
+            // letting the tap through only produces an error about a choice the
+            // user never had.
+            onPressed: _busy || _directory == null || _directory!.trim().isEmpty
+                ? null
+                : _confirm,
+            child: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : TrText('下载'),
+          ),
+        ],
       ),
-      actions: <Widget>[
-        SpringTextButton(
-          onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: TrText('取消'),
-        ),
-        SpringFilledButton(
-          key: const ValueKey<String>('download-confirm'),
-          onPressed: _busy ? null : _confirm,
-          child: _busy
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : TrText('下载'),
-        ),
-      ],
     );
   }
 }

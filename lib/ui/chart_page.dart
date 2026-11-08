@@ -277,6 +277,10 @@ class _AppChartPageState extends State<AppChartPage>
                           ? () => setState(() {
                               final id = chart.entries[index].track!.id;
                               if (!_selected.add(id)) _selected.remove(id);
+                              // Leaving the selection bar up with nothing
+                              // selected has no exit: the bar's close button is
+                              // the only way out and the rows still show checks.
+                              if (_selected.isEmpty) _selecting = false;
                             })
                           : () => widget.state.playQueue(
                               chart.entries
