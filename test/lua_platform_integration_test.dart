@@ -186,7 +186,18 @@ void main() {
           const MethodChannel('plugins.flutter.io/path_provider'),
           null,
         );
-    await directory.delete(recursive: true);
+    // Plugin runtimes can still release files a moment after the test body
+    // returns; deleting a directory that is momentarily non-empty is a flake,
+    // not a failure. Retry briefly before giving up.
+    for (var attempt = 0; ; attempt++) {
+      try {
+        await directory.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt >= 20) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
   });
   PluginManager manager() =>
       PluginManager(rootDirectory: Directory('${directory.path}/plugins'));
