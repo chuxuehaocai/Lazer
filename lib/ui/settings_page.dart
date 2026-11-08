@@ -877,6 +877,36 @@ class _SettingsOverview extends StatelessWidget {
             ),
             const _AppSectionLabel('关于'),
             AppleGroupedCard(
+              key: const ValueKey('free-open-source-declaration'),
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Lazer是免费开源软件，如果你是付费买了这个播放器的，那么你被骗了。',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: apple.label,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.asset(
+                        'assets/antiresell.png',
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.medium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            AppleGroupedCard(
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[

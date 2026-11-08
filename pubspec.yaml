@@ -96,6 +96,7 @@ flutter:
   assets:
     - assets/l10n/
     - assets/app_icon.png
+    - assets/antiresell.png
     - assets/chart_logos/
     - assets/easter_eggs/still_alive/
 
