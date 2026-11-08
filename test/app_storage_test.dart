@@ -137,6 +137,31 @@ void main() {
     },
   );
 
+  test('a migration that keeps failing is abandoned after bounded attempts', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final blocker = await File(
+      '${directory.path}/blocked-retry',
+    ).writeAsString('file');
+    await prefs.setString(AppStorage.pendingKey, blocker.path);
+    for (var attempt = 0; attempt < AppStorage.maxPendingAttempts; attempt++) {
+      final current = storage();
+      await current.initialize(prefs);
+      expect(current.error, isNotNull);
+      if (attempt < AppStorage.maxPendingAttempts - 1) {
+        expect(current.requiresRestart, isTrue);
+      } else {
+        expect(current.requiresRestart, isFalse);
+      }
+    }
+    // The third failure dropped the request: it will not be retried on every
+    // later launch, and the settings page keeps reporting the failure.
+    expect(prefs.containsKey(AppStorage.pendingKey), isFalse);
+    expect(prefs.containsKey(AppStorage.pendingAttemptsKey), isFalse);
+    final later = storage();
+    await later.initialize(prefs);
+    expect(later.requiresRestart, isFalse);
+  });
+
   test(
     'an unavailable selected root falls back without erasing its preference',
     () async {
