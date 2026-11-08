@@ -69,17 +69,20 @@ curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
 # every package run; that asset intermittently returns 504 on CI. Use the
 # type-2 runtime already embedded in the verified linuxdeploy AppImage.
 runtime="$tools/runtime-$arch"
-python3 - "$tools/linuxdeploy-$arch.AppImage" "$runtime" <<'PY'
-import sys
-
-src, dst = sys.argv[1:3]
-data = open(src, 'rb').read()
-offset = data.find(b'hsqs')
-if offset <= 0:
-    raise SystemExit('could not locate the AppImage runtime')
-open(dst, 'wb').write(data[:offset])
-PY
+linuxdeploy="$tools/linuxdeploy-$arch.AppImage"
+runtime_offset="$(APPIMAGE_EXTRACT_AND_RUN=1 "$linuxdeploy" --appimage-offset)"
+[[ "$runtime_offset" =~ ^[1-9][0-9]*$ ]] || {
+  echo "Could not determine the linuxdeploy AppImage runtime offset: $runtime_offset" >&2
+  exit 1
+}
+linuxdeploy_size="$(stat -c '%s' "$linuxdeploy")"
+(( runtime_offset < linuxdeploy_size )) || {
+  echo "The linuxdeploy runtime offset exceeds the AppImage size" >&2
+  exit 1
+}
+head -c "$runtime_offset" "$linuxdeploy" > "$runtime"
 test -s "$runtime"
+chmod 0444 "$runtime"
 export LDAI_RUNTIME_FILE="$runtime"
 chmod +x "$tools/"*.AppImage "$tools/"*.sh
 
