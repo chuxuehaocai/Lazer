@@ -110,861 +110,816 @@ class _SettingsOverview extends StatelessWidget {
           children: <Widget>[
             Column(
               children: <Widget>[
-                const ApplePageTitle(
-                  title: '设置',
-                  subtitle: '外观、界面和账户。',
-                  padding: EdgeInsets.fromLTRB(0, 12, 0, 20),
-                ),
-                const _AppSectionLabel('界面'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      AppleListTile(
-                        padding: SettingsSpacing.rowPadding,
-                        minHeight: SettingsSpacing.rowMinHeight,
-                        key: const ValueKey('open-font-settings'),
-                        title: context.tr('字体自定义'),
-                        subtitle: context.tr('选择 MiSans、系统或导入字体，调节文字与歌词大小和粗细'),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => SettingsDetailHost.open(
-                          context,
-                          page: (_) => FontSettingsPage(state: state),
-                          view: (_) => FontSettingsView(state: state),
-                        ),
-                      ),
-                      _AppSettingRow(
-                        label: '配色',
-                        subtitle: state.paletteMode.detail,
-                        trailing: DropdownButton<AppPaletteMode>(
-                          value: state.paletteMode,
-                          underline: const SizedBox.shrink(),
-                          borderRadius: BorderRadius.circular(12),
-                          items: <DropdownMenuItem<AppPaletteMode>>[
-                            for (final AppPaletteMode mode
-                                in AppPaletteMode.values)
-                              DropdownMenuItem<AppPaletteMode>(
-                                value: mode,
-                                child: TrText(mode.label),
-                              ),
-                          ],
-                          onChanged: (AppPaletteMode? value) {
-                            if (value == null) return;
-                            unawaited(state.setAppPalette(value));
-                            if (value == AppPaletteMode.custom &&
-                                state.accentColor == null) {
-                              unawaited(_pickAppAccent(context, state));
-                            }
-                          },
-                        ),
-                      ),
-                      if (state.paletteMode == AppPaletteMode.custom)
-                        _AppSettingRow(
-                          label: '强调色',
-                          subtitle: '点按色块挑选主题强调色',
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: <Widget>[
-                              Text(
-                                _accentHex(
-                                  state.accentColor ?? AppleColors.musicRed,
-                                ),
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: apple.secondaryLabel,
-                                  fontFeatures: const <FontFeature>[
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              _AppAccentSwatch(
-                                key: const ValueKey('accent-swatch'),
-                                color:
-                                    state.accentColor ?? AppleColors.musicRed,
-                                onTap: () =>
-                                    unawaited(_pickAppAccent(context, state)),
-                              ),
-                            ],
-                          ),
-                        ),
-                      _AppSettingRow(
-                        label: '设备形态',
-                        subtitle: state.surface.detail,
-                        trailing: DropdownButton<AppSurface>(
-                          value: state.surface,
-                          underline: const SizedBox.shrink(),
-                          borderRadius: BorderRadius.circular(12),
-                          items: <DropdownMenuItem<AppSurface>>[
-                            for (final AppSurface surface in AppSurface.values)
-                              DropdownMenuItem<AppSurface>(
-                                value: surface,
-                                child: TrText(surface.label),
-                              ),
-                          ],
-                          onChanged: (AppSurface? value) {
-                            if (value != null) {
-                              unawaited(state.setSurface(value));
-                            }
-                          },
-                        ),
-                      ),
-                      _AppSettingRow(
-                        label: '界面布局',
-                        subtitle: state.uiMode.detail,
-                        trailing: DropdownButton<AppUiMode>(
-                          value: state.uiMode,
-                          underline: const SizedBox.shrink(),
-                          borderRadius: BorderRadius.circular(12),
-                          items: <DropdownMenuItem<AppUiMode>>[
-                            for (final AppUiMode mode in AppUiMode.values)
-                              DropdownMenuItem<AppUiMode>(
-                                value: mode,
-                                child: TrText(mode.label),
-                              ),
-                          ],
-                          onChanged: (AppUiMode? value) {
-                            if (value != null) {
-                              unawaited(state.setUiMode(value));
-                            }
-                          },
-                        ),
-                      ),
-                      const LanRemoteSettings(),
-                      _AppSliderRow(
-                        key: const ValueKey('dpi-scale-slider'),
-                        label: 'DPI 缩放',
-                        valueText: '${(shownScale * 100).round()}%',
-                        subtitle: state.autoDpiScale
-                            ? '自动推算 · 拖动拉杆即改为手动'
-                            : car
-                            ? '车机形态已把界面放大到 ${(minScale * 100).round()}% 起'
-                            : '按比例放大整块界面，适合高分屏',
-                        value: shownScale.clamp(minScale, kDpiScaleMax),
-                        min: minScale,
-                        max: kDpiScaleMax,
-                        divisions: ((kDpiScaleMax - minScale) / kDpiScaleStep)
-                            .round(),
-                        onChanged: (double value) =>
-                            unawaited(state.setDpiScale(value)),
-                        action: SpringTextButton(
-                          key: const ValueKey('dpi-scale-reset'),
-                          onPressed: () => unawaited(state.resetDpiScale()),
-                          child: const TrText('恢复默认'),
-                        ),
-                      ),
-                      _AppSwitchRow(
-                        key: const ValueKey('auto-dpi-switch'),
-                        label: '自动调节 DPI 缩放',
-                        subtitle: '按窗口可用空间自动推算',
-                        value: state.autoDpiScale,
-                        onChanged: (bool value) =>
-                            unawaited(state.setAutoDpiScale(value)),
-                      ),
-                      _AppSliderRow(
-                        key: const ValueKey('animation-speed-slider'),
-                        label: '动画速率',
-                        valueText:
-                            '${state.animationSpeed.toStringAsFixed(1)}×',
-                        subtitle: '数值越大动画越快，作用于页面、播放页和其他弹簧过渡',
-                        value: state.animationSpeed,
-                        min: MotionTiming.minSpeed,
-                        max: MotionTiming.maxSpeed,
-                        divisions:
-                            ((MotionTiming.maxSpeed - MotionTiming.minSpeed) /
-                                    MotionTiming.step)
-                                .round(),
-                        onChanged: (double value) =>
-                            unawaited(state.setAnimationSpeed(value)),
-                        action: SpringTextButton(
-                          key: const ValueKey('animation-speed-reset'),
-                          onPressed: () =>
-                              unawaited(state.resetAnimationSpeed()),
-                          child: const TrText('恢复默认'),
-                        ),
-                      ),
-                      _AppSettingRow(
-                        label: '背景',
-                        subtitle: state.backgroundMode.detail,
-                        trailing: SettingsChoice<AppBackgroundMode>(
-                          key: const ValueKey('browse-background-mode'),
-                          value: state.backgroundMode,
-                          items: <DropdownMenuItem<AppBackgroundMode>>[
-                            for (final AppBackgroundMode mode
-                                in AppBackgroundMode.values)
-                              DropdownMenuItem<AppBackgroundMode>(
-                                value: mode,
-                                child: TrText(mode.label),
-                              ),
-                          ],
-                          onChanged: (AppBackgroundMode? value) {
-                            if (value == null) return;
-                            unawaited(state.setAppBackground(value));
-                            if (value == AppBackgroundMode.customImage &&
-                                state.backgroundImagePath == null) {
-                              unawaited(
-                                _pickBackgroundImage(
-                                  context,
-                                  state,
-                                  backgroundImagePicker,
-                                ),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                      if (state.backgroundMode == AppBackgroundMode.customImage)
-                        _AppSettingRow(
-                          label: '背景图片',
-                          subtitle: state.backgroundImagePath == null
-                              ? '尚未选择图片，点按右侧选择'
-                              : '已选择图片，可更换或移除',
-                          trailing: Wrap(
-                            spacing: 8,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: <Widget>[
-                              if (state.backgroundImagePath != null)
-                                SpringTextButton(
-                                  key: const ValueKey('background-image-clear'),
-                                  onPressed: () {
-                                    final String? path =
-                                        state.backgroundImagePath;
-                                    unawaited(
-                                      state.setAppBackgroundImage(null),
-                                    );
-                                    unawaited(
-                                      state.setAppBackground(
-                                        AppBackgroundMode.off,
-                                      ),
-                                    );
-                                    unawaited(
-                                      deleteCustomBackgroundImage(path),
-                                    );
-                                  },
-                                  child: const TrText('移除'),
-                                ),
-                              SpringOutlinedButton(
-                                key: const ValueKey('background-image-pick'),
-                                onPressed: () => unawaited(
-                                  _pickBackgroundImage(
-                                    context,
-                                    state,
-                                    backgroundImagePicker,
-                                  ),
-                                ),
-                                child: Text(
-                                  context.tr(
-                                    state.backgroundImagePath == null
-                                        ? '选择图片'
-                                        : '更换',
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      _AppSliderRow(
-                        key: const ValueKey('ui-alpha'),
-                        label: '内容不透明度',
-                        valueText: '${(state.uiAlpha * 100).round()}%',
-                        subtitle: '数值越小，背景越明显',
-                        value: state.uiAlpha.clamp(0.4, 1.0),
-                        min: 0.4,
-                        max: 1.0,
-                        divisions: 12,
-                        onChanged: state.backgroundMode == AppBackgroundMode.off
-                            ? null
-                            : (double value) =>
-                                  unawaited(state.setAppUiAlpha(value)),
-                      ),
-                      _BackgroundPreferences(state: state, player: false),
-                      // The flowing canvas is the app's only continuously
-                      // repainting surface, so its precision is the setting a
-                      // struggling GPU needs. Both halves of it are shown —
-                      // the mesh it draws and how often it redraws it — so the
-                      // value is verifiable rather than a blind percentage.
-                      _AppSliderRow(
-                        key: const ValueKey('dynamic-background-quality'),
-                        label: '动态背景渲染精度',
-                        valueText:
-                            '${(state.dynamicBackgroundQuality * 100).round()}%',
-                        // One literal on purpose: the translation table matches
-                        // it as a single pattern key.
-                        subtitle:
-                            '网格 ${flowPrecision.columns}×${flowPrecision.rows}，帧率单独设置',
-                        value: state.dynamicBackgroundQuality,
-                        min: kDynamicBackgroundQualityMin,
-                        max: kDynamicBackgroundQualityMax,
-                        divisions:
-                            ((kDynamicBackgroundQualityMax -
-                                        kDynamicBackgroundQualityMin) /
-                                    kDynamicBackgroundQualityStep)
-                                .round(),
-                        onChanged: (double value) =>
-                            unawaited(state.setDynamicBackgroundQuality(value)),
-                        action: SpringTextButton(
-                          key: const ValueKey(
-                            'dynamic-background-quality-reset',
-                          ),
-                          onPressed: () =>
-                              unawaited(state.resetDynamicBackgroundQuality()),
-                          child: const TrText('恢复默认'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('外观'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _AppSettingRow(
-                        label: '主题',
-                        subtitle: switch (state.themeMode) {
-                          ThemeMode.system => '跟随系统',
-                          ThemeMode.light => '浅色',
-                          ThemeMode.dark => '深色',
-                        },
-                        trailing: DropdownButton<ThemeMode>(
-                          value: state.themeMode,
-                          underline: const SizedBox.shrink(),
-                          borderRadius: BorderRadius.circular(12),
-                          items: const <DropdownMenuItem<ThemeMode>>[
-                            DropdownMenuItem<ThemeMode>(
-                              value: ThemeMode.system,
-                              child: TrText('跟随系统'),
-                            ),
-                            DropdownMenuItem<ThemeMode>(
-                              value: ThemeMode.light,
-                              child: TrText('浅色'),
-                            ),
-                            DropdownMenuItem<ThemeMode>(
-                              value: ThemeMode.dark,
-                              child: TrText('深色'),
-                            ),
-                          ],
-                          onChanged: (ThemeMode? value) {
-                            if (value != null) {
-                              unawaited(state.setThemeMode(value));
-                            }
-                          },
-                        ),
-                      ),
-                      _AppSettingRow(
-                        label: '语言',
-                        subtitle: state.language.name,
-                        trailing: DropdownButton<AppLanguage>(
-                          value: state.language,
-                          underline: const SizedBox.shrink(),
-                          borderRadius: BorderRadius.circular(12),
-                          items: <DropdownMenuItem<AppLanguage>>[
-                            for (final AppLanguage language
-                                in AppLanguage.values)
-                              DropdownMenuItem<AppLanguage>(
-                                value: language,
-                                child: Text(language.name),
-                              ),
-                          ],
-                          onChanged: (AppLanguage? value) {
-                            if (value != null) {
-                              unawaited(state.setLanguage(value));
-                            }
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('动态背景'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: _BackgroundPreferences(
-                    state: state,
-                    player: true,
-                    picker: backgroundImagePicker,
-                  ),
-                ),
-                const _AppSectionLabel('播放'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _AppSettingRow(
-                        label: '播放音质',
-                        subtitle: state.audioQualityDetail(
-                          state.playbackQuality,
-                        ),
-                        trailing: DropdownButton<AudioQuality>(
-                          key: const ValueKey('playback-quality'),
-                          value: state.playbackQuality,
-                          underline: const SizedBox.shrink(),
-                          borderRadius: BorderRadius.circular(12),
-                          items: <DropdownMenuItem<AudioQuality>>[
-                            for (final AudioQuality quality
-                                in AudioQuality.values)
-                              DropdownMenuItem<AudioQuality>(
-                                value: quality,
-                                child: TrText(state.audioQualityLabel(quality)),
-                              ),
-                          ],
-                          onChanged: (AudioQuality? value) {
-                            if (value != null) {
-                              unawaited(state.setPlaybackQuality(value));
-                            }
-                          },
-                        ),
-                      ),
-                      _AppSwitchRow(
-                        label: '独立播放',
-                        subtitle: '不接入系统媒体控制',
-                        value: state.independentPlayback,
-                        onChanged: (bool value) =>
-                            unawaited(state.setIndependentPlayback(value)),
-                      ),
-                      _AppSwitchRow(
-                        key: const ValueKey('auto-mix'),
-                        label: '自动混音',
-                        subtitle: state.autoMixError ?? '在当前歌曲结束前平滑衔接下一首',
-                        value: state.autoMixEnabled,
-                        onChanged: (bool value) =>
-                            unawaited(state.setAutoMixEnabled(value)),
-                      ),
-                      AppleListTile(
-                        padding: SettingsSpacing.rowPadding,
-                        minHeight: SettingsSpacing.rowMinHeight,
-                        key: const ValueKey('open-scheduled-pause'),
-                        title: context.tr('定时关闭'),
-                        subtitle: context.tr('每天到点暂停当前播放'),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => SettingsDetailHost.open(
-                          context,
-                          page: (_) => ScheduledPauseSettingsPage(state: state),
-                          view: (_) => ScheduledPauseSettingsPage(state: state),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                HifiSettingsSection(state: state),
-                if (AppStorage.shared.supported) ...[
-                  const _AppSectionLabel('数据存储'),
-                  const StorageSettings(),
-                ],
-                const _AppSectionLabel('下载'),
-                PlaybackCacheSettings(controller: state.playbackCache),
-                const SizedBox(height: SettingsSpacing.groupGap),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _AppSettingRow(
-                        label: '下载音质',
-                        subtitle: state.audioQualityDetail(
-                          state.downloadQuality,
-                        ),
-                        trailing: DropdownButton<AudioQuality>(
-                          key: const ValueKey('download-quality'),
-                          value: state.downloadQuality,
-                          underline: const SizedBox.shrink(),
-                          borderRadius: BorderRadius.circular(12),
-                          items: <DropdownMenuItem<AudioQuality>>[
-                            for (final AudioQuality quality
-                                in AudioQuality.values)
-                              DropdownMenuItem<AudioQuality>(
-                                value: quality,
-                                child: TrText(state.audioQualityLabel(quality)),
-                              ),
-                          ],
-                          onChanged: (AudioQuality? value) {
-                            if (value != null) {
-                              unawaited(state.setDownloadQuality(value));
-                            }
-                          },
-                        ),
-                      ),
-                      _AppSettingRow(
-                        label: '下载任务',
-                        subtitle: '查看进度、取消或重试下载',
-                        trailing: AnimatedBuilder(
-                          animation: state.downloadManager,
-                          builder: (BuildContext context, Widget? child) {
-                            final int active =
-                                state.downloadManager.activeCount;
-                            final int done =
-                                state.downloadManager.completedCount;
-                            return Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Text(
-                                  context.tr(
-                                    active > 0 ? '$active 进行中' : '$done 已完成',
-                                  ),
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: apple.secondaryLabel,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                SpringTextButton(
-                                  key: const ValueKey('open-download-queue'),
-                                  onPressed: () =>
-                                      showDownloadQueueSheet(context, state),
-                                  child: const TrText('查看'),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                      if (onOpenLocalMusic != null)
-                        AnimatedBuilder(
-                          animation: state.localLibrary,
-                          builder: (BuildContext context, Widget? child) {
-                            final int count = state.localLibrary.availableCount;
-                            return _AppSettingRow(
-                              label: '本地音乐',
-                              subtitle: count == 0
-                                  ? '下载和导入的歌曲会保存在这里'
-                                  : '$count 首 · ${formatBytes(state.localLibrary.totalBytes)}',
-                              trailing: SpringTextButton(
-                                key: const ValueKey(
-                                  'open-local-music-settings',
-                                ),
-                                onPressed: onOpenLocalMusic,
-                                child: const TrText('管理'),
-                              ),
-                            );
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('交互'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _AppSwitchRow(
-                        label: '震动反馈',
-                        subtitle: '点击可操作的元素和拖动进度条、数值条时反馈',
-                        value: state.hapticsEnabled,
-                        onChanged: (bool value) =>
-                            unawaited(state.setHapticsEnabled(value)),
-                      ),
-                      if (defaultTargetPlatform == TargetPlatform.iOS ||
-                          defaultTargetPlatform == TargetPlatform.android)
-                        _AppSliderRow(
-                          label: '震动强度',
-                          valueText:
-                              '${(state.hapticIntensity * 100).round()}%',
-                          value: state.hapticIntensity.clamp(0.0, 1.0),
-                          min: 0,
-                          max: 1,
-                          divisions: 20,
-                          onChanged: state.hapticsEnabled
-                              ? (double value) =>
-                                    unawaited(state.setHapticIntensity(value))
-                              : null,
-                        ),
-                      _AppSliderRow(
-                        label: '歌词控件自动隐藏',
-                        valueText:
-                            '${state.lyricControlsSeconds.toStringAsFixed(1)} 秒',
-                        subtitle: '闲置一会儿后收起歌词页的控件',
-                        value: state.lyricControlsSeconds.clamp(1.0, 10.0),
-                        min: 1,
-                        max: 10,
-                        divisions: 18,
-                        onChanged: (double value) =>
-                            unawaited(state.setLyricControlsSeconds(value)),
-                      ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('快捷键'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: AppleListTile(
-                    padding: SettingsSpacing.rowPadding,
-                    minHeight: SettingsSpacing.rowMinHeight,
-                    key: const ValueKey('open-shortcut-settings'),
-                    title: context.tr('快捷键设置'),
-                    subtitle: context.tr('自定义播放控制的键盘快捷键'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => SettingsDetailHost.open(
-                      context,
-                      page: (_) => ShortcutSettingsPage(state: state),
-                      view: (_) => ShortcutSettingsView(state: state),
-                    ),
-                  ),
-                ),
-                const _AppSectionLabel('歌词'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _AppSwitchRow(
-                        label: '歌词模糊',
-                        subtitle: '距离当前歌词越远，模糊越强；手动浏览时渐隐',
-                        value: state.lyricBlurEnabled,
-                        onChanged: (bool value) =>
-                            unawaited(state.setLyricBlurEnabled(value)),
-                      ),
-                      _AppSwitchRow(
-                        key: const ValueKey('system-media-lyrics-switch'),
-                        label: '系统媒体控件显示歌词',
-                        subtitle: '通知、锁屏和灵动岛显示当前这一句，关闭后显示歌手',
-                        value: state.systemMediaLyrics,
-                        onChanged: (bool value) =>
-                            unawaited(state.setSystemMediaLyrics(value)),
-                      ),
-                      _AppSliderRow(
-                        label: '手动浏览后恢复跟随',
-                        valueText:
-                            '${state.lyricResumeSeconds.toStringAsFixed(1)} 秒',
-                        subtitle: '松开手后多久回到当前行',
-                        value: state.lyricResumeSeconds.clamp(1.0, 10.0),
-                        min: 1,
-                        max: 10,
-                        divisions: 18,
-                        onChanged: (double value) =>
-                            unawaited(state.setLyricResumeSeconds(value)),
-                      ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('滚动'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _AppSliderRow(
-                        label: '滚动惯性',
-                        valueText: '${(state.scrollRetention * 100).round()}%',
-                        subtitle: '85–98%；数值越高，松手后滑行越久、越远',
-                        value: state.scrollRetention,
-                        min: ScrollMotion.minRetention,
-                        max: ScrollMotion.maxRetention,
-                        divisions: 13,
-                        onChanged: (double value) =>
-                            unawaited(state.setScrollRetention(value)),
-                        action: SpringTextButton(
-                          onPressed: () => unawaited(
-                            state.setScrollRetention(
-                              ScrollMotion.defaultRetention,
-                            ),
-                          ),
-                          child: const TrText('恢复默认'),
-                        ),
-                      ),
-                      _AppSliderRow(
-                        label: '滚动加速度',
-                        valueText:
-                            '${(state.scrollAcceleration * 100).round()}%',
-                        subtitle: '50–300%；数值越高，滚轮和连续甩动提速越明显',
-                        value: state.scrollAcceleration,
-                        min: ScrollMotion.minAcceleration,
-                        max: ScrollMotion.maxAcceleration,
-                        divisions: 25,
-                        onChanged: (double value) =>
-                            unawaited(state.setScrollAcceleration(value)),
-                        action: SpringTextButton(
-                          onPressed: () => unawaited(
-                            state.setScrollAcceleration(
-                              ScrollMotion.defaultAcceleration,
-                            ),
-                          ),
-                          child: const TrText('恢复默认'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('性能'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _AppSettingRow(
-                        label: '动画帧预算',
-                        subtitle: '全部界面动画按 10 ms 设计；低帧目标不低于 90 fps',
-                        trailing: Text(
-                          '10 ms',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: apple.secondaryLabel,
-                            fontFeatures: const <FontFeature>[
-                              FontFeature.tabularFigures(),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('调试'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _AppSwitchRow(
-                        label: '显示帧数',
-                        subtitle: '实时显示 UI、GPU、低帧和 100 fps 帧预算',
-                        value: state.showFrameStats,
-                        onChanged: (bool value) =>
-                            unawaited(state.setShowFrameStats(value)),
-                      ),
-                      _AppSettingRow(
-                        label: '音频设备',
-                        subtitle: '查看当前音频输出端点和音频会话详情',
-                        trailing: SpringOutlinedButton(
-                          key: const ValueKey('open-audio-device-info'),
-                          onPressed: () =>
-                              unawaited(showAudioDeviceInfoDialog(context)),
-                          child: const TrText('查看'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('账户'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      AppleListTile(
-                        padding: SettingsSpacing.rowPadding,
-                        minHeight: SettingsSpacing.rowMinHeight,
-                        key: const ValueKey('music-platform-settings'),
-                        title: context.tr('音乐平台'),
-                        subtitle: state.musicProvider.name,
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (state.musicProvider.experimental)
-                              const ExperimentalMusicBadge(),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.chevron_right_rounded),
-                          ],
-                        ),
-                        onTap: () =>
-                            unawaited(showAppLoginDialog(context, state)),
-                      ),
-                      _AppSettingRow(
-                        label: state.isGuest ? '游客' : state.user.name,
-                        subtitle: state.isGuest
-                            ? '登录后同步歌单和每日推荐'
-                            : state.user.vipLabel ?? '普通用户',
-                        trailing: state.isGuest
-                            ? SpringFilledButton(
-                                onPressed: () => unawaited(
-                                  showAppLoginDialog(context, state),
-                                ),
-                                child: const TrText('登录'),
-                              )
-                            : SpringTextButton(
-                                onPressed: state.signOut,
-                                child: const TrText('退出登录'),
-                              ),
-                      ),
-                      if (state.musicAuthenticationMethods.contains(
-                        'exportCookie',
-                      ))
-                        _AppSettingRow(
-                          label: '导出 Cookie',
-                          subtitle: state.isGuest
-                              ? '登录后可导出当前平台登录 Cookie'
-                              : '复制当前平台登录 Cookie 到剪贴板',
-                          trailing: SpringOutlinedButton(
-                            key: const ValueKey('export-session-cookie'),
-                            onPressed: state.isGuest
-                                ? null
-                                : () => unawaited(
-                                    _copySessionCookie(context, state),
-                                  ),
-                            child: const TrText('复制'),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const _AppSectionLabel('扩展'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: AppleListTile(
-                    padding: SettingsSpacing.rowPadding,
-                    minHeight: SettingsSpacing.rowMinHeight,
-                    key: const ValueKey('open-plugin-manager'),
-                    title: context.tr('插件管理'),
-                    subtitle: context.tr('导入 ZIP、启用或卸载 Lua 音乐平台'),
-                    leading: AppleIconTile(
-                      icon: Icons.extension_rounded,
-                      color: apple.accent,
-                    ),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => SettingsDetailHost.open(
-                      context,
-                      page: (_) => PluginManagerPage(state: state),
-                      view: (_) => PluginManagerView(state: state),
-                    ),
-                  ),
-                ),
-                const _AppSectionLabel('关于'),
-                AppleGroupedCard(
-                  margin: EdgeInsets.zero,
-                  child: Column(
-                    children: <Widget>[
-                      _VersionSecretTile(state: state),
-                      AppleListTile(
-                        padding: SettingsSpacing.rowPadding,
-                        minHeight: SettingsSpacing.rowMinHeight,
-                        key: const ValueKey('open-github-project'),
-                        title: context.tr('GitHub 项目'),
-                        subtitle: UpdateChecker.repositoryUrl,
-                        trailing: const Icon(Icons.open_in_new_rounded),
-                        onTap: () => unawaited(_openProjectRepository(context)),
-                      ),
-                      AppleListTile(
-                        padding: SettingsSpacing.rowPadding,
-                        minHeight: SettingsSpacing.rowMinHeight,
-                        key: const ValueKey('export-logs'),
-                        title: context.tr('导出日志'),
-                        subtitle: context.tr('保存运行日志与播放诊断信息'),
-                        trailing: const Icon(Icons.file_download_outlined),
-                        onTap: () => unawaited(exportLogs(context, state)),
-                      ),
-                      _AppSettingRow(
-                        label: '检查更新',
-                        subtitle: '从 GitHub 获取最新版本',
-                        trailing: state.updateChecking
-                            ? const SizedBox.square(
-                                dimension: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : SpringOutlinedButton(
-                                onPressed: () => unawaited(
-                                  checkUpdatesFromSettings(context, state),
-                                ),
-                                child: const TrText('检查更新'),
-                              ),
-                      ),
-                      if (state.skippedUpdateVersion != null)
-                        _AppSettingRow(
-                          label: context.tr(
-                            '已跳过 v${state.skippedUpdateVersion}',
-                          ),
-                          subtitle: '自动提醒不再提示这个版本',
-                          trailing: SpringTextButton(
-                            onPressed: () =>
-                                unawaited(state.clearSkippedUpdate()),
-                            child: const TrText('恢复提醒'),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+            const ApplePageTitle(
+              title: '设置',
+              subtitle: '外观、界面和账户。',
+              padding: EdgeInsets.fromLTRB(0, 12, 0, 20),
             ),
+            const _AppSectionLabel('界面'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
+                    key: const ValueKey('open-font-settings'),
+                    title: context.tr('字体自定义'),
+                    subtitle: context.tr('选择 MiSans、系统或导入字体，调节文字与歌词大小和粗细'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => SettingsDetailHost.open(
+                      context,
+                      page: (_) => FontSettingsPage(state: state),
+                      view: (_) => FontSettingsView(state: state),
+                    ),
+                  ),
+                  _AppSettingRow(
+                    label: '配色',
+                    subtitle: state.paletteMode.detail,
+                    trailing: DropdownButton<AppPaletteMode>(
+                      value: state.paletteMode,
+                      underline: const SizedBox.shrink(),
+                      borderRadius: BorderRadius.circular(12),
+                      items: <DropdownMenuItem<AppPaletteMode>>[
+                        for (final AppPaletteMode mode in AppPaletteMode.values)
+                          DropdownMenuItem<AppPaletteMode>(
+                            value: mode,
+                            child: TrText(mode.label),
+                          ),
+                      ],
+                      onChanged: (AppPaletteMode? value) {
+                        if (value == null) return;
+                        unawaited(state.setAppPalette(value));
+                        if (value == AppPaletteMode.custom &&
+                            state.accentColor == null) {
+                          unawaited(_pickAppAccent(context, state));
+                        }
+                      },
+                    ),
+                  ),
+                  if (state.paletteMode == AppPaletteMode.custom)
+                    _AppSettingRow(
+                      label: '强调色',
+                      subtitle: '点按色块挑选主题强调色',
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            _accentHex(
+                              state.accentColor ?? AppleColors.musicRed,
+                            ),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: apple.secondaryLabel,
+                              fontFeatures: const <FontFeature>[
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          _AppAccentSwatch(
+                            key: const ValueKey('accent-swatch'),
+                            color: state.accentColor ?? AppleColors.musicRed,
+                            onTap: () =>
+                                unawaited(_pickAppAccent(context, state)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  _AppSettingRow(
+                    label: '设备形态',
+                    subtitle: state.surface.detail,
+                    trailing: DropdownButton<AppSurface>(
+                      value: state.surface,
+                      underline: const SizedBox.shrink(),
+                      borderRadius: BorderRadius.circular(12),
+                      items: <DropdownMenuItem<AppSurface>>[
+                        for (final AppSurface surface in AppSurface.values)
+                          DropdownMenuItem<AppSurface>(
+                            value: surface,
+                            child: TrText(surface.label),
+                          ),
+                      ],
+                      onChanged: (AppSurface? value) {
+                        if (value != null) unawaited(state.setSurface(value));
+                      },
+                    ),
+                  ),
+                  _AppSettingRow(
+                    label: '界面布局',
+                    subtitle: state.uiMode.detail,
+                    trailing: DropdownButton<AppUiMode>(
+                      value: state.uiMode,
+                      underline: const SizedBox.shrink(),
+                      borderRadius: BorderRadius.circular(12),
+                      items: <DropdownMenuItem<AppUiMode>>[
+                        for (final AppUiMode mode in AppUiMode.values)
+                          DropdownMenuItem<AppUiMode>(
+                            value: mode,
+                            child: TrText(mode.label),
+                          ),
+                      ],
+                      onChanged: (AppUiMode? value) {
+                        if (value != null) unawaited(state.setUiMode(value));
+                      },
+                    ),
+                  ),
+                  const LanRemoteSettings(),
+                  _AppSliderRow(
+                    key: const ValueKey('dpi-scale-slider'),
+                    label: 'DPI 缩放',
+                    valueText: '${(shownScale * 100).round()}%',
+                    subtitle: state.autoDpiScale
+                        ? '自动推算 · 拖动拉杆即改为手动'
+                        : car
+                        ? '车机形态已把界面放大到 ${(minScale * 100).round()}% 起'
+                        : '按比例放大整块界面，适合高分屏',
+                    value: shownScale.clamp(minScale, kDpiScaleMax),
+                    min: minScale,
+                    max: kDpiScaleMax,
+                    divisions: ((kDpiScaleMax - minScale) / kDpiScaleStep)
+                        .round(),
+                    onChanged: (double value) =>
+                        unawaited(state.setDpiScale(value)),
+                    action: SpringTextButton(
+                      key: const ValueKey('dpi-scale-reset'),
+                      onPressed: () => unawaited(state.resetDpiScale()),
+                      child: const TrText('恢复默认'),
+                    ),
+                  ),
+                  _AppSwitchRow(
+                    key: const ValueKey('auto-dpi-switch'),
+                    label: '自动调节 DPI 缩放',
+                    subtitle: '按窗口可用空间自动推算',
+                    value: state.autoDpiScale,
+                    onChanged: (bool value) =>
+                        unawaited(state.setAutoDpiScale(value)),
+                  ),
+                  _AppSliderRow(
+                    key: const ValueKey('animation-speed-slider'),
+                    label: '动画速率',
+                    valueText: '${state.animationSpeed.toStringAsFixed(1)}×',
+                    subtitle: '数值越大动画越快，作用于页面、播放页和其他弹簧过渡',
+                    value: state.animationSpeed,
+                    min: MotionTiming.minSpeed,
+                    max: MotionTiming.maxSpeed,
+                    divisions:
+                        ((MotionTiming.maxSpeed - MotionTiming.minSpeed) /
+                                MotionTiming.step)
+                            .round(),
+                    onChanged: (double value) =>
+                        unawaited(state.setAnimationSpeed(value)),
+                    action: SpringTextButton(
+                      key: const ValueKey('animation-speed-reset'),
+                      onPressed: () => unawaited(state.resetAnimationSpeed()),
+                      child: const TrText('恢复默认'),
+                    ),
+                  ),
+                  _AppSettingRow(
+                    label: '背景',
+                    subtitle: state.backgroundMode.detail,
+                    trailing: SettingsChoice<AppBackgroundMode>(
+                      key: const ValueKey('browse-background-mode'),
+                      value: state.backgroundMode,
+                      items: <DropdownMenuItem<AppBackgroundMode>>[
+                        for (final AppBackgroundMode mode
+                            in AppBackgroundMode.values)
+                          DropdownMenuItem<AppBackgroundMode>(
+                            value: mode,
+                            child: TrText(mode.label),
+                          ),
+                      ],
+                      onChanged: (AppBackgroundMode? value) {
+                        if (value == null) return;
+                        unawaited(state.setAppBackground(value));
+                        if (value == AppBackgroundMode.customImage &&
+                            state.backgroundImagePath == null) {
+                          unawaited(
+                            _pickBackgroundImage(
+                              context,
+                              state,
+                              backgroundImagePicker,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                  if (state.backgroundMode == AppBackgroundMode.customImage)
+                    _AppSettingRow(
+                      label: '背景图片',
+                      subtitle: state.backgroundImagePath == null
+                          ? '尚未选择图片，点按右侧选择'
+                          : '已选择图片，可更换或移除',
+                      trailing: Wrap(
+                        spacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[
+                          if (state.backgroundImagePath != null)
+                            SpringTextButton(
+                              key: const ValueKey('background-image-clear'),
+                              onPressed: () {
+                                final String? path = state.backgroundImagePath;
+                                unawaited(state.setAppBackgroundImage(null));
+                                unawaited(
+                                  state.setAppBackground(AppBackgroundMode.off),
+                                );
+                                unawaited(deleteCustomBackgroundImage(path));
+                              },
+                              child: const TrText('移除'),
+                            ),
+                          SpringOutlinedButton(
+                            key: const ValueKey('background-image-pick'),
+                            onPressed: () => unawaited(
+                              _pickBackgroundImage(
+                                context,
+                                state,
+                                backgroundImagePicker,
+                              ),
+                            ),
+                            child: Text(
+                              context.tr(
+                                state.backgroundImagePath == null
+                                    ? '选择图片'
+                                    : '更换',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  _AppSliderRow(
+                    key: const ValueKey('ui-alpha'),
+                    label: '内容不透明度',
+                    valueText: '${(state.uiAlpha * 100).round()}%',
+                    subtitle: '数值越小，背景越明显',
+                    value: state.uiAlpha.clamp(0.4, 1.0),
+                    min: 0.4,
+                    max: 1.0,
+                    divisions: 12,
+                    onChanged: state.backgroundMode == AppBackgroundMode.off
+                        ? null
+                        : (double value) =>
+                              unawaited(state.setAppUiAlpha(value)),
+                  ),
+                  _BackgroundPreferences(state: state, player: false),
+                  // The flowing canvas is the app's only continuously
+                  // repainting surface, so its precision is the setting a
+                  // struggling GPU needs. Both halves of it are shown —
+                  // the mesh it draws and how often it redraws it — so the
+                  // value is verifiable rather than a blind percentage.
+                  _AppSliderRow(
+                    key: const ValueKey('dynamic-background-quality'),
+                    label: '动态背景渲染精度',
+                    valueText:
+                        '${(state.dynamicBackgroundQuality * 100).round()}%',
+                    // One literal on purpose: the translation table matches
+                    // it as a single pattern key.
+                    subtitle:
+                        '网格 ${flowPrecision.columns}×${flowPrecision.rows}，帧率单独设置',
+                    value: state.dynamicBackgroundQuality,
+                    min: kDynamicBackgroundQualityMin,
+                    max: kDynamicBackgroundQualityMax,
+                    divisions:
+                        ((kDynamicBackgroundQualityMax -
+                                    kDynamicBackgroundQualityMin) /
+                                kDynamicBackgroundQualityStep)
+                            .round(),
+                    onChanged: (double value) =>
+                        unawaited(state.setDynamicBackgroundQuality(value)),
+                    action: SpringTextButton(
+                      key: const ValueKey('dynamic-background-quality-reset'),
+                      onPressed: () =>
+                          unawaited(state.resetDynamicBackgroundQuality()),
+                      child: const TrText('恢复默认'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('外观'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _AppSettingRow(
+                    label: '主题',
+                    subtitle: switch (state.themeMode) {
+                      ThemeMode.system => '跟随系统',
+                      ThemeMode.light => '浅色',
+                      ThemeMode.dark => '深色',
+                    },
+                    trailing: DropdownButton<ThemeMode>(
+                      value: state.themeMode,
+                      underline: const SizedBox.shrink(),
+                      borderRadius: BorderRadius.circular(12),
+                      items: const <DropdownMenuItem<ThemeMode>>[
+                        DropdownMenuItem<ThemeMode>(
+                          value: ThemeMode.system,
+                          child: TrText('跟随系统'),
+                        ),
+                        DropdownMenuItem<ThemeMode>(
+                          value: ThemeMode.light,
+                          child: TrText('浅色'),
+                        ),
+                        DropdownMenuItem<ThemeMode>(
+                          value: ThemeMode.dark,
+                          child: TrText('深色'),
+                        ),
+                      ],
+                      onChanged: (ThemeMode? value) {
+                        if (value != null) {
+                          unawaited(state.setThemeMode(value));
+                        }
+                      },
+                    ),
+                  ),
+                  _AppSettingRow(
+                    label: '语言',
+                    subtitle: state.language.name,
+                    trailing: DropdownButton<AppLanguage>(
+                      value: state.language,
+                      underline: const SizedBox.shrink(),
+                      borderRadius: BorderRadius.circular(12),
+                      items: <DropdownMenuItem<AppLanguage>>[
+                        for (final AppLanguage language in AppLanguage.values)
+                          DropdownMenuItem<AppLanguage>(
+                            value: language,
+                            child: Text(language.name),
+                          ),
+                      ],
+                      onChanged: (AppLanguage? value) {
+                        if (value != null) {
+                          unawaited(state.setLanguage(value));
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('动态背景'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: _BackgroundPreferences(
+                state: state,
+                player: true,
+                picker: backgroundImagePicker,
+              ),
+            ),
+            const _AppSectionLabel('播放'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _AppSettingRow(
+                    label: '播放音质',
+                    subtitle: state.audioQualityDetail(state.playbackQuality),
+                    trailing: DropdownButton<AudioQuality>(
+                      key: const ValueKey('playback-quality'),
+                      value: state.playbackQuality,
+                      underline: const SizedBox.shrink(),
+                      borderRadius: BorderRadius.circular(12),
+                      items: <DropdownMenuItem<AudioQuality>>[
+                        for (final AudioQuality quality in AudioQuality.values)
+                          DropdownMenuItem<AudioQuality>(
+                            value: quality,
+                            child: TrText(state.audioQualityLabel(quality)),
+                          ),
+                      ],
+                      onChanged: (AudioQuality? value) {
+                        if (value != null) {
+                          unawaited(state.setPlaybackQuality(value));
+                        }
+                      },
+                    ),
+                  ),
+                  _AppSwitchRow(
+                    label: '独立播放',
+                    subtitle: '不接入系统媒体控制',
+                    value: state.independentPlayback,
+                    onChanged: (bool value) =>
+                        unawaited(state.setIndependentPlayback(value)),
+                  ),
+                  _AppSwitchRow(
+                    key: const ValueKey('auto-mix'),
+                    label: '自动混音',
+                    subtitle: state.autoMixError ?? '在当前歌曲结束前平滑衔接下一首',
+                    value: state.autoMixEnabled,
+                    onChanged: (bool value) =>
+                        unawaited(state.setAutoMixEnabled(value)),
+                  ),
+                  AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
+                    key: const ValueKey('open-scheduled-pause'),
+                    title: context.tr('定时关闭'),
+                    subtitle: context.tr('每天到点暂停当前播放'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => SettingsDetailHost.open(
+                      context,
+                      page: (_) => ScheduledPauseSettingsPage(state: state),
+                      view: (_) => ScheduledPauseSettingsPage(state: state),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            HifiSettingsSection(state: state),
+            if (AppStorage.shared.supported) ...[
+              const _AppSectionLabel('数据存储'),
+              const StorageSettings(),
+            ],
+            const _AppSectionLabel('下载'),
+            PlaybackCacheSettings(controller: state.playbackCache),
+            const SizedBox(height: SettingsSpacing.groupGap),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _AppSettingRow(
+                    label: '下载音质',
+                    subtitle: state.audioQualityDetail(state.downloadQuality),
+                    trailing: DropdownButton<AudioQuality>(
+                      key: const ValueKey('download-quality'),
+                      value: state.downloadQuality,
+                      underline: const SizedBox.shrink(),
+                      borderRadius: BorderRadius.circular(12),
+                      items: <DropdownMenuItem<AudioQuality>>[
+                        for (final AudioQuality quality in AudioQuality.values)
+                          DropdownMenuItem<AudioQuality>(
+                            value: quality,
+                            child: TrText(state.audioQualityLabel(quality)),
+                          ),
+                      ],
+                      onChanged: (AudioQuality? value) {
+                        if (value != null) {
+                          unawaited(state.setDownloadQuality(value));
+                        }
+                      },
+                    ),
+                  ),
+                  _AppSettingRow(
+                    label: '下载任务',
+                    subtitle: '查看进度、取消或重试下载',
+                    trailing: AnimatedBuilder(
+                      animation: state.downloadManager,
+                      builder: (BuildContext context, Widget? child) {
+                        final int active = state.downloadManager.activeCount;
+                        final int done = state.downloadManager.completedCount;
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Text(
+                              context.tr(
+                                active > 0 ? '$active 进行中' : '$done 已完成',
+                              ),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: apple.secondaryLabel,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            SpringTextButton(
+                              key: const ValueKey('open-download-queue'),
+                              onPressed: () =>
+                                  showDownloadQueueSheet(context, state),
+                              child: const TrText('查看'),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                  if (onOpenLocalMusic != null)
+                    AnimatedBuilder(
+                      animation: state.localLibrary,
+                      builder: (BuildContext context, Widget? child) {
+                        final int count = state.localLibrary.availableCount;
+                        return _AppSettingRow(
+                          label: '本地音乐',
+                          subtitle: count == 0
+                              ? '下载和导入的歌曲会保存在这里'
+                              : '$count 首 · ${formatBytes(state.localLibrary.totalBytes)}',
+                          trailing: SpringTextButton(
+                            key: const ValueKey('open-local-music-settings'),
+                            onPressed: onOpenLocalMusic,
+                            child: const TrText('管理'),
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('交互'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _AppSwitchRow(
+                    label: '震动反馈',
+                    subtitle: '点击可操作的元素和拖动进度条、数值条时反馈',
+                    value: state.hapticsEnabled,
+                    onChanged: (bool value) =>
+                        unawaited(state.setHapticsEnabled(value)),
+                  ),
+                  if (defaultTargetPlatform == TargetPlatform.iOS ||
+                      defaultTargetPlatform == TargetPlatform.android)
+                    _AppSliderRow(
+                      label: '震动强度',
+                      valueText: '${(state.hapticIntensity * 100).round()}%',
+                      value: state.hapticIntensity.clamp(0.0, 1.0),
+                      min: 0,
+                      max: 1,
+                      divisions: 20,
+                      onChanged: state.hapticsEnabled
+                          ? (double value) =>
+                                unawaited(state.setHapticIntensity(value))
+                          : null,
+                    ),
+                  _AppSliderRow(
+                    label: '歌词控件自动隐藏',
+                    valueText:
+                        '${state.lyricControlsSeconds.toStringAsFixed(1)} 秒',
+                    subtitle: '闲置一会儿后收起歌词页的控件',
+                    value: state.lyricControlsSeconds.clamp(1.0, 10.0),
+                    min: 1,
+                    max: 10,
+                    divisions: 18,
+                    onChanged: (double value) =>
+                        unawaited(state.setLyricControlsSeconds(value)),
+                  ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('快捷键'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: AppleListTile(
+                padding: SettingsSpacing.rowPadding,
+                minHeight: SettingsSpacing.rowMinHeight,
+                key: const ValueKey('open-shortcut-settings'),
+                title: context.tr('快捷键设置'),
+                subtitle: context.tr('自定义播放控制的键盘快捷键'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => SettingsDetailHost.open(
+                  context,
+                  page: (_) => ShortcutSettingsPage(state: state),
+                  view: (_) => ShortcutSettingsView(state: state),
+                ),
+              ),
+            ),
+            const _AppSectionLabel('歌词'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _AppSwitchRow(
+                    label: '歌词模糊',
+                    subtitle: '距离当前歌词越远，模糊越强；手动浏览时渐隐',
+                    value: state.lyricBlurEnabled,
+                    onChanged: (bool value) =>
+                        unawaited(state.setLyricBlurEnabled(value)),
+                  ),
+                  _AppSwitchRow(
+                    key: const ValueKey('system-media-lyrics-switch'),
+                    label: '系统媒体控件显示歌词',
+                    subtitle: '通知、锁屏和灵动岛显示当前这一句，关闭后显示歌手',
+                    value: state.systemMediaLyrics,
+                    onChanged: (bool value) =>
+                        unawaited(state.setSystemMediaLyrics(value)),
+                  ),
+                  _AppSliderRow(
+                    label: '手动浏览后恢复跟随',
+                    valueText:
+                        '${state.lyricResumeSeconds.toStringAsFixed(1)} 秒',
+                    subtitle: '松开手后多久回到当前行',
+                    value: state.lyricResumeSeconds.clamp(1.0, 10.0),
+                    min: 1,
+                    max: 10,
+                    divisions: 18,
+                    onChanged: (double value) =>
+                        unawaited(state.setLyricResumeSeconds(value)),
+                  ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('滚动'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _AppSliderRow(
+                    label: '滚动惯性',
+                    valueText: '${(state.scrollRetention * 100).round()}%',
+                    subtitle: '85–98%；数值越高，松手后滑行越久、越远',
+                    value: state.scrollRetention,
+                    min: ScrollMotion.minRetention,
+                    max: ScrollMotion.maxRetention,
+                    divisions: 13,
+                    onChanged: (double value) =>
+                        unawaited(state.setScrollRetention(value)),
+                    action: SpringTextButton(
+                      onPressed: () => unawaited(
+                        state.setScrollRetention(ScrollMotion.defaultRetention),
+                      ),
+                      child: const TrText('恢复默认'),
+                    ),
+                  ),
+                  _AppSliderRow(
+                    label: '滚动加速度',
+                    valueText: '${(state.scrollAcceleration * 100).round()}%',
+                    subtitle: '50–300%；数值越高，滚轮和连续甩动提速越明显',
+                    value: state.scrollAcceleration,
+                    min: ScrollMotion.minAcceleration,
+                    max: ScrollMotion.maxAcceleration,
+                    divisions: 25,
+                    onChanged: (double value) =>
+                        unawaited(state.setScrollAcceleration(value)),
+                    action: SpringTextButton(
+                      onPressed: () => unawaited(
+                        state.setScrollAcceleration(
+                          ScrollMotion.defaultAcceleration,
+                        ),
+                      ),
+                      child: const TrText('恢复默认'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('性能'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _AppSettingRow(
+                    label: '动画帧预算',
+                    subtitle: '全部界面动画按 10 ms 设计；低帧目标不低于 90 fps',
+                    trailing: Text(
+                      '10 ms',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: apple.secondaryLabel,
+                        fontFeatures: const <FontFeature>[
+                          FontFeature.tabularFigures(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('调试'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _AppSwitchRow(
+                    label: '显示帧数',
+                    subtitle: '实时显示 UI、GPU、低帧和 100 fps 帧预算',
+                    value: state.showFrameStats,
+                    onChanged: (bool value) =>
+                        unawaited(state.setShowFrameStats(value)),
+                  ),
+                  _AppSettingRow(
+                    label: '音频设备',
+                    subtitle: '查看当前音频输出端点和音频会话详情',
+                    trailing: SpringOutlinedButton(
+                      key: const ValueKey('open-audio-device-info'),
+                      onPressed: () =>
+                          unawaited(showAudioDeviceInfoDialog(context)),
+                      child: const TrText('查看'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('账户'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
+                    key: const ValueKey('music-platform-settings'),
+                    title: context.tr('音乐平台'),
+                    subtitle: state.musicProvider.name,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (state.musicProvider.experimental)
+                          const ExperimentalMusicBadge(),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.chevron_right_rounded),
+                      ],
+                    ),
+                    onTap: () => unawaited(showAppLoginDialog(context, state)),
+                  ),
+                  _AppSettingRow(
+                    label: state.isGuest ? '游客' : state.user.name,
+                    subtitle: state.isGuest
+                        ? '登录后同步歌单和每日推荐'
+                        : state.user.vipLabel ?? '普通用户',
+                    trailing: state.isGuest
+                        ? SpringFilledButton(
+                            onPressed: () =>
+                                unawaited(showAppLoginDialog(context, state)),
+                            child: const TrText('登录'),
+                          )
+                        : SpringTextButton(
+                            onPressed: state.signOut,
+                            child: const TrText('退出登录'),
+                          ),
+                  ),
+                  if (state.musicAuthenticationMethods.contains('exportCookie'))
+                    _AppSettingRow(
+                      label: '导出 Cookie',
+                      subtitle: state.isGuest
+                          ? '登录后可导出当前平台登录 Cookie'
+                          : '复制当前平台登录 Cookie 到剪贴板',
+                      trailing: SpringOutlinedButton(
+                        key: const ValueKey('export-session-cookie'),
+                        onPressed: state.isGuest
+                            ? null
+                            : () =>
+                                  unawaited(_copySessionCookie(context, state)),
+                        child: const TrText('复制'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const _AppSectionLabel('扩展'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: AppleListTile(
+                padding: SettingsSpacing.rowPadding,
+                minHeight: SettingsSpacing.rowMinHeight,
+                key: const ValueKey('open-plugin-manager'),
+                title: context.tr('插件管理'),
+                subtitle: context.tr('导入 ZIP、启用或卸载 Lua 音乐平台'),
+                leading: const AppleIconTile(icon: Icons.extension_rounded),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => SettingsDetailHost.open(
+                  context,
+                  page: (_) => PluginManagerPage(state: state),
+                  view: (_) => PluginManagerView(state: state),
+                ),
+              ),
+            ),
+            const _AppSectionLabel('关于'),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  _VersionSecretTile(state: state),
+                  AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
+                    key: const ValueKey('open-github-project'),
+                    title: context.tr('GitHub 项目'),
+                    subtitle: UpdateChecker.repositoryUrl,
+                    trailing: const Icon(Icons.open_in_new_rounded),
+                    onTap: () => unawaited(_openProjectRepository(context)),
+                  ),
+                  AppleListTile(
+                    padding: SettingsSpacing.rowPadding,
+                    minHeight: SettingsSpacing.rowMinHeight,
+                    key: const ValueKey('export-logs'),
+                    title: context.tr('导出日志'),
+                    subtitle: context.tr('保存运行日志与播放诊断信息'),
+                    trailing: const Icon(Icons.file_download_outlined),
+                    onTap: () => unawaited(exportLogs(context, state)),
+                  ),
+                  _AppSettingRow(
+                    label: '检查更新',
+                    subtitle: '从 GitHub 获取最新版本',
+                    trailing: state.updateChecking
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : SpringOutlinedButton(
+                            onPressed: () => unawaited(
+                              checkUpdatesFromSettings(context, state),
+                            ),
+                            child: const TrText('检查更新'),
+                          ),
+                  ),
+                  if (state.skippedUpdateVersion != null)
+                    _AppSettingRow(
+                      label: context.tr('已跳过 v${state.skippedUpdateVersion}'),
+                      subtitle: '自动提醒不再提示这个版本',
+                      trailing: SpringTextButton(
+                        onPressed: () => unawaited(state.clearSkippedUpdate()),
+                        child: const TrText('恢复提醒'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            ],
+          ),
           ],
         ),
       ),
