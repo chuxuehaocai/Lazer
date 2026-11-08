@@ -46,6 +46,8 @@ jobs:
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub --reporter expanded
       - run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
+      - name: Check interface localisation coverage
+        run: python3 tool/check_i18n.py
       - name: Test platform output contracts without hardware
         run: |
           cmake -S native/lazer-audio/tests/aaudio -B build/aaudio-contract -DCMAKE_BUILD_TYPE=Release
@@ -368,16 +370,38 @@ jobs:
           set -euo pipefail
           archive="build/linux/${{ matrix.bundle_arch }}/release/mimalloc-2.1.2.tar.gz"
           mkdir -p "$(dirname "$archive")"
-          curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
-            --retry-max-time 180 \
-            "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.2.tar.gz" \
-            -o "$archive"
+          # github.com's release CDN intermittently answers 504 for this
+          # archive (observed on the ARM64 runner, two attempts in a row). The
+          # codeload host serves the same bytes through a different endpoint, so
+          # try it first, give each endpoint a budget long enough to outlast a
+          # short CDN incident, and verify the bytes before using them.
+          urls=(
+            "https://codeload.github.com/microsoft/mimalloc/tar.gz/refs/tags/v2.1.2"
+            "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.2.tar.gz"
+          )
+          downloaded=false
+          for url in "${urls[@]}"; do
+            echo "Fetching $url"
+            if curl --fail --location --silent --show-error \
+              --connect-timeout 20 \
+              --retry 8 --retry-all-errors --retry-delay 3 --retry-max-time 300 \
+              "$url" -o "$archive.part"; then
+              downloaded=true
+              break
+            fi
+            rm -f -- "$archive.part"
+          done
+          if [[ "$downloaded" != true ]]; then
+            echo "::error::Could not download the mimalloc archive from any endpoint"
+            exit 1
+          fi
           expected=5179c8f5cf1237d2300e2d8559a7bc55
-          actual="$(md5sum "$archive" | awk '{print $1}')"
-          [[ "$actual" == "$expected" ]] || {
+          actual="$(md5sum "$archive.part" | awk '{print $1}')"
+          if [[ "$actual" != "$expected" ]]; then
             echo "mimalloc archive checksum mismatch: $actual" >&2
             exit 1
-          }
+          fi
+          mv -- "$archive.part" "$archive"
       - run: flutter build linux --release --no-pub --target-platform ${{ matrix.flutter_target }} --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Stage native audio and FFmpeg into the Linux bundle
         run: |

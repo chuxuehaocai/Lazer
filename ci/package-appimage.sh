@@ -47,6 +47,7 @@ esac
 # a different redirect and works when that CDN path does not.
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   if ! curl --fail --location --retry 6 --retry-all-errors --retry-delay 3 \
+    --connect-timeout 20 --retry-max-time 240 \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H 'Accept: application/octet-stream' \
     "https://api.github.com/repos/linuxdeploy/linuxdeploy/releases/assets/$linuxdeploy_asset" \
@@ -57,13 +58,37 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
 fi
 if [[ ! -s "$tools/linuxdeploy-$arch.AppImage" ]]; then
   curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
+    --connect-timeout 20 --retry-max-time 300 \
     "$linuxdeploy_url" -o "$tools/linuxdeploy-$arch.AppImage"
 fi
 echo "$tool_sha  linuxdeploy-$arch.AppImage" |
   (cd "$tools" && sha256sum --check -)
-curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
-  https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/7a3fbc31a9e5075073ff8790f26effbac5f84453/linuxdeploy-plugin-gtk.sh \
-  -o "$tools/linuxdeploy-plugin-gtk.sh"
+
+# The plugin is fetched by commit, so its bytes are immutable. raw.
+# githubusercontent.com has answered 504 from runners; jsDelivr serves the same
+# pinned file from a different network. Verify the hash either way, so a mirror
+# cannot substitute a different script.
+gtk_plugin_sha=b0f4cbc684a0103a9651f0955b635eaea0096b3a66c0f5a2c2aa337960375171
+gtk_plugin_urls=(
+  "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/7a3fbc31a9e5075073ff8790f26effbac5f84453/linuxdeploy-plugin-gtk.sh"
+  "https://cdn.jsdelivr.net/gh/linuxdeploy/linuxdeploy-plugin-gtk@7a3fbc31a9e5075073ff8790f26effbac5f84453/linuxdeploy-plugin-gtk.sh"
+)
+plugin_downloaded=false
+for url in "${gtk_plugin_urls[@]}"; do
+  if curl --fail --location --retry 8 --retry-all-errors --retry-delay 3 \
+    --connect-timeout 20 --retry-max-time 240 \
+    "$url" -o "$tools/linuxdeploy-plugin-gtk.sh"; then
+    plugin_downloaded=true
+    break
+  fi
+  rm -f -- "$tools/linuxdeploy-plugin-gtk.sh"
+done
+if [[ "$plugin_downloaded" != true ]]; then
+  echo 'Could not download linuxdeploy-plugin-gtk.sh from any endpoint' >&2
+  exit 1
+fi
+echo "$gtk_plugin_sha  linuxdeploy-plugin-gtk.sh" |
+  (cd "$tools" && sha256sum --check -)
 
 # appimagetool otherwise downloads its runtime from the GitHub release CDN on
 # every package run; that asset intermittently returns 504 on CI. Use the
