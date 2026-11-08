@@ -821,6 +821,7 @@ class _SettingsOverview extends StatelessWidget {
                   ),
                   _AppSettingRow(
                     label: state.isGuest ? '游客' : state.user.name,
+                    labelMaxLines: 1,
                     subtitle: state.isGuest
                         ? '登录后同步歌单和每日推荐'
                         : state.user.vipLabel ?? '普通用户',
@@ -993,6 +994,7 @@ class _AppSettingRow extends SettingsRow {
     required super.label,
     required super.subtitle,
     required super.trailing,
+    super.labelMaxLines,
   });
 }
 

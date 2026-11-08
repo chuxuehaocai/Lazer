@@ -23,6 +23,7 @@ class SettingsRow extends StatelessWidget {
     required this.trailing,
     this.controlFlex = 9,
     this.expandControl = false,
+    this.labelMaxLines,
   });
 
   final String label;
@@ -32,6 +33,7 @@ class SettingsRow extends StatelessWidget {
 
   /// Choices use their available width; switches retain their natural size.
   final bool expandControl;
+  final int? labelMaxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +45,8 @@ class SettingsRow extends StatelessWidget {
       children: <Widget>[
         Text(
           context.tr(label),
+          maxLines: labelMaxLines,
+          overflow: labelMaxLines == null ? null : TextOverflow.ellipsis,
           style: theme.textTheme.bodyLarge?.copyWith(color: apple.label),
         ),
         if (subtitle.isNotEmpty) ...<Widget>[
