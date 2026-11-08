@@ -91,7 +91,7 @@ flutter run
 Windows 请完整解压后运行；AppImage 下载后先 `chmod +x`；
 macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 
-更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [扫码登录](docs/login-qr.md) · [验证码登录](docs/login-sms.md) · [密码登录](docs/login-password.md) · [统一界面](docs/ui.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
+更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [Lua 插件开发](docs/lua-plugins.md) · [音乐平台架构](docs/music-gateways.md) · [统一界面](docs/ui.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 
 ## 参考与致谢
 

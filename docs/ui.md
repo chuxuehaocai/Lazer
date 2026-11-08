@@ -127,7 +127,7 @@ independently of those thresholds.
 
 Everything above the pixels remains shared with the existing app:
 
-- `AppState`, NetEase gateway, catalogue cache, artwork loading, playback,
+- `AppState`, Lua gateways, catalogue cache, artwork loading, playback,
   queueing, likes, comments and lyrics.
 - The shared `LyricViewport` with word-level sweep, selection, copy and image
   export, plus all persisted lyric preferences.

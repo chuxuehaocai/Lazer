@@ -91,30 +91,6 @@ index 40. The preceding backdrop-off sample measured 0.455 / 1.477 ms build /
 raster p95. These separate runs are not paired evidence; on this Windows
 profile they do not point to the mesh as the main source of frame stalls.
 
-## Large gateway responses
-
-`tool/gateway_profile.dart` feeds the transport 20 in-memory 703,378-byte
-responses containing 5,000 synthetic tracks, with frames continuously
-scheduled. It checks the decoded result but performs no network requests:
-
-```powershell
-flutter run --profile -d windows -t tool/gateway_profile.dart --dart-define=PROFILE_OUTPUT=C:/temp/lazer-gateway-profile.json
-```
-
-One paired run on the Windows setup above:
-
-| Measure | Branch base | Working tree |
-| --- | ---: | ---: |
-| Frame interval p99 | 12.134 ms | 6.067 ms |
-| Intervals over 16.7 ms | 0 | 0 |
-| Response processing p50 | 8.911 ms | 11.011 ms |
-| Response processing p95 | 11.493 ms | 12.934 ms |
-
-The sample suggests improved scheduling responsiveness at the cost of extra
-processing latency. It excludes network, real catalogue mapping and UI layout;
-repeat on target devices before drawing a general conclusion. Large response
-parsing uses `compute`, which does not create a background isolate on web.
-
 ## Large cache writes
 
 `tool/cache_write_profile.dart` serializes 5,000 synthetic track records 20
@@ -139,30 +115,6 @@ a single run does not establish a general frame-rate improvement. Copying the
 snapshot and isolate transfer still cost UI time. Disk performance, catalogue
 object conversion and web execution are outside this test; `compute` does not
 create a separate isolate on web.
-
-## Catalogue track conversion experiment
-
-`tool/catalog_profile.dart` loads 5,000 synthetic tracks through an in-memory
-cache and a fake gateway, scheduling frames throughout. Each case runs 12 times
-and verifies the resulting tracks; it does not use user data, disk or network.
-
-```powershell
-flutter run --profile -d windows -t tool/catalog_profile.dart --dart-define=PROFILE_OUTPUT=C:/temp/lazer-catalog-profile.json
-```
-
-One paired run compared the branch base with an experimental background-isolate
-conversion. The experiment was reverted because this sample showed no frame
-interval improvement and increased latency:
-
-| Measure | Branch base | Experimental conversion (reverted) |
-| --- | ---: | ---: |
-| Cold in-memory cache latency p95 | 0.764 ms | 4.269 ms |
-| Fake network latency p95 | 5.066 ms | 8.202 ms |
-| Frame interval p99, both cases | 6.067 ms | 6.067 ms |
-| Intervals over 16.7 ms, both cases | 0 | 0 |
-
-These are single-run synthetic measurements, not a measure of actual storage,
-network, track-list rendering or performance on other devices.
 
 ## Local manifest loading
 
