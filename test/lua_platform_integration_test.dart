@@ -76,11 +76,24 @@ final _musicSource = _source
   return {}
 ''');
 
-CachedLyricsStore _noLyricsDisk() => CachedLyricsStore(supportDirectory:()async=>throw const FileSystemException('lyrics tested separately'));
-Catalog _isolatedCatalog() => Catalog(cache:DiskCache(directory:()async=>throw const FileSystemException('catalogue tested separately')),lyricsCache:_noLyricsDisk());
+CachedLyricsStore _noLyricsDisk() => CachedLyricsStore(
+  supportDirectory: () async =>
+      throw const FileSystemException('lyrics tested separately'),
+);
+Catalog _isolatedCatalog() => Catalog(
+  cache: DiskCache(
+    directory: () async =>
+        throw const FileSystemException('catalogue tested separately'),
+  ),
+  lyricsCache: _noLyricsDisk(),
+);
+
 class _MusicCatalog extends Catalog {
   _MusicCatalog(Directory directory)
-    : super(cache: DiskCache(directory: () async => directory),lyricsCache:_noLyricsDisk());
+    : super(
+        cache: DiskCache(directory: () async => directory),
+        lyricsCache: _noLyricsDisk(),
+      );
   @override
   Future<AudioSource?> audioSourceFor(
     Track track, {
@@ -177,8 +190,11 @@ void main() {
   });
   PluginManager manager() =>
       PluginManager(rootDirectory: Directory('${directory.path}/plugins'));
-  AppState state(PluginManager plugins) =>
-      AppState(catalog:_isolatedCatalog(),pluginManager: plugins, artworkSeedLoader: (_) async => null);
+  AppState state(PluginManager plugins) => AppState(
+    catalog: _isolatedCatalog(),
+    pluginManager: plugins,
+    artworkSeedLoader: (_) async => null,
+  );
 
   test('Lua description supplies platforms and login capabilities', () async {
     final plugins = manager();
@@ -242,6 +258,28 @@ void main() {
         expect(signedOut.isGuest, isTrue);
       } finally {
         signedOut.dispose();
+      }
+    },
+  );
+
+  test(
+    'first Lua login refreshes the account playlists without another navigation',
+    () async {
+      final plugins = manager();
+      await plugins.importZip(_package(source: _musicSource));
+      final app = AppState(
+        pluginManager: plugins,
+        catalog: _MusicCatalog(Directory('${directory.path}/collection')),
+        artworkSeedLoader: (_) async => null,
+      );
+      try {
+        await app.bootstrap();
+        expect((await app.signInWithCookie('alpha-fixture')).ok, isTrue);
+        await _waitFor(() => app.collections.liked != null);
+        expect(app.collections.liked!.name, 'alpha listener喜欢的音乐');
+        expect(app.collections.created, isEmpty);
+      } finally {
+        app.dispose();
       }
     },
   );
@@ -336,7 +374,7 @@ void main() {
       final engine = _Engine();
       final restored = AppState(
         pluginManager: manager(),
-        catalog:_isolatedCatalog(),
+        catalog: _isolatedCatalog(),
         audioEngine: engine,
         artworkSeedLoader: (_) async => null,
       );
@@ -577,7 +615,7 @@ void main() {
       );
       final app = AppState(
         pluginManager: plugins,
-        catalog:_isolatedCatalog(),
+        catalog: _isolatedCatalog(),
         hifi: hifi,
         hifiSettings: hifi.settings,
         artworkSeedLoader: (_) async => null,

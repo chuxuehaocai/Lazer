@@ -1531,7 +1531,9 @@ class _AppShellState extends State<AppShell>
   String get _pageTitle {
     if (_comments) return '评论'; // i18n:key
     if (_localMusic) return '本地音乐'; // i18n:key
-    if (_savedAlbums) return '收藏的专辑'; // i18n:key
+    // AppSavedAlbumsPage owns the large page title. Keeping a shell title here
+    // creates a second “收藏的专辑” header above it.
+    if (_savedAlbums) return '';
     if (_chart != null) return _chart!.title;
     if (_playlist != null) return _playlist!.name;
     if (_artist != null) {

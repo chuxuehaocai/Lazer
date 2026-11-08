@@ -12,6 +12,7 @@ import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/ui/widgets.dart';
+import 'package:lazer_nextgen/widgets/cover_transition.dart';
 
 Album _album(String id, String title, String artist) => Album(
   id: id,
@@ -301,6 +302,7 @@ void main() {
     // The library keeps its section while the content pane swaps to the page.
     expect(find.byType(AppSavedAlbumsPage), findsOneWidget);
     expect(find.text('Night'), findsOneWidget);
+    expect(find.text('收藏的专辑'), findsOneWidget);
 
     await tester.tap(find.byTooltip('返回'));
     await tester.pumpAndSettle();
@@ -336,6 +338,20 @@ void main() {
     expect(find.text('Theirs'), findsOneWidget);
     expect(find.text('Mine'), findsNothing);
     expect(catalog.offsets, <int>[0, 0]);
+  });
+
+  testWidgets('album card text participates in the shared cover transition', (
+    tester,
+  ) async {
+    final catalog = _Catalog(
+      pages: <List<Album>>[
+        <Album>[_album('1', 'Night', 'Artist A')],
+      ],
+    );
+    final state = await _state(tester, catalog);
+    await tester.pumpWidget(_page(state));
+    await _settle(tester);
+    expect(find.byType(CoverTransitionText), findsNWidgets(2));
   });
 
   testWidgets('a page that claims more without albums stops the walk', (

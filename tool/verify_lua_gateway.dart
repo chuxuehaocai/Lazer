@@ -170,22 +170,41 @@ Future<void> main(List<String> arguments) async {
     });
     if (manifest.capabilities.contains('homeFeed')) {
       await check('provider_home_feed', () async {
-        final feed=await gateway.homeFeed();
-        require(feed.quick.isNotEmpty || feed.daily.isNotEmpty || feed.playlists.isNotEmpty || feed.albums.isNotEmpty);
+        final feed = await gateway.homeFeed();
+        require(
+          feed.quick.isNotEmpty ||
+              feed.daily.isNotEmpty ||
+              feed.playlists.isNotEmpty ||
+              feed.albums.isNotEmpty,
+        );
+        if (manifest.provider == 'netease') {
+          require(feed.editorialPlaylists.isNotEmpty);
+          require(
+            feed.editorialPlaylists.any(
+              (item) => item.coverUrl?.isNotEmpty == true,
+            ),
+          );
+        }
       });
     }
     if (manifest.capabilities.contains('savedAlbums')) {
-      await check('saved_albums', () async { await gateway.savedAlbums(limit:3); });
+      await check('saved_albums', () async {
+        await gateway.savedAlbums(limit: 3);
+      });
     }
     if (manifest.capabilities.contains('charts')) {
-      await check('provider_charts', () async { require((await gateway.charts()).isNotEmpty); });
+      await check('provider_charts', () async {
+        require((await gateway.charts()).isNotEmpty);
+      });
     }
     if (manifest.capabilities.contains('radio')) {
-      await check('personal_radio', () async { await gateway.radio(MusicRadioKind.personal,limit:3); });
+      await check('personal_radio', () async {
+        await gateway.radio(MusicRadioKind.personal, limit: 3);
+      });
     }
     if (manifest.capabilities.contains('comments')) {
       await check('song_comments', () async {
-        final page=await gateway.comments(song.id,limit:3);
+        final page = await gateway.comments(song.id, limit: 3);
         require(page.containsKey('total') && page.containsKey('latest'));
       });
     }

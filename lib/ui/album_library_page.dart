@@ -450,25 +450,33 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
               child: AppCover(url: album.coverUrl, size: side, radius: 14),
             ),
             const SizedBox(height: 8),
-            Text(
-              album.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: apple.label,
-                fontWeight: context.fonts.weightFor(
-                  FontCategory.title,
-                  FontWeight.w600,
+            CoverTransitionText.source(
+              coverKey: coverKey,
+              role: CoverTextRole.title,
+              child: Text(
+                album.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: apple.label,
+                  fontWeight: context.fonts.weightFor(
+                    FontCategory.title,
+                    FontWeight.w600,
+                  ),
                 ),
               ),
             ),
             if (album.artist.isNotEmpty)
-              Text(
-                album.artist,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: apple.secondaryLabel,
+              CoverTransitionText.source(
+                coverKey: coverKey,
+                role: CoverTextRole.detail,
+                child: Text(
+                  album.artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: apple.secondaryLabel,
+                  ),
                 ),
               ),
           ],
