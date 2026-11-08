@@ -38,12 +38,35 @@ done
 tools=$(mktemp -d)
 trap 'rm -rf -- "$tools"' EXIT
 linuxdeploy_url="https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-$arch.AppImage"
-curl --fail --location --retry 3 "$linuxdeploy_url" -o "$tools/linuxdeploy-$arch.AppImage"
+curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
+  "$linuxdeploy_url" -o "$tools/linuxdeploy-$arch.AppImage"
 echo "$tool_sha  linuxdeploy-$arch.AppImage" |
   (cd "$tools" && sha256sum --check -)
-curl --fail --location --retry 3 \
+curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
   https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/7a3fbc31a9e5075073ff8790f26effbac5f84453/linuxdeploy-plugin-gtk.sh \
   -o "$tools/linuxdeploy-plugin-gtk.sh"
+
+# appimagetool otherwise downloads its runtime from the GitHub release CDN on
+# every package run; that asset intermittently returns 504 on CI. Pre-fetch it
+# with retries, and fall back to the type-2 runtime already embedded in the
+# verified linuxdeploy AppImage if the CDN still refuses the request.
+runtime="$tools/runtime-$arch"
+runtime_url="https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch"
+if ! curl --fail --location --retry 4 --retry-all-errors --retry-delay 3 \
+  "$runtime_url" -o "$runtime"; then
+  python3 - "$tools/linuxdeploy-$arch.AppImage" "$runtime" <<'PY'
+import sys
+
+src, dst = sys.argv[1:3]
+data = open(src, 'rb').read()
+offset = data.find(b'hsqs')
+if offset <= 0:
+    raise SystemExit('could not locate the AppImage runtime')
+open(dst, 'wb').write(data[:offset])
+PY
+fi
+test -s "$runtime"
+export LDAI_RUNTIME_FILE="$runtime"
 chmod +x "$tools/"*.AppImage "$tools/"*.sh
 
 # Retain Flutter's executable-relative data/ and lib/ directories. libmpv is
