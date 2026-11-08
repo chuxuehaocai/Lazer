@@ -29,14 +29,57 @@ class PluginManifest {
         !safePath(entry) ||
         !entry.endsWith('.lua') ||
         domains.length > 32 ||
-        domains.any(
-          (d) => !RegExp(
-            r'^(\*\.)?[a-zA-Z0-9][a-zA-Z0-9.-]*(?::\d{1,5})?$',
-          ).hasMatch(d),
-        )) {
+        domains.any(invalidNetworkRule)) {
       throw const FormatException('插件清单无效，或不支持该插件 API 版本。');
     }
   }
+
+  /// Whether a declared network rule would grant more than the plugin asked for.
+  ///
+  /// A wildcard such as `*.com` (or `*.co.uk`) would authorise every host under
+  /// a public suffix, which is not a permission a plugin can meaningfully list.
+  /// A wildcard must name a registrable domain, not a suffix.
+  static bool invalidNetworkRule(String domain) {
+    if (!RegExp(
+      r'^(\*\.)?[a-zA-Z0-9][a-zA-Z0-9.-]*(?::\d{1,5})?$',
+    ).hasMatch(domain)) {
+      return true;
+    }
+    if (!domain.startsWith('*.')) return false;
+    final host = domain.substring(2).split(':').first.toLowerCase();
+    final labels = host.split('.').where((label) => label.isNotEmpty).toList();
+    if (labels.length < 2) return true;
+    return labels.length == 2 && _publicSuffixes.contains(host);
+  }
+
+  /// Two-label suffixes that are registries rather than registrable domains.
+  ///
+  /// This is not the public-suffix list; it is the short list a plugin is
+  /// realistically tempted to write as a wildcard. Anything longer must name
+  /// its own label (`*.example.co.uk`), which is a real scope.
+  static const Set<String> _publicSuffixes = <String>{
+    'co.uk',
+    'org.uk',
+    'ac.uk',
+    'gov.uk',
+    'co.jp',
+    'ne.jp',
+    'or.jp',
+    'com.au',
+    'net.au',
+    'org.au',
+    'com.cn',
+    'net.cn',
+    'org.cn',
+    'com.tw',
+    'co.kr',
+    'co.in',
+    'co.nz',
+    'co.za',
+    'com.br',
+    'com.mx',
+    'com.tr',
+  };
 
   factory PluginManifest.decode(String value) =>
       PluginManifest.fromJson(jsonDecode(value) as Map<String, dynamic>);

@@ -95,6 +95,32 @@ void main() {
     expect(PluginManifest.safePath('../api.lua'), isFalse);
   });
 
+  test('manifest rejects a wildcard over a public suffix', () {
+    Map<String, Object> withNetwork(List<String> domains) => <String, Object>{
+      'id': 'demo.network',
+      'name': 'Demo',
+      'version': '1.0.0',
+      'provider': 'demo',
+      'apiVersion': 1,
+      'entry': 'main.lua',
+      'permissions': <String, Object>{'network': domains},
+    };
+    expect(
+      () => PluginManifest.fromJson(withNetwork(<String>['*.com'])),
+      throwsFormatException,
+    );
+    expect(
+      () => PluginManifest.fromJson(withNetwork(<String>['*.co.uk'])),
+      throwsFormatException,
+    );
+    expect(
+      PluginManifest.fromJson(
+        withNetwork(<String>['*.example.com']),
+      ).domains,
+      <String>['*.example.com'],
+    );
+  });
+
   test('Lua entrypoint and module calls remain data-only', () async {
     final runtime = LuaPluginRuntime(
       manifest: PluginManifest.fromJson(const {
