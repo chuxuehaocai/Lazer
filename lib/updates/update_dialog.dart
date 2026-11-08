@@ -29,18 +29,32 @@ Future<void> checkUpdatesFromSettings(
 
 /// Presents a new release. [state] remembers a skip so automatic checks stop
 /// offering this exact version until a newer one is published.
+///
+/// The shell's automatic prompt and the settings button can both ask for the
+/// same release. Only one dialog may exist at a time; a second request is a
+/// no-op instead of stacking an identical card behind the first. The flag lives
+/// on the state (not in a static) so a new session starts clean.
 Future<void> showUpdateDialog(
   BuildContext context,
   AppState state,
   AppRelease release,
 ) async {
-  final bool? skipped = await showAppleDialog<bool>(
-    context: context,
-    builder: (BuildContext context) =>
-        _UpdateDialog(state: state, release: release),
-  );
-  if (skipped == true && context.mounted) {
-    _notice(context, context.tr('已跳过 ${release.version.normalized}'));
+  final String version = release.version.normalized;
+  if (state.updateDialogVersion == version) return;
+  state.updateDialogVersion = version;
+  try {
+    final bool? skipped = await showAppleDialog<bool>(
+      context: context,
+      builder: (BuildContext context) =>
+          _UpdateDialog(state: state, release: release),
+    );
+    if (skipped == true && context.mounted) {
+      _notice(context, context.tr('已跳过 $version'));
+    }
+  } finally {
+    if (state.updateDialogVersion == version) {
+      state.updateDialogVersion = null;
+    }
   }
 }
 

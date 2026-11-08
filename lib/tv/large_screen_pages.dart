@@ -1364,7 +1364,13 @@ class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage>
           Positioned(
             left: 12,
             right: 12,
-            bottom: 18,
+            // The page paints below the shell's floating transport. At 18 dp
+            // the batch bar sat entirely under that card: its buttons were
+            // invisible and competed with the transport for the remote's focus.
+            bottom:
+                LargeScreenMetrics.transportHeight +
+                24 +
+                MediaQuery.paddingOf(context).bottom,
             child: TrackBatchBar(
               selectedCount: _selected.length,
               totalCount: tracks.map((track) => track.id).toSet().length,
@@ -1457,6 +1463,7 @@ class _LargeScreenArtistPageState extends State<LargeScreenArtistPage>
   List<Album> _albums = const <Album>[];
   String? _error;
   bool _loading = true;
+  int _loadSerial = 0;
 
   @override
   void initState() {
@@ -1471,6 +1478,8 @@ class _LargeScreenArtistPageState extends State<LargeScreenArtistPage>
   }
 
   Future<void> _load() async {
+    final int serial = ++_loadSerial;
+    final String requested = widget.artist.key;
     setState(() {
       _loading = true;
       _error = null;
@@ -1481,14 +1490,20 @@ class _LargeScreenArtistPageState extends State<LargeScreenArtistPage>
       );
       final ArtistAlbumPage albums = await widget.state.catalog
           .artistAlbumPageFor(widget.artist, offset: 0);
-      if (!mounted) return;
+      // The shell reuses this State for the next artist in the same slot; a
+      // late answer for the previous one must not replace the header.
+      if (!mounted || serial != _loadSerial || requested != widget.artist.key) {
+        return;
+      }
       setState(() {
         _details = details;
         _albums = albums.albums;
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || serial != _loadSerial || requested != widget.artist.key) {
+        return;
+      }
       setState(() {
         _error = '歌手资料加载失败，请重试。';
         _loading = false;
@@ -1859,7 +1874,13 @@ class _LargeScreenChartPageState extends State<LargeScreenChartPage>
           Positioned(
             left: 12,
             right: 12,
-            bottom: 18,
+            // The page paints below the shell's floating transport. At 18 dp
+            // the batch bar sat entirely under that card: its buttons were
+            // invisible and competed with the transport for the remote's focus.
+            bottom:
+                LargeScreenMetrics.transportHeight +
+                24 +
+                MediaQuery.paddingOf(context).bottom,
             child: TrackBatchBar(
               selectedCount: _selected.length,
               totalCount: playable.map((track) => track.id).toSet().length,
@@ -1936,6 +1957,11 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage>
   String? _error;
   String _query = '';
 
+  /// In-flight search token. Typing or submitting again invalidates the old
+  /// request, so a late answer can never leave the spinner up for a query the
+  /// field no longer contains.
+  int _request = 0;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -1945,14 +1971,13 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage>
   void _onChanged(String value) {
     // Typing only updates the clear affordance. A query is committed on
     // Enter, so the remote/keyboard does not fire a request per keystroke.
-    if (value.trim().isNotEmpty) {
-      setState(() {});
-      return;
-    }
+    // It also cancels the previous search: its answer describes different text.
+    _request++;
     setState(() {
+      _searching = false;
+      if (value.trim().isNotEmpty) return;
       _query = '';
       _results = SearchResults.empty;
-      _searching = false;
       _error = null;
     });
   }
@@ -1964,19 +1989,20 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage>
   }
 
   Future<void> _search(String query) async {
+    final int request = ++_request;
     setState(() {
       _searching = true;
       _error = null;
     });
     try {
       final SearchResults results = await widget.state.search(query);
-      if (!mounted || _controller.text.trim() != query) return;
+      if (!mounted || request != _request) return;
       setState(() {
         _results = results;
         _searching = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || request != _request) return;
       setState(() {
         _error = '搜索失败，请检查网络后重试。';
         _searching = false;

@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/plugins/plugin_manager.dart';
 import 'package:lazer_nextgen/plugins/plugin_market.dart';
@@ -32,6 +34,7 @@ Uint8List package({String id = 'fixture.market', String version = '1.0.0'}) {
 Map<String, dynamic> entry({
   String id = 'fixture.market',
   String version = '1.0.0',
+  Uint8List? bytes,
 }) => {
   'id': id,
   'version': version,
@@ -39,6 +42,11 @@ Map<String, dynamic> entry({
   'summary': 'A music platform',
   'author': 'Fixture',
   'download': 'fixture.zip',
+  // A market entry installs executable code, so the fixture carries the hash of
+  // the exact package bytes its download URL serves.
+  'sha256': sha256
+      .convert(bytes ?? package(id: id, version: version))
+      .toString(),
   'platforms': ['windows', 'linux', 'macos', 'android', 'ios'],
   'minAppVersion': '2.0.0-beta.6',
 };
@@ -54,6 +62,20 @@ void main() {
   tearDown(() async {
     manager.dispose();
     await root.delete(recursive: true);
+  });
+  test('uninstall removes the credentials stored beside the plugin', () async {
+    await manager.importZip(package());
+    final plugin = manager.plugins.single;
+    final Directory data = Directory(
+      p.join(root.parent.path, 'lua_plugin_data', plugin.manifest.id),
+    );
+    await data.create(recursive: true);
+    await File(
+      p.join(data.path, 'storage.json'),
+    ).writeAsString('{"token":"secret"}');
+    await manager.uninstall(plugin.manifest.id);
+    expect(manager.plugins, isEmpty);
+    expect(await data.exists(), isFalse);
   });
   test('default and custom sources normalize directory and JSON URLs', () {
     expect(
@@ -133,6 +155,10 @@ void main() {
   );
   test('market download installs and updates real Lua ZIPs', () async {
     var version = '1.0.0';
+    final packages = <String, Uint8List>{
+      '1.0.0': package(version: '1.0.0'),
+      '1.1.0': package(version: '1.1.0'),
+    };
     final market = PluginMarket(
       manager,
       client: MockClient(
@@ -140,12 +166,14 @@ void main() {
             ? http.Response(
                 jsonEncode({
                   'schemaVersion': 1,
-                  'plugins': [entry(version: version)],
+                  'plugins': [
+                    entry(version: version, bytes: packages[version]),
+                  ],
                 }),
                 200,
                 headers: {'content-type': 'application/json; charset=utf-8'},
               )
-            : http.Response.bytes(package(version: version), 200),
+            : http.Response.bytes(packages[version]!, 200),
       ),
     );
     addTearDown(market.dispose);
@@ -161,19 +189,17 @@ void main() {
   });
   test('manifest identity mismatch preserves the installed plugin', () async {
     await manager.importZip(package());
+    final Uint8List other = package(id: 'other.plugin', version: '1.1.0');
     final market = PluginMarket(
       manager,
       client: MockClient(
-        (_) async => http.Response.bytes(
-          package(id: 'other.plugin', version: '1.1.0'),
-          200,
-        ),
+        (_) async => http.Response.bytes(other, 200),
       ),
     );
     addTearDown(market.dispose);
     await market.install(
       MarketPlugin.fromJson(
-        entry(version: '1.1.0'),
+        entry(version: '1.1.0', bytes: other),
         pluginIndexUri(defaultPluginSource),
       ),
     );
@@ -201,6 +227,14 @@ void main() {
           pluginIndexUri(defaultPluginSource),
         ),
         throwsFormatException,
+      );
+      expect(
+        () => MarketPlugin.fromJson(
+          entry()..remove('sha256'),
+          pluginIndexUri(defaultPluginSource),
+        ),
+        throwsFormatException,
+        reason: 'a market package without a checksum is not installable',
       );
     },
   );

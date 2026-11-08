@@ -24,6 +24,14 @@ class AppStorage {
   static final shared = AppStorage();
   static const rootKey = 'lazer_data_root';
   static const pendingKey = 'lazer_pending_data_root';
+
+  /// How many launches have already tried to apply [pendingKey].
+  ///
+  /// A migration that can never succeed (a folder that stays unwritable) used to
+  /// be retried on every launch forever. After a bounded number of attempts the
+  /// request is dropped and the settings page keeps showing the failure.
+  static const pendingAttemptsKey = 'lazer_pending_data_root_attempts';
+  static const maxPendingAttempts = 3;
   static const _marker = '.lazer-storage';
   final bool supported;
   final Future<Directory> Function() _support, _cache, _documents;
@@ -93,6 +101,7 @@ class AppStorage {
         await prefs.setString(rootKey, next);
       }
       await prefs.remove(pendingKey);
+      await prefs.remove(pendingAttemptsKey);
       _root = next;
       _pending = null;
       _hasPending = false;
@@ -100,6 +109,18 @@ class AppStorage {
     } catch (failure) {
       error = failure.toString();
       _fallback = !rootAvailable;
+      final int attempts = (prefs.getInt(pendingAttemptsKey) ?? 0) + 1;
+      if (attempts >= maxPendingAttempts) {
+        // Give up on a request that keeps failing (unwritable folder, revoked
+        // permission) instead of retrying it on every launch. The error and the
+        // fallback stay visible in the storage settings.
+        await prefs.remove(pendingKey);
+        await prefs.remove(pendingAttemptsKey);
+        _pending = null;
+        _hasPending = false;
+      } else {
+        await prefs.setInt(pendingAttemptsKey, attempts);
+      }
     }
   }
 
@@ -170,6 +191,8 @@ class AppStorage {
       _hasPending = false;
     } else {
       await prefs.setString(pendingKey, next ?? '');
+      // A fresh request gets a fresh retry budget.
+      await prefs.remove(pendingAttemptsKey);
       _hasPending = true;
     }
     _pending = next;

@@ -13,6 +13,7 @@ library;
 
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
@@ -431,15 +432,23 @@ Object? _execute(LazerAudioApi api, int op, List<Object?> params) {
   }
 }
 
-/// `[engineConfig fields..., event callback address, log callback address]`.
+/// `[engineConfig fields..., event callback address, log callback address,
+/// device token]`.
 ///
 /// The callback addresses are `NativeCallable` function pointers created on the
 /// UI isolate; the engine keeps them for its lifetime, so they must outlive it.
+/// The token is the endpoint the user picked; the engine resolves it when it
+/// opens the output, and an absent token means the system default.
 Object? _create(LazerAudioApi api, List<Object?> params) {
   final Pointer<LazerAudioEngineConfig> config =
       calloc<LazerAudioEngineConfig>();
+  Pointer<Uint16>? deviceId;
   try {
     _writeDevice(config.ref.device, params.sublist(0, 6));
+    deviceId = _allocWideString(
+      params.length > 8 ? params[8] as String? : null,
+    );
+    if (deviceId != null) config.ref.device.deviceId = deviceId;
     config.ref
       ..abiVersion = lazerAudioAbiVersion
       ..structSize = sizeOf<LazerAudioEngineConfig>();
@@ -456,6 +465,7 @@ Object? _create(LazerAudioApi api, List<Object?> params) {
     final Pointer<Void> engine = api.create(config);
     return engine == nullptr ? null : engine.address;
   } finally {
+    _freeWideString(deviceId);
     calloc.free(config);
   }
 }
@@ -515,10 +525,18 @@ Object? _queueReader(LazerAudioApi api, List<Object?> params) {
 Object? _setDevice(LazerAudioApi api, List<Object?> params) {
   final Pointer<LazerAudioDeviceConfig> device =
       calloc<LazerAudioDeviceConfig>();
+  Pointer<Uint16>? deviceId;
   try {
     _writeDevice(device.ref, params.sublist(1, 7));
+    // The selected endpoint was previously dropped here, so every session
+    // opened the system default no matter what the settings page said.
+    deviceId = _allocWideString(
+      params.length > 7 ? params[7] as String? : null,
+    );
+    if (deviceId != null) device.ref.deviceId = deviceId;
     return api.setDevice(Pointer<Void>.fromAddress(params[0] as int), device);
   } finally {
+    _freeWideString(deviceId);
     calloc.free(device);
   }
 }
@@ -592,6 +610,34 @@ void _writeDevice(LazerAudioDeviceConfig device, List<Object?> values) {
     ..bufferMillis = values[3] as int
     ..bitPerfect = values[4] as int
     ..dsdOutputMode = values[5] as int;
+}
+
+/// Allocates [value] in the ABI's `wchar_t *` encoding.
+///
+/// `wchar_t` is UTF-16 on Windows and UTF-32 on Linux/macOS; the engine decodes
+/// whichever the host uses (`wideStringToUtf8`), so the pointer must carry that
+/// width. The pointer is typed `Pointer<Uint16>` because that is what the ABI
+/// field declares — only the pointee size differs by platform.
+Pointer<Uint16>? _allocWideString(String? value) {
+  if (value == null || value.isEmpty) return null;
+  if (Platform.isWindows) {
+    final List<int> units = value.codeUnits;
+    final Pointer<Uint16> pointer = calloc<Uint16>(units.length + 1);
+    for (int index = 0; index < units.length; index++) {
+      pointer[index] = units[index];
+    }
+    return pointer;
+  }
+  final List<int> codePoints = value.runes.toList(growable: false);
+  final Pointer<Uint32> pointer = calloc<Uint32>(codePoints.length + 1);
+  for (int index = 0; index < codePoints.length; index++) {
+    pointer[index] = codePoints[index];
+  }
+  return Pointer<Uint16>.fromAddress(pointer.address);
+}
+
+void _freeWideString(Pointer<Uint16>? pointer) {
+  if (pointer != null) calloc.free(pointer);
 }
 
 void _writeOpenParams(

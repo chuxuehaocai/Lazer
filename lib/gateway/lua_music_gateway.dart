@@ -61,17 +61,31 @@ class LuaMusicGateway extends MusicAccountGateway {
     });
     if (value is Map && value['error'] is Map) {
       final error = value['error'] as Map;
+      final int? code = (error['code'] as num?)?.toInt();
+      // The sandbox reports an HTTP status it parsed out of a thrown Lua error
+      // through `code`. Treating it as an application code hid 401/429 from the
+      // login prompt and the retry messaging.
+      final int? httpStatus =
+          (error['httpStatus'] as num?)?.toInt() ??
+          (code != null && code >= 400 && code <= 599 ? code : null);
       throw MusicGatewayException(
         provider.id,
         operation,
-        code: (error['code'] as num?)?.toInt(),
-        httpStatus: (error['httpStatus'] as num?)?.toInt(),
+        code: code,
+        httpStatus: httpStatus,
       );
     }
     return value;
   }
 
   List<dynamic> _list(Object? value) => value is List ? value : const [];
+
+  Map<String, dynamic> _mapResult(Object? value) {
+    if (value is Map) return Map<String, dynamic>.from(value);
+    // A nil or list where an object was promised is a plugin bug. Mapping it to
+    // an empty object made it look like a successful empty result.
+    throw MusicGatewayException(provider.id, 'response', reason: 'invalid payload');
+  }
   String _string(Object? value) => value?.toString() ?? '';
   MusicId _id(MusicEntityKind kind, Object? value) => id(kind, _string(value));
   MusicArtist _artist(Map value) => MusicArtist(
@@ -125,6 +139,17 @@ class LuaMusicGateway extends MusicAccountGateway {
     int offset,
     int limit,
   ) {
+    // Lua's empty table arrives as `{}` rather than `[]`; that is the plugin
+    // saying "no rows", not a malformed page. A non-empty map or a scalar is
+    // malformed though, and returning an empty page for it hid plugin bugs.
+    if (raw is Map && raw.isEmpty) raw = const <Object?>[];
+    if (raw != null && raw is! List) {
+      throw MusicGatewayException(
+        provider.id,
+        'response',
+        reason: 'invalid payload',
+      );
+    }
     final list = raw is List
         ? raw.whereType<Map>().map(convert).toList()
         : <T>[];
@@ -239,11 +264,11 @@ class LuaMusicGateway extends MusicAccountGateway {
 
   @override
   Future<MusicSong> song(MusicId id) async => _song(
-    Map.from(await _call('song', {'id': remoteId(id, MusicEntityKind.song)})),
+    _mapResult(await _call('song', {'id': remoteId(id, MusicEntityKind.song)})),
   );
   @override
   Future<MusicAlbum> album(MusicId id) async => _album(
-    Map.from(await _call('album', {'id': remoteId(id, MusicEntityKind.album)})),
+    _mapResult(await _call('album', {'id': remoteId(id, MusicEntityKind.album)})),
   );
   @override
   Future<MusicPage<MusicAlbum>> albums({
@@ -277,7 +302,7 @@ class LuaMusicGateway extends MusicAccountGateway {
   );
   @override
   Future<MusicArtist> artist(MusicId id) async => _artist(
-    Map.from(
+    _mapResult(
       await _call('artist', {'id': remoteId(id, MusicEntityKind.artist)}),
     ),
   );
@@ -323,7 +348,7 @@ class LuaMusicGateway extends MusicAccountGateway {
   );
   @override
   Future<MusicPlaylist> playlist(MusicId id) async => _playlist(
-    Map.from(
+    _mapResult(
       await _call('playlist', {'id': remoteId(id, MusicEntityKind.playlist)}),
     ),
   );
@@ -347,7 +372,7 @@ class LuaMusicGateway extends MusicAccountGateway {
     String name, {
     bool isPublic = false,
   }) async => _playlist(
-    Map.from(
+    _mapResult(
       await _call('createPlaylist', {'name': name, 'isPublic': isPublic}),
     ),
   );
@@ -390,7 +415,7 @@ class LuaMusicGateway extends MusicAccountGateway {
     MusicId song, {
     MusicStreamQuality quality = MusicStreamQuality.original,
   }) async {
-    final raw = Map.from(
+    final raw = _mapResult(
       await _call('stream', {
         'id': remoteId(song, MusicEntityKind.song),
         'quality': quality.name,
@@ -506,7 +531,7 @@ class LuaMusicGateway extends MusicAccountGateway {
 
   @override
   Future<MusicHome> homeFeed() async {
-    final raw = Map.from(await _call('homeFeed'));
+    final raw = _mapResult(await _call('homeFeed'));
     List<T> values<T>(String key, T Function(Map) convert) =>
         _list(raw[key]).whereType<Map>().map(convert).toList();
     return MusicHome(

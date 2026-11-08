@@ -1,3 +1,5 @@
+// i18n:data — the condition and meaning strings below are interface keys; the
+// signal-path panel renders them through `context.tr`.
 // The three conditions behind a bit-perfect claim, as separate facts.
 //
 // The engine used to publish one boolean (`bit_perfect_active`) that it decided
@@ -75,8 +77,7 @@ class OutputPathState {
   /// conditions decide it. Derived here instead of copied from the engine so a
   /// stale flag cannot light the indicator: the engine's own answer is only
   /// compared against it ([agreesWithEngine]).
-  bool get bitPerfect =>
-      live && exclusive && !dspActive && formatMatchesSource;
+  bool get bitPerfect => live && exclusive && !dspActive && formatMatchesSource;
 
   /// Whether the engine's flag and the three conditions tell the same story.
   ///
@@ -95,14 +96,12 @@ class OutputPathState {
   ];
 
   /// What a bit-perfect verdict means for this path, for the panel's wording.
-  String get bitPerfectMeaning => isDsdPath
-      ? 'DSD 位流原样进入 DoP 载波 / 原生 DSD 字'
-      : 'PCM 样本原样进入设备';
+  String get bitPerfectMeaning =>
+      isDsdPath ? 'DSD 位流原样进入 DoP 载波 / 原生 DSD 字' : 'PCM 样本原样进入设备';
 
   /// The format the session actually runs, for the diagnostics panel.
-  String get formatLabel => live
-      ? '$actualSampleRate Hz/$actualBitDepth-bit/${channels}ch'
-      : '未协商';
+  String get formatLabel =>
+      live ? '$actualSampleRate Hz/$actualBitDepth-bit/${channels}ch' : '未协商';
 
   @override
   String toString() =>

@@ -194,6 +194,7 @@ class _PluginRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final apple = AppleSemanticColors.of(context);
+    final String hosts = plugin.manifest.domains.join('、');
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
       child: Row(
@@ -226,6 +227,18 @@ class _PluginRow extends StatelessWidget {
                         : Theme.of(context).colorScheme.error,
                   ),
                 ),
+                if (plugin.manifest.domains.isNotEmpty ||
+                    plugin.manifest.storage)
+                  Text(
+                    context.tr(
+                      plugin.manifest.storage
+                          ? '网络：$hosts · 本地存储'
+                          : '网络：$hosts',
+                    ),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: apple.secondaryLabel,
+                    ),
+                  ),
               ],
             ),
           ),

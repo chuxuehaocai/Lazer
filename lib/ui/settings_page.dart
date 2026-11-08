@@ -448,7 +448,9 @@ class _SettingsOverview extends StatelessWidget {
                         for (final AppLanguage language in AppLanguage.values)
                           DropdownMenuItem<AppLanguage>(
                             value: language,
-                            child: Text(language.name),
+                            // Language endonyms stay as written; only the
+                            // "follow system" entry is interface text.
+                            child: TrText(language.name),
                           ),
                       ],
                       onChanged: (AppLanguage? value) {

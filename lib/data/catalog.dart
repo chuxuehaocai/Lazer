@@ -524,28 +524,33 @@ class Catalog {
         'charts': value.map((chart) => chart.toJson()).toList(),
       };
 
-  Future<List<MusicChart>> providerCharts() => _cached(
-    'provider-charts:$_scope',
-    const Duration(minutes: 30),
-    _decodeCharts,
-    _encodeCharts,
-    () async {
-      final gateway = activeGateway;
-      final lists = await gateway.charts();
-      return Future.wait(
-        lists.map((list) async {
-          final songs = await gateway.playlistSongs(list.id, limit: 100);
-          return MusicChart(
-            id: list.id.cacheKey,
-            title: list.name,
-            source: gateway.provider.name,
-            issueLabel: '',
-            accent: 0,
-            entries: [
-              for (var i = 0; i < songs.items.length; i++)
-                ChartEntry(
-                  rank: i + 1,
-                  title: songs.items[i].title,
+  Future<List<MusicChart>> providerCharts() {
+    // The key, the gateway and the fetch must describe the same connection.
+    // Reading `activeGateway` again after the cache await let a switch mid-load
+    // store one platform's charts under the previous platform's namespace.
+    final MusicGateway gateway = activeGateway;
+    final String scope = gateway.cacheNamespace;
+    return _cached(
+      'provider-charts:$scope',
+      const Duration(minutes: 30),
+      _decodeCharts,
+      _encodeCharts,
+      () async {
+        final lists = await gateway.charts();
+        return Future.wait(
+          lists.map((list) async {
+            final songs = await gateway.playlistSongs(list.id, limit: 100);
+            return MusicChart(
+              id: list.id.cacheKey,
+              title: list.name,
+              source: gateway.provider.name,
+              issueLabel: '',
+              accent: 0,
+              entries: [
+                for (var i = 0; i < songs.items.length; i++)
+                  ChartEntry(
+                    rank: i + 1,
+                    title: songs.items[i].title,
                   artist: songs.items[i].artists.map((a) => a.name).join(' / '),
                   track: _platform.track(songs.items[i]),
                 ),
@@ -556,6 +561,7 @@ class Catalog {
       );
     },
   );
+  }
 
   Future<MusicChart> chartIssue(MusicChart chart, ChartIssue issue) => _cached(
     'chart-issue-v2:${chart.providerKey}:${issue.id}',

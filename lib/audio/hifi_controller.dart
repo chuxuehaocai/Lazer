@@ -8,6 +8,8 @@
 // Everything here reports honestly: a device that refused exclusive mode, a
 // bit-perfect request the endpoint cannot honour, or a DSD mode without a DSD source
 // are shown as they are, never as "supported".
+// i18n:data — the fallback reason below is an interface key; the HiFi settings
+// page renders it through `context.tr`.
 library;
 
 import '../state/build_safe_notifier.dart';

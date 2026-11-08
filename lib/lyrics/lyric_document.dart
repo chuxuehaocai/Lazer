@@ -29,11 +29,29 @@ class LyricLine {
 /// or two digits for the minute and second fields, scales a one-to-three digit
 /// fraction by its length (`.5` is 500 ms, `.05` is 50 ms) and drops rows
 /// whose seconds field is 60 or more.
+///
+/// `[offset:±N]` is applied to every timestamp: a positive offset moves the
+/// lyrics later, which is the direction the tag is defined in. Lines that would
+/// land before zero are clamped to the start of the song. Without this, a file
+/// that ships an offset highlights and seeks one offset away from the words.
 List<LyricLine> parseLrc(String? source) {
   if (source == null || source.trim().isEmpty) return const [];
   final stamp = RegExp(r'\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]');
+  final offsetTag = RegExp(
+    r'\[offset:\s*([+-]?\d+)\s*\]',
+    caseSensitive: false,
+  );
+  final rows = source.split(RegExp(r'[\r\n]+'));
+  Duration offset = Duration.zero;
+  for (final row in rows) {
+    final match = offsetTag.firstMatch(row);
+    final int? milliseconds = match == null
+        ? null
+        : int.tryParse(match.group(1)!);
+    if (milliseconds != null) offset = Duration(milliseconds: milliseconds);
+  }
   final lines = <LyricLine>[];
-  for (final row in source.split(RegExp(r'[\r\n]+'))) {
+  for (final row in rows) {
     final matches = stamp.allMatches(row).toList();
     if (matches.isEmpty) continue;
     final text = row.substring(matches.last.end).trim();
@@ -41,16 +59,13 @@ List<LyricLine> parseLrc(String? source) {
       final seconds = int.parse(match.group(2)!);
       if (seconds >= 60) continue;
       final fraction = (match.group(3) ?? '').padRight(3, '0');
-      lines.add(
-        LyricLine(
-          Duration(
-            minutes: int.parse(match.group(1)!),
-            seconds: seconds,
-            milliseconds: int.parse(fraction),
-          ),
-          text,
-        ),
+      final base = Duration(
+        minutes: int.parse(match.group(1)!),
+        seconds: seconds,
+        milliseconds: int.parse(fraction),
       );
+      final shifted = base + offset;
+      lines.add(LyricLine(shifted.isNegative ? Duration.zero : shifted, text));
     }
   }
   lines.sort((a, b) => a.time.compareTo(b.time));

@@ -386,6 +386,12 @@ verify that tickers, source snapshots and temporary overlay layers are released.
 Cover pixel tests include the first returning frame and immediate reopening;
 the old layer stays visible until its replacement has painted.
 
+Opening artwork keeps the bouncy 600 ms response: expanding into a detail pane
+is the one place its overshoot reads as momentum. The return is critically
+damped and shares the retained page switch's 420 ms response, because it lands
+on a fixed card slot where any overshoot passes *inside* the card and springs
+back out. See [the return audit](cover-return-audit-2026-11.md).
+
 The system media clock sleeps when playback is paused or absent. Paused seek
 notifications still update the OS timeline immediately through the tick lane;
 playing ticks do not increase the one-second publication cadence. These work

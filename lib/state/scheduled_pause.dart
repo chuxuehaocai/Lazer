@@ -66,7 +66,9 @@ class ScheduledPauseSettings {
         if (point.valid && ids.add(point.id)) points.add(point);
       }
       return ScheduledPauseSettings(
-        enabled: data['enabled'] == true,
+        // An enabled schedule needs at least one point that can fire.
+        enabled:
+            data['enabled'] == true && points.any((point) => point.enabled),
         points: points,
       );
     } catch (_) {

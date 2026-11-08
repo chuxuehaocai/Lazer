@@ -48,7 +48,11 @@ class MarketPlugin {
         ReleaseVersion.parse(version) == null ||
         download.scheme != 'https' ||
         download.userInfo.isNotEmpty ||
-        checksum != null && !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(checksum!)) {
+        // A market entry installs executable plugin code. Without a checksum
+        // there is nothing tying the bytes to the reviewed package, so a
+        // missing hash is a rejection, not "trust the transport".
+        checksum == null ||
+        !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(checksum!)) {
       throw const FormatException('插件源包含无效的插件信息。');
     }
   }
@@ -120,6 +124,12 @@ class PluginMarket extends ChangeNotifier with BuildSafeNotifier {
     final response = await _client
         .send(http.Request('GET', uri))
         .timeout(const Duration(seconds: 20));
+    // A redirect is a new URL the index never named. Validate where the bytes
+    // actually came from instead of trusting the initial (HTTPS) URL.
+    final Uri delivered = response.request?.url ?? uri;
+    if (delivered.scheme != 'https' || delivered.userInfo.isNotEmpty) {
+      throw const FormatException('插件源请求被重定向到不安全的地址。');
+    }
     if (response.statusCode != 200) {
       throw FormatException('插件源请求失败（HTTP ${response.statusCode}）。');
     }
@@ -217,8 +227,9 @@ class PluginMarket extends ChangeNotifier with BuildSafeNotifier {
         maxPluginArchiveBytes,
         transfer: transfer,
       );
-      if (plugin.checksum != null &&
-          sha256.convert(bytes).toString() != plugin.checksum!.toLowerCase()) {
+      // Every market entry carries a sha256 (constructor-enforced); keep the
+      // comparison for the bytes actually installed.
+      if (sha256.convert(bytes).toString() != plugin.checksum!.toLowerCase()) {
         throw const FormatException('插件校验失败，请刷新插件源后重试。');
       }
       if (_disposed || transfer != _download) return;

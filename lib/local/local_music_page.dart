@@ -277,6 +277,36 @@ class _LocalMusicPageState extends State<LocalMusicPage>
     }
   }
 
+  /// Removes missing records only after the listener confirms what is lost.
+  ///
+  /// The probe can mark a whole library missing when a removable volume is not
+  /// mounted, and clearing the records is not reversible. The files themselves
+  /// stay on disk, which is what the confirmation says.
+  Future<void> _clearMissing(int count) async {
+    final bool? confirmed = await showAppleDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const TrText('清理丢失记录？'),
+        content: Text(
+          context.tr('会把 $count 条记录从资料库移除；磁盘上的文件不会被删除。'),
+        ),
+        actions: <Widget>[
+          SpringTextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const TrText('取消'),
+          ),
+          SpringFilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const TrText('清理'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await state.localLibrary.clearMissing();
+    }
+  }
+
   void _playAll(List<LocalTrack> playable) {
     if (playable.isEmpty) return;
     state.playQueue(<Track>[
@@ -522,7 +552,7 @@ class _LocalMusicPageState extends State<LocalMusicPage>
                                     'local-music-clear-missing',
                                   ),
                                   onPressed: () => unawaited(
-                                    state.localLibrary.clearMissing(),
+                                    _clearMissing(missing.length),
                                   ),
                                   child: const TrText('清理记录'),
                                 ),

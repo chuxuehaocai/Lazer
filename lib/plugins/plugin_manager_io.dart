@@ -109,13 +109,17 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.runtime = runtime;
       await runtime.start();
       final description = await runtime.invoke('describe');
-      MediaRequestRules.register(plugin.manifest.id, [
-        for (final rule
-            in description is Map && description['media'] is List
-                ? description['media'] as List
-                : const [])
-          if (rule is Map) Map<String, dynamic>.from(rule),
-      ]);
+      MediaRequestRules.register(
+        plugin.manifest.id,
+        [
+          for (final rule
+              in description is Map && description['media'] is List
+                  ? description['media'] as List
+                  : const [])
+            if (rule is Map) Map<String, dynamic>.from(rule),
+        ],
+        permittedDomains: plugin.manifest.domains,
+      );
       final declared = description is Map ? description['providers'] : null;
       final providers = declared is List
           ? declared.whereType<Map>().toList()
@@ -317,6 +321,19 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         throw const FormatException();
       }
       if (await directory.exists()) await directory.delete(recursive: true);
+      // Credentials and storage written by the plugin live beside the plugin
+      // directory, not inside it. Uninstalling used to leave session cookies in
+      // plaintext, and reinstalling the same id brought them back.
+      final dataParent = Directory(p.join(p.dirname(base), 'lua_plugin_data'));
+      final data = Directory(p.join(dataParent.path, plugin.manifest.id));
+      if (data.absolute.parent.path != dataParent.absolute.path) {
+        throw const FormatException();
+      }
+      if (await data.exists()) await data.delete(recursive: true);
+      final backup = Directory(p.join(base, '.backup-${plugin.manifest.id}'));
+      if (p.dirname(backup.absolute.path) == base && await backup.exists()) {
+        await backup.delete(recursive: true);
+      }
       _plugins.remove(plugin);
       await afterChange?.call();
     } finally {

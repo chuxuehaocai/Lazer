@@ -177,7 +177,7 @@ void main() {
     expect(await File(tasks.last.path!).exists(), isTrue);
   });
 
-  test('an existing file is kept instead of overwritten', () async {
+  test('a foreign file at the target name is kept and not adopted', () async {
     final File existing = File(
       '${downloads.path}${Platform.pathSeparator}音乐人 - 曲目.mp3',
     );
@@ -197,11 +197,52 @@ void main() {
         )
         .single;
     await waitUntil(
-      () => task.status == DownloadStatus.existing,
-      reason: 'existing detection',
+      () => task.status == DownloadStatus.completed,
+      reason: 'the download must use its own name',
     );
     expect(await existing.readAsBytes(), <int>[9, 9, 9]);
+    expect(task.path, isNot(existing.path));
+    expect(task.path, endsWith('音乐人 - 曲目 (2).mp3'));
     await waitUntil(() => local.count == 1, reason: 'library record');
+    expect(local.tracks.single.path, isNot(existing.path));
+  });
+
+  test('two songs whose names sanitise alike do not share a file', () async {
+    final LocalLibrary local = library();
+    await local.load();
+    final DownloadManager manager = DownloadManager(
+      catalog: _DownloadCatalog(base),
+      library: local,
+    );
+    addTearDown(manager.dispose);
+    // Same artist and title, different ids: one file name for two songs.
+    final DownloadTask first = manager
+        .enqueue(
+          <Track>[_track('1', '曲目')],
+          quality: AudioQuality.exhigh,
+          directory: downloads.path,
+        )
+        .single;
+    final DownloadTask second = manager
+        .enqueue(
+          <Track>[_track('2', '曲目')],
+          quality: AudioQuality.exhigh,
+          directory: downloads.path,
+        )
+        .single;
+    final List<DownloadTask> tasks = <DownloadTask>[first, second];
+    await waitUntil(
+      () => tasks.every((DownloadTask task) => task.isDone),
+      reason: 'both downloads',
+    );
+    expect(tasks.first.path, isNot(tasks.last.path));
+    expect(await File(tasks.first.path!).readAsBytes(), payload);
+    expect(await File(tasks.last.path!).readAsBytes(), payload);
+    await waitUntil(() => local.count == 2, reason: 'two library records');
+    expect(
+      local.tracks.map((LocalTrack track) => track.path).toSet().length,
+      2,
+    );
   });
 
   test('a failed resolution reports an error and can be retried', () async {

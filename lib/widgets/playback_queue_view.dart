@@ -69,7 +69,7 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
         // The getter returns an immutable snapshot; take it once per rebuild,
         // rather than copying the entire queue for every visible row.
         final List<Track> queue = state.queue;
-        final String? currentId = state.current?.id;
+        final int currentIndex = state.queueIndex;
         return SafeArea(
           top: false,
           child: Column(
@@ -119,8 +119,10 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
                     track: queue[i],
                     index: i,
                     state: state,
-                    isCurrent: currentId == queue[i].id,
-                    playing: state.playing && currentId == queue[i].id,
+                    // The queue may contain the same song twice; only the slot
+                    // the transport is actually at is the current one.
+                    isCurrent: i == currentIndex,
+                    playing: state.playing && i == currentIndex,
                     onTap: () => state.playTrackAt(i),
                   ),
                 ),

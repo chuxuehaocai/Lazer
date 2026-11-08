@@ -85,88 +85,98 @@ Future<void> main() async {
       // Window chrome, preferences and device detection do not depend on one
       // another. Start them together so a platform round trip does not postpone
       // opening the audio engine and restoring the usable application.
-      final Future<void> windowReady = initWindowFrame();
-      // The television input model (D-pad focus) needs this before the first
-      // frame: a television with no pointer would otherwise boot into a screen
-      // where nothing can be operated.
-      // The native HiFi engine (FFmpeg + WASAPI/ALSA/CoreAudio) when this build
-      // ships one, otherwise just_audio/media_kit. Chosen once per launch.
-      final Future<SharedPreferences> prefsFuture =
-          SharedPreferences.getInstance();
-      final Future<bool> televisionFuture = detectTelevision();
-      final watchFuture = detectWatch();
-      final prefs = await prefsFuture;
-      await AppStorage.shared.initialize(prefs);
-      LazerAudioLoader.importedLibraryPath = prefs.getString(
-        'lazer_native_engine_path',
-      );
-      final Future<AudioEngineSelection> selectionFuture = createAudioEngine(
-        preferNative: prefs.getBool('hifi_native_engine') ?? true,
-        autoMixEnabled: prefs.getBool('lazer_automix_enabled') ?? false,
-      );
-      final bool television = await televisionFuture;
-      final watch = await watchFuture;
-      final AudioEngineSelection selection = await selectionFuture;
-      await windowReady;
-      final AudioEngine audio = selection.engine;
-      debugPrint('Audio engine: ${selection.description}');
-      // The HiFi page needs one owner for "apply these settings to whatever engine
-      // is running"; it exists even on just_audio so the page can still show the
-      // device catalog and why the native engine is not in use.
-      final HifiController hifi = HifiController(
-        HifiSettings.fromMap(<String, Object?>{
-          'hifi_native_engine': prefs.getBool('hifi_native_engine'),
-          'hifi_output_token': prefs.getString('hifi_output_token'),
-          'hifi_output_name': prefs.getString('hifi_output_name'),
-          'hifi_exclusive': prefs.getBool('hifi_exclusive'),
-          'hifi_bit_perfect': prefs.getBool('hifi_bit_perfect'),
-          'hifi_dsd_mode': prefs.getString('hifi_dsd_mode'),
-          'hifi_dsd_rate_policy': prefs.getString('hifi_dsd_rate_policy'),
-          'hifi_volume_normalization': prefs.getString(
-            'hifi_volume_normalization',
-          ),
-          'hifi_crossfeed': prefs.getString('hifi_crossfeed'),
-          'hifi_buffer_millis': prefs.getInt('hifi_buffer_millis'),
-          'hifi_equalizer': prefs.getString('hifi_equalizer'),
-        }),
-        engine: selection.native,
-        catalogApi: selection.isNative ? LazerAudioLoader.load().api : null,
-        persist: (HifiSettings value) async {
-          final SharedPreferences prefs = await SharedPreferences.getInstance();
-          for (final MapEntry<String, Object?> entry in value.toMap().entries) {
-            final Object? stored = entry.value;
-            if (stored == null) {
-              await prefs.remove(entry.key);
-            } else if (stored is bool) {
-              await prefs.setBool(entry.key, stored);
-            } else if (stored is int) {
-              await prefs.setInt(entry.key, stored);
-            } else {
-              await prefs.setString(entry.key, '$stored');
+      try {
+        final Future<void> windowReady = initWindowFrame();
+        // The television input model (D-pad focus) needs this before the first
+        // frame: a television with no pointer would otherwise boot into a screen
+        // where nothing can be operated.
+        // The native HiFi engine (FFmpeg + WASAPI/ALSA/CoreAudio) when this build
+        // ships one, otherwise just_audio/media_kit. Chosen once per launch.
+        final Future<SharedPreferences> prefsFuture =
+            SharedPreferences.getInstance();
+        final Future<bool> televisionFuture = detectTelevision();
+        final watchFuture = detectWatch();
+        final prefs = await prefsFuture;
+        await AppStorage.shared.initialize(prefs);
+        LazerAudioLoader.importedLibraryPath = prefs.getString(
+          'lazer_native_engine_path',
+        );
+        final Future<AudioEngineSelection> selectionFuture = createAudioEngine(
+          preferNative: prefs.getBool('hifi_native_engine') ?? true,
+          autoMixEnabled: prefs.getBool('lazer_automix_enabled') ?? false,
+        );
+        final bool television = await televisionFuture;
+        final watch = await watchFuture;
+        final AudioEngineSelection selection = await selectionFuture;
+        await windowReady;
+        final AudioEngine audio = selection.engine;
+        debugPrint('Audio engine: ${selection.description}');
+        // The HiFi page needs one owner for "apply these settings to whatever engine
+        // is running"; it exists even on just_audio so the page can still show the
+        // device catalog and why the native engine is not in use.
+        final HifiController hifi = HifiController(
+          HifiSettings.fromMap(<String, Object?>{
+            'hifi_native_engine': prefs.getBool('hifi_native_engine'),
+            'hifi_output_token': prefs.getString('hifi_output_token'),
+            'hifi_output_name': prefs.getString('hifi_output_name'),
+            'hifi_exclusive': prefs.getBool('hifi_exclusive'),
+            'hifi_bit_perfect': prefs.getBool('hifi_bit_perfect'),
+            'hifi_dsd_mode': prefs.getString('hifi_dsd_mode'),
+            'hifi_dsd_rate_policy': prefs.getString('hifi_dsd_rate_policy'),
+            'hifi_volume_normalization': prefs.getString(
+              'hifi_volume_normalization',
+            ),
+            'hifi_crossfeed': prefs.getString('hifi_crossfeed'),
+            'hifi_buffer_millis': prefs.getInt('hifi_buffer_millis'),
+            'hifi_equalizer': prefs.getString('hifi_equalizer'),
+          }),
+          engine: selection.native,
+          catalogApi: selection.isNative ? LazerAudioLoader.load().api : null,
+          persist: (HifiSettings value) async {
+            final SharedPreferences prefs =
+                await SharedPreferences.getInstance();
+            for (final MapEntry<String, Object?> entry
+                in value.toMap().entries) {
+              final Object? stored = entry.value;
+              if (stored == null) {
+                await prefs.remove(entry.key);
+              } else if (stored is bool) {
+                await prefs.setBool(entry.key, stored);
+              } else if (stored is int) {
+                await prefs.setInt(entry.key, stored);
+              } else {
+                await prefs.setString(entry.key, '$stored');
+              }
             }
-          }
-        },
-      )..attach();
-      final state = AppState(
-        audioEngine: audio,
-        enableExternalCharts: true,
-        deviceIsTelevision: television,
-        deviceIsWatch: watch.watch,
-        deviceIsRoundWatch: watch.round,
-        independentPlayback:
-            prefs.getBool('lazer_independent_playback') ?? false,
-        autoMixEnabled: prefs.getBool('lazer_automix_enabled') ?? false,
-        hifiSettings: hifi.settings,
-        hifi: hifi,
-        // Null on the native engine. Otherwise the player shows this verbatim,
-        // so a fallback this launch cannot be mistaken for a HiFi session.
-        hifiPathNotice: selection.path.notice,
-      );
-      final session = PlaybackSession(state, audio);
-      final media = SystemMediaController(state);
-      runApp(
-        LazerApp(state: state, audio: audio, media: media, session: session),
-      );
+          },
+        )..attach();
+        final state = AppState(
+          audioEngine: audio,
+          enableExternalCharts: true,
+          deviceIsTelevision: television,
+          deviceIsWatch: watch.watch,
+          deviceIsRoundWatch: watch.round,
+          independentPlayback:
+              prefs.getBool('lazer_independent_playback') ?? false,
+          autoMixEnabled: prefs.getBool('lazer_automix_enabled') ?? false,
+          hifiSettings: hifi.settings,
+          hifi: hifi,
+          // Null on the native engine. Otherwise the player shows this verbatim,
+          // so a fallback this launch cannot be mistaken for a HiFi session.
+          hifiPathNotice: selection.path.notice,
+        );
+        final session = PlaybackSession(state, audio);
+        final media = SystemMediaController(state);
+        runApp(
+          LazerApp(state: state, audio: audio, media: media, session: session),
+        );
+      } catch (error, stack) {
+        // Nothing above this point has a widget tree yet. Without this catch a
+        // failed plugin channel, engine start-up or storage initialisation
+        // escaped the zone and left a window with no content and no log record.
+        AppLog.shared.record('startup failed: $error\n$stack');
+        runApp(_StartupFailureApp(error: '$error'));
+      }
     },
     zoneSpecification: ZoneSpecification(
       print: (Zone self, ZoneDelegate parent, Zone zone, String line) {
@@ -242,6 +252,13 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _state.addListener(_onRootUiChanged);
     _playbackLifecycle = AppLifecycleListener(
       onResume: _state.synchronizePlaybackAfterResume,
+      // A mobile app can be killed from the background without another frame.
+      // Flush the queue index and the listening session while the process is
+      // still alive; onPause covers the same window on platforms that only
+      // report pause.
+      onPause: () => unawaited(_state.flushPersistence()),
+      onHide: () => unawaited(_state.flushPersistence()),
+      onDetach: () => unawaited(_state.flushPersistence()),
     );
     _state.bootstrap();
     _remote = LanRemoteController(_state);
@@ -371,6 +388,61 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                     state: _state,
                     autoCheckUpdates: true,
                   ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The smallest usable surface when start-up failed before the real app existed.
+///
+/// It cannot use `AppState`, the localisation tables or the Apple theme: those
+/// are provided by the very bootstrap that failed. It still has to say what
+/// happened and where the log is, instead of showing an empty window.
+class _StartupFailureApp extends StatelessWidget {
+  const _StartupFailureApp({required this.error});
+
+  final String error;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: const <LocalizationsDelegate<Object>>[
+        AppLocalizations.delegate,
+      ],
+      home: Scaffold(
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Icon(Icons.error_outline_rounded, size: 44),
+                const SizedBox(height: 16),
+                // The localisation tables load from the asset bundle and do not
+                // need the app state, so the fallback screen can still speak the
+                // user's language even though start-up failed.
+                const TrText(
+                  'Lazer 启动失败 / Lazer could not start',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 10),
+                const TrText(
+                  '请重新启动应用。如果问题持续，请在设置中导出诊断日志。',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 18),
+                SelectableText(
+                  error,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
           ),
         ),
       ),

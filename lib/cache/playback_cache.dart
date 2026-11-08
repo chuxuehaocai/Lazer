@@ -372,6 +372,16 @@ class PlaybackCacheController extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {}
   }
 
+  /// Writes play counts, recency and the pending-delete queue now.
+  ///
+  /// The periodic save is a coalesced write; a process that goes away between
+  /// two writes loses the last window of history, which is also the input of
+  /// the eviction policy. The lifecycle hooks await this.
+  Future<void> flushHistory() async {
+    if (_disposed) return;
+    await _serialize(_saveHistory);
+  }
+
   @override
   void dispose() {
     _disposed = true;
