@@ -472,7 +472,11 @@ class _AppTrackRowState extends State<AppTrackRow>
                   SizedBox(
                     width: 46,
                     child: Text(
-                      formatDuration(widget.track.duration),
+                      // A remote file has no duration until a decoder opens it;
+                      // showing 0:00 there would claim the song is empty.
+                      widget.track.duration > Duration.zero
+                          ? formatDuration(widget.track.duration)
+                          : '--:--',
                       textAlign: TextAlign.end,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: apple.secondaryLabel,

@@ -19,6 +19,7 @@
     <uses-feature android:name="android.hardware.type.watch" android:required="false" />
     <application
         android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="true"
         android:enableOnBackInvokedCallback="true"
         android:label="Lazer"
         android:name="${applicationName}"

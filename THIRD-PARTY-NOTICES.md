@@ -64,6 +64,23 @@ The component is used under Apache-2.0. A copy of that license is included at
 `licenses/twilight_echo/Apache-2.0.txt`; retain the attribution and license
 when distributing builds containing this code.
 
+## Network source clients
+
+The NAS, radio and podcast features use four pure-Dart packages. Their
+licenses are retained in the packages themselves and are listed by Flutter's
+own licence page:
+
+- `dartssh2` (SFTP/SSH) — MIT, <https://github.com/TerminalStudio/dartssh2>
+- `smb_connect` (SMB2) — Apache-2.0, <https://github.com/vadia/smb_connect>
+- `xml` (DAV and RSS/Atom parsing) — MIT, <https://github.com/renggli/dart-xml>
+- `pointycastle` (AES-GCM for stored credentials, and the crypto underneath the
+  two protocol clients) — MIT (Bouncy Castle), <https://github.com/bcgit/pc-dart>
+
+`smb_connect` declares the pointycastle 3.x line while `dartssh2` 4.x requires
+4.x; the repository pins 4.x through `dependency_overrides` because the
+pointycastle API surface both packages use is unchanged. Both copies would
+otherwise be linked.
+
 ## FFmpeg
 
 The DSD-capable FFmpeg builds produced by

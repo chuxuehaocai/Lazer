@@ -16,6 +16,16 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Lazer 需要访问局域网，才能播放 NAS、网络电台与播客里的音乐。</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- NAS WebDAV, radio streams and podcast enclosures are user-provided
+		     and frequently plain HTTP on a LAN address. Dart sockets bypass
+		     ATS, but the AVFoundation fallback player does not. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>CFBundleDisplayName</key>
 	<string>Lazer</string>
 	<key>CFBundleLocalizations</key>

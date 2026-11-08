@@ -8,7 +8,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:encrypt/encrypt.dart' as aes;
+import 'package:pointycastle/export.dart' as pc;
 import 'package:lua_dardo_plus/lua.dart';
 import 'package:path/path.dart' as p;
 
@@ -477,16 +477,9 @@ end
             .toRadixString(16)
             .padLeft(spec['width'] as int? ?? 256, '0');
       case 'aes':
-        final key = aes.Key.fromUtf8(spec['key'] as String);
+        final key = utf8.encode(spec['key'] as String);
         final cbc = spec['mode'] == 'cbc';
-        final cipher = aes.Encrypter(
-          aes.AES(
-            key,
-            mode: cbc ? aes.AESMode.cbc : aes.AESMode.ecb,
-            padding: 'PKCS7',
-          ),
-        );
-        final iv = cbc ? aes.IV.fromUtf8(spec['iv'] as String) : null;
+        final iv = cbc ? utf8.encode(spec['iv'] as String) : null;
         if (spec['decrypt'] == true) {
           final bytes = spec['encoding'] == 'hex'
               ? Uint8List.fromList([
@@ -494,15 +487,49 @@ end
                     int.parse(input.substring(i, i + 2), radix: 16),
                 ])
               : base64Decode(input);
-          return cipher.decrypt(aes.Encrypted(bytes), iv: iv);
+          return utf8.decode(_aes(bytes, key: key, iv: iv, encrypt: false));
         }
-        final bytes = cipher.encrypt(input, iv: iv).bytes;
+        final bytes = _aes(
+          Uint8List.fromList(utf8.encode(input)),
+          key: key,
+          iv: iv,
+        );
         return spec['encoding'] == 'hex'
             ? bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join()
             : base64Encode(bytes);
       default:
         throw const FormatException('Unknown crypto operation');
     }
+  }
+
+  /// AES-CBC/ECB with PKCS7, the two modes the Lua `crypto` helper exposes.
+  /// This used to come from the `encrypt` package; pointycastle is the engine
+  /// underneath it and is already in the tree for the network clients.
+  Uint8List _aes(
+    Uint8List input, {
+    required List<int> key,
+    List<int>? iv,
+    bool encrypt = true,
+  }) {
+    final pc.PaddedBlockCipher cipher = pc.PaddedBlockCipherImpl(
+      pc.PKCS7Padding(),
+      iv == null
+          ? pc.ECBBlockCipher(pc.AESEngine())
+          : pc.CBCBlockCipher(pc.AESEngine()),
+    );
+    final pc.CipherParameters parameters = iv == null
+        ? pc.PaddedBlockCipherParameters<pc.CipherParameters,
+              pc.CipherParameters>(pc.KeyParameter(Uint8List.fromList(key)), null)
+        : pc.PaddedBlockCipherParameters<pc.CipherParameters,
+              pc.CipherParameters>(
+            pc.ParametersWithIV(
+              pc.KeyParameter(Uint8List.fromList(key)),
+              Uint8List.fromList(iv),
+            ),
+            null,
+          );
+    cipher.init(encrypt, parameters);
+    return cipher.process(input);
   }
 
   String? _compactCookie(String value) {

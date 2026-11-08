@@ -40,7 +40,6 @@ dependencies:
 
   # Shared HTTP and cryptographic primitives for sandboxed Lua providers.
   crypto: ^3.0.6
-  encrypt: ^5.0.3
   http: ^1.2.2
   shared_preferences: ^2.3.3
   just_audio: ^0.9.42
@@ -70,6 +69,21 @@ dependencies:
     path: third_party/lua_dardo_plus
   archive: ^4.6.0
   path: ^1.9.1
+
+  # Native network sources: WebDAV/Gate HTTPS, plain FTP, SFTP over SSH and
+  # SMB2 shares. Both libraries are pure Dart, so every platform build keeps
+  # working without a native toolchain.
+  dartssh2: ^4.1.0
+  smb_connect: ^0.0.9
+  xml: ^7.0.1
+  pointycastle: ^4.0.0
+
+# `smb_connect` still declares the pointycastle 3 line, but the crypto it uses
+# (AES, MD4/MD5, HMAC) is unchanged in 4.x and the package compiles and runs
+# against it. `dartssh2` 4 requires 4.x; keeping one major for both avoids two
+# copies of the crypto code in the bundle.
+dependency_overrides:
+  pointycastle: ^4.0.0
 
 dev_dependencies:
   flutter_test:

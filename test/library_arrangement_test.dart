@@ -117,6 +117,10 @@ void main() {
 
   testWidgets('歌单排列 decides how many cards share a row', (tester) async {
     final AppState state = await _signedIn(tester);
+    // The library now carries the local-music and network-source rows above the
+    // grid; give the viewport the height those rows take so all five cards are
+    // laid out (the grid itself is lazy and only mounts what fits).
+    tester.view.physicalSize = const Size(390, 1200);
     await state.setPlaylistColumns(3);
     await tester.pumpWidget(_library(state));
     await tester.pump();

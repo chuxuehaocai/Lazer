@@ -81,6 +81,14 @@ TRANSLATING_WIDGETS: dict[str, set[str | None]] = {
     "_VerticalVolumeBar": {"semanticLabel"},
     # lib/ui/font_settings_page.dart
     "_FontCard": {"label", "detail", "sample"},
+    # lib/network/network_widgets.dart
+    "NetworkField": {"label", "hint"},
+    "NetworkBusyBanner": {"message"},
+    "NetworkErrorText": {None},
+    # lib/network/network_source_editor.dart
+    "_NetworkSwitch": {"label"},
+    # lib/network/network_sources_page.dart — translated inside _SectionActions.
+    "_SectionAction": {"label"},
     # lib/ui/shell.dart
     "_CompactIcon": {"tooltip"},
     "_ToolbarButton": {"tooltip"},
@@ -109,6 +117,18 @@ TRANSLATING_CALLS: dict[str, set[str | None]] = {
     "_watchInput": {"hint"},
     "_watchMessage": {None},
     "_openWatchTracks": {None},
+    # Network pages: snack bars and prompts translate their argument at the
+    # render site, so call sites keep the source language.
+    "showNetworkMessage": {None},
+    "showNetworkTextPrompt": {
+        None,
+        "title",
+        "label",
+        "hint",
+        "description",
+        "confirmLabel",
+    },
+    "_withBusy": {None},
 }
 
 # Flutter APIs that paint a String on screen.
