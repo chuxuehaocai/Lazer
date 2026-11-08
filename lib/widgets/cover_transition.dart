@@ -18,6 +18,15 @@ const _coverSpring = AppleSpring(
   bounce: .2,
 );
 
+/// The return leg lands on a shelf card, which is a fixed slot rather than a
+/// pane the artwork can grow into. Any bounce there overshoots *inside* the
+/// card and springs back out, which reads as the cover rebounding after the
+/// detail page has already closed. It also runs on the retained page switch's
+/// own 420 ms response, so the artwork stops moving when the page does instead
+/// of wobbling for another 700 ms. Opening keeps [_coverSpring]: expanding into
+/// a large pane is the one place the overshoot reads as momentum.
+const _coverReturnSpring = AppleSpring(duration: Duration(milliseconds: 420));
+
 class _CoverSnapshot {
   _CoverSnapshot(this.image) {
     _liveSnapshots++;
@@ -199,6 +208,29 @@ void _refreshSnapshots(BuildContext? context) {
     if (ancestor is SnapshotWidget) ancestor.controller.clear();
     return true;
   });
+}
+
+/// Holds one [GlobalKey] for a list item across rebuilds.
+///
+/// `final key = GlobalKey()` inside `itemBuilder` is a new key on every
+/// rebuild. The source element is then replaced instead of updated, which
+/// resets the hidden state that keeps a returning cover from being painted
+/// twice. Keying this wrapper by the item's identity keeps the key with its row
+/// even when the list is reordered.
+class StableCoverKey extends StatefulWidget {
+  const StableCoverKey({super.key, required this.builder});
+
+  final Widget Function(GlobalKey key) builder;
+
+  @override
+  State<StableCoverKey> createState() => _StableCoverKeyState();
+}
+
+class _StableCoverKeyState extends State<StableCoverKey> {
+  final GlobalKey _key = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_key);
 }
 
 /// A source keeps its layout while its artwork travels in the root overlay.
@@ -875,6 +907,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget>
           targetRadius: widget.radius,
           fromBlend: fromBlend,
           toBlend: 0,
+          spring: _coverReturnSpring,
           text: text,
           viewport: () => _viewportRect(viewport, overlayBox),
           motion: widget.motion,
@@ -954,6 +987,7 @@ class _CoverFlight extends StatefulWidget {
     this.viewport,
     this.motion,
     this.fromProgress,
+    this.spring = _coverSpring,
   });
 
   final Rect start;
@@ -974,6 +1008,7 @@ class _CoverFlight extends StatefulWidget {
   final Rect? Function()? viewport;
   final AnimationController? motion;
   final double? fromProgress;
+  final AppleSpring spring;
 
   @override
   State<_CoverFlight> createState() => _CoverFlightState();
@@ -1024,6 +1059,7 @@ class _CoverFlightState extends State<_CoverFlight>
       widget.toBlend,
       motion: widget.motion,
       fromProgress: widget.fromProgress,
+      spring: widget.spring,
     );
     _blend = _CoverBlend(
       _clock,
@@ -1037,6 +1073,7 @@ class _CoverFlightState extends State<_CoverFlight>
           widget.toBlend,
           motion: widget.motion,
           fromProgress: widget.fromProgress,
+          spring: widget.spring,
         ),
     ];
     if (!(widget.handle?._held ?? false)) {
@@ -1259,9 +1296,11 @@ class _CoverPhysics extends Simulation {
     this.toBlend, {
     this.motion,
     double? fromProgress,
-  }) : _target = destination() ?? initial.rect,
+    AppleSpring spring = _coverSpring,
+  }) : _spring = spring,
+       _target = destination() ?? initial.rect,
        fromProgress = fromProgress ?? motion?.value ?? 0,
-       _blend = _coverSpring.simulation(
+       _blend = spring.simulation(
          initial.blend,
          toBlend,
          velocity: initial.blendVelocity,
@@ -1281,8 +1320,9 @@ class _CoverPhysics extends Simulation {
   double _epoch = 0;
   late List<SpringSimulation> _edges;
   final SpringSimulation _blend;
+  final AppleSpring _spring;
 
-  static List<SpringSimulation> _springs(_CoverPresentation from, Rect target) {
+  List<SpringSimulation> _springs(_CoverPresentation from, Rect target) {
     final values = [
       from.rect.left,
       from.rect.top,
@@ -1298,7 +1338,7 @@ class _CoverPhysics extends Simulation {
     ];
     return [
       for (var i = 0; i < 4; i++)
-        _coverSpring.simulation(values[i], targets[i], velocity: velocities[i])
+        _spring.simulation(values[i], targets[i], velocity: velocities[i])
           ..tolerance = const Tolerance(distance: .05, velocity: .5),
     ];
   }

@@ -350,44 +350,50 @@ class _ArtistReleaseShelf extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(width: 16),
         itemBuilder: (BuildContext context, int index) {
           final Album album = albums[index];
-          final coverKey = GlobalKey();
-          return SizedBox(
-            width: 160,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: feedbackAction(context, () {
-                rememberCoverTransition('playlist:${album.id}', coverKey);
-                unawaited(openAlbumDetails(context, state, album));
-              }),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  CoverTransitionSource(
-                    key: coverKey,
-                    identity: 'playlist:${album.id}',
-                    child: AppCover(url: album.coverUrl, size: 160, radius: 9),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    album.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+          return StableCoverKey(
+            key: ValueKey<String>('artist-album:${album.id}'),
+            builder: (GlobalKey coverKey) => SizedBox(
+              width: 160,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: feedbackAction(context, () {
+                  rememberCoverTransition('playlist:${album.id}', coverKey);
+                  unawaited(openAlbumDetails(context, state, album));
+                }),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    CoverTransitionSource(
+                      key: coverKey,
+                      identity: 'playlist:${album.id}',
+                      child: AppCover(
+                        url: album.coverUrl,
+                        size: 160,
+                        radius: 9,
+                      ),
                     ),
-                  ),
-                  Text(
-                    <String>[
-                      if (album.year.isNotEmpty) album.year,
-                      if (album.releaseType.isNotEmpty) album.releaseType,
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppleSemanticColors.of(context).secondaryLabel,
+                    const SizedBox(height: 8),
+                    Text(
+                      album.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                ],
+                    Text(
+                      <String>[
+                        if (album.year.isNotEmpty) album.year,
+                        if (album.releaseType.isNotEmpty) album.releaseType,
+                      ].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppleSemanticColors.of(context).secondaryLabel,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -541,85 +547,90 @@ class _AppArtistReleasesPageState extends State<AppArtistReleasesPage>
                       Divider(height: 1, indent: 80, color: apple.separator),
                   itemBuilder: (BuildContext context, int index) {
                     final Album album = albums[index];
-                    final coverKey = GlobalKey();
-                    final String detail = <String>[
-                      if (album.year.isNotEmpty) album.year,
-                      if (album.releaseType.isNotEmpty) album.releaseType,
-                      if (album.trackCount != null)
-                        context.tr('${album.trackCount} 首'),
-                    ].join(' · ');
-                    return Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(10),
-                        onTap: feedbackAction(context, () {
-                          rememberCoverTransition(
-                            'playlist:${album.id}',
-                            coverKey,
-                          );
-                          unawaited(
-                            openAlbumDetails(context, widget.state, album),
-                          );
-                        }),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 10,
-                          ),
-                          child: Row(
-                            children: <Widget>[
-                              CoverTransitionSource(
-                                key: coverKey,
-                                identity: 'playlist:${album.id}',
-                                child: AppCover(
-                                  url: album.coverUrl,
-                                  size: 62,
-                                  radius: 7,
-                                ),
+                    return StableCoverKey(
+                      key: ValueKey<String>('artist-release:${album.id}'),
+                      builder: (GlobalKey coverKey) {
+                        final String detail = <String>[
+                          if (album.year.isNotEmpty) album.year,
+                          if (album.releaseType.isNotEmpty) album.releaseType,
+                          if (album.trackCount != null)
+                            context.tr('${album.trackCount} 首'),
+                        ].join(' · ');
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: feedbackAction(context, () {
+                              rememberCoverTransition(
+                                'playlist:${album.id}',
+                                coverKey,
+                              );
+                              unawaited(
+                                openAlbumDetails(context, widget.state, album),
+                              );
+                            }),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 10,
                               ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: <Widget>[
-                                    Text(
-                                      album.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge
-                                          ?.copyWith(
-                                            color: apple.label,
-                                            fontWeight: FontWeight.w600,
-                                          ),
+                              child: Row(
+                                children: <Widget>[
+                                  CoverTransitionSource(
+                                    key: coverKey,
+                                    identity: 'playlist:${album.id}',
+                                    child: AppCover(
+                                      url: album.coverUrl,
+                                      size: 62,
+                                      radius: 7,
                                     ),
-                                    if (detail.isNotEmpty) ...<Widget>[
-                                      const SizedBox(height: 3),
-                                      Text(
-                                        detail,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: apple.secondaryLabel,
-                                            ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        Text(
+                                          album.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyLarge
+                                              ?.copyWith(
+                                                color: apple.label,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                        ),
+                                        if (detail.isNotEmpty) ...<Widget>[
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            detail,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color: apple.secondaryLabel,
+                                                ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: apple.tertiaryLabel,
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 12),
-                              Icon(
-                                Icons.chevron_right_rounded,
-                                color: apple.tertiaryLabel,
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      },
                     );
                   },
                 ),

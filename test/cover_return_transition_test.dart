@@ -382,6 +382,57 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('return lands on the card without rebounding inside it', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const _ReturnHarness());
+    final state = tester.state<_ReturnHarnessState>(
+      find.byType(_ReturnHarness),
+    );
+    final card = tester.getRect(find.byKey(state.source, skipOffstage: false));
+    state.enter();
+    await _settle(tester);
+    state.back();
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(_returnKey), findsOneWidget);
+    // The retained shelf slides in under the flight, so early frames are
+    // legitimately larger than the settled card. Only the tail can rebound.
+    for (var frame = 0; frame < 30; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    var worst = 0.0;
+    var frames = 0;
+    while (find.byKey(_returnKey).evaluate().isNotEmpty) {
+      final rect = tester.getRect(find.byKey(_returnKey));
+      // Each edge only travels toward the card: left/top grow, right/bottom
+      // shrink. Passing a target and coming back lands the artwork inside the
+      // slot, which is the "the cover rebounds when I close the page" report.
+      // A bouncy return spring measured 4.2-5.8 px of it here.
+      worst = [
+        worst,
+        card.left - rect.left,
+        card.top - rect.top,
+        card.right - rect.right,
+        card.bottom - rect.bottom,
+      ].reduce((a, b) => a > b ? a : b);
+      frames++;
+      expect(frames, lessThan(60), reason: 'the return must stop with its page');
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(
+      worst,
+      lessThan(.5),
+      reason: 'the cover must settle on the card, not oscillate through it',
+    );
+    await tester.pumpAndSettle();
+    expect(
+      (tester.getRect(find.byKey(state.source)).topLeft - card.topLeft).distance,
+      lessThan(.001),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   for (final axis in Axis.values) {
     testWidgets(
       'scrolling $axis during return restores the cover to its card',
