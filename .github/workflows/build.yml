@@ -362,6 +362,22 @@ jobs:
           prefix="$RUNNER_TEMP/lazer-ffmpeg"
           bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
           echo "LAZER_FFMPEG_ROOT=$prefix" >> "$GITHUB_ENV"
+      - name: Pre-fetch media_kit's mimalloc archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="build/linux/${{ matrix.bundle_arch }}/release/mimalloc-2.1.2.tar.gz"
+          mkdir -p "$(dirname "$archive")"
+          curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
+            --retry-max-time 180 \
+            "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.2.tar.gz" \
+            -o "$archive"
+          expected=5179c8f5cf1237d2300e2d8559a7bc55
+          actual="$(md5sum "$archive" | awk '{print $1}')"
+          [[ "$actual" == "$expected" ]] || {
+            echo "mimalloc archive checksum mismatch: $actual" >&2
+            exit 1
+          }
       - run: flutter build linux --release --no-pub --target-platform ${{ matrix.flutter_target }} --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Stage native audio and FFmpeg into the Linux bundle
         run: |
