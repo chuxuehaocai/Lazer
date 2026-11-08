@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
+import '../theme/adaptive_contrast.dart';
 import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
 import 'interaction_feedback.dart';
@@ -382,6 +383,13 @@ class AppleIconTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final apple = AppleSemanticColors.of(context);
+    final tileColor = adaptiveAccent(
+      color,
+      apple.secondaryGroupedBackground,
+      minimum: 3,
+    );
+    final iconColor = contrastingLabel(tileColor);
     return Container(
       width: size,
       height: size,
@@ -389,11 +397,11 @@ class AppleIconTile extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: <Color>[Color.lerp(color, Colors.white, .15)!, color],
+          colors: <Color>[Color.lerp(tileColor, iconColor, .15)!, tileColor],
         ),
         borderRadius: BorderRadius.circular(radius),
       ),
-      child: Icon(icon, size: iconSize, color: Colors.white),
+      child: Icon(icon, size: iconSize, color: iconColor),
     );
   }
 }
