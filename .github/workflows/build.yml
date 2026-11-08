@@ -375,6 +375,8 @@ jobs:
               || { echo "::error::the bundle has no $component runtime library"; exit 1; }
           done
       - name: Bundle GTK, libmpv and Flutter into AppImage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash ci/package-appimage.sh ${{ matrix.arch }}
       - name: Check AppImage starts with a display and session bus
         shell: bash

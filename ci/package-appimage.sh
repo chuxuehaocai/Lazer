@@ -38,8 +38,27 @@ done
 tools=$(mktemp -d)
 trap 'rm -rf -- "$tools"' EXIT
 linuxdeploy_url="https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-$arch.AppImage"
-curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
-  "$linuxdeploy_url" -o "$tools/linuxdeploy-$arch.AppImage"
+case "$arch" in
+  x86_64) linuxdeploy_asset=313839329 ;;
+  aarch64) linuxdeploy_asset=313839294 ;;
+esac
+# The release-assets CDN has repeatedly answered 504 for large assets from
+# hosted runners. The API asset endpoint serves the same verified file through
+# a different redirect and works when that CDN path does not.
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  if ! curl --fail --location --retry 6 --retry-all-errors --retry-delay 3 \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H 'Accept: application/octet-stream' \
+    "https://api.github.com/repos/linuxdeploy/linuxdeploy/releases/assets/$linuxdeploy_asset" \
+    -o "$tools/linuxdeploy-$arch.AppImage"; then
+    rm -f -- "$tools/linuxdeploy-$arch.AppImage"
+    echo 'API asset download failed; falling back to the release CDN' >&2
+  fi
+fi
+if [[ ! -s "$tools/linuxdeploy-$arch.AppImage" ]]; then
+  curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
+    "$linuxdeploy_url" -o "$tools/linuxdeploy-$arch.AppImage"
+fi
 echo "$tool_sha  linuxdeploy-$arch.AppImage" |
   (cd "$tools" && sha256sum --check -)
 curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
@@ -47,14 +66,10 @@ curl --fail --location --retry 10 --retry-all-errors --retry-delay 3 \
   -o "$tools/linuxdeploy-plugin-gtk.sh"
 
 # appimagetool otherwise downloads its runtime from the GitHub release CDN on
-# every package run; that asset intermittently returns 504 on CI. Pre-fetch it
-# with retries, and fall back to the type-2 runtime already embedded in the
-# verified linuxdeploy AppImage if the CDN still refuses the request.
+# every package run; that asset intermittently returns 504 on CI. Use the
+# type-2 runtime already embedded in the verified linuxdeploy AppImage.
 runtime="$tools/runtime-$arch"
-runtime_url="https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch"
-if ! curl --fail --location --retry 4 --retry-all-errors --retry-delay 3 \
-  "$runtime_url" -o "$runtime"; then
-  python3 - "$tools/linuxdeploy-$arch.AppImage" "$runtime" <<'PY'
+python3 - "$tools/linuxdeploy-$arch.AppImage" "$runtime" <<'PY'
 import sys
 
 src, dst = sys.argv[1:3]
@@ -64,7 +79,6 @@ if offset <= 0:
     raise SystemExit('could not locate the AppImage runtime')
 open(dst, 'wb').write(data[:offset])
 PY
-fi
 test -s "$runtime"
 export LDAI_RUNTIME_FILE="$runtime"
 chmod +x "$tools/"*.AppImage "$tools/"*.sh
