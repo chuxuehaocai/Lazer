@@ -1,3 +1,4 @@
+import 'package:lazer_nextgen/lyrics/cached_lyrics_store.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -75,9 +76,11 @@ final _musicSource = _source
   return {}
 ''');
 
+CachedLyricsStore _noLyricsDisk() => CachedLyricsStore(supportDirectory:()async=>throw const FileSystemException('lyrics tested separately'));
+Catalog _isolatedCatalog() => Catalog(cache:DiskCache(directory:()async=>throw const FileSystemException('catalogue tested separately')),lyricsCache:_noLyricsDisk());
 class _MusicCatalog extends Catalog {
   _MusicCatalog(Directory directory)
-    : super(cache: DiskCache(directory: () async => directory));
+    : super(cache: DiskCache(directory: () async => directory),lyricsCache:_noLyricsDisk());
   @override
   Future<AudioSource?> audioSourceFor(
     Track track, {
@@ -175,7 +178,7 @@ void main() {
   PluginManager manager() =>
       PluginManager(rootDirectory: Directory('${directory.path}/plugins'));
   AppState state(PluginManager plugins) =>
-      AppState(pluginManager: plugins, artworkSeedLoader: (_) async => null);
+      AppState(catalog:_isolatedCatalog(),pluginManager: plugins, artworkSeedLoader: (_) async => null);
 
   test('Lua description supplies platforms and login capabilities', () async {
     final plugins = manager();
@@ -333,6 +336,7 @@ void main() {
       final engine = _Engine();
       final restored = AppState(
         pluginManager: manager(),
+        catalog:_isolatedCatalog(),
         audioEngine: engine,
         artworkSeedLoader: (_) async => null,
       );
@@ -366,6 +370,7 @@ void main() {
               .contains('https://images.test/alpha.jpg'),
         );
       } finally {
+        await restored.currentArtwork.ready;
         restored.dispose();
       }
     },
@@ -572,6 +577,7 @@ void main() {
       );
       final app = AppState(
         pluginManager: plugins,
+        catalog:_isolatedCatalog(),
         hifi: hifi,
         hifiSettings: hifi.settings,
         artworkSeedLoader: (_) async => null,

@@ -358,6 +358,7 @@ void DspChain::configureFormat(PcmFormat format) {
     applyPendingConfig();
     volume_.configure(format_.sampleRate, rampMillis_);
     volume_.reset(1.0);
+    volumeStarted_ = false;
     reset();
 }
 
@@ -405,7 +406,11 @@ void DspChain::requestConfig(const LazerAudioDspConfig &config) {
 void DspChain::setVolume(double volume, int32_t rampMillis) {
     rampMillis_ = std::max(rampMillis, 1);
     volume_.configure(format_.sampleRate > 0 ? format_.sampleRate : 44100, rampMillis_);
-    volume_.setTarget(std::clamp(volume, 0.0, 1.0));
+    const double target = std::clamp(volume, 0.0, 1.0);
+    // A new stream has no preceding audible gain to interpolate from. Starting
+    // at unity would expose full-scale samples even when the user chose mute.
+    if (!volumeStarted_) volume_.reset(target);
+    else volume_.setTarget(target);
 }
 
 void DspChain::reset() noexcept {
@@ -513,6 +518,7 @@ void DspChain::applyPendingConfig() {
 }
 
 double DspChain::process(float *interleaved, size_t frameCount) {
+    if (frameCount > 0) volumeStarted_ = true;
     if (interleaved == nullptr || frameCount == 0 || !format_.isValid()) return 0.0;
     applyPendingConfig();
     const size_t channels = static_cast<size_t>(format_.channels);

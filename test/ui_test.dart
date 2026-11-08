@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -9,7 +10,6 @@ import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/diagnostics/build_info.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -37,10 +37,7 @@ const Playlist _playlist = Playlist(
   description: '来自你的听歌偏好',
 );
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
@@ -233,7 +230,7 @@ class _SignedInState extends AppState {
     detail: '3 个字段',
     userId: 23,
     avatarUrl: 'https://example.com/avatar.jpg',
-    vipType: 11,
+    membership: 'Example Plus',
   );
 
   @override
@@ -805,7 +802,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('CYP2D6_Official'), findsOneWidget);
-    expect(find.text('黑胶会员'), findsOneWidget);
+    expect(find.text('Example Plus'), findsOneWidget);
     expect(find.text('3 个字段'), findsNothing);
     final tile = find.ancestor(
       of: find.text('CYP2D6_Official'),

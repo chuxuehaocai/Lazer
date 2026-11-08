@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -8,7 +9,6 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
@@ -48,10 +48,7 @@ const Album _album = Album(
   trackCount: 12,
 );
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-}
+class _Gateway extends TestMusicGateway {}
 
 class _ReportingState extends AppState {
   _ReportingState() : super(catalog: _Catalog());

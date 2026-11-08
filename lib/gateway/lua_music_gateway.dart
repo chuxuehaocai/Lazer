@@ -4,7 +4,7 @@ import 'music_gateway.dart';
 /// Provider-neutral adapter for a Lua plugin. A plugin returns JSON-shaped
 /// values; this class is deliberately the only place that turns them into
 /// client models, keeping Lua independent from Dart and Flutter.
-class LuaMusicGateway extends MusicGateway {
+class LuaMusicGateway extends MusicAccountGateway {
   LuaMusicGateway({
     required this.runtime,
     required this.provider,
@@ -18,7 +18,11 @@ class LuaMusicGateway extends MusicGateway {
   });
   final LuaPluginRuntime runtime;
   final String? pluginId;
+  @override
   final Set<String> authenticationMethods;
+  @override
+  @override
+  @override
   final String? loginHint, cookieHint, forgotPasswordUrl;
   bool supportsAuthentication(String method) =>
       authenticationMethods.contains(method);
@@ -50,7 +54,23 @@ class LuaMusicGateway extends MusicGateway {
   Future<dynamic> _call(
     String operation, [
     Map<String, dynamic> args = const {},
-  ]) => runtime.invoke(operation, {'platform': provider.id, ...args});
+  ]) async {
+    final value = await runtime.invoke(operation, {
+      'platform': provider.id,
+      ...args,
+    });
+    if (value is Map && value['error'] is Map) {
+      final error = value['error'] as Map;
+      throw MusicGatewayException(
+        provider.id,
+        operation,
+        code: (error['code'] as num?)?.toInt(),
+        httpStatus: (error['httpStatus'] as num?)?.toInt(),
+      );
+    }
+    return value;
+  }
+
   List<dynamic> _list(Object? value) => value is List ? value : const [];
   String _string(Object? value) => value?.toString() ?? '';
   MusicId _id(MusicEntityKind kind, Object? value) => id(kind, _string(value));
@@ -58,6 +78,8 @@ class LuaMusicGateway extends MusicGateway {
     id: _id(MusicEntityKind.artist, value['id']),
     name: _string(value['name']),
     coverUrl: value['coverUrl'] as String?,
+    description: _string(value['description']),
+    albumCount: (value['albumCount'] as num?)?.toInt(),
   );
   MusicSong _song(Map value) => MusicSong(
     id: _id(MusicEntityKind.song, value['id']),
@@ -75,6 +97,7 @@ class LuaMusicGateway extends MusicGateway {
     contentType: value['contentType'] as String?,
     suffix: value['suffix'] as String?,
     bitRate: (value['bitRate'] as num?)?.toInt(),
+    translatedTitle: value['translatedTitle'] as String?,
   );
   MusicAlbum _album(Map value) => MusicAlbum(
     id: _id(MusicEntityKind.album, value['id']),
@@ -127,22 +150,28 @@ class LuaMusicGateway extends MusicGateway {
     return _adopt(raw, preserveOnFailure: true);
   }
 
+  @override
   Future<MusicUser?> loginWithCookie(String cookie) =>
       _login('loginCookie', {'cookie': cookie});
 
+  @override
   Future<MusicUser?> loginWithPassword(String account, String password) =>
       _login('loginPassword', {'account': account, 'password': password});
+  @override
   Future<MusicUser?> loginWithCaptcha(String phone, String captcha) =>
       _login('loginCaptcha', {'phone': phone, 'captcha': captcha});
+  @override
   Future<void> sendCaptcha(String phone) async {
     await _call('sendCaptcha', {'phone': phone});
   }
 
+  @override
   Future<String?> qrKey() async {
     final raw = await _call('qrKey');
     return raw?.toString().isEmpty == true ? null : raw?.toString();
   }
 
+  @override
   Future<String> qrUrl(String key) async {
     final url = (await _call('qrUrl', {'key': key}))?.toString() ?? '';
     if (url.isNotEmpty) {
@@ -152,6 +181,7 @@ class LuaMusicGateway extends MusicGateway {
     return url;
   }
 
+  @override
   Future<int> qrCheck(String key) async =>
       (await _call('qrCheck', {'key': _qrKeys[key] ?? key}) as num?)?.toInt() ??
       0;
@@ -164,9 +194,12 @@ class LuaMusicGateway extends MusicGateway {
       id: _id(MusicEntityKind.user, raw['id']),
       name: _string(raw['name']),
       avatarUrl: raw['avatarUrl'] as String?,
+      signature: raw['signature'] as String?,
+      membership: raw['membership'] as String?,
     );
   }
 
+  @override
   Future<void> logout() async {
     final generation = ++_authGeneration;
     try {
@@ -247,6 +280,21 @@ class LuaMusicGateway extends MusicGateway {
     Map.from(
       await _call('artist', {'id': remoteId(id, MusicEntityKind.artist)}),
     ),
+  );
+  @override
+  Future<MusicPage<MusicSong>> artistSongs(
+    MusicId id, {
+    int limit = 100,
+    int offset = 0,
+  }) async => _page(
+    await _call('artistSongs', {
+      'id': remoteId(id, MusicEntityKind.artist),
+      'limit': limit,
+      'offset': offset,
+    }),
+    _song,
+    offset,
+    limit,
   );
   @override
   Future<MusicPage<MusicAlbum>> artistAlbums(
@@ -355,6 +403,7 @@ class LuaMusicGateway extends MusicGateway {
       bitRate: (raw['bitRate'] as num?)?.toInt(),
       size: (raw['size'] as num?)?.toInt(),
       transcoded: raw['transcoded'] == true,
+      headers: Map<String, String>.from(raw['headers'] as Map? ?? const {}),
     );
   }
 
@@ -380,7 +429,11 @@ class LuaMusicGateway extends MusicGateway {
                     ),
                 ],
                 synced: item['synced'] == true,
-                translation: item['translation'] as String?,
+                translation:
+                    item['translation'] as String? ?? item['tlyric'] as String?,
+                wordTranslation:
+                    item['wordTranslation'] as String? ??
+                    item['ytlrc'] as String?,
                 wordByWord: item['wordByWord'] as String?,
                 lrc: item['lrc'] as String?,
                 offset: Duration(
@@ -434,5 +487,90 @@ class LuaMusicGateway extends MusicGateway {
     _song,
     0,
     limit,
+  );
+
+  @override
+  Future<String?> exportCookie() async =>
+      (await _call('exportCookie')) as String?;
+
+  @override
+  Future<MusicPage<MusicAlbum>> savedAlbums({
+    int limit = 30,
+    int offset = 0,
+  }) async => _page(
+    await _call('savedAlbums', {'limit': limit, 'offset': offset}),
+    _album,
+    offset,
+    limit,
+  );
+
+  @override
+  Future<MusicHome> homeFeed() async {
+    final raw = Map.from(await _call('homeFeed'));
+    List<T> values<T>(String key, T Function(Map) convert) =>
+        _list(raw[key]).whereType<Map>().map(convert).toList();
+    return MusicHome(
+      featured: raw['featured'] is Map ? _album(raw['featured'] as Map) : null,
+      featuredSongs: values('featuredSongs', _song),
+      quick: values('quick', _song),
+      daily: values('daily', _song),
+      recommended: values('recommended', _playlist),
+      playlists: values('playlists', _playlist),
+      albums: values('albums', _album),
+      editorialPlaylists: values('editorialPlaylists', _playlist),
+    );
+  }
+
+  @override
+  Future<List<MusicPlaylist>> charts() async =>
+      _list(await _call('charts')).whereType<Map>().map(_playlist).toList();
+
+  @override
+  Future<List<MusicSong>> radio(
+    MusicRadioKind kind, {
+    MusicId? seed,
+    MusicId? playlist,
+    int limit = 30,
+  }) async => _list(
+    await _call('radio', {
+      'kind': kind.name,
+      'seed': seed?.value,
+      'playlist': playlist?.value,
+      'limit': limit,
+    }),
+  ).whereType<Map>().map(_song).toList();
+
+  @override
+  Future<Map<String, dynamic>> comments(
+    MusicId song, {
+    int limit = 20,
+    int offset = 0,
+  }) async => Map<String, dynamic>.from(
+    await _call('comments', {
+      'id': remoteId(song, MusicEntityKind.song),
+      'limit': limit,
+      'offset': offset,
+    }),
+  );
+
+  @override
+  Future<void> setCommentLiked(
+    MusicId song,
+    String commentId,
+    bool liked,
+  ) async {
+    await _call('setCommentLiked', {
+      'id': remoteId(song, MusicEntityKind.song),
+      'commentId': commentId,
+      'liked': liked,
+    });
+  }
+
+  @override
+  Future<Map<String, dynamic>> listenTogether(
+    String operation, [
+    Map<String, dynamic> args = const {},
+  ]) async => Map<String, dynamic>.from(
+    await _call('listenTogether', {'operation': operation, ...args}),
   );
 }

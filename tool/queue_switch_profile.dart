@@ -43,13 +43,8 @@ class _Engine implements AudioEngine {
   void dispose() {}
 }
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<List<GatewaySong>> songDetails(List<int> ids) async => [];
-}
-
 class _Catalog extends Catalog {
-  _Catalog() : super(gateway: _Gateway());
+  _Catalog() : super(gateway: LocalMusicGateway());
   @override
   HomeFeed? get home =>
       const HomeFeed(featuredTracks: [], quick: [], playlists: [], albums: []);

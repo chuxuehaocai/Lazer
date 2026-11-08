@@ -1,3 +1,4 @@
+import '../utils/media_requests.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -164,7 +165,7 @@ class AutoMixAudioEngine
     if (uri.scheme == 'file') {
       await player.setFilePath(uri.toFilePath());
     } else {
-      await player.setUrl(url);
+      await player.setUrl(url, headers: MediaRequestRules.headers(url));
     }
   }
 
@@ -198,7 +199,9 @@ class AutoMixAudioEngine
   /// The URL the second decoder is preparing, or null when there is none.
   @override
   String? get queuedSourceUrl {
-    if (_incoming == null || _currentIndex + 1 >= _queueUrls.length) return null;
+    if (_incoming == null || _currentIndex + 1 >= _queueUrls.length) {
+      return null;
+    }
     return _queueUrls[_currentIndex + 1];
   }
 

@@ -435,7 +435,9 @@ class LazerMediaHandler extends BaseAudioHandler {
   Future<void> seek(Duration position) async {
     if (!_acceptCommands) return;
     final duration = state.current?.duration.inMicroseconds ?? 0;
-    if (duration > 0) state.seek(position.inMicroseconds / duration);
+    if (duration > 0) {
+      await state.seekAsync(position.inMicroseconds / duration);
+    }
     _publishPlayback();
   }
 

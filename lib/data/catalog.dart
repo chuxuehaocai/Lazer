@@ -8,7 +8,8 @@ import 'package:crypto/crypto.dart';
 import '../cache/disk_cache.dart';
 import '../cache/media_cache.dart';
 import '../gateway/gateway.dart';
-import '../gateway/transport.dart';
+import '../lyrics/cached_lyrics_store.dart';
+import '../utils/media_requests.dart';
 import 'audio_quality.dart';
 import 'billboard.dart';
 import 'biliboard.dart';
@@ -23,7 +24,6 @@ const String dailyRecommendationsPlaylistId = 'daily-recommendations';
 /// Albums read per 收藏的专辑 page. Large enough that a collection of a few
 /// hundred albums opens in a handful of reads, small enough to stay a fast
 /// first paint.
-const int _savedAlbumPageSize = 50;
 
 /// Music returned by the gateway.
 class HomeFeed {
@@ -89,7 +89,7 @@ class UserCollections {
     this.subscribed = const <Playlist>[],
   });
 
-  /// The "喜欢的音乐" collection (NetEase `specialType = 5`), when present.
+  /// The "喜欢的音乐" collection (provider favorites flag), when present.
   final Playlist? liked;
   final List<Playlist> created;
   final List<Playlist> subscribed;
@@ -100,34 +100,22 @@ class UserCollections {
 /// Gateway-backed catalogue. Failed requests never create fabricated music.
 class Catalog {
   Catalog({
-    NeteaseGateway? gateway,
+    MusicGateway? gateway,
     DiskCache? cache,
     BiliboardClient? charts,
     BillboardClient? billboard,
-  }) : _legacyInjected = gateway != null,
-       gateway =
-           gateway ??
-           NeteaseGateway(transport: NeteaseTransport(enabled: false)),
-       cache = cache ?? DiskCache.shared,
+    CachedLyricsStore? lyricsCache,
+  }) : cache = cache ?? DiskCache.shared,
        charts = charts ?? BiliboardClient(),
        billboard = billboard ?? BillboardClient(),
-       audioCache = AudioCache(disk: cache);
-
-  final NeteaseGateway gateway;
-  final bool _legacyInjected;
-  late final GatewayRegistry connections = GatewayRegistry()
-    ..add(
-      _legacyInjected
-          ? NeteaseMusicGateway(connectionId: 'netease', gateway: gateway)
-          : LocalMusicGateway(),
-    );
+       audioCache = AudioCache(disk: cache),
+       lyricsCache = lyricsCache ?? CachedLyricsStore() {
+    connections.add(gateway ?? LocalMusicGateway());
+  }
+  final GatewayRegistry connections = GatewayRegistry();
   late final _PlatformCatalog _platform = _PlatformCatalog(this);
   MusicGateway get activeGateway => connections.active!;
 
-  /// The built-in compatibility adapter is kept only for migrations and
-  /// tests. All installed Lua providers, including a NetEase replacement,
-  /// travel through the provider-neutral model boundary.
-  bool get usesPlatformGateway => activeGateway is! NeteaseMusicGateway;
   Track trackFromMusicSong(MusicSong song) => _platform.track(song);
   Playlist playlistFromMusicPlaylist(MusicPlaylist playlist) =>
       _platform.playlist(playlist);
@@ -145,6 +133,21 @@ class Catalog {
   final BiliboardClient charts;
   final BillboardClient billboard;
   final AudioCache audioCache;
+  final CachedLyricsStore lyricsCache;
+
+  Future<void> cacheLyrics(Track track, {String? audioPath}) async {
+    try {
+      final payload =
+          await lyricsCache.read(track, audioPath: audioPath) ??
+          await lyricsFor(track);
+      if (payload != null) {
+        await lyricsCache.save(track, payload, audioPath: audioPath);
+      }
+    } catch (_) {
+      // Missing lyrics must not turn an audio cache into a failure.
+    }
+  }
+
   final _requests = <String, _PendingRequest>{};
   final _failedRequests = <String, _FailedRequest>{};
   final Map<String, int> _epochs = <String, int>{};
@@ -188,23 +191,10 @@ class Catalog {
   }
 
   // Private playlists and recommendations must not cross session boundaries.
-  String get _scope {
-    if (usesPlatformGateway) return activeGateway.cacheNamespace;
-    final cookie = gateway.sessionCookie;
-    return cookie == null
-        ? 'guest'
-        : sha256.convert(utf8.encode(cookie)).toString();
-  }
+  String get _scope => activeGateway.cacheNamespace;
 
-  // Versioned so collections cached before ownership was read from
-  // `subscribed`/`creator` cannot keep every own playlist in the subscribed
-  // shelf.
-  String _collectionsKey(int uid, {MusicGateway? connection}) {
-    final owner = connection ?? activeGateway;
-    return owner is NeteaseMusicGateway
-        ? 'collections:v2:$_scope:$uid'
-        : 'collections:v3:${owner.cacheNamespace}';
-  }
+  String _collectionsKey(int uid, {MusicGateway? connection}) =>
+      'collections:v3:${(connection ?? activeGateway).cacheNamespace}';
 
   String _playlistKey(String playlistId) {
     final reference = MusicId.tryParse(playlistId);
@@ -433,7 +423,7 @@ class Catalog {
     await Future.wait(<Future<void>>[
       _expire('external-billboard-v1'),
       _expire('external-biliboard-v1'),
-      _expire('netease-mirror-charts-v2'),
+      _expire('provider-charts:$_scope'),
     ]);
   }
 
@@ -450,238 +440,44 @@ class Catalog {
 
   Future<HomeFeed?> loadHome({int? userId}) async {
     final epoch = _platformEpoch;
-    final selected = usesPlatformGateway ? activeGateway : null;
+    final selected = activeGateway;
     if (selected is LocalMusicGateway) {
       _home = null;
-      _homeError = '导入音乐平台插件，或在资料库播放本地音乐。';
-      return null;
-    }
-    if (selected != null && selected.user == null) {
-      _home = null;
-      _homeError =
-          '请登录 ${selected.provider.name}${selected is LuaMusicGateway ? '。' : ' 服务器。'}'; // i18n:key
+      _homeError = null;
       return null;
     }
     _homeError = null;
     try {
-      final loaded = selected != null
-          ? await _platform.home(selected)
-          : await _cached(
-              'home:$_scope:${userId ?? 0}',
-              const Duration(minutes: 20),
-              _decodeHome,
-              _encodeHome,
-              () async {
-                final feed = await _loadHome(userId: userId);
-                if (feed == null) throw StateError('Home unavailable');
-                return feed;
-              },
-            );
-      if (epoch != _platformEpoch) return _home;
-      _home = loaded;
-      if (selected != null) _online = true;
-      _homeError = null;
-      return _home;
-    } catch (_) {
-      if (epoch != _platformEpoch) return _home;
-      _homeError = '曲库加载失败，请检查网络后重试。'; // i18n:key
-      return _home = null;
-    }
-  }
-
-  Future<HomeFeed?> _loadHome({int? userId}) async {
-    _homeError = null;
-    Object? firstFailure;
-    Future<T?> optional<T>(Future<T> request) async {
-      try {
-        return await request;
-      } catch (error) {
-        firstFailure ??= error;
-        return null;
-      }
-    }
-
-    final signedIn = userId != null && userId > 0;
-    final results = await Future.wait<Object?>(<Future<Object?>>[
-      optional(gateway.topPlaylists(limit: 12)),
-      optional(
-        signedIn
-            ? gateway.userPlaylists(userId, limit: 30)
-            : Future<List<GatewayPlaylist>>.value(const <GatewayPlaylist>[]),
-      ),
-      optional(
-        signedIn
-            ? gateway.dailyRecommendedSongs()
-            : Future<List<GatewaySong>>.value(const <GatewaySong>[]),
-      ),
-      optional(
-        signedIn
-            ? gateway.dailyRecommendedPlaylists()
-            : Future<List<GatewayPlaylist>>.value(const <GatewayPlaylist>[]),
-      ),
-      optional(gateway.personalizedPlaylists()),
-      optional(
-        signedIn
-            ? gateway.personalizedNewSongs(limit: 24)
-            : Future<List<GatewaySong>>.value(const <GatewaySong>[]),
-      ),
-      // NetEase's main editorial account. Creator identity, rather than the
-      // recommendation endpoint, keeps this shelf editorially sourced.
-      optional(gateway.userPlaylists(1463586082, limit: 24)),
-    ]);
-    final top =
-        results[0] as List<GatewayPlaylist>? ?? const <GatewayPlaylist>[];
-    final userPlaylists =
-        results[1] as List<GatewayPlaylist>? ?? const <GatewayPlaylist>[];
-    final dailySongs =
-        results[2] as List<GatewaySong>? ?? const <GatewaySong>[];
-    final dailyPlaylists =
-        results[3] as List<GatewayPlaylist>? ?? const <GatewayPlaylist>[];
-    final personalized =
-        results[4] as List<GatewayPlaylist>? ?? const <GatewayPlaylist>[];
-    final newSongs = results[5] as List<GatewaySong>? ?? const <GatewaySong>[];
-    final editorial =
-        results[6] as List<GatewayPlaylist>? ?? const <GatewayPlaylist>[];
-    final recommended = <int, GatewayPlaylist>{};
-    for (final playlist in [...dailyPlaylists, ...personalized]) {
-      recommended.putIfAbsent(playlist.id, () => playlist);
-    }
-
-    List<Track> quick = dailySongs.take(8).map(trackFromSong).toList();
-    if (quick.isEmpty && top.isNotEmpty) {
-      try {
-        quick = (await playlistTracks(
-          top.first.id.toString(),
-        )).take(8).toList();
-      } catch (error) {
-        firstFailure ??= error;
-      }
-    }
-
-    final uniquePlaylists = <int, GatewayPlaylist>{};
-    for (final playlist in <GatewayPlaylist>[
-      ...userPlaylists,
-      ...recommended.values,
-      ...top,
-    ]) {
-      if (playlist.id > 0) {
-        uniquePlaylists.putIfAbsent(playlist.id, () => playlist);
-      }
-    }
-
-    final albumSongs = <int, GatewaySong>{};
-    for (final song in newSongs) {
-      if (song.albumId > 0) albumSongs.putIfAbsent(song.albumId, () => song);
-    }
-    Album? featured;
-    if (dailySongs.isNotEmpty && dailySongs.first.albumId > 0) {
-      featured = albumFromSong(dailySongs.first);
-    } else if (quick.isNotEmpty && quick.first.albumId > 0) {
-      final track = quick.first;
-      featured = Album(
-        id: track.albumId.toString(),
-        title: track.album,
-        artist: track.artist,
-        year: '',
-        coverSeed: track.coverSeed,
-        note: '',
-        coverUrl: track.coverUrl,
+      final loaded = await _cached(
+        'home:$_scope:${userId ?? 0}',
+        const Duration(minutes: 20),
+        _decodeHome,
+        _encodeHome,
+        () => _platform.home(selected),
       );
-    }
-
-    final feed = HomeFeed(
-      recommended: (recommended.isEmpty ? top : recommended.values)
-          .take(8)
-          .map(playlistFromGateway)
-          .toList(),
-      featured: featured,
-      featuredTracks: dailySongs
-          .where((song) => song.albumId == dailySongs.firstOrNull?.albumId)
-          .take(8)
-          .map(trackFromSong)
-          .toList(),
-      quick: quick,
-      daily: dailySongs.map(trackFromSong).toList(),
-      playlists: uniquePlaylists.values
-          .take(12)
-          .map(playlistFromGateway)
-          .toList(),
-      albums: albumSongs.values.take(12).map(albumFromSong).toList(),
-      editorialPlaylists: editorial
-          .where((playlist) => playlist.specialType != 5)
-          .take(12)
-          .map(playlistFromGateway)
-          .toList(),
-    );
-    _online = firstFailure == null || !feed.isEmpty;
-    if (feed.isEmpty && firstFailure != null) {
-      _homeError = '曲库加载失败，请检查网络后重试。'; // i18n:key
-      return null;
-    } else {
-      if (feed.isEmpty) _homeError = '当前没有可展示的音乐。'; // i18n:key
-      return feed;
+      if (epoch != _platformEpoch) return _home;
+      _online = true;
+      return _home = loaded;
+    } catch (error) {
+      if (epoch != _platformEpoch) return _home;
+      _online = false;
+      _homeError = error is MusicGatewayException && error.authenticationFailure
+          ? '请登录 ${selected.provider.name}${selected is MusicAccountGateway ? '。' : ' 服务器。'}'
+          : '曲库加载失败，请检查网络后重试。';
+      return _home = null;
     }
   }
 
   /// Search the live catalogue. Errors propagate to the search view.
   Future<SearchResults> search(String rawQuery) async {
-    final String query = rawQuery.trim();
+    final query = rawQuery.trim();
     if (query.isEmpty) return SearchResults.empty;
-    if (usesPlatformGateway) return _platform.search(activeGateway, query);
-    try {
-      final List<Object?>
-      results = await Future.wait<Object?>(<Future<Object?>>[
-        // cloudsearch carries album.picUrl; the compatibility /search payload only
-        // exposes a picId, which leaves track covers unrenderable.
-        gateway.search(query, limit: 20, useCloudSearch: true),
-        gateway.searchAlbums(query, limit: 10),
-        gateway.searchPlaylists(query, limit: 10),
-        gateway.searchArtists(query, limit: 10),
-      ]);
-      final List<GatewaySong> songs =
-          results[0] as List<GatewaySong>? ?? const <GatewaySong>[];
-      final List<GatewayAlbum> albumHits =
-          results[1] as List<GatewayAlbum>? ?? const <GatewayAlbum>[];
-      final List<GatewayArtist> artistHits =
-          results[3] as List<GatewayArtist>? ?? const <GatewayArtist>[];
-      final List<GatewayPlaylist> playlistHits =
-          results[2] as List<GatewayPlaylist>? ?? const <GatewayPlaylist>[];
-      _online = true;
-      final List<Track> tracks = songs.map<Track>(trackFromSong).toList();
-      final Map<int, ArtistRef> artistsById = <int, ArtistRef>{};
-      for (final Track track in tracks) {
-        for (final ArtistRef artist in track.artists) {
-          if (artist.id > 0) artistsById[artist.id] = artist;
-        }
-      }
-      return SearchResults(
-        tracks: tracks,
-        albums: albumHits.map<Album>(albumFromGateway).toList(),
-        playlists: playlistHits.map<Playlist>(playlistFromGateway).toList(),
-        artists: <ArtistRef>[
-          for (final GatewayArtist artist in artistHits)
-            ArtistRef(
-              id: artist.id,
-              name: artist.name,
-              coverUrl: artist.coverUrl,
-            ),
-          ...artistsById.values.where(
-            (ArtistRef artist) =>
-                !artistHits.any((GatewayArtist hit) => hit.id == artist.id),
-          ),
-        ],
-      );
-    } catch (_) {
-      _online = false;
-      rethrow;
-    }
+    return _platform.search(activeGateway, query);
   }
 
-  Future<List<Track>> personalFmTracks() async => usesPlatformGateway
-      ? (await activeGateway.recommendations()).items
-            .map(_platform.track)
-            .toList()
-      : (await gateway.personalFm()).map(trackFromSong).toList();
+  Future<List<Track>> personalFmTracks() async => (await activeGateway.radio(
+    MusicRadioKind.personal,
+  )).map(_platform.track).toList();
 
   /// External rankings load independently from the main discovery feed. A
   /// slow chart host must never hold the entire home page hostage.
@@ -725,75 +521,38 @@ class Catalog {
         'charts': value.map((chart) => chart.toJson()).toList(),
       };
 
-  /// NetEase mirrors a handful of established charts and, unlike a scraped
-  /// ranking, gives us immediately playable song ids. These are current-only:
-  /// the API does not expose a trustworthy issue archive.
-  Future<List<MusicChart>> neteaseMirrorCharts() => _cached(
-    'netease-mirror-charts-v2',
+  Future<List<MusicChart>> providerCharts() => _cached(
+    'provider-charts:$_scope',
     const Duration(minutes: 30),
-    (json) => (json['charts'] as List? ?? const <Object>[])
-        .whereType<Map<String, dynamic>>()
-        .map(MusicChart.fromJson)
-        .toList(),
-    (value) => <String, Object?>{
-      'charts': value.map((chart) => chart.toJson()).toList(),
-    },
+    _decodeCharts,
+    _encodeCharts,
     () async {
-      final playlists = await gateway.chartPlaylists();
-      final selected = playlists
-          .where((playlist) {
-            final name = playlist.name.toLowerCase();
-            return name.contains('uk排行榜') ||
-                name.contains('beatport') ||
-                name.contains('oricon') ||
-                name.contains('nrj');
-          })
-          .take(5);
-      final loaded = await Future.wait<MusicChart?>([
-        for (final playlist in selected)
-          _neteaseChart(playlist).catchError((_) => null),
-      ]);
-      return loaded.whereType<MusicChart>().toList();
+      final gateway = activeGateway;
+      final lists = await gateway.charts();
+      return Future.wait(
+        lists.map((list) async {
+          final songs = await gateway.playlistSongs(list.id, limit: 100);
+          return MusicChart(
+            id: list.id.cacheKey,
+            title: list.name,
+            source: gateway.provider.name,
+            issueLabel: '',
+            accent: 0,
+            entries: [
+              for (var i = 0; i < songs.items.length; i++)
+                ChartEntry(
+                  rank: i + 1,
+                  title: songs.items[i].title,
+                  artist: songs.items[i].artists.map((a) => a.name).join(' / '),
+                  track: _platform.track(songs.items[i]),
+                ),
+            ],
+            providerKey: list.id.cacheKey,
+          );
+        }),
+      );
     },
   );
-
-  Future<MusicChart?> _neteaseChart(GatewayPlaylist playlist) async {
-    // Keep the complete source ranking. Several mirrored charts are Top 100
-    // lists; the old 20-song cap made every board look artificially identical.
-    final body = await gateway.playlistTracks(playlist.id);
-    final rawSongs = body['songs'];
-    if (rawSongs is! List) return null;
-    final songs = rawSongs
-        .whereType<Map<String, dynamic>>()
-        .map((item) {
-          final nested = item['song'] ?? item['data'];
-          return GatewaySong.fromJson(
-            nested is Map<String, dynamic> ? nested : item,
-          );
-        })
-        .where((song) => song.id > 0 && song.title.isNotEmpty)
-        .toList();
-    if (songs.isEmpty) return null;
-    return MusicChart(
-      id: 'netease:${playlist.id}',
-      title: playlist.name,
-      source: '网易云镜像',
-      issueLabel: '当前榜',
-      entries: <ChartEntry>[
-        for (var index = 0; index < songs.length; index++)
-          ChartEntry(
-            rank: index + 1,
-            title: songs[index].title,
-            artist: songs[index].artistLine,
-            coverUrl: songs[index].coverUrl,
-            track: trackFromSong(songs[index]),
-          ),
-      ],
-      accent: 0xFFE94B64,
-      providerKey: 'netease:${playlist.id}',
-      logoUrl: playlist.coverUrl,
-    );
-  }
 
   Future<MusicChart> chartIssue(MusicChart chart, ChartIssue issue) => _cached(
     'chart-issue-v2:${chart.providerKey}:${issue.id}',
@@ -818,67 +577,32 @@ class Catalog {
     int? seedSongId,
     int count = 30,
   }) async {
-    if (MusicId.tryParse(liked.id) != null) {
-      final tracks = await playlistTracks(liked.id);
-      return List<Track>.of(tracks)..shuffle();
-    }
-    final int playlistId = int.tryParse(liked.id) ?? 0;
-    if (playlistId <= 0) return const <Track>[];
-    // The liked list is only needed to pick a seed when nothing is playing
-    // yet; a refill seeded by the current song must not re-download it.
-    List<Track> likedTracks = const <Track>[];
-    if (seedSongId == null) {
-      likedTracks = await playlistTracks(liked.id);
-      if (likedTracks.isEmpty) return const <Track>[];
-    }
-    final int songId = seedSongId ?? int.tryParse(likedTracks.first.id) ?? 0;
-    if (songId <= 0) return likedTracks;
-    final generated = await gateway.intelligenceList(
-      songId: songId,
-      playlistId: playlistId,
-      count: count,
-    );
-    if (generated.isNotEmpty) return generated.map(trackFromSong).toList();
-    if (likedTracks.isEmpty) {
-      likedTracks = await playlistTracks(liked.id);
-    }
-    return likedTracks;
+    final id = _platform.reference(liked.id, MusicEntityKind.playlist);
+    final songs = await _platform
+        .owner(id)
+        .radio(MusicRadioKind.heart, playlist: id, limit: count);
+    if (songs.isNotEmpty) return songs.map(_platform.track).toList();
+    return List<Track>.of(await playlistTracks(liked.id))..shuffle();
   }
 
-  /// The listener's play record, joined with each song's duration.
-  ///
-  /// Cached for five minutes: opening 听歌排行 used to force a network round
-  /// trip (and a full upload flush) on every visit, which stalled the library.
   Future<List<TrackPlayStat>> playStats(int uid, {bool force = false}) async {
-    if (uid <= 0) return const <TrackPlayStat>[];
-    if (activeGateway is LuaMusicGateway) {
-      final page = await activeGateway.playStats(limit: 100, offset: 0);
-      return [
-        for (final record in page.items)
-          TrackPlayStat(
-            songId: record.song.id.cacheKey,
-            playCount: record.playCount,
-            duration: record.song.duration,
-          ),
-      ];
-    }
     final key = 'play-stats:$_scope:$uid';
     if (force) await _expire(key);
     return _cached(
       key,
       const Duration(minutes: 5),
       _decodePlayStats,
-      (stats) => <String, dynamic>{
-        'stats': <Map<String, dynamic>>[
-          for (final stat in stats) stat.toJson(),
-        ],
+      (stats) => {
+        'stats': [for (final stat in stats) stat.toJson()],
       },
       () async {
-        final records = await gateway.playRecord(uid);
-        return <TrackPlayStat>[
+        final records = await _platform.all(
+          (offset) => activeGateway.playStats(limit: 100, offset: offset),
+        );
+        return [
           for (final record in records)
             TrackPlayStat(
-              songId: '${record.song.id}',
+              songId: record.song.id.cacheKey,
               playCount: record.playCount,
               duration: record.song.duration,
             ),
@@ -889,83 +613,16 @@ class Catalog {
 
   Future<void> invalidatePlayStats(int uid) =>
       _expire('play-stats:$_scope:$uid');
-
-  static List<TrackPlayStat> _decodePlayStats(Map<String, dynamic> json) {
-    final raw = json['stats'];
-    if (raw is! List) return const <TrackPlayStat>[];
-    return <TrackPlayStat>[
-      for (final row in raw)
-        if (row is Map<String, dynamic>) TrackPlayStat.fromJson(row),
-    ];
-  }
-
-  /// Records the start of a play in 最近播放.
-  Future<void> reportPlayStart({required int songId, required int sourceId}) =>
-      gateway.reportPlayStart(songId: songId, sourceId: sourceId);
-
-  /// Uploads one qualified play to the account's cloud play record.
-  Future<void> reportPlayback({
-    required int songId,
-    required int playedSeconds,
-    int sourceId = 0,
-  }) => gateway.reportPlayback(
-    songId: songId,
-    playedSeconds: playedSeconds,
-    sourceId: sourceId,
-  );
-
-  // -- listen together -----------------------------------------------------
-
-  Future<Map<String, dynamic>> listenTogetherCreateRoom() =>
-      gateway.listenTogetherCreateRoom();
-
-  Future<Map<String, dynamic>> listenTogetherAccept(
-    String roomId,
-    int inviterId,
-  ) => gateway.listenTogetherAccept(roomId, inviterId);
-
-  Future<Map<String, dynamic>> listenTogetherRoomCheck(String roomId) =>
-      gateway.listenTogetherRoomCheck(roomId);
-
-  Future<Map<String, dynamic>> listenTogetherEnd(String roomId) =>
-      gateway.listenTogetherEnd(roomId);
-
-  Future<Map<String, dynamic>> listenTogetherHeartbeat(
-    String roomId,
-    int songId,
-    String playStatus,
-    int progress,
-  ) => gateway.listenTogetherHeartbeat(roomId, songId, playStatus, progress);
-
-  Future<Map<String, dynamic>> listenTogetherPlayCommand(
-    String roomId,
-    Map<String, Object?> commandInfo,
-  ) => gateway.listenTogetherPlayCommand(roomId, commandInfo);
+  static List<TrackPlayStat> _decodePlayStats(Map<String, dynamic> json) => [
+    for (final row in json['stats'] as List? ?? const [])
+      if (row is Map<String, dynamic>) TrackPlayStat.fromJson(row),
+  ];
 
   Future<List<Track>> artistStationTracks(ArtistRef seed) async {
-    if (seed.platformKey != null) return artistSongsFor(seed);
-    if (seed.id <= 0) return const <Track>[];
-    final similar = await gateway.similarArtists(seed.id);
-    final artistIds = <int>[
-      seed.id,
-      ...similar.take(4).map((artist) => artist.id),
-    ];
-    final groups = await Future.wait<List<GatewaySong>>(
-      artistIds.map(
-        (id) =>
-            gateway.artistTopSongs(id).catchError((_) => const <GatewaySong>[]),
-      ),
-    );
-    final List<Track> station = <Track>[];
-    final Set<int> seen = <int>{};
-    for (var row = 0; row < 8; row++) {
-      for (final songs in groups) {
-        if (row >= songs.length) continue;
-        final song = songs[row];
-        if (seen.add(song.id)) station.add(trackFromSong(song));
-      }
-    }
-    return station;
+    final id = _platform.reference(seed.key, MusicEntityKind.artist);
+    return (await _platform.owner(id).radio(MusicRadioKind.artist, seed: id))
+        .map(_platform.track)
+        .toList();
   }
 
   Future<MusicChart> prepareChart(
@@ -1024,7 +681,7 @@ class Catalog {
     );
   }
 
-  /// How long a resolved row keeps its NetEase id. Song ids do not move.
+  /// How long a resolved row keeps its provider reference. Song ids do not move.
   static const Duration _chartMatchTtl = Duration(days: 14);
 
   /// A row the search host does not know is remembered only briefly. A board
@@ -1047,7 +704,7 @@ class Catalog {
           ),
         )
         .toString();
-    final String matchKey = 'chart-entry-match-v2:$identity';
+    final String matchKey = 'chart-entry-match-v3:$_scope:$identity';
     final Track? remembered = await _rememberedChartTrack(matchKey);
     if (remembered != null) return entry.copyWith(track: remembered);
     if (!force && await _recentlyMissed(identity)) return entry;
@@ -1059,9 +716,10 @@ class Catalog {
       await cache.writeJson(matchKey, resolved.toJson());
       return resolved;
     } on _NoChartMatch {
-      await cache.writeJson('chart-entry-miss-v1:$identity', <String, dynamic>{
-        'title': entry.title,
-      });
+      await cache.writeJson(
+        'chart-entry-miss-v2:$_scope:$identity',
+        <String, dynamic>{'title': entry.title},
+      );
       return entry;
     } catch (_) {
       // A search that failed for transport reasons stays retryable: writing a
@@ -1083,7 +741,7 @@ class Catalog {
 
   Future<bool> _recentlyMissed(String identity) async {
     final CachedJson? saved = await cache.readJson(
-      'chart-entry-miss-v1:$identity',
+      'chart-entry-miss-v2:$_scope:$identity',
     );
     return saved != null && saved.fresh(_chartMatchMissTtl);
   }
@@ -1107,25 +765,18 @@ class Catalog {
     double bestScore = 0;
 
     Future<void> search(String value) async {
-      List<GatewaySong> candidates = const <GatewaySong>[];
-      try {
-        candidates = await gateway
-            .search(value, limit: 8, useCloudSearch: true)
-            .timeout(const Duration(seconds: 5));
-      } catch (_) {
-        // The authenticated cloud-search route is intermittently rejected;
-        // the classic search route remains usable on the same session.
-      }
-      if (candidates.isEmpty) {
-        candidates = await gateway
-            .search(value, limit: 8)
-            .timeout(const Duration(seconds: 5));
-      }
+      final candidates =
+          (await activeGateway
+                  .search(value, limit: 8)
+                  .timeout(const Duration(seconds: 5)))
+              .songs
+              .items;
+
       for (final candidate in candidates) {
         final double score = _chartMatchScore(entry, candidate);
         if (score > bestScore) {
           bestScore = score;
-          match = trackFromSong(candidate);
+          match = _platform.track(candidate);
         }
       }
     }
@@ -1148,7 +799,7 @@ class Catalog {
     return entry.copyWith(track: match);
   }
 
-  static double _chartMatchScore(ChartEntry entry, GatewaySong song) {
+  static double _chartMatchScore(ChartEntry entry, MusicSong song) {
     final String title = _normaliseMusicText(entry.title);
     final String translated = _normaliseMusicText(entry.translatedTitle ?? '');
     final String candidateTitle = _normaliseMusicText(song.title);
@@ -1162,7 +813,9 @@ class Catalog {
       score += .5;
     }
     final String sourceArtist = _normaliseMusicText(entry.artist);
-    final String candidateArtist = _normaliseMusicText(song.artistLine);
+    final String candidateArtist = _normaliseMusicText(
+      song.artists.map((artist) => artist.name).join(' / '),
+    );
     if (sourceArtist.isNotEmpty && candidateArtist.isNotEmpty) {
       if (sourceArtist == candidateArtist) {
         score += .35;
@@ -1216,125 +869,11 @@ class Catalog {
           (tracks) => {
             'tracks': tracks.map((track) => track.toJson()).toList(),
           },
-          () => MusicId.tryParse(playlistId) != null
-              ? _platform.playlistTracks(playlistId)
-              : _playlistTracks(playlistId),
+          () => _platform.playlistTracks(playlistId),
         );
 
-  /// Fetches the complete playlist in stable 500-song pages.
-  Future<List<Track>> _playlistTracks(String playlistId) async {
-    final int id = int.tryParse(playlistId) ?? 0;
-    if (id <= 0) throw ArgumentError.value(playlistId, 'playlistId');
-    try {
-      final Map<String, dynamic> body = await gateway.playlistDetail(id);
-      final dynamic rawPlaylist = body['playlist'];
-      if (rawPlaylist is! Map<String, dynamic>) {
-        throw StateError('歌单数据不可用。'); // i18n:key
-      }
-      final GatewayPlaylist playlist = GatewayPlaylist.fromJson(rawPlaylist);
-      final List<GatewaySong> ordered = <GatewaySong>[];
-      if (playlist.trackIds.isNotEmpty) {
-        // Large playlists are two or more song-detail pages; the round trips
-        // are independent, so overlap them. A thousand-song list used to wait
-        // for every page in turn even though each one is a separate request.
-        final List<int> ids = playlist.trackIds;
-        final int pages = (ids.length / 500).ceil();
-        final List<List<GatewaySong>?> details =
-            List<List<GatewaySong>?>.filled(pages, null);
-        int next = 0;
-        Future<void> worker() async {
-          while (true) {
-            final int page = next++;
-            if (page >= pages) return;
-            final int offset = page * 500;
-            final int end = math.min(offset + 500, ids.length);
-            details[page] = await gateway.songDetails(ids.sublist(offset, end));
-          }
-        }
-
-        await Future.wait(<Future<void>>[
-          for (var i = 0; i < math.min(4, pages); i++) worker(),
-        ]);
-        for (final List<GatewaySong>? page in details) {
-          if (page != null) ordered.addAll(page);
-        }
-      }
-      if (playlist.trackIds.isEmpty ||
-          ordered.any((song) => song.title.isEmpty || song.artists.isEmpty)) {
-        // Some editorial/recommendation playlists omit trackIds from detail.
-        // The dedicated paged route also repairs incomplete song/detail rows.
-        final int expected = math.max(
-          1,
-          math.max(playlist.trackCount, playlist.trackIds.length),
-        );
-        final List<GatewaySong> complete = <GatewaySong>[];
-        // Fetch a handful of pages at a time, in order. Waiting for every
-        // page of a long list before showing anything made a 5 000-song
-        // playlist open in ten sequential round trips.
-        for (int start = 0; start < expected; start += 500 * 3) {
-          final List<int> offsets = <int>[
-            for (
-              int offset = start;
-              offset < expected && offset < start + 500 * 3;
-              offset += 500
-            )
-              offset,
-          ];
-          final List<Map<String, dynamic>> batch =
-              await Future.wait(<Future<Map<String, dynamic>>>[
-                for (final int offset in offsets)
-                  gateway.playlistTracks(id, limit: 500, offset: offset),
-              ]);
-          var shortPage = false;
-          for (final Map<String, dynamic> page in batch) {
-            final rawSongs = page['songs'];
-            final songs = rawSongs is List
-                ? rawSongs
-                      .whereType<Map<String, dynamic>>()
-                      .map((item) {
-                        final nested = item['song'] ?? item['data'];
-                        return GatewaySong.fromJson(
-                          nested is Map<String, dynamic> ? nested : item,
-                        );
-                      })
-                      .where((song) => song.id > 0)
-                      .toList()
-                : const <GatewaySong>[];
-            complete.addAll(songs);
-            if (songs.length < 500) {
-              shortPage = true;
-              break;
-            }
-          }
-          if (shortPage) break;
-        }
-        if (complete.isNotEmpty) {
-          ordered
-            ..clear()
-            ..addAll(complete);
-        }
-      }
-      _online = true;
-      return ordered.map(trackFromSong).toList();
-    } catch (_) {
-      _online = false;
-      rethrow;
-    }
-  }
-
-  /// The signed-in user's own collections: liked songs, created playlists,
-  /// subscribed playlists. Errors propagate to the profile view.
-  Future<UserCollections> userCollections(int uid) => usesPlatformGateway
-      ? platformCollections(activeGateway)
-      : uid <= 0
-      ? Future.value(UserCollections.empty)
-      : _cached(
-          _collectionsKey(uid),
-          const Duration(minutes: 5),
-          _decodeCollections,
-          _encodeCollections,
-          () => _userCollections(uid),
-        );
+  Future<UserCollections> userCollections(int uid) =>
+      platformCollections(activeGateway);
 
   Future<UserCollections> platformCollections(MusicGateway owner) {
     if (owner.user == null) return Future.value(UserCollections.empty);
@@ -1347,109 +886,28 @@ class Catalog {
     );
   }
 
-  Future<UserCollections> _userCollections(int uid) async {
-    if (uid <= 0) return UserCollections.empty;
-    try {
-      final List<GatewayPlaylist> raw = await gateway.userPlaylists(
-        uid,
-        limit: 1000,
-      );
-      _online = true;
-      Playlist? liked;
-      final List<Playlist> created = <Playlist>[];
-      final List<Playlist> subscribed = <Playlist>[];
-      for (final GatewayPlaylist p in raw) {
-        final Playlist playlist = playlistFromGateway(p);
-        // `/user/playlist` does not send `created`; own playlists have
-        // `subscribed: false` and the account's id in `creator.userId`.
-        final bool mine =
-            p.created || p.creatorId == uid || p.subscribed == false;
-        // The personal liked collection also shows up as an own playlist;
-        // pull it out so the profile can label and count it on its own
-        // (mirrors the reference: specialType 5, name fallback for compatibility
-        // payloads).
-        if (p.specialType == 5 || (mine && p.name.endsWith('喜欢的音乐'))) {
-          liked ??= playlist;
-        } else if (mine) {
-          created.add(playlist);
-        } else {
-          subscribed.add(playlist);
-        }
-      }
-      return UserCollections(
-        liked: liked,
-        created: created,
-        subscribed: subscribed,
-      );
-    } catch (_) {
-      _online = false;
-      rethrow;
-    }
-  }
+  Future<List<Track>> albumTracks(int albumId) => albumTracksFor(
+    activeGateway.id(MusicEntityKind.album, '$albumId').cacheKey,
+  );
 
-  Future<List<Track>> albumTracks(int albumId) async {
-    return (await albumDetails(albumId)).tracks;
-  }
-
-  /// 收藏的专辑: one page of the albums the signed-in account saved.
-  ///
-  /// [uid] scopes the NetEase collection; a platform connection ignores it and
-  /// reads its own starred albums instead.
-  ///
-  /// Every page is cached under its own key, so [force] cannot expire them one
-  /// by one: it bumps the generation the keys carry instead, which drops the
-  /// whole set at once and keeps a refreshed collection from mixing fresh
-  /// first pages with stale later ones.
   Future<AlbumPage> savedAlbums(
     int uid, {
     int offset = 0,
     bool force = false,
   }) async {
     if (offset < 0) throw ArgumentError.value(offset, 'offset');
-    if (usesPlatformGateway) {
-      return _platform.savedAlbums(activeGateway, offset);
-    }
-    if (uid <= 0) {
-      return const AlbumPage(albums: <Album>[], more: false, receivedCount: 0);
-    }
-    final String scope = '$_scope:$uid';
+    final scope = _scope;
     if (force) {
       _savedAlbumGenerations[scope] = (_savedAlbumGenerations[scope] ?? 0) + 1;
     }
-    final int generation = _savedAlbumGenerations[scope] ?? 0;
-    final key = 'saved-albums:v3:$scope:$generation:$offset';
+    final key =
+        'saved-albums:v4:$scope:${_savedAlbumGenerations[scope] ?? 0}:$offset';
     return _cached(
       key,
       const Duration(minutes: 15),
       AlbumPage.fromJson,
-      (value) => value.toJson(),
-      () async {
-        final payload = await gateway.albumSublist(
-          limit: _savedAlbumPageSize,
-          offset: offset,
-        );
-        final albums = albumSublistAlbums(payload);
-        _online = true;
-        // Only what the detail page can open: an entry without a usable album
-        // reference would render as a card that does nothing.
-        final List<Album> openable = <Album>[];
-        for (final GatewayAlbum album in albums) {
-          final Album value = albumFromGateway(album);
-          if (value.hasReference) openable.add(value);
-        }
-        return AlbumPage(
-          albums: openable,
-          // The marker the route asked for, with the page length as a
-          // backstop: a service that stops sending it must not truncate the
-          // collection at its first page.
-          more:
-              (albumSublistHasMore(payload) ||
-                  albums.length >= _savedAlbumPageSize) &&
-              albums.isNotEmpty,
-          total: albumSublistCount(payload),
-          receivedCount: albums.length,
-        );
-      },
+      (page) => page.toJson(),
+      () => _platform.savedAlbums(activeGateway, offset),
       failureCooldown: const Duration(seconds: 30),
     );
   }
@@ -1459,7 +917,7 @@ class Catalog {
 
   Future<AlbumDetails> albumDetailsFor(String key, {bool force = false}) async {
     final reference = MusicId.tryParse(key);
-    if (reference == null) return albumDetails(int.parse(key), force: force);
+    if (reference == null) throw ArgumentError('Invalid album reference.');
     // Platform albums must share the same in-flight request and stored snapshot
     // as native catalogue albums. Opening a second detail or pressing play on a
     // slow connection used to start the entire metadata/song-page load again.
@@ -1498,91 +956,60 @@ class Catalog {
     );
   }
 
-  Future<List<Track>> artistSongsFor(ArtistRef artist, {bool force = false}) =>
-      artist.platformKey != null
-      ? _platform.artistSongs(artist)
-      : artistSongs(artist.id, force: force);
-
-  Future<AlbumDetails> albumDetails(int albumId, {bool force = false}) async {
-    if (albumId <= 0) throw ArgumentError.value(albumId, 'albumId');
-    final key = 'album-detail:$albumId';
-    if (force) await _expire(key);
-    return _cached(
-      key,
-      const Duration(hours: 1),
-      AlbumDetails.fromJson,
-      (value) => value.toJson(),
-      () async {
-        final Map<String, dynamic> body = await gateway.albumDetailRaw(albumId);
-        final rawAlbum = body['album'];
-        if (rawAlbum is! Map<String, dynamic>) {
-          throw StateError('Album metadata unavailable');
-        }
-        final dynamic songs = body['songs'];
-        final List<GatewaySong> parsed = songs is List
-            ? songs
-                  .whereType<Map<String, dynamic>>()
-                  .map<GatewaySong>(GatewaySong.fromJson)
-                  .where((GatewaySong song) => song.id > 0)
-                  .toList()
-            : const <GatewaySong>[];
-        _online = true;
-        return AlbumDetails(
-          album: albumFromGateway(GatewayAlbum.fromJson(rawAlbum)),
-          tracks: parsed.map<Track>(trackFromSong).toList(),
-          description: rawAlbum['description'] as String? ?? '',
-          company: rawAlbum['company'] as String? ?? '',
-          publishTime: (rawAlbum['publishTime'] as num?)?.toInt(),
-        );
-      },
-      failureCooldown: const Duration(seconds: 30),
-    );
-  }
-
-  Future<ArtistDetails> artistDetails(
-    ArtistRef seed, {
+  Future<List<Track>> artistSongsFor(
+    ArtistRef artist, {
     bool force = false,
   }) async {
-    if (seed.platformKey != null) return _platform.artistDetails(seed);
-    if (seed.id <= 0) throw ArgumentError.value(seed.id, 'artistId');
-    final key = 'artist-detail:${seed.id}';
+    if (artist.platformKey == null) return artistSongs(artist.id, force: force);
+    final id = _platform.reference(artist.key, MusicEntityKind.artist);
+    final key =
+        'artist-songs:v2:${_platform.owner(id).cacheNamespace}:${id.cacheKey}';
     if (force) await _expire(key);
     return _cached(
       key,
       const Duration(minutes: 30),
-      ArtistDetails.fromJson,
-      (value) => value.toJson(),
-      () async {
-        final results = await Future.wait<Object>([
-          gateway.artistTopSongs(seed.id),
-          gateway.artistDetail(seed.id).catchError((_) => <String, dynamic>{}),
-        ]);
-        final tracks = (results[0] as List<GatewaySong>)
-            .where((song) => song.id > 0)
-            .map(trackFromSong)
-            .toList();
-        final payload = results[1] as Map<String, dynamic>;
-        final data = payload['data'];
-        final raw = data is Map<String, dynamic>
-            ? data['artist']
-            : payload['artist'];
-        final metadata = raw is Map<String, dynamic>
-            ? raw
-            : <String, dynamic>{};
-        final artist = GatewayArtist.fromJson(metadata);
-        _online = true;
-        return ArtistDetails(
-          artist: ArtistRef(
-            id: seed.id,
-            name: artist.name.isEmpty ? seed.name : artist.name,
-            coverUrl: artist.coverUrl ?? seed.coverUrl,
-          ),
-          tracks: tracks,
-          description: metadata['briefDesc'] as String? ?? '',
-          musicCount: (metadata['musicSize'] as num?)?.toInt() ?? 0,
-          albumCount: (metadata['albumSize'] as num?)?.toInt() ?? 0,
-        );
+      (json) => _decodeTracks(json['tracks']),
+      (tracks) => {
+        'tracks': [for (final track in tracks) track.toJson()],
       },
+      () => _platform.artistSongs(artist),
+      failureCooldown: const Duration(seconds: 30),
+    );
+  }
+
+  Future<AlbumDetails> albumDetails(int albumId, {bool force = false}) =>
+      albumDetailsFor(
+        activeGateway.id(MusicEntityKind.album, '$albumId').cacheKey,
+        force: force,
+      );
+  Future<ArtistDetails> artistDetails(
+    ArtistRef artist, {
+    bool force = false,
+  }) async {
+    if (artist.platformKey == null) {
+      artist = ArtistRef(
+        id: artist.id,
+        name: artist.name,
+        coverUrl: artist.coverUrl,
+        platformKey: activeGateway
+            .id(MusicEntityKind.artist, '${artist.id}')
+            .cacheKey,
+      );
+    }
+    final id = _platform.reference(artist.key, MusicEntityKind.artist);
+    final key =
+        'artist-detail:v2:${_platform.owner(id).cacheNamespace}:${id.cacheKey}';
+    if (force) {
+      await _expire(key);
+      await artistSongsFor(artist, force: true);
+    }
+    return _cached(
+      key,
+      const Duration(minutes: 30),
+      ArtistDetails.fromJson,
+      (details) => details.toJson(),
+      () => _platform.artistDetails(artist),
+      failureCooldown: const Duration(seconds: 30),
     );
   }
 
@@ -1590,259 +1017,36 @@ class Catalog {
     int id, {
     int offset = 0,
     bool force = false,
-  }) async {
-    if (id <= 0 || offset < 0) throw ArgumentError('Invalid artist album page');
-    final key = 'artist-albums:$id:$offset';
-    if (force) await _expire(key);
-    return _cached(
-      key,
-      const Duration(minutes: 15),
-      ArtistAlbumPage.fromJson,
-      (value) => value.toJson(),
-      () async {
-        final payload = await gateway.artistAlbums(id, offset: offset);
-        final raw = payload['hotAlbums'];
-        final albums = raw is List
-            ? [
-                for (final album in raw)
-                  if (album is Map<String, dynamic>)
-                    albumFromGateway(GatewayAlbum.fromJson(album)),
-              ]
-            : <Album>[];
-        _online = true;
-        return ArtistAlbumPage(
-          albums: albums
-              .where((album) => (int.tryParse(album.id) ?? 0) > 0)
-              .toList(),
-          more: payload['more'] == true && albums.isNotEmpty,
-          receivedCount: raw is List ? raw.length : 0,
-        );
-      },
-      failureCooldown: const Duration(seconds: 30),
-    );
-  }
+  }) => artistAlbumPageFor(
+    ArtistRef(
+      id: 0,
+      name: '',
+      platformKey: activeGateway.id(MusicEntityKind.artist, '$id').cacheKey,
+    ),
+    offset: offset,
+    force: force,
+  );
+  Future<List<Track>> artistSongs(int id, {bool force = false}) =>
+      artistSongsFor(
+        ArtistRef(
+          id: 0,
+          name: '',
+          platformKey: activeGateway.id(MusicEntityKind.artist, '$id').cacheKey,
+        ),
+        force: force,
+      );
 
-  Future<List<Track>> artistSongs(int id, {bool force = false}) async {
-    if (id <= 0) throw ArgumentError.value(id, 'artistId');
-    final key = 'artist-songs:$id';
-    if (force) await _expire(key);
-    return _cached(
-      key,
-      const Duration(minutes: 30),
-      (json) => _decodeTracks(json['tracks']),
-      (tracks) => <String, dynamic>{
-        'tracks': tracks.map((track) => track.toJson()).toList(),
-      },
-      () async {
-        const int limit = 100;
-        var offset = 0;
-        var more = true;
-        final List<Track> tracks = <Track>[];
-        final Set<String> ids = <String>{};
-        while (more) {
-          final payload = await gateway.artistSongs(
-            id,
-            limit: limit,
-            offset: offset,
-          );
-          final dynamic raw = payload['songs'];
-          final List<dynamic> page = raw is List ? raw : const <dynamic>[];
-          for (final item in page.whereType<Map<String, dynamic>>()) {
-            final song = GatewaySong.fromJson(item);
-            if (song.id > 0) {
-              final track = trackFromSong(song);
-              if (ids.add(track.id)) tracks.add(track);
-            }
-          }
-          offset += page.length;
-          more = payload['more'] == true && page.isNotEmpty;
-        }
-        _online = true;
-        return tracks;
-      },
-    );
-  }
-
-  /// Resolves a stream for [track] at [quality], degrading through the lower
-  /// tiers when the account or the catalogue cannot provide the requested one.
-  ///
-  /// Cached playback files are quality-specific; [useCache] is false for
-  /// downloads so they always fetch the rendition the user picked.
   Future<AudioSource?> audioSourceFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool useCache = true,
-  }) async {
-    final reference = MusicId.tryParse(track.id);
-    if (reference != null) {
-      return _platform.audioSource(reference, quality, useCache);
-    }
-    final int id = int.tryParse(track.id) ?? 0;
-    if (id <= 0) return null;
-    Object? failure;
-
-    if (useCache) {
-      final cached = await audioCache.find(track.id, quality: quality);
-      if (cached != null) {
-        return AudioSource(
-          url: cached.uri.toString(),
-          quality: quality,
-          format: _audioFormat(null, cached.path),
-        );
-      }
-    }
-
-    bool mayTryUpstream = true;
-    try {
-      final AudioSource? resolved = await _resolveAudioSource(id, quality);
-      if (resolved != null) {
-        _online = true;
-        if (useCache) {
-          unawaited(
-            audioCache.store(
-              track.id,
-              resolved.url,
-              quality: resolved.quality,
-              format: resolved.format,
-            ),
-          );
-        }
-        return resolved;
-      }
-    } catch (error) {
-      // A transport failure would make every lower-tier request wait for the
-      // same timeout again; cached fallbacks are still worth checking.
-      failure = error;
-      mayTryUpstream = false;
-      _online = false;
-    }
-
-    for (final AudioQuality lower in quality.fallbackChain.skip(1)) {
-      if (useCache) {
-        final cached = await audioCache.find(track.id, quality: lower);
-        if (cached != null) {
-          return AudioSource(
-            url: cached.uri.toString(),
-            quality: lower,
-            format: _audioFormat(null, cached.path),
-          );
-        }
-      }
-      if (!mayTryUpstream) continue;
-      try {
-        final AudioSource? resolved = await _resolveAudioSource(id, lower);
-        if (resolved != null) {
-          _online = true;
-          if (useCache) {
-            unawaited(
-              audioCache.store(
-                track.id,
-                resolved.url,
-                quality: resolved.quality,
-                format: resolved.format,
-              ),
-            );
-          }
-          return resolved;
-        }
-      } catch (error) {
-        failure ??= error;
-        // A refusal is about the account or the song, so hammering every lower
-        // tier would only repeat the same answer. A rate refusal is different:
-        // it has already been retried once inside `_resolveAudioSource`, and a
-        // different rendition is a different request, so the lower tiers are
-        // still worth a try rather than failing the track outright.
-        if (!isRateLimited(error)) mayTryUpstream = false;
-        _online = false;
-      }
-    }
-    if (failure != null) throw failure;
-    _online = false;
-    return null;
-  }
-
-  /// Whether [error] is the service's request-rate refusal.
-  ///
-  /// Holding down "next" is enough to reach it. It is deliberately *not*
-  /// treated as an ordinary failure: it says nothing about the song, so
-  /// playback degrades to another rendition (or a cached file) instead of
-  /// reporting the track as unplayable.
+  }) => _platform.audioSource(track, quality, useCache);
   static bool isRateLimited(Object? error) =>
-      error is GatewayServiceException && _isRateLimitCode(error.code);
-
-  /// The codes the service uses to say "too many requests".
-  ///
-  /// -460 is the service's "too frequent" code; 406 is the refusal the CDN-side
-  /// endpoints answer with; 429 is the standard one.
-  static bool _isRateLimitCode(int code) =>
-      code == -460 || code == 406 || code == 429;
-
-  /// Playback URL for a track, or null when the gateway has none (VIP /
-  /// region lock / offline).
+      error is MusicGatewayException && error.httpStatus == 429;
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
   }) async => (await audioSourceFor(track, quality: quality))?.url;
-
-  /// Resolves one requested tier, retrying it once when the *answer* was a
-  /// request-rate refusal.
-  ///
-  /// A refusal that arrives as an exception is retried by the gateway transport
-  /// itself; here [songUrl] returns normally, so an empty entry carrying the
-  /// refusal code is the signal to wait and ask this same tier again. Retrying
-  /// inside the tier keeps every tier requested exactly once, which is the
-  /// contract the fallback chain is built on.
-  Future<AudioSource?> _resolveAudioSource(
-    int id,
-    AudioQuality requested,
-  ) async {
-    for (var attempt = 0; ; attempt++) {
-      final GatewaySongUrl? result = await gateway.songUrl(
-        id,
-        level: requested.level,
-      );
-      final int? code = result?.code;
-      final bool refusedByRate = code != null && _isRateLimitCode(code);
-      final AudioSource? resolved = _audioSourceFrom(result, requested);
-      if (resolved != null) return resolved;
-      if (!refusedByRate || attempt >= _rateLimitAttempts - 1) {
-        if (refusedByRate) {
-          // Still refused after the paced retry: surface it as the service
-          // refusal it is, so the caller degrades instead of blaming the song.
-          throw GatewayServiceException(code, '/song/url/v1');
-        }
-        return null;
-      }
-      // The refusal is a verdict on the request rate, not on the song.
-      await Future<void>.delayed(_rateLimitBackoff);
-    }
-  }
-
-  /// Attempts per tier, and the pause between them, for a rate refusal.
-  static const int _rateLimitAttempts = 2;
-  static const Duration _rateLimitBackoff = Duration(milliseconds: 700);
-
-  /// Maps one gateway answer onto a playable source, or null when there is none.
-  static AudioSource? _audioSourceFrom(
-    GatewaySongUrl? result,
-    AudioQuality requested,
-  ) {
-    final String? raw = result?.url;
-    if (raw == null || raw.isEmpty) return null;
-    final String url = raw.startsWith('http://')
-        ? raw.replaceFirst('http://', 'https://')
-        : raw;
-    final AudioQuality actual =
-        AudioQualityInfo.fromLevel(result?.level) ??
-        AudioQualityInfo.fromBitrate(result?.br) ??
-        requested;
-    return AudioSource(
-      url: url,
-      quality: actual,
-      format: _audioFormat(result?.type, url),
-      bytes: result?.size,
-    );
-  }
 
   static const Set<String> _audioFormats = <String>{
     'mp3',
@@ -1888,19 +1092,7 @@ class Catalog {
     },
   );
 
-  Future<GatewayLyrics?> _lyricsFor(Track track) async {
-    if (MusicId.tryParse(track.id) != null) return _platform.lyrics(track.id);
-    final int id = int.tryParse(track.id) ?? 0;
-    if (id <= 0) return null;
-    try {
-      final GatewayLyrics lyrics = await gateway.preferredLyrics(id);
-      _online = true;
-      return lyrics;
-    } catch (_) {
-      _online = false;
-      rethrow;
-    }
-  }
+  Future<GatewayLyrics?> _lyricsFor(Track track) => _platform.lyrics(track.id);
 
   // -- mapping --------------------------------------------------------------
 
@@ -1950,75 +1142,11 @@ class Catalog {
         .map((p) => p.toJson())
         .toList(),
   };
-
-  static int _seedFrom(int id) => id.hashCode & 0x7fffffff;
-
-  static int _accentFrom(int id) => id.abs() % 3;
-
-  static Track trackFromSong(GatewaySong song) => Track(
-    id: song.id.toString(),
-    title: song.title,
-    artist: song.artistLine,
-    artists: song.artistDetails.map(artistFromGateway).toList(),
-    album: song.albumName,
-    albumId: song.albumId,
-    translatedTitle: song.translatedTitle,
-    duration: song.duration,
-    coverSeed: _seedFrom(song.id),
-    accent: _accentFrom(song.id),
-    coverUrl: song.coverUrl,
-  );
-
-  static Album albumFromSong(GatewaySong song) => Album(
-    id: song.albumId.toString(),
-    title: song.albumName,
-    artist: song.artistLine,
-    artists: song.artistDetails.map(artistFromGateway).toList(),
-    year: '',
-    coverSeed: _seedFrom(song.albumId),
-    note: '',
-    coverUrl: song.coverUrl,
-  );
-
-  static Album albumFromGateway(GatewayAlbum album) {
-    final String year = album.publishTime != null && album.publishTime! > 0
-        ? DateTime.fromMillisecondsSinceEpoch(
-            album.publishTime!,
-          ).year.toString()
-        : '';
-    return Album(
-      id: album.id.toString(),
-      title: album.title,
-      artist: album.artist,
-      artists: album.artists.map(artistFromGateway).toList(),
-      year: year,
-      coverSeed: _seedFrom(album.id),
-      note: album.trackCount > 0 ? '${album.trackCount} 首曲目' : '', // i18n:key
-      accent: _accentFrom(album.id),
-      trackCount: album.trackCount > 0 ? album.trackCount : null,
-      coverUrl: album.coverUrl,
-      releaseType: album.releaseType,
-      subType: album.subType,
-    );
-  }
-
-  static ArtistRef artistFromGateway(GatewayArtist artist) =>
-      ArtistRef(id: artist.id, name: artist.name, coverUrl: artist.coverUrl);
-
-  static Playlist playlistFromGateway(GatewayPlaylist playlist) => Playlist(
-    id: playlist.id.toString(),
-    name: playlist.name,
-    trackIds: playlist.trackIds.map<String>((int id) => id.toString()).toList(),
-    coverSeed: _seedFrom(playlist.id),
-    description: playlist.description,
-    coverUrl: playlist.coverUrl,
-    trackCount: playlist.trackCount,
-  );
 }
 
 /// Raised when the search host answered but nothing scored high enough to be
 /// trusted as the song behind a chart row. It is not a transport failure, so a
-/// caller can tell "not on NetEase" apart from "the network just failed".
+/// caller can tell "not in this catalogue" apart from "the network just failed".
 class _NoChartMatch implements Exception {
   const _NoChartMatch();
 }

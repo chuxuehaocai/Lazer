@@ -101,6 +101,36 @@ bool testSamplePeakCeiling(int32_t sampleRate) {
     return passed;
 }
 
+bool testInitialVolume() {
+    using lazer::audio::DspChain;
+    bool passed = true;
+    for (const auto rate : {44100, 96000}) {
+        for (const double target : {0.0, 0.02, 0.5}) {
+            DspChain chain;
+            chain.configureFormat({rate, 2});
+            chain.setVolume(target, 200);
+            std::vector<float> head(512 * 2, 1.0f);
+            chain.process(head.data(), 512);
+            passed &= expect(std::all_of(head.begin(), head.end(), [target](float sample) {
+                return std::abs(static_cast<double>(sample) - target) < 1e-6;
+            }), "every first-block sample must use the requested volume, including mute");
+            chain.setVolume(0.8, 200);
+            std::vector<float> ramp(512 * 2, 1.0f);
+            chain.process(ramp.data(), 512);
+            passed &= expect(ramp.front() < ramp.back() && ramp.back() < 0.8f,
+                "volume changes after playback starts must still ramp smoothly");
+            chain.configureFormat({rate, 2});
+            chain.setVolume(0.01, 200);
+            float next[] = {1.0f, 1.0f};
+            chain.process(next, 1);
+            passed &= expect(std::abs(next[0] - 0.01f) < 1e-6,
+                "reopening a source must not expose the preceding source's gain");
+        }
+    }
+    if (passed) std::printf("initial volume, mute, source replacement and live ramp OK\n");
+    return passed;
+}
+
 bool testTpdfQuantizer() {
     constexpr int32_t kBits = 16;
     constexpr size_t kSampleCount = 200'000;
@@ -196,5 +226,6 @@ int main() {
     const bool at96000 = testSamplePeakCeiling(96'000);
     const bool dither = testTpdfQuantizer();
     const bool packing = testIntegerPcmPacking();
-    return at44100 && at96000 && dither && packing ? 0 : 1;
+    const bool initialVolume = testInitialVolume();
+    return at44100 && at96000 && dither && packing && initialVolume ? 0 : 1;
 }

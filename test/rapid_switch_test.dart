@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -8,7 +9,6 @@ import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/local/local_library.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -243,10 +243,7 @@ class _QueueRefusingEngine implements AudioEngine, QueueAudioEngine {
   void dispose() {}
 }
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<List<GatewaySong>> songDetails(List<int> ids) async => [];
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
@@ -355,11 +352,9 @@ void main() {
     final second = engine.setQueue(<String>['https://audio.test/b']);
     final third = engine.setQueue(<String>['https://audio.test/c']);
     await tester.pump();
-    expect(
-      player.opened,
-      <String>['https://audio.test/a'],
-      reason: 'superseded loads queue behind the one already opening',
-    );
+    expect(player.opened, <String>[
+      'https://audio.test/a',
+    ], reason: 'superseded loads queue behind the one already opening');
 
     held.complete();
     await tester.pump();

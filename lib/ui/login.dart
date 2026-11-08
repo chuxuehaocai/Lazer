@@ -12,9 +12,7 @@ import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../animation/view_transitions.dart';
 import '../updates/open_external.dart';
-import '../widgets/music_provider_badge.dart';
 import '../gateway/gateway.dart';
-import 'navidrome_login_fields.dart';
 import 'plugin_manager_page.dart';
 
 /// Present the sign-in card in the Apple sheet language.
@@ -57,7 +55,6 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
   static final RegExp _phonePattern = RegExp(r'^1\d{10}$');
 
   _Mode _mode = _Mode.qr;
-  late bool _navidrome = state.isNavidrome && !state.isLuaProvider;
   Set<String> get _methods => state.musicAuthenticationMethods;
   bool _supports(_Mode mode) => _methods.contains(switch (mode) {
     _Mode.qr => 'qr',
@@ -94,11 +91,11 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
   void initState() {
     super.initState();
     _mode = _Mode.values.where(_supports).firstOrNull ?? _Mode.cookie;
-    if (!_navidrome && _mode == _Mode.qr) unawaited(_start());
+    if (_mode == _Mode.qr) unawaited(_start());
   }
 
   Future<void> _start() async {
-    if (_navidrome || !_supports(_Mode.qr)) return;
+    if (!_supports(_Mode.qr)) return;
     final int generation = ++_qrGeneration;
     _poll?.cancel();
     setState(() {
@@ -109,7 +106,6 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     final owner = state.activeConnectionKey;
     final String? url = await state.beginQrLogin();
     if (!mounted ||
-        _navidrome ||
         _mode != _Mode.qr ||
         generation != _qrGeneration ||
         owner != state.activeConnectionKey) {
@@ -127,14 +123,13 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
   }
 
   Future<void> _tick(String url) async {
-    if (_polling || !mounted || _navidrome || _mode != _Mode.qr) return;
+    if (_polling || !mounted || _mode != _Mode.qr) return;
     _polling = true;
     final generation = _qrGeneration;
     final owner = state.activeConnectionKey;
     try {
       final int code = await state.pollQrLogin(url);
       if (!mounted ||
-          _navidrome ||
           generation != _qrGeneration ||
           owner != state.activeConnectionKey) {
         return;
@@ -186,24 +181,12 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       await state.selectMusicConnection(key);
       if (!mounted) return;
       setState(() {
-        _navidrome = state.isNavidrome && !state.isLuaProvider;
         _mode = _Mode.values.where(_supports).firstOrNull ?? _Mode.cookie;
       });
       if (_mode == _Mode.qr) unawaited(_start());
     } finally {
       if (mounted) setState(() => _navBusy = false);
     }
-  }
-
-  void _switchPlatform(bool navidrome) {
-    if (_navBusy || _submitting || _navidrome == navidrome) return;
-    _poll?.cancel();
-    _qrGeneration++;
-    setState(() {
-      _navidrome = navidrome;
-      _error = null;
-    });
-    if (!navidrome && _mode == _Mode.qr) unawaited(_start());
   }
 
   Future<void> _submitCookie() async {
@@ -417,32 +400,8 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                 ],
                 onChanged: _submitting || _navBusy ? null : _selectConnection,
               ),
-              if (state.navidromeFactory != null && !state.isLuaProvider)
-                SegmentedButton<bool>(
-                  selected: {_navidrome},
-                  showSelectedIcon: false,
-                  segments: <ButtonSegment<bool>>[
-                    const ButtonSegment(value: false, label: TrText('网易云音乐')),
-                    if (state.navidromeAvailable)
-                      const ButtonSegment(
-                        value: true,
-                        label: Text('Navidrome'),
-                      ),
-                  ],
-                  onSelectionChanged: _navBusy || _submitting
-                      ? null
-                      : (values) => _switchPlatform(values.single),
-                ),
-              if (_navidrome)
-                const Padding(
-                  padding: EdgeInsets.only(top: 10),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: ExperimentalMusicBadge(),
-                  ),
-                ),
               const SizedBox(height: 12),
-              if (!_navidrome && _methods.isNotEmpty)
+              if (_methods.isNotEmpty)
                 Text(
                   context.tr(
                     state.musicLoginHint ??
@@ -458,7 +417,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                   ),
                 ),
               const SizedBox(height: 18),
-              if (_methods.isEmpty && !_navidrome)
+              if (_methods.isEmpty)
                 Column(
                   children: [
                     TrText(
@@ -485,32 +444,22 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                 ViewTransitionSwitcher(
                   expand: false,
                   child: KeyedSubtree(
-                    key: ValueKey(
-                      _navidrome
-                          ? 'navidrome-${state.activeConnectionKey}'
-                          : _mode.name,
+                    key: ValueKey(_mode.name),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_mode == _Mode.sms)
+                          ..._smsFields(theme, apple)
+                        else if (_mode == _Mode.password)
+                          ..._passwordFields(theme, apple)
+                        else if (_mode == _Mode.cookie)
+                          ..._cookieFields(theme)
+                        else
+                          ..._qrFields(theme),
+                        ..._modeLinks(),
+                      ],
                     ),
-                    child: _navidrome
-                        ? NavidromeLoginFields(
-                            state: state,
-                            onConnected: () => Navigator.of(context).maybePop(),
-                            onBusy: (busy) => setState(() => _navBusy = busy),
-                          )
-                        : Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (_mode == _Mode.sms)
-                                ..._smsFields(theme, apple)
-                              else if (_mode == _Mode.password)
-                                ..._passwordFields(theme, apple)
-                              else if (_mode == _Mode.cookie)
-                                ..._cookieFields(theme)
-                              else
-                                ..._qrFields(theme),
-                              ..._modeLinks(),
-                            ],
-                          ),
                   ),
                 ),
             ],

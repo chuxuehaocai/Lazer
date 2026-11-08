@@ -3,23 +3,24 @@ import 'package:flutter/foundation.dart';
 
 import '../data/song_comments.dart';
 import '../gateway/gateway.dart';
-import '../gateway/transport.dart';
 import 'build_safe_notifier.dart';
 
 /// Comment requests and optimistic likes have their own notification lane.
 /// Paging and reactions never rebuild playback or depend on its clock.
 class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
-  SongCommentsController(this.gateway);
-  final NeteaseGateway gateway;
+  SongCommentsController(this.connections);
+  final GatewayRegistry connections;
+  MusicGateway? _owner;
+  String? _namespace;
   static const pageSize = 20;
   String? trackId;
   int _accountId = 0, _generation = 0, _offset = 0;
   bool _disposed = false, _loaded = false;
   Future<void>? _opening;
   bool _retryMore = false;
-  final Map<int, SongComment> _comments = {};
-  final List<int> _hot = [], _latest = [];
-  final Set<int> _pendingLikes = {}, _overriddenLikes = {};
+  final Map<String, SongComment> _comments = {};
+  final List<String> _hot = [], _latest = [];
+  final Set<String> _pendingLikes = {}, _overriddenLikes = {};
   bool loading = false,
       loadingMore = false,
       hasMore = false,
@@ -38,7 +39,7 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
   }
 
   bool get isEmpty => _hot.isEmpty && _latest.isEmpty;
-  bool isLiking(int id) => _pendingLikes.contains(id);
+  bool isLiking(String id) => _pendingLikes.contains(id);
   bool get reacting => _pendingLikes.isNotEmpty;
   bool _current(int generation) => !_disposed && generation == _generation;
 
@@ -65,7 +66,15 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
     loginRequired = false;
     loadingMore = false;
     hasMore = false;
-    unsupported = (int.tryParse(id) ?? 0) <= 0;
+    final reference = MusicId.tryParse(id);
+    _owner = null;
+    if (reference != null) {
+      try {
+        _owner = connections.resolve(reference);
+      } catch (_) {}
+    }
+    _namespace = _owner?.cacheNamespace;
+    unsupported = _owner?.supports(MusicCapability.comments) != true;
     if (unsupported) {
       loading = false;
       _loaded = true;
@@ -93,7 +102,9 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> _load({required bool first}) async {
     final generation = _generation;
-    final songId = int.parse(trackId!);
+    final songId = MusicId.tryParse(trackId!)!;
+    final owner = _owner!;
+    final namespace = _namespace;
     if (first) {
       loading = true;
     } else {
@@ -103,13 +114,13 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
     try {
       final page = SongCommentPage.fromJson(
-        await gateway.songComments(
+        await owner.comments(
           songId,
           limit: pageSize,
           offset: first ? 0 : _offset,
         ),
       );
-      if (!_current(generation)) return;
+      if (!_current(generation) || owner.cacheNamespace != namespace) return;
       if (first) {
         _hot.clear();
         _latest.clear();
@@ -148,7 +159,7 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  Future<void> toggleLike(int id) async {
+  Future<void> toggleLike(String id) async {
     final previous = _comments[id];
     if (previous == null || _accountId <= 0 || _pendingLikes.contains(id)) {
       return;
@@ -166,12 +177,13 @@ class SongCommentsController extends ChangeNotifier with BuildSafeNotifier {
     loginRequired = false;
     notifyListeners();
     try {
-      await gateway.setSongCommentLiked(int.parse(trackId!), id, wanted);
+      await _owner!.setCommentLiked(MusicId.tryParse(trackId!)!, id, wanted);
     } catch (error) {
       if (_current(generation)) {
         _comments[id] = previous;
         if (!wasOverridden) _overriddenLikes.remove(id);
-        loginRequired = error is GatewayServiceException && error.code == 301;
+        loginRequired =
+            error is MusicGatewayException && error.authenticationFailure;
         actionError = loginRequired ? '登录已失效，请重新登录后点赞。' : '点赞失败，请稍后重试。';
       }
     } finally {

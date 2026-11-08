@@ -13,6 +13,7 @@ import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/library_page.dart';
 import 'package:lazer_nextgen/ui/listening_statistics_page.dart';
+import 'package:lazer_nextgen/widgets/settings_detail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _sun = Track(
@@ -294,4 +295,46 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('desktop library statistics uses the retained detail subview', (
+    tester,
+  ) async {
+    final controller = await _fixture(empty: true);
+    final state = AppState(listeningStatistics: controller);
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(),
+        home: SettingsDetailHost(
+          compact: false,
+          child: Builder(
+            builder: (context) => AppLibraryPage(
+              state: state,
+              onOpenPlaylist: (_) {},
+              onOpenLocalMusic: () {},
+              onOpenSavedAlbums: () {},
+              onOpenListeningStatistics: () => SettingsDetailHost.open(
+                context,
+                page: (_) => AppListeningStatisticsPage(statistics: controller),
+                view: (_) => AppListeningStatisticsPage(statistics: controller),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('open-listening-statistics')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('settings-detail-back')), findsOneWidget);
+    expect(find.byType(AppBar), findsNothing);
+    expect(find.byType(AppListeningStatisticsPage), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-detail-back')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('open-listening-statistics')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
 }

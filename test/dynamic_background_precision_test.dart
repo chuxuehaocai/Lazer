@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,7 +7,6 @@ import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/player_bar.dart';
@@ -27,10 +27,7 @@ const Track _track = Track(
   coverSeed: 1,
 );
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-}
+class _Gateway extends TestMusicGateway {}
 
 /// A loaded source with no clock of its own, so the player counts as playing
 /// without any platform channel.

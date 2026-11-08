@@ -24,7 +24,8 @@ import '../gateway/music_models.dart';
 import '../l10n/app_localizations.dart';
 import '../ui/login.dart';
 import '../ui/pages.dart';
-import '../ui/home_pages.dart' show dailyRecommendationsPlaylist;
+import '../ui/home_pages.dart'
+    show dailyRecommendationsPlaylist, LocalRecentHome;
 import '../local/local_music_page.dart';
 import '../state/app_state.dart';
 import '../state/detail_requests.dart';
@@ -197,6 +198,13 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
   @override
   Widget build(BuildContext context) {
     final HomeFeed? feed = _state.home;
+    if (_state.isLocalPlayback) {
+      return LocalRecentHome(
+        state: _state,
+        onPlayTrack: (tracks, index) =>
+            _state.playQueue(tracks, startIndex: index),
+      );
+    }
     if (feed == null) {
       final String? error = _state.homeError;
       return LargeScreenNotice(
@@ -319,7 +327,9 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
             // guest gets the login sheet instead of a dead tile, and keeping
             // the top shelf actionable also gives the page a focus anchor.
             child: HomeActionShelf(
-              serverLibrary: _state.isNavidrome,
+              serverLibrary: !_state.supportsMusic(
+                MusicCapability.recommendations,
+              ),
               dailyOpensPlaylist: _state.signedIn,
               busy: _startingStation,
               covers: covers,
@@ -331,7 +341,9 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
                   : () => widget.actions.onOpenPlaylist(
                       dailyRecommendationsPlaylist(
                         feed,
-                        serverLibrary: _state.isNavidrome,
+                        serverLibrary: !_state.supportsMusic(
+                          MusicCapability.recommendations,
+                        ),
                       ),
                     ),
               onFm: _state.signedIn
@@ -415,7 +427,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
       );
     }
 
-    if (!_state.isNavidrome) {
+    if (_state.supportsMusic(MusicCapability.recommendations)) {
       addSection(
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -476,7 +488,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
     if (feed.editorialPlaylists.isNotEmpty) {
       addSection(
         LargeScreenShelf(
-          title: '网易云编辑精选',
+          title: '编辑精选',
           height: LargeScreenMetrics.artworkCardHeight(width),
           itemCount: feed.editorialPlaylists.length,
           itemBuilder: (BuildContext context, int index) {

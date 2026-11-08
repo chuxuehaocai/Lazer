@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -7,7 +8,6 @@ import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -171,10 +171,7 @@ class _PlainEngine implements AudioEngine {
   void dispose() {}
 }
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<List<GatewaySong>> songDetails(List<int> ids) async => [];
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
@@ -505,10 +502,10 @@ void main() {
     final engine = _QueueEngine();
     final state = AppState(catalog: _Catalog(), audioEngine: engine);
 
-    state.playQueue(<Track>[_track('1'), _track('2')]);
+    state.playQueue([const Track(id:'fixture:test:song:1',title:'Track 1',artist:'',album:'',duration:Duration(minutes:3),coverSeed:0)]);
     await tester.pump();
 
-    expect(state.recentTracks.map((track) => track.id), <String>['1']);
+    expect(state.recentTracks.map((track) => track.id), <String>['fixture:test:song:1']);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('lazer_recent_tracks_v1'), contains('Track 1'));
     state.dispose();

@@ -29,6 +29,7 @@ class _PlatformCatalog {
     artist: value.artists.map((artist) => artist.name).join(' / '),
     artists: value.artists.map(artist).toList(),
     album: value.albumName,
+    translatedTitle: value.translatedTitle,
     albumKey: value.albumId?.cacheKey,
     duration: value.duration,
     coverSeed: value.id.cacheKey.hashCode & 0x7fffffff,
@@ -71,6 +72,19 @@ class _PlatformCatalog {
   }
 
   Future<HomeFeed> home(MusicGateway gateway) async {
+    if (gateway.supports(MusicCapability.homeFeed)) {
+      final feed = await gateway.homeFeed();
+      return HomeFeed(
+        featured: feed.featured == null ? null : album(feed.featured!),
+        featuredTracks: feed.featuredSongs.map(track).toList(),
+        quick: feed.quick.map(track).toList(),
+        daily: feed.daily.map(track).toList(),
+        recommended: feed.recommended.map(playlist).toList(),
+        playlists: feed.playlists.map(playlist).toList(),
+        albums: feed.albums.map(album).toList(),
+        editorialPlaylists: feed.editorialPlaylists.map(playlist).toList(),
+      );
+    }
     if (gateway.user == null) {
       throw MusicGatewayException(gateway.provider.id, 'session', code: 40);
     }
@@ -223,6 +237,13 @@ class _PlatformCatalog {
   Future<List<Track>> artistSongs(ArtistRef seed) async {
     final id = reference(seed.key, MusicEntityKind.artist);
     final gateway = owner(id);
+    try {
+      return (await all(
+        (offset) => gateway.artistSongs(id, limit: 100, offset: offset),
+      )).map(track).toList();
+    } on MusicUnsupportedException {
+      // Album traversal is a fallback for providers without an artist-song API.
+    }
     final albums = await all(
       (offset) => gateway.artistAlbums(id, limit: 100, offset: offset),
     );
@@ -239,8 +260,13 @@ class _PlatformCatalog {
 
   Future<ArtistDetails> artistDetails(ArtistRef seed) async {
     final id = reference(seed.key, MusicEntityKind.artist);
-    final value = await owner(id).artist(id);
-    final tracks = await artistSongs(seed);
+    MusicArtist value;
+    try {
+      value = await owner(id).artist(id);
+    } catch (_) {
+      value = MusicArtist(id: id, name: seed.name, coverUrl: seed.coverUrl);
+    }
+    final tracks = await catalog.artistSongsFor(seed);
     return ArtistDetails(
       artist: artist(value),
       tracks: tracks,
@@ -251,48 +277,75 @@ class _PlatformCatalog {
   }
 
   Future<AudioSource?> audioSource(
-    MusicId id,
+    Track track,
     AudioQuality quality,
     bool useCache,
   ) async {
-    if (useCache) {
-      final cached = await catalog.audioCache.find(
-        id.cacheKey,
-        quality: quality,
-      );
-      if (cached != null) {
-        return AudioSource(
-          url: cached.uri.toString(),
-          quality: quality,
-          format: Catalog._audioFormat(null, cached.path),
+    final id = reference(track.id, MusicEntityKind.song);
+    Object? failure;
+    var requestRemote = true;
+    for (final tier in quality.fallbackChain) {
+      if (useCache) {
+        final cached = await catalog.audioCache.find(
+          id.cacheKey,
+          quality: tier,
         );
+        if (cached != null) {
+          unawaited(catalog.cacheLyrics(track, audioPath: cached.path));
+          return AudioSource(
+            url: cached.uri.toString(),
+            quality: tier,
+            format: Catalog._audioFormat(null, cached.path),
+          );
+        }
+      }
+      if (!requestRemote) continue;
+      try {
+        final source = await owner(id).stream(
+          id,
+          quality: switch (tier) {
+            AudioQuality.lossless => MusicStreamQuality.original,
+            AudioQuality.exhigh => MusicStreamQuality.high,
+            AudioQuality.higher => MusicStreamQuality.medium,
+            AudioQuality.standard => MusicStreamQuality.low,
+          },
+        );
+        final actual = AudioQualityInfo.fromBitrate(source.bitRate) ?? tier;
+        MediaRequestRules.rememberStream(source.uri.toString(), source.headers);
+        if (useCache) {
+          unawaited(catalog.cacheLyrics(track));
+          unawaited(
+            catalog.audioCache
+                .store(
+                  id.cacheKey,
+                  source.uri.toString(),
+                  quality: actual,
+                  format: source.suffix,
+                  headers: source.headers,
+                )
+                .then((file) async {
+                  if (file != null) {
+                    await catalog.cacheLyrics(track, audioPath: file.path);
+                  }
+                }),
+          );
+        }
+        return AudioSource(
+          url: source.uri.toString(),
+          quality: actual,
+          format: source.suffix,
+          bytes: source.size,
+          headers: source.headers,
+        );
+      } catch (error) {
+        failure ??= error;
+        requestRemote =
+            Catalog.isRateLimited(error) ||
+            error is MusicGatewayException && error.code == 70;
       }
     }
-    final source = await owner(id).stream(
-      id,
-      quality: switch (quality) {
-        AudioQuality.lossless => MusicStreamQuality.original,
-        AudioQuality.exhigh => MusicStreamQuality.high,
-        AudioQuality.higher => MusicStreamQuality.medium,
-        AudioQuality.standard => MusicStreamQuality.low,
-      },
-    );
-    if (useCache) {
-      unawaited(
-        catalog.audioCache.store(
-          id.cacheKey,
-          source.uri.toString(),
-          quality: quality,
-          format: source.suffix,
-        ),
-      );
-    }
-    return AudioSource(
-      url: source.uri.toString(),
-      quality: quality,
-      format: source.suffix,
-      bytes: source.size,
-    );
+    if (failure != null) throw failure;
+    return null;
   }
 
   Future<GatewayLyrics> lyrics(String key) async {
@@ -315,6 +368,7 @@ class _PlatformCatalog {
       lrc: value.lrc ?? buffer.toString(),
       yrc: value.wordByWord,
       tlyric: value.translation,
+      ytlrc: value.wordTranslation,
     );
   }
 }

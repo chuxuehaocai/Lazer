@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,17 +6,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/widgets.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/ui_scaling.dart';
 
-const GatewayUserProfile _profile = GatewayUserProfile(
-  userId: 7,
-  nickname: 'tester',
-);
+const FixtureProfile _profile = FixtureProfile(userId: 7, nickname: 'tester');
 
 Playlist _playlist(String id, String name) => Playlist(
   id: id,
@@ -25,15 +22,12 @@ Playlist _playlist(String id, String name) => Playlist(
   trackCount: 2,
 );
 
-class _Gateway extends NeteaseGateway {
+class _Gateway extends TestMusicGateway {
   @override
-  Future<GatewayLoginStatus> loginWithCookie(String cookie) async {
+  Future<FixtureLoginStatus> fixtureLoginWithCookie(String cookie) async {
     sessionCookie = 'MUSIC_U=fixture';
-    return const GatewayLoginStatus(profile: _profile);
+    return const FixtureLoginStatus(profile: _profile);
   }
-
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
 }
 
 class _Catalog extends Catalog {

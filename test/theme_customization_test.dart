@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
@@ -26,10 +26,7 @@ const Track _track = Track(
   coverSeed: 2,
 );
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());

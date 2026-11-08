@@ -469,7 +469,7 @@ void main() {
   );
 
   _testPlayback(
-    'signing out ends the old session without a skip on the next selection',
+    'sign-out without a remote account preserves local listening',
     (tester) async {
       final h = _Harness();
       await h.start(tester);
@@ -480,7 +480,7 @@ void main() {
       await h.hear(tester, const Duration(seconds: 1));
       expect(h.all.totalDuration, const Duration(seconds: 2));
       expect(h.all.playCount, 2);
-      expect(h.all.skipCount, 0);
+      expect(h.all.skipCount, 1);
     },
   );
 }

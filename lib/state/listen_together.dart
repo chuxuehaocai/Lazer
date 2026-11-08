@@ -1,3 +1,4 @@
+import '../gateway/music_gateway.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -13,14 +14,14 @@ class ListenTogetherMember {
     this.avatarUrl,
   });
 
-  final int userId;
+  final String userId;
   final String name;
   final String? avatarUrl;
 }
 
 /// The account's listen-together room.
 ///
-/// NetEase models this as a server-side room with a room id and an inviter id;
+/// music provider models this as a server-side room with a room id and an inviter id;
 /// the client keeps it alive with a heartbeat that carries the current song,
 /// play status and progress. Creating a room and joining by invite are enough
 /// for the shared session; the playback itself stays on this device.
@@ -31,24 +32,41 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   }
 
   final AppState state;
+  MusicGateway? _roomOwner;
+  MusicGateway get _selectedOwner {
+    final song=MusicId.tryParse(state.current?.id ?? '');
+    if(song!=null) {try{return state.catalog.connections.resolve(song);}catch(_) {}}
+    return state.catalog.activeGateway;
+  }
+  MusicGateway get _owner => _roomOwner ?? _selectedOwner;
 
   bool loading = false;
   bool active = false;
   String? roomId;
-  int? inviterId;
+  String? inviterId;
   String? error;
   List<ListenTogetherMember> members = const <ListenTogetherMember>[];
   Timer? _heartbeat;
   bool _disposed = false;
 
-  // Play-command bookkeeping. The values mirror the APK's PlayCommand:
+  // Shared transport changes; Lua constructs any service-specific envelope.
   // commandType is PLAY / PAUSE / PROGRESS, progress is in milliseconds and
   // triggerType is MANUAL for local input or AUTO for a track hand-off.
   int _clientSeq = 0;
-  int? _lastSongId;
+  String? _lastSongId;
   bool? _lastPlaying;
   int _lastPositionMs = 0;
   DateTime _lastProgressCommand = DateTime.fromMillisecondsSinceEpoch(0);
+
+  String? get _currentSongId {
+    final id = MusicId.tryParse(state.current?.id ?? '');
+    final owner = _owner;
+    return id != null &&
+            id.provider == owner.provider.id &&
+            id.connection == owner.connectionId
+        ? id.value
+        : null;
+  }
 
   bool get ready => active && (roomId?.isNotEmpty ?? false);
 
@@ -62,12 +80,12 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<bool> create() async {
-    if (state.isNavidrome) {
+    if (!_selectedOwner.supports(MusicCapability.listenTogether)) {
       error = '当前音乐平台不支持一起听。'; // i18n:key
       _notify();
       return false;
     }
-    if (!state.signedIn) {
+    if (_selectedOwner.user==null) {
       error = '请先登录后再一起听'; // i18n:key
       _notify();
       return false;
@@ -76,18 +94,17 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     error = null;
     _notify();
     try {
-      final Map<String, dynamic> body = await state.catalog
-          .listenTogetherCreateRoom();
+      final Map<String, dynamic> body = await _selectedOwner.listenTogether('create');
       final Map<String, dynamic> data = _dataOf(body);
       final String id = '${data['roomId'] ?? data['roomid'] ?? ''}'.trim();
       if (id.isEmpty) {
         error = '创建一起听房间失败，请稍后重试。'; // i18n:key
         return false;
       }
+      _roomOwner = _selectedOwner;
       roomId = id;
       inviterId =
-          int.tryParse('${data['inviterId'] ?? data['userId'] ?? ''}') ??
-          state.user.userId;
+          '${data['inviterId'] ?? _owner.user?.id.value ?? ''}';
       active = true;
       members = _membersOf(body);
       _startHeartbeat();
@@ -104,13 +121,13 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<bool> join(String rawCode) async {
-    final (String? room, int? inviter) = parseInvite(rawCode);
-    if (room == null || inviter == null || inviter <= 0) {
+    final (String? room, String? inviter) = parseInvite(rawCode);
+    if (room == null || inviter == null || inviter.isEmpty) {
       error = '邀请码无效。'; // i18n:key
       _notify();
       return false;
     }
-    if (!state.signedIn) {
+    if (_selectedOwner.user==null) {
       error = '请先登录后再一起听'; // i18n:key
       _notify();
       return false;
@@ -119,13 +136,13 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     error = null;
     _notify();
     try {
-      final Map<String, dynamic> body = await state.catalog
-          .listenTogetherAccept(room, inviter);
+      final Map<String, dynamic> body = await _selectedOwner.listenTogether('join',{'roomId':room,'inviterId':inviter});
       final int code = (body['code'] as num?)?.toInt() ?? 200;
       if (code != 200) {
         error = '加入一起听失败，请检查邀请码。'; // i18n:key
         return false;
       }
+      _roomOwner = _selectedOwner;
       roomId = room;
       inviterId = inviter;
       active = true;
@@ -149,8 +166,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     final String? id = roomId;
     if (id == null || id.isEmpty) return;
     try {
-      final Map<String, dynamic> body = await state.catalog
-          .listenTogetherRoomCheck(id);
+      final Map<String, dynamic> body = await _owner.listenTogether('status',{'roomId':id});
       final List<ListenTogetherMember> found = _membersOf(body);
       if (found.isNotEmpty) members = found;
       _notify();
@@ -162,6 +178,8 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> leave() async {
     final String? id = roomId;
+    final owner=_owner;
+    _roomOwner=null;
     _heartbeat?.cancel();
     _heartbeat = null;
     active = false;
@@ -173,9 +191,9 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     _lastPlaying = null;
     _lastPositionMs = 0;
     _notify();
-    if (id != null && id.isNotEmpty && state.signedIn) {
+    if (id != null && id.isNotEmpty && owner.user!=null) {
       try {
-        await state.catalog.listenTogetherEnd(id);
+        await owner.listenTogether('leave',{'roomId':id});
       } catch (_) {
         // Leaving locally is what matters; the server expires an idle room.
       }
@@ -185,7 +203,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// Accepts the forms the APK's invite share produces: a link with
   /// `roomId`/`inviterId` query parameters, `roomId|inviterId`, or two
   /// whitespace-separated values.
-  static (String?, int?) parseInvite(String raw) {
+  static (String?, String?) parseInvite(String raw) {
     final String text = raw.trim();
     if (text.isEmpty) return (null, null);
     final Uri? uri = Uri.tryParse(text);
@@ -195,12 +213,12 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
       final String? inviter =
           uri.queryParameters['inviterId'] ?? uri.queryParameters['inviterid'];
       if (room != null && inviter != null) {
-        return (room, int.tryParse(inviter));
+        return (room, inviter);
       }
     }
     final List<String> parts = text.split(RegExp(r'[|,\s]+'));
     if (parts.length >= 2) {
-      return (parts.first.trim(), int.tryParse(parts[1].trim()));
+      return (parts.first.trim(), parts[1].trim());
     }
     return (null, null);
   }
@@ -212,7 +230,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _primePlayback() {
-    _lastSongId = int.tryParse(state.current?.id ?? '');
+    _lastSongId = _currentSongId;
     _lastPlaying = state.playing;
     _lastPositionMs = state.position.inMilliseconds;
   }
@@ -225,11 +243,11 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// has to guess which queue entry came next.
   void _onPlaybackState() {
     if (!ready) return;
-    final int? songId = int.tryParse(state.current?.id ?? '');
-    if (songId == null || songId <= 0) return;
+    final String? songId = _currentSongId;
+    if (songId == null || songId.isEmpty) return;
     final bool playing = state.playing;
     if (_lastSongId != songId) {
-      final int former = _lastSongId ?? songId;
+      final String former = _lastSongId ?? songId;
       _lastSongId = songId;
       _lastPlaying = playing;
       _lastPositionMs = state.position.inMilliseconds;
@@ -251,7 +269,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// Detects a seek by a jump in the 100 ms tick lane and reports PROGRESS.
   void _onPlaybackTick() {
     if (!ready) return;
-    final int? songId = int.tryParse(state.current?.id ?? '');
+    final String? songId = _currentSongId;
     if (songId == null || songId != _lastSongId) {
       _lastSongId = songId;
       _lastPositionMs = state.position.inMilliseconds;
@@ -272,33 +290,28 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
 
   void _sendPlayCommand(
     String type, {
-    int? formerSongId,
+    String? formerSongId,
     int? progressMs,
     String trigger = 'MANUAL',
   }) {
     final String? id = roomId;
-    final int songId = int.tryParse(state.current?.id ?? '') ?? 0;
-    if (!ready || id == null || songId <= 0 || !state.signedIn) return;
+    final String songId = _currentSongId ?? '';
+    if (!ready || id == null || songId.isEmpty || _owner.user==null) return;
     final int position = (progressMs ?? state.position.inMilliseconds).clamp(
       0,
       1 << 62,
     );
-    final int userId = state.user.userId;
     final Map<String, Object?> command = <String, Object?>{
       'clientSeq': ++_clientSeq,
       'commandType': type,
-      'formerSongId': '${formerSongId ?? songId}',
-      'ignoreUserId': <int>[userId],
+      'formerSongId': formerSongId ?? songId,
       'playStatus': state.playing ? 'PLAY' : 'PAUSE',
       'progress': position,
-      'serverSeq': 0,
-      'targetSongId': '$songId',
+      'targetSongId': songId,
       'triggerType': trigger,
-      'userId': userId,
     };
     unawaited(
-      state.catalog
-          .listenTogetherPlayCommand(id, command)
+      _owner.listenTogether('command',{'roomId':id,'command':command})
           .catchError((Object _) => <String, dynamic>{}),
     );
   }
@@ -306,15 +319,9 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   void _beat() {
     final String? id = roomId;
     if (!active || id == null || id.isEmpty || _disposed) return;
-    final int songId = int.tryParse(state.current?.id ?? '') ?? 0;
+    final String songId = _currentSongId ?? '';
     unawaited(
-      state.catalog
-          .listenTogetherHeartbeat(
-            id,
-            songId,
-            state.playing ? 'PLAY' : 'PAUSE',
-            state.position.inMilliseconds,
-          )
+      _owner.listenTogether('heartbeat',{'roomId':id,'songId':songId.isEmpty?'0':songId,'playStatus':state.playing?'PLAY':'PAUSE','progress':state.position.inMilliseconds})
           .catchError((_) => <String, dynamic>{}),
     );
   }
@@ -327,17 +334,17 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   static List<ListenTogetherMember> _membersOf(Map<String, dynamic> body) {
     final Map<String, dynamic> data = _dataOf(body);
     final dynamic list =
-        data['members'] ?? data['users'] ?? data['participants'];
+        data['members'];
     if (list is! List) return const <ListenTogetherMember>[];
     final List<ListenTogetherMember> members = <ListenTogetherMember>[];
     for (final item in list.whereType<Map<String, dynamic>>()) {
-      final dynamic rawId = item['userId'] ?? item['uid'];
-      if (rawId is! num) continue;
+      final dynamic rawId = item['userId'];
+      if (rawId == null) continue;
       members.add(
         ListenTogetherMember(
-          userId: rawId.toInt(),
-          name: '${item['nickname'] ?? item['name'] ?? item['userName'] ?? ''}',
-          avatarUrl: item['avatarUrl'] as String? ?? item['avatar'] as String?,
+          userId: rawId.toString(),
+          name: '${item['name'] ?? ''}',
+          avatarUrl: item['avatarUrl'] as String?,
         ),
       );
     }

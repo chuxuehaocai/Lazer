@@ -210,7 +210,7 @@ class Playlist {
 /// One published chart issue from an external editorial source.
 ///
 /// Chart entries deliberately remain independent from [Track]: an external
-/// ranking can still be presented when NetEase does not carry a safe match.
+/// ranking can still be presented when music provider does not carry a safe match.
 class MusicChart {
   const MusicChart({
     required this.id,
@@ -394,11 +394,11 @@ class Album {
   final String? coverUrl;
   final List<ArtistRef> artists;
 
-  /// NetEase exposes values such as `专辑` and `EP/Single` here.
+  /// music provider exposes values such as `专辑` and `EP/Single` here.
   final String releaseType;
   final String subType;
 
-  /// Whether the shared album detail page can open this entry: a NetEase
+  /// Whether the shared album detail page can open this entry: a music provider
   /// album id or a namespaced platform reference.
   bool get hasReference =>
       (int.tryParse(id) ?? 0) > 0 ||

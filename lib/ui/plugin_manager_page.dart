@@ -11,6 +11,9 @@ import '../theme/apple_design.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/spring_buttons.dart';
+import '../widgets/build_safe_state.dart';
+import '../plugins/plugin_package.dart';
+import 'plugin_market_page.dart';
 
 class PluginManagerPage extends StatelessWidget {
   const PluginManagerPage({super.key, required this.state});
@@ -26,7 +29,9 @@ class PluginManagerView extends StatefulWidget {
   State<PluginManagerView> createState() => _PluginManagerViewState();
 }
 
-class _PluginManagerViewState extends State<PluginManagerView> {
+class _PluginManagerViewState extends State<PluginManagerView>
+    with BuildSafeState<PluginManagerView> {
+  bool _picking = false;
   PluginManager get manager => widget.state.pluginManager;
   @override
   void initState() {
@@ -35,13 +40,23 @@ class _PluginManagerViewState extends State<PluginManagerView> {
   }
 
   Future<void> _import() async {
-    final file = await openFile(
-      acceptedTypeGroups: const [
-        XTypeGroup(label: 'Lazer 插件', extensions: ['zip']),
-      ],
-    );
-    if (file == null || !mounted) return;
+    if (_picking || manager.busy) return;
+    setState(() => _picking = true);
     try {
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'Lazer 插件',
+            extensions: ['zip'],
+            mimeTypes: ['application/zip', 'application/x-zip-compressed'],
+            uniformTypeIdentifiers: ['public.zip-archive'],
+          ),
+        ],
+      );
+      if (file == null || !mounted) return;
+      if (await file.length() > maxPluginArchiveBytes) {
+        throw const FormatException('插件包不能超过 16 MB。');
+      }
       await manager.importZip(await file.readAsBytes());
       if (mounted) {
         ScaffoldMessenger.of(
@@ -54,6 +69,8 @@ class _PluginManagerViewState extends State<PluginManagerView> {
           context,
         ).showSnackBar(SnackBar(content: Text('$error')));
       }
+    } finally {
+      if (mounted) setState(() => _picking = false);
     }
   }
 
@@ -65,9 +82,17 @@ class _PluginManagerViewState extends State<PluginManagerView> {
       builder: (context, _) => SettingsDetailScaffold(
         title: '插件管理',
         actions: [
+          SpringTextButton(
+            onPressed: () => SettingsDetailHost.open(
+              context,
+              page: (_) => PluginMarketPage(state: widget.state),
+              view: (_) => PluginMarketView(state: widget.state),
+            ),
+            child: const TrText('插件市场'),
+          ),
           SpringFilledButton(
-            onPressed: manager.busy ? null : _import,
-            child: const TrText('导入 ZIP'),
+            onPressed: manager.busy || _picking ? null : _import,
+            child: TrText(_picking || manager.busy ? '正在导入…' : '导入 ZIP'),
           ),
         ],
         child: ListView(

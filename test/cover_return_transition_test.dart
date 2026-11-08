@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -204,6 +205,7 @@ const _track = Track(
 );
 
 class _Catalog extends Catalog {
+  _Catalog():super(gateway:TestMusicGateway());
   int requests = 0;
 
   @override

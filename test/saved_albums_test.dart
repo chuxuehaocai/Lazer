@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/catalog_details.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/detail_requests.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -22,20 +22,17 @@ Album _album(String id, String title, String artist) => Album(
   note: '',
 );
 
-class _Gateway extends NeteaseGateway {
+class _Gateway extends TestMusicGateway {
   /// The account the next sign-in adopts, so a test can switch accounts.
   int uid = 7;
 
   @override
-  Future<GatewayLoginStatus> loginWithCookie(String cookie) async {
+  Future<FixtureLoginStatus> fixtureLoginWithCookie(String cookie) async {
     sessionCookie = 'MUSIC_U=test';
-    return GatewayLoginStatus(
-      profile: GatewayUserProfile(userId: uid, nickname: 'tester'),
+    return FixtureLoginStatus(
+      profile: FixtureProfile(userId: uid, nickname: 'tester'),
     );
   }
-
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
 }
 
 /// A catalogue whose 收藏的专辑 collection is a fixed list of pages.
@@ -43,7 +40,7 @@ class _Catalog extends Catalog {
   _Catalog({
     this.pages = const <List<Album>>[],
     this.pagesForUid,
-    NeteaseGateway? gateway,
+    TestMusicGateway? gateway,
   }) : super(gateway: gateway ?? _Gateway());
 
   List<List<Album>> pages;
@@ -150,9 +147,7 @@ Finder _gridText(String text) =>
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
 
-  testWidgets('收藏的专辑 lists the account albums and opens one', (
-    tester,
-  ) async {
+  testWidgets('收藏的专辑 lists the account albums and opens one', (tester) async {
     final catalog = _Catalog(
       pages: <List<Album>>[
         <Album>[_album('1', 'Night', 'Artist A'), _album('2', 'Day', 'B')],

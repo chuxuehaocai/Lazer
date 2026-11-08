@@ -86,7 +86,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
     }
   }
 
-  Future<void> _like(int id) async {
+  Future<void> _like(String id) async {
     if (!widget.state.signedIn) {
       await showAppLoginDialog(context, widget.state);
       if (!mounted || !widget.state.signedIn) return;

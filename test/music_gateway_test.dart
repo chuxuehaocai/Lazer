@@ -1,17 +1,35 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/testing.dart';
-import 'package:http/http.dart' as http;
 import 'package:lazer_nextgen/gateway/gateway.dart';
 
-NavidromeGateway _navidrome(String server, String username) => NavidromeGateway(
-  serverUrl: server,
-  username: username,
-  client: MockClient(
-    (_) async => http.Response('{"subsonic-response":{"status":"ok"}}', 200),
-  ),
-);
+class _Gateway extends MusicGateway {
+  _Gateway(String server, String username)
+    : connectionId = '${server.replaceFirst(RegExp(r"/+$"), "")}/$username';
+  @override
+  final String connectionId;
+  @override
+  MusicProvider get provider =>
+      const MusicProvider(id: 'fixture', name: 'Fixture');
+  MusicUser? _user;
+  bool closed = false;
+  @override
+  MusicUser? get user => _user;
+  @override
+  Set<MusicCapability> get capabilities => const {};
+  Future<MusicUser> login(String password) async {
+    if (closed) throw StateError('closed');
+    return _user = MusicUser(
+      id: id(MusicEntityKind.user, 'listener'),
+      name: 'Listener',
+    );
+  }
+
+  @override
+  void close() {
+    closed = true;
+  }
+}
 
 void main() {
   test('music references round-trip arbitrary opaque IDs without coercion', () {
@@ -71,14 +89,14 @@ void main() {
     () async {
       final registry = GatewayRegistry();
       addTearDown(registry.close);
-      final first = _navidrome('https://a.example', 'alice');
-      final second = _navidrome('https://b.example', 'alice');
-      final otherUser = _navidrome('https://a.example', 'bob');
-      final netease = NeteaseMusicGateway(connectionId: 'netease-main');
+      final first = _Gateway('https://a.example', 'alice');
+      final second = _Gateway('https://b.example', 'alice');
+      final otherUser = _Gateway('https://a.example', 'bob');
+      final local = LocalMusicGateway();
       registry.add(first);
       registry.add(second);
       registry.add(otherUser);
-      registry.add(netease);
+      registry.add(local);
       expect(registry.connections, hasLength(4));
       expect(registry.active, same(first));
       final song = first.id(MusicEntityKind.song, 'same');
@@ -103,9 +121,9 @@ void main() {
     'registry handles duplicates, detachment, missing IDs and disposal',
     () async {
       final registry = GatewayRegistry();
-      final first = _navidrome('https://a.example', 'alice');
-      final duplicate = _navidrome('https://a.example/', 'alice');
-      final second = _navidrome('https://b.example', 'alice');
+      final first = _Gateway('https://a.example', 'alice');
+      final duplicate = _Gateway('https://a.example/', 'alice');
+      final second = _Gateway('https://b.example', 'alice');
       addTearDown(duplicate.close);
       registry.add(first);
       registry.add(first);
@@ -128,15 +146,6 @@ void main() {
       registry.close();
     },
   );
-
-  test('Navidrome is explicitly experimental in the provider catalogue', () {
-    expect(GatewayRegistry.providers.map((provider) => provider.id), [
-      'netease',
-      'navidrome',
-    ]);
-    expect(MusicProvider.netease.experimental, isFalse);
-    expect(MusicProvider.navidrome.experimental, isTrue);
-  });
 
   test('song, album, lyric and page collections are immutable snapshots', () {
     const id = MusicId(

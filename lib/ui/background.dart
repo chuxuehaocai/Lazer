@@ -1318,7 +1318,7 @@ Future<AlbumCoverPalette?> _readOneCoverPalette(String url) async {
   }
 }
 
-/// Resize only providers that support NetEase's rendition parameter. Local
+/// Resize only providers that support music provider's rendition parameter. Local
 /// covers and authenticated third-party artwork URLs retain their exact URI.
 String? albumPaletteArtworkUrl(String? raw) =>
     enlargedArtworkUrl(raw, sizePx: albumFlowConfiguration.paletteImageEdge);

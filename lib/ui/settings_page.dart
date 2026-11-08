@@ -831,12 +831,12 @@ class _SettingsOverview extends StatelessWidget {
                             child: const TrText('退出登录'),
                           ),
                   ),
-                  if (!state.isNavidrome && (state.isGuest || state.isLegacyProvider))
+                  if (state.musicAuthenticationMethods.contains('exportCookie'))
                     _AppSettingRow(
                       label: '导出 Cookie',
                       subtitle: state.isGuest
-                          ? '登录后可导出网易云音乐登录 Cookie'
-                          : '复制当前网易云音乐登录 Cookie 到剪贴板',
+                          ? '登录后可导出当前平台登录 Cookie'
+                          : '复制当前平台登录 Cookie 到剪贴板',
                       trailing: SpringOutlinedButton(
                         key: const ValueKey('export-session-cookie'),
                         onPressed: state.isGuest
@@ -942,7 +942,7 @@ Future<void> _openProjectRepository(BuildContext context) async {
 }
 
 Future<void> _copySessionCookie(BuildContext context, AppState state) async {
-  final String cookie = state.gateway.sessionCookie?.trim() ?? '';
+  final String cookie = (await state.exportSessionCookie())?.trim() ?? '';
   if (cookie.isNotEmpty) {
     await Clipboard.setData(ClipboardData(text: cookie));
   }

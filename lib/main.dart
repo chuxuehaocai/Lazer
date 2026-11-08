@@ -178,7 +178,7 @@ Future<void> main() async {
   );
 }
 
-/// Music player backed by the ported NetEase gateway.
+/// Music player backed by the ported music provider gateway.
 class LazerApp extends StatefulWidget {
   const LazerApp({
     super.key,

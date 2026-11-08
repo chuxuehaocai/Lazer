@@ -1,31 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/data/lyrics.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/gateway/transport.dart';
-
-class _FailedLyricsTransport extends NeteaseTransport {
-  @override
-  Future<Map<String, dynamic>> request(
-    String alias,
-    Map<String, String> parameters,
-  ) async {
-    if (alias == '/lyric/new') return <String, dynamic>{'code': 200};
-    throw GatewayHttpException(503, alias);
-  }
-}
 
 void main() {
-  test(
-    'failed lyric fallback is reported instead of synthesized empty lyrics',
-    () async {
-      await expectLater(
-        NeteaseGateway(
-          transport: _FailedLyricsTransport(),
-        ).preferredLyrics(2055244250),
-        throwsA(isA<GatewayHttpException>()),
-      );
-    },
-  );
   test('parses LRC timestamps', () {
     final lines = parseLyrics(
       const GatewayLyrics(lrc: '[00:01.25]第一句\n[00:03.000]第二句'),
@@ -128,5 +105,34 @@ void main() {
       ),
     );
     expect(lines.map((line) => line.translation), ['第一句', '第二句']);
+  });
+
+  test('merges partial tlyric with ytlrc rows from the same song', () {
+    final lines = parseLyrics(
+      const GatewayLyrics(
+        lrc: '[00:01.00]Still one\n[00:02.00]Still two\n[00:03.00]Still three',
+        tlyric: '[00:01.00]第一句',
+        ytlrc: '[2000,700](2000,700,0)第二句\n[00:03.00]第三句',
+      ),
+    );
+    expect(lines.map((line) => line.translation), <String?>[
+      '第一句',
+      '第二句',
+      '第三句',
+    ]);
+  });
+
+  test('does not let a partial translation track shift later lines', () {
+    final lines = parseLyrics(
+      const GatewayLyrics(
+        lrc: '[00:01.00]one\n[00:02.00]two\n[00:03.00]three\n[00:04.00]four',
+        tlyric: '[00:01.00]一\n[00:03.00]三',
+        ytlrc: '[4000,500](4000,500,0)四',
+      ),
+    );
+    expect(lines[0].translation, '一');
+    expect(lines[1].translation, isNull);
+    expect(lines[2].translation, '三');
+    expect(lines[3].translation, '四');
   });
 }

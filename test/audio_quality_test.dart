@@ -7,98 +7,53 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/gateway/transport.dart'
-    show GatewayServiceException;
 
-const Track _track = Track(
-  id: '42',
-  title: '曲目',
-  artist: '音乐人',
-  album: '专辑',
-  duration: Duration(minutes: 3),
+class _QualityGateway extends MusicGateway {
+  @override
+  MusicProvider get provider =>
+      const MusicProvider(id: 'fixture', name: 'Fixture');
+  @override
+  String get connectionId => 'quality';
+  @override
+  MusicUser? get user => null;
+  @override
+  Set<MusicCapability> get capabilities => const {};
+  final levels = <MusicStreamQuality>[];
+  final available = <MusicStreamQuality>{};
+  bool offline = false, rateLimited = false;
+  int? granted;
+  @override
+  Future<MusicStream> stream(
+    MusicId song, {
+    MusicStreamQuality quality = MusicStreamQuality.original,
+  }) async {
+    levels.add(quality);
+    if (offline) {
+      throw const SocketException('offline');
+    }
+    if (rateLimited) {
+      throw const MusicGatewayException('fixture', 'stream', httpStatus: 429);
+    }
+    if (!available.contains(quality)) {
+      throw const MusicGatewayException('fixture', 'stream', code: 70);
+    }
+    return MusicStream(
+      uri: Uri.parse('https://audio.test/song.mp3'),
+      suffix: 'mp3',
+      bitRate: granted,
+      headers: const {'X-Audio': 'fixture'},
+    );
+  }
+}
+
+Track _track(_QualityGateway gateway) => Track(
+  id: gateway.id(MusicEntityKind.song, '42').cacheKey,
+  title: 'Song',
+  artist: 'Artist',
+  album: 'Album',
+  duration: Duration.zero,
   coverSeed: 0,
 );
-
-class _QualityGateway extends NeteaseGateway {
-  _QualityGateway({
-    this.available = const <AudioQuality>{},
-    this.failAll = false,
-  });
-
-  /// Tiers the fake account may receive. A request outside the set returns no
-  /// URL, which is how the service answers a missing rendition.
-  final Set<AudioQuality> available;
-  final bool failAll;
-  final List<String> levels = <String>[];
-
-  @override
-  Future<GatewaySongUrl?> songUrl(int id, {String level = 'exhigh'}) async {
-    levels.add(level);
-    if (failAll) throw const SocketException('offline');
-    final AudioQuality? requested = AudioQualityInfo.fromLevel(level);
-    if (requested == null || !available.contains(requested)) {
-      return GatewaySongUrl(id: id, code: 404);
-    }
-    return GatewaySongUrl(
-      id: id,
-      url: 'https://audio.test/$id-${requested.name}.mp3',
-      br: requested.bitrate,
-      type: 'mp3',
-      code: 200,
-      level: requested.level,
-      size: 4096,
-    );
-  }
-}
-
-class _BitrateGateway extends NeteaseGateway {
-  @override
-  Future<GatewaySongUrl?> songUrl(int id, {String level = 'exhigh'}) async =>
-      GatewaySongUrl(
-        id: id,
-        url: 'https://audio.test/$id-low.mp3',
-        br: 128000,
-        type: 'mp3',
-        code: 200,
-      );
-}
-
-/// Answers the first [refusalsBeforeSuccess] requests per tier with the
-/// service's "too frequent" refusal: HTTP 200, an empty entry, and code 406.
-class _RateLimitedGateway extends NeteaseGateway {
-  _RateLimitedGateway({
-    required this.refusalsBeforeSuccess,
-    this.available = const <AudioQuality>{},
-  });
-
-  final int refusalsBeforeSuccess;
-  final Set<AudioQuality> available;
-  final List<String> levels = <String>[];
-  final Map<String, int> _refused = <String, int>{};
-
-  @override
-  Future<GatewaySongUrl?> songUrl(int id, {String level = 'exhigh'}) async {
-    levels.add(level);
-    final int refused = _refused[level] ?? 0;
-    final AudioQuality? requested = AudioQualityInfo.fromLevel(level);
-    if (refused < refusalsBeforeSuccess) {
-      _refused[level] = refused + 1;
-      return GatewaySongUrl(id: id, code: 406);
-    }
-    if (requested == null || !available.contains(requested)) {
-      return GatewaySongUrl(id: id, code: 404);
-    }
-    return GatewaySongUrl(
-      id: id,
-      url: 'https://audio.test/$id-${requested.name}.mp3',
-      br: requested.bitrate,
-      type: 'mp3',
-      code: 200,
-      level: requested.level,
-      size: 4096,
-    );
-  }
-}
 
 void main() {
   group('AudioQuality', () {
@@ -136,7 +91,7 @@ void main() {
       expect(AudioQualityInfo.parse('unknown'), AudioQuality.exhigh);
       expect(AudioQualityInfo.parse(null), AudioQuality.exhigh);
       expect(AudioQualityInfo.fromLevel('exhigh'), AudioQuality.exhigh);
-      expect(AudioQualityInfo.fromLevel('jymaster'), AudioQuality.lossless);
+      expect(AudioQualityInfo.fromLevel('lossless'), AudioQuality.lossless);
       expect(AudioQualityInfo.fromLevel('dolby'), isNull);
     });
 
@@ -204,144 +159,95 @@ void main() {
   });
 
   group('catalogue degradation', () {
-    test('serves the requested tier when the account has it', () async {
-      final _QualityGateway gateway = _QualityGateway(
-        available: <AudioQuality>{AudioQuality.lossless},
-      );
-      final Catalog catalog = Catalog(gateway: gateway);
-      final AudioSource? source = await catalog.audioSourceFor(
-        _track,
+    test(
+      'a granted rendition preserves the requested tier and request headers',
+      () async {
+        final gateway = _QualityGateway()
+          ..available.add(MusicStreamQuality.original);
+        final source = await Catalog(gateway: gateway).audioSourceFor(
+          _track(gateway),
+          quality: AudioQuality.lossless,
+          useCache: false,
+        );
+        expect(source!.quality, AudioQuality.lossless);
+        expect(source.headers['X-Audio'], 'fixture');
+        expect(gateway.levels, [MusicStreamQuality.original]);
+      },
+    );
+    test('missing renditions fall through the lower tiers', () async {
+      final gateway = _QualityGateway()..available.add(MusicStreamQuality.low);
+      final source = await Catalog(gateway: gateway).audioSourceFor(
+        _track(gateway),
         quality: AudioQuality.lossless,
         useCache: false,
       );
-      expect(source?.quality, AudioQuality.lossless);
-      expect(source?.url, 'https://audio.test/42-lossless.mp3');
-      expect(source?.format, 'mp3');
-      expect(gateway.levels, <String>['lossless']);
+      expect(source!.quality, AudioQuality.standard);
+      expect(gateway.levels, [
+        MusicStreamQuality.original,
+        MusicStreamQuality.high,
+        MusicStreamQuality.medium,
+        MusicStreamQuality.low,
+      ]);
     });
-
-    test(
-      'falls through every lower tier when a rendition is refused',
-      () async {
-        final _QualityGateway gateway = _QualityGateway(
-          available: <AudioQuality>{AudioQuality.higher},
-        );
-        final Catalog catalog = Catalog(gateway: gateway);
-        final AudioSource? source = await catalog.audioSourceFor(
-          _track,
+    test('returned bitrate identifies a downgraded rendition', () async {
+      final gateway = _QualityGateway()
+        ..available.add(MusicStreamQuality.original)
+        ..granted = 128000;
+      final source = await Catalog(gateway: gateway).audioSourceFor(
+        _track(gateway),
+        quality: AudioQuality.lossless,
+        useCache: false,
+      );
+      expect(source!.quality, AudioQuality.standard);
+    });
+    test('transport failures stop repeated remote requests', () async {
+      final gateway = _QualityGateway()..offline = true;
+      await expectLater(
+        Catalog(gateway: gateway).audioSourceFor(
+          _track(gateway),
           quality: AudioQuality.lossless,
           useCache: false,
-        );
-        expect(source?.quality, AudioQuality.higher);
-        expect(source?.url, 'https://audio.test/42-higher.mp3');
-        expect(gateway.levels, <String>['lossless', 'exhigh', 'higher']);
-      },
-    );
-
-    test(
-      'reports the granted tier when the service returns a lower one',
-      () async {
-        final Catalog catalog = Catalog(gateway: _BitrateGateway());
-        final AudioSource? source = await catalog.audioSourceFor(
-          _track,
-          quality: AudioQuality.exhigh,
-          useCache: false,
-        );
-        expect(source?.quality, AudioQuality.standard);
-      },
-    );
-
-    test('a transport failure stops the upstream fallback retries', () async {
-      final _QualityGateway gateway = _QualityGateway(failAll: true);
-      final Catalog catalog = Catalog(gateway: gateway);
-      await expectLater(
-        catalog.audioUrlFor(_track, quality: AudioQuality.lossless),
+        ),
         throwsA(isA<SocketException>()),
       );
-      expect(gateway.levels, <String>['lossless']);
-      expect(catalog.online, isFalse);
+      expect(gateway.levels, hasLength(1));
     });
-
     test(
-      'a rate refusal with an empty URL retries its tier, not the song',
+      'rate limits remain retryable and never become unavailable-song errors',
       () async {
-        // Holding "next" makes the service answer HTTP 200 with an empty entry
-        // carrying the refusal code. That must not be reported as an
-        // unavailable song: each tier is asked again after a pause, and the
-        // answer that finally succeeds is the one that plays.
-        final _RateLimitedGateway gateway = _RateLimitedGateway(
-          refusalsBeforeSuccess: 1,
-          available: <AudioQuality>{AudioQuality.higher},
-        );
-        final Catalog catalog = Catalog(gateway: gateway);
-        final AudioSource? source = await catalog.audioSourceFor(
-          _track,
-          quality: AudioQuality.lossless,
-          useCache: false,
-        );
-        expect(source?.quality, AudioQuality.higher);
-        expect(
-          gateway.levels,
-          <String>[
-            'lossless',
-            'lossless',
-            'exhigh',
-            'exhigh',
-            'higher',
-            'higher',
-          ],
-          reason: 'every tier is asked exactly twice: refused, then granted',
-        );
-      },
-    );
-
-    test(
-      'a rate refusal that persists is reported as a service refusal',
-      () async {
-        final Catalog catalog = Catalog(
-          gateway: _RateLimitedGateway(
-            refusalsBeforeSuccess: 100,
-            available: <AudioQuality>{},
-          ),
-        );
+        final gateway = _QualityGateway()..rateLimited = true;
         await expectLater(
-          catalog.audioUrlFor(_track, quality: AudioQuality.lossless),
-          throwsA(
-            isA<GatewayServiceException>().having(
-              (GatewayServiceException e) => e.code,
-              'code',
-              406,
-            ),
+          Catalog(gateway: gateway).audioSourceFor(
+            _track(gateway),
+            quality: AudioQuality.lossless,
+            useCache: false,
           ),
+          throwsA(predicate(Catalog.isRateLimited)),
         );
+        expect(gateway.levels, hasLength(4));
       },
     );
-
-    test(
-      'a lower-tier cache entry still plays after a transport failure',
-      () async {
-        final Directory directory = await Directory.systemTemp.createTemp(
-          'lazer-quality-fallback-test-',
-        );
-        addTearDown(() => directory.delete(recursive: true));
-        final DiskCache disk = DiskCache(directory: () async => directory);
-        final File? cached = await disk.put(
-          CacheBucket.audio,
-          AudioCache.cacheKey(_track.id, AudioQuality.standard),
-          () => Stream<List<int>>.value(<int>[1, 2, 3]),
-          extension: 'mp3',
-        );
-        final Catalog catalog = Catalog(
-          gateway: _QualityGateway(failAll: true),
-          cache: disk,
-        );
-        final AudioSource? source = await catalog.audioSourceFor(
-          _track,
-          quality: AudioQuality.lossless,
-        );
-        expect(source?.url, cached!.uri.toString());
-        expect(source?.quality, AudioQuality.standard);
-      },
-    );
+    test('lower-tier disk audio plays after a transport failure', () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'audio-fallback-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final disk = DiskCache(directory: () async => directory);
+      final gateway = _QualityGateway()..offline = true;
+      final track = _track(gateway);
+      await disk.put(
+        CacheBucket.audio,
+        AudioCache.cacheKey(track.id, AudioQuality.standard),
+        () => Stream.value([1, 2, 3]),
+        extension: 'mp3',
+      );
+      final source = await Catalog(
+        gateway: gateway,
+        cache: disk,
+      ).audioSourceFor(track, quality: AudioQuality.lossless);
+      expect(source!.quality, AudioQuality.standard);
+      expect(source.url, startsWith('file:'));
+      expect(gateway.levels, hasLength(1));
+    });
   });
 }

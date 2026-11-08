@@ -1,3 +1,4 @@
+import '../utils/media_requests.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -74,7 +75,7 @@ class ArtworkCache {
           final request = await client
               .getUrl(uri)
               .timeout(const Duration(seconds: 15));
-          artworkHeaders.forEach(request.headers.set);
+          MediaRequestRules.headers(candidate).forEach(request.headers.set);
           final response = await request.close().timeout(
             const Duration(seconds: 15),
           );
@@ -219,18 +220,24 @@ class AudioCache {
     String url, {
     AudioQuality quality = AudioQuality.exhigh,
     String? format,
+    Map<String, String> headers = const {},
   }) {
     final key = cacheKey(trackId, quality);
     return _pending.putIfAbsent(key, () async {
       try {
-        return await _download(key, url, format);
+        return await _download(key, url, format, headers);
       } finally {
         _pending.remove(key);
       }
     });
   }
 
-  Future<File?> _download(String key, String url, String? format) async {
+  Future<File?> _download(
+    String key,
+    String url,
+    String? format,
+    Map<String, String> headers,
+  ) async {
     final cached = await _findKey(key);
     if (cached != null) return cached;
     final client = HttpClient()..autoUncompress = false;
@@ -239,7 +246,10 @@ class AudioCache {
       final request = await client
           .getUrl(uri)
           .timeout(const Duration(seconds: 20));
-      request.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
+      ({
+        ...MediaRequestRules.headers(url),
+        ...headers,
+      }).forEach(request.headers.set);
       final response = await request.close().timeout(
         const Duration(seconds: 20),
       );

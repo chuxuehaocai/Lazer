@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
@@ -16,7 +16,7 @@ import 'package:lazer_nextgen/widgets/playback_queue_view.dart';
 import 'package:lazer_nextgen/widgets/song_comments_view.dart';
 
 const Track _track = Track(
-  id: '1939575649',
+  id: 'fixture:test:song:1939575649',
   title: 'パベル',
   artist: 'いよわ / 重音テト',
   album: 'パベル',
@@ -37,10 +37,7 @@ const String _tlyric =
     '[00:12.00]在未开拓的高塔上思考着答案\n'
     '[00:18.00]用文字讲述文化';
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());

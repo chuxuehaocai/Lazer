@@ -20,9 +20,10 @@ not use a fixed NetEase/Navidrome list for platform selection.
 
 `MusicGateway` and `MusicId` are the shared model boundary. `platform_catalog.dart`
 maps those values into the existing home, search, library, album, artist, lyrics
-and player views. Old Dart adapter classes are retained for the legacy test
-harness; normal application startup selects `LocalMusicGateway` and only
-registers streaming providers from installed Lua plugins.
+and player views. No Dart service adapters, endpoint tables or platform lists are bundled.
+Application startup selects `LocalMusicGateway` and registers streaming
+providers only from installed Lua plugins. Tests use in-memory neutral
+gateways and real Lua sandboxes.
 
 ## Authentication
 
@@ -70,7 +71,8 @@ responses. Creating a QR session preserves any existing authenticated account.
 ## NetEase plugin and verification
 
 Source: `E:/projects/lazer_ncm/netease-cloud`.
-Importable package: `E:/projects/lazer_ncm/dist/lazer.netease-1.0.1.zip`.
+The ZIP is built and used only for local verification; it is intentionally not
+checked into this repository or uploaded to the plugin market.
 Navidrome has no Lua package yet and is not advertised by this plugin.
 
 The NetEase service protocol, request paths, cookies, AES/RSA envelopes and
@@ -92,3 +94,32 @@ Both use a temporary data directory and delete it when finished. They do not
 bundle credentials or copy the Cookie file into source or the ZIP.
 
 References retain provider, connection and entity type. Route playback, downloads, metadata and favorites through `connections.resolve(id)`. Never coerce opaque IDs to integers or persist signed media URLs.
+
+## Local mode and offline lyrics
+
+The local Home retains Recent, filtered against available imported, downloaded
+and cached files. Search matches the local library by title, translation,
+artist and album. Likes is omitted from mobile, desktop and television
+navigation; Home comes first on desktop.
+
+Audio caching and explicit downloads also save timed lyrics and translations
+under application support storage (`cached_lyrics`). A file-path alias recovers
+lyrics if cached audio is re-scanned with a new local ID. Imported LRC files are
+copied to `imported_lyrics`, so removing the original does not break playback.
+Imports take precedence over automatic caches.
+
+## Plugin market and installation
+
+The market defaults to `https://lazer.naominet.dev/plugin` and reads
+`plugins.json`, following the website's schema version 1. Sources can be changed
+and are persisted. Listings support localized metadata, search, refresh,
+platform/minimum-version checks, installation and updates. Downloads show
+progress, can be cancelled, and are bounded to 16 MB. Optional SHA-256 checks
+and required manifest ID/version checks run before replacing an installation.
+
+ZIP decoding and validation run in a worker isolate. File selection uses the
+registered Windows/Linux/macOS/Android/iOS implementations, with ZIP extensions,
+MIME types and the `public.zip-archive` UTI. Cancellation and picker errors leave
+the install button usable. Plugin manager and market use the same fade-through
+contract on incoming and outgoing mobile routes, so transparent pages never
+blend their controls during either direction of the transition.

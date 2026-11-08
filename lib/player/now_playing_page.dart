@@ -1,3 +1,4 @@
+import '../gateway/music_models.dart';
 import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
@@ -244,7 +245,9 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   void initState() {
     super.initState();
     widget.state.playerPresentationChanged(true);
-    _commentsController = SongCommentsController(widget.state.gateway);
+    _commentsController = SongCommentsController(
+      widget.state.catalog.connections,
+    );
     widget.state.addListener(_preferencesChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(widget.state.ensureCurrentLyrics());
@@ -390,7 +393,11 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   Future<void> _openComments() async {
     final track = widget.state.current;
-    if (track == null || _commentsOpen) return;
+    if (track == null ||
+        !widget.state.supportsCurrentMusic(MusicCapability.comments) ||
+        _commentsOpen) {
+      return;
+    }
     _commentsOpen = true;
     _hideTimer?.cancel();
     await showSongComments(
@@ -406,6 +413,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   void _selectDesktopPane(DesktopNowPlayingPane pane) {
+    if (pane == DesktopNowPlayingPane.comments &&
+        !widget.state.supportsCurrentMusic(MusicCapability.comments)) {
+      pane = DesktopNowPlayingPane.lyrics;
+    }
     if (_desktopPane == pane) {
       _controlsActivity();
       return;
@@ -426,7 +437,9 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       oldWidget.state.removeListener(_preferencesChanged);
       widget.state.addListener(_preferencesChanged);
       _commentsController.dispose();
-      _commentsController = SongCommentsController(widget.state.gateway);
+      _commentsController = SongCommentsController(
+        widget.state.catalog.connections,
+      );
     }
   }
 
@@ -1281,7 +1294,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 selected: lyricsOpen,
                 onTap: onLyrics,
               ),
-              if (!state.isNavidrome)
+              if (state.supportsCurrentMusic(MusicCapability.listenTogether))
                 _MoreAction(
                   icon: Icons.group_rounded,
                   label: context.tr(
@@ -1309,7 +1322,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 label: context.tr('下载歌曲'),
                 onTap: onDownload,
               ),
-              if (!state.isNavidrome)
+              if (state.supportsCurrentMusic(MusicCapability.comments))
                 _MoreAction(
                   icon: Icons.chat_bubble_outline_rounded,
                   label: context.tr('查看评论'),

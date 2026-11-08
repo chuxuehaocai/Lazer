@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -5,16 +6,12 @@ import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
-const GatewayUserProfile _profile = GatewayUserProfile(
-  userId: 7,
-  nickname: '测试账户',
-);
+const FixtureProfile _profile = FixtureProfile(userId: 7, nickname: '测试账户');
 
 const Track _track = Track(
-  id: '42',
+  id: 'fixture:test:song:42',
   title: 'Short song',
   artist: 'Artist',
   album: 'Album',
@@ -22,41 +19,33 @@ const Track _track = Track(
   coverSeed: 1,
 );
 
-class _Gateway extends NeteaseGateway {
+class _Gateway extends TestMusicGateway {
   final List<(int, int, int)> uploads = <(int, int, int)>[];
   final List<(int, int)> starts = <(int, int)>[];
   bool failUploads = false;
 
   @override
-  Future<GatewayLoginStatus> loginWithCookie(String cookie) async {
+  Future<FixtureLoginStatus> fixtureLoginWithCookie(String cookie) async {
     sessionCookie = 'MUSIC_U=fixture';
-    return const GatewayLoginStatus(profile: _profile);
+    return const FixtureLoginStatus(profile: _profile);
   }
 
   @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-
+  Set<MusicCapability> get capabilities => const {MusicCapability.scrobble};
   @override
-  Future<List<GatewayPlayRecord>> playRecord(int uid) async =>
-      const <GatewayPlayRecord>[];
-
-  @override
-  Future<void> reportPlayStart({
-    required int songId,
-    required int sourceId,
+  Future<void> scrobble(
+    MusicId song, {
+    required Duration played,
+    bool submission = true,
+    DateTime? time,
   }) async {
     if (failUploads) throw StateError('offline');
-    starts.add((songId, sourceId));
-  }
-
-  @override
-  Future<void> reportPlayback({
-    required int songId,
-    required int playedSeconds,
-    int sourceId = 0,
-  }) async {
-    if (failUploads) throw StateError('offline');
-    uploads.add((songId, playedSeconds, sourceId));
+    final number = int.parse(song.value);
+    if (submission) {
+      uploads.add((number, played.inSeconds, number));
+    } else {
+      starts.add((number, number));
+    }
   }
 }
 
@@ -82,7 +71,11 @@ class _Catalog extends Catalog {
   Future<List<TrackPlayStat>> playStats(int uid, {bool force = false}) async {
     playStatsCalls++;
     return const <TrackPlayStat>[
-      TrackPlayStat(songId: '42', playCount: 1, duration: Duration(seconds: 8)),
+      TrackPlayStat(
+        songId: 'fixture:test:song:42',
+        playCount: 1,
+        duration: Duration(seconds: 8),
+      ),
     ];
   }
 
@@ -207,8 +200,8 @@ void main() {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     expect(
       prefs.getString('lazer_play_uploads'),
-      '[{"songId":42,"kind":"start","seconds":0,"sourceId":42},'
-      '{"songId":42,"kind":"play","seconds":4,"sourceId":42}]',
+      '[{"songId":"fixture:test:song:42","account":"fixture:test:7","kind":"start","seconds":0},'
+      '{"songId":"fixture:test:song:42","account":"fixture:test:7","kind":"play","seconds":4}]',
     );
 
     // The next library visit pushes the backlog before reading the record.

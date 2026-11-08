@@ -1,11 +1,11 @@
-﻿import 'package:flutter/material.dart';
+import 'support/music_gateway.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
@@ -16,7 +16,7 @@ import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'support/player_transition.dart';
 
 const Track _track = Track(
-  id: 'route-fixture',
+  id: 'fixture:test:song:route-fixture',
   title: 'Route fixture',
   artist: 'Test artist',
   album: 'Test album',
@@ -25,6 +25,7 @@ const Track _track = Track(
 );
 
 class _Catalog extends Catalog {
+  _Catalog() : super(gateway: TestMusicGateway());
   @override
   Future<String?> audioUrlFor(
     Track track, {
@@ -83,10 +84,7 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await pumpPlayerTransition(tester, playerSlide, AnimationStatus.completed);
-    expect(
-      playerSlide.value.dy,
-      closeTo(0, .001),
-    );
+    expect(playerSlide.value.dy, closeTo(0, .001));
     expect(tester.getSemantics(rootFinder).id, rootBefore.id);
     await tester.tap(find.byKey(const ValueKey<String>('desktop-close')));
     await tester.pump();

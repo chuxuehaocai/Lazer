@@ -15,7 +15,7 @@ import 'coalescing_writer.dart';
 enum LocalTrackSource { download, scan, cache }
 
 /// Stable identifier for a file the service does not know about. Keeping local
-/// ids away from numeric NetEase ids stops artwork and lyric lookups from
+/// ids away from remote ids stops artwork and lyric lookups from
 /// treating them as catalogue songs.
 String localTrackIdForPath(String path) =>
     'local:${sha1.convert(utf8.encode(path))}';
@@ -153,6 +153,26 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
   }
 
   List<LocalTrack> get tracks => List<LocalTrack>.unmodifiable(_tracks);
+  int _playableRevision = -1;
+  List<Track> _playable = const [];
+
+  /// One available rendition per song, with an explicit path for offline play.
+  List<Track> get playableTracks {
+    if (_playableRevision == _tracksRevision) return _playable;
+    final chosen = <String, LocalTrack>{};
+    for (final entry in _tracks) {
+      if (entry.missing) continue;
+      final previous = chosen[entry.id];
+      if (previous == null || _prefer(entry, previous, null)) {
+        chosen[entry.id] = entry;
+      }
+    }
+    _playable = List.unmodifiable(
+      chosen.values.map((entry) => entry.track.copyWith(localPath: entry.path)),
+    );
+    _playableRevision = _tracksRevision;
+    return _playable;
+  }
 
   /// Changes whenever the track list or its missing-file status changes.
   int get tracksRevision => _tracksRevision;

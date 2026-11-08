@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -8,15 +9,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/cache/disk_cache.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
-const GatewayUserProfile _profile = GatewayUserProfile(
-  userId: 7,
-  nickname: '测试账户',
-);
+const FixtureProfile _profile = FixtureProfile(userId: 7, nickname: '测试账户');
 
 Playlist _playlist(String id, String name) => Playlist(
   id: id,
@@ -35,15 +32,12 @@ Track _track(String id, String title) => Track(
   coverSeed: 1,
 );
 
-class _Gateway extends NeteaseGateway {
+class _Gateway extends TestMusicGateway {
   @override
-  Future<GatewayLoginStatus> loginWithCookie(String cookie) async {
+  Future<FixtureLoginStatus> fixtureLoginWithCookie(String cookie) async {
     sessionCookie = 'MUSIC_U=fixture';
-    return const GatewayLoginStatus(profile: _profile);
+    return const FixtureLoginStatus(profile: _profile);
   }
-
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
 }
 
 class _CachedCatalog extends Catalog {
@@ -107,20 +101,33 @@ class _SwitchingCatalog extends Catalog {
   }
 }
 
-class _RetryAlbumGateway extends NeteaseGateway {
+class _RetryAlbumGateway extends TestMusicGateway {
   bool offline = true;
   int calls = 0;
   @override
-  Future<Map<String, dynamic>> albumDetailRaw(int id) async {
+  Future<MusicAlbum> album(MusicId albumId) async {
     calls++;
     if (offline) throw const SocketException('offline');
-    return {
-      'album': {'id': id, 'name': 'Album'},
-      'songs': [
-        {'id': 1, 'name': 'Recovered album song', 'dt': 180000},
-      ],
-    };
+    return MusicAlbum(id: albumId, title: 'Album', artists: []);
   }
+
+  @override
+  Future<MusicPage<MusicSong>> albumSongs(
+    MusicId albumId, {
+    int limit = 100,
+    int offset = 0,
+  }) async => MusicPage(
+    [
+      MusicSong(
+        id: id(MusicEntityKind.song, '1'),
+        title: 'Recovered album song',
+        artists: [],
+        duration: const Duration(minutes: 3),
+      ),
+    ],
+    offset: offset,
+    hasMore: false,
+  );
 }
 
 void main() {
@@ -139,7 +146,7 @@ void main() {
     final state = AppState(catalog: catalog);
     addTearDown(state.dispose);
     const album = Album(
-      id: '77',
+      id: 'fixture:test:album:77',
       title: 'Album',
       artist: 'Artist',
       year: '',

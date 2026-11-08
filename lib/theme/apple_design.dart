@@ -1,8 +1,5 @@
 import 'package:flutter/cupertino.dart'
-    show
-        CupertinoPageTransitionsBuilder,
-        CupertinoTextThemeData,
-        CupertinoThemeData;
+    show CupertinoTextThemeData, CupertinoThemeData;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'font_preferences.dart';
@@ -384,10 +381,11 @@ ThemeData buildAppleTheme({
     extensions: <ThemeExtension<dynamic>>[apple, fonts],
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: <TargetPlatform, PageTransitionsBuilder>{
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        // Both sides must use the same fade-through contract. Platform-default
+        // outgoing pages otherwise remain visible under transparent settings.
+        TargetPlatform.iOS: LazerPageTransitionsBuilder(),
         TargetPlatform.macOS: LazerPageTransitionsBuilder(),
-        TargetPlatform.android:
-            PredictiveBackFullscreenPageTransitionsBuilder(),
+        TargetPlatform.android: LazerPageTransitionsBuilder(),
         TargetPlatform.fuchsia: LazerPageTransitionsBuilder(),
         TargetPlatform.windows: LazerPageTransitionsBuilder(),
         TargetPlatform.linux: LazerPageTransitionsBuilder(),

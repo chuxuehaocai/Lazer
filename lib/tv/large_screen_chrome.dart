@@ -59,6 +59,7 @@ class LargeScreenNavBar extends StatelessWidget {
     required this.onNowPlaying,
     required this.account,
     this.playing = false,
+    this.showLikes = true,
   });
 
   final LargeScreenTab selected;
@@ -70,6 +71,7 @@ class LargeScreenNavBar extends StatelessWidget {
   final VoidCallback onNowPlaying;
   final Widget account;
   final bool playing;
+  final bool showLikes;
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +111,10 @@ class LargeScreenNavBar extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        for (final LargeScreenTab tab in LargeScreenTab.values)
+                        for (final LargeScreenTab tab
+                            in LargeScreenTab.values.where(
+                              (tab) => showLikes || tab != LargeScreenTab.likes,
+                            ))
                           _NavChip(
                             key: ValueKey<String>(
                               'large-screen-tab-${tab.name}',

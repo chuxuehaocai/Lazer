@@ -1,3 +1,4 @@
+import '../utils/media_requests.dart';
 // i18n:data — these strings are keys; the download sheet renders task.error
 // through context.tr.
 import 'dart:async';
@@ -283,7 +284,10 @@ class DownloadManager extends ChangeNotifier with BuildSafeNotifier {
       final HttpClientRequest request = await client
           .getUrl(Uri.parse(source.url))
           .timeout(const Duration(seconds: 20));
-      request.headers.set(HttpHeaders.refererHeader, 'https://music.163.com/');
+      ({
+        ...MediaRequestRules.headers(source.url),
+        ...source.headers,
+      }).forEach(request.headers.set);
       final HttpClientResponse response = await request.close().timeout(
         const Duration(seconds: 20),
       );
@@ -353,6 +357,7 @@ class DownloadManager extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> _record(DownloadTask task, File file) async {
+    await catalog.cacheLyrics(task.track, audioPath: file.path);
     final LocalLibrary? library = this.library;
     if (library == null) return;
     try {

@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,14 +7,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/playback_queue_view.dart';
 
 const Track _track = Track(
-  id: 'more-fixture',
+  id: 'fixture:test:song:more-fixture',
   title: 'More fixture',
   artist: 'Test artist',
   album: 'Test album',
@@ -22,6 +22,7 @@ const Track _track = Track(
 );
 
 class _Catalog extends Catalog {
+  _Catalog() : super(gateway: TestMusicGateway());
   @override
   Future<String?> audioUrlFor(
     Track track, {

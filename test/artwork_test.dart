@@ -1,3 +1,4 @@
+import 'package:lazer_nextgen/utils/media_requests.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/utils/artwork.dart';
@@ -5,9 +6,19 @@ import 'package:lazer_nextgen/widgets/plate_art.dart';
 import 'package:lazer_nextgen/widgets/artwork_image.dart';
 
 const cover =
-    'https://p1.music.126.net/Xgxfl8qPlwjRIoBDI-cPrg==/109951173819308049.jpg?param=1024y1024';
+    'https://p1.images.test/Xgxfl8qPlwjRIoBDI-cPrg==/109951173819308049.jpg?param=1024y1024';
 
 void main() {
+  setUp(
+    () => MediaRequestRules.register('fixture', [
+      {
+        'host': '*.images.test',
+        'artworkResize': {'parameter': 'param', 'value': '{size}y{size}'},
+        'fallbackHosts': ['p2.images.test', 'p3.images.test', 'p4.images.test'],
+      },
+    ]),
+  );
+  tearDown(() => MediaRequestRules.remove('fixture'));
   test('public covers survive snapshots while signed URLs are renewed', () {
     expect(persistableArtworkUrl(cover), cover);
     expect(
@@ -51,7 +62,7 @@ void main() {
     expect(artworkPixelSize(2000, 1), 1024);
     expect(
       artworkUrlForSize(cover, logicalEdge: 44, devicePixelRatio: 2),
-      'https://p1.music.126.net/Xgxfl8qPlwjRIoBDI-cPrg==/109951173819308049.jpg?param=96y96',
+      'https://p1.images.test/Xgxfl8qPlwjRIoBDI-cPrg==/109951173819308049.jpg?param=96y96',
     );
   });
 
@@ -90,7 +101,7 @@ void main() {
       // CDN fallback is now handled once in the shared cache, rather than
       // restarting the same candidate sequence separately in each widget.
       expect(retried.url, sizedCover);
-      const next = 'https://p1.music.126.net/another/123.jpg';
+      const next = 'https://p1.images.test/another/123.jpg';
       await render(next);
       expect(
         (tester.widget<Image>(find.byType(Image)).image as ArtworkImage).url,

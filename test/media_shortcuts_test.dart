@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
@@ -14,10 +14,7 @@ import 'package:lazer_nextgen/state/media_shortcuts.dart';
 import 'package:lazer_nextgen/widgets/media_shortcut_listener.dart';
 import 'package:lazer_nextgen/widgets/shortcut_recorder_dialog.dart';
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());

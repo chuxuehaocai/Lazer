@@ -1,8 +1,8 @@
+import 'package:lazer_nextgen/gateway/music_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/player/desktop_now_playing.dart';
@@ -17,6 +17,13 @@ Track _track(String title) => Track(
   duration: const Duration(minutes: 3),
   coverSeed: 1,
 );
+
+class _ActionsState extends AppState {
+  @override
+  bool supportsCurrentMusic(MusicCapability capability) =>
+      capability == MusicCapability.comments ||
+      capability == MusicCapability.listenTogether;
+}
 
 class _TickState extends AppState {
   final clockPosition = ValueNotifier<Duration>(Duration.zero);
@@ -77,7 +84,7 @@ void main() {
     tester.view.physicalSize = const Size(1280, 650);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final state = AppState(catalog: Catalog());
+    final state = _ActionsState();
     addTearDown(state.dispose);
     final track = _track('Cover motion');
     final artwork = find.byKey(const ValueKey('test-artwork'));
@@ -134,7 +141,7 @@ void main() {
     tester.view.physicalSize = const Size(1280, 650);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final state = AppState(catalog: Catalog());
+    final state = _ActionsState();
     addTearDown(state.dispose);
     final track = _track('Reversible cover');
     final artwork = find.byKey(const ValueKey('test-artwork'));
@@ -178,7 +185,7 @@ void main() {
     tester.view.physicalSize = const Size(1280, 650);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final state = AppState(catalog: Catalog());
+    final state = _ActionsState();
     addTearDown(state.dispose);
     final track = _track('Reduced cover motion');
     final artwork = find.byKey(const ValueKey('test-artwork'));
@@ -218,7 +225,7 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       final semantics = tester.ensureSemantics();
-      final state = AppState(catalog: Catalog());
+      final state = _ActionsState();
       addTearDown(state.dispose);
       final track = _track('Accessible dock');
       final fullscreen = find.byKey(const ValueKey('desktop-fullscreen'));
@@ -269,14 +276,14 @@ void main() {
       );
 
       await tester.pumpWidget(_page(state, track));
-    state.clockPosition.value = const Duration(seconds: 30);
+      state.clockPosition.value = const Duration(seconds: 30);
       await tester.pump();
       expect(seek().value, closeTo(1 / 6, .001));
       expect(find.text('0:30'), findsOneWidget);
 
       await tester.pumpWidget(_page(state, track, controlsVisible: false));
       await tester.pumpAndSettle();
-    state.clockPosition.value = const Duration(seconds: 90);
+      state.clockPosition.value = const Duration(seconds: 90);
       await tester.pump();
       expect(seek().value, closeTo(1 / 6, .001));
       expect(find.text('0:30'), findsOneWidget);
@@ -295,7 +302,7 @@ void main() {
   ) async {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final state = AppState(catalog: Catalog());
+    final state = _ActionsState();
     addTearDown(state.dispose);
     final track = _track('A long song title that wraps across multiple lines');
     final artwork = find.byKey(const ValueKey('test-artwork'));
@@ -323,7 +330,7 @@ void main() {
   ) async {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final state = AppState(catalog: Catalog());
+    final state = _ActionsState();
     addTearDown(state.dispose);
 
     for (final size in <Size>[const Size(1280, 800), const Size(1280, 650)]) {

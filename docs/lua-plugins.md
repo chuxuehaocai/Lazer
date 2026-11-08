@@ -105,4 +105,57 @@ end
 
 导入流程会先验证路径、大小、清单和 Lua 入口，再在临时目录启动 VM。启动成功后才替换旧版本；失败会保留旧版本。停用、更新或卸载前客户端会停止该插件的请求和关联播放会话。插件不应把 Cookie、令牌或签名音频 URL 写入日志、返回错误文本或长期缓存；会话凭据只能放在 `host.storage_*` 中。
 
-网易云 Gateway 的完整示例位于 `E:\projects\lazer_ncm\netease-cloud`，可直接使用 `E:\projects\lazer_ncm\dist\lazer.netease-1.0.1.zip` 导入。Navidrome 暂不随插件包提供实现。
+网易云 Gateway 的完整示例位于 `E:\projects\lazer_ncm\netease-cloud`。本地开发时可自行打包后导入；插件 ZIP 只用于本地验证，暂不随客户端仓库或插件市场上传。Navidrome 暂不随插件包提供实现。
+
+## 扩展的平台接口
+
+客户端没有内置流媒体网关。API 路径、签名、响应解析、账号规则和平台文案均应由 Lua 提供。
+新增能力均为可选；只有实现后才在 `capabilities` 中声明。
+
+| 能力 | 操作和返回值 |
+| --- | --- |
+| `homeFeed` | `homeFeed` 返回 `{featured,featuredSongs,quick,daily,recommended,playlists,albums,editorialPlaylists}`；歌曲、专辑和歌单均使用通用模型 |
+| `savedAlbums` | `savedAlbums({limit,offset})` 返回收藏的专辑当前页 |
+| `radio` | `radio({kind,seed,playlist,limit})`；kind 为 `personal`、`heart` 或 `artist`，返回歌曲数组 |
+| `charts` | `charts` 返回排行榜的歌单模型，歌曲通过 `playlistSongs` 分页取得 |
+| `comments` | `comments({id,limit,offset})` 返回 `{hot,latest,total,hasMore}`；`setCommentLiked({id,commentId,liked})` 设置点赞 |
+| `listenTogether` | `listenTogether({operation,...})` 支持 `create/join/status/leave/heartbeat/command`，返回 `{roomId,inviterId,members}` |
+
+`artistSongs({id,limit,offset})` 返回歌手歌曲当前页。评论使用字符串 ID：
+`{id,content,author,authorId,avatarUrl,time,location,liked,likedCount,replies}`，
+其中回复为 `{author,content}`，时间为 Unix 毫秒。一起听成员为
+`{userId,name,avatarUrl}`，所有远程 ID 都应当视作不透明字符串。
+
+`session` 和登录结果可附带 `signature`、`membership`，供客户端展示资料与会员名称。
+可选认证能力 `exportCookie` 启用用户主动导出入口；对应操作返回当前平台 Cookie 字符串。
+没有声明该能力时，客户端不会提供导出入口。
+
+流地址允许返回 `headers` 字符串映射。歌词另可返回 `wordTranslation`，与
+`translation` 分别保留逐字和逐行翻译。客户端下载和缓存歌曲时会自动保存完整歌词，
+插件不需要复制文件或管理本地音乐库。
+
+`describe` 可在 `providers` 同级提供 `media` 数组，声明素材请求规则：
+
+```lua
+media = {
+  {host="*.images.example.com",
+   headers={["Referer"]="https://example.com/"},
+   artworkResize={parameter="size",value="{size}x{size}"},
+   fallbackHosts={"images2.example.com"}}
+}
+```
+
+缩图规则、请求头与备用主机由插件声明，Dart 不识别平台域名。不要把账号 Cookie 放入
+公共素材规则。敏感音频请求头应随单次 `stream` 结果返回，不会写入队列快照。
+
+预期错误可返回 `{error={code=40,httpStatus=401}}`。`40/41/44` 或 HTTP 401 表示
+认证失败，HTTP 429 表示限流，`code=70` 表示当前歌曲或音质不可用；客户端可据此
+提示重新登录、保留重试机会或尝试较低音质。错误中不要包含服务正文或凭据。
+
+## 市场源
+
+默认源为 `https://lazer.naominet.dev/plugin`。目录源追加 `/plugins.json`，也接受直接的
+JSON 地址。索引格式为 `{schemaVersion:1,plugins:[...]}`；每项至少包含 `id`、`version`、
+`name`、`summary` 和 HTTPS `download`，可以附带 `author`、`platforms`、
+`minAppVersion`、`sha256`。`name/summary` 可以是字符串或语言标签到文本的映射。
+索引中的 ID、版本必须与 ZIP 内清单严格一致；预发布客户端遵循 SemVer 的兼容性比较。

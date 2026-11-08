@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -5,7 +6,6 @@ import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -139,10 +139,7 @@ class _MixQueueEngine extends _Engine
   }
 }
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<List<GatewaySong>> songDetails(List<int> ids) async => [];
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
@@ -308,38 +305,37 @@ void main() {
     state.dispose();
   });
 
-  testWidgets(
-    'the successor is not replaced while the overlap is audible',
-    (tester) async {
-      final engine = _MixQueueEngine();
-      final state = AppState(
-        catalog: _Catalog(),
-        audioEngine: engine,
-        autoMixEnabled: true,
-      );
-      addTearDown(engine.dispose);
-      state.playQueue(<Track>[_track('1'), _track('2'), _track('3')]);
-      await tester.pump();
-      expect(engine.prepared, <String>['url-2']);
+  testWidgets('the successor is not replaced while the overlap is audible', (
+    tester,
+  ) async {
+    final engine = _MixQueueEngine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      autoMixEnabled: true,
+    );
+    addTearDown(engine.dispose);
+    state.playQueue(<Track>[_track('1'), _track('2'), _track('3')]);
+    await tester.pump();
+    expect(engine.prepared, <String>['url-2']);
 
-      // The overlap starts. Preparing track 3 now would ask the engine for a
-      // second successor, which fails and clears the queued reader — the song
-      // being mixed in would fade back out.
-      engine.advanceAt(const Duration(seconds: 6));
-      await tester.pump();
-      await tester.pump();
-      expect(state.current?.id, '2');
+    // The overlap starts. Preparing track 3 now would ask the engine for a
+    // second successor, which fails and clears the queued reader — the song
+    // being mixed in would fade back out.
+    engine.advanceAt(const Duration(seconds: 6));
+    await tester.pump();
+    await tester.pump();
+    expect(state.current?.id, '2');
 
-      // The hand-off completes: the incoming decoder is the active source, so the
-      // successor is prepared then.
-      engine.finishMix();
-      await tester.pump();
-      await tester.pump();
-      expect(state.current?.id, '2');
-      expect(engine.prepared.last, 'url-3');
-      state.dispose();
-    },
-  );
+    // The hand-off completes: the incoming decoder is the active source, so the
+    // successor is prepared then.
+    engine.finishMix();
+    await tester.pump();
+    await tester.pump();
+    expect(state.current?.id, '2');
+    expect(engine.prepared.last, 'url-3');
+    state.dispose();
+  });
 
   testWidgets('a seek during the overlap returns to the outgoing song', (
     tester,
@@ -370,32 +366,33 @@ void main() {
     state.dispose();
   });
 
-  testWidgets('a dropped successor cannot leave playback waiting for a handoff', (
-    tester,
-  ) async {
-    final engine = _MixQueueEngine();
-    final state = AppState(
-      catalog: _Catalog(),
-      audioEngine: engine,
-      autoMixEnabled: true,
-    );
-    addTearDown(engine.dispose);
-    state.playQueue(<Track>[_track('1'), _track('2')]);
-    await tester.pump();
-    expect(engine.prepared, <String>['url-2']);
+  testWidgets(
+    'a dropped successor cannot leave playback waiting for a handoff',
+    (tester) async {
+      final engine = _MixQueueEngine();
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        autoMixEnabled: true,
+      );
+      addTearDown(engine.dispose);
+      state.playQueue(<Track>[_track('1'), _track('2')]);
+      await tester.pump();
+      expect(engine.prepared, <String>['url-2']);
 
-    // The preparation loses its race: the engine holds no successor, so the
-    // hand-off the app expects can never arrive. Reaching the end of the track
-    // must advance the queue instead of standing still in silence.
-    engine.dropSuccessor();
-    engine.position = _track('1').duration;
-    await tester.pump(AppState.playbackInterval);
-    await tester.pump();
+      // The preparation loses its race: the engine holds no successor, so the
+      // hand-off the app expects can never arrive. Reaching the end of the track
+      // must advance the queue instead of standing still in silence.
+      engine.dropSuccessor();
+      engine.position = _track('1').duration;
+      await tester.pump(AppState.playbackInterval);
+      await tester.pump();
 
-    expect(state.current?.id, '2');
-    expect(state.playing, isTrue);
-    state.dispose();
-  });
+      expect(state.current?.id, '2');
+      expect(state.playing, isTrue);
+      state.dispose();
+    },
+  );
 
   testWidgets('changing to single repeat replaces the pending mix successor', (
     tester,

@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/login.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/theme/font_preferences.dart';
@@ -13,7 +13,7 @@ import 'package:lazer_nextgen/state/app_state.dart';
 
 const String _scanUrl = 'https://music.163.com/login?codekey=fixture-key';
 
-const GatewayUserProfile _profile = GatewayUserProfile(
+const FixtureProfile _profile = FixtureProfile(
   userId: 7,
   nickname: '测试账户',
   vipType: 11,
@@ -21,14 +21,14 @@ const GatewayUserProfile _profile = GatewayUserProfile(
 
 /// Scripted QR authority: the key handshake, the poll codes in order, and the
 /// account endpoint that may trail the confirmation.
-class _QrGateway extends NeteaseGateway {
+class _QrGateway extends TestMusicGateway {
   _QrGateway({
     this.codes = const <int>[801],
-    this.statuses = const <GatewayLoginStatus>[],
+    this.statuses = const <FixtureLoginStatus>[],
   });
 
   final List<int> codes;
-  final List<GatewayLoginStatus> statuses;
+  final List<FixtureLoginStatus> statuses;
 
   int polls = 0;
   int statusCalls = 0;
@@ -42,7 +42,7 @@ class _QrGateway extends NeteaseGateway {
   Future<String> createQrCodeUrl(String key) async => _scanUrl;
 
   @override
-  Future<GatewayQrCheck> checkQrCode(
+  Future<FixtureQrCheck> checkQrCode(
     String key, {
     String secureCaptcha = '',
   }) async {
@@ -52,21 +52,18 @@ class _QrGateway extends NeteaseGateway {
     polls++;
     final int code = codes.isEmpty ? 801 : codes[index];
     if (code == 803) sessionCookie = 'MUSIC_U=fixture';
-    return GatewayQrCheck(code: code, cookie: sessionCookie);
+    return FixtureQrCheck(code: code, cookie: sessionCookie);
   }
 
   @override
-  Future<GatewayLoginStatus> loginStatus() async {
+  Future<FixtureLoginStatus> fixtureLoginStatus() async {
     final int index = statusCalls < statuses.length
         ? statusCalls
         : statuses.length - 1;
     statusCalls++;
-    if (statuses.isEmpty) return const GatewayLoginStatus();
+    if (statuses.isEmpty) return const FixtureLoginStatus();
     return statuses[index];
   }
-
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
 }
 
 class _Catalog extends Catalog {
@@ -153,9 +150,9 @@ void main() {
     () async {
       final gateway = _QrGateway(
         codes: <int>[803],
-        statuses: const <GatewayLoginStatus>[
-          GatewayLoginStatus(),
-          GatewayLoginStatus(profile: _profile),
+        statuses: const <FixtureLoginStatus>[
+          FixtureLoginStatus(),
+          FixtureLoginStatus(profile: _profile),
         ],
       );
       final state = _state(gateway);
@@ -164,7 +161,8 @@ void main() {
         state.dispose();
       });
       final String? url = await state.beginQrLogin();
-      expect(await state.pollQrLogin(url!), 803);
+      expect(await state.pollQrLogin(url!), 802);
+      expect(await state.pollQrLogin(url), 803);
       expect(gateway.statusCalls, greaterThan(1));
       expect(state.signedIn, isTrue);
       expect(state.user.method, AuthMethod.qrcode);
@@ -174,7 +172,7 @@ void main() {
         (await SharedPreferences.getInstance()).getString(
           'lazer_gateway_cookie',
         ),
-        'MUSIC_U=fixture',
+        isNull,
       );
     },
   );
@@ -184,11 +182,11 @@ void main() {
     () async {
       final gateway = _QrGateway(
         codes: <int>[803, 800],
-        statuses: const <GatewayLoginStatus>[
-          GatewayLoginStatus(),
-          GatewayLoginStatus(),
-          GatewayLoginStatus(),
-          GatewayLoginStatus(profile: _profile),
+        statuses: const <FixtureLoginStatus>[
+          FixtureLoginStatus(),
+          FixtureLoginStatus(),
+          FixtureLoginStatus(),
+          FixtureLoginStatus(profile: _profile),
         ],
       );
       final state = _state(gateway);
@@ -200,7 +198,9 @@ void main() {
       // First poll: confirmed, but the account is not ready yet.
       expect(await state.pollQrLogin(url!), 802);
       expect(state.signedIn, isFalse);
-      // Second poll: the key is spent (800), the account is ready now.
+      expect(await state.pollQrLogin(url), 802);
+      expect(await state.pollQrLogin(url), 802);
+      // Later polls validate the account without reusing the spent QR key.
       expect(await state.pollQrLogin(url), 803);
       expect(state.signedIn, isTrue);
     },
@@ -225,8 +225,8 @@ void main() {
     addTearDown(tester.view.reset);
     final gateway = _QrGateway(
       codes: <int>[801, 803],
-      statuses: const <GatewayLoginStatus>[
-        GatewayLoginStatus(profile: _profile),
+      statuses: const <FixtureLoginStatus>[
+        FixtureLoginStatus(profile: _profile),
       ],
     );
     final state = _state(gateway);

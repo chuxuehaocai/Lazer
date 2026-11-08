@@ -1,3 +1,4 @@
+import '../gateway/music_models.dart';
 import '../animation/apple_spring.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -444,7 +445,7 @@ class _Presentation extends StatelessWidget {
               ),
             ),
           ),
-          if (!state.isNavidrome)
+          if (state.supportsCurrentMusic(MusicCapability.listenTogether))
             AccessibleIconButton(
               tooltip: '一起听',
               onPressed: () =>
@@ -820,7 +821,9 @@ class _DesktopDock extends StatelessWidget {
                               onPressed: () =>
                                   onPaneChanged(DesktopNowPlayingPane.lyrics),
                             ),
-                            if (!state.isNavidrome)
+                            if (state.supportsCurrentMusic(
+                              MusicCapability.comments,
+                            ))
                               _PaneTab(
                                 key: const ValueKey('desktop-comments'),
                                 label: '评论',

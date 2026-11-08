@@ -240,6 +240,7 @@ private:
     double preampLinear_ = 1.0;
     Limiter limiter_;
     VolumeRamp volume_;
+    bool volumeStarted_ = false;
     int32_t rampMillis_ = 200;
     double lastReductionDb_ = 0.0;
     /* Applied order, owned by the audio thread once installed. */

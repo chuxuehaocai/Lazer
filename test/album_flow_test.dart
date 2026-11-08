@@ -1,3 +1,5 @@
+import 'package:lazer_nextgen/utils/media_requests.dart';
+import 'support/music_gateway.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -7,7 +9,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -24,10 +25,7 @@ const Track _track = Track(
   translatedTitle: '测试译名',
 );
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());
@@ -66,6 +64,11 @@ Widget _reducedMotion(Widget child) => Builder(
 );
 
 void main() {
+  setUp(()=>MediaRequestRules.register('fixture',[
+    {'host':'*.images.test','artworkResize':{'parameter':'param','value':'{size}y{size}'}},
+    {'host':'127.0.0.1','headers':{'Referer':'https://provider.test/'}}
+  ]));
+  tearDown(()=>MediaRequestRules.remove('fixture'));
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   test('the flow palette is a five-step ramp on the seed hue', () {
@@ -109,17 +112,17 @@ void main() {
   test('the palette fetches a 96px rendition of the cover', () {
     expect(
       albumPaletteArtworkUrl(
-        'https://p1.music.126.net/a/b.jpg?param=1024y1024',
+        'https://p1.images.test/a/b.jpg?param=1024y1024',
       ),
-      'https://p1.music.126.net/a/b.jpg?param=96y96',
+      'https://p1.images.test/a/b.jpg?param=96y96',
     );
     expect(
-      albumPaletteArtworkUrl('//p1.music.126.net/a/b.jpg'),
-      'https://p1.music.126.net/a/b.jpg?param=96y96',
+      albumPaletteArtworkUrl('//p1.images.test/a/b.jpg'),
+      'https://p1.images.test/a/b.jpg?param=96y96',
     );
     expect(
-      albumPaletteArtworkUrl('https://p1.music.126.net/a/b.jpg?x=1'),
-      'https://p1.music.126.net/a/b.jpg?x=1&param=96y96',
+      albumPaletteArtworkUrl('https://p1.images.test/a/b.jpg?x=1'),
+      'https://p1.images.test/a/b.jpg?x=1&param=96y96',
     );
     expect(albumPaletteArtworkUrl(''), isNull);
     expect(albumPaletteArtworkUrl(null), isNull);

@@ -6,7 +6,7 @@ import 'models.dart';
 
 /// Reads the public Billboard Hot 100 page so the chart keeps all 100 rows,
 /// artwork and published movement metadata instead of inheriting the shorter
-/// NetEase mirror.
+/// music provider mirror.
 class BillboardClient {
   BillboardClient({http.Client? client}) : _client = client ?? http.Client();
 
@@ -214,7 +214,7 @@ class BillboardClient {
       if (latest.subtract(Duration(days: offset * 7)) case final date)
         ChartIssue(
           id: _dateId(date),
-          label: '${date.year} · ${date.month}月${date.day}日',  // i18n:key
+          label: '${date.year} · ${date.month}月${date.day}日', // i18n:key
         ),
   ];
 

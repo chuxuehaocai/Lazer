@@ -6,9 +6,6 @@ class GatewayRegistry {
   final Map<String, MusicGateway> _connections = {};
   String? _active;
 
-  /// Compatibility catalogue; production providers are installed as Lua ZIPs.
-  static const providers = [MusicProvider.netease, MusicProvider.navidrome];
-
   static String keyOf(MusicGateway gateway) =>
       '${Uri.encodeComponent(gateway.provider.id)}:${Uri.encodeComponent(gateway.connectionId)}';
 

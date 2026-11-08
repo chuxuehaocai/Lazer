@@ -70,6 +70,11 @@ abstract class MusicGateway {
   }) => Future.error(MusicUnsupportedException(provider.id, 'albumSongs'));
   Future<MusicArtist> artist(MusicId id) =>
       Future.error(MusicUnsupportedException(provider.id, 'artist'));
+  Future<MusicPage<MusicSong>> artistSongs(
+    MusicId id, {
+    int limit = 100,
+    int offset = 0,
+  }) => Future.error(MusicUnsupportedException(provider.id, 'artistSongs'));
   Future<MusicPage<MusicAlbum>> artistAlbums(
     MusicId id, {
     int limit = 30,
@@ -126,6 +131,55 @@ abstract class MusicGateway {
 
   Future<MusicPage<MusicSong>> recommendations({int limit = 30}) =>
       Future.error(MusicUnsupportedException(provider.id, 'recommendations'));
+
+  Future<MusicHome> homeFeed() =>
+      Future.error(MusicUnsupportedException(provider.id, 'homeFeed'));
+  Future<List<MusicPlaylist>> charts() =>
+      Future.error(MusicUnsupportedException(provider.id, 'charts'));
+  Future<List<MusicSong>> radio(
+    MusicRadioKind kind, {
+    MusicId? seed,
+    MusicId? playlist,
+    int limit = 30,
+  }) => Future.error(MusicUnsupportedException(provider.id, 'radio'));
+  Future<Map<String, dynamic>> comments(
+    MusicId song, {
+    int limit = 20,
+    int offset = 0,
+  }) => Future.error(MusicUnsupportedException(provider.id, 'comments'));
+  Future<void> setCommentLiked(MusicId song, String commentId, bool liked) =>
+      Future.error(MusicUnsupportedException(provider.id, 'comments'));
+  Future<Map<String, dynamic>> listenTogether(
+    String operation, [
+    Map<String, dynamic> args = const {},
+  ]) => Future.error(MusicUnsupportedException(provider.id, 'listenTogether'));
+}
+
+/// Authentication is optional and described by the installed connection.
+abstract class MusicAccountGateway extends MusicGateway {
+  Set<String> get authenticationMethods;
+  String? get loginHint => null;
+  String? get cookieHint => null;
+  String? get forgotPasswordUrl => null;
+  Future<MusicUser?> loginWithCookie(String cookie) =>
+      Future.error(MusicUnsupportedException(provider.id, 'loginCookie'));
+  Future<MusicUser?> loginWithPassword(String account, String password) =>
+      Future.error(MusicUnsupportedException(provider.id, 'loginPassword'));
+  Future<MusicUser?> loginWithCaptcha(String phone, String captcha) =>
+      Future.error(MusicUnsupportedException(provider.id, 'loginCaptcha'));
+  Future<void> sendCaptcha(String phone) =>
+      Future.error(MusicUnsupportedException(provider.id, 'sendCaptcha'));
+  Future<String?> qrKey() =>
+      Future.error(MusicUnsupportedException(provider.id, 'qrKey'));
+  Future<String> qrUrl(String key) =>
+      Future.error(MusicUnsupportedException(provider.id, 'qrUrl'));
+  Future<int> qrCheck(String key) =>
+      Future.error(MusicUnsupportedException(provider.id, 'qrCheck'));
+  Future<void> logout() async {
+    clearSession();
+  }
+
+  Future<String?> exportCookie() => Future.value(null);
 }
 
 class MusicUnsupportedException implements Exception {

@@ -15,6 +15,9 @@ enum MusicCapability {
   recommendations,
   comments,
   listenTogether,
+  radio,
+  charts,
+  homeFeed,
 }
 
 class MusicProvider {
@@ -27,16 +30,6 @@ class MusicProvider {
   final String id;
   final String name;
   final bool experimental;
-
-  static const netease = MusicProvider(
-    id: 'netease',
-    name: 'NetEase Cloud Music',
-  );
-  static const navidrome = MusicProvider(
-    id: 'navidrome',
-    name: 'Navidrome',
-    experimental: true,
-  );
 }
 
 /// A reference cannot accidentally resolve against another account or server.
@@ -109,10 +102,17 @@ class MusicId {
 }
 
 class MusicUser {
-  const MusicUser({required this.id, required this.name, this.avatarUrl});
+  const MusicUser({
+    required this.id,
+    required this.name,
+    this.avatarUrl,
+    this.signature,
+    this.membership,
+  });
   final MusicId id;
   final String name;
   final String? avatarUrl;
+  final String? signature, membership;
 }
 
 class MusicArtist {
@@ -145,6 +145,7 @@ class MusicSong {
     this.contentType,
     this.suffix,
     this.bitRate,
+    this.translatedTitle,
   }) : artists = List.unmodifiable(artists);
 
   final MusicId id;
@@ -162,6 +163,7 @@ class MusicSong {
 
   /// Bits per second (Subsonic's kbps field is converted by its adapter).
   final int? bitRate;
+  final String? translatedTitle;
 }
 
 class MusicAlbum {
@@ -232,6 +234,25 @@ enum MusicStreamQuality { original, high, medium, low }
 
 enum MusicAlbumSort { newest, random }
 
+enum MusicRadioKind { personal, heart, artist }
+
+class MusicHome {
+  const MusicHome({
+    this.featured,
+    this.featuredSongs = const [],
+    this.quick = const [],
+    this.daily = const [],
+    this.recommended = const [],
+    this.playlists = const [],
+    this.albums = const [],
+    this.editorialPlaylists = const [],
+  });
+  final MusicAlbum? featured;
+  final List<MusicSong> featuredSongs, quick, daily;
+  final List<MusicPlaylist> recommended, playlists, editorialPlaylists;
+  final List<MusicAlbum> albums;
+}
+
 class MusicStream {
   const MusicStream({
     required this.uri,
@@ -240,6 +261,7 @@ class MusicStream {
     this.bitRate,
     this.size,
     this.transcoded = false,
+    this.headers = const {},
   });
   final Uri uri;
   final String? contentType;
@@ -247,6 +269,7 @@ class MusicStream {
   final int? bitRate;
   final int? size;
   final bool transcoded;
+  final Map<String, String> headers;
 
   // Signed URLs are credentials; never include them in diagnostics.
   @override
@@ -268,6 +291,7 @@ class MusicLyrics {
     this.lrc,
     this.wordByWord,
     this.translation,
+    this.wordTranslation,
   }) : lines = List.unmodifiable(lines);
 
   final List<MusicLyricLine> lines;
@@ -277,10 +301,44 @@ class MusicLyrics {
   final String? lrc;
   final String? wordByWord;
   final String? translation;
+  final String? wordTranslation;
 }
 
 class MusicPlayRecord {
   const MusicPlayRecord({required this.song, required this.playCount});
   final MusicSong song;
   final int playCount;
+}
+
+/// Timed lyric payload shared by providers and the offline store.
+class GatewayLyrics {
+  const GatewayLyrics({
+    this.lrc,
+    this.yrc,
+    this.tlyric,
+    this.ytlrc,
+    this.pureMusic = false,
+  });
+
+  final String? lrc;
+  final String? yrc;
+  final String? tlyric;
+  final String? ytlrc;
+  final bool pureMusic;
+
+  bool get hasTimedLyric {
+    final String? yrcLyric = yrc;
+    final String? lrcLyric = lrc;
+    if (yrcLyric != null && _yrcTimedLine.hasMatch(yrcLyric)) return true;
+    return lrcLyric != null && _lrcTimedLine.hasMatch(lrcLyric);
+  }
+
+  static final RegExp _yrcTimedLine = RegExp(
+    r'^\s*\[\d+,\d+\]',
+    multiLine: true,
+  );
+  static final RegExp _lrcTimedLine = RegExp(
+    r'^\s*\[\d{1,2}:\d{2}',
+    multiLine: true,
+  );
 }

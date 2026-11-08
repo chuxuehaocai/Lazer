@@ -8,6 +8,7 @@ import '../l10n/app_localizations.dart';
 import '../listening/listening_statistics.dart';
 import '../theme/apple_design.dart';
 import '../widgets/apple_ui.dart';
+import '../widgets/settings_detail.dart';
 import '../widgets/ui_scaling.dart';
 import 'widgets.dart';
 
@@ -26,12 +27,113 @@ class _AppListeningStatisticsPageState extends State<AppListeningStatisticsPage>
     with BuildSafeState<AppListeningStatisticsPage> {
   ListeningRange _range = ListeningRange.last7Days;
 
+  Widget _content(BuildContext context) {
+    final inset = pageInset(context);
+    return AnimatedBuilder(
+      animation: widget.statistics,
+      builder: (context, _) {
+        final data = widget.statistics.snapshot(_range);
+        final date = data.firstRecordedAt == null
+            ? null
+            : _date(data.firstRecordedAt!);
+        return Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: adaptiveContentMaxWidth(context, 1100),
+            ),
+            child: ListView(
+              key: const PageStorageKey('listening-statistics-scroll'),
+              padding: EdgeInsets.fromLTRB(inset, 8, inset, 32),
+              children: <Widget>[
+                ApplePageTitle(
+                  title: '你的音乐足迹',
+                  subtitle: date == null ? '记录从首次播放开始' : '开始记录于 $date',
+                  padding: const EdgeInsets.only(top: 12, bottom: 20),
+                ),
+                _RangeSelector(
+                  selected: _range,
+                  onChanged: (value) => setState(() => _range = value),
+                ),
+                const SizedBox(height: 20),
+                if (!widget.statistics.loaded)
+                  const Padding(
+                    padding: EdgeInsets.all(40),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else ...<Widget>[
+                  _Summary(data: data),
+                  const SizedBox(height: 20),
+                  if (data.totalDuration == Duration.zero &&
+                      data.playCount == 0)
+                    AppleGroupedCard(
+                      key: const ValueKey('listening-statistics-empty'),
+                      margin: EdgeInsets.zero,
+                      child: const AppleEmptyState(
+                        message: '这段时间还没有听歌记录。播放一首喜欢的歌，让音乐足迹慢慢积累。',
+                        icon: Icons.insights_rounded,
+                      ),
+                    )
+                  else ...<Widget>[
+                    _HourlyCard(
+                      key: ValueKey(_range),
+                      durations: data.hourlyDuration,
+                      peakHour: data.peakHour,
+                    ),
+                    const SizedBox(height: 20),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final skipped = _RankingCard(
+                          title: '最常切走的歌',
+                          subtitle: '按主动切歌次数排序',
+                          tracks: data.mostSkipped.take(5).toList(),
+                          skipped: true,
+                        );
+                        final played = _RankingCard(
+                          title: '最常播放的歌',
+                          subtitle: '按播放次数排序',
+                          tracks: data.mostPlayed.take(5).toList(),
+                          skipped: false,
+                        );
+                        if (constraints.maxWidth < 740) {
+                          return Column(
+                            children: <Widget>[
+                              skipped,
+                              const SizedBox(height: 20),
+                              played,
+                            ],
+                          );
+                        }
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Expanded(child: skipped),
+                            const SizedBox(width: 20),
+                            Expanded(child: played),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  const _CountingNotes(),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final inset = pageInset(context);
+    final content = _content(context);
+    if (SettingsDetailHost.isEmbedded(context)) {
+      return SettingsDetailScaffold(title: '听歌统计', child: content);
+    }
     return Scaffold(
       backgroundColor: Colors.transparent,
-      extendBodyBehindAppBar: true,
+      extendBodyBehindAppBar: false,
       appBar: AppBar(
         title: const TrText('听歌统计'),
         backgroundColor: Colors.transparent,
@@ -39,103 +141,7 @@ class _AppListeningStatisticsPageState extends State<AppListeningStatisticsPage>
         shadowColor: Colors.transparent,
         scrolledUnderElevation: 0,
       ),
-      body: SafeArea(
-        top: false,
-        child: AnimatedBuilder(
-          animation: widget.statistics,
-          builder: (context, _) {
-            final data = widget.statistics.snapshot(_range);
-            final date = data.firstRecordedAt == null
-                ? null
-                : _date(data.firstRecordedAt!);
-            return Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: adaptiveContentMaxWidth(context, 1100),
-                ),
-                child: ListView(
-                  key: const PageStorageKey('listening-statistics-scroll'),
-                  padding: EdgeInsets.fromLTRB(inset, 8, inset, 32),
-                  children: <Widget>[
-                    ApplePageTitle(
-                      title: '你的音乐足迹',
-                      subtitle: date == null ? '记录从首次播放开始' : '开始记录于 $date',
-                      padding: const EdgeInsets.only(top: 12, bottom: 20),
-                    ),
-                    _RangeSelector(
-                      selected: _range,
-                      onChanged: (value) => setState(() => _range = value),
-                    ),
-                    const SizedBox(height: 20),
-                    if (!widget.statistics.loaded)
-                      const Padding(
-                        padding: EdgeInsets.all(40),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else ...<Widget>[
-                      _Summary(data: data),
-                      const SizedBox(height: 20),
-                      if (data.totalDuration == Duration.zero &&
-                          data.playCount == 0)
-                        AppleGroupedCard(
-                          key: const ValueKey('listening-statistics-empty'),
-                          margin: EdgeInsets.zero,
-                          child: const AppleEmptyState(
-                            message: '这段时间还没有听歌记录。播放一首喜欢的歌，让音乐足迹慢慢积累。',
-                            icon: Icons.insights_rounded,
-                          ),
-                        )
-                      else ...<Widget>[
-                        _HourlyCard(
-                          key: ValueKey(_range),
-                          durations: data.hourlyDuration,
-                          peakHour: data.peakHour,
-                        ),
-                        const SizedBox(height: 20),
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final skipped = _RankingCard(
-                              title: '最常切走的歌', // i18n:key
-                              subtitle: '按主动切歌次数排序', // i18n:key
-                              tracks: data.mostSkipped.take(5).toList(),
-                              skipped: true,
-                            );
-                            final played = _RankingCard(
-                              title: '最常播放的歌', // i18n:key
-                              subtitle: '按播放次数排序', // i18n:key
-                              tracks: data.mostPlayed.take(5).toList(),
-                              skipped: false,
-                            );
-                            if (constraints.maxWidth < 740) {
-                              return Column(
-                                children: <Widget>[
-                                  skipped,
-                                  const SizedBox(height: 20),
-                                  played,
-                                ],
-                              );
-                            }
-                            return Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Expanded(child: skipped),
-                                const SizedBox(width: 20),
-                                Expanded(child: played),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
-                      const SizedBox(height: 24),
-                      const _CountingNotes(),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
+      body: SafeArea(top: false, child: content),
     );
   }
 }

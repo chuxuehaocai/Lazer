@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SearchCatalog extends Catalog {
+  SearchCatalog():super(gateway:TestMusicGateway());
   final requests = <String, Completer<SearchResults>>{};
   int requestCount = 0;
   @override

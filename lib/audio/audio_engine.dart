@@ -1,3 +1,4 @@
+import '../utils/media_requests.dart';
 import 'dart:async';
 
 import 'package:audio_session/audio_session.dart';
@@ -411,7 +412,6 @@ class JustAudioEngine
     return _queueUrls[index + 1];
   }
 
-
   @override
   Stream<void> get completed => _completed.stream;
 
@@ -450,7 +450,7 @@ class JustAudioEngine
       if (uri.scheme == 'file') {
         await _player.setFilePath(uri.toFilePath());
       } else {
-        await _player.setUrl(url);
+        await _player.setUrl(url, headers: MediaRequestRules.headers(url));
       }
       if (generation != _generation) return;
       _commandedIndex = 0;
@@ -484,7 +484,11 @@ class JustAudioEngine
       final ConcatenatingAudioSource source = ConcatenatingAudioSource(
         useLazyPreparation: false,
         children: <AudioSource>[
-          for (final String url in urls) AudioSource.uri(Uri.parse(url)),
+          for (final String url in urls)
+            AudioSource.uri(
+              Uri.parse(url),
+              headers: MediaRequestRules.headers(url),
+            ),
         ],
       );
       await _player.setAudioSource(source, initialIndex: startIndex);
@@ -504,7 +508,12 @@ class JustAudioEngine
     return _serialize(() async {
       final ConcatenatingAudioSource? queue = _queue;
       if (queue == null || queueId != _queueId) return false;
-      await queue.add(AudioSource.uri(Uri.parse(url)));
+      await queue.add(
+        AudioSource.uri(
+          Uri.parse(url),
+          headers: MediaRequestRules.headers(url),
+        ),
+      );
       if (queueId != _queueId) return false;
       _queueUrls.add(url);
       final int? currentIndex = _player.currentIndex;

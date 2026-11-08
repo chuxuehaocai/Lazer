@@ -16,6 +16,8 @@
 // `NativeStreamReader` and the transport to `NativeAudioEngine`.
 library;
 
+import '../../utils/media_requests.dart';
+
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:io';
@@ -139,7 +141,10 @@ class AudioStreamEntry {
   Future<int?> expectedLengthWithin(Duration timeout) async {
     final int? known = expectedBytes;
     if (known != null && known > 0) return known;
-    if (_done == null || _lengthResolved.isCompleted || _cancelled || _failure != null) {
+    if (_done == null ||
+        _lengthResolved.isCompleted ||
+        _cancelled ||
+        _failure != null) {
       // Nothing is downloading, so there is no announcement to wait for.
       return expectedBytes;
     }
@@ -223,6 +228,7 @@ class AudioStreamEntry {
     _downloadedBytes = position;
 
     final HttpClientRequest request = await client.getUrl(Uri.parse(url));
+    MediaRequestRules.headers(url).forEach(request.headers.set);
     request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
     if (position > 0) {
       request.headers.set(HttpHeaders.rangeHeader, 'bytes=$position-');
@@ -232,7 +238,8 @@ class AudioStreamEntry {
     // which is a finished download rather than a failure. It is also the only way to learn the size
     // of a fully cached track whose provider never announced one, so it is recorded here: for a file
     // the server will not serve a byte beyond, the file's length *is* the track's length.
-    if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable && position > 0) {
+    if (response.statusCode == HttpStatus.requestedRangeNotSatisfiable &&
+        position > 0) {
       await response.drain<void>();
       await _sink?.close();
       _sink = null;

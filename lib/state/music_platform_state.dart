@@ -3,7 +3,6 @@ part of 'app_state.dart';
 class _MusicPlatformState {
   _MusicPlatformState(this.state);
   final AppState state;
-  SessionUser neteaseUser = SessionUser.guest;
   // A selected connection is a content source, not a global logout. Keep the
   // account snapshot for every connection so local playback can coexist with
   // signed-in platform accounts.
@@ -33,7 +32,6 @@ class _MusicPlatformState {
 
   bool busy = false;
   int _request = 0;
-  static const _configKey = 'lazer_music_connections_v1';
   static const _selectedKey = 'lazer_music_connection';
   static const _lastAccountKey = 'lazer_last_music_account';
 
@@ -60,9 +58,6 @@ class _MusicPlatformState {
     }
     final key = state.activeConnectionKey;
     _sessions[key] = current;
-    if (state.catalog.activeGateway is NeteaseMusicGateway) {
-      neteaseUser = current;
-    }
     _lastSessionKey = key;
   }
 
@@ -76,9 +71,6 @@ class _MusicPlatformState {
   }
 
   SessionUser? _sessionFor(String key, MusicGateway gateway) {
-    if (gateway is NeteaseMusicGateway && !neteaseUser.isGuest) {
-      return neteaseUser;
-    }
     final account = gateway.user;
     if (account == null) {
       _sessions.remove(key);
@@ -93,6 +85,8 @@ class _MusicPlatformState {
       detail: gateway.provider.name,
       userId: int.tryParse(account.id.value) ?? 1,
       avatarUrl: account.avatarUrl,
+      signature: account.signature,
+      membership: account.membership,
     );
   }
 
@@ -134,7 +128,7 @@ class _MusicPlatformState {
     if (_lastSessionKey == key) _lastSessionKey = null;
     await removeConnectionPlayback(owner);
     try {
-      if (owner is LuaMusicGateway) {
+      if (owner is MusicAccountGateway) {
         await owner.logout();
       } else {
         owner.clearSession();
@@ -185,64 +179,6 @@ class _MusicPlatformState {
     await state._saveQueue();
   }
 
-  Future<void> selectNetease() => select(
-    GatewayRegistry.keyOf(
-      state.musicConnections.firstWhere(
-        (gateway) => gateway.provider.id == 'netease',
-      ),
-    ),
-  );
-
-  Future<AuthOutcome> login(
-    String server,
-    String username,
-    String password,
-    bool allowHttp,
-  ) async {
-    if (busy) return const AuthOutcome(false, error: '正在连接音乐服务器。'); // i18n:key
-    final request = ++_request;
-    busy = true;
-    state.notifyListeners();
-    NavidromeGateway? candidate;
-    try {
-      rememberActiveSession();
-      candidate =
-          state.navidromeFactory?.call(server, username, allowHttp) ??
-          NavidromeGateway(
-            serverUrl: server,
-            username: username,
-            allowInsecureHttp: allowHttp,
-          );
-      await candidate.login(password);
-      if (request != _request) {
-        candidate.close();
-        return const AuthOutcome(false, error: '连接已取消。'); // i18n:key
-      }
-      final key = GatewayRegistry.keyOf(candidate);
-      if (state.catalog.activeGateway is NeteaseMusicGateway) {
-        neteaseUser = state.user;
-      }
-      final registry = state.catalog.connections;
-      if (registry.connections.any(
-        (gateway) => GatewayRegistry.keyOf(gateway) == key,
-      )) {
-        registry.remove(key);
-      }
-      registry.add(candidate);
-      _activate(key);
-      candidate = null;
-      await _save();
-      unawaited(state.refreshHome());
-      return const AuthOutcome(true);
-    } catch (error) {
-      candidate?.close();
-      return AppState._failure(error);
-    } finally {
-      busy = false;
-      if (!state._presentationDisposed) state.notifyListeners();
-    }
-  }
-
   Future<void> select(String key) async {
     if (key == state.activeConnectionKey || busy) return;
     if (!state.musicConnections.any(
@@ -255,9 +191,6 @@ class _MusicPlatformState {
     state.notifyListeners();
     try {
       rememberActiveSession();
-      if (state.catalog.activeGateway is NeteaseMusicGateway) {
-        neteaseUser = state.user;
-      }
       await state.listenTogether.leave();
       final target = state.musicConnections.firstWhere(
         (value) => GatewayRegistry.keyOf(value) == key,
@@ -452,34 +385,16 @@ class _MusicPlatformState {
   }
 
   Future<void> restore() async {
-    if (state.catalog.activeGateway is NeteaseMusicGateway) {
-      neteaseUser = state.user;
-    }
     try {
+      for (final gateway
+          in state.musicConnections.whereType<MusicAccountGateway>()) {
+        if (gateway.user != null) continue;
+        try {
+          await gateway.checkSession();
+        } catch (_) {}
+      }
       final prefs = await SharedPreferences.getInstance();
       _lastSessionKey = prefs.getString(_lastAccountKey);
-      final saved = jsonDecode(prefs.getString(_configKey) ?? '[]');
-      if (saved is List) {
-        for (final config in saved.whereType<Map<String, dynamic>>()) {
-          try {
-            if (state.navidromeFactory == null) continue;
-            final gateway =
-                state.navidromeFactory?.call(
-                  config['server'] as String,
-                  config['username'] as String,
-                  config['http'] == true,
-                ) ??
-                NavidromeGateway(
-                  serverUrl: config['server'] as String,
-                  username: config['username'] as String,
-                  allowInsecureHttp: config['http'] == true,
-                );
-            state.catalog.connections.add(gateway);
-          } catch (_) {
-            // A malformed saved connection must not hide the working account.
-          }
-        }
-      }
       final selected =
           prefs.getString(_selectedKey) ??
           (state.pluginManager.gateways.isEmpty
@@ -490,6 +405,8 @@ class _MusicPlatformState {
             (gateway) => GatewayRegistry.keyOf(gateway) == selected,
           )) {
         _activate(selected);
+      } else {
+        _activate(state.activeConnectionKey);
       }
     } catch (_) {}
   }
@@ -497,18 +414,6 @@ class _MusicPlatformState {
   Future<void> _save() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _configKey,
-        jsonEncode([
-          for (final gateway
-              in state.musicConnections.whereType<NavidromeGateway>())
-            {
-              'server': gateway.server.toString(),
-              'username': gateway.username,
-              'http': gateway.server.scheme == 'http',
-            },
-        ]),
-      );
       await prefs.setString(_selectedKey, state.activeConnectionKey);
       if (_lastSessionKey != null) {
         await prefs.setString(_lastAccountKey, _lastSessionKey!);
@@ -608,14 +513,16 @@ class _MusicPlatformState {
       return;
     }
     state._metadataPending.add(track.id);
+    var retryForAccount = false;
     try {
       final owner = state.catalog.connections.resolve(id);
-      if (owner.user == null) return;
       final namespace = owner.cacheNamespace;
       final value = await owner.song(id);
       if (state._presentationDisposed ||
           owner.cacheNamespace != namespace ||
           !identical(state.catalog.connections.resolve(id), owner)) {
+        retryForAccount =
+            !state._presentationDisposed && owner.cacheNamespace != namespace;
         return;
       }
       final updated = state.catalog.trackFromMusicSong(value);
@@ -660,17 +567,28 @@ class _MusicPlatformState {
       // Metadata can retry when the account is reconnected.
     } finally {
       state._metadataPending.remove(track.id);
+      if (retryForAccount) unawaited(state._refreshMissingArtwork());
     }
   }
 
   Future<void> report(Track track, Duration played, bool submission) async {
     try {
-      final id = MusicId.tryParse(track.id)!;
-      await state.catalog.connections
-          .resolve(id)
-          .scrobble(id, played: played, submission: submission);
+      final id = MusicId.tryParse(track.id);
+      if (id == null) return;
+      final gateway = state.catalog.connections.resolve(id);
+      if (gateway.user == null || !gateway.supports(MusicCapability.scrobble)) {
+        return;
+      }
+      state._enqueuePlay(
+        _PlayReport(
+          songId: id.cacheKey,
+          account: gateway.cacheNamespace,
+          kind: submission ? _PlayLogKind.play : _PlayLogKind.start,
+          seconds: played.inSeconds,
+        ),
+      );
     } catch (_) {
-      // Playback remains available when the server cannot record a listen.
+      // A removed plugin must not interrupt local listening.
     }
   }
 }

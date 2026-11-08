@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,18 +6,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/widgets/playlist_picker_dialog.dart';
 
-const GatewayUserProfile _profile = GatewayUserProfile(
-  userId: 7,
-  nickname: '测试账户',
-);
+const FixtureProfile _profile = FixtureProfile(userId: 7, nickname: '测试账户');
 
 const Track _track = Track(
-  id: '5',
+  id: 'fixture:test:song:5',
   title: 'Song',
   artist: 'Artist',
   album: 'Album',
@@ -24,32 +21,33 @@ const Track _track = Track(
   coverSeed: 1,
 );
 
-class _Gateway extends NeteaseGateway {
+class _Gateway extends TestMusicGateway {
   final List<String> createdNames = <String>[];
   final List<(int, int)> added = <(int, int)>[];
 
   @override
-  Future<GatewayLoginStatus> loginWithCookie(String cookie) async {
+  Future<FixtureLoginStatus> fixtureLoginWithCookie(String cookie) async {
     sessionCookie = 'MUSIC_U=fixture';
-    return const GatewayLoginStatus(profile: _profile);
+    return const FixtureLoginStatus(profile: _profile);
   }
 
   @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
-
-  @override
-  Future<GatewayPlaylist?> createPlaylist(
+  Future<MusicPlaylist> createPlaylist(
     String name, {
-    bool privacy = false,
+    bool isPublic = false,
   }) async {
     createdNames.add(name);
-    return GatewayPlaylist(id: 99, name: name, created: true, trackCount: 0);
+    return MusicPlaylist(
+      id: id(MusicEntityKind.playlist, '99'),
+      name: name,
+      writable: true,
+    );
   }
 
   @override
-  Future<void> addTracksToPlaylist(int playlistId, List<int> trackIds) async {
-    for (final int id in trackIds) {
-      added.add((playlistId, id));
+  Future<void> addToPlaylist(MusicId playlist, List<MusicId> songs) async {
+    for (final song in songs) {
+      added.add((int.parse(playlist.value), int.parse(song.value)));
     }
   }
 }
@@ -57,7 +55,10 @@ class _Gateway extends NeteaseGateway {
 class _Catalog extends Catalog {
   _Catalog({super.gateway});
 
-  _Gateway get _fake => gateway as _Gateway;
+  @override
+  Future<void> invalidatePlatformCollections(MusicGateway owner) async {}
+
+  _Gateway get _fake => activeGateway as _Gateway;
 
   @override
   Future<void> invalidatePlaylist(String id) async {}
@@ -79,7 +80,7 @@ class _Catalog extends Catalog {
     created: <Playlist>[
       for (final String name in _fake.createdNames)
         Playlist(
-          id: '99',
+          id: 'fixture:test:playlist:99',
           name: name,
           trackIds: const <String>[],
           coverSeed: 1,
@@ -139,7 +140,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '创建'));
     await tester.pumpAndSettle();
 
-    final _Gateway gateway = state.catalog.gateway as _Gateway;
+    final _Gateway gateway = state.catalog.activeGateway as _Gateway;
     expect(gateway.createdNames, <String>['夜间散步']);
     expect(find.text('已创建「夜间散步」'), findsOneWidget);
   });
@@ -148,7 +149,7 @@ void main() {
     tester,
   ) async {
     final AppState state = await _signedIn();
-    final _Gateway gateway = state.catalog.gateway as _Gateway;
+    final _Gateway gateway = state.catalog.activeGateway as _Gateway;
     gateway.createdNames.add('夜间散步');
     await state.refreshCollections(force: true);
     await tester.pumpWidget(

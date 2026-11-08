@@ -27,7 +27,6 @@ import '../scrolling/scroll_motion.dart';
 import '../l10n/app_language.dart';
 import '../data/models.dart';
 import '../gateway/gateway.dart';
-import '../gateway/transport.dart';
 import '../lyrics/imported_lyrics_store.dart';
 import '../listening/listening_statistics.dart';
 import '../updates/release_version.dart';
@@ -62,6 +61,7 @@ class SessionUser {
     this.avatarUrl,
     this.signature,
     this.vipType,
+    this.membership,
   });
 
   /// The default session: the app boots straight into the shell with this
@@ -88,16 +88,18 @@ class SessionUser {
   /// The user's profile signature ("个人简介").
   final String? signature;
 
-  /// Raw NetEase VIP tier (0 = none).
+  /// Optional membership tier (0 = none).
   final int? vipType;
+  final String? membership;
 
   bool get isGuest => handle == '@guest';
 
   /// Membership badge text for the profile header; null when not a VIP.
   String? get vipLabel {
+    if (!isGuest && membership?.isNotEmpty == true) return membership;
     final int type = vipType ?? 0;
     if (isGuest || type <= 0) return null;
-    return '黑胶会员';
+    return '会员';
   }
 
   String get methodLabel => isGuest
@@ -108,23 +110,6 @@ class SessionUser {
           AuthMethod.password => '密码登录',
           AuthMethod.cookie => 'Cookie 登录',
         };
-
-  factory SessionUser.fromProfile(
-    GatewayUserProfile profile, {
-    required AuthMethod method,
-    required String detail,
-  }) {
-    return SessionUser(
-      name: profile.nickname.isEmpty ? '乐迷' : profile.nickname,
-      handle: '@${profile.userId}',
-      method: method,
-      detail: detail,
-      userId: profile.userId,
-      avatarUrl: profile.avatarUrl,
-      signature: profile.signature,
-      vipType: profile.vipType,
-    );
-  }
 }
 
 /// Outcome of a sign-in attempt; [error] is user-facing.
@@ -161,7 +146,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.startupBufferTarget = startupBuffer,
     this.startupBufferDeadline = startupBufferTimeout,
     this.startupByteTarget = startupBytes,
-    this.navidromeFactory,
     PluginManager? pluginManager,
     this.scheduledPauseClock = DateTime.now,
     math.Random? shuffleRandom,
@@ -186,6 +170,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         downloadManager ??
         DownloadManager(catalog: this.catalog, library: this.localLibrary);
     _ownsDownloadManager = downloadManager == null;
+    // Begin loading the persisted gain as soon as the state exists.  Playback
+    // can then open its first source without waiting on preferences again, and
+    // the gain is still applied before the engine is allowed to play.
+    unawaited(_loadVolumePreferences());
     playbackCache = PlaybackCacheController(
       audioCache: this.catalog.audioCache,
       library: this.localLibrary,
@@ -499,69 +487,44 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await _startAudio(resumeAt: position);
   }
 
-  static const String _sessionKey = 'lazer_gateway_cookie';
-
   static const String _recentTracksKey = 'lazer_recent_tracks_v1';
   static const int _recentTracksLimit = 60;
 
   final Catalog catalog;
-  final NavidromeGateway Function(
-    String server,
-    String username,
-    bool allowHttp,
-  )?
-  navidromeFactory;
   late final _MusicPlatformState _musicPlatforms = _MusicPlatformState(this);
   MusicProvider get musicProvider => catalog.activeGateway.provider;
+  bool get isLocalPlayback => catalog.activeGateway is LocalMusicGateway;
   String get activeConnectionKey =>
       GatewayRegistry.keyOf(catalog.activeGateway);
   String get activeContentKey => catalog.activeGateway.cacheNamespace;
-  bool get isNavidrome => musicProvider.id == 'navidrome';
-  List<MusicGateway> get availableMusicPlatforms => [
-    for (final connection in musicConnections)
-      if (connection is LuaMusicGateway ||
-          connection is LocalMusicGateway ||
-          isLegacyProvider && connection.provider.id != 'local')
-        connection,
-  ];
+  List<MusicGateway> get availableMusicPlatforms => musicConnections;
   Set<String> get musicAuthenticationMethods {
     final active = catalog.activeGateway;
-    if (active is LuaMusicGateway) return active.authenticationMethods;
-    if (isLegacyProvider) return const {'qr', 'sms', 'password', 'cookie'};
+    if (active is MusicAccountGateway) return active.authenticationMethods;
     return const {};
   }
 
-  String? get musicLoginHint => (catalog.activeGateway is LuaMusicGateway)
-      ? (catalog.activeGateway as LuaMusicGateway).loginHint
+  String? get musicLoginHint => (catalog.activeGateway is MusicAccountGateway)
+      ? (catalog.activeGateway as MusicAccountGateway).loginHint
       : null;
-  String? get musicCookieHint => (catalog.activeGateway is LuaMusicGateway)
-      ? (catalog.activeGateway as LuaMusicGateway).cookieHint
+  String? get musicCookieHint => (catalog.activeGateway is MusicAccountGateway)
+      ? (catalog.activeGateway as MusicAccountGateway).cookieHint
       : null;
   String? get musicForgotPasswordUrl =>
-      (catalog.activeGateway is LuaMusicGateway)
-      ? (catalog.activeGateway as LuaMusicGateway).forgotPasswordUrl
-      : isLegacyProvider
-      ? 'https://music.163.com/#/forgetpassword'
+      (catalog.activeGateway is MusicAccountGateway)
+      ? (catalog.activeGateway as MusicAccountGateway).forgotPasswordUrl
       : null;
-  bool get isLuaProvider => catalog.activeGateway is LuaMusicGateway;
-  bool get hasNetworkProvider => isLuaProvider || isLegacyProvider;
-  bool get isLegacyProvider =>
-      catalog.activeGateway is NeteaseMusicGateway || isNavidrome;
+  Future<String?> exportSessionCookie() async {
+    final active = catalog.activeGateway;
+    return active is MusicAccountGateway ? active.exportCookie() : null;
+  }
 
-  /// Navidrome is a legacy compatibility adapter until its Lua plugin exists.
-  bool get navidromeAvailable =>
-      navidromeFactory != null ||
-      musicConnections.any((gateway) => gateway.provider.id == 'navidrome');
-  String audioQualityLabel(AudioQuality value) =>
-      isNavidrome && value == AudioQuality.lossless ? '原始音质' : value.label;
-  String audioQualityDetail(AudioQuality value) =>
-      isNavidrome && value == AudioQuality.lossless
-      ? '服务器原始文件，不转码'
-      : value.detail;
-  String audioQualityBitrate(AudioQuality value) =>
-      isNavidrome && value == AudioQuality.lossless
-      ? '原始格式'
-      : value.bitrateLabel;
+  bool get isLuaProvider => catalog.activeGateway is MusicAccountGateway;
+  bool get hasNetworkProvider => !isLocalPlayback;
+
+  String audioQualityLabel(AudioQuality value) => value.label;
+  String audioQualityDetail(AudioQuality value) => value.detail;
+  String audioQualityBitrate(AudioQuality value) => value.bitrateLabel;
   List<MusicGateway> get musicConnections => catalog.connections.connections;
 
   /// Signed-in accounts are independent from the selected catalogue source.
@@ -571,14 +534,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool get platformChanging => _musicPlatforms.busy;
   bool supportsMusic(MusicCapability capability) =>
       catalog.activeGateway.supports(capability);
-  Future<AuthOutcome> signInWithNavidrome({
-    required String serverUrl,
-    required String username,
-    required String password,
-    bool allowInsecureHttp = false,
-  }) => navidromeFactory == null
-      ? Future.value(const AuthOutcome(false, error: 'Navidrome 插件尚未提供。'))
-      : _musicPlatforms.login(serverUrl, username, password, allowInsecureHttp);
+  bool supportsCurrentMusic(MusicCapability capability) {
+    final id = MusicId.tryParse(current?.id ?? '');
+    if (id == null) return false;
+    try {
+      return catalog.connections.resolve(id).supports(capability);
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> selectMusicConnection(String key) => _musicPlatforms.select(key);
   late final ListenTogetherController listenTogether = ListenTogetherController(
     state: this,
@@ -602,10 +567,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ThemeMode themeMode = ThemeMode.system;
   double _volume = 1;
   double _unmutedVolume = 1;
+  int _volumeRevision = 0;
+  Future<void>? _volumePreferences;
   double get volume => _volume;
+
+  Future<void> _loadVolumePreferences() => _volumePreferences ??= () async {
+    final revision = _volumeRevision;
+    if (revision != 0) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_presentationDisposed || revision != _volumeRevision) return;
+      _volume = (prefs.getDouble('lazer_volume') ?? 1).clamp(0, 1);
+      _unmutedVolume =
+          (prefs.getDouble('lazer_unmuted_volume') ??
+                  (_volume > 0 ? _volume : 1))
+              .clamp(.01, 1);
+    } catch (_) {
+      // Defaults remain available when settings storage is unavailable.
+    }
+  }();
 
   Future<void> setVolume(double value) async {
     if (!value.isFinite) return;
+    _volumeRevision++;
     _volume = value.clamp(0, 1);
     if (_volume > 0) _unmutedVolume = _volume;
     notifyListeners();
@@ -621,6 +605,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Callers persist once on release with [setVolume].
   void previewVolume(double value) {
     if (!value.isFinite) return;
+    _volumeRevision++;
     _volume = value.clamp(0, 1);
     if (_volume > 0) _unmutedVolume = _volume;
     unawaited(audioEngine?.setVolume(_volume) ?? Future<void>.value());
@@ -1417,9 +1402,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         );
         if (stored != null && stillCurrent()) {
           collections = stored;
-          if (catalog.usesPlatformGateway) {
-            _musicPlatforms.rememberCollections(owner, stored);
-          }
+          _musicPlatforms.rememberCollections(owner, stored);
           notifyListeners();
         }
       }
@@ -1427,9 +1410,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       final loaded = await catalog.userCollections(uid);
       if (stillCurrent()) {
         collections = loaded;
-        if (catalog.usesPlatformGateway) {
-          _musicPlatforms.rememberCollections(owner, loaded);
-        }
+        _musicPlatforms.rememberCollections(owner, loaded);
       }
     } catch (_) {
       if (stillCurrent()) {
@@ -1461,25 +1442,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ((String, String, String?), Future<void>)? _lyricRequest;
   final Set<String> _metadataLoaded = <String>{};
   final Set<String> _metadataPending = <String>{};
-  Set<int> _likedSongIds = <int>{};
   String? likeError;
-  bool get currentLiked {
-    if (MusicId.tryParse(current?.id ?? '') != null) {
-      return _musicPlatforms.isLiked(current!.id);
-    }
-    final id = int.tryParse(current?.id ?? '');
-    return id != null && _likedSongIds.contains(id);
-  }
-
-  /// Size of the loaded personal like list (0 while guest or not yet loaded).
-  int get likedCount => catalog.usesPlatformGateway
-      ? collections.liked?.trackCount ?? 0
-      : _likedSongIds.length;
-
-  /// Whether the gateway was reachable on the last interaction.
+  bool get currentLiked =>
+      current != null && _musicPlatforms.isLiked(current!.id);
+  int get likedCount => collections.liked?.trackCount ?? 0;
   bool get online => catalog.online;
-
-  NeteaseGateway get gateway => catalog.gateway;
 
   // -- session --------------------------------------------------------------
 
@@ -1614,11 +1581,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       MotionTiming.speed = animationSpeed;
       autoDpiScale = prefs.getBool('lazer_auto_dpi_scale') ?? true;
-      _volume = (prefs.getDouble('lazer_volume') ?? 1).clamp(0, 1);
-      _unmutedVolume =
-          (prefs.getDouble('lazer_unmuted_volume') ??
-                  (_volume > 0 ? _volume : 1))
-              .clamp(0.01, 1);
+      if (_volumeRevision == 0) {
+        _volume = (prefs.getDouble('lazer_volume') ?? 1).clamp(0, 1);
+        _unmutedVolume =
+            (prefs.getDouble('lazer_unmuted_volume') ??
+                    (_volume > 0 ? _volume : 1))
+                .clamp(.01, 1);
+      }
+      _volumePreferences = Future<void>.value();
       playbackQuality = AudioQualityInfo.parse(
         prefs.getString('lazer_playback_quality'),
       );
@@ -1744,11 +1714,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await pluginManager.restore();
     if (_presentationDisposed) return;
     await _musicPlatforms.synchronizePlugins(refresh: false);
-    await _restoreSession();
     if (_presentationDisposed) return;
     await _musicPlatforms.restore();
     if (_presentationDisposed) return;
     if (signedIn) unawaited(_flushPlayUploads());
+    unawaited(_refreshMissingArtwork());
     await refreshHome();
   }
 
@@ -1768,7 +1738,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> refreshDiscoveryCharts({bool force = false}) async {
-    if (!hasNetworkProvider || isNavidrome) {
+    if (!hasNetworkProvider) {
       discoveryCharts = const [];
       discoveryChartsError = null;
       return;
@@ -1783,14 +1753,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         (_) => const <MusicChart>[],
       );
       try {
-        final netease = await catalog.neteaseMirrorCharts();
-        if (netease.isNotEmpty) {
-          discoveryCharts = _sortDiscoveryCharts(netease);
+        final provider = await catalog.providerCharts();
+        if (provider.isNotEmpty) {
+          discoveryCharts = _sortDiscoveryCharts(provider);
           notifyListeners();
         }
       } catch (_) {
-        // External charts below can still populate the section.
+        // External charts remain available when the music provider is offline.
       }
+
       final external = await externalFuture;
       if (external.isNotEmpty) {
         final ids = discoveryCharts.map((chart) => chart.id).toSet();
@@ -1831,62 +1802,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     return result;
   }
 
-  Future<void> _restoreSession() async {
-    if (!isLegacyProvider) return;
-    try {
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      final String? cookie = prefs.getString(_sessionKey);
-      if (cookie == null || cookie.trim().isEmpty) return;
-      gateway.sessionCookie = cookie;
-      final GatewayLoginStatus status = await gateway.loginStatus();
-      final GatewayUserProfile? profile = status.profile;
-      if (status.signedIn && profile != null) {
-        _user = SessionUser.fromProfile(
-          profile,
-          method: AuthMethod.cookie,
-          detail: _cookieDetail(cookie),
-        );
-        notifyListeners();
-        unawaited(_refreshLikedSongs());
-      } else {
-        gateway.clearSession();
-        await prefs.remove(_sessionKey);
-      }
-    } catch (_) {
-      // Tests (no plugin) and offline boots stay on the guest session.
-    }
-  }
-
   Future<AuthOutcome> signInWithCookie(String cookie) async {
     try {
       final active = catalog.activeGateway;
-      if (active is LuaMusicGateway) {
+      if (active is MusicAccountGateway) {
         final user = await active.loginWithCookie(cookie);
         if (user == null) {
           return const AuthOutcome(false, error: '这个 Cookie 无效或已过期。');
         }
-        return _adoptLuaLogin(
+        return _adoptAccountLogin(
           user,
           AuthMethod.cookie,
           active.provider.name,
           owner: active,
         );
       }
-      if (!isLegacyProvider) {
-        return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
-      }
-      if (isNavidrome) await _musicPlatforms.selectNetease();
-      final GatewayLoginStatus status = await gateway.loginWithCookie(cookie);
-      final GatewayUserProfile? profile = status.profile;
-      if (!status.signedIn || profile == null) {
-        return const AuthOutcome(false, error: '这个 Cookie 无效或已过期。');
-      }
-      _adoptSession(
-        profile,
-        AuthMethod.cookie,
-        _cookieDetail(gateway.sessionCookie ?? cookie),
-      );
-      return const AuthOutcome(true);
+      return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
     } catch (error) {
       return _failure(error);
     }
@@ -1899,24 +1830,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }) async {
     try {
       final active = catalog.activeGateway;
-      if (active is LuaMusicGateway) {
-        return _adoptLuaLogin(
+      if (active is MusicAccountGateway) {
+        return _adoptAccountLogin(
           await active.loginWithPassword(phone, password),
           AuthMethod.password,
           _maskPhone(phone),
           owner: active,
         );
       }
-      if (!isLegacyProvider) {
-        return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
-      }
-      if (isNavidrome) await _musicPlatforms.selectNetease();
-      final GatewayLoginResult result = await gateway.loginWithPhonePassword(
-        phone,
-        password,
-        countryCode: countryCode,
-      );
-      return _adoptLoginResult(result, AuthMethod.password, _maskPhone(phone));
+      return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
     } catch (error) {
       return _failure(error);
     }
@@ -1925,23 +1847,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<AuthOutcome> signInWithEmail(String email, String password) async {
     try {
       final active = catalog.activeGateway;
-      if (active is LuaMusicGateway) {
-        return _adoptLuaLogin(
+      if (active is MusicAccountGateway) {
+        return _adoptAccountLogin(
           await active.loginWithPassword(email, password),
           AuthMethod.password,
           _maskEmail(email),
           owner: active,
         );
       }
-      if (!isLegacyProvider) {
-        return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
-      }
-      if (isNavidrome) await _musicPlatforms.selectNetease();
-      final GatewayLoginResult result = await gateway.loginWithEmail(
-        email,
-        password,
-      );
-      return _adoptLoginResult(result, AuthMethod.password, _maskEmail(email));
+      return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
     } catch (error) {
       return _failure(error);
     }
@@ -1976,23 +1890,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ) async {
     try {
       final active = catalog.activeGateway;
-      if (active is LuaMusicGateway) {
-        return _adoptLuaLogin(
+      if (active is MusicAccountGateway) {
+        return _adoptAccountLogin(
           await active.loginWithCaptcha(phone, captcha),
           AuthMethod.sms,
           _maskPhone(phone),
           owner: active,
         );
       }
-      if (!isLegacyProvider) {
-        return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
-      }
-      if (isNavidrome) await _musicPlatforms.selectNetease();
-      final GatewayLoginResult result = await gateway.loginWithPhoneCaptcha(
-        phone,
-        captcha,
-      );
-      return _adoptLoginResult(result, AuthMethod.sms, _maskPhone(phone));
+      return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
     } catch (error) {
       return _failure(error);
     }
@@ -2001,25 +1907,21 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<AuthOutcome> sendSmsCode(String phone) async {
     try {
       final active = catalog.activeGateway;
-      if (active is LuaMusicGateway) {
+      if (active is MusicAccountGateway) {
         await active.sendCaptcha(phone);
         return const AuthOutcome(true);
       }
-      if (!isLegacyProvider) {
-        return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
-      }
-      await gateway.sendCaptcha(phone);
-      return const AuthOutcome(true);
+      return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
     } catch (error) {
       return _failure(error);
     }
   }
 
-  AuthOutcome _adoptLuaLogin(
+  AuthOutcome _adoptAccountLogin(
     MusicUser? user,
     AuthMethod method,
     String detail, {
-    required LuaMusicGateway owner,
+    required MusicAccountGateway owner,
   }) {
     if (user == null) return const AuthOutcome(false, error: '登录失败，请稍后再试。');
     if (_presentationDisposed ||
@@ -2034,6 +1936,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       detail: detail,
       userId: int.tryParse(user.id.value) ?? 1,
       avatarUrl: user.avatarUrl,
+      signature: user.signature,
+      membership: user.membership,
     );
     _musicPlatforms.adoptLogin(owner, account);
     return const AuthOutcome(true);
@@ -2046,21 +1950,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     qrStartError = null;
     try {
       final active = catalog.activeGateway;
-      if (active is LuaMusicGateway) {
+      if (active is MusicAccountGateway) {
         final key = await active.qrKey();
         if (key == null || key.isEmpty) return null;
         final url = await active.qrUrl(key);
         return url.isEmpty ? null : url;
       }
-      if (!isLegacyProvider) {
-        qrStartError = '请先安装并启用支持扫码登录的插件。';
-        return null;
-      }
-      if (isNavidrome) await _musicPlatforms.selectNetease();
-      final String key = await gateway.createQrKey();
-      if (key.isEmpty) return null;
-      final String url = await gateway.createQrCodeUrl(key);
-      return url.isEmpty ? null : url;
+      qrStartError = '请先安装并启用支持扫码登录的插件。';
+      return null;
     } catch (error) {
       qrStartError = _friendly(error);
       return null;
@@ -2086,7 +1983,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// after 803 must not be mistaken for an expired key either.
   Future<int> pollQrLogin(String url) async {
     final owner = catalog.activeGateway;
-    if (owner is LuaMusicGateway) {
+    if (owner is MusicAccountGateway) {
       try {
         if (_qrConfirmed) {
           final user = await owner.checkSession();
@@ -2095,7 +1992,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             return 800;
           }
           if (user != null) {
-            _adoptLuaLogin(
+            _adoptAccountLogin(
               user,
               AuthMethod.qrcode,
               owner.provider.name,
@@ -2118,7 +2015,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             return 800;
           }
           if (user == null) return 802;
-          _adoptLuaLogin(
+          _adoptAccountLogin(
             user,
             AuthMethod.qrcode,
             owner.provider.name,
@@ -2131,91 +2028,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         return 801;
       }
     }
-    final Uri? uri = Uri.tryParse(url);
-    final String? key = uri?.queryParameters['codekey'];
-    if (key == null || key.isEmpty) return 800;
-    try {
-      if (_qrConfirmed && await _adoptQrSession()) return 803;
-      final GatewayQrCheck check = await gateway.checkQrCode(key);
-      qrPollError = null;
-      if (check.code == 803) {
-        _qrConfirmed = true;
-        if (await _adoptQrSession()) return 803;
-        // Confirmed, account still syncing: stay on the "scanned" state and
-        // let the next poll retry the account instead of dropping the login.
-        return 802;
-      }
-      if (check.code == 800 && _qrConfirmed) {
-        // A confirmed key is spent: later polls answer "expired" even though
-        // the login succeeded. Give the account one more chance first.
-        if (await _adoptQrSession()) return 803;
-      }
-      return check.code;
-    } catch (error) {
-      qrPollError = _friendly(error);
-      return 801;
-    }
-  }
-
-  /// Reads the account behind the confirmed QR cookie, retrying briefly:
-  /// `MUSIC_U` is already installed by [pollQrLogin], but `/login/status`
-  /// can answer "not signed in" for a beat after the confirmation.
-  Future<bool> _adoptQrSession() async {
-    final connection = activeConnectionKey;
-    for (int attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) {
-        await Future<void>.delayed(const Duration(milliseconds: 400));
-      }
-      try {
-        final GatewayLoginStatus status = await gateway.loginStatus();
-        final GatewayUserProfile? profile = status.profile;
-        if (status.signedIn &&
-            profile != null &&
-            activeConnectionKey == connection &&
-            !isNavidrome) {
-          _qrConfirmed = false;
-          _adoptSession(profile, AuthMethod.qrcode, '扫码登录');
-          return true;
-        }
-      } catch (_) {
-        // Keep retrying — the account endpoint lags the confirmation.
-      }
-    }
-    return false;
-  }
-
-  AuthOutcome _adoptLoginResult(
-    GatewayLoginResult result,
-    AuthMethod method,
-    String detail,
-  ) {
-    final GatewayUserProfile? profile = result.profile;
-    if (!result.ok || profile == null) {
-      final String message = result.message ?? '';
-      return AuthOutcome(
-        false,
-        error: message.isEmpty ? '登录失败，请稍后再试。' : message,
-      );
-    }
-    _adoptSession(profile, method, detail);
-    return const AuthOutcome(true);
-  }
-
-  void _adoptSession(
-    GatewayUserProfile profile,
-    AuthMethod method,
-    String detail,
-  ) {
-    if (_user.userId != profile.userId) {
-      collections = UserCollections.empty;
-      _likedSongIds = <int>{};
-    }
-    _user = SessionUser.fromProfile(profile, method: method, detail: detail);
-    _musicPlatforms.rememberActiveSession();
-    _persistSession(gateway.sessionCookie);
-    unawaited(refreshHome());
-    unawaited(_refreshLikedSongs());
-    notifyListeners();
+    return 800;
   }
 
   /// Back to the guest session — stay in the shell, drop the credentials.
@@ -2228,91 +2041,30 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final owner = selected is LocalMusicGateway
         ? _musicPlatforms.lastSessionGateway
         : selected;
-    if (owner is LuaMusicGateway || owner is NavidromeGateway) {
-      await _musicPlatforms.signOut(owner!);
-      return;
-    }
-    _musicPlatforms.cancelPending();
-    _musicPlatforms.rememberActiveSession();
-    collections = UserCollections.empty;
-    collectionsLoading = false;
-    collectionsError = null;
-    _finishPlaySession();
-    await _flushPlayUploads();
-    _playUploads.clear();
-    unawaited(_persistPlayUploads());
-    unawaited(listenTogether.leave());
-    _finishListening();
-    pause();
-    _stationLoader = null;
-    _stationLoading = false;
-    _stationSeen.clear();
-    _queue = <Track>[];
-    currentArtwork.update(null);
-    _lyricSnapshots.clear();
-    _lyricRequest = null;
-    _markQueueChanged();
-    _queueIndex = 0;
-    _position = Duration.zero;
-    lyrics = const <LyricLine>[];
-    ++_lyricGeneration;
-    _lyricsTrackId = null;
-    lyricsLoading = false;
-    lyricsPureMusic = false;
-    lyricsImported = false;
-    lyricsError = null;
-    ++_generation;
-    unawaited(audioEngine?.stop() ?? Future<void>.value());
-    unawaited(_saveQueue());
-    _user = SessionUser.guest;
-    _likedSongIds = <int>{};
-    likeError = null;
-    _qrConfirmed = false;
-    playStats = const <TrackPlayStat>[];
-    playStatsError = null;
-    _playStatsUid = null;
-    final activeGateway = catalog.activeGateway;
-    final MusicGateway? sessionGateway = activeGateway is LocalMusicGateway
-        ? _musicPlatforms.lastSessionGateway
-        : activeGateway;
-    _musicPlatforms.forgetActiveSession();
-    if (sessionGateway is LuaMusicGateway) {
-      try {
-        await sessionGateway.logout();
-      } catch (_) {
-        sessionGateway.clearSession();
-      }
-      unawaited(_forgetSession());
-    } else if (sessionGateway is NavidromeGateway) {
-      sessionGateway.clearSession();
-      _musicPlatforms.liked.clear();
-    } else if (sessionGateway is NeteaseMusicGateway || isLegacyProvider) {
-      gateway.clearSession();
-      _musicPlatforms.neteaseUser = SessionUser.guest;
-      unawaited(_forgetSession());
-    }
-    unawaited(refreshHome());
-    notifyListeners();
-  }
-
-  Future<void> _persistSession(String? cookie) async {
-    if (cookie == null || cookie.trim().isEmpty) return;
-    try {
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_sessionKey, cookie);
-    } catch (_) {}
-  }
-
-  Future<void> _forgetSession() async {
-    try {
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_sessionKey);
-    } catch (_) {}
+    if (owner != null) await _musicPlatforms.signOut(owner);
   }
 
   // -- catalogue actions ----------------------------------------------------
 
-  Future<SearchResults> search(String query) => catalog.search(query);
+  Future<SearchResults> search(String query) async {
+    if (!isLocalPlayback) return catalog.search(query);
+    await localLibrary.load();
+    final terms = query
+        .trim()
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((term) => term.isNotEmpty)
+        .toList();
+    if (terms.isEmpty) return SearchResults.empty;
+    return SearchResults(
+      tracks: localLibrary.playableTracks.where((track) {
+        final text =
+            '${track.title} ${track.translatedTitle ?? ''} ${track.artist} ${track.album}'
+                .toLowerCase();
+        return terms.every(text.contains);
+      }).toList(),
+    );
+  }
 
   /// The signed-in user's collections for the "我" page. Errors propagate.
   Future<UserCollections> userCollections() =>
@@ -2346,27 +2098,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     final String trimmed = name.trim();
     if (trimmed.isEmpty) throw ArgumentError('name cannot be blank.');
-    if (catalog.usesPlatformGateway) {
-      return _musicPlatforms.createPlaylist(trimmed, privacy);
-    }
-    final GatewayPlaylist? created = await gateway.createPlaylist(
-      trimmed,
-      privacy: privacy,
-    );
-    if (created == null) return null;
-    final Playlist playlist = Catalog.playlistFromGateway(created);
-    // Insert optimistically: the picker closes as soon as the song is added,
-    // and the refreshed list can arrive a moment later or fail offline.
-    if (!collections.created.any((Playlist item) => item.id == playlist.id)) {
-      collections = UserCollections(
-        liked: collections.liked,
-        created: <Playlist>[playlist, ...collections.created],
-        subscribed: collections.subscribed,
-      );
-      notifyListeners();
-    }
-    await _invalidateLibraryCollections();
-    return playlist;
+    return _musicPlatforms.createPlaylist(trimmed, privacy);
   }
 
   /// Adds [trackId] to one of the account's cloud playlists.
@@ -2374,57 +2106,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Adding to 我喜欢的音乐 is the service's "like" action, so the local heart
   /// state follows immediately; every playlist's cached track list is
   /// invalidated so opening it shows the new song.
-  Future<void> addSongToCloudPlaylist(String playlistId, String trackId) async {
-    if (MusicId.tryParse(playlistId) != null ||
-        MusicId.tryParse(trackId) != null) {
-      await _musicPlatforms.addSong(playlistId, trackId);
-      return;
-    }
-    if (!signedIn || !hasNetworkProvider) {
-      throw StateError('Sign in to add songs to a playlist.');
-    }
-    final int pid = int.tryParse(playlistId) ?? 0;
-    final int sid = int.tryParse(trackId) ?? 0;
-    if (pid <= 0 || sid <= 0) {
-      throw ArgumentError('Invalid playlist or song.');
-    }
-    if (int.tryParse(collections.liked?.id ?? '') == pid) {
-      // 我喜欢的音乐 is not manipulated through the playlist endpoints.
-      final int uid = _user.userId;
-      if (uid <= 0) throw StateError('Sign in to add songs to a playlist.');
-      await gateway.setSongLiked(sid, uid, true);
-      _likedSongIds.add(sid);
-      final Playlist? liked = collections.liked;
-      if (liked != null && !liked.trackIds.contains(trackId)) {
-        collections = UserCollections(
-          liked: Playlist(
-            id: liked.id,
-            name: liked.name,
-            trackIds: <String>[...liked.trackIds, trackId],
-            coverSeed: liked.coverSeed,
-            description: liked.description,
-            coverUrl: liked.coverUrl,
-            trackCount: liked.trackCount + 1,
-          ),
-          created: collections.created,
-          subscribed: collections.subscribed,
-        );
-      }
-    } else {
-      await gateway.addTracksToPlaylist(pid, <int>[sid]);
-    }
-    await _invalidateLibraryCollections(playlistId: playlistId);
-    notifyListeners();
-  }
-
-  /// Drops cached copies touched by a playlist mutation and reloads the
-  /// library shelves in the background.
-  Future<void> _invalidateLibraryCollections({String? playlistId}) async {
-    if (playlistId != null) await catalog.invalidatePlaylist(playlistId);
-    final int uid = _user.userId;
-    if (uid > 0) await catalog.invalidateCollections(uid);
-    unawaited(refreshCollections(force: true));
-  }
+  Future<void> addSongToCloudPlaylist(String playlistId, String trackId) =>
+      _musicPlatforms.addSong(playlistId, trackId);
 
   // -- transport ------------------------------------------------------------
   //
@@ -2468,6 +2151,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   final ShuffleOrder _shuffleOrder;
   (bool, LoopMode)? _stationPlayMode;
   bool _realActive = false;
+  Future<void>? _audioOpening;
   int _generation = 0;
   int trackChangeDirection = 1;
 
@@ -2543,14 +2227,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queueSnapshot = null;
   }
 
-  List<Track> get recentTracks => List<Track>.unmodifiable(
-    _recentTracks.where((track) {
-      final reference = MusicId.tryParse(track.id);
-      return reference == null
-          ? !isNavidrome
-          : reference.connection == catalog.activeGateway.connectionId;
-    }),
-  );
+  List<Track> get recentTracks {
+    if (isLocalPlayback) {
+      final available = {
+        for (final track in localLibrary.playableTracks) track.id: track,
+      };
+      return List.unmodifiable(
+        _recentTracks.map((track) => available[track.id]).whereType<Track>(),
+      );
+    }
+    return List<Track>.unmodifiable(
+      _recentTracks.where((track) {
+        if (track.localPath != null) return true;
+        final reference = MusicId.tryParse(track.id);
+        if (reference == null) return false;
+        try {
+          catalog.connections.resolve(reference);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }),
+    );
+  }
 
   /// Counts without allocating an immutable snapshot of the queue.
   int get queueLength => _queue.length;
@@ -3149,6 +2848,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _tickNotifier.pulse();
   }
 
+  /// Applies a system or remote seek even when a new source is still opening.
+  /// The synchronous [seek] keeps the UI responsive; this variant waits for
+  /// the decoder hand-off and repeats the engine seek once the new source is
+  /// active so callers can safely await the command.
+  Future<void> seekAsync(double fraction) async {
+    final trackId = current?.id;
+    seek(fraction);
+    final opening = _audioOpening;
+    if (opening == null || _realActive) return;
+    try {
+      await opening;
+    } catch (_) {
+      return;
+    }
+    if (_presentationDisposed || current?.id != trackId || !_realActive) return;
+    seek(fraction);
+  }
+
   /// Follows the engine back to the song an audible overlap was mixed out of.
   ///
   /// A seek (and any other cancellation) drops the incoming side of a mix while
@@ -3324,7 +3041,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// [recovering] marks a reload this app started because the output was lost:
   /// it keeps the retry budgets already spent on this source, so a device that
   /// fails every open cannot loop.
-  Future<void> _startAudio({
+  Future<void> _startAudio({Duration? resumeAt, bool recovering = false}) {
+    final future = _startAudioImpl(resumeAt: resumeAt, recovering: recovering);
+    _audioOpening = future;
+    unawaited(
+      future.then<void>((_) {
+        _finishAudioOpening(future);
+      }, onError: (error, stack) => _finishAudioOpening(future, error, stack)),
+    );
+    return future;
+  }
+
+  void _finishAudioOpening(
+    Future<void> future, [
+    Object? error,
+    StackTrace? stack,
+  ]) {
+    if (identical(_audioOpening, future)) _audioOpening = null;
+  }
+
+  Future<void> _startAudioImpl({
     Duration? resumeAt,
     bool recovering = false,
   }) async {
@@ -3363,6 +3099,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final QueueAudioEngine? queueEngine = _queueEngine;
     int? queueId;
     try {
+      await _loadVolumePreferences();
+      if (generation != _generation) return;
+      await engine.setVolume(_volume);
+      if (generation != _generation || _presentationDisposed) return;
       if (queueEngine != null) {
         try {
           queueId = await queueEngine.setQueue(<String>[url]);
@@ -3896,55 +3636,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       await _musicPlatforms.hydrate(track, reference);
       return;
     }
-    final id = int.tryParse(track.id);
-    if (id == null || id <= 0) return;
-    _metadataPending.add(track.id);
-    try {
-      final songs = await gateway.songDetails(<int>[id]);
-      final song = songs.where((song) => song.id == id).firstOrNull;
-      if (song == null) return;
-      _metadataLoaded.add(track.id);
-      // Hydrate matching entries without replacing the current queue or
-      // erasing artwork and translations when a field is absent upstream.
-      bool changed = false;
-      _queue = _queue.map((entry) {
-        if (entry.id != track.id ||
-            (entry.coverUrl == song.coverUrl &&
-                entry.translatedTitle == song.translatedTitle &&
-                entry.albumId > 0 &&
-                entry.artists.isNotEmpty)) {
-          return entry;
-        }
-        changed = true;
-        return Track(
-          id: entry.id,
-          title: entry.title,
-          artist: entry.artist,
-          artists: song.artistDetails.isNotEmpty
-              ? song.artistDetails.map(Catalog.artistFromGateway).toList()
-              : entry.artists,
-          album: entry.album,
-          duration: entry.duration,
-          coverSeed: entry.coverSeed,
-          accent: entry.accent,
-          albumId: song.albumId > 0 ? song.albumId : entry.albumId,
-          coverUrl: song.coverUrl ?? entry.coverUrl,
-          translatedTitle: song.translatedTitle ?? entry.translatedTitle,
-        );
-      }).toList();
-      if (changed) {
-        _markQueueChanged();
-        unawaited(refreshArtworkSeed());
-        unawaited(_saveQueue());
-        final Track? hydrated = current;
-        if (hydrated != null) unawaited(_replaceRecentMetadata(hydrated));
-        notifyListeners();
-      }
-    } catch (_) {
-      // Keep playback available; the next playback attempt can retry metadata.
-    } finally {
-      _metadataPending.remove(track.id);
-    }
   }
 
   Future<void> _restoreQueue(int initialActivity) async {
@@ -3991,16 +3682,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await _saveRecentTracks();
   }
 
-  Future<void> _replaceRecentMetadata(Track track) async {
-    bool changed = false;
-    _recentTracks = _recentTracks.map((entry) {
-      if (entry.id != track.id) return entry;
-      changed = true;
-      return track;
-    }).toList();
-    if (changed) await _saveRecentTracks();
-  }
-
   Future<void> _saveRecentTracks() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -4025,6 +3706,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       listeningStatistics.begin(current!, audioEngine!.position);
     }
     try {
+      await _loadVolumePreferences();
+      if (_presentationDisposed || !_playing || generation != _generation) {
+        return;
+      }
+      await audioEngine!.setVolume(_volume);
       await audioEngine!.play();
       if (_presentationDisposed) return;
       // A pending native play may finish after the pause boundary.
@@ -4043,51 +3729,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  Future<void> _refreshLikedSongs() async {
-    if (_presentationDisposed) return;
-    if (isNavidrome) {
-      await refreshCollections(force: true);
-      return;
-    }
-    final uid = _user.userId;
-    if (uid <= 0) return;
-    try {
-      final ids = await gateway.likedSongIds(uid);
-      if (_user.userId != uid) return;
-      _likedSongIds = ids;
-      notifyListeners();
-    } catch (_) {
-      // Personal likes are optional while public playback remains available.
-    }
-  }
-
-  Future<void> toggleLikeCurrent() async {
-    if (MusicId.tryParse(current?.id ?? '') != null) {
-      await _musicPlatforms.toggleLike();
-      return;
-    }
-    final id = int.tryParse(current?.id ?? '');
-    final uid = _user.userId;
-    if (id == null || uid <= 0) return;
-    final liked = !_likedSongIds.contains(id);
-    likeError = null;
-    try {
-      await gateway.setSongLiked(id, uid, liked);
-      if (_user.userId != uid) return;
-      if (liked) {
-        _likedSongIds.add(id);
-      } else {
-        _likedSongIds.remove(id);
-      }
-      // The next entry into the liked playlist must reflect this mutation.
-      final playlistId = collections.liked?.id;
-      if (playlistId != null) await catalog.invalidatePlaylist(playlistId);
-      await catalog.invalidateCollections(_user.userId);
-    } catch (_) {
-      likeError = '收藏失败，请稍后重试。';
-    }
-    notifyListeners();
-  }
+  Future<void> toggleLikeCurrent() => _musicPlatforms.toggleLike();
 
   Future<void> ensureCurrentLyrics({bool force = false}) async {
     final track = current;
@@ -4167,30 +3809,102 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _checkImportedLyrics(track, key, generation);
     Object? failure;
     bool cacheable = false;
-    final bool localOnly =
-        track.localPath != null || track.id.startsWith('local:');
+    final localOnly = track.localPath != null || track.id.startsWith('local:');
+    bool currentRequest() =>
+        !_presentationDisposed && generation == _lyricGeneration;
+    void publish(GatewayLyrics payload) {
+      if (!currentRequest()) return;
+      if (!lyricsImported) {
+        lyrics = List.unmodifiable(parseLyrics(payload));
+        lyricsPureMusic = payload.pureMusic;
+      }
+      cacheable = true;
+      lyricsError = null;
+      lyricsLoading = false;
+      _rememberLyrics(key);
+      notifyListeners();
+    }
+
+    Future<(GatewayLyrics?, Object?)>? remote;
     if (!localOnly) {
-      try {
-        final payload = await catalog.lyricsFor(track);
-        if (generation != _lyricGeneration) return;
-        if (!lyricsImported) {
-          lyrics = payload == null
-              ? const <LyricLine>[]
-              : List<LyricLine>.unmodifiable(parseLyrics(payload));
-          lyricsPureMusic = payload?.pureMusic ?? false;
+      remote = () async {
+        try {
+          return (await catalog.lyricsFor(track), null);
+        } catch (error) {
+          return (null, error);
         }
-        cacheable = payload != null;
-      } catch (error) {
-        if (generation != _lyricGeneration) return;
-        failure = error;
+      }();
+    }
+    final stored = catalog.lyricsCache.read(track);
+    if (remote == null) {
+      final payload = await stored;
+      if (!currentRequest()) return;
+      if (payload != null) publish(payload);
+    } else {
+      // Whichever usable copy arrives first can paint. Disk I/O and cache
+      // writes must never delay a ready lyric response or its animation.
+      final first = await Future.any<(bool, GatewayLyrics?, Object?)>([
+        remote.then((value) => (true, value.$1, value.$2)),
+        stored.then((value) => (false, value, null)),
+      ]);
+      if (!currentRequest()) return;
+      if (!first.$1 && first.$2 != null) {
+        publish(first.$2!);
+        unawaited(
+          remote.then((value) {
+            final payload = value.$1;
+            if (payload == null || _presentationDisposed) return;
+            unawaited(catalog.lyricsCache.save(track, payload));
+            publish(payload);
+          }),
+        );
+        return;
+      }
+      if (first.$1) {
+        final payload = first.$2;
+        failure = first.$3;
+        if (payload != null) {
+          unawaited(catalog.lyricsCache.save(track, payload));
+          publish(payload);
+        } else {
+          // A cache lookup may be blocked on the platform storage channel.
+          // Do not keep the lyric sheet in a spinner after the provider has
+          // already answered; adopt a late cache hit when it arrives.
+          unawaited(
+            stored.then((cached) {
+              if (cached != null && currentRequest()) publish(cached);
+            }),
+          );
+        }
+      } else {
+        final result = await remote;
+        if (!currentRequest()) return;
+        final payload = result.$1;
+        failure = result.$2;
+        if (payload != null) {
+          unawaited(catalog.lyricsCache.save(track, payload));
+          publish(payload);
+        }
       }
     }
     // Cloud lyrics are authoritative, but a `.lrc` beside a downloaded or
     // scanned file is a useful offline fallback.
-    if (lyrics.isEmpty && !lyricsPureMusic) {
+    if (lyrics.isEmpty &&
+        !lyricsPureMusic &&
+        (localOnly || track.localPath != null)) {
       final File? localFile = await localLibrary.localFileFor(track);
       if (generation != _lyricGeneration) return;
       final String? localPath = localFile?.path ?? track.localPath;
+      final cached = await catalog.lyricsCache.read(
+        track,
+        audioPath: localPath,
+      );
+      if (generation != _lyricGeneration) return;
+      if (cached != null && !lyricsImported) {
+        lyrics = List.unmodifiable(parseLyrics(cached));
+        lyricsPureMusic = cached.pureMusic;
+        cacheable = true;
+      }
       final String? sidecar = await ImportedLyricsStore.sidecarFor(localPath);
       if (generation != _lyricGeneration) return;
       if (sidecar != null &&
@@ -4589,27 +4303,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  /// The queue a play is credited to: the album when the track names one,
-  /// otherwise the song itself, matching the official play-log `sourceId`.
-  int _playSourceId(Track track) {
-    if (track.albumId > 0) return track.albumId;
-    return int.tryParse(track.id) ?? 0;
-  }
-
   void _reportPlayStart(Track track) {
-    if (MusicId.tryParse(track.id) != null) {
-      unawaited(_musicPlatforms.report(track, Duration.zero, false));
-      return;
-    }
-    final int? songId = int.tryParse(track.id);
-    if (songId == null || songId <= 0 || !signedIn) return;
-    _enqueuePlay(
-      _PlayReport(
-        songId: songId,
-        kind: _PlayLogKind.start,
-        sourceId: _playSourceId(track),
-      ),
-    );
+    unawaited(_musicPlatforms.report(track, Duration.zero, false));
   }
 
   /// The official play record qualifies a play after half the song, capped at
@@ -4639,27 +4334,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? track = _playSessionTrack;
     if (track == null || !_playSessionQualified || _playSessionSent) return;
     _playSessionSent = true;
-    if (MusicId.tryParse(track.id) != null) {
-      unawaited(_musicPlatforms.report(track, _playSessionTime, true));
-      return;
-    }
-    final int? songId = int.tryParse(track.id);
-    if (songId == null || songId <= 0 || !signedIn) return;
-    final int durationSeconds = track.duration.inSeconds;
-    final int seconds = _playSessionTime.inSeconds.clamp(
-      1,
-      durationSeconds > 0
-          ? durationSeconds
-          : _playSessionTime.inSeconds.clamp(1, 1 << 20),
-    );
-    _enqueuePlay(
-      _PlayReport(
-        songId: songId,
-        kind: _PlayLogKind.play,
-        seconds: seconds,
-        sourceId: _playSourceId(track),
-      ),
-    );
+    unawaited(_musicPlatforms.report(track, _playSessionTime, true));
   }
 
   void _enqueuePlay(_PlayReport report) {
@@ -4679,24 +4354,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (decoded is! List) return;
       for (final dynamic row in decoded) {
         if (row is! Map<String, dynamic>) continue;
-        final int songId = (row['songId'] as num?)?.toInt() ?? 0;
-        final int seconds = (row['seconds'] as num?)?.toInt() ?? 0;
-        final int sourceId = (row['sourceId'] as num?)?.toInt() ?? songId;
-        // Entries written before the split carry only seconds and are plays.
-        final _PlayLogKind kind = row['kind'] == 'start'
-            ? _PlayLogKind.start
-            : _PlayLogKind.play;
-        if (songId > 0 && (kind == _PlayLogKind.start || seconds > 0)) {
-          _playUploads.add(
-            _PlayReport(
-              songId: songId,
-              kind: kind,
-              seconds: seconds,
-              sourceId: sourceId,
-            ),
-          );
+        final songId = row['songId'];
+        final account = row['account'];
+        if (songId is! String ||
+            account is! String ||
+            MusicId.tryParse(songId) == null) {
+          continue;
         }
+        final seconds = (row['seconds'] as num?)?.toInt() ?? 0;
+        _playUploads.add(
+          _PlayReport(
+            songId: songId,
+            account: account,
+            kind: row['kind'] == 'start'
+                ? _PlayLogKind.start
+                : _PlayLogKind.play,
+            seconds: seconds,
+          ),
+        );
       }
+
       while (_playUploads.length > 50) {
         _playUploads.removeAt(0);
       }
@@ -4714,9 +4391,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           for (final report in _playUploads)
             <String, Object?>{
               'songId': report.songId,
+              'account': report.account,
               'kind': report.kind == _PlayLogKind.start ? 'start' : 'play',
               'seconds': report.seconds,
-              'sourceId': report.sourceId,
             },
         ]),
       );
@@ -4727,47 +4404,41 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// on the next track boundary or the next library refresh, so an offline
   /// spell does not silently lose plays.
   Future<void> _flushPlayUploads() async {
-    if (isNavidrome) return;
-    if (_playUploadInFlight || !signedIn) return;
+    if (_playUploadInFlight) return;
     _playUploadInFlight = true;
-    var uploaded = false;
-    var uploadedPlay = false;
+    var changed = false;
     try {
-      while (_playUploads.isNotEmpty) {
-        final _PlayReport report = _playUploads.first;
+      for (final report in List<_PlayReport>.of(_playUploads)) {
         try {
-          if (report.kind == _PlayLogKind.start) {
-            await catalog.reportPlayStart(
-              songId: report.songId,
-              sourceId: report.sourceId,
-            );
-          } else {
-            await catalog.reportPlayback(
-              songId: report.songId,
-              playedSeconds: report.seconds,
-              sourceId: report.sourceId,
-            );
-            uploadedPlay = true;
+          final id = MusicId.tryParse(report.songId);
+          if (id == null) {
+            _playUploads.remove(report);
+            changed = true;
+            continue;
           }
-          _playUploads.removeAt(0);
-          uploaded = true;
+          final owner = catalog.connections.resolve(id);
+          if (owner.user == null || owner.cacheNamespace != report.account) {
+            continue;
+          }
+          await owner.scrobble(
+            id,
+            played: Duration(seconds: report.seconds),
+            submission: report.kind == _PlayLogKind.play,
+          );
+          _playUploads.remove(report);
+          changed = true;
+          if (report.kind == _PlayLogKind.play &&
+              identical(owner, catalog.activeGateway)) {
+            await catalog.invalidatePlayStats(_user.userId);
+            _playStatsUid = null;
+          }
         } catch (_) {
-          break;
+          // Keep a failed account's report without blocking other platforms.
         }
       }
     } finally {
       _playUploadInFlight = false;
-      final int uid = _user.userId;
-      if (uploaded) {
-        unawaited(_persistPlayUploads());
-        if (uid > 0 && uploadedPlay) {
-          await catalog.invalidatePlayStats(uid);
-          // The loaded list predates this play; make the next library visit
-          // fetch the updated record instead of short-circuiting on the old
-          // in-memory copy.
-          if (_playStatsUid == uid) _playStatsUid = null;
-        }
-      }
+      if (changed) unawaited(_persistPlayUploads());
     }
   }
 
@@ -4808,29 +4479,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     return '$visible***${trimmed.substring(at)}';
   }
 
-  static String _cookieDetail(String cookie) {
-    final int fields = cookie
-        .split(';')
-        .where((String s) => s.trim().isNotEmpty)
-        .length;
-    return '$fields 个字段';
-  }
-
   static String _friendly(Object error) {
+    if (Catalog.isRateLimited(error)) return '操作过于频繁，请稍后再试。';
     if (error is MusicGatewayException) {
       return error.authenticationFailure
           ? '服务器拒绝了登录，请检查用户名和密码。'
-          : '音乐服务器连接失败，请检查地址和网络后重试。';
+          : '音乐服务器连接失败，请稍后重试。';
     }
-    if (error is GatewayHttpException) {
-      return '网络请求失败（HTTP ${error.statusCode}）。';
-    }
-    if (error is GatewayConnectionException) {
-      return '连接失败，请检查网络后重试。';
-    }
-    if (error is GatewayProtocolException) return '服务返回了无法解析的数据。';
-    if (Catalog.isRateLimited(error)) return '操作过于频繁，请稍后再试。';
-    if (error is GatewayServiceException) return '服务暂时拒绝了请求（${error.code}）。';
     if (error is ArgumentError) return error.message?.toString() ?? '输入无效。';
     return '连接失败，请检查网络后重试。';
   }
@@ -4889,13 +4544,12 @@ class _PlayReport {
     required this.songId,
     required this.kind,
     this.seconds = 0,
-    this.sourceId = 0,
+    required this.account,
   });
 
-  final int songId;
+  final String songId, account;
   final _PlayLogKind kind;
   final int seconds;
-  final int sourceId;
 }
 
 /// Transport heartbeat lane. `notifyListeners()` is @protected, so this thin

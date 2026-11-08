@@ -1,7 +1,7 @@
 // i18n:data — interface strings declared here are translated at their render sites.
 /// The four audio tiers the player and downloader expose.
 ///
-/// The values line up with the NetEase `/song/url/v1` `level` names: requests
+/// The values line up with the music provider `/song/url/v1` `level` names: requests
 /// are made by level, while the gateway maps each level onto the bitrate the
 /// upstream player-url endpoint understands. [fallbackChain] is used when the
 /// account cannot receive the requested tier (no VIP, region lock, no FLAC
@@ -21,7 +21,7 @@ extension AudioQualityInfo on AudioQuality {
     AudioQuality.standard => '128 kbps · 文件更小',
     AudioQuality.higher => '192 kbps · 兼顾体积与细节',
     AudioQuality.exhigh => '320 kbps · 推荐',
-    AudioQuality.lossless => 'FLAC 无损 · 需要黑胶会员',
+    AudioQuality.lossless => 'FLAC 无损 · 取决于音源',
   };
 
   /// The upstream `level` parameter.
@@ -74,7 +74,7 @@ extension AudioQualityInfo on AudioQuality {
     orElse: () => AudioQuality.exhigh,
   );
 
-  /// Maps a NetEase `level` string back onto a tier.
+  /// Maps a music provider `level` string back onto a tier.
   static AudioQuality? fromLevel(String? level) {
     final String value = level?.trim().toLowerCase() ?? '';
     for (final AudioQuality quality in AudioQuality.values) {
@@ -112,6 +112,7 @@ class AudioSource {
     required this.quality,
     this.format,
     this.bytes,
+    this.headers = const {},
   });
 
   /// HTTP(S) or local `file:` URL.
@@ -126,4 +127,5 @@ class AudioSource {
 
   /// Advertised file size, when the service reports it.
   final int? bytes;
+  final Map<String, String> headers;
 }

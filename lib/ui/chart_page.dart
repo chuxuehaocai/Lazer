@@ -83,7 +83,7 @@ class _AppChartPageState extends State<AppChartPage>
         _matching = false;
       });
     } catch (_) {
-      // Covers, ranks and source links remain usable without a NetEase match.
+      // Covers, ranks and source links remain usable without a music provider match.
       if (mounted && serial == _requestSerial) {
         setState(() => _matching = false);
       }
@@ -224,7 +224,7 @@ class _AppChartPageState extends State<AppChartPage>
                       padding: EdgeInsets.fromLTRB(inset, 0, inset, 16),
                       child: ChartLoadCard(
                         loading: false,
-                        message: '这些歌曲暂时匹配不到网易云，可以重新匹配', // i18n:key
+                        message: '这些歌曲暂时匹配不到当前平台，可以重新匹配', // i18n:key
                         onRetry: () => unawaited(_retryMatching()),
                       ),
                     ),

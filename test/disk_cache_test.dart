@@ -1,3 +1,4 @@
+import 'package:lazer_nextgen/utils/media_requests.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -37,6 +38,11 @@ class _GatedJsonCache extends DiskCache {
 }
 
 void main() {
+  setUp(()=>MediaRequestRules.register('fixture',[
+    {'host':'*.images.test','artworkResize':{'parameter':'param','value':'{size}y{size}'}},
+    {'host':'127.0.0.1','headers':{'Referer':'https://provider.test/'}}
+  ]));
+  tearDown(()=>MediaRequestRules.remove('fixture'));
   late Directory directory;
   late DiskCache cache;
   setUp(() async {
@@ -321,7 +327,7 @@ void main() {
         await request.response.close();
       });
       final source = 'http://${server.address.host}:${server.port}/cover';
-      const artworkUrl = 'https://p1.music.126.net/real-cover.jpg';
+      const artworkUrl = 'https://p1.images.test/real-cover.jpg';
       final artwork = ArtworkCache(disk: cache, candidates: (_) => [source]);
       final result = await Future.wait([
         artwork.bytes(artworkUrl),
@@ -329,8 +335,8 @@ void main() {
       ]);
       expect(result.first, [137, 80, 78, 71]);
       expect(requests, 1);
-      expect(agent, 'LazerDesktop/1.0');
-      expect(referer, 'https://music.163.com/');
+      expect(agent, 'Lazer/2.0');
+      expect(referer, 'https://provider.test/');
       await server.close(force: true);
       final restarted = ArtworkCache(
         disk: DiskCache(directory: () async => directory),
@@ -360,7 +366,7 @@ void main() {
         disk: cache,
         candidates: (_) => ['$base/rejected', '$base/original'],
       );
-      const url = 'https://p1.music.126.net/fallback.jpg';
+      const url = 'https://p1.images.test/fallback.jpg';
       expect(await artwork.bytes(url), [137, 80, 78, 71]);
       expect(paths, ['/rejected', '/original']);
       expect(await artwork.bytes(url), [137, 80, 78, 71]);

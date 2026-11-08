@@ -7,44 +7,31 @@ import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/home_pages.dart';
 
-class _DailyGateway extends NeteaseGateway {
+class _DailyGateway extends MusicGateway {
   bool offline = false;
-
   @override
-  Future<List<GatewaySong>> dailyRecommendedSongs() async {
+  MusicProvider get provider =>
+      const MusicProvider(id: 'fixture', name: 'Fixture');
+  @override
+  String get connectionId => 'daily';
+  @override
+  MusicUser? get user => null;
+  @override
+  Set<MusicCapability> get capabilities => const {MusicCapability.homeFeed};
+  @override
+  Future<MusicHome> homeFeed() async {
     if (offline) throw const SocketException('offline');
-    return List<GatewaySong>.generate(
-      35,
-      (index) => GatewaySong(
-        id: index + 1,
-        title: 'Daily ${index + 1}',
-        artists: const <String>['Artist'],
-        albumName: 'Album',
-        duration: const Duration(minutes: 3),
-      ),
-    );
+    final songs = [
+      for (var i = 1; i <= 35; i++)
+        MusicSong(
+          id: id(MusicEntityKind.song, '$i'),
+          title: 'Daily $i',
+          artists: [],
+          duration: const Duration(minutes: 3),
+        ),
+    ];
+    return MusicHome(quick: songs.take(8).toList(), daily: songs);
   }
-
-  @override
-  Future<List<GatewayPlaylist>> topPlaylists({
-    String category = '全部',
-    int limit = 12,
-    int offset = 0,
-  }) async => const [];
-  @override
-  Future<List<GatewayPlaylist>> userPlaylists(
-    int uid, {
-    int limit = 30,
-    int offset = 0,
-  }) async => const [];
-  @override
-  Future<List<GatewayPlaylist>> personalizedPlaylists({int limit = 12}) async =>
-      const [];
-  @override
-  Future<List<GatewayPlaylist>> dailyRecommendedPlaylists() async => const [];
-  @override
-  Future<List<GatewaySong>> personalizedNewSongs({int limit = 20}) async =>
-      const [];
 }
 
 void main() {
@@ -63,8 +50,11 @@ void main() {
       final playlist = dailyRecommendationsPlaylist(feed);
       expect(playlist.id, dailyRecommendationsPlaylistId);
       expect(playlist.trackCount, 35);
-      expect(playlist.trackIds.last, '35');
-      expect((await catalog.playlistTracks(playlist.id)).last.id, '35');
+      expect(playlist.trackIds.last, 'fixture:daily:song:35');
+      expect(
+        (await catalog.playlistTracks(playlist.id)).last.id,
+        'fixture:daily:song:35',
+      );
       expect(await catalog.cachedPlaylistTracks(playlist.id), hasLength(35));
 
       final restarted = Catalog(

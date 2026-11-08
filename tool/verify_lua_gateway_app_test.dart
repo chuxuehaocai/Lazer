@@ -50,7 +50,8 @@ void main() {
         );
         expect(installed.error, isNull);
         expect(app.isLuaProvider, isTrue);
-        expect(app.musicProvider.name, '网易云音乐');
+        expect(app.musicProvider.name, isNotEmpty);
+        final platformKey = app.activeConnectionKey;
         expect(app.musicAuthenticationMethods, containsAll(['qr', 'cookie']));
         final login = await app.signInWithCookie(
           await File(cookiePath).readAsString(),
@@ -129,14 +130,14 @@ void main() {
         expect(app.isGuest, isFalse);
         expect(app.activeMusicSignedIn, isFalse);
         expect(app.user.handle == originalAccount, isTrue);
-        await app.selectMusicConnection('netease:lazer.netease');
+        await app.selectMusicConnection(platformKey);
         expect(app.user.handle == originalAccount, isTrue);
         app.dispose();
         states.remove(app);
 
         final restored = create();
         await restored.bootstrap();
-        expect(restored.activeConnectionKey, 'netease:lazer.netease');
+        expect(restored.activeConnectionKey, platformKey);
         expect(
           restored.user.handle == originalAccount,
           isTrue,

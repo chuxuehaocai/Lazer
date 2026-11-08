@@ -32,6 +32,7 @@ import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/retained_content_switcher.dart';
 import '../widgets/song_comments_view.dart';
+import '../widgets/settings_detail.dart';
 import 'background.dart';
 import 'login.dart';
 import '../navigation/pull_down_to_close.dart';
@@ -276,10 +277,16 @@ class _AppShellState extends State<AppShell>
   /// is held back and folded into the rebuild that ends the switch.
   void _onAppStateChanged() {
     if (!mounted) return;
+    if (_comments && !state.supportsCurrentMusic(MusicCapability.comments)) {
+      _comments = false;
+    }
     if (_connectionKey != state.activeContentKey) {
       _browseHistory.clear();
       cancelCoverTransitions();
       _connectionKey = state.activeContentKey;
+      if (state.isLocalPlayback && _section == _AppSection.likes) {
+        _section = _AppSection.home;
+      }
       _playlist = null;
       _album = null;
       _artist = null;
@@ -610,7 +617,7 @@ class _AppShellState extends State<AppShell>
   }
 
   void _toggleComments() {
-    if (!state.supportsMusic(MusicCapability.comments)) return;
+    if (!state.supportsCurrentMusic(MusicCapability.comments)) return;
     if (_comments) {
       _backToRoot();
       return;
@@ -619,7 +626,9 @@ class _AppShellState extends State<AppShell>
     setState(() {
       _comments = !_comments;
       if (_comments) {
-        _commentsController ??= SongCommentsController(state.gateway);
+        _commentsController ??= SongCommentsController(
+          state.catalog.connections,
+        );
       }
     });
   }
@@ -1060,6 +1069,7 @@ class _AppShellState extends State<AppShell>
           child: Column(
             children: <Widget>[
               LargeScreenNavBar(
+                showLikes: !state.isLocalPlayback,
                 selected: _largeScreenTab,
                 searchActive: _section == _AppSection.search && !_hasOpenDetail,
                 canGoBack: _hasOpenDetail,
@@ -1186,6 +1196,13 @@ class _AppShellState extends State<AppShell>
   }
 
   Widget _mobileBottomBar() {
+    final sections = [
+      _AppSection.home,
+      _AppSection.search,
+      _AppSection.library,
+      if (!state.isLocalPlayback) _AppSection.likes,
+      _AppSection.settings,
+    ];
     // This surface floats over the page. Only AppleGlass paints a background;
     // its clip leaves the gutters and the gap between capsules transparent.
     return SafeArea(
@@ -1213,9 +1230,10 @@ class _AppShellState extends State<AppShell>
                 const SizedBox(height: 16),
               ],
               CapsuleNavigationBar(
-                selectedIndex: _section.index,
-                onDestinationSelected: (int index) =>
-                    _select(_AppSection.values[index]),
+                selectedIndex: sections
+                    .indexOf(_section)
+                    .clamp(0, sections.length - 1),
+                onDestinationSelected: (int index) => _select(sections[index]),
                 destinations: <NavigationDestination>[
                   NavigationDestination(
                     icon: const Icon(Icons.home_outlined),
@@ -1232,11 +1250,12 @@ class _AppShellState extends State<AppShell>
                     selectedIcon: const Icon(Icons.library_music_rounded),
                     label: context.tr('音乐库'),
                   ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.favorite_border_rounded),
-                    selectedIcon: const Icon(Icons.favorite_rounded),
-                    label: context.tr('我喜欢'),
-                  ),
+                  if (!state.isLocalPlayback)
+                    NavigationDestination(
+                      icon: const Icon(Icons.favorite_border_rounded),
+                      selectedIcon: const Icon(Icons.favorite_rounded),
+                      label: context.tr('我喜欢'),
+                    ),
                   NavigationDestination(
                     icon: const Icon(Icons.settings_outlined),
                     selectedIcon: const Icon(Icons.settings_rounded),
@@ -1283,18 +1302,6 @@ class _AppShellState extends State<AppShell>
                       children: <Widget>[
                         _sidebarLabel(apple, '浏览'), // i18n:key
                         AppRailItem(
-                          icon: Icons.search_rounded,
-                          label: '搜索',
-                          selected:
-                              _section == _AppSection.search &&
-                              _playlist == null &&
-                              _artist == null &&
-                              _chart == null &&
-                              !_comments,
-                          onTap: () => _select(_AppSection.search),
-                        ),
-                        const SizedBox(height: 2),
-                        AppRailItem(
                           icon: Icons.home_rounded,
                           label: '主页',
                           selected:
@@ -1304,6 +1311,18 @@ class _AppShellState extends State<AppShell>
                               _chart == null &&
                               !_comments,
                           onTap: () => _select(_AppSection.home),
+                        ),
+                        const SizedBox(height: 2),
+                        AppRailItem(
+                          icon: Icons.search_rounded,
+                          label: '搜索',
+                          selected:
+                              _section == _AppSection.search &&
+                              _playlist == null &&
+                              _artist == null &&
+                              _chart == null &&
+                              !_comments,
+                          onTap: () => _select(_AppSection.search),
                         ),
                         const SizedBox(height: 2),
                         AppRailItem(
@@ -1318,17 +1337,18 @@ class _AppShellState extends State<AppShell>
                           onTap: () => _select(_AppSection.library),
                         ),
                         const SizedBox(height: 2),
-                        AppRailItem(
-                          icon: Icons.favorite_rounded,
-                          label: '我喜欢',
-                          selected:
-                              _section == _AppSection.likes &&
-                              _playlist == null &&
-                              _artist == null &&
-                              _chart == null &&
-                              !_comments,
-                          onTap: () => _select(_AppSection.likes),
-                        ),
+                        if (!state.isLocalPlayback)
+                          AppRailItem(
+                            icon: Icons.favorite_rounded,
+                            label: '我喜欢',
+                            selected:
+                                _section == _AppSection.likes &&
+                                _playlist == null &&
+                                _artist == null &&
+                                _chart == null &&
+                                !_comments,
+                            onTap: () => _select(_AppSection.likes),
+                          ),
                         const SizedBox(height: 22),
                         SizedBox(
                           height: 33,
@@ -1623,11 +1643,9 @@ class _AppShellState extends State<AppShell>
   /// avatar opens the account menu; a guest gets the login flow instead.
   Widget _accountRow(AppleSemanticColors apple) {
     final String name = state.isGuest ? context.tr('游客') : state.user.name;
-    final String detail = state.isNavidrome
-        ? '${state.musicProvider.name} · ${context.tr('实验性')}'
-        : state.isGuest
-        ? context.tr('登录以同步资料库')
-        : context.tr(state.user.vipLabel ?? '普通用户');
+    final String detail = state.user.isGuest
+        ? context.tr('登录账户')
+        : context.tr(state.user.vipLabel ?? '普通账户');
     return PopupMenuButton<String>(
       key: const ValueKey('rail-account'),
       tooltip: context.tr(state.isGuest ? '登录' : state.user.name),
@@ -1827,11 +1845,28 @@ class _AppShellState extends State<AppShell>
         state: state,
         onOpenPlaylist: _openPlaylist,
       ),
-      _AppSection.library => AppLibraryPage(
-        state: state,
-        onOpenPlaylist: _openPlaylist,
-        onOpenLocalMusic: _openLocalMusic,
-        onOpenSavedAlbums: _openSavedAlbums,
+      _AppSection.library => SettingsDetailHost(
+        compact: useCompactLayout(
+          state.uiMode,
+          MediaQuery.sizeOf(context).width,
+        ),
+        child: Builder(
+          builder: (detailContext) => AppLibraryPage(
+            state: state,
+            onOpenPlaylist: _openPlaylist,
+            onOpenLocalMusic: _openLocalMusic,
+            onOpenSavedAlbums: _openSavedAlbums,
+            onOpenListeningStatistics: () => SettingsDetailHost.open(
+              detailContext,
+              page: (_) => AppListeningStatisticsPage(
+                statistics: state.listeningStatistics,
+              ),
+              view: (_) => AppListeningStatisticsPage(
+                statistics: state.listeningStatistics,
+              ),
+            ),
+          ),
+        ),
       ),
       _AppSection.likes => AppLikesPage(state: state),
       _AppSection.settings => AppSettingsPage(

@@ -157,7 +157,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  member.name.isEmpty ? '${member.userId}' : member.name,
+                  member.name.isEmpty ? member.userId : member.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

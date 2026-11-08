@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -6,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/background.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
@@ -26,16 +26,17 @@ class _Catalog extends Catalog {
   Future<GatewayLyrics?> lyricsFor(Track track) async => null;
 }
 
-class _ArtworkGateway extends NeteaseGateway {
-  final details = Completer<List<GatewaySong>>();
-
+class _ArtworkGateway extends TestMusicGateway {
+  final details = Completer<MusicSong>();
   @override
-  Future<List<GatewaySong>> songDetails(List<int> ids) =>
-      ids.single == 2 ? details.future : Future.value([]);
+  Future<MusicSong> song(MusicId id) => details.future;
+  @override
+  MusicUser get user =>
+      MusicUser(id: id(MusicEntityKind.user, '7'), name: 'Tester');
 }
 
 Track _track(String id) => Track(
-  id: id,
+  id: 'fixture:test:song:$id',
   title: id,
   artist: 'Artist',
   album: 'Album',
@@ -157,7 +158,7 @@ void main() {
     state.next();
     state.next();
     await Future<void>.delayed(Duration.zero);
-    expect(state.current?.id, 'c');
+    expect(state.current?.id, 'fixture:test:song:c');
     expect(state.accentSeed, Colors.blue);
     old.complete(Colors.green);
     await Future<void>.delayed(Duration.zero);
@@ -186,16 +187,16 @@ void main() {
     state.pause();
     state.next();
     await Future<void>.delayed(Duration.zero);
-    gateway.details.complete([
-      const GatewaySong(
-        id: 2,
+    gateway.details.complete(
+      MusicSong(
+        id: gateway.id(MusicEntityKind.song, '2'),
         title: '2',
-        artists: ['Artist'],
+        artists: [],
         albumName: 'Album',
         duration: Duration(minutes: 3),
         coverUrl: 'https://cover.test/hydrated',
       ),
-    ]);
+    );
     await Future<void>.delayed(Duration.zero);
     expect(state.playing, isFalse);
     expect(state.current?.coverUrl, 'https://cover.test/hydrated');

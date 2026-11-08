@@ -77,7 +77,7 @@ void main() {
     library.dispose();
   });
 
-  test('sign-out prevents an in-flight queue restore from returning', () async {
+  test('local mode without an account preserves an in-flight queue restore', () async {
     final started = Completer<void>();
     final gate = Completer<String?>();
     final store = PlaybackQueueStore(
@@ -103,7 +103,7 @@ void main() {
       }),
     );
     await boot;
-    expect(state.queue, isEmpty);
+    expect(state.queue.map((track)=>track.id),['10']);
     state.dispose();
     library.dispose();
   });

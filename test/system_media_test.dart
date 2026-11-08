@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_service_platform_interface/audio_service_platform_interface.dart'
@@ -11,7 +12,6 @@ import 'package:lazer_nextgen/audio/windows_media_platform.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 const _tracks = [
@@ -41,10 +41,7 @@ const _tracks = [
   ),
 ];
 
-class _Gateway extends NeteaseGateway {
-  @override
-  Future<List<GatewaySong>> songDetails(List<int> ids) async => [];
-}
+class _Gateway extends TestMusicGateway {}
 
 class _Catalog extends Catalog {
   _Catalog() : super(gateway: _Gateway());

@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:ui' as ui;
@@ -11,7 +12,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/interaction/app_haptics.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
@@ -83,7 +83,7 @@ class _Catalog extends Catalog {
   Future<List<Track>> playlistTracks(String id) async => [_track];
 }
 
-class _AuthGateway extends NeteaseGateway {
+class _AuthGateway extends TestMusicGateway {
   _AuthGateway({this.qrCompletes = false});
 
   /// Whether the fake QR poll reports a confirmed scan. Widget tests that only
@@ -91,8 +91,8 @@ class _AuthGateway extends NeteaseGateway {
   /// polls immediately now, so a 803 would close the dialog on the first frame.
   final bool qrCompletes;
 
-  static const status = GatewayLoginStatus(
-    profile: GatewayUserProfile(
+  static const status = FixtureLoginStatus(
+    profile: FixtureProfile(
       userId: 7,
       nickname: '测试账户',
       vipType: 11,
@@ -100,25 +100,24 @@ class _AuthGateway extends NeteaseGateway {
     ),
   );
   @override
-  Future<GatewayLoginStatus> loginWithCookie(String cookie) async {
+  Future<FixtureLoginStatus> fixtureLoginWithCookie(String cookie) async {
     sessionCookie = cookie;
     return status;
   }
 
   @override
-  Future<GatewayLoginStatus> loginStatus() async => status;
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => {1939575649};
+  Future<FixtureLoginStatus> fixtureLoginStatus() async => status;
+
   @override
   Future<String> createQrKey() async => 'fixture-key';
   @override
-  Future<GatewayQrCheck> checkQrCode(
+  Future<FixtureQrCheck> checkQrCode(
     String key, {
     String secureCaptcha = '',
   }) async {
-    if (!qrCompletes) return const GatewayQrCheck(code: 801);
+    if (!qrCompletes) return const FixtureQrCheck(code: 801);
     sessionCookie = 'MUSIC_U=fixture';
-    return const GatewayQrCheck(code: 803, cookie: 'MUSIC_U=fixture');
+    return const FixtureQrCheck(code: 803, cookie: 'MUSIC_U=fixture');
   }
 }
 

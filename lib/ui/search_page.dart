@@ -134,7 +134,9 @@ class _AppSearchPageState extends State<AppSearchPage>
       if (!mounted || generation != _generation) return;
       setState(() {
         _loading = false;
-        _error = '搜索失败，请检查网络后重试。'; // i18n:key
+        _error = widget.state.isLocalPlayback
+            ? '本地音乐库暂时无法读取，请重试。'
+            : '搜索失败，请检查网络后重试。';
       });
     }
   }
@@ -151,6 +153,7 @@ class _AppSearchPageState extends State<AppSearchPage>
             Padding(
               padding: EdgeInsets.fromLTRB(inset, 14, inset, 12),
               child: AppleSearchField(
+                hintText: widget.state.isLocalPlayback ? '搜索本地音乐' : null,
                 controller: _search,
                 autofocus: _autoFocusField,
                 onChanged: _onChanged,
@@ -182,8 +185,8 @@ class _AppSearchPageState extends State<AppSearchPage>
     }
     final SearchResults? results = _results;
     if (_query.isEmpty) {
-      return const AppNotice(
-        message: '搜索歌曲、歌手或歌单。',
+      return AppNotice(
+        message: widget.state.isLocalPlayback ? '搜索本地歌曲、歌手或专辑。' : '搜索歌曲、歌手或歌单。',
         icon: Icons.search_rounded,
       );
     }
@@ -193,36 +196,37 @@ class _AppSearchPageState extends State<AppSearchPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Padding(
-          padding: EdgeInsets.fromLTRB(inset, 0, inset, 10),
-          child: Row(
-            children: <Widget>[
-              _SearchTabButton(
-                label: '歌曲',
-                active: _tab == _SearchTab.songs,
-                onTap: () => setState(() => _tab = _SearchTab.songs),
-              ),
-              const SizedBox(width: 8),
-              _SearchTabButton(
-                label: '专辑',
-                active: _tab == _SearchTab.albums,
-                onTap: () => setState(() => _tab = _SearchTab.albums),
-              ),
-              const SizedBox(width: 8),
-              _SearchTabButton(
-                label: '歌手',
-                active: _tab == _SearchTab.artists,
-                onTap: () => setState(() => _tab = _SearchTab.artists),
-              ),
-              const SizedBox(width: 8),
-              _SearchTabButton(
-                label: '歌单',
-                active: _tab == _SearchTab.playlists,
-                onTap: () => setState(() => _tab = _SearchTab.playlists),
-              ),
-            ],
+        if (!widget.state.isLocalPlayback)
+          Padding(
+            padding: EdgeInsets.fromLTRB(inset, 0, inset, 10),
+            child: Row(
+              children: <Widget>[
+                _SearchTabButton(
+                  label: '歌曲',
+                  active: _tab == _SearchTab.songs,
+                  onTap: () => setState(() => _tab = _SearchTab.songs),
+                ),
+                const SizedBox(width: 8),
+                _SearchTabButton(
+                  label: '专辑',
+                  active: _tab == _SearchTab.albums,
+                  onTap: () => setState(() => _tab = _SearchTab.albums),
+                ),
+                const SizedBox(width: 8),
+                _SearchTabButton(
+                  label: '歌手',
+                  active: _tab == _SearchTab.artists,
+                  onTap: () => setState(() => _tab = _SearchTab.artists),
+                ),
+                const SizedBox(width: 8),
+                _SearchTabButton(
+                  label: '歌单',
+                  active: _tab == _SearchTab.playlists,
+                  onTap: () => setState(() => _tab = _SearchTab.playlists),
+                ),
+              ],
+            ),
           ),
-        ),
         Expanded(
           child: ViewTransitionSwitcher(
             child: KeyedSubtree(

@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -71,7 +71,7 @@ class _Catalog extends Catalog {
   }) async => null;
 }
 
-class _Gateway extends NeteaseGateway {}
+class _Gateway extends TestMusicGateway {}
 
 Widget _app(AppState state) => MaterialApp(
   theme: buildAppleTheme(brightness: Brightness.dark),

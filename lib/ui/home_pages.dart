@@ -1,3 +1,4 @@
+import '../gateway/music_models.dart';
 import '../state/build_safe_notifier.dart';
 import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
@@ -113,11 +114,18 @@ class _AppHomePageState extends State<AppHomePage>
 
   @override
   Widget build(BuildContext context) {
+    if (widget.state.isLocalPlayback) {
+      return LocalRecentHome(
+        state: widget.state,
+        onPlayTrack: widget.onPlayTrack,
+      );
+    }
     final HomeFeed? feed = widget.state.home;
     if (feed == null) {
       return AppNotice(
         message: widget.state.homeError ?? '正在加载曲库…',
-        action: widget.state.isNavidrome && widget.state.isGuest
+        action:
+            widget.state.hasNetworkProvider && !widget.state.activeMusicSignedIn
             ? SpringFilledButton(
                 onPressed: () =>
                     unawaited(showAppLoginDialog(context, widget.state)),
@@ -153,7 +161,9 @@ class _AppHomePageState extends State<AppHomePage>
               sliver: SliverList(
                 delegate: SliverChildListDelegate(<Widget>[
                   HomeActionShelf(
-                    serverLibrary: widget.state.isNavidrome,
+                    serverLibrary: !widget.state.supportsMusic(
+                      MusicCapability.recommendations,
+                    ),
                     busy: _startingStation,
                     covers: <String?>[
                       ...recent.map((track) => track.coverUrl),
@@ -167,7 +177,9 @@ class _AppHomePageState extends State<AppHomePage>
                         : () => widget.onOpenPlaylist(
                             dailyRecommendationsPlaylist(
                               feed,
-                              serverLibrary: widget.state.isNavidrome,
+                              serverLibrary: !widget.state.supportsMusic(
+                                MusicCapability.recommendations,
+                              ),
                             ),
                           ),
                     onFm: widget.state.signedIn
@@ -205,7 +217,7 @@ class _AppHomePageState extends State<AppHomePage>
                   ],
                   if (feed.editorialPlaylists.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 38),
-                    const AppSectionHeader(title: '网易云编辑精选'),
+                    const AppSectionHeader(title: '编辑精选'),
                     const SizedBox(height: 14),
                     _EditorialPlaylistShelf(
                       playlists: feed.editorialPlaylists,
@@ -213,7 +225,9 @@ class _AppHomePageState extends State<AppHomePage>
                       compact: compact,
                     ),
                   ],
-                  if (!widget.state.isNavidrome) ...[
+                  if (widget.state.supportsMusic(
+                    MusicCapability.recommendations,
+                  )) ...[
                     const SizedBox(height: 38),
                     const AppSectionHeader(title: '排行榜'),
                     const SizedBox(height: 14),
@@ -743,6 +757,52 @@ class _MovingCoverMosaicState extends State<_MovingCoverMosaic>
   }
 }
 
+class LocalRecentHome extends StatelessWidget {
+  const LocalRecentHome({
+    super.key,
+    required this.state,
+    required this.onPlayTrack,
+  });
+  final AppState state;
+  final void Function(List<Track>, int) onPlayTrack;
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: Listenable.merge([state, state.localLibrary]),
+    builder: (context, _) {
+      final recent = state.recentTracks;
+      final inset = pageInset(context);
+      return Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: adaptiveContentMaxWidth(context, 1180),
+          ),
+          child: ListView(
+            key: const PageStorageKey('local-recent-scroll'),
+            padding: EdgeInsets.fromLTRB(
+              inset,
+              20,
+              inset,
+              28 + MediaQuery.paddingOf(context).bottom,
+            ),
+            children: [
+              const AppSectionHeader(title: '最近播放'),
+              const SizedBox(height: 14),
+              if (recent.isEmpty)
+                const AppNotice(message: '还没有最近播放记录')
+              else
+                _HomeTrackGrid(
+                  state: state,
+                  tracks: recent,
+                  onPlay: onPlayTrack,
+                ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class _HomeTrackGrid extends StatelessWidget {
   const _HomeTrackGrid({
     required this.state,
@@ -912,7 +972,7 @@ class _EditorialPlaylistShelf extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        context.tr('网易云编辑精选'),
+                        context.tr('编辑精选'),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: Colors.white70,
                           fontWeight: FontWeight.w700,

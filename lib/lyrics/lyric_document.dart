@@ -25,7 +25,7 @@ class LyricLine {
 /// Port of LrcRow.kt and LyricTimeline.kt: both fractional separators and
 /// multiple timestamps are supported; untimed JSON credits are ignored.
 ///
-/// The official parser (`com.netease.cloudmusic.module.lyric.y`) accepts one
+/// The official parser (`word-lyric`) accepts one
 /// or two digits for the minute and second fields, scales a one-to-three digit
 /// fraction by its length (`.5` is 500 ms, `.05` is 50 ms) and drops rows
 /// whose seconds field is 60 or more.
@@ -101,10 +101,16 @@ const double _translationAlignmentRatio = .7;
 List<LyricLine> parseLyrics(GatewayLyrics payload) {
   final words = parseYrc(payload.yrc);
   final original = words.isNotEmpty ? words : parseLrc(payload.lrc);
-  final regularTranslations = parseLrc(payload.tlyric);
-  final allTranslations = regularTranslations.isNotEmpty
-      ? regularTranslations
-      : parseLrc(payload.ytlrc);
+  // Some platform responses put the translated lines that have no word
+  // timing in `tlyric`, while the remaining lines only exist in `ytlrc`.
+  // Treating tlyric as an exclusive fallback drops those lines (notably in
+  // long soundtrack lyrics). Parse both formats and merge duplicate rows.
+  final allTranslations = _mergeTranslations(<LyricLine>[
+    ...parseLrc(payload.tlyric),
+    ...parseYrc(payload.tlyric),
+    ...parseLrc(payload.ytlrc),
+    ...parseYrc(payload.ytlrc),
+  ]);
   final translations = allTranslations
       .where((line) => line.text.trim().isNotEmpty)
       .toList(growable: false);
@@ -130,15 +136,73 @@ List<LyricLine> parseLyrics(GatewayLyrics payload) {
       if (text != null) matched[sourceIndexes[i]] = text;
     }
   } else {
-    for (final int index in sourceIndexes) {
-      final String? text = _nearestTranslation(original[index], translations);
-      if (text != null) matched[index] = text;
-    }
+    matched.addAll(_matchTranslations(original, sourceIndexes, translations));
   }
   return <LyricLine>[
     for (var i = 0; i < original.length; i++)
       _withTranslation(original[i], matched[i]),
   ];
+}
+
+/// Matches a sparse translation track one-to-one with the nearest source
+/// lines.  A translation row must not be reused for two neighbouring source
+/// lines: doing so makes a missing translation appear on the preceding line
+/// whenever the next translated row is within the tolerance window.
+Map<int, String> _matchTranslations(
+  List<LyricLine> original,
+  List<int> sourceIndexes,
+  List<LyricLine> translations,
+) {
+  final pairs = <({int source, int translation, int distance})>[];
+  for (final source in sourceIndexes) {
+    final sourceTime = original[source].time.inMilliseconds;
+    for (
+      var translation = 0;
+      translation < translations.length;
+      translation++
+    ) {
+      final distance =
+          (translations[translation].time.inMilliseconds - sourceTime).abs();
+      if (distance <= _translationWindow.inMilliseconds) {
+        pairs.add((
+          source: source,
+          translation: translation,
+          distance: distance,
+        ));
+      }
+    }
+  }
+  pairs.sort((left, right) {
+    final byDistance = left.distance.compareTo(right.distance);
+    if (byDistance != 0) return byDistance;
+    final bySource = left.source.compareTo(right.source);
+    if (bySource != 0) return bySource;
+    return left.translation.compareTo(right.translation);
+  });
+
+  final usedSources = <int>{};
+  final usedTranslations = <int>{};
+  final result = <int, String>{};
+  for (final pair in pairs) {
+    if (!usedSources.add(pair.source) ||
+        !usedTranslations.add(pair.translation)) {
+      continue;
+    }
+    final text = translations[pair.translation].text.trim();
+    if (text.isNotEmpty) result[pair.source] = text;
+  }
+  return result;
+}
+
+List<LyricLine> _mergeTranslations(List<LyricLine> values) {
+  final seen = <String>{};
+  final result = <LyricLine>[];
+  for (final line in values) {
+    final key = '${line.time.inMicroseconds}\u0000${line.text.trim()}';
+    if (seen.add(key)) result.add(line);
+  }
+  result.sort((left, right) => left.time.compareTo(right.time));
+  return result;
 }
 
 List<String?>? _pairByLine(
@@ -156,29 +220,6 @@ List<String?>? _pairByLine(
   }
   if (aligned / sourceIndexes.length < _translationAlignmentRatio) return null;
   return <String?>[for (final LyricLine line in translations) line.text.trim()];
-}
-
-String? _nearestTranslation(LyricLine line, List<LyricLine> translations) {
-  final int target = line.time.inMilliseconds;
-  int low = 0;
-  int high = translations.length;
-  while (low < high) {
-    final int middle = (low + high) ~/ 2;
-    if (translations[middle].time.inMilliseconds < target) {
-      low = middle + 1;
-    } else {
-      high = middle;
-    }
-  }
-  // Equal-time credits must not block all later translations by making a
-  // forward-only nearest search stop at a tie.
-  int cursor = (low - 1).clamp(0, translations.length - 1);
-  int delta(int index) =>
-      (translations[index].time.inMilliseconds - target).abs();
-  if (low < translations.length && delta(low) < delta(cursor)) cursor = low;
-  return delta(cursor) <= _translationWindow.inMilliseconds
-      ? translations[cursor].text.trim()
-      : null;
 }
 
 LyricLine _withTranslation(LyricLine line, String? translation) {

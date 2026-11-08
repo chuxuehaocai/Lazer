@@ -248,45 +248,48 @@ class SettingsDetailScaffold extends StatelessWidget {
       );
     }
     final apple = AppleSemanticColors.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final inset = constraints.maxWidth < 600 ? 20.0 : 32.0;
-        return Column(
-          key: const ValueKey('settings-detail-subview'),
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(inset - 12, 12, inset, 0),
-              child: Row(
-                children: [
-                  AccessibleIconButton(
-                    key: const ValueKey('settings-detail-back'),
-                    tooltip: '返回',
-                    onPressed: close,
-                    icon: const Icon(Icons.chevron_left_rounded),
-                  ),
-                  SpringTextButton(
-                    onPressed: close,
-                    child: TrText(
-                      '设置',
-                      style: TextStyle(color: apple.secondaryLabel),
+    return Material(
+      type: MaterialType.transparency,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final inset = constraints.maxWidth < 600 ? 20.0 : 32.0;
+          return Column(
+            key: const ValueKey('settings-detail-subview'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(inset - 12, 12, inset, 0),
+                child: Row(
+                  children: [
+                    AccessibleIconButton(
+                      key: const ValueKey('settings-detail-back'),
+                      tooltip: '返回',
+                      onPressed: close,
+                      icon: const Icon(Icons.chevron_left_rounded),
                     ),
-                  ),
-                ],
+                    SpringTextButton(
+                      onPressed: close,
+                      child: TrText(
+                        '设置',
+                        style: TextStyle(color: apple.secondaryLabel),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            ApplePageTitle(
-              title: title,
-              padding: EdgeInsets.fromLTRB(inset, 4, inset, 20),
-              trailing: actions.isEmpty
-                  ? null
-                  : Wrap(spacing: 8, children: actions),
-            ),
-            Divider(height: 1, thickness: .5, color: apple.separator),
-            Expanded(child: child),
-          ],
-        );
-      },
+              ApplePageTitle(
+                title: title,
+                padding: EdgeInsets.fromLTRB(inset, 4, inset, 20),
+                trailing: actions.isEmpty
+                    ? null
+                    : Wrap(spacing: 8, children: actions),
+              ),
+              Divider(height: 1, thickness: .5, color: apple.separator),
+              Expanded(child: child),
+            ],
+          );
+        },
+      ),
     );
   }
 }

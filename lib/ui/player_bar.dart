@@ -1,3 +1,4 @@
+import '../gateway/music_models.dart';
 import '../widgets/build_safe_state.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -260,7 +261,10 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                     const SizedBox(width: 2),
                     AppQueueButton(state: state),
                     const SizedBox(width: 2),
-                    if (widget.onComments != null && !state.isNavidrome) ...[
+                    if (widget.onComments != null &&
+                        state.supportsCurrentMusic(
+                          MusicCapability.comments,
+                        )) ...[
                       _CompactIcon(
                         icon: Icons.mode_comment_outlined,
                         tooltip: '评论',

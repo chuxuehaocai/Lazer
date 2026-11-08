@@ -38,6 +38,7 @@ class AppLibraryPage extends StatelessWidget {
     required this.onOpenPlaylist,
     required this.onOpenLocalMusic,
     required this.onOpenSavedAlbums,
+    this.onOpenListeningStatistics,
     this.localImporter = const LocalMusicImporter(),
   });
 
@@ -48,6 +49,7 @@ class AppLibraryPage extends StatelessWidget {
   /// 音乐库 → 收藏的专辑: the account's saved albums have their own page, so
   /// someone looking for an album does not have to read through playlists.
   final VoidCallback onOpenSavedAlbums;
+  final VoidCallback? onOpenListeningStatistics;
 
   /// Lets tests hand in a fake chooser; production uses the system picker.
   final LocalMusicImporter localImporter;
@@ -143,18 +145,20 @@ class AppLibraryPage extends StatelessWidget {
                             color: AppleSemanticColors.of(context).accent,
                           ),
                           showChevron: true,
-                          onTap: () => unawaited(
-                            Navigator.of(context).push<void>(
-                              ApplePageRoute<void>(
-                                settings: const RouteSettings(
-                                  name: '/listening-statistics',
-                                ),
-                                builder: (_) => AppListeningStatisticsPage(
-                                  statistics: state.listeningStatistics,
+                          onTap:
+                              onOpenListeningStatistics ??
+                              () => unawaited(
+                                Navigator.of(context).push<void>(
+                                  ApplePageRoute<void>(
+                                    settings: const RouteSettings(
+                                      name: '/listening-statistics',
+                                    ),
+                                    builder: (_) => AppListeningStatisticsPage(
+                                      statistics: state.listeningStatistics,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
                         ),
                       ),
                       if (mine.isNotEmpty) ...<Widget>[

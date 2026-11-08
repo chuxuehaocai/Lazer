@@ -1,14 +1,14 @@
 import '../state/build_safe_notifier.dart';
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:archive/archive.dart';
+import 'plugin_package.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../storage/app_storage.dart';
 import '../gateway/lua_music_gateway.dart';
 import '../gateway/music_gateway.dart';
+import '../utils/media_requests.dart';
 import 'lua_plugin_runtime.dart';
 import 'plugin_manifest.dart';
 
@@ -107,6 +107,13 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.runtime = runtime;
       await runtime.start();
       final description = await runtime.invoke('describe');
+      MediaRequestRules.register(plugin.manifest.id, [
+        for (final rule
+            in description is Map && description['media'] is List
+                ? description['media'] as List
+                : const [])
+          if (rule is Map) Map<String, dynamic>.from(rule),
+      ]);
       final declared = description is Map ? description['providers'] : null;
       final providers = declared is List
           ? declared.whereType<Map>().toList()
@@ -160,6 +167,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       }
       plugin.error = null;
     } catch (_) {
+      MediaRequestRules.remove(plugin.manifest.id);
       plugin.runtime?.close();
       plugin.runtime = null;
       plugin.gateways.clear();
@@ -167,72 +175,42 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  Future<InstalledPlugin> importZip(Uint8List bytes) async {
+  Future<InstalledPlugin> importZip(
+    Uint8List bytes, {
+    String? expectedId,
+    String? expectedVersion,
+  }) async {
     if (busy) throw const PluginException('正在处理插件，请稍候。');
     busy = true;
     _notify();
     Directory? staging;
     try {
       await restore();
-      if (bytes.length > 16 * 1024 * 1024) {
-        throw const FormatException('插件包不能超过 16 MB。');
-      }
-      final archive = ZipDecoder().decodeBytes(bytes, verify: true);
-      if (archive.length > 256) throw const FormatException('插件文件过多。');
-      final names = <String>{};
-      var total = 0;
-      for (final file in archive) {
-        final name = file.name.endsWith('/')
-            ? file.name.substring(0, file.name.length - 1)
-            : file.name;
-        if (!PluginManifest.safePath(name) ||
-            !names.add(name.toLowerCase()) ||
-            file.isSymbolicLink) {
-          throw const FormatException('插件包含不安全或重复的文件路径。');
-        }
-        total += file.size;
-        if (total > 8 * 1024 * 1024 || file.size > 2 * 1024 * 1024) {
-          throw const FormatException('插件解压后体积过大。');
-        }
-        if (file.isFile &&
-            name != 'manifest.json' &&
-            !name.endsWith('.lua') &&
-            !name.endsWith('.md') &&
-            !name.endsWith('.txt') &&
-            !name.endsWith('.json') &&
-            name != 'LICENSE') {
-          throw const FormatException('插件仅支持 Lua 源码与说明文件。');
-        }
-      }
-      final manifestFile = archive.findFile('manifest.json');
-      if (manifestFile == null) {
-        throw const FormatException('ZIP 根目录缺少 manifest.json。');
-      }
-      final manifest = PluginManifest.decode(utf8.decode(manifestFile.content));
-      if (archive.findFile(manifest.entry) == null) {
-        throw const FormatException('缺少插件入口。');
+      final package = await compute(
+        decodePluginPackage,
+        bytes,
+        debugLabel: 'lua-plugin-package',
+      );
+      final manifest = package.manifest;
+      if (expectedId != null && manifest.id != expectedId ||
+          expectedVersion != null && manifest.version != expectedVersion) {
+        throw const FormatException('插件包与市场信息不一致，请刷新插件源后重试。');
       }
       final base = (await root).absolute;
       staging = await Directory(
         p.join(base.path, '.staging-${DateTime.now().microsecondsSinceEpoch}'),
       ).create();
-      for (final file in archive.where((f) => f.isFile)) {
+      for (final file in package.files.entries) {
         final destination = File(
-          p.join(staging.path, file.name.replaceAll('/', p.separator)),
+          p.join(staging.path, file.key.replaceAll('/', p.separator)),
         );
         await destination.parent.create(recursive: true);
-        await destination.writeAsBytes(file.content);
+        await destination.writeAsBytes(file.value);
       }
       // Compile and initialize before touching the installed version or its data.
-      final sourceMap = <String, String>{
-        for (final f in archive.where(
-          (f) => f.isFile && f.name.endsWith('.lua'),
-        ))
-          f.name: utf8.decode(f.content),
-      };
       final probe = LuaPluginRuntime(
         manifest: manifest,
-        sources: sourceMap,
+        sources: package.sources,
         dataDirectory: p.join(staging.path, '.probe-data'),
       );
       try {
@@ -301,6 +279,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _notify();
     try {
       await beforeChange?.call(id);
+      MediaRequestRules.remove(plugin.manifest.id);
       plugin.runtime?.close();
       plugin.runtime = null;
       plugin.gateways.clear();
@@ -327,6 +306,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _notify();
     try {
       await beforeChange?.call(id);
+      MediaRequestRules.remove(plugin.manifest.id);
       plugin.runtime?.close();
       plugin.gateways.clear();
       final base = (await root).absolute.path;
@@ -351,6 +331,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   void dispose() {
     _disposed = true;
     for (final plugin in _plugins) {
+      MediaRequestRules.remove(plugin.manifest.id);
       plugin.runtime?.close();
     }
     super.dispose();

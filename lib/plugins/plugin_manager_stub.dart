@@ -28,8 +28,11 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   Future<void> Function(String pluginId)? beforeChange;
   Future<void> Function()? afterChange;
   Future<void> restore() async {}
-  Future<InstalledPlugin> importZip(Uint8List bytes) =>
-      Future.error(const PluginException('当前平台不支持 ZIP 插件安装。'));
+  Future<InstalledPlugin> importZip(
+    Uint8List bytes, {
+    String? expectedId,
+    String? expectedVersion,
+  }) => Future.error(const PluginException('当前平台不支持 ZIP 插件安装。'));
   Future<void> setEnabled(String id, bool enabled) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> uninstall(String id) =>

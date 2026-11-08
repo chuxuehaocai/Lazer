@@ -8,7 +8,7 @@ import 'package:flutter/painting.dart';
 import '../cache/media_cache.dart';
 import '../utils/artwork.dart';
 
-/// NetworkImage adds headers to HttpClient's default User-Agent. The NetEase
+/// NetworkImage adds headers to HttpClient's default User-Agent. The music provider
 /// image CDN rejects that duplicated header, so set each header explicitly.
 class ArtworkImage extends ImageProvider<ArtworkImage> {
   const ArtworkImage(this.url, {this.targetSize})

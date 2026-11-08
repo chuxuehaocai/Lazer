@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -6,7 +7,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/local/local_library.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/playback_queue_store.dart';
@@ -29,26 +29,20 @@ class _Library extends LocalLibrary {
   Future<void> load() => ready;
 }
 
-class _Gateway extends NeteaseGateway {
+class _Gateway extends TestMusicGateway {
   _Gateway({this.sessionReady});
-  final Completer<GatewayLoginStatus>? sessionReady;
+  final Completer<FixtureLoginStatus>? sessionReady;
   final sessionRequested = Completer<void>();
 
   @override
-  Future<GatewayLoginStatus> loginStatus() {
+  Future<FixtureLoginStatus> fixtureLoginStatus() {
     sessionRequested.complete();
     return sessionReady!.future;
   }
-
-  @override
-  Future<List<GatewaySong>> songDetails(List<int> ids) async => const [];
-
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => const {};
 }
 
 class _Catalog extends Catalog {
-  _Catalog({this.ready, NeteaseGateway? gateway})
+  _Catalog({this.ready, TestMusicGateway? gateway})
     : super(gateway: gateway ?? _Gateway());
   final Completer<HomeFeed?>? ready;
   final requested = Completer<int?>();
@@ -187,7 +181,7 @@ void main() {
       SharedPreferences.setMockInitialValues({
         'lazer_gateway_cookie': 'MUSIC_U=saved',
       });
-      final sessionReady = Completer<GatewayLoginStatus>();
+      final sessionReady = Completer<FixtureLoginStatus>();
       final gateway = _Gateway(sessionReady: sessionReady);
       final catalog = _Catalog(gateway: gateway);
       final library = _Library(Future<void>.value());
@@ -205,14 +199,14 @@ void main() {
         await _until(() => state.current != null);
         expect(catalog.requested.isCompleted, isFalse);
         sessionReady.complete(
-          const GatewayLoginStatus(
-            profile: GatewayUserProfile(userId: 42, nickname: 'Saved account'),
+          const FixtureLoginStatus(
+            profile: FixtureProfile(userId: 42, nickname: 'Saved account'),
           ),
         );
         expect(await catalog.requested.future, 42);
       } finally {
         if (!sessionReady.isCompleted) {
-          sessionReady.complete(const GatewayLoginStatus());
+          sessionReady.complete(const FixtureLoginStatus());
         }
         await boot;
         state.dispose();

@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,14 +6,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/login.dart';
 
 const String _scanUrl = 'https://music.163.com/login?codekey=fixture-key';
 
-const GatewayUserProfile _profile = GatewayUserProfile(
+const FixtureProfile _profile = FixtureProfile(
   userId: 7,
   nickname: '测试账户',
   vipType: 11,
@@ -20,7 +20,7 @@ const GatewayUserProfile _profile = GatewayUserProfile(
 
 /// Scripted password authority: the QR handshake the card mounts with, plus
 /// the phone and email password calls the card can make.
-class _PasswordGateway extends NeteaseGateway {
+class _PasswordGateway extends TestMusicGateway {
   final List<(String, String, String)> phoneLogins =
       <(String, String, String)>[];
   final List<(String, String)> emailLogins = <(String, String)>[];
@@ -32,13 +32,13 @@ class _PasswordGateway extends NeteaseGateway {
   Future<String> createQrCodeUrl(String key) async => _scanUrl;
 
   @override
-  Future<GatewayQrCheck> checkQrCode(
+  Future<FixtureQrCheck> checkQrCode(
     String key, {
     String secureCaptcha = '',
-  }) async => const GatewayQrCheck(code: 801);
+  }) async => const FixtureQrCheck(code: 801);
 
   @override
-  Future<GatewayLoginResult> loginWithPhonePassword(
+  Future<FixtureLoginResult> fixturePhonePassword(
     String phone,
     String password, {
     String countryCode = '86',
@@ -46,31 +46,28 @@ class _PasswordGateway extends NeteaseGateway {
   }) async {
     phoneLogins.add((countryCode, phone, password));
     sessionCookie = 'MUSIC_U=fixture';
-    return const GatewayLoginResult(
+    return const FixtureLoginResult(
       code: 200,
       cookie: 'MUSIC_U=fixture',
       profile: _profile,
-      account: GatewayAccount(id: 7),
+      account: FixtureAccount(id: 7),
     );
   }
 
   @override
-  Future<GatewayLoginResult> loginWithEmail(
+  Future<FixtureLoginResult> fixtureEmailPassword(
     String email,
     String password,
   ) async {
     emailLogins.add((email, password));
     sessionCookie = 'MUSIC_U=fixture';
-    return const GatewayLoginResult(
+    return const FixtureLoginResult(
       code: 200,
       cookie: 'MUSIC_U=fixture',
       profile: _profile,
-      account: GatewayAccount(id: 7),
+      account: FixtureAccount(id: 7),
     );
   }
-
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
 }
 
 class _Catalog extends Catalog {

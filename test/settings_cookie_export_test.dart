@@ -1,3 +1,4 @@
+import 'support/music_gateway.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,26 +7,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
-import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/widgets/spring_buttons.dart';
 
-const GatewayUserProfile _profile = GatewayUserProfile(
-  userId: 7,
-  nickname: '测试账户',
-);
+const FixtureProfile _profile = FixtureProfile(userId: 7, nickname: '测试账户');
 
-class _CookieGateway extends NeteaseGateway {
+class _CookieGateway extends TestMusicGateway {
   @override
-  Future<GatewayLoginStatus> loginWithCookie(String cookie) async {
+  Future<FixtureLoginStatus> fixtureLoginWithCookie(String cookie) async {
     sessionCookie = cookie;
-    return const GatewayLoginStatus(profile: _profile);
+    return const FixtureLoginStatus(profile: _profile);
   }
-
-  @override
-  Future<Set<int>> likedSongIds(int uid) async => <int>{};
 }
 
 class _CookieCatalog extends Catalog {
@@ -56,7 +50,7 @@ Future<AppState> _pumpSettings(
   tester.view.physicalSize = const Size(1280, 4200);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final AppState state = existing ?? AppState();
+  final AppState state = existing ?? AppState(catalog:_CookieCatalog(gateway:_CookieGateway()));
   addTearDown(state.dispose);
   await tester.pumpWidget(
     MaterialApp(
@@ -77,7 +71,7 @@ void main() {
       await _pumpSettings(tester);
 
       expect(find.text('导出 Cookie'), findsOneWidget);
-      expect(find.text('登录后可导出网易云音乐登录 Cookie'), findsOneWidget);
+      expect(find.text('登录后可导出当前平台登录 Cookie'), findsOneWidget);
       final SpringOutlinedButton exportButton = tester.widget(
         find.byKey(const ValueKey('export-session-cookie')),
       );
