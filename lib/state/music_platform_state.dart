@@ -112,11 +112,6 @@ class _MusicPlatformState {
       state._collectionsPending = null;
       state._collectionsGeneration++;
       unawaited(state.refreshHome());
-      // A newly adopted Lua session has no cached collection snapshot yet.
-      // Start the account-scoped playlist request immediately so the library
-      // is populated after the first login instead of waiting for a later
-      // navigation or manual refresh.
-      unawaited(state.refreshCollections(force: true));
     }
     unawaited(state._refreshMissingArtwork());
     unawaited(_save());
