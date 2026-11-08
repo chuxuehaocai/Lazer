@@ -21,9 +21,7 @@
 </p>
 
 <p align="center">
-  <b>一个用 Flutter 手写的网易云音乐客户端。</b><br>
-  WEAPI / EAPI 就住在客户端里，不挂任何第三方网关，<br>
-  曲库、歌词、评论、私人雷达，都从服务本身现取。
+  <b>一个用 Flutter 手写的音乐客户端。</b><br>
 </p>
 
 <p align="center">简体中文 | <a href="README.en.md">English</a></p>
@@ -63,27 +61,6 @@
 - 正在播放页有 AMLL 网格背景、封面与歌词互切、队列与评论面板，还有 M / L / Q / C / F 一把快捷键。
 - 定时停止支持多个每天重复的时间点。到点暂停一次并保留队列和进度，之后可手动继续。
 
-## 长这样
-
-<table>
-  <tr>
-    <td align="center" width="50%"><img src="docs/images/shot-home.jpg" width="100%" alt="首页：现在就听"></td>
-    <td align="center" width="50%"><img src="docs/images/shot-library.jpg" width="100%" alt="曲库：真实曲库"></td>
-  </tr>
-  <tr>
-    <td align="center"><b>现在就听</b><br><sub>推荐歌单、私人雷达与每日推荐，打开就在第一屏。</sub></td>
-    <td align="center"><b>真实曲库</b><br><sub>搜索、歌手、专辑与收藏，全部读自服务本身。</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/images/shot-playing.jpg" width="100%" alt="正在播放：沉浸式播放"></td>
-    <td align="center"><img src="docs/images/shot-adaptive.jpg" width="100%" alt="自适应：一套页面"></td>
-  </tr>
-  <tr>
-    <td align="center"><b>沉浸式播放</b><br><sub>AMLL 逐字歌词、35% 焦点带，与弹簧跟随滚动。</sub></td>
-    <td align="center"><b>一套页面</b><br><sub>桌面侧栏与移动标签栏，共享同一份页面与状态。</sub></td>
-  </tr>
-</table>
-
 ## 开始折腾
 
 需要 **Flutter 3.47.0 stable**。
@@ -118,7 +95,6 @@ macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 
 ## 参考与致谢
 
-- 接口实现参考 [API Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)。
 - 正在播放页版式参考 [AMLL Player](https://github.com/amll-dev/amll-player)。
 - 歌词动画参考 [Apple Music Like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics)。
 - 还有屏幕前的你
