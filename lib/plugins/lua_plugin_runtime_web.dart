@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
 // i18n:data — runtime error messages are interface keys shown by the plugin UI
 // through `context.tr`.
 import 'dart:async';

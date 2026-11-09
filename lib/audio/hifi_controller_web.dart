@@ -66,11 +66,6 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   void attach() {}
 
-  @override
-  void dispose() {
-    super.dispose();
-  }
-
   Future<void> update(HifiSettings next) async {
     _settings = next;
     notifyListeners();

@@ -152,9 +152,4 @@ class NetworkSourcesController extends ChangeNotifier with BuildSafeNotifier {
   }) {}
 
   void detachPlayback() {}
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
 }

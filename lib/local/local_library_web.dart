@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
@@ -251,9 +252,4 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
   Future<void> addScanRoot(String path) async {}
   Future<void> removeScanRoot(String path) async {}
   Future<void> removeScannedUnder(String root) async {}
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
 }
