@@ -128,7 +128,7 @@ vercel project protection disable lazer_demo --sso --yes
 
 Notes:
 
-- The static output comes from this repository's `build/web`; `lazer_demo` only holds the Vercel Function and packing script.
+- The static output comes from this repository's `build/web`; `lazer_demo` only holds the Vercel Function and packing script. The packer content-hashes the CanvasKit directory and `main.dart.js` and serves them with an immutable cache, so return visits do not download those megabytes again.
 - `api/plugin-http.js` only accepts HTTPS hosts declared by the calling plugin manifest and rejects loopback, private, link-local and metadata addresses. Forwarded requests carry `X-Real-IP` / `X-Forwarded-For` generated from api-enhanced's mainland China ranges; browsers cannot override those headers.
 - Uploaded Lua is untrusted. A production deployment should still keep a domain allowlist, rate limits, and redacted logs.
 

@@ -9,6 +9,8 @@
   <title>Lazer</title>
   <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+  <link rel="preload" href="flutter_bootstrap.js" as="script">
+  <link rel="preload" href="main.dart.js" as="script">
   <style>
     html, body {
       margin: 0;
@@ -16,6 +18,14 @@
       height: 100%;
       background-color: #141413;
       overscroll-behavior: none;
+    }
+    /* Pin the root font size and disable mobile text autosizing. Flutter Web
+       derives its text scale from the root font size; a phone browser that
+       inflates it during autosizing makes the whole interface look zoomed. */
+    html {
+      font-size: 16px;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
     }
     @media (prefers-color-scheme: light) {
       html, body { background-color: #F2F2F7; }
