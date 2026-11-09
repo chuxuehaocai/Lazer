@@ -97,11 +97,23 @@ class NetworkSourcesPage extends StatefulWidget {
     required this.state,
     this.controller,
     this.onBack,
+    this.embedded = false,
+    this.onBrowse,
+    this.onOpenPodcast,
   });
 
   final AppState state;
   final NetworkSourcesController? controller;
   final VoidCallback? onBack;
+
+  /// True when the shell's content pane hosts the page (the 收藏的专辑 shape):
+  /// the shell owns the back button, and drills stay inside the pane.
+  final bool embedded;
+
+  /// Opens a storage source's folder browser. Null falls back to a pushed
+  /// route, which is how the page works outside the shell.
+  final ValueChanged<NetworkSource>? onBrowse;
+  final ValueChanged<PodcastSubscription>? onOpenPodcast;
 
   @override
   State<NetworkSourcesPage> createState() => _NetworkSourcesPageState();
@@ -203,6 +215,11 @@ class _NetworkSourcesPageState extends State<NetworkSourcesPage>
   }
 
   void _browse(NetworkSource source) {
+    final ValueChanged<NetworkSource>? open = widget.onBrowse;
+    if (open != null) {
+      open(source);
+      return;
+    }
     Navigator.of(context).push<void>(
       ApplePageRoute<void>(
         settings: const RouteSettings(name: '/network-browse'),
@@ -395,6 +412,11 @@ class _NetworkSourcesPageState extends State<NetworkSourcesPage>
   }
 
   void _openPodcast(PodcastSubscription podcast) {
+    final ValueChanged<PodcastSubscription>? open = widget.onOpenPodcast;
+    if (open != null) {
+      open(podcast);
+      return;
+    }
     Navigator.of(context).push<void>(
       ApplePageRoute<void>(
         settings: const RouteSettings(name: '/network-podcast'),
@@ -435,11 +457,13 @@ class _NetworkSourcesPageState extends State<NetworkSourcesPage>
                         totalStorage,
                       ),
                       padding: const EdgeInsets.fromLTRB(0, 12, 0, 14),
-                      trailing: NetworkBackButton(
-                        onPressed:
-                            widget.onBack ??
-                            () => Navigator.of(context).maybePop(),
-                      ),
+                      trailing: widget.embedded
+                          ? null
+                          : NetworkBackButton(
+                              onPressed:
+                                  widget.onBack ??
+                                  () => Navigator.of(context).maybePop(),
+                            ),
                     ),
                   ),
                 ),

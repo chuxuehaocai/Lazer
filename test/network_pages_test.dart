@@ -332,6 +332,57 @@ void main() {
     expect(state.queueLength, 2);
   });
 
+  testWidgets('an embedded hub keeps the shell chrome and calls back', (
+    tester,
+  ) async {
+    late final NetworkSource source;
+    late final PodcastSubscription podcast;
+    await tester.runAsync(() async {
+      source = await controller.addSource(
+        NetworkSourceDraft(
+          kind: NetworkSourceKind.webdav,
+          name: 'Living Room',
+          host: 'nas.local',
+        ),
+      );
+      podcast = await controller.subscribe(
+        'https://podcast.example/feed.xml',
+      );
+    });
+    NetworkSource? browsed;
+    PodcastSubscription? opened;
+    await pumpPage(
+      tester,
+      NetworkSourcesPage(
+        state: state,
+        controller: controller,
+        embedded: true,
+        onBrowse: (NetworkSource value) => browsed = value,
+        onOpenPodcast: (PodcastSubscription value) => opened = value,
+      ),
+    );
+    // 收藏的专辑 shape: the shell owns the back button.
+    expect(find.byTooltip('返回'), findsNothing);
+    await tester.tap(
+      find.byKey(ValueKey<String>('network-source-row-${source.id}')),
+    );
+    expect(browsed?.id, source.id);
+    await tester.tap(find.byKey(const ValueKey('network-tab-podcast')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(ValueKey<String>('network-podcast-row-${podcast.id}')),
+    );
+    expect(opened?.id, podcast.id);
+  });
+
+  testWidgets('a pushed hub still offers its own back button', (tester) async {
+    await pumpPage(
+      tester,
+      NetworkSourcesPage(state: state, controller: controller),
+    );
+    expect(find.byTooltip('返回'), findsOneWidget);
+  });
+
   testWidgets('the hub fits a phone with large text', (tester) async {
     // 390 × 844 dp on a 3× screen: physicalSize is in physical pixels.
     tester.view.physicalSize = const Size(1170, 2532);
