@@ -107,6 +107,7 @@ class _LyricViewportState extends State<LyricViewport>
   bool _extendingSelection = false;
   final GlobalKey _viewportKey = GlobalKey();
   late double _blurTarget = widget.state.lyricBlurEnabled ? 1 : 0;
+  late double _blurIntensity = widget.state.lyricBlurIntensity.clamp(0.0, 1.0);
 
   @override
   void initState() {
@@ -156,6 +157,7 @@ class _LyricViewportState extends State<LyricViewport>
     if (oldWidget.state != widget.state) {
       oldWidget.state.all.removeListener(_onLane);
       widget.state.all.addListener(_onLane);
+      _blurIntensity = widget.state.lyricBlurIntensity.clamp(0.0, 1.0);
     }
     _updateBlur();
   }
@@ -271,6 +273,13 @@ class _LyricViewportState extends State<LyricViewport>
       }
     }
     _lastLanePosition = precise;
+    // The intensity slider lives on another page; repaint the rows now so the
+    // new strength applies without waiting for the next animation frame.
+    final double intensity = widget.state.lyricBlurIntensity.clamp(0.0, 1.0);
+    if (_blurIntensity != intensity) {
+      _blurIntensity = intensity;
+      _frames.value++;
+    }
     _updateBlur();
   }
 
@@ -289,7 +298,7 @@ class _LyricViewportState extends State<LyricViewport>
     if (_rowUnit <= 0 || _blur.value <= 0) return 0;
     final centre = _ys[i].value + _heights[i] * 0.5;
     final distance = (centre - _size.height * 0.35).abs() / _rowUnit;
-    return math.min(5.0, distance * 1.55) * _blur.value;
+    return math.min(5.0, distance * 1.55) * _blur.value * _blurIntensity;
   }
 
   /// Dissolves rows into the viewport edges so the clip never slices a blurred

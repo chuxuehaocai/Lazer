@@ -44,6 +44,8 @@
   "交互": "Interaction",
   "震动反馈": "Haptic feedback",
   "歌词模糊": "Lyric blur",
+  "歌词模糊强度": "Lyric blur intensity",
+  "0% 最清晰，100% 为默认强度": "0% is clearest; 100% is the default strength",
   "距离当前歌词越远，模糊越强；手动浏览时渐隐": "More blur further from the current line; fades out during manual browsing",
   "{seconds} 秒": "{seconds} s",
   "滚动惯性": "Scroll inertia",

@@ -686,6 +686,19 @@ class _SettingsOverview extends StatelessWidget {
                     onChanged: (bool value) =>
                         unawaited(state.setLyricBlurEnabled(value)),
                   ),
+                  _AppSliderRow(
+                    label: '歌词模糊强度',
+                    valueText: '${(state.lyricBlurIntensity * 100).round()}%',
+                    subtitle: '0% 最清晰，100% 为默认强度',
+                    value: state.lyricBlurIntensity,
+                    min: 0,
+                    max: 1,
+                    divisions: 20,
+                    onChanged: state.lyricBlurEnabled
+                        ? (double value) =>
+                              unawaited(state.setLyricBlurIntensity(value))
+                        : null,
+                  ),
                   _AppSwitchRow(
                     key: const ValueKey('system-media-lyrics-switch'),
                     label: '系统媒体控件显示歌词',

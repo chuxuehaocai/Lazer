@@ -127,7 +127,12 @@ void main() {
   ) async {
     await _pumpSettings(tester);
 
-    await tester.tap(find.byKey(const ValueKey('open-audio-device-info')));
+    final Finder audioPanel = find.byKey(
+      const ValueKey('open-audio-device-info'),
+    );
+    await tester.ensureVisible(audioPanel);
+    await tester.pump();
+    await tester.tap(audioPanel);
     await tester.pump();
     // The audio_session plugin answers through a real platform channel; give
     // the real event loop a moment before pumping the result into the frame.

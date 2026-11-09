@@ -311,10 +311,12 @@ void main() {
       4,
     );
     await state.setLyricBlurEnabled(false);
+    await state.setLyricBlurIntensity(.4);
     await state.setScrollRetention(.98);
     await state.setLyricResumeSeconds(3);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool('lazer_lyric_blur'), false);
+    expect(prefs.getDouble('lazer_lyric_blur_intensity'), .4);
     expect(prefs.getDouble('lazer_scroll_retention'), .98);
     expect(prefs.getDouble('lazer_lyric_resume_seconds'), 3);
   });

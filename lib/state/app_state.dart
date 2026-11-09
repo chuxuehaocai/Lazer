@@ -1039,6 +1039,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   double lyricControlsSeconds = 1.5;
   bool lyricBlurEnabled = true;
+  double lyricBlurIntensity = 1;
   bool showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
 
   double lyricFontSize = 22;
@@ -1307,6 +1308,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await (await SharedPreferences.getInstance()).setBool(
       'lazer_lyric_blur',
       value,
+    );
+  }
+
+  Future<void> setLyricBlurIntensity(double value) async {
+    final double next = value.clamp(0.0, 1.0);
+    if (lyricBlurIntensity == next) return;
+    lyricBlurIntensity = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_lyric_blur_intensity',
+      next,
     );
   }
 
@@ -1699,6 +1711,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricControlsSeconds =
           (prefs.getDouble('lazer_lyric_controls_seconds') ?? 1.5).clamp(1, 10);
       lyricBlurEnabled = prefs.getBool('lazer_lyric_blur') ?? true;
+      lyricBlurIntensity = (prefs.getDouble('lazer_lyric_blur_intensity') ?? 1)
+          .clamp(0.0, 1.0);
       showFrameStats =
           prefs.getBool('lazer_show_frame_stats') ?? showFrameStats;
       lyricFontSize = (prefs.getDouble('lazer_lyric_font_size') ?? 22).clamp(

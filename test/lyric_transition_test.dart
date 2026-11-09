@@ -94,6 +94,15 @@ void main() {
         equals(ui.ImageFilter.blur(sigmaX: 1.5, sigmaY: 1.5)),
         reason: 'blur follows the row\'s distance from the focus band',
       );
+      await state.setLyricBlurIntensity(.5);
+      await tester.pump();
+      expect(
+        tester.widget<ImageFiltered>(adjacent).imageFilter,
+        equals(ui.ImageFilter.blur(sigmaX: .75, sigmaY: .75)),
+        reason: 'the intensity slider scales the distance blur',
+      );
+      await state.setLyricBlurIntensity(1);
+      await tester.pump();
       if (const bool.fromEnvironment('SAVE_UI_PROBES')) {
         await tester.runAsync(() async {
           final image =

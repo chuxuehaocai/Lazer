@@ -632,6 +632,7 @@ void main() {
       '字体自定义',
       '音频引擎',
       '歌词模糊',
+      '歌词模糊强度',
       '手动浏览后恢复跟随',
       '滚动惯性',
       '滚动加速度',
@@ -744,6 +745,12 @@ void main() {
     expect(state.lyricFontWeight, 700);
     await tester.tap(find.byKey(const ValueKey('settings-detail-back')));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('歌词模糊'));
+    final Finder blurStrength = controlFor<Slider>('歌词模糊强度');
+    await tester.ensureVisible(blurStrength);
+    await tester.drag(blurStrength, const Offset(-120, 0));
+    await tester.pumpAndSettle();
+    expect(state.lyricBlurIntensity, lessThan(1));
     await tester.ensureVisible(find.text('歌词模糊'));
     await tester.tap(controlFor<Switch>('歌词模糊'));
     await tester.pumpAndSettle();
