@@ -155,6 +155,7 @@ LargeScreenActions _noopActions() => LargeScreenActions(
   onOpenLikes: () {},
   onOpenLocalMusic: () {},
   onOpenSavedAlbums: () {},
+  onOpenNetworkSources: () {},
   onPlayTracks: (List<Track> tracks, int index) {},
 );
 

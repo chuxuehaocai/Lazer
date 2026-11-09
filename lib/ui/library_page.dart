@@ -16,6 +16,7 @@ import '../gateway/music_models.dart';
 import '../l10n/app_localizations.dart';
 import '../local/local_music_import.dart';
 import '../local/local_music_page.dart';
+import '../network/network_sources_page.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
@@ -39,6 +40,7 @@ class AppLibraryPage extends StatelessWidget {
     required this.onOpenLocalMusic,
     required this.onOpenSavedAlbums,
     this.onOpenListeningStatistics,
+    this.onOpenNetworkSources,
     this.localImporter = const LocalMusicImporter(),
   });
 
@@ -50,6 +52,10 @@ class AppLibraryPage extends StatelessWidget {
   /// someone looking for an album does not have to read through playlists.
   final VoidCallback onOpenSavedAlbums;
   final VoidCallback? onOpenListeningStatistics;
+
+  /// 音乐库 → 网络源. Null opens the hub as a pushed page, which is also how
+  /// the library card works outside the shell's content pane.
+  final VoidCallback? onOpenNetworkSources;
 
   /// Lets tests hand in a fake chooser; production uses the system picker.
   final LocalMusicImporter localImporter;
@@ -113,6 +119,15 @@ class AppLibraryPage extends StatelessWidget {
                         state: state,
                         onOpen: onOpenLocalMusic,
                         importer: localImporter,
+                      ),
+                      const SizedBox(height: 12),
+                      NetworkSourcesCard(
+                        state: state,
+                        onOpen:
+                            onOpenNetworkSources ??
+                            () => unawaited(
+                              openNetworkSourcesPage(context, state),
+                            ),
                       ),
                       if (state.supportsMusic(MusicCapability.savedAlbums)) ...[
                         const SizedBox(height: 12),

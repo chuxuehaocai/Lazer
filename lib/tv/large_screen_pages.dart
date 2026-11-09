@@ -49,6 +49,7 @@ class LargeScreenActions {
     required this.onOpenLocalMusic,
     required this.onOpenSavedAlbums,
     required this.onPlayTracks,
+    this.onOpenNetworkSources,
   });
 
   final ValueChanged<Playlist> onOpenPlaylist;
@@ -59,6 +60,10 @@ class LargeScreenActions {
   final VoidCallback onOpenLocalMusic;
   final VoidCallback onOpenSavedAlbums;
   final void Function(List<Track> tracks, int index) onPlayTracks;
+
+  /// 音乐库 → 网络源 on a television. Optional so existing call sites and
+  /// tests keep compiling; the rail only shows the row when it is wired.
+  final VoidCallback? onOpenNetworkSources;
 }
 
 List<Playlist> _uniquePlaylists(Iterable<Playlist> playlists) {
@@ -666,6 +671,7 @@ class _LargeScreenLibraryPageState extends State<LargeScreenLibraryPage>
             onSelect: (LargeScreenLibraryFilter value) =>
                 setState(() => _filter = value),
             onLocalMusic: widget.actions.onOpenLocalMusic,
+            onNetworkSources: widget.actions.onOpenNetworkSources,
             onLikes: widget.actions.onOpenLikes,
             onSavedAlbums: widget.actions.onOpenSavedAlbums,
             showsSavedAlbums: widget.state.supportsMusic(
@@ -699,6 +705,7 @@ class _LibraryRail extends StatelessWidget {
     required this.onSelect,
     required this.onLocalMusic,
     required this.onLikes,
+    this.onNetworkSources,
     required this.onSavedAlbums,
     required this.showsSavedAlbums,
   });
@@ -706,6 +713,7 @@ class _LibraryRail extends StatelessWidget {
   final LargeScreenLibraryFilter selected;
   final ValueChanged<LargeScreenLibraryFilter> onSelect;
   final VoidCallback onLocalMusic;
+  final VoidCallback? onNetworkSources;
   final VoidCallback onLikes;
   final VoidCallback onSavedAlbums;
 
@@ -745,6 +753,12 @@ class _LibraryRail extends StatelessWidget {
             icon: Icons.folder_rounded,
             onTap: onLocalMusic,
           ),
+          if (onNetworkSources != null)
+            _RailButton(
+              label: '网络源',
+              icon: Icons.lan_rounded,
+              onTap: onNetworkSources!,
+            ),
           if (showsSavedAlbums)
             _RailButton(
               label: '收藏的专辑',

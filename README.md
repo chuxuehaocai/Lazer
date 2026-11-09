@@ -36,6 +36,7 @@
 - 歌手主页有热门歌曲和分页专辑；专辑详情带简介与完整曲目，点名字就钻进去了。
 - 收藏的专辑在资料库单独成页：封面墙随滚动续页，按专辑名、歌手一筛就找到想听的那张。
 - 热门 / 最新评论、分页加载、点赞与取消点赞。游客可以看，想说话就先登录。
+- 网络源：WebDAV、SMB、SFTP、FTP 直接连 NAS，浏览、整目录播放、扫描入库；网络电台和 RSS 播客订阅在同一页，播客记得每一集听到哪。
 - 系统媒体控件：Windows、macOS、Linux、Android、iOS 都认得它；通知、锁屏与灵动岛会跟着唱到哪一句。
 
 **歌词这件小事**
@@ -91,7 +92,7 @@ flutter run
 Windows 请完整解压后运行；AppImage 下载后先 `chmod +x`；
 macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 
-更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [Lua 插件开发](docs/lua-plugins.md) · [音乐平台架构](docs/music-gateways.md) · [统一界面](docs/ui.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
+更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [Lua 插件开发](docs/lua-plugins.md) · [音乐平台架构](docs/music-gateways.md) · [网络源](docs/network-sources.md) · [统一界面](docs/ui.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 
 ## 参考与致谢
 

@@ -21,8 +21,9 @@ import '../interaction/app_haptics.dart';
 import '../data/audio_quality.dart';
 import '../data/catalog.dart';
 import '../data/lyrics.dart';
-import '../local/local_library.dart';
 import '../local/coalescing_writer.dart';
+import '../local/local_library.dart';
+import '../network/network_sources_controller.dart';
 import '../scrolling/scroll_motion.dart';
 import '../l10n/app_language.dart';
 import '../data/models.dart';
@@ -127,6 +128,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   AppState({
     Catalog? catalog,
     LocalLibrary? localLibrary,
+    NetworkSourcesController? networkSources,
     DownloadManager? downloadManager,
     ImportedLyricsStore? importedLyrics,
     PlaybackQueueStore? queueStore,
@@ -151,6 +153,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     math.Random? shuffleRandom,
   }) : catalog = catalog ?? Catalog(),
        localLibrary = localLibrary ?? LocalLibrary(),
+       networkSources = networkSources ?? NetworkSourcesController(),
        _queueStore = queueStore ?? PlaybackQueueStore(),
        listeningStatistics =
            listeningStatistics ?? ListeningStatisticsController(),
@@ -412,6 +415,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Downloaded and scanned files, shared by playback, downloads and the
   /// library page.
   final LocalLibrary localLibrary;
+
+  /// NAS shares, internet radio and podcasts. Resolves their tracks to the
+  /// loopback stream gate; owns its own persistence. The state disposes it
+  /// with everything else, even when a test injects one.
+  final NetworkSourcesController networkSources;
 
   /// Download queue. Owned by this state unless a test injects one.
   late final DownloadManager downloadManager;
@@ -1752,8 +1760,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // postpone the home request or the restored queue. The cache itself joins
     // LocalLibrary.load(), so concurrent loading still reads its index once.
     // Keep bootstrap's completion contract: callers can await every lane.
+    // Structural changes and position ticks both matter: the tick lane is what
+    // fires while a podcast plays, and the structural lane covers pausing,
+    // switching tracks and queue edits.
+    networkSources.attachPlayback(
+      current: () => current,
+      position: () => position,
+      listenable: all,
+    );
     await Future.wait<void>(<Future<void>>[
       localLibrary.load(),
+      networkSources.load(),
       playbackCache.load(),
       audioEngine?.setVolume(_volume) ?? Future<void>.value(),
       _restorePlaybackSnapshot(initialQueueActivity),
@@ -2353,6 +2370,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     return List<Track>.unmodifiable(
       _recentTracks.where((track) {
         if (track.localPath != null) return true;
+        if (networkSources.ownsTrackId(track.id)) return true;
         final reference = MusicId.tryParse(track.id);
         if (reference == null) return false;
         try {
@@ -2997,6 +3015,59 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     seek(fraction);
   }
 
+  /// Seeks to an absolute position, waiting for a source that is still opening.
+  ///
+  /// Podcast resume needs a position, not a fraction: the feed often does not
+  /// know the episode length, so there is no duration to divide by. This waits
+  /// for [playQueue] to finish opening its first source and then seeks once,
+  /// which is what makes "continue listening" land where it stopped.
+  Future<void> seekTo(Duration target) async {
+    final Track? track = current;
+    if (track == null) return;
+    final String trackId = track.id;
+    final Future<void>? opening = _audioOpening;
+    if (opening != null && !_realActive) {
+      try {
+        await opening;
+      } catch (_) {
+        return;
+      }
+    }
+    if (_presentationDisposed || current?.id != trackId || !_realActive) return;
+    final AudioEngine? engine = audioEngine;
+    if (engine == null || target <= Duration.zero) return;
+    _sampleListening();
+    listeningStatistics.suspend();
+    _leavePresentedMix();
+    _position = target;
+    _notePlayheadMoved();
+    final int request = ++_seekRequest;
+    final int generation = _generation;
+    final int listeningRevision = ++_listeningRevision;
+    _pendingListeningSeek = listeningRevision;
+    _optimisticSeek = target;
+    _optimisticSeekGeneration = generation;
+    _optimisticSeekClock
+      ..reset()
+      ..start();
+    _tickNotifier.pulse();
+    try {
+      await engine.seek(target);
+    } catch (_) {
+      if (request == _seekRequest) _clearOptimisticSeek();
+      return;
+    }
+    if (_presentationDisposed ||
+        request != _seekRequest ||
+        generation != _generation ||
+        listeningRevision != _listeningRevision) {
+      return;
+    }
+    _pendingListeningSeek = null;
+    if (_playing) listeningStatistics.rebase(engine.position);
+    _tickNotifier.pulse();
+  }
+
   /// Follows the engine back to the song an audible overlap was mixed out of.
   ///
   /// A seek (and any other cancellation) drops the incoming side of a mix while
@@ -3154,6 +3225,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     Track track, {
     bool Function()? stillCurrent,
   }) async {
+    // Network tracks live behind the loopback gate; asking the local library
+    // or the catalogue about them cannot succeed and would log a miss.
+    if (networkSources.ownsTrackId(track.id)) {
+      final String? url = await networkSources.resolveStream(track);
+      if (stillCurrent != null && !stillCurrent()) return null;
+      return url;
+    }
     final AudioQuality quality = playbackQuality;
     final File? local = await localLibrary.localFileFor(
       track,
@@ -3290,7 +3368,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _resetStallClock();
     unawaited(_recordCurrentLocally());
     unawaited(_ensureStationBuffer());
-    if (_playing) unawaited(_startWhenBuffered(generation, url));
+    if (_playing) {
+      if (networkSources.isLiveStream(track)) {
+        // A live station has no measurable lead-in to wait for; buffering it
+        // would delay the stream by seconds for no benefit.
+        unawaited(_resumeAudio());
+      } else {
+        unawaited(_startWhenBuffered(generation, url));
+      }
+    }
     if (engine is! SerialQueueAudioEngine) unawaited(_prefetchNext());
     notifyListeners();
   }
@@ -4664,6 +4750,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     pluginManager.dispose();
     catalog.connections.close();
     _presentationDisposed = true;
+    // Detach before the tick lane is disposed: removing a listener from a
+    // disposed notifier asserts in debug builds.
+    networkSources.dispose();
     _lyricSnapshots.clear();
     _lyricRequest = null;
     currentArtwork.dispose();

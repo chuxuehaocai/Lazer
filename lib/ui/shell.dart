@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
 import '../local/local_music_page.dart';
+import '../network/network_sources_page.dart';
 import '../state/app_state.dart';
 import '../state/build_safe_notifier.dart';
 import '../state/song_comments_controller.dart';
@@ -1174,6 +1175,8 @@ class _AppShellState extends State<AppShell>
       onOpenLikes: () => _select(_AppSection.likes),
       onOpenLocalMusic: _openLocalMusic,
       onOpenSavedAlbums: _openSavedAlbums,
+      onOpenNetworkSources: () =>
+          unawaited(openNetworkSourcesPage(context, state)),
       onPlayTracks: (List<Track> tracks, int index) =>
           state.playQueue(tracks, startIndex: index),
     );

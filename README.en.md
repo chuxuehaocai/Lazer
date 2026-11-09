@@ -36,6 +36,7 @@
 - Artist pages with popular tracks and paged albums; album pages carry the description and the full track list — tap a name and you are there.
 - Saved albums get their own page in the library: a cover wall that pages as you scroll, filtered by album or artist so the record you feel like hearing is a keystroke away.
 - Popular and latest comments with pagination, likes and unlikes. Guests can read; sign in to react.
+- Network sources: WebDAV, SMB, SFTP and FTP reach the NAS directly — browse it, play a folder, scan it into the library. Internet radio and RSS podcast subscriptions live on the same page, and podcasts remember where each episode stopped.
 - System media controls on Windows, macOS, Linux, Android and iOS; the notification, lock screen and Dynamic Island carry the line being sung.
 
 **The lyric part**
@@ -119,7 +120,7 @@ artifacts are retained for 30 days. Extract the complete Windows ZIP before
 launching its EXE, run `chmod +x` on a downloaded AppImage, and note that macOS
 Apps are ad-hoc signed while the IPA needs your own signing.
 
-More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [scheduled pause](docs/scheduled-pause.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [password sign-in](docs/login-password.md) · [unified interface](docs/ui.md) · [third-party notices](THIRD-PARTY-NOTICES.md)
+More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [scheduled pause](docs/scheduled-pause.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [password sign-in](docs/login-password.md) · [unified interface](docs/ui.md) · [network sources](docs/network-sources.md) · [third-party notices](THIRD-PARTY-NOTICES.md)
 
 ## References and thanks
 

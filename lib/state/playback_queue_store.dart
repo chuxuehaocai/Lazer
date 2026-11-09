@@ -5,6 +5,7 @@ import '../gateway/music_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/models.dart';
+import '../network/network_source.dart';
 
 const String playbackQueueKey = 'lazer_playback_queue_v1';
 
@@ -139,7 +140,8 @@ PlaybackQueueSnapshot? _decodeQueue(String raw) {
     final localPath = item['localPath'] as String?;
     if (int.tryParse(id) == null &&
         MusicId.tryParse(id)?.kind != MusicEntityKind.song &&
-        !(id.startsWith('local:') && localPath?.isNotEmpty == true)) {
+        !(id.startsWith('local:') && localPath?.isNotEmpty == true) &&
+        !isNetworkOwnedTrackId(id)) {
       continue;
     }
     tracks.add(

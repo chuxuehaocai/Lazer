@@ -139,6 +139,27 @@ void main() {
     expect(saved['tracks'][0]['durationMs'], 180000);
   });
 
+  test('network, radio and podcast tracks survive a restart', () async {
+    final store = PlaybackQueueStore();
+    await store.save(
+      <Track>[
+        track('network:abc'),
+        track('radio:rs-1'),
+        track('podcast:pe-1'),
+        track('not-a-track'),
+      ],
+      1,
+      1,
+    );
+    final snapshot = await store.load();
+    expect(
+      snapshot!.tracks.map((Track item) => item.id),
+      <String>['network:abc', 'radio:rs-1', 'podcast:pe-1'],
+    );
+    expect(snapshot.index, 1);
+    expect(snapshot.tracks.first.title, 'Song network:abc');
+  });
+
   test(
     'local files and remote references survive the same queue snapshot',
     () async {
