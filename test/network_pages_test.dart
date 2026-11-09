@@ -193,6 +193,28 @@ void main() {
     expect(station.id, isNotEmpty);
   });
 
+  testWidgets('tapping a station row starts that station', (tester) async {
+    late final RadioStation station;
+    await tester.runAsync(() async {
+      station = await controller.addStation(
+        name: 'Jazz FM',
+        url: 'http://jazz.example/live',
+      );
+    });
+    await pumpPage(
+      tester,
+      NetworkSourcesPage(state: state, controller: controller),
+    );
+    await tester.tap(find.byKey(const ValueKey('network-tab-radio')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(ValueKey<String>('network-radio-row-${station.id}')),
+    );
+    await waitForIo(tester, () => state.current != null);
+    expect(state.current?.id, 'radio:${station.id}');
+    expect(state.current?.title, 'Jazz FM');
+  });
+
   testWidgets('the add-source dialog collects a WebDAV address', (tester) async {
     await pumpPage(tester, NetworkSourcesPage(state: state, controller: controller));
     await tester.tap(find.byKey(const ValueKey('network-add-source')));

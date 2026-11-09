@@ -57,6 +57,7 @@ class NetworkSource {
 
   /// `host:port`, or just the host when the port is the protocol's default.
   String get address {
+    if (kind == NetworkSourceKind.smb) return host;
     final int defaultPort = secure
         ? networkSourceDefaultSecurePort(kind)
         : networkSourceDefaultPort(kind);
@@ -265,7 +266,11 @@ class NetworkSourceDraft {
     kind: kind,
     name: name.trim(),
     host: host.trim(),
-    port: effectivePort,
+    // smb_connect always dials 445; accepting another port here would store a
+    // number the connection cannot honour.
+    port: kind == NetworkSourceKind.smb
+        ? networkSourceDefaultPort(NetworkSourceKind.smb)
+        : effectivePort,
     secure: secure,
     path: kind == NetworkSourceKind.smb
         ? _smbDraftPath(path)

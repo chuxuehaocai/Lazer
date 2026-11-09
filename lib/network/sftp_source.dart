@@ -2,6 +2,7 @@
 // ignore_for_file: prefer_initializing_formals — the protocol adapters keep
 // private fields and stable named parameters; the lint cannot express that.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
@@ -214,9 +215,15 @@ class DartSftpSession implements SftpSession {
     return DartSftpSession._(client, sftp);
   }
 
-  /// `MD5:aa:bb:…` — the same shape `ssh-keygen -l -E md5` prints, so a user
-  /// can compare it with the NAS console.
+  /// `SHA256:…` in OpenSSH's own spelling, so a user can compare it with the
+  /// NAS console. `dartssh2` 4 hands the callback the printable
+  /// fingerprint bytes, not the raw digest; a callback that does supply a
+  /// digest is still formatted as hex.
   static String formatHostKey(String type, Uint8List fingerprint) {
+    final String text = utf8.decode(fingerprint, allowMalformed: true);
+    if (text.startsWith('SHA256:') || text.startsWith('MD5:')) {
+      return '${type.toUpperCase()} $text';
+    }
     final String hex = fingerprint
         .map((int byte) => byte.toRadixString(16).padLeft(2, '0'))
         .join(':');

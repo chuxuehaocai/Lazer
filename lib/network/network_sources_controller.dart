@@ -66,8 +66,15 @@ class NetworkSourcesController extends ChangeNotifier with BuildSafeNotifier {
     this.idleClientTimeout = const Duration(minutes: 5),
     this.streamUrlCacheFor = const Duration(minutes: 10),
     this.persist = true,
-  }) : _vault = vault ?? NetworkCredentialsVault(),
-       _supportDirectory = supportDirectory ?? appSupportDirectory,
+  }) : _supportDirectory = supportDirectory ?? appSupportDirectory,
+       // Keep the vault beside the manifests it belongs to: a caller that
+       // redirects storage (tests, a custom data root) must not leave
+       // credentials in the default profile directory.
+       _vault =
+           vault ??
+           NetworkCredentialsVault(
+             supportDirectory: supportDirectory ?? appSupportDirectory,
+           ),
        _clientFactory = clientFactory ?? defaultNetworkClientFactory,
        _textFetcher = textFetcher ?? fetchNetworkText,
        _clock = clock ?? DateTime.now {

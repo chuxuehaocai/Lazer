@@ -168,6 +168,24 @@ void main() {
     expect(await vault.readAsString(), isNot(contains('secret')));
   });
 
+  test('an injected support directory also holds the credentials', () async {
+    final NetworkSourcesController controller = NetworkSourcesController(
+      supportDirectory: () async => directory,
+    );
+    addTearDown(controller.dispose);
+    await controller.addSource(
+      NetworkSourceDraft(
+        kind: NetworkSourceKind.sftp,
+        host: 'nas.local',
+        path: '/',
+      ),
+      password: 'secret',
+    );
+    final File vault = File('${directory.path}/network_credentials.json');
+    expect(await vault.exists(), isTrue);
+    expect(await vault.readAsString(), isNot(contains('secret')));
+  });
+
   test('an empty password field keeps the stored secret, clear drops it', () async {
     final Map<String, String> passwords = <String, String>{};
     final NetworkSourcesController controller = await _controller(

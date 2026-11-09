@@ -246,31 +246,41 @@ class _NetworkSourceEditorState extends State<_NetworkSourceEditor>
                 keyboardType: TextInputType.url,
                 fieldKey: const ValueKey<String>('network-field-host'),
               ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    flex: 2,
-                    child: NetworkField(
-                      label: '端口',
-                      hint: '',
-                      controller: _port,
-                      keyboardType: TextInputType.number,
-                      fieldKey: const ValueKey<String>('network-field-port'),
+              if (smb)
+                // smb_connect always dials 445, so the port field would be a
+                // control that does nothing.
+                NetworkField(
+                  label: '共享与目录',
+                  hint: 'Music 或 data/music',
+                  controller: _path,
+                  fieldKey: const ValueKey<String>('network-field-path'),
+                )
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      flex: 2,
+                      child: NetworkField(
+                        label: '端口',
+                        hint: '',
+                        controller: _port,
+                        keyboardType: TextInputType.number,
+                        fieldKey: const ValueKey<String>('network-field-port'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    flex: 3,
-                    child: NetworkField(
-                      label: smb ? '共享与目录' : '起始目录',
-                      hint: smb ? 'Music 或 data/music' : '/',
-                      controller: _path,
-                      fieldKey: const ValueKey<String>('network-field-path'),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 3,
+                      child: NetworkField(
+                        label: '起始目录',
+                        hint: '/',
+                        controller: _path,
+                        fieldKey: const ValueKey<String>('network-field-path'),
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
               NetworkField(
                 label: '用户名',
                 hint: smb ? r'NAS\用户名 或留空' : '留空表示匿名',
