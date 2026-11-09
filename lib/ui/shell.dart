@@ -1919,6 +1919,15 @@ class _AppShellState extends State<AppShell>
     if (_comments) return 'comments';
     if (_localMusic) return 'local-music';
     if (_savedAlbums) return 'saved-albums';
+    // Each network level is its own content key so RetainedContentSwitcher
+    // animates hub → folder → episodes like any other page.
+    final String? podcastId = _networkPodcastId;
+    if (podcastId != null) return 'network-podcast:$podcastId';
+    final String? sourceId = _networkSourceId;
+    if (sourceId != null) {
+      return 'network-browse:$sourceId:${_networkSourcePath ?? '/'}';
+    }
+    if (_networkSources) return 'network-sources';
     if (_chart != null) return 'chart:${_chart!.id}';
     if (_artist != null) {
       final String view = _artistSongs

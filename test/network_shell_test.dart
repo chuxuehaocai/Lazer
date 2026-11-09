@@ -12,6 +12,7 @@ import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
+import 'package:lazer_nextgen/widgets/retained_content_switcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/music_gateway.dart';
@@ -123,7 +124,7 @@ void main() {
       MaterialApp(
         theme: buildAppleTheme(brightness: Brightness.dark),
         builder: (BuildContext context, Widget? child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(disableAnimations: true),
+          data: MediaQuery.of(context),
           child: child!,
         ),
         home: AppShell(state: state),
@@ -147,6 +148,15 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(card);
+    await tester.pump();
+    // The new pane is a new content key, so RetainedContentSwitcher slides it
+    // in instead of replacing the pane without motion.
+    final RetainedContentSwitcher switcher = tester
+        .widget<RetainedContentSwitcher>(
+          find.byType(RetainedContentSwitcher),
+        );
+    expect(switcher.currentKey, contains('network-sources'));
+    expect(switcher.duration, greaterThan(Duration.zero));
     await tester.pumpAndSettle();
 
     // The shell's player bar is still on stage: the page swapped inside the
