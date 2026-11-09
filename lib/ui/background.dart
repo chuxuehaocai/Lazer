@@ -15,6 +15,7 @@ import '../state/ui_preferences.dart';
 import '../utils/artwork.dart';
 import '../theme/tokens.dart';
 import '../theme/adaptive_contrast.dart';
+import 'palette_pixels.dart';
 
 export '../player/player_backdrop.dart' show AlbumBlurFlow;
 
@@ -1293,29 +1294,17 @@ Future<AlbumCoverPalette?> _readCoverPalette(List<String> candidates) async {
 }
 
 Future<AlbumCoverPalette?> _readOneCoverPalette(String url) async {
-  final ui.Image? image = await decodeAlbumPaletteImage(url);
-  if (image == null) return null;
-  try {
-    final ByteData? pixels = await image.toByteData(
-      format: ui.ImageByteFormat.rawRgba,
-    );
-    if (pixels == null) return null;
-    final rgba = pixels.buffer.asUint8List(
-      pixels.offsetInBytes,
-      pixels.lengthInBytes,
-    );
-    final palette = AlbumCoverPalette(
-      seed: albumSeedFromPixels(rgba, image.width, image.height),
-      mesh: albumMeshColorsFromPixels(rgba, image.width, image.height),
-    );
-    if (_artworkPalettes.length >= albumFlowConfiguration.paletteCacheEntries) {
-      _artworkPalettes.remove(_artworkPalettes.keys.first);
-    }
-    _artworkPalettes[url] = palette;
-    return palette;
-  } finally {
-    image.dispose();
+  final PalettePixels? pixels = await readPalettePixels(url);
+  if (pixels == null) return null;
+  final palette = AlbumCoverPalette(
+    seed: albumSeedFromPixels(pixels.rgba, pixels.width, pixels.height),
+    mesh: albumMeshColorsFromPixels(pixels.rgba, pixels.width, pixels.height),
+  );
+  if (_artworkPalettes.length >= albumFlowConfiguration.paletteCacheEntries) {
+    _artworkPalettes.remove(_artworkPalettes.keys.first);
   }
+  _artworkPalettes[url] = palette;
+  return palette;
 }
 
 /// Resize only providers that support music provider's rendition parameter. Local

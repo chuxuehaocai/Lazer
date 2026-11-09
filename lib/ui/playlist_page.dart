@@ -189,26 +189,37 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
           _scheduleLocateRefresh();
         }
       }
-      final List<Track> tracks;
-      String? note;
       if (album != null) {
         // The list row only carries a stub Album; the full description lives
         // on the album detail endpoint.
         final details = await catalog.albumDetailsFor(album.id, force: force);
-        tracks = details.tracks;
-        note = details.description;
-      } else {
-        tracks = await catalog.playlistTracks(playlistId);
+        if (!mounted || serial != _requestSerial) return;
+        setState(() {
+          _tracks = details.tracks;
+          _note = details.description;
+          _metricsDirty = true;
+          _rowIndexTrackId = null;
+          _rowIndexCache = -1;
+        });
+        _scheduleLocateRefresh();
+        return;
       }
-      if (!mounted || serial != _requestSerial) return;
-      setState(() {
-        _tracks = tracks;
-        _note = note;
-        _metricsDirty = true;
-        _rowIndexTrackId = null;
-        _rowIndexCache = -1;
-      });
-      _scheduleLocateRefresh();
+
+      // Replace the stale snapshot with the first live page, then append each
+      // following 100-song page as soon as it arrives. AppCover starts its own
+      // image request, so a slow cover CDN cannot delay the song rows.
+      final fresh = <Track>[];
+      await for (final page in catalog.playlistTrackPages(playlistId)) {
+        if (!mounted || serial != _requestSerial) return;
+        fresh.addAll(page);
+        setState(() {
+          _tracks = List<Track>.unmodifiable(fresh);
+          _metricsDirty = true;
+          _rowIndexTrackId = null;
+          _rowIndexCache = -1;
+        });
+        _scheduleLocateRefresh();
+      }
     } catch (_) {
       if (!mounted || serial != _requestSerial) return;
       setState(() => _error = '歌单读取失败，请重试。'); // i18n:key

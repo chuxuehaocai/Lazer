@@ -309,9 +309,9 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     return LanRemoteScope(
       controller: _remote,
       child: InteractionFeedback(
-        state: _state,
+        feedback: _state.feedback,
         child: MaterialApp(
-          title: 'Lazer · Field Player',
+          title: 'Lazer',
           debugShowCheckedModeBanner: false,
           navigatorObservers: [_browseNavigation],
           themeAnimationCurve: const AppleSpringCurve(),

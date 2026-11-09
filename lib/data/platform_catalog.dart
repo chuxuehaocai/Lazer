@@ -169,9 +169,13 @@ class _PlatformCatalog {
     final lists = !gateway.supports(MusicCapability.playlists)
         ? <MusicPlaylist>[]
         : await all((offset) => gateway.playlists(limit: 100, offset: offset));
+    // Only the first liked page belongs in the collection snapshot. The old
+    // full walk fetched every liked song before the library could paint at
+    // all — slow on a first login and effectively empty until a restart.
+    // Later pages load when 我喜欢 itself is opened.
     final favorites = !gateway.supports(MusicCapability.favorites)
         ? <MusicSong>[]
-        : await all((offset) => gateway.favorites(limit: 100, offset: offset));
+        : (await gateway.favorites(limit: 100, offset: 0)).items;
     if (gateway.user?.id != account.id) {
       throw StateError('Music account changed.');
     }
@@ -197,9 +201,9 @@ class _PlatformCatalog {
               trackIds: favoriteIds,
               coverSeed: liked?.coverSeed ?? 0,
               coverUrl: liked?.coverUrl ?? favorites.firstOrNull?.coverUrl,
-              trackCount: gateway.supports(MusicCapability.favorites)
-                  ? favorites.length
-                  : liked!.trackCount,
+              trackCount: (liked?.trackCount ?? 0) > 0
+                  ? liked!.trackCount
+                  : favorites.length,
             ),
       created: unique.values
           .where((list) => list.writable && list.id != personal?.id)
@@ -212,18 +216,32 @@ class _PlatformCatalog {
     );
   }
 
-  Future<List<Track>> playlistTracks(String key) async {
+  Stream<List<Track>> playlistTrackPages(String key) async* {
     final id = reference(key, MusicEntityKind.playlist);
     final gateway = owner(id);
     final account = gateway.user?.id;
-    final songs = await all(
-      (offset) => id.value == favoritesKey
-          ? gateway.favorites(limit: 100, offset: offset)
-          : gateway.playlistSongs(id, limit: 100, offset: offset),
-      concurrency: 2,
-    );
-    if (gateway.user?.id != account) throw StateError('Music account changed.');
-    return songs.map(track).toList();
+    var offset = 0;
+    for (;;) {
+      final page = id.value == favoritesKey
+          ? await gateway.favorites(limit: 100, offset: offset)
+          : await gateway.playlistSongs(id, limit: 100, offset: offset);
+      if (gateway.user?.id != account) {
+        throw StateError('Music account changed.');
+      }
+      if (page.items.isEmpty) return;
+      final tracks = page.items.map(track).toList();
+      yield tracks;
+      offset += page.items.length;
+      if (!page.hasMore || page.items.length < 100) return;
+    }
+  }
+
+  Future<List<Track>> playlistTracks(String key) async {
+    final tracks = <Track>[];
+    await for (final page in playlistTrackPages(key)) {
+      tracks.addAll(page);
+    }
+    return tracks;
   }
 
   Future<AlbumDetails> albumDetails(String key) async {

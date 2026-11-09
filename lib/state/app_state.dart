@@ -10,7 +10,7 @@ import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../audio/audio_engine.dart';
-import '../audio/native/lazer_audio_engine.dart' show NativeAudioEngine;
+import '../audio/engine_factory.dart';
 import '../animation/apple_spring.dart';
 import '../audio/hifi_controller.dart';
 import '../cache/playback_cache.dart';
@@ -460,7 +460,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         autoMixError = null;
         // Switching between passthrough/integer and mixed PCM requires the
         // native decoder to reopen, using the same engine and output device.
-        if (engine is NativeAudioEngine && _realActive && current != null) {
+        if (engine != null &&
+            isNativeAudioEngine(engine) &&
+            _realActive &&
+            current != null) {
           await _startAudio(resumeAt: resumeAt);
         }
         await (await SharedPreferences.getInstance()).setBool(
@@ -1416,6 +1419,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       playStatsError = null;
       return;
     }
+    // Play counts and listen time stay on this device. A plugin that does not
+    // declare scrobble is not asked for the service's play record.
+    if (!catalog.activeGateway.supports(MusicCapability.scrobble)) {
+      final bool hadCloudRecord =
+          playStats.isNotEmpty || playStatsError != null || playStatsLoading;
+      playStats = const <TrackPlayStat>[];
+      playStatsError = null;
+      playStatsLoading = false;
+      _playStatsUid = uid;
+      if (hadCloudRecord) notifyListeners();
+      return;
+    }
     if (playStatsLoading) return;
     if (!force && _playStatsUid == uid && playStats.isNotEmpty) return;
     _playStatsUid = uid;
@@ -1486,6 +1501,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
     try {
       if (force) {
+        _musicPlatforms.resetLikesHydration(owner);
         await catalog.invalidateCollections(uid);
       } else if (collections.liked == null &&
           collections.created.isEmpty &&
@@ -3247,12 +3263,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return url;
     }
     final AudioQuality quality = playbackQuality;
-    final File? local = await localLibrary.localFileFor(
+    final String? local = await localLibrary.playbackUrl(
       track,
       quality: quality,
     );
     if (stillCurrent != null && !stillCurrent()) return null;
-    if (local != null) return local.uri.toString();
+    if (local != null) return local;
     return catalog.audioUrlFor(track, quality: quality);
   }
 
@@ -4683,6 +4699,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           }
           final owner = catalog.connections.resolve(id);
           if (owner.user == null || owner.cacheNamespace != report.account) {
+            continue;
+          }
+          if (!owner.supports(MusicCapability.scrobble)) {
+            _playUploads.remove(report);
+            changed = true;
             continue;
           }
           await owner.scrobble(

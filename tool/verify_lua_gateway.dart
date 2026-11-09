@@ -211,9 +211,11 @@ Future<void> main(List<String> arguments) async {
     await check('lyrics', () async {
       await gateway.lyrics(song.id);
     });
-    await check('play_statistics', () async {
-      await gateway.playStats(limit: 3);
-    });
+    if (manifest.capabilities.contains('scrobble')) {
+      await check('play_statistics', () async {
+        await gateway.playStats(limit: 3);
+      });
+    }
     await check('stream_and_media_bytes', () async {
       MusicStream? stream;
       for (final candidate in results.songs.items) {

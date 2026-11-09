@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' show SemanticsRole, lerpDouble;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../animation/apple_spring.dart';
@@ -180,55 +181,53 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
       enabled: destination.enabled,
       onTap: onTap,
       excludeSemantics: true,
-      child: Tooltip(
-        message: destination.tooltip ?? destination.label,
-        excludeFromSemantics: true,
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            onTap: onTap,
-            excludeFromSemantics: true,
-            borderRadius: BorderRadius.circular(999),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: IconTheme(
-                data: IconThemeData(size: 22, color: color),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    selected
-                        ? destination.selectedIcon ?? destination.icon
-                        : destination.icon,
-                    Flexible(
-                      child: SizeTransition(
-                        axis: Axis.horizontal,
-                        alignment: Alignment.centerLeft,
-                        sizeFactor: weight,
-                        child: FadeTransition(
-                          opacity: weight,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  destination.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelLarge
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                        color: color,
-                                      ),
-                                ),
+      // The browser draws its tooltip through a separate overlay, which a
+      // phone-width page can end up showing over the whole shell; the tab
+      // label is already visible when it matters.
+      child: _withTooltip(
+        destination.tooltip ?? destination.label,
+        GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: IconTheme(
+              data: IconThemeData(size: 22, color: color),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  selected
+                      ? destination.selectedIcon ?? destination.icon
+                      : destination.icon,
+                  Flexible(
+                    child: SizeTransition(
+                      axis: Axis.horizontal,
+                      alignment: Alignment.centerLeft,
+                      sizeFactor: weight,
+                      child: FadeTransition(
+                        opacity: weight,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                destination.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelLarge
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: color,
+                                    ),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -236,6 +235,14 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
       ),
     );
   }
+
+  Widget _withTooltip(String message, Widget child) => kIsWeb
+      ? child
+      : Tooltip(
+          message: message,
+          excludeFromSemantics: true,
+          child: child,
+        );
 }
 
 class _CapsuleLayout extends MultiChildLayoutDelegate {

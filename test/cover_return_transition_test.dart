@@ -239,6 +239,12 @@ class _Catalog extends Catalog {
     requests++;
     return [_track];
   }
+
+  @override
+  Stream<List<Track>> playlistTrackPages(String id) async* {
+    requests++;
+    yield [_track];
+  }
 }
 
 Future<void> _settle(WidgetTester tester) async {

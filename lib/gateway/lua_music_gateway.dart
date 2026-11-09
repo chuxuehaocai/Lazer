@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../plugins/lua_plugin_runtime.dart';
 import 'music_gateway.dart';
 
@@ -198,7 +200,10 @@ class LuaMusicGateway extends MusicAccountGateway {
 
   @override
   Future<String> qrUrl(String key) async {
-    final url = (await _call('qrUrl', {'key': key}))?.toString() ?? '';
+    final url = (await _call('qrUrl', {
+      'key': key,
+      'web': kIsWeb,
+    }))?.toString() ?? '';
     if (url.isNotEmpty) {
       _qrKeys.clear();
       _qrKeys[url] = key;

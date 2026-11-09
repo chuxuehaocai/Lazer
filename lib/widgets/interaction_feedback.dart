@@ -4,28 +4,33 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
 
 import '../animation/apple_spring.dart';
-import '../state/app_state.dart';
+
+/// Haptic or click feedback with an optional detent/boundary emphasis.
+typedef FeedbackCallback =
+    Future<void> Function({bool detent, bool boundary});
 
 /// Supplies feedback preferences without listening to raw pointer events.
 class InteractionFeedback extends InheritedWidget {
   const InteractionFeedback({
     super.key,
-    required this.state,
+    required this.feedback,
     required super.child,
   });
-  final AppState state;
-  static AppState? of(BuildContext context) =>
-      context.getInheritedWidgetOfExactType<InteractionFeedback>()?.state;
+
+  /// Kept as a callback so chrome widgets do not depend on the native app
+  /// state graph.
+  final FeedbackCallback feedback;
+  static FeedbackCallback? of(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<InteractionFeedback>()?.feedback;
   @override
-  bool updateShouldNotify(InteractionFeedback oldWidget) =>
-      oldWidget.state != state;
+  bool updateShouldNotify(InteractionFeedback oldWidget) => false;
 }
 
 VoidCallback? feedbackAction(BuildContext context, VoidCallback? action) {
   if (action == null) return null;
   return () {
-    final state = InteractionFeedback.of(context);
-    if (state != null) unawaited(state.feedback());
+    final feedback = InteractionFeedback.of(context);
+    if (feedback != null) unawaited(feedback());
     action();
   };
 }

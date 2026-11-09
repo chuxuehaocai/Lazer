@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="Lazer">
+  <title>Lazer</title>
+  <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background-color: #141413;
+      overscroll-behavior: none;
+    }
+    @media (prefers-color-scheme: light) {
+      html, body { background-color: #F2F2F7; }
+    }
+    html[data-theme="dark"], html[data-theme="dark"] body { background-color: #141413; }
+    html[data-theme="light"], html[data-theme="light"] body { background-color: #F2F2F7; }
+
+    #lazer-boot {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      background-color: #141413;
+      color: #FFFFFF;
+      font-family: "MiSans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      transition: opacity .28s ease;
+    }
+    html[data-theme="light"] #lazer-boot {
+      background-color: #F2F2F7;
+      color: #1C1C1E;
+    }
+    #lazer-boot.lazer-boot--done {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #lazer-boot .lazer-boot__brand {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -.5px;
+    }
+    #lazer-boot .lazer-boot__track {
+      width: 168px;
+      height: 3px;
+      border-radius: 999px;
+      overflow: hidden;
+      background-color: rgba(255, 255, 255, .16);
+    }
+    html[data-theme="light"] #lazer-boot .lazer-boot__track {
+      background-color: rgba(0, 0, 0, .12);
+    }
+    #lazer-boot .lazer-boot__fill {
+      width: 0;
+      height: 100%;
+      border-radius: 999px;
+      background-color: #FA2D48;
+      transition: width .25s ease;
+    }
+    #lazer-boot .lazer-boot__hint {
+      font-size: 12px;
+      opacity: .62;
+    }
+  </style>
+  <script>
+    (function () {
+      var dark = true;
+      try {
+        var stored = localStorage.getItem('lazer_theme_mode');
+        dark = stored === 'dark' ||
+          (stored !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      } catch (e) {}
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      var metas = document.querySelectorAll('meta[name="theme-color"]');
+      for (var i = 0; i < metas.length; i++) {
+        metas[i].content = dark ? '#141413' : '#F2F2F7';
+      }
+      if (window.location.pathname.endsWith('/')) {
+        document.documentElement.dataset.base = window.location.pathname;
+      }
+    })();
+  </script>
+</head>
+<body>
+  <div id="lazer-boot" role="status" aria-live="polite">
+    <div class="lazer-boot__brand">Lazer</div>
+    <div class="lazer-boot__track"><div class="lazer-boot__fill" id="lazer-boot-fill"></div></div>
+    <div class="lazer-boot__hint" id="lazer-boot-hint">正在加载…</div>
+  </div>
+  <script>
+    (function () {
+      var fill = document.getElementById('lazer-boot-fill');
+      var hint = document.getElementById('lazer-boot-hint');
+      var boot = document.getElementById('lazer-boot');
+      var progress = 0;
+      var done = false;
+
+      function setProgress(value) {
+        progress = Math.max(progress, Math.min(100, value));
+        fill.style.width = progress + '%';
+      }
+
+      // The engine renders a real frame only after its own resources arrive;
+      // creep forward while waiting so the bar never looks frozen.
+      var creep = setInterval(function () {
+        if (done) return;
+        setProgress(progress + (progress < 70 ? 6 : 1));
+        if (progress >= 88) {
+          hint.textContent = '正在准备界面…';
+        }
+      }, 220);
+
+      function finish() {
+        if (done) return;
+        done = true;
+        clearInterval(creep);
+        setProgress(100);
+        boot.classList.add('lazer-boot--done');
+        setTimeout(function () {
+          if (boot && boot.parentNode) boot.parentNode.removeChild(boot);
+        }, 320);
+      }
+
+      setProgress(4);
+      window.addEventListener('flutter-first-frame', finish, { once: true });
+      // Safety net: never trap the page behind the loader.
+      setTimeout(finish, 30000);
+    })();
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

@@ -17,6 +17,7 @@
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.0-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
+  <img alt="web demo" src="https://img.shields.io/badge/Web%20Demo-Vercel-000000">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-4C9A7A"></a>
 </p>
 
@@ -97,6 +98,39 @@ flutter analyze
 flutter test
 flutter run
 ```
+
+### Web build and Vercel deployment
+
+The web build is compiled from this repository's `lib/main.dart` and shares the same Dart UI, plugin runtime and state layer as the desktop and mobile apps. The deployed site is [player.naominet.dev](https://player.naominet.dev).
+
+> Mainland China: Flutter Web loads CanvasKit from `www.gstatic.com` by default, which is unreachable there and leaves the page stuck on the loading screen. Always build with `--no-web-resources-cdn` so CanvasKit ships inside `build/web/canvaskit/`.
+
+```sh
+# 1. Build the static site in this repository
+flutter pub get
+flutter build web --release --no-web-resources-cdn
+
+# 2. Pack the Vercel Build Output with the lazer_demo wrapper
+#    (it provides the same-origin /api/plugin-http function)
+cd ../lazer_ncm/lazer_demo
+node tool/prepare-vercel-output.js
+
+# 3. Deploy with the Vercel CLI
+vercel deploy --prebuilt --prod --project lazer_demo
+```
+
+On a fresh account, create the project and disable SSO protection first; otherwise the public domain shows a login wall:
+
+```sh
+vercel project create lazer_demo --non-interactive
+vercel project protection disable lazer_demo --sso --yes
+```
+
+Notes:
+
+- The static output comes from this repository's `build/web`; `lazer_demo` only holds the Vercel Function and packing script.
+- `api/plugin-http.js` only accepts HTTPS hosts declared by the calling plugin manifest and rejects loopback, private, link-local and metadata addresses. Forwarded requests carry `X-Real-IP` / `X-Forwarded-For` generated from api-enhanced's mainland China ranges; browsers cannot override those headers.
+- Uploaded Lua is untrusted. A production deployment should still keep a domain allowlist, rate limits, and redacted logs.
 
 ## Automated builds
 

@@ -1,6 +1,7 @@
 import '../widgets/build_safe_state.dart';
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -27,6 +28,7 @@ import '../tv/large_screen_widgets.dart';
 import '../tv/tv_mode.dart';
 import '../updates/update_checker.dart';
 import '../updates/update_dialog.dart';
+import '../updates/open_external.dart';
 import '../utils/artwork.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/artwork_image.dart';
@@ -1621,6 +1623,16 @@ class _AppShellState extends State<AppShell>
                 ),
               ),
             ),
+            if (kIsWeb) ...<Widget>[
+              _ToolbarButton(
+                tooltip: 'GitHub 项目',
+                icon: Icons.code_rounded,
+                onPressed: () => unawaited(
+                  openExternalUrl(UpdateChecker.repositoryUrl),
+                ),
+              ),
+              const SizedBox(width: 2),
+            ],
           ],
         ),
       ),
@@ -1677,6 +1689,16 @@ class _AppShellState extends State<AppShell>
                 ),
               ),
             ),
+            if (kIsWeb) ...<Widget>[
+              const SizedBox(width: 2),
+              _ToolbarButton(
+                tooltip: 'GitHub 项目',
+                icon: Icons.code_rounded,
+                onPressed: () => unawaited(
+                  openExternalUrl(UpdateChecker.repositoryUrl),
+                ),
+              ),
+            ],
             const SizedBox(width: 2),
             _accountButton(apple, radius: 15),
           ],

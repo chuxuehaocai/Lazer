@@ -90,7 +90,7 @@ List<LyricLine> parseYrc(String? source) {
         if (word.group(4)!.isNotEmpty)
           LyricWord(
             Duration(milliseconds: int.parse(word.group(1)!)),
-            Duration(milliseconds: int.parse(word.group(2)!).clamp(1, 1 << 62)),
+            Duration(milliseconds: int.parse(word.group(2)!).clamp(1, 0x1FFFFFFFFFFFFF)),
             word.group(4)!,
           ),
     ];

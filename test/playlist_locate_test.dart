@@ -37,6 +37,11 @@ class _Catalog extends Catalog {
   Future<List<Track>> playlistTracks(String id) async => _tracks();
 
   @override
+  Stream<List<Track>> playlistTrackPages(String id) async* {
+    yield _tracks();
+  }
+
+  @override
   Future<List<Track>?> cachedPlaylistTracks(String playlistId) async => null;
 }
 

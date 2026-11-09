@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'open_external_on_web.dart'
+    if (dart.library.html) 'open_external_on_web_html.dart';
+
 const MethodChannel _updatesChannel = MethodChannel(
   'dev.naominet.lazer/updates',
 );
@@ -30,7 +33,7 @@ Future<bool> openExternalUrl(String raw) async {
   if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
     return false;
   }
-  if (kIsWeb) return false;
+  if (kIsWeb) return openUrlOnWeb(uri.toString());
   if (defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS) {
     try {

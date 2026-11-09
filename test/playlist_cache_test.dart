@@ -69,6 +69,11 @@ class _CachedCatalog extends Catalog {
   Future<List<Track>> playlistTracks(String id) => liveTracks.future;
 
   @override
+  Stream<List<Track>> playlistTrackPages(String id) async* {
+    yield await playlistTracks(id);
+  }
+
+  @override
   Future<HomeFeed?> loadHome({int? userId}) async => null;
 
   @override
@@ -98,6 +103,11 @@ class _SwitchingCatalog extends Catalog {
       return oldLive.future;
     }
     return Future.value([_track('new', 'New song')]);
+  }
+
+  @override
+  Stream<List<Track>> playlistTrackPages(String id) async* {
+    yield await playlistTracks(id);
   }
 }
 

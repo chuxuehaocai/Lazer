@@ -299,7 +299,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     if (!ready || id == null || songId.isEmpty || _owner.user==null) return;
     final int position = (progressMs ?? state.position.inMilliseconds).clamp(
       0,
-      1 << 62,
+      0x1FFFFFFFFFFFFF,
     );
     final Map<String, Object?> command = <String, Object?>{
       'clientSeq': ++_clientSeq,

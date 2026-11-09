@@ -1,6 +1,5 @@
 // i18n:data — interface strings declared here are translated at their render sites.
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:xml/xml.dart';
 
@@ -549,14 +548,32 @@ class PodcastFeedParser {
   }
 
   static DateTime? _date(String value) {
-    if (value.trim().isEmpty) return null;
-    final DateTime? iso = DateTime.tryParse(value.trim());
+    final String text = value.trim();
+    if (text.isEmpty) return null;
+    final DateTime? iso = DateTime.tryParse(text);
     if (iso != null) return iso;
-    try {
-      return HttpDate.parse(value.trim());
-    } catch (_) {
-      return null;
-    }
+    // RFC 1123 (`Wed, 02 Oct 2002 13:00:00 GMT`), the format feeds use.
+    final match = RegExp(
+      r'^[A-Za-z]{3},\s+(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2,4})\s+'
+      r'(\d{2}):(\d{2})(?::(\d{2}))?\s+(?:GMT|UTC|[+-]0000)$',
+    ).firstMatch(text);
+    if (match == null) return null;
+    const months = <String, int>{
+      'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+      'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+    };
+    final int? month = months[match.group(2)!.toLowerCase()];
+    if (month == null) return null;
+    int year = int.parse(match.group(3)!);
+    if (year < 100) year += year < 50 ? 2000 : 1900;
+    return DateTime.utc(
+      year,
+      month,
+      int.parse(match.group(1)!),
+      int.parse(match.group(4)!),
+      int.parse(match.group(5)!),
+      int.tryParse(match.group(6) ?? '') ?? 0,
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 // i18n:data — interface strings declared here are translated at their render sites.
 import 'dart:async';
-import 'dart:io';
+
+import 'remote_error.dart';
 
 /// The network storage protocols the player speaks itself.
 enum NetworkSourceKind { webdav, smb, sftp, ftp }
@@ -110,17 +111,16 @@ class RemoteFailure implements Exception {
     if (error is TimeoutException) {
       return const RemoteFailure(RemoteFailureKind.timeout);
     }
-    if (error is HandshakeException) {
-      return RemoteFailure(RemoteFailureKind.tls, detail: error.message);
-    }
-    if (error is SocketException) {
-      return RemoteFailure(RemoteFailureKind.unreachable, detail: error.osError?.message ?? error.message);
-    }
-    if (error is HttpException) {
-      return RemoteFailure(fallback, detail: error.message);
-    }
-    if (error is TlsException) {
-      return RemoteFailure(RemoteFailureKind.tls, detail: error.message);
+    final platform = classifyPlatformError(error);
+    if (platform != null) {
+      return RemoteFailure(
+        switch (platform.kind) {
+          'tls' => RemoteFailureKind.tls,
+          'unreachable' => RemoteFailureKind.unreachable,
+          _ => fallback,
+        },
+        detail: platform.detail,
+      );
     }
     return RemoteFailure(fallback, detail: error.toString());
   }

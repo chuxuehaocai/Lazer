@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../interaction/app_haptics.dart';
 import '../l10n/app_localizations.dart';
-import '../state/app_state.dart';
 import 'interaction_feedback.dart';
 
 /// Keep a control's OverlayPortal and its anchor in the same semantics island.
@@ -68,7 +67,7 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
 
   @override
   Widget build(BuildContext context) {
-    final AppState? state = widget.detentFeedback
+    final FeedbackCallback? feedback = widget.detentFeedback
         ? InteractionFeedback.of(context)
         : null;
     final ValueChanged<double>? onChanged = widget.onChanged;
@@ -93,7 +92,9 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
                       steps: widget.divisions,
                     );
                     _detents!.begin(value);
-                    if (state != null) unawaited(state.feedback(detent: true));
+                    if (feedback != null) {
+                      unawaited(feedback(detent: true));
+                    }
                     widget.onChangeStart?.call(value);
                   }
                 : widget.onChangeStart,
@@ -102,10 +103,10 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
                 : (value) {
                     final detents = _detents;
                     if (detents != null &&
-                        state != null &&
+                        feedback != null &&
                         detents.update(value)) {
                       unawaited(
-                        state.feedback(
+                        feedback(
                           detent: true,
                           boundary: value <= widget.min || value >= widget.max,
                         ),

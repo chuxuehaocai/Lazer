@@ -126,7 +126,7 @@ void main() {
       addTearDown(state.dispose);
       await tester.pumpWidget(
         InteractionFeedback(
-          state: state,
+          feedback: state.feedback,
           child: MaterialApp(
             home: Scaffold(
               body: Column(
@@ -280,7 +280,7 @@ void main() {
       addTearDown(state.dispose);
       await tester.pumpWidget(
         InteractionFeedback(
-          state: state,
+          feedback: state.feedback,
           child: MaterialApp(
             theme: buildAppleTheme(),
             home: Scaffold(body: AppSettingsPage(state: state)),

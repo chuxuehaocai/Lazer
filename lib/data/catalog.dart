@@ -864,6 +864,30 @@ class Catalog {
       .trim();
 
   /// Reuses recent snapshots; expired snapshots remain available offline.
+  Stream<List<Track>> playlistTrackPages(String playlistId) async* {
+    if (playlistId == dailyRecommendationsPlaylistId) {
+      final tracks = _home?.daily.isNotEmpty == true
+          ? _home!.daily
+          : _home?.quick ?? const <Track>[];
+      if (tracks.isNotEmpty) yield tracks;
+      return;
+    }
+    final accumulated = <Track>[];
+    await for (final page in _platform.playlistTrackPages(playlistId)) {
+      accumulated.addAll(page);
+      // Yield as soon as one 100-song page is ready. Artwork widgets can load
+      // their URLs independently while the next page is being requested.
+      yield page;
+    }
+    final key = _playlistKey(playlistId);
+    _remember(key, accumulated, DateTime.now());
+    unawaited(
+      cache.writeJson(key, {
+        'tracks': accumulated.map((track) => track.toJson()).toList(),
+      }),
+    );
+  }
+
   Future<List<Track>> playlistTracks(String playlistId) =>
       playlistId == dailyRecommendationsPlaylistId
       ? Future.value(

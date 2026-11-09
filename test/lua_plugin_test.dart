@@ -6,6 +6,7 @@ import 'package:archive/archive.dart';
 import 'package:lazer_nextgen/plugins/lua_plugin_runtime.dart';
 import 'package:lazer_nextgen/plugins/plugin_manifest.dart';
 import 'package:lazer_nextgen/plugins/plugin_manager.dart';
+import 'package:lazer_nextgen/plugins/plugin_package.dart';
 
 void main() {
   test(
@@ -179,5 +180,35 @@ void main() {
     expect(manager.plugins.single.enabled, isTrue);
     await manager.setEnabled('demo.manager', false);
     expect(manager.plugins.single.enabled, isFalse);
+  });
+
+  test('a folder zip and Windows paths still resolve the plugin root', () {
+    final manifestBytes = utf8.encode(
+      jsonEncode(const {
+        'id': 'demo.wrapped',
+        'name': 'Wrapped',
+        'version': '1.0.0',
+        'provider': 'demo',
+        'apiVersion': 1,
+        'entry': 'main.lua',
+      }),
+    );
+    final sourceBytes = utf8.encode('return {call=function() return {} end}');
+    final archive = Archive()
+      ..addFile(
+        ArchiveFile(
+          'netease-cloud\\manifest.json',
+          manifestBytes.length,
+          manifestBytes,
+        ),
+      )
+      ..addFile(
+        ArchiveFile('netease-cloud\\main.lua', sourceBytes.length, sourceBytes),
+      );
+    final package = decodePluginPackage(
+      Uint8List.fromList(ZipEncoder().encode(archive)),
+    );
+    expect(package.manifest.id, 'demo.wrapped');
+    expect(package.sources.containsKey('main.lua'), isTrue);
   });
 }

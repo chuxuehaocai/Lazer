@@ -9,15 +9,74 @@ class _MusicPlatformState {
   final Map<String, SessionUser> _sessions = <String, SessionUser>{};
   final Map<String, UserCollections> _collectionsByAccount = {};
   final Map<String, Set<String>> _likesByAccount = {};
+  final Set<String> _likesHydrating = <String>{};
+  final Set<String> _likesHydrated = <String>{};
   String? _lastSessionKey;
   Set<String> get liked => likesFor(state.catalog.activeGateway);
   Set<String> likesFor(MusicGateway gateway) =>
       _likesByAccount.putIfAbsent(gateway.cacheNamespace, () => <String>{});
   void rememberCollections(MusicGateway gateway, UserCollections value) {
     _collectionsByAccount[gateway.cacheNamespace] = value;
-    likesFor(gateway)
-      ..clear()
-      ..addAll(value.liked?.trackIds ?? const []);
+    // The collections snapshot only carries the first page of likes so the
+    // library paints immediately. Add instead of replacing, then fill the rest
+    // of the liked set in the background — otherwise every song past that page
+    // plays without a lit heart.
+    likesFor(gateway).addAll(value.liked?.trackIds ?? const <String>[]);
+    unawaited(hydrateLikes(gateway));
+  }
+
+  /// Walks every favorites page and adds the ids to the liked set. Runs after
+  /// the visible library has painted, so a large account never blocks login.
+  Future<void> hydrateLikes(MusicGateway gateway) async {
+    if (!gateway.supports(MusicCapability.favorites) || gateway.user == null) {
+      return;
+    }
+    final String namespace = gateway.cacheNamespace;
+    if (_likesHydrated.contains(namespace) ||
+        !_likesHydrating.add(namespace)) {
+      return;
+    }
+    try {
+      var offset = 0;
+      while (true) {
+        if (state._presentationDisposed ||
+            gateway.cacheNamespace != namespace ||
+            gateway.user == null) {
+          return;
+        }
+        final MusicPage<MusicSong> page = await gateway.favorites(
+          limit: 100,
+          offset: offset,
+        );
+        if (state._presentationDisposed ||
+            gateway.cacheNamespace != namespace) {
+          return;
+        }
+        final Set<String> likes = likesFor(gateway);
+        var changed = false;
+        for (final MusicSong song in page.items) {
+          if (likes.add(song.id.cacheKey)) changed = true;
+        }
+        if (changed && !state._presentationDisposed) state.notifyListeners();
+        if (!page.hasMore || page.items.isEmpty) {
+          _likesHydrated.add(namespace);
+          return;
+        }
+        offset += page.items.length;
+      }
+    } catch (_) {
+      // Leave the first-page snapshot in place; the next refresh retries.
+    } finally {
+      _likesHydrating.remove(namespace);
+    }
+  }
+
+  /// A forced refresh must re-walk the likes so a change made elsewhere lands.
+  void resetLikesHydration(MusicGateway gateway) {
+    final namespace = gateway.cacheNamespace;
+    _likesHydrated.remove(namespace);
+    _likesHydrating.remove(namespace);
+    likesFor(gateway).clear();
   }
 
   bool isLiked(String key) {
@@ -125,6 +184,8 @@ class _MusicPlatformState {
     _sessions.remove(key);
     _collectionsByAccount.remove(namespace);
     _likesByAccount.remove(namespace);
+    _likesHydrated.remove(namespace);
+    _likesHydrating.remove(namespace);
     if (_lastSessionKey == key) _lastSessionKey = null;
     await removeConnectionPlayback(owner);
     try {

@@ -314,6 +314,57 @@ class _LocalMusicPageState extends State<LocalMusicPage>
     ]);
   }
 
+  Widget _actions(BuildContext context, List<LocalTrack> playable) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (playable.isNotEmpty)
+          SpringFilledButton.tonalIcon(
+            key: const ValueKey<String>('local-music-play-all'),
+            onPressed: () => _playAll(playable),
+            icon: const Icon(Icons.play_arrow_rounded, size: 19),
+            label: TrText('播放全部'),
+          ),
+        const SizedBox(width: 8),
+        SpringFilledButton.icon(
+          key: const ValueKey<String>('local-music-import'),
+          onPressed: _busy ? null : () => _import(),
+          icon: _busy
+              ? const SizedBox.square(
+                  dimension: 15,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.add_rounded, size: 19),
+          label: TrText('导入'),
+        ),
+        const SizedBox(width: 4),
+        PopupMenuButton<String>(
+          key: const ValueKey<String>('local-music-import-menu'),
+          enabled: !_busy,
+          tooltip: context.tr('更多导入方式'),
+          icon: const Icon(Icons.more_horiz_rounded),
+          onSelected: (String value) {
+            if (value == 'scan') {
+              unawaited(_scanSystem());
+            } else if (value == 'folder') {
+              unawaited(_pickFolder());
+            }
+          },
+          itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+            PopupMenuItem<String>(
+              value: 'scan',
+              child: TrText('扫描系统音乐'),
+            ),
+            PopupMenuItem<String>(
+              value: 'folder',
+              child: TrText('选择文件夹…'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   Future<void> _showRowMenu(
     BuildContext rowContext,
     List<LocalTrack> playable,
@@ -405,76 +456,34 @@ class _LocalMusicPageState extends State<LocalMusicPage>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
-                        ApplePageTitle(
-                          title: '本地音乐',
-                          subtitle: _subtitle(
-                            context,
-                            playable.length,
-                            bytes,
-                            missing.length,
+                        if (MediaQuery.sizeOf(context).width < 560) ...<Widget>[
+                          ApplePageTitle(
+                            title: '本地音乐',
+                            subtitle: _subtitle(
+                              context,
+                              playable.length,
+                              bytes,
+                              missing.length,
+                            ),
+                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 6),
                           ),
-                          padding: const EdgeInsets.fromLTRB(0, 12, 0, 10),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: <Widget>[
-                              if (playable.isNotEmpty)
-                                SpringFilledButton.tonalIcon(
-                                  key: const ValueKey<String>(
-                                    'local-music-play-all',
-                                  ),
-                                  onPressed: () => _playAll(playable),
-                                  icon: const Icon(
-                                    Icons.play_arrow_rounded,
-                                    size: 19,
-                                  ),
-                                  label: TrText('播放全部'),
-                                ),
-                              const SizedBox(width: 8),
-                              SpringFilledButton.icon(
-                                key: const ValueKey<String>(
-                                  'local-music-import',
-                                ),
-                                onPressed: _busy ? null : () => _import(),
-                                icon: _busy
-                                    ? const SizedBox.square(
-                                        dimension: 15,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.add_rounded, size: 19),
-                                label: TrText('导入'),
-                              ),
-                              const SizedBox(width: 4),
-                              PopupMenuButton<String>(
-                                key: const ValueKey<String>(
-                                  'local-music-import-menu',
-                                ),
-                                enabled: !_busy,
-                                tooltip: context.tr('更多导入方式'),
-                                icon: const Icon(Icons.more_horiz_rounded),
-                                onSelected: (String value) {
-                                  if (value == 'scan') {
-                                    unawaited(_scanSystem());
-                                  } else if (value == 'folder') {
-                                    unawaited(_pickFolder());
-                                  }
-                                },
-                                itemBuilder: (BuildContext context) =>
-                                    <PopupMenuEntry<String>>[
-                                      PopupMenuItem<String>(
-                                        value: 'scan',
-                                        child: TrText('扫描系统音乐'),
-                                      ),
-                                      PopupMenuItem<String>(
-                                        value: 'folder',
-                                        child: TrText('选择文件夹…'),
-                                      ),
-                                    ],
-                              ),
-                            ],
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: _actions(context, playable),
                           ),
-                        ),
+                          const SizedBox(height: 10),
+                        ] else
+                          ApplePageTitle(
+                            title: '本地音乐',
+                            subtitle: _subtitle(
+                              context,
+                              playable.length,
+                              bytes,
+                              missing.length,
+                            ),
+                            padding: const EdgeInsets.fromLTRB(0, 12, 0, 10),
+                            trailing: _actions(context, playable),
+                          ),
                         if (playable.isEmpty && missing.isEmpty)
                           AppleEmptyState(
                             message: '还没有本地音乐。\n选几首存在这台设备上的歌吧。',

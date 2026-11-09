@@ -24,12 +24,10 @@ abstract final class MotionTiming {
 
   static Duration scale(Duration duration) {
     if (duration <= Duration.zero) return duration;
-    return Duration(
-      microseconds: (duration.inMicroseconds / _speed).round().clamp(
-        1,
-        1 << 62,
-      ),
-    );
+    final int microseconds = (duration.inMicroseconds / _speed).round();
+    // A 62-bit shift overflows to zero on the web, which makes clamp's upper
+    // bound smaller than its lower bound and throws mid-layout.
+    return Duration(microseconds: microseconds < 1 ? 1 : microseconds);
   }
 }
 

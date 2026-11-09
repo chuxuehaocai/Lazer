@@ -623,8 +623,8 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
     _heldByLongPress = fromHold;
     // The same tap-strength pulse a card gets when it is picked up anywhere
     // else in the app.
-    final AppState? app = InteractionFeedback.of(context);
-    if (app != null) unawaited(app.feedback());
+    final FeedbackCallback? feedback = InteractionFeedback.of(context);
+    if (feedback != null) unawaited(feedback());
     setState(() {
       _dragging = playlist.id;
       _preview = null;

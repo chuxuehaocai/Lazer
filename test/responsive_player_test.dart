@@ -279,7 +279,7 @@ void main() {
     );
     await tester.pumpWidget(
       InteractionFeedback(
-        state: state,
+        feedback: state.feedback,
         child: MaterialApp(
           home: Scaffold(
             body: Builder(

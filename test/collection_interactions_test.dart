@@ -83,6 +83,10 @@ class _Catalog extends Catalog {
   @override
   Future<List<Track>> playlistTracks(String playlistId) async => _tracks;
   @override
+  Stream<List<Track>> playlistTrackPages(String playlistId) async* {
+    yield _tracks;
+  }
+  @override
   Future<AlbumDetails> albumDetailsFor(
     String key, {
     bool force = false,
