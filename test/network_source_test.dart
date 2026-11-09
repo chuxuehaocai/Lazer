@@ -172,6 +172,18 @@ void main() {
       expect(source.locationLabel, '未选择共享');
     });
 
+    test('SMB always dials 445, whatever the draft said', () {
+      final NetworkSource source = NetworkSourceDraft(
+        kind: NetworkSourceKind.smb,
+        host: 'nas',
+        port: 1445,
+        path: 'Music',
+      ).toSource(id: 's');
+      expect(source.port, 445);
+      expect(source.address, 'nas');
+      expect(source.connection(password: '').port, 445);
+    });
+
     test('the SMB root path drops the share', () {
       final NetworkSource source = NetworkSourceDraft(
         kind: NetworkSourceKind.smb,
@@ -273,6 +285,21 @@ void main() {
         '</trackList></playlist>',
       );
       expect(xspf.single.url, 'http://classic.example/live');
+    });
+
+    test('mirrored stations collapse to one row', () {
+      final List<RadioPlaylistEntry> entries = parseRadioPlaylist(
+        '[playlist]\n'
+        'File1=http://ice5.example.com/live\n'
+        'Title1=SomaFM: Groove Salad (#5): chilled beats\n'
+        'File2=http://ice2.example.com/live\n'
+        'Title2=SomaFM: Groove Salad (#2): chilled beats\n'
+        'File3=http://other.example.net/news\n'
+        'Title3=News\n',
+      );
+      expect(entries.length, 2);
+      expect(entries.first.url, contains('ice5'));
+      expect(entries.last.name, 'News');
     });
 
     test('duplicate URLs are dropped', () {

@@ -26,12 +26,16 @@ class NetworkBrowsePage extends StatefulWidget {
     required this.controller,
     required this.sourceId,
     this.initialPath,
+    this.embedded = false,
   });
 
   final AppState state;
   final NetworkSourcesController controller;
   final String sourceId;
   final String? initialPath;
+
+  /// The shell content pane owns the back button when this is true.
+  final bool embedded;
 
   @override
   State<NetworkBrowsePage> createState() => _NetworkBrowsePageState();
@@ -244,9 +248,11 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
                                     color: apple.secondaryLabel,
                                   ),
                           ),
-                          NetworkBackButton(
-                            onPressed: () => Navigator.of(context).maybePop(),
-                          ),
+                          if (!widget.embedded)
+                            NetworkBackButton(
+                              onPressed: () =>
+                                  Navigator.of(context).maybePop(),
+                            ),
                         ],
                       ),
                     ),

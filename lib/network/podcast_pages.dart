@@ -22,11 +22,17 @@ class PodcastEpisodesPage extends StatefulWidget {
     required this.state,
     required this.controller,
     required this.podcastId,
+    this.embedded = false,
+    this.onBack,
   });
 
   final AppState state;
   final NetworkSourcesController controller;
   final String podcastId;
+
+  /// The shell content pane owns the back button when this is true.
+  final bool embedded;
+  final VoidCallback? onBack;
 
   @override
   State<PodcastEpisodesPage> createState() => _PodcastEpisodesPageState();
@@ -169,7 +175,8 @@ class _PodcastEpisodesPageState extends State<PodcastEpisodesPage>
               message: '这个播客订阅已经不在了。',
               icon: Icons.podcasts_rounded,
               action: SpringFilledButton(
-                onPressed: () => Navigator.of(context).maybePop(),
+                onPressed:
+                    widget.onBack ?? () => Navigator.of(context).maybePop(),
                 child: const TrText('返回'),
               ),
             ),
@@ -210,9 +217,12 @@ class _PodcastEpisodesPageState extends State<PodcastEpisodesPage>
                                     color: apple.secondaryLabel,
                                   ),
                           ),
-                          NetworkBackButton(
-                            onPressed: () => Navigator.of(context).maybePop(),
-                          ),
+                          if (!widget.embedded)
+                            NetworkBackButton(
+                              onPressed:
+                                  widget.onBack ??
+                                  () => Navigator.of(context).maybePop(),
+                            ),
                         ],
                       ),
                     ),

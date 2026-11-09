@@ -163,9 +163,9 @@ void main() {
       expect(
         DartSftpSession.formatHostKey(
           'ssh-ed25519',
-          Uint8List.fromList(<int>[0, 1, 0xab, 0xff]),
+          Uint8List.fromList(utf8.encode('SHA256:abc123')),
         ),
-        'SSH-ED25519 MD5:00:01:ab:ff',
+        'SSH-ED25519 SHA256:abc123',
       );
     });
   });

@@ -7,7 +7,9 @@ import 'package:flutter/scheduler.dart';
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
 import '../local/local_music_page.dart';
+import '../network/network_browse_page.dart';
 import '../network/network_sources_page.dart';
+import '../network/podcast_pages.dart';
 import '../state/app_state.dart';
 import '../state/build_safe_notifier.dart';
 import '../state/song_comments_controller.dart';
@@ -119,6 +121,12 @@ class _AppShellState extends State<AppShell>
   MusicChart? _chart;
   bool _localMusic = false;
   bool _savedAlbums = false;
+  // 网络源 lives in the content pane like 收藏的专辑, with its own drill-down
+  // state instead of full-screen routes.
+  bool _networkSources = false;
+  String? _networkSourceId;
+  String? _networkSourcePath;
+  String? _networkPodcastId;
   bool _artistSongs = false;
   AlbumReleaseGroup? _artistReleases;
   bool _comments = false;
@@ -440,6 +448,10 @@ class _AppShellState extends State<AppShell>
       _comments = false;
       _localMusic = false;
       _savedAlbums = false;
+      _networkSources = false;
+      _networkSourceId = null;
+      _networkSourcePath = null;
+      _networkPodcastId = null;
     });
   }
 
@@ -456,6 +468,10 @@ class _AppShellState extends State<AppShell>
       _comments = false;
       _localMusic = false;
       _savedAlbums = false;
+      _networkSources = false;
+      _networkSourceId = null;
+      _networkSourcePath = null;
+      _networkPodcastId = null;
     });
   }
 
@@ -468,6 +484,10 @@ class _AppShellState extends State<AppShell>
       _section = _AppSection.library;
       _localMusic = true;
       _savedAlbums = false;
+      _networkSources = false;
+      _networkSourceId = null;
+      _networkSourcePath = null;
+      _networkPodcastId = null;
       _playlist = null;
       _album = null;
       _artist = null;
@@ -487,6 +507,10 @@ class _AppShellState extends State<AppShell>
       _section = _AppSection.library;
       _savedAlbums = true;
       _localMusic = false;
+      _networkSources = false;
+      _networkSourceId = null;
+      _networkSourcePath = null;
+      _networkPodcastId = null;
       _playlist = null;
       _album = null;
       _artist = null;
@@ -494,6 +518,45 @@ class _AppShellState extends State<AppShell>
       _artistSongs = false;
       _artistReleases = null;
       _comments = false;
+    });
+  }
+
+  /// 音乐库 → 网络源. Same shape as 收藏的专辑: the library stays the current
+  /// section and the content pane becomes the hub; drills stay inside it.
+  void _openNetworkSources() {
+    _browseHistory.clear();
+    cancelCoverTransitions();
+    setState(() {
+      _section = _AppSection.library;
+      _playlist = null;
+      _album = null;
+      _artist = null;
+      _chart = null;
+      _artistSongs = false;
+      _artistReleases = null;
+      _comments = false;
+      _localMusic = false;
+      _savedAlbums = false;
+      _networkSources = true;
+      _networkSourceId = null;
+      _networkSourcePath = null;
+      _networkPodcastId = null;
+    });
+  }
+
+  void _openNetworkSource(String sourceId, String? path) {
+    setState(() {
+      _networkSourceId = sourceId;
+      _networkSourcePath = path;
+      _networkPodcastId = null;
+    });
+  }
+
+  void _openNetworkPodcast(String podcastId) {
+    setState(() {
+      _networkPodcastId = podcastId;
+      _networkSourceId = null;
+      _networkSourcePath = null;
     });
   }
 
@@ -604,6 +667,17 @@ class _AppShellState extends State<AppShell>
   }
 
   void _backToRoot() {
+    if (_networkPodcastId != null) {
+      setState(() => _networkPodcastId = null);
+      return;
+    }
+    if (_networkSourceId != null) {
+      setState(() {
+        _networkSourceId = null;
+        _networkSourcePath = null;
+      });
+      return;
+    }
     if (_browseHistory.isNotEmpty) {
       final identity = _chart != null
           ? 'chart:${_chart!.id}'
@@ -639,6 +713,10 @@ class _AppShellState extends State<AppShell>
       _comments = false;
       _localMusic = false;
       _savedAlbums = false;
+      _networkSources = false;
+      _networkSourceId = null;
+      _networkSourcePath = null;
+      _networkPodcastId = null;
     });
   }
 
@@ -739,7 +817,8 @@ class _AppShellState extends State<AppShell>
       _chart != null ||
       _comments ||
       _localMusic ||
-      _savedAlbums;
+      _savedAlbums ||
+      _networkSources;
 
   /// A remote's Back button is the only navigation affordance a television
   /// has. It closes the player, then detail pages, then returns to 发现; only
@@ -1175,8 +1254,7 @@ class _AppShellState extends State<AppShell>
       onOpenLikes: () => _select(_AppSection.likes),
       onOpenLocalMusic: _openLocalMusic,
       onOpenSavedAlbums: _openSavedAlbums,
-      onOpenNetworkSources: () =>
-          unawaited(openNetworkSourcesPage(context, state)),
+      onOpenNetworkSources: _openNetworkSources,
       onPlayTracks: (List<Track> tracks, int index) =>
           state.playQueue(tracks, startIndex: index),
     );
@@ -1194,6 +1272,43 @@ class _AppShellState extends State<AppShell>
     }
     if (_localMusic) return LargeScreenLocalMusicPage(state: state);
     if (_savedAlbums) return LargeScreenSavedAlbumsPage(state: state);
+    if (_networkPodcastId != null) {
+      return LargeScreenReusedPage(
+        maxWidth: 1180,
+        bottomInset: LargeScreenMetrics.floatingBarInset,
+        child: PodcastEpisodesPage(
+          state: state,
+          controller: state.networkSources,
+          podcastId: _networkPodcastId!,
+          embedded: true,
+        ),
+      );
+    }
+    if (_networkSourceId != null) {
+      return LargeScreenReusedPage(
+        maxWidth: 1180,
+        bottomInset: LargeScreenMetrics.floatingBarInset,
+        child: NetworkBrowsePage(
+          state: state,
+          controller: state.networkSources,
+          sourceId: _networkSourceId!,
+          initialPath: _networkSourcePath,
+          embedded: true,
+        ),
+      );
+    }
+    if (_networkSources) {
+      return LargeScreenReusedPage(
+        maxWidth: 1180,
+        bottomInset: LargeScreenMetrics.floatingBarInset,
+        child: NetworkSourcesPage(
+          state: state,
+          embedded: true,
+          onBrowse: (source) => _openNetworkSource(source.id, null),
+          onOpenPodcast: (podcast) => _openNetworkPodcast(podcast.id),
+        ),
+      );
+    }
     final MusicChart? chart = _chart;
     if (chart != null) return LargeScreenChartPage(state: state, chart: chart);
     final ArtistRef? artist = _artist;
@@ -1479,7 +1594,8 @@ class _AppShellState extends State<AppShell>
         _chart != null ||
         _comments ||
         _localMusic ||
-        _savedAlbums;
+        _savedAlbums ||
+        _networkSources;
     return SizedBox(
       height: 64,
       child: Padding(
@@ -1518,7 +1634,8 @@ class _AppShellState extends State<AppShell>
         _chart != null ||
         _comments ||
         _localMusic ||
-        _savedAlbums;
+        _savedAlbums ||
+        _networkSources;
     return SizedBox(
       height: 50,
       child: Padding(
@@ -1574,6 +1691,9 @@ class _AppShellState extends State<AppShell>
     // AppSavedAlbumsPage owns the large page title. Keeping a shell title here
     // creates a second “收藏的专辑” header above it.
     if (_savedAlbums) return '';
+    if (_networkSources || _networkSourceId != null || _networkPodcastId != null) {
+      return '';
+    }
     if (_chart != null) return _chart!.title;
     if (_playlist != null) return _playlist!.name;
     if (_artist != null) {
@@ -1799,6 +1919,15 @@ class _AppShellState extends State<AppShell>
     if (_comments) return 'comments';
     if (_localMusic) return 'local-music';
     if (_savedAlbums) return 'saved-albums';
+    // Each network level is its own content key so RetainedContentSwitcher
+    // animates hub → folder → episodes like any other page.
+    final String? podcastId = _networkPodcastId;
+    if (podcastId != null) return 'network-podcast:$podcastId';
+    final String? sourceId = _networkSourceId;
+    if (sourceId != null) {
+      return 'network-browse:$sourceId:${_networkSourcePath ?? '/'}';
+    }
+    if (_networkSources) return 'network-sources';
     if (_chart != null) return 'chart:${_chart!.id}';
     if (_artist != null) {
       final String view = _artistSongs
@@ -1850,6 +1979,31 @@ class _AppShellState extends State<AppShell>
     if (_savedAlbums) {
       return AppSavedAlbumsPage(state: state);
     }
+    if (_networkPodcastId != null) {
+      return PodcastEpisodesPage(
+        state: state,
+        controller: state.networkSources,
+        podcastId: _networkPodcastId!,
+        embedded: true,
+      );
+    }
+    if (_networkSourceId != null) {
+      return NetworkBrowsePage(
+        state: state,
+        controller: state.networkSources,
+        sourceId: _networkSourceId!,
+        initialPath: _networkSourcePath,
+        embedded: true,
+      );
+    }
+    if (_networkSources) {
+      return NetworkSourcesPage(
+        state: state,
+        embedded: true,
+        onBrowse: (source) => _openNetworkSource(source.id, null),
+        onOpenPodcast: (podcast) => _openNetworkPodcast(podcast.id),
+      );
+    }
     final ArtistRef? artist = _artist;
     if (artist != null) {
       if (_artistSongs) {
@@ -1898,6 +2052,7 @@ class _AppShellState extends State<AppShell>
             onOpenPlaylist: _openPlaylist,
             onOpenLocalMusic: _openLocalMusic,
             onOpenSavedAlbums: _openSavedAlbums,
+            onOpenNetworkSources: _openNetworkSources,
             onOpenListeningStatistics: () => SettingsDetailHost.open(
               detailContext,
               page: (_) => AppListeningStatisticsPage(

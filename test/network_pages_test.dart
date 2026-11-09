@@ -193,6 +193,28 @@ void main() {
     expect(station.id, isNotEmpty);
   });
 
+  testWidgets('tapping a station row starts that station', (tester) async {
+    late final RadioStation station;
+    await tester.runAsync(() async {
+      station = await controller.addStation(
+        name: 'Jazz FM',
+        url: 'http://jazz.example/live',
+      );
+    });
+    await pumpPage(
+      tester,
+      NetworkSourcesPage(state: state, controller: controller),
+    );
+    await tester.tap(find.byKey(const ValueKey('network-tab-radio')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(ValueKey<String>('network-radio-row-${station.id}')),
+    );
+    await waitForIo(tester, () => state.current != null);
+    expect(state.current?.id, 'radio:${station.id}');
+    expect(state.current?.title, 'Jazz FM');
+  });
+
   testWidgets('the add-source dialog collects a WebDAV address', (tester) async {
     await pumpPage(tester, NetworkSourcesPage(state: state, controller: controller));
     await tester.tap(find.byKey(const ValueKey('network-add-source')));
@@ -308,6 +330,57 @@ void main() {
     await waitForIo(tester, () => state.current != null);
     expect(state.current?.id.startsWith('network:'), isTrue);
     expect(state.queueLength, 2);
+  });
+
+  testWidgets('an embedded hub keeps the shell chrome and calls back', (
+    tester,
+  ) async {
+    late final NetworkSource source;
+    late final PodcastSubscription podcast;
+    await tester.runAsync(() async {
+      source = await controller.addSource(
+        NetworkSourceDraft(
+          kind: NetworkSourceKind.webdav,
+          name: 'Living Room',
+          host: 'nas.local',
+        ),
+      );
+      podcast = await controller.subscribe(
+        'https://podcast.example/feed.xml',
+      );
+    });
+    NetworkSource? browsed;
+    PodcastSubscription? opened;
+    await pumpPage(
+      tester,
+      NetworkSourcesPage(
+        state: state,
+        controller: controller,
+        embedded: true,
+        onBrowse: (NetworkSource value) => browsed = value,
+        onOpenPodcast: (PodcastSubscription value) => opened = value,
+      ),
+    );
+    // 收藏的专辑 shape: the shell owns the back button.
+    expect(find.byTooltip('返回'), findsNothing);
+    await tester.tap(
+      find.byKey(ValueKey<String>('network-source-row-${source.id}')),
+    );
+    expect(browsed?.id, source.id);
+    await tester.tap(find.byKey(const ValueKey('network-tab-podcast')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(ValueKey<String>('network-podcast-row-${podcast.id}')),
+    );
+    expect(opened?.id, podcast.id);
+  });
+
+  testWidgets('a pushed hub still offers its own back button', (tester) async {
+    await pumpPage(
+      tester,
+      NetworkSourcesPage(state: state, controller: controller),
+    );
+    expect(find.byTooltip('返回'), findsOneWidget);
   });
 
   testWidgets('the hub fits a phone with large text', (tester) async {

@@ -115,6 +115,16 @@ List<RadioPlaylistEntry> parseRadioPlaylist(
   } else {
     entries.addAll(_parseM3u(text, fallbackName));
   }
+  // "Station (#1)" is a mirror marker, not part of the station's name.
+  for (int i = 0; i < entries.length; i++) {
+    final String name = entries[i].name.replaceAll(
+      RegExp(r'\s*\(#\d+\)'),
+      '',
+    );
+    if (name.isNotEmpty && name != entries[i].name) {
+      entries[i] = RadioPlaylistEntry(name: name, url: entries[i].url);
+    }
+  }
   // Deduplicate by URL: M3U files sometimes repeat a stream in a group.
   final Set<String> seen = <String>{};
   final List<RadioPlaylistEntry> unique = <RadioPlaylistEntry>[];
@@ -122,7 +132,35 @@ List<RadioPlaylistEntry> parseRadioPlaylist(
     if (entry.url.isEmpty || !seen.add(entry.url)) continue;
     unique.add(entry);
   }
-  return unique;
+  // Collapse mirror entries: SomaFM-style PLS files list one station on
+  // several ice hosts, with titles differing only by " (#3)". Keep the first
+  // so the import produces one row, not one per mirror. Stations on different
+  // domains keep their own row even when the titles match.
+  final Set<String> mirrors = <String>{};
+  final List<RadioPlaylistEntry> collapsed = <RadioPlaylistEntry>[];
+  for (final RadioPlaylistEntry entry in unique) {
+    final String key = _mirrorKey(entry);
+    if (key.isNotEmpty && !mirrors.add(key)) continue;
+    collapsed.add(entry);
+  }
+  return collapsed;
+}
+
+String _mirrorKey(RadioPlaylistEntry entry) {
+  final String title = entry.name
+      .replaceAll(RegExp(r'\s*\(#\d+\)'), '')
+      .trim()
+      .toLowerCase();
+  if (title.isEmpty) return '';
+  final String host = Uri.tryParse(entry.url)?.host ?? '';
+  final List<String> labels = host
+      .split('.')
+      .where((String part) => part.isNotEmpty)
+      .toList();
+  final String domain = labels.length >= 2
+      ? labels.sublist(labels.length - 2).join('.')
+      : host;
+  return '$title|$domain';
 }
 
 List<RadioPlaylistEntry> _parseM3u(String text, String fallbackName) {
