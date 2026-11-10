@@ -187,8 +187,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   int _focus = 0;
   double _anchorMs = 0;
   int _anchorMicros = 0;
-  late TextStyle _activeStyle;
-  late TextStyle _inactiveStyle;
+  late TextStyle _lyricStyle;
 
   @override
   void initState() {
@@ -208,8 +207,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   }
 
   void _refreshTextStyles() {
-    _activeStyle = _textStyle(1);
-    _inactiveStyle = _textStyle(.94);
+    _lyricStyle = _textStyle(1);
   }
 
   @override
@@ -298,13 +296,23 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   void _applyPosition(int positionMs, bool playing) {
     final double next = positionMs.toDouble();
     final double predicted = _currentPositionMs;
-    final bool seek = (next - predicted).abs() > 700;
-    _anchorMs = next;
-    _anchorMicros = _clock.elapsedMicroseconds;
+    final bool wasPlaying = _playing;
+    final double delta = next - predicted;
+    final bool seek = delta.abs() > 700;
     _playing = playing;
+    // Re-anchor only on a seek, a transport change, or a meaningful drift.
+    // Re-anchoring on every 50 ms packet would pull the local clock backwards
+    // by a few milliseconds each time and make the line switch shiver.
+    if (seek || !playing || !wasPlaying || delta > 100 || delta < -150) {
+      _anchorMs = next;
+      _anchorMicros = _clock.elapsedMicroseconds;
+    }
     _seekPending = seek;
     final int focus = _focusFor(next);
-    if (seek || focus != _focus) {
+    // Focus follows the playhead forwards; a stale packet must not drag the
+    // highlighted line back for one frame at the boundary.
+    final bool backwards = focus < _focus && (!playing || delta < -150);
+    if (seek || focus > _focus || backwards) {
       _focus = focus;
       _retarget(instant: false);
       if (mounted) setState(() {});
@@ -377,8 +385,16 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       return;
     }
     final int activeIndex = indices.indexOf(focus);
+    // The Now Playing sheet's rows above the focus are usually off-screen, so
+    // they do not consume a stagger delay. This overlay shows only a few rows
+    // around the focus; feed the helper off-screen positions for those rows so
+    // the active line still starts immediately and only lower rows cascade.
+    final List<double> staggerPositions = <double>[
+      for (var i = 0; i < indices.length; i++)
+        i < activeIndex ? -slot * 2 : (i - activeIndex) * slot,
+    ];
     final List<double> delays = lyricStaggerDelays(
-      positions,
+      staggerPositions,
       heights,
       activeIndex,
       disabled: _seekPending,
@@ -614,10 +630,11 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       textAlign: TextAlign.center,
-      style: active ? _activeStyle : _inactiveStyle,
+      style: _lyricStyle,
     );
     final double activeY = _verticalPadding + (_settings.lineCount ~/ 2) * slot;
     return Positioned(
+      key: ValueKey<int>(index),
       top: 0,
       left: inset,
       right: inset,
@@ -631,7 +648,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
               0.0,
               1.0,
             );
-            final double opacity = active ? 1 : 0.48 + 0.52 * emphasis;
+            final double opacity = 0.48 + 0.52 * emphasis;
             final double distance = ((motion.y.value - activeY).abs() / slot)
                 .clamp(0.0, 6.0);
             final double sigma = _settings.blurEnabled
@@ -669,6 +686,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     bool active,
   ) {
     return Positioned(
+      key: ValueKey<int>(index),
       top: 0,
       left: inset,
       right: inset,
