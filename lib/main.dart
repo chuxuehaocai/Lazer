@@ -3,6 +3,7 @@ import 'dart:async';
 import 'storage/app_storage.dart';
 import 'animation/apple_spring.dart';
 
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -15,6 +16,9 @@ import 'audio/hifi_controller.dart';
 import 'audio/system_media_handler.dart';
 import 'audio/native/lazer_audio_library.dart';
 import 'audio/playback_session.dart';
+import 'desktop_lyrics/desktop_lyrics_controller.dart';
+import 'desktop_lyrics/lyrics_overlay.dart';
+import 'desktop_lyrics/overlay_protocol.dart';
 import 'diagnostics/frame_stats.dart';
 import 'diagnostics/app_log.dart';
 import 'ui/shell.dart';
@@ -55,7 +59,7 @@ bool _isMutedLog(Object? line) {
   return _mutedLogMarkers.any(text.contains);
 }
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   // runZoned guards runApp and every later print from the audio backend:
   // the zone stays current for callbacks scheduled from here onward.
   await runZoned<Future<void>>(
@@ -74,6 +78,7 @@ Future<void> main() async {
         AppLog.shared.record('$error\n$stack');
         return previousPlatformError?.call(error, stack) ?? false;
       };
+      if (await _runLyricsOverlay(args)) return;
       // Queue playback hands the next track to libmpv while the current one is
       // still playing, but mpv only opens that entry early with
       // `--prefetch-playlist`. Without it a streamed boundary waits for the
@@ -188,6 +193,22 @@ Future<void> main() async {
   );
 }
 
+Future<bool> _runLyricsOverlay(List<String> args) async {
+  if (args.length < 3 || args.first != 'multi_window') return false;
+  final LyricsOverlayLaunch? launch = LyricsOverlayLaunch.tryParse(args[2]);
+  if (launch == null) return false;
+  try {
+    await runLyricsOverlay(
+      WindowController.fromWindowId(args[1]),
+      launch,
+    );
+    return true;
+  } catch (error, stack) {
+    AppLog.shared.record('desktop lyrics startup: $error\n$stack');
+    return false;
+  }
+}
+
 /// Music player backed by the ported music provider gateway.
 class LazerApp extends StatefulWidget {
   const LazerApp({
@@ -230,6 +251,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   final BrowseNavigationObserver _browseNavigation = BrowseNavigationObserver();
   late final AppLifecycleListener _playbackLifecycle;
   late final LanRemoteController _remote;
+  late final DesktopLyricsController _desktopLyrics;
 
   _RootUiSignature get _rootUiSignature => (
     _state.accentSeed,
@@ -261,6 +283,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
       onDetach: () => unawaited(_state.flushPersistence()),
     );
     _state.bootstrap();
+    _desktopLyrics = DesktopLyricsController(_state);
     _remote = LanRemoteController(_state);
     unawaited(_remote.initialize());
   }
@@ -291,6 +314,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   @override
   void dispose() {
     _playbackLifecycle.dispose();
+    _desktopLyrics.dispose();
     _remote.dispose();
     _browseNavigation.dispose();
     _state.removeListener(_onRootUiChanged);
