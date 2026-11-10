@@ -148,8 +148,7 @@ marked as pre-releases. Output filenames follow `Lazer-<OS>-<Arch>`.
 | Output | Contents |
 | --- | --- |
 | `Lazer-Windows-x86_64.zip` | EXE, DLLs, resources and Visual C++ runtime |
-| `Lazer-macOS-universal.zip` | Universal Intel / Apple Silicon App |
-| `Lazer-macOS-x86_64.zip` | Intel App built on a native Intel runner |
+| `Lazer-macOS-aarch64.zip` | Apple Silicon App |
 | `Lazer-Linux-x86_64.AppImage` | Linux x86_64, including GTK and libmpv |
 | `Lazer-Linux-aarch64.AppImage` | Linux ARM64 built on a native ARM runner |
 | `Lazer-Android-universal.apk` | Universal APK signed with the release key from repository secrets (see [build details](docs/builds.md#android-release-signing)) |
