@@ -159,13 +159,24 @@ class _MusicPlatformState {
     return Map.unmodifiable(result);
   }
 
-  void adoptLogin(MusicGateway gateway, SessionUser account) {
+  void adoptLogin(
+    MusicGateway gateway,
+    SessionUser account, {
+    String? expectedActiveKey,
+  }) {
     final key = GatewayRegistry.keyOf(gateway);
     _sessions[key] = account;
     _lastSessionKey = key;
-    if (identical(gateway, state.catalog.activeGateway) ||
-        state.catalog.activeGateway is LocalMusicGateway) {
-      state.catalog.selectConnection(state.activeConnectionKey);
+    // Signing in selects the account that was just authenticated when the
+    // platform the listener started from is still visible. A late login for a
+    // platform they switched away from must not steal focus from the current
+    // source.
+    final bool stillSelected = expectedActiveKey == null
+        ? identical(gateway, state.catalog.activeGateway)
+        : state.activeConnectionKey == expectedActiveKey;
+    if (stillSelected) {
+      _activate(key);
+      _collectionsByAccount.remove(gateway.cacheNamespace);
       state._user = account;
       state.collections = UserCollections.empty;
       state._collectionsPending = null;

@@ -1924,7 +1924,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       await catalog.invalidateHome(userId: signedIn ? _user.userId : null);
     }
     if (_presentationDisposed) return;
-    unawaited(refreshCollections());
+    unawaited(refreshCollections(force: force));
     await catalog.loadHome(userId: _user.userId);
     if (_presentationDisposed) return;
     notifyListeners();
@@ -2022,6 +2022,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     try {
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
+        final expectedActiveKey = activeConnectionKey;
         final user = await active.loginWithCookie(cookie);
         if (user == null) {
           return const AuthOutcome(false, error: '这个 Cookie 无效或已过期。');
@@ -2031,6 +2032,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           AuthMethod.cookie,
           active.provider.name,
           owner: active,
+          expectedActiveKey: expectedActiveKey,
         );
       }
       return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
@@ -2047,11 +2049,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     try {
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
+        final expectedActiveKey = activeConnectionKey;
+        final user = await active.loginWithPassword(phone, password);
         return _adoptAccountLogin(
-          await active.loginWithPassword(phone, password),
+          user,
           AuthMethod.password,
           _maskPhone(phone),
           owner: active,
+          expectedActiveKey: expectedActiveKey,
         );
       }
       return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
@@ -2064,11 +2069,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     try {
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
+        final expectedActiveKey = activeConnectionKey;
+        final user = await active.loginWithPassword(email, password);
         return _adoptAccountLogin(
-          await active.loginWithPassword(email, password),
+          user,
           AuthMethod.password,
           _maskEmail(email),
           owner: active,
+          expectedActiveKey: expectedActiveKey,
         );
       }
       return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
@@ -2107,11 +2115,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     try {
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
+        final expectedActiveKey = activeConnectionKey;
+        final user = await active.loginWithCaptcha(phone, captcha);
         return _adoptAccountLogin(
-          await active.loginWithCaptcha(phone, captcha),
+          user,
           AuthMethod.sms,
           _maskPhone(phone),
           owner: active,
+          expectedActiveKey: expectedActiveKey,
         );
       }
       return const AuthOutcome(false, error: '请先安装并启用音乐平台插件。');
@@ -2138,6 +2149,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     AuthMethod method,
     String detail, {
     required MusicAccountGateway owner,
+    String? expectedActiveKey,
   }) {
     if (user == null) return const AuthOutcome(false, error: '登录失败，请稍后再试。');
     if (_presentationDisposed ||
@@ -2155,7 +2167,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       signature: user.signature,
       membership: user.membership,
     );
-    _musicPlatforms.adoptLogin(owner, account);
+    _musicPlatforms.adoptLogin(
+      owner,
+      account,
+      expectedActiveKey: expectedActiveKey,
+    );
     return const AuthOutcome(true);
   }
 
@@ -2213,6 +2229,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
               AuthMethod.qrcode,
               owner.provider.name,
               owner: owner,
+              expectedActiveKey: GatewayRegistry.keyOf(owner),
             );
             return 803;
           }
@@ -2236,6 +2253,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             AuthMethod.qrcode,
             owner.provider.name,
             owner: owner,
+            expectedActiveKey: GatewayRegistry.keyOf(owner),
           );
         }
         return code;
@@ -2944,6 +2962,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         unawaited(_startAudio());
       }
       _ensureTicker();
+    } else {
+      // The engine is still parked on the previous track while paused. Drop
+      // the active marker so Play opens the newly selected track instead of
+      // resuming the old source.
+      _realActive = false;
+      _queueId = null;
+      _resumePositionOnOpen = false;
     }
     notifyListeners();
     unawaited(_ensureStationBuffer());

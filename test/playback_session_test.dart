@@ -77,6 +77,7 @@ class _PreparingEngine extends JustAudioEngine
 
 class _Player implements audio.AudioPlayer {
   final states = StreamController<audio.ProcessingState>.broadcast();
+  final List<String> urls = <String>[];
   int plays = 0;
   int pauses = 0;
   int stops = 0;
@@ -88,6 +89,8 @@ class _Player implements audio.AudioPlayer {
   @override
   Duration position = Duration.zero;
   @override
+  Duration get bufferedPosition => duration ?? Duration.zero;
+  @override
   int? get currentIndex => 0;
   @override
   Duration? get duration => const Duration(seconds: 30);
@@ -98,7 +101,10 @@ class _Player implements audio.AudioPlayer {
     Duration? initialPosition,
     bool preload = true,
     dynamic tag,
-  }) async => duration;
+  }) async {
+    urls.add(url);
+    return duration;
+  }
   @override
   Future<void> play() async {
     plays++;
@@ -142,7 +148,7 @@ class _Catalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
-  }) async => 'https://audio.test/track';
+  }) async => 'https://audio.test/${track.id}';
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();
 }
@@ -156,8 +162,48 @@ const _track = Track(
   coverSeed: 1,
 );
 
+const _track2 = Track(
+  id: '2',
+  title: 'Next Track',
+  artist: 'Artist',
+  album: 'Album',
+  duration: Duration(seconds: 30),
+  coverSeed: 2,
+);
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets(
+    'paused next opens the selected track when playback resumes',
+    (tester) async {
+      final player = _Player();
+      final engine = JustAudioEngine(player: player);
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        startupBufferTarget: Duration.zero,
+        startupByteTarget: 0,
+      );
+
+      state.playQueue(<Track>[_track, _track2]);
+      await tester.pump();
+      expect(player.urls.last, 'https://audio.test/1');
+
+      state.pause();
+      state.next();
+      await tester.pump();
+      expect(state.current?.id, '2');
+
+      state.play();
+      await tester.pump();
+      expect(player.urls.last, 'https://audio.test/2');
+      await tester.pump(const Duration(seconds: 1));
+      state.dispose();
+      engine.dispose();
+      await tester.pump();
+    },
+  );
 
   testWidgets(
     'independent playback never opens an OS session and normal mode honors interruptions',
