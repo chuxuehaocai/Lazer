@@ -34,6 +34,7 @@ class _LyricsCatalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async => null;
 }
 

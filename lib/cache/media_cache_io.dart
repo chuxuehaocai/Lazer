@@ -221,15 +221,43 @@ class AudioCache {
     AudioQuality quality = AudioQuality.exhigh,
     String? format,
     Map<String, String> headers = const {},
+    bool Function()? isCancelled,
   }) {
     final key = cacheKey(trackId, quality);
     return _pending.putIfAbsent(key, () async {
       try {
-        return await _download(key, url, format, headers);
+        return await _download(key, url, format, headers, isCancelled);
       } finally {
         _pending.remove(key);
       }
     });
+  }
+
+  /// Background downloads run next to the stream the user is waiting for, so
+  /// they are capped: skipping through a queue used to start one full-length
+  /// download per resolved track and share the link with playback.
+  static const int _maxConcurrentDownloads = 2;
+  int _activeDownloads = 0;
+  final _downloadWaiters = <Completer<void>>[];
+
+  Future<void> _acquireDownloadSlot() async {
+    if (_activeDownloads < _maxConcurrentDownloads) {
+      _activeDownloads++;
+      return;
+    }
+    final completer = Completer<void>();
+    _downloadWaiters.add(completer);
+    // The releaser hands its slot over instead of counting it down, so the
+    // number of running downloads never leaves the cap.
+    await completer.future;
+  }
+
+  void _releaseDownloadSlot() {
+    if (_downloadWaiters.isNotEmpty) {
+      _downloadWaiters.removeAt(0).complete();
+      return;
+    }
+    if (_activeDownloads > 0) _activeDownloads--;
   }
 
   Future<File?> _download(
@@ -237,11 +265,17 @@ class AudioCache {
     String url,
     String? format,
     Map<String, String> headers,
+    bool Function()? isCancelled,
   ) async {
+    bool cancelled() => isCancelled?.call() ?? false;
+    if (cancelled()) return null;
     final cached = await _findKey(key);
     if (cached != null) return cached;
+    if (cancelled()) return null;
+    await _acquireDownloadSlot();
     final client = HttpClient()..autoUncompress = false;
     try {
+      if (cancelled()) return null;
       final uri = Uri.parse(url);
       final request = await client
           .getUrl(uri)
@@ -269,7 +303,7 @@ class AudioCache {
       return await disk.put(
         CacheBucket.audio,
         key,
-        () => response.timeout(const Duration(seconds: 30)),
+        () => _guardedBody(response, cancelled),
         extension: extension,
         expectedLength: response.contentLength,
         maxBytes: 200 * 1024 * 1024,
@@ -278,6 +312,24 @@ class AudioCache {
       return null;
     } finally {
       client.close(force: true);
+      _releaseDownloadSlot();
     }
   }
+
+  /// Stops handing bytes to the disk once the track has been skipped: the file
+  /// would never be played, and `DiskCache.put` deletes the partial write when
+  /// the stream fails.
+  static Stream<List<int>> _guardedBody(
+    HttpClientResponse response,
+    bool Function() cancelled,
+  ) async* {
+    await for (final chunk in response.timeout(const Duration(seconds: 30))) {
+      if (cancelled()) throw const _DownloadCancelled();
+      yield chunk;
+    }
+  }
+}
+
+class _DownloadCancelled implements Exception {
+  const _DownloadCancelled();
 }

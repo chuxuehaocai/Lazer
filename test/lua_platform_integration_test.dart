@@ -99,6 +99,7 @@ class _MusicCatalog extends Catalog {
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool useCache = true,
+    bool Function()? isCancelled,
   }) => super.audioSourceFor(track, quality: quality, useCache: false);
 }
 
@@ -492,6 +493,9 @@ void main() {
         expect(engine.urls, hasLength(1));
         await app.toggleLikeCurrent();
         expect(app.currentLiked, isTrue);
+        // Play reports are uploaded a few seconds after a track settles, so a
+        // rapid skip cannot park a scrobble in front of the next resolve.
+        await Future<void>.delayed(const Duration(seconds: 6));
         final alphaState =
             await alpha.runtime.invoke('testState', {'platform': 'alpha'})
                 as Map;

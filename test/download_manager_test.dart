@@ -29,6 +29,7 @@ class _DownloadCatalog extends Catalog {
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool useCache = true,
+    bool Function()? isCancelled,
   }) async {
     requests.add(quality);
     if (failing.contains(track.id)) throw const SocketException('offline');

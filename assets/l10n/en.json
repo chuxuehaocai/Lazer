@@ -162,6 +162,8 @@
   "登录后点赞": "Sign in to like",
   "保存封面": "Save artwork",
   "重新登录": "Sign in again",
+  "登录已过期，请重新登录后重试。": "Your session expired. Sign in again and retry.",
+  "暂时没有更多歌曲，请稍后重试。": "No more songs right now. Try again in a moment.",
   "选择歌手": "Choose artist",
   "歌手": "Artist",
   "歌手详情": "Artist details",
@@ -971,7 +973,7 @@
   "插件请求失败。": "Plugin request failed.",
   "插件启动失败。": "The plugin failed to start.",
   "插件已停止，请重新启用。": "The plugin has stopped. Enable it again.",
-  "插件响应超时，请重新启用后重试。": "The plugin timed out. Enable it again and retry.",
+  "插件响应超时，已自动重启插件。": "The plugin timed out and was restarted automatically.",
   "插件网络请求失败。": "The plugin's network request failed.",
   "插件请求失败，请重试或更新插件。": "Plugin request failed. Retry or update the plugin.",
   "插件缺少 call 入口。": "The plugin has no call entry point.",
@@ -1161,5 +1163,6 @@
   "已索引": "Indexed",
   "扫描已取消，已索引 {count} 首": "Scan cancelled; {count} songs indexed",
   "已索引 {added} 首，更新 {updated} 首": "Indexed {added} songs, updated {updated}",
-  "已刷新 {count} 个播客，{failed} 个失败": "Refreshed {count} podcasts, {failed} failed"
+  "已刷新 {count} 个播客，{failed} 个失败": "Refreshed {count} podcasts, {failed} failed",
+  "音乐插件无响应，请在插件管理中重新启用。": "The music plugin is not responding. Re-enable it in plugin settings."
 }

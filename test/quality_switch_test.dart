@@ -29,6 +29,7 @@ class _QualityCatalog extends Catalog {
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool useCache = true,
+    bool Function()? isCancelled,
   }) async {
     requests.add(quality);
     return AudioSource(url: 'quality://${quality.name}', quality: quality);

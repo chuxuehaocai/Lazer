@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../plugins/lua_plugin_runtime.dart';
+import '../plugins/plugin_manifest.dart' show PluginException;
 import 'music_gateway.dart';
 
 /// Provider-neutral adapter for a Lua plugin. A plugin returns JSON-shaped
@@ -53,14 +54,48 @@ class LuaMusicGateway extends MusicAccountGateway {
         MusicCapability.recommendations,
       };
 
+  /// Per-operation wall clock for the shared plugin queue.
+  ///
+  /// One plugin runs its calls one at a time, and a track resolve waits behind
+  /// whatever else the app asked for. Background work therefore gets a tighter
+  /// budget than the plugin default: a wedged upload report must not park the
+  /// lane the next `stream` needs. Resolving a track keeps the default, because
+  /// it is the one call the listener is actually waiting on.
+  static const Map<String, Duration> _budgets = <String, Duration>{
+    'scrobble': Duration(seconds: 10),
+    'playStats': Duration(seconds: 10),
+    'lyrics': Duration(seconds: 10),
+    'song': Duration(seconds: 10),
+  };
+
   Future<dynamic> _call(
     String operation, [
     Map<String, dynamic> args = const {},
   ]) async {
+    final Duration? budget = _budgets[operation];
+    try {
+      return await _callOnce(operation, args, budget);
+    } on PluginException catch (error) {
+      // A timed-out plugin restarts its own VM; the abandoned call never reached
+      // a result, so repeating it once on the fresh VM is safe and turns "the
+      // plugin is dead until you re-enable it" into one slow answer. Only the
+      // track resolve is worth that second wait: background work is retried from
+      // its own queue instead, without making the listener wait for it.
+      if (error.code != PluginException.timeoutCode) rethrow;
+      if (operation != 'stream') rethrow;
+      return _callOnce(operation, args, budget);
+    }
+  }
+
+  Future<dynamic> _callOnce(
+    String operation,
+    Map<String, dynamic> args,
+    Duration? budget,
+  ) async {
     final value = await runtime.invoke(operation, {
       'platform': provider.id,
       ...args,
-    });
+    }, budget);
     if (value is Map && value['error'] is Map) {
       final error = value['error'] as Map;
       final int? code = (error['code'] as num?)?.toInt();

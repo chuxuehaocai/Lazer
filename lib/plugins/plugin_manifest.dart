@@ -135,6 +135,13 @@ class PluginManifest {
 
 class PluginException implements Exception {
   const PluginException(this.message, {this.code});
+
+  /// Marks a call abandoned because the plugin VM did not answer in time.
+  ///
+  /// The runtime restarts the VM after it; the operation itself never reached a
+  /// result, so a caller may repeat it once against the fresh VM.
+  static const int timeoutCode = 408;
+
   final String message;
   final int? code;
   @override

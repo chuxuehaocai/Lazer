@@ -30,6 +30,14 @@ import 'dart:math' as math;
 /// app-side factory (`engine_factory.dart`) cannot be.
 typedef CacheDirectoryProvider = Future<Directory> Function();
 
+/// How long the response headers may take before the download is abandoned.
+///
+/// The client's connect timeout only covers the connection itself: a server that
+/// accepts the TCP connection and then never answers used to park the download
+/// forever, and a download that is merely *slow* still reports `failure == null`,
+/// which is the one state the engine's stall recovery cannot get out of.
+const Duration _responseHeaderTimeout = Duration(seconds: 20);
+
 /// One cache file plus the download that fills it.
 class AudioStreamEntry {
   AudioStreamEntry({
@@ -37,10 +45,16 @@ class AudioStreamEntry {
     required this.file,
     required this.key,
     this.expectedBytes,
+    this.responseHeaderTimeout = _responseHeaderTimeout,
   });
 
   final String url;
   final File file;
+
+  /// How long the server may take to send response headers before this download
+  /// is abandoned. Configurable so a check can prove the timeout without
+  /// spending twenty seconds on it.
+  final Duration responseHeaderTimeout;
 
   /// Stable 64-bit name derived from the URL; used for the file name so a
   /// re-open resumes the same download across launches.
@@ -233,7 +247,22 @@ class AudioStreamEntry {
     if (position > 0) {
       request.headers.set(HttpHeaders.rangeHeader, 'bytes=$position-');
     }
-    final HttpClientResponse response = await request.close();
+    final HttpClientResponse response = await request.close().timeout(
+      responseHeaderTimeout,
+      onTimeout: () {
+        // Nothing has been read yet, so the body is not the problem: give up on
+        // this connection instead of holding the entry "busy" forever.
+        try {
+          request.abort();
+        } catch (_) {
+          // Already completed on the way out.
+        }
+        throw TimeoutException(
+          'no response headers while downloading audio',
+          responseHeaderTimeout,
+        );
+      },
+    );
     // A range starting past the end means the cache file already holds everything the server has,
     // which is a finished download rather than a failure. It is also the only way to learn the size
     // of a fully cached track whose provider never announced one, so it is recorded here: for a file
@@ -326,6 +355,7 @@ class AudioStreamCache {
     this._directory, {
     HttpClient? client,
     this.maximumEntries = 8,
+    this.responseHeaderTimeout = _responseHeaderTimeout,
   }) : _client =
            client ??
            // Keep-alive client with a bounded connect timeout; `close()` forces
@@ -337,6 +367,9 @@ class AudioStreamCache {
 
   /// How many files are kept on disk; the least recently opened entry is evicted.
   final int maximumEntries;
+
+  /// How long a download may wait for response headers before failing.
+  final Duration responseHeaderTimeout;
 
   final Map<int, AudioStreamEntry> _entries = <int, AudioStreamEntry>{};
   final List<int> _order = <int>[];
@@ -365,6 +398,14 @@ class AudioStreamCache {
       existing.expectedBytes ??= expectedBytes;
       if (existing.complete) return existing;
     }
+    if (existing != null) {
+      // Replacing the entry replaces its download too. Leaving the old one alive
+      // gave one file two writers that overwrote each other's ranges while the
+      // reader was serving it, and kept fetching bytes nobody would use.
+      existing.cancel();
+      _entries.remove(key);
+      _order.remove(key);
+    }
     final Directory directory = await _directory();
     final Directory cacheDirectory = Directory(
       '${directory.path}${Platform.pathSeparator}audio-cache',
@@ -381,6 +422,7 @@ class AudioStreamCache {
       file: file,
       key: key,
       expectedBytes: expectedBytes,
+      responseHeaderTimeout: responseHeaderTimeout,
     );
     _entries[key] = entry;
     _order.remove(key);

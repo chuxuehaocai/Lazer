@@ -30,6 +30,7 @@ class _SeekCatalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async => 'fixture';
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async =>

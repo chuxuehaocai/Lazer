@@ -248,6 +248,10 @@ class DownloadManager extends ChangeNotifier with BuildSafeNotifier {
         task.track,
         quality: task.requestedQuality,
         useCache: false,
+        // A download that the user emptied out of the queue should stop asking
+        // the plugin for a URL — the plugin answers one call at a time, and that
+        // call is competing with whatever the playing track needs.
+        isCancelled: () => task.status == DownloadStatus.canceled,
       );
     } catch (_) {
       _fail(task, '无法获取下载地址');

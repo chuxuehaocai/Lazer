@@ -40,12 +40,26 @@ class LuaPluginRuntime {
   Future<void> _calls = Future.value();
   final Map<int, Completer<Object?>> _pending = {};
   int _serial = 0;
+
+  /// Whether the current VM is unusable. Cleared by [_reset], which is how a
+  /// timed-out VM comes back: a slow operation used to kill the plugin for the
+  /// rest of the session, so one hiccup meant every later stream, lyric and
+  /// cover request failed with "插件已停止".
   bool _closed = false;
 
-  Future<void> start() => _starting ??= _start();
+  /// Whether the plugin was shut down on purpose (disabled, removed, or built
+  /// from sources that cannot start). A reset never sets this.
+  bool _disposed = false;
+
+  Future<void> start() {
+    if (_disposed) {
+      return Future<void>.error(const PluginException('插件已停止，请重新启用。'));
+    }
+    return _starting ??= _start();
+  }
 
   Future<void> _start() async {
-    if (_closed) throw const PluginException('插件已停止。');
+    if (_disposed) throw const PluginException('插件已停止。');
     final ready = Completer<void>();
     final port = _port = ReceivePort();
     port.listen((dynamic message) async {
@@ -87,7 +101,7 @@ class LuaPluginRuntime {
       }
     });
     try {
-      _isolate = await Isolate.spawn(
+      final isolate = await Isolate.spawn(
         _runPlugin,
         {
           'port': port.sendPort,
@@ -99,6 +113,12 @@ class LuaPluginRuntime {
         onError: port.sendPort,
         onExit: port.sendPort,
       );
+      if (_disposed || !identical(_port, port)) {
+        // A reset or a close replaced this VM while it was spawning.
+        isolate.kill(priority: Isolate.immediate);
+        return;
+      }
+      _isolate = isolate;
       await ready.future.timeout(timeout);
     } catch (_) {
       close();
@@ -106,14 +126,21 @@ class LuaPluginRuntime {
     }
   }
 
+  /// Runs one plugin operation on the serialized VM queue.
+  ///
+  /// [budget] overrides the plugin-wide timeout for this call. The queue is
+  /// shared by everything the plugin does for the app, so a slow non-essential
+  /// call (a scrobble upload, a lyric fetch) must be bounded more tightly than a
+  /// track resolve — otherwise it holds the lane every later resolve needs.
   Future<Object?> invoke(
     String operation, [
     Map<String, dynamic> args = const {},
+    Duration? budget,
   ]) {
     final result = Completer<Object?>();
     _calls = _calls.then((_) async {
       try {
-        result.complete(await _invoke(operation, args));
+        result.complete(await _invoke(operation, args, budget));
       } catch (error, stack) {
         result.completeError(error, stack);
       }
@@ -121,7 +148,11 @@ class LuaPluginRuntime {
     return result.future;
   }
 
-  Future<Object?> _invoke(String operation, Map<String, dynamic> args) async {
+  Future<Object?> _invoke(
+    String operation,
+    Map<String, dynamic> args,
+    Duration? budget,
+  ) async {
     await start();
     if (_closed) throw const PluginException('插件已停止，请重新启用。');
     final id = ++_serial;
@@ -129,18 +160,44 @@ class LuaPluginRuntime {
     _pending[id] = result;
     _commands!.send({'id': id, 'operation': operation, 'args': args});
     try {
-      return await result.future.timeout(timeout);
+      return await result.future.timeout(budget ?? timeout);
     } on TimeoutException {
-      close();
-      throw const PluginException('插件响应超时，请重新启用后重试。');
+      // The VM is unresponsive, not gone: drop the isolate and let the next call
+      // start a fresh one. The answer to this call is gone, so it reports the
+      // timeout and the caller may repeat it once against the new VM.
+      _pending.remove(id);
+      _reset();
+      throw const PluginException(
+        '插件响应超时，已自动重启插件。',
+        code: PluginException.timeoutCode,
+      );
     }
   }
 
+  /// Shuts the plugin down for good. Used when it is disabled, removed, or its
+  /// sources cannot start at all.
   void close() {
-    if (_closed) return;
+    if (_disposed) return;
+    _disposed = true;
+    _teardown();
+  }
+
+  /// Discards the current VM but keeps the plugin usable: the next call starts a
+  /// fresh isolate. Loaded state (login cookies, storage) lives in the plugin's
+  /// own files, so a restart does not log the user out.
+  void _reset() {
+    _teardown();
+    _closed = false;
+  }
+
+  void _teardown() {
     _closed = true;
     _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
     _port?.close();
+    _port = null;
+    _commands = null;
+    _starting = null;
     for (final pending in _pending.values) {
       pending.completeError(const PluginException('插件已停止。'));
     }

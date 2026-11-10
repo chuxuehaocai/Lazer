@@ -64,6 +64,7 @@ class LuaPluginRuntime {
   Future<Object?> invoke(
     String operation, [
     Map<String, dynamic> args = const {},
+    Duration? budget,
   ]) {
     final result = Completer<Object?>();
     _calls = _calls.then((_) async {
@@ -75,7 +76,7 @@ class LuaPluginRuntime {
         result.completeError(error, stack);
       }
     });
-    return result.future.timeout(timeout);
+    return result.future.timeout(budget ?? timeout);
   }
 
   void close() {

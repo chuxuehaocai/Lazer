@@ -211,4 +211,71 @@ void main() {
     expect(package.manifest.id, 'demo.wrapped');
     expect(package.sources.containsKey('main.lua'), isTrue);
   });
+
+  test('a VM that times out is replaced, and the next call still works', () async {
+    final directory = await Directory.systemTemp.createTemp('lazer-restart-');
+    addTearDown(() => directory.delete(recursive: true));
+    final runtime = LuaPluginRuntime(
+      manifest: PluginManifest.fromJson(const {
+        'id': 'demo.restart',
+        'name': 'Restart',
+        'version': '1.0.0',
+        'provider': 'restart',
+        'apiVersion': 1,
+        'entry': 'main.lua',
+        'permissions': {'storage': true},
+      }),
+      sources: const {
+        'main.lua': '''
+          host.storage_set("boots", (host.storage_get("boots") or 0) + 1)
+          return {call = function(op, args)
+            if op == "hang" then while true do end end
+            if op == "boots" then return {count = host.storage_get("boots")} end
+            return {ok = true}
+          end}
+        ''',
+      },
+      dataDirectory: directory.path,
+      timeout: const Duration(milliseconds: 600),
+    );
+    addTearDown(runtime.close);
+    expect(await runtime.invoke('ping'), {'ok': true});
+    // A plugin that never returns must not cost the session its plugin: the
+    // call reports a retryable timeout and the next call gets a fresh VM.
+    await expectLater(
+      runtime.invoke('hang'),
+      throwsA(
+        isA<PluginException>().having(
+          (error) => error.code,
+          'code',
+          PluginException.timeoutCode,
+        ),
+      ),
+    );
+    expect(await runtime.invoke('ping'), {'ok': true});
+    final boots = await runtime.invoke('boots') as Map;
+    expect(boots['count'], 2);
+  });
+
+  test('close is permanent while a timeout is not', () async {
+    final directory = await Directory.systemTemp.createTemp('lazer-close-');
+    addTearDown(() => directory.delete(recursive: true));
+    final runtime = LuaPluginRuntime(
+      manifest: PluginManifest.fromJson(const {
+        'id': 'demo.close',
+        'name': 'Close',
+        'version': '1.0.0',
+        'provider': 'close',
+        'apiVersion': 1,
+        'entry': 'main.lua',
+      }),
+      sources: const {
+        'main.lua': 'return {call = function() return {ok = true} end}',
+      },
+      dataDirectory: directory.path,
+      timeout: const Duration(seconds: 5),
+    );
+    runtime.close();
+    await expectLater(runtime.invoke('ping'), throwsA(isA<PluginException>()));
+  });
 }

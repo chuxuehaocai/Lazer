@@ -1073,13 +1073,24 @@ class Catalog {
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool useCache = true,
-  }) => _platform.audioSource(track, quality, useCache);
+    bool Function()? isCancelled,
+  }) => _platform.audioSource(
+    track,
+    quality,
+    useCache,
+    isCancelled: isCancelled,
+  );
   static bool isRateLimited(Object? error) =>
       error is MusicGatewayException && error.httpStatus == 429;
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
-  }) async => (await audioSourceFor(track, quality: quality))?.url;
+    bool Function()? isCancelled,
+  }) async => (await audioSourceFor(
+    track,
+    quality: quality,
+    isCancelled: isCancelled,
+  ))?.url;
 
   static const Set<String> _audioFormats = <String>{
     'mp3',
