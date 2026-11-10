@@ -137,6 +137,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.audioEngine,
     this._independentPlayback = false,
     bool autoMixEnabled = false,
+    this.skipUnavailableSongs = true,
     this.enableExternalCharts = false,
     this.deviceIsTelevision = false,
     this.deviceIsWatch = false,
@@ -290,6 +291,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   final bool enableExternalCharts;
   bool get independentPlayback => _independentPlayback;
 
+  /// Whether to automatically skip to the next track when a song cannot be played
+  /// due to server errors or unavailable access (e.g. VIP-only / locked tracks).
+  bool skipUnavailableSongs;
+
   /// Whether the Android device under this app is a television.
   ///
   /// Detected natively before the first frame (Leanback / `UI_MODE_TYPE_
@@ -437,6 +442,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('lazer_independent_playback', _independentPlayback);
+  }
+
+  Future<void> setSkipUnavailableSongs(bool value) async {
+    if (skipUnavailableSongs == value) return;
+    skipUnavailableSongs = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lazer_skip_unavailable_songs', skipUnavailableSongs);
   }
 
   /// Overlaps a prepared next song in the selected audio engine.
@@ -1595,6 +1608,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _pauseSchedule.update(scheduledPause);
       _independentPlayback =
           prefs.getBool('lazer_independent_playback') ?? _independentPlayback;
+      skipUnavailableSongs =
+          prefs.getBool('lazer_skip_unavailable_songs') ?? skipUnavailableSongs;
       _autoMixEnabled =
           prefs.getBool('lazer_automix_enabled') ?? _autoMixEnabled;
       if (audioEngine is AutoMixConfigurableAudioEngine) {
@@ -2644,6 +2659,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _shuffleOrder.reset();
     _markQueueChanged();
     _queueIndex = startIndex.clamp(0, tracks.length - 1);
+    _unavailableSkipCount = 0;
     unawaited(_saveQueue());
     _position = Duration.zero;
     _resumePositionOnOpen = false;
@@ -2776,6 +2792,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void next() {
     if (_queue.isEmpty) return;
+    _unavailableSkipCount = 0;
     _finishPlaySession();
     if (_stationLoader != null && _queueIndex >= _queue.length - 1) {
       unawaited(_advanceStationFromTail());
@@ -2790,6 +2807,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void previous() {
     if (_queue.isEmpty) return;
+    _unavailableSkipCount = 0;
     final bool restart = _position.inSeconds > 3;
     final int target = restart
         ? _queueIndex
@@ -3324,12 +3342,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         stillCurrent: () => generation == _generation,
       );
     } catch (error) {
-      if (generation == _generation) _failPlayback(_friendly(error));
+      if (generation == _generation) {
+        if (!_skipUnavailableTrack()) {
+          _failPlayback(_friendly(error));
+        }
+      }
       return;
     }
     if (generation != _generation) return;
     if (url == null || url.isEmpty) {
-      _failPlayback('这首歌暂时无法播放，请换一首。');
+      if (!_skipUnavailableTrack()) {
+        _failPlayback('这首歌暂时无法播放，请换一首。');
+      }
       return;
     }
     if (engine == null) {
@@ -3380,6 +3404,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (generation != _generation) return;
     _queueId = queueId;
     _realActive = true;
+    _unavailableSkipCount = 0;
     _resumePositionOnOpen = false;
     // Remembered so a dead download can be reloaded from the position the
     // listener was at, instead of leaving a parked player on screen.
@@ -4238,6 +4263,27 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await importedLyrics.delete(track);
     _lyricSnapshots.remove(_lyricsKey(track));
     if (current?.id == track.id) await _loadLyrics(refresh: true);
+  }
+
+  int _unavailableSkipCount = 0;
+
+  bool _skipUnavailableTrack() {
+    if (!skipUnavailableSongs || _queue.length <= 1) return false;
+    if (_unavailableSkipCount >= _queue.length - 1) {
+      _unavailableSkipCount = 0;
+      return false;
+    }
+    _unavailableSkipCount++;
+    final int? next = _autoAdvanceIndex();
+    if (next != null && next != _queueIndex) {
+      _moveTo(next, direction: 1);
+      return true;
+    }
+    if (_stationLoader != null) {
+      unawaited(_continueStationAfterEnd());
+      return true;
+    }
+    return false;
   }
 
   void _failPlayback(String message) {

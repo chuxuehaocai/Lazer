@@ -38,6 +38,8 @@
   "账户": "Account",
   "独立播放": "Independent playback",
   "不接入系统媒体控制": "Do not use system media controls",
+  "自动跳过无法播放歌曲": "Automatically skip unavailable songs",
+  "遇到 VIP 歌曲或服务器错误等无法播放时自动跳到下一首": "Skip to the next song when VIP-only or server errors prevent playback",
   "自动混音": "AutoMix",
   "当前音频引擎不支持无缝混音，请更新音频引擎。": "Update the audio engine to enable seamless mixing.",
   "在当前歌曲结束前平滑衔接下一首": "Blend into the next song before the current one ends",
@@ -1146,5 +1148,6 @@
   "已索引": "Indexed",
   "扫描已取消，已索引 {count} 首": "Scan cancelled; {count} songs indexed",
   "已索引 {added} 首，更新 {updated} 首": "Indexed {added} songs, updated {updated}",
+  "无法识别这个 ZIP。{error}": "Could not recognize this ZIP. {error}",
   "已刷新 {count} 个播客，{failed} 个失败": "Refreshed {count} podcasts, {failed} failed"
 }
