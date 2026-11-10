@@ -45,6 +45,11 @@
 - LRC / YRC parsing, per-grapheme emphasized springs, a 35% focus band, progressive masks and distance blur.
 - Font size and weight adjust with a live preview; copy several lines or export them as a PNG.
 - Lyrics follow the music, and glide back to following after you scroll away by hand.
+- Desktop lyrics: on Windows the lyrics live in explorer's desktop layer (above the wallpaper,
+  below normal windows, click-through); every desktop also gets a draggable floating lyric window.
+  Three lines by default, configurable from one to five, rendered by the same spring engine.
+- The desktop lyric's left handle drags it and remembers the position; playback progress syncs
+  every 50 ms, and interludes show breathing dots.
 
 **The interface part**
 
