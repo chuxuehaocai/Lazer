@@ -629,6 +629,18 @@ class _SettingsOverview extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
+                  if (!kIsWeb &&
+                      (defaultTargetPlatform == TargetPlatform.windows ||
+                          defaultTargetPlatform == TargetPlatform.linux ||
+                          defaultTargetPlatform == TargetPlatform.macOS))
+                    _AppSwitchRow(
+                      key: const ValueKey('minimize-to-taskbar-switch'),
+                      label: '关闭后最小化到系统托盘',
+                      subtitle: '关闭窗口时不退出程序，在系统托盘保持后台运行与控制',
+                      value: state.minimizeToTaskbarOnClose,
+                      onChanged: (bool value) =>
+                          unawaited(state.setMinimizeToTaskbarOnClose(value)),
+                    ),
                   _AppSwitchRow(
                     label: '震动反馈',
                     subtitle: '点击可操作的元素和拖动进度条、数值条时反馈',
