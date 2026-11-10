@@ -20,6 +20,18 @@ class AppLocalizations {
   ];
   static const delegate = _AppLocalizationsDelegate();
   static final fallback = AppLocalizations(supportedLocales.first, {});
+
+  static Future<AppLocalizations> loadLocale(Locale? locale) {
+    final resolved = resolve(locale);
+    final cached = _AppLocalizationsDelegate._loaded[resolved];
+    if (cached != null) return SynchronousFuture(cached);
+    return const _AppLocalizationsDelegate()._read(resolved);
+  }
+
+  static AppLocalizations? cachedLocale(Locale? locale) {
+    final resolved = resolve(locale);
+    return _AppLocalizationsDelegate._loaded[resolved];
+  }
   static Locale resolve(Locale? locale) {
     if (locale?.languageCode == 'zh') {
       if (locale?.scriptCode == 'Hans') return supportedLocales[0];

@@ -1,4 +1,5 @@
 import 'support/music_gateway.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +8,7 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/animation/apple_spring.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
+import 'package:lazer_nextgen/l10n/app_localizations.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
@@ -220,6 +222,51 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getDouble('lazer_dpi_scale'), kDpiScaleDefault);
       expect(prefs.getBool('lazer_auto_dpi_scale'), isTrue);
+    });
+
+    test('minimize to taskbar on close persists and restores', () async {
+      final state = AppState(catalog: _Catalog());
+      addTearDown(state.dispose);
+      expect(state.minimizeToTaskbarOnClose, isFalse);
+      await state.setMinimizeToTaskbarOnClose(true);
+      expect(state.minimizeToTaskbarOnClose, isTrue);
+
+      final restarted = AppState(catalog: _Catalog());
+      addTearDown(restarted.dispose);
+      expect(restarted.minimizeToTaskbarOnClose, isFalse);
+      await restarted.bootstrap();
+      expect(restarted.minimizeToTaskbarOnClose, isTrue);
+
+      await restarted.setMinimizeToTaskbarOnClose(false);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('lazer_minimize_to_taskbar_on_close'), isFalse);
+    });
+
+    test('tray menu items have translations across supported locales', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final en = await AppLocalizations.loadLocale(const Locale('en'));
+      expect(en.text('播放'), 'Play');
+      expect(en.text('暂停'), 'Pause');
+      expect(en.text('上一首'), 'Previous');
+      expect(en.text('下一首'), 'Next');
+      expect(en.text('显示主界面'), 'Show Lazer');
+      expect(en.text('退出 Lazer'), 'Quit Lazer');
+      expect(en.text('暂未播放歌曲'), 'No track playing');
+
+      final zhHant = await AppLocalizations.loadLocale(
+        const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
+      );
+      expect(zhHant.text('暂停'), '暫停');
+      expect(zhHant.text('显示主界面'), '顯示主畫面');
+      expect(zhHant.text('退出 Lazer'), '結束 Lazer');
+
+      final ja = await AppLocalizations.loadLocale(const Locale('ja'));
+      expect(ja.text('播放'), '再生');
+      expect(ja.text('暂停'), '一時停止');
+      expect(ja.text('上一首'), '前の曲');
+      expect(ja.text('下一首'), '次の曲');
+      expect(ja.text('显示主界面'), 'Lazer を表示');
+      expect(ja.text('退出 Lazer'), 'Lazer を終了');
     });
   });
 
@@ -548,5 +595,52 @@ void main() {
     expect(UiMetrics.carOf(settingsContext), isFalse);
     expect(tester.widget<Slider>(dpiSlider).min, kDpiScaleMin);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('minimize to taskbar switch toggles setting on desktop', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      tester.view.physicalSize = const Size(900, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final state = AppState(catalog: _Catalog());
+      addTearDown(state.dispose);
+
+      await tester.pumpWidget(
+        AnimatedBuilder(
+          animation: state,
+          builder: (BuildContext context, _) => MaterialApp(
+            theme: buildAppleTheme(),
+            home: Scaffold(body: AppSettingsPage(state: state)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final switchFinder = find.byKey(
+        const ValueKey('minimize-to-taskbar-switch'),
+      );
+      await tester.scrollUntilVisible(switchFinder, 500);
+      await tester.pumpAndSettle();
+      expect(switchFinder, findsOneWidget);
+      expect(find.text('关闭后最小化到系统托盘'), findsOneWidget);
+      expect(state.minimizeToTaskbarOnClose, isFalse);
+
+      final switchWidget = find.descendant(
+        of: switchFinder,
+        matching: find.byType(Switch),
+      );
+      await tester.tap(switchWidget);
+      await tester.pumpAndSettle();
+      expect(state.minimizeToTaskbarOnClose, isTrue);
+
+      await tester.tap(switchWidget);
+      await tester.pumpAndSettle();
+      expect(state.minimizeToTaskbarOnClose, isFalse);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }

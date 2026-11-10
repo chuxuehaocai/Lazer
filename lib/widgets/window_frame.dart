@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../state/app_state.dart';
 import 'window_title_area.dart';
 
 export 'window_title_area.dart';
@@ -19,7 +20,7 @@ final bool kCustomWindowFrame =
 /// Strips the system title bar before the first frame reaches the screen. The
 /// runner only shows the window once Flutter has rendered, so the native bar
 /// never flashes. No-op off desktop and under tests.
-Future<void> initWindowFrame() async {
+Future<void> initWindowFrame({bool preventClose = false}) async {
   if (!kCustomWindowFrame) return;
   await windowManager.ensureInitialized();
   await windowManager.waitUntilReadyToShow(
@@ -39,6 +40,17 @@ Future<void> initWindowFrame() async {
     await windowManager.setHasShadow(false);
   }
   await windowManager.setTitle(kWindowTitle);
+  if (preventClose) {
+    await syncWindowPreventClose(true);
+  }
+}
+
+/// Synchronizes the native preventClose flag on platforms with custom window frame.
+Future<void> syncWindowPreventClose(bool preventClose) async {
+  if (!kCustomWindowFrame) return;
+  try {
+    await windowManager.setPreventClose(preventClose);
+  } catch (_) {}
 }
 
 /// Places the independent title area above the whole app (outside the
@@ -49,9 +61,10 @@ Future<void> initWindowFrame() async {
 /// lights in the same strip. Falls through to the plain child wherever the
 /// system frame is in charge.
 class WindowFrame extends StatelessWidget {
-  const WindowFrame({super.key, required this.child});
+  const WindowFrame({super.key, required this.child, this.state});
 
   final Widget child;
+  final AppState? state;
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +73,7 @@ class WindowFrame extends StatelessWidget {
       textDirection: TextDirection.ltr,
       child: Column(
         children: <Widget>[
-          const WindowTitleArea(),
+          WindowTitleArea(state: state),
           Expanded(child: child),
         ],
       ),

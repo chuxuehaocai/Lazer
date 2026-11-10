@@ -216,6 +216,38 @@ void main() {
     },
   );
 
+  testWidgets(
+    'window title area close button handles minimizeToTaskbarOnClose safely',
+    (tester) async {
+      final state = AppState(catalog: _Catalog());
+      addTearDown(state.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppleTheme(),
+          home: Scaffold(
+            body: WindowTitleArea(state: state),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final Finder close = find.byKey(
+        const ValueKey<String>('window-title-close'),
+      );
+      expect(close, findsOneWidget);
+
+      await tester.tap(close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      await state.setMinimizeToTaskbarOnClose(true);
+      await tester.pumpAndSettle();
+      await tester.tap(close);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   test('confirmed QR adopts and persists a verified session', () async {
     final state = AppState(
       catalog: _Catalog(gateway: _AuthGateway(qrCompletes: true)),

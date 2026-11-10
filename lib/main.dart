@@ -28,6 +28,7 @@ import 'tv/tv_mode.dart';
 import 'tv/lan_remote.dart';
 import 'watch/watch_shell.dart';
 import 'widgets/window_frame.dart';
+import 'widgets/app_system_tray.dart';
 import 'widgets/media_shortcut_listener.dart';
 import 'widgets/interaction_feedback.dart';
 import 'widgets/shared_browse_background.dart';
@@ -109,6 +110,9 @@ Future<void> main() async {
         final watch = await watchFuture;
         final AudioEngineSelection selection = await selectionFuture;
         await windowReady;
+        if (prefs.getBool('lazer_minimize_to_taskbar_on_close') ?? false) {
+          await syncWindowPreventClose(true);
+        }
         final AudioEngine audio = selection.engine;
         debugPrint('Audio engine: ${selection.description}');
         // The HiFi page needs one owner for "apply these settings to whatever engine
@@ -263,6 +267,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _state.bootstrap();
     _remote = LanRemoteController(_state);
     unawaited(_remote.initialize());
+    unawaited(AppSystemTray.instance.initialize(_state));
   }
 
   void _onRootUiChanged() {
@@ -290,6 +295,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
 
   @override
   void dispose() {
+    AppSystemTray.instance.dispose();
     _playbackLifecycle.dispose();
     _remote.dispose();
     _browseNavigation.dispose();
@@ -355,6 +361,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                 state: _state,
                 child: CarMetrics(
                   child: WindowFrame(
+                    state: _state,
                     child: Builder(
                       builder: (context) => Theme(
                         data: Theme.of(

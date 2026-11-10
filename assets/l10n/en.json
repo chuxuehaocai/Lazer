@@ -115,6 +115,11 @@
   "全屏": "Full screen",
   "还原窗口": "Restore window",
   "关闭窗口": "Close window",
+  "关闭后最小化到系统托盘": "Minimize to system tray on close",
+  "关闭窗口时不退出程序，在系统托盘保持后台运行与控制": "Keep running in system tray on window close with playback controls",
+  "显示主界面": "Show Lazer",
+  "退出 Lazer": "Quit Lazer",
+  "暂未播放歌曲": "No track playing",
   "推荐歌单": "Recommended playlists",
   "点击可操作的元素和拖动进度条、数值条时反馈": "Feedback on controls, seek bar and setting sliders",
   "震动强度": "Haptic intensity",
@@ -1146,5 +1151,6 @@
   "已索引": "Indexed",
   "扫描已取消，已索引 {count} 首": "Scan cancelled; {count} songs indexed",
   "已索引 {added} 首，更新 {updated} 首": "Indexed {added} songs, updated {updated}",
+  "无法识别这个 ZIP。{error}": "Could not recognize this ZIP. {error}",
   "已刷新 {count} 个播客，{failed} 个失败": "Refreshed {count} podcasts, {failed} failed"
 }

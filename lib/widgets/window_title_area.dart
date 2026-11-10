@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../l10n/app_localizations.dart';
+import '../state/app_state.dart';
 
 /// Window title shown in the title area — also pushed to the native window so
 /// the taskbar and Alt+Tab agree with the bar.
@@ -36,7 +37,9 @@ double get _titleInset => usesNativeWindowButtons ? 84 : 16;
 /// sits outside the navigator (see `WindowFrame`), so pushed routes and the
 /// now-playing page never cover or move it.
 class WindowTitleArea extends StatefulWidget {
-  const WindowTitleArea({super.key});
+  const WindowTitleArea({super.key, this.state});
+
+  final AppState? state;
 
   @override
   State<WindowTitleArea> createState() => _WindowTitleAreaState();
@@ -52,6 +55,8 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    widget.state?.addListener(_onStateChanged);
+    _syncPreventClose();
     // A window restored from a saved maximized/fullscreen state must show the
     // restore glyph, not the fullscreen glyph. No window channel (tests,
     // headless capture): keep the windowed, focused shape.
@@ -73,7 +78,27 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
   }
 
   @override
+  void didUpdateWidget(WindowTitleArea oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.state != oldWidget.state) {
+      oldWidget.state?.removeListener(_onStateChanged);
+      widget.state?.addListener(_onStateChanged);
+      _syncPreventClose();
+    }
+  }
+
+  void _onStateChanged() => _syncPreventClose();
+
+  void _syncPreventClose() {
+    try {
+      final bool minimize = widget.state?.minimizeToTaskbarOnClose ?? false;
+      windowManager.setPreventClose(minimize);
+    } catch (_) {}
+  }
+
+  @override
   void dispose() {
+    widget.state?.removeListener(_onStateChanged);
     windowManager.removeListener(this);
     super.dispose();
   }
@@ -95,6 +120,18 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
 
   @override
   void onWindowBlur() => _apply(focused: false);
+
+  @override
+  void onWindowClose() async {
+    try {
+      final bool minimize = widget.state?.minimizeToTaskbarOnClose ?? false;
+      if (minimize) {
+        await windowManager.hide();
+      } else {
+        await windowManager.destroy();
+      }
+    } catch (_) {}
+  }
 
   void _apply({bool? maximized, bool? fullScreen, bool? focused}) {
     if (!mounted) return;
@@ -136,7 +173,12 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
 
   Future<void> _close() async {
     try {
-      await windowManager.close();
+      final bool minimize = widget.state?.minimizeToTaskbarOnClose ?? false;
+      if (minimize) {
+        await windowManager.hide();
+      } else {
+        await windowManager.close();
+      }
     } catch (_) {
       // Ignore: the window may be gone mid-teardown.
     }

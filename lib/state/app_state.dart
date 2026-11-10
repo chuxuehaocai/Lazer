@@ -599,6 +599,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Timer? _bufferPulseTimer;
   static const playbackInterval = Duration(milliseconds: 100);
   bool hapticsEnabled = true;
+
+  /// Whether closing the desktop window minimizes it to the taskbar instead of
+  /// terminating the process.
+  bool minimizeToTaskbarOnClose = false;
+
   final AppHaptics haptics = AppHaptics();
   Future<void> feedback({bool detent = false, bool boundary = false}) =>
       haptics.pulse(
@@ -1353,6 +1358,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await prefs.setBool('lazer_haptics', value);
   }
 
+  Future<void> setMinimizeToTaskbarOnClose(bool value) async {
+    if (minimizeToTaskbarOnClose == value) return;
+    minimizeToTaskbarOnClose = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lazer_minimize_to_taskbar_on_close', value);
+  }
+
   Future<void> setLyricControlsSeconds(double value) async {
     lyricControlsSeconds = value.clamp(1, 10);
     notifyListeners();
@@ -1607,6 +1620,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         }
       }
       hapticsEnabled = prefs.getBool('lazer_haptics') ?? true;
+      minimizeToTaskbarOnClose =
+          prefs.getBool('lazer_minimize_to_taskbar_on_close') ?? false;
       hapticIntensity = (prefs.getDouble('lazer_haptic_intensity') ?? 0.5)
           .clamp(0, 1);
       themeMode = ThemeMode.values.firstWhere(
