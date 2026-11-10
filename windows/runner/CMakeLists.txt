@@ -7,6 +7,7 @@ project(runner LANGUAGES CXX)
 #
 # Any new source files that you add to the application should be added here.
 add_executable(${BINARY_NAME} WIN32
+  "desktop_lyrics_plugin.cpp"
   "flutter_window.cpp"
   "system_media_controls.cpp"
   "main.cpp"
@@ -34,6 +35,9 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+# desktop_lyrics_plugin.cpp hosts a MethodChannel in the runner, so it needs
+# the plugin-side embedder wrapper in addition to the app wrapper.
+target_link_libraries(${BINARY_NAME} PRIVATE flutter_wrapper_plugin)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE windowsapp.lib shcore.lib shlwapi.lib)
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")

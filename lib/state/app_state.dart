@@ -121,6 +121,10 @@ class AuthOutcome {
   final String? error;
 }
 
+const int kLyricsOverlayMinLines = 1;
+const int kLyricsOverlayMaxLines = 5;
+const int kLyricsOverlayDefaultLines = 3;
+
 /// Single source of truth: session (real gateway) + playback engine.
 ///
 /// Playback uses a real [AudioEngine] and stream URL from the gateway.
@@ -1045,6 +1049,58 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double lyricBlurIntensity = 1;
   bool showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
 
+  static const String floatingLyricsKey = 'lazer_floating_lyrics';
+  static const String desktopLyricsKey = 'lazer_desktop_lyrics';
+  static const String lyricsOverlayLinesKey = 'lazer_lyrics_overlay_lines';
+
+  bool floatingLyricsEnabled = false;
+  bool desktopLyricsEnabled = false;
+  int lyricsOverlayLines = kLyricsOverlayDefaultLines;
+
+  bool get desktopLyricsSupported =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  Future<void> setFloatingLyricsEnabled(bool value) async {
+    if (floatingLyricsEnabled == value &&
+        (!value || !desktopLyricsEnabled)) {
+      return;
+    }
+    floatingLyricsEnabled = value;
+    if (value) desktopLyricsEnabled = false;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(floatingLyricsKey, value);
+    if (value) await prefs.setBool(desktopLyricsKey, false);
+  }
+
+  Future<void> setDesktopLyricsEnabled(bool value) async {
+    if (value && !desktopLyricsSupported) return;
+    if (desktopLyricsEnabled == value &&
+        (!value || !floatingLyricsEnabled)) {
+      return;
+    }
+    desktopLyricsEnabled = value;
+    if (value) floatingLyricsEnabled = false;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(desktopLyricsKey, value);
+    if (value) await prefs.setBool(floatingLyricsKey, false);
+  }
+
+  Future<void> setLyricsOverlayLines(int value) async {
+    final int next = value.clamp(
+      kLyricsOverlayMinLines,
+      kLyricsOverlayMaxLines,
+    );
+    if (lyricsOverlayLines == next) return;
+    lyricsOverlayLines = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setInt(
+      lyricsOverlayLinesKey,
+      next,
+    );
+  }
+
   double lyricFontSize = 22;
   int lyricFontWeight = 600;
   FontPreferences fontPreferences = const FontPreferences();
@@ -1758,6 +1814,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           // Preference storage is unavailable; the in-memory fallback stands.
         }
       }
+      floatingLyricsEnabled = prefs.getBool(floatingLyricsKey) ?? false;
+      desktopLyricsEnabled =
+          desktopLyricsSupported && (prefs.getBool(desktopLyricsKey) ?? false);
+      if (desktopLyricsEnabled) floatingLyricsEnabled = false;
+      lyricsOverlayLines =
+          (prefs.getInt(lyricsOverlayLinesKey) ?? kLyricsOverlayDefaultLines)
+              .clamp(kLyricsOverlayMinLines, kLyricsOverlayMaxLines);
       importedEnginePath = prefs.getString('lazer_native_engine_path');
       systemMediaLyrics = prefs.getBool('lazer_system_media_lyrics') ?? true;
       await prefs.remove('lazer_show_artwork_with_lyrics');

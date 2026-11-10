@@ -1,7 +1,10 @@
 #include "flutter_window.h"
 
+#include <desktop_multi_window/desktop_multi_window_plugin.h>
+
 #include <optional>
 
+#include "desktop_lyrics_plugin.h"
 #include "flutter/generated_plugin_registrant.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -63,6 +66,12 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  // Subwindows created by desktop_multi_window do not run the generated
+  // registrant. Register the plugins a lyrics overlay needs.
+  DesktopMultiWindowSetWindowCreatedCallback(
+      [](void* flutter_view_controller) {
+        DesktopLyricsRegisterSubwindowPlugins(flutter_view_controller);
+      });
   system_media_ = std::make_unique<SystemMediaControls>(
       flutter_controller_->engine()->messenger(), GetHandle());
   const HWND view = flutter_controller_->view()->GetNativeWindow();

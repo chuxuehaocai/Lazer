@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  desktop_multi_window
   file_selector_windows
   gal
   media_kit_libs_windows_audio

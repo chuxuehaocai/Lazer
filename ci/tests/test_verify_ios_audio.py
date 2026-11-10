@@ -22,9 +22,9 @@ SPEC.loader.exec_module(VERIFY)
 
 class IosAudioExportsTest(unittest.TestCase):
     def test_gate_covers_every_reader_symbol_dart_looks_up(self):
-        dart = (REPO / "lib/audio/native/lazer_audio_library.dart").read_text(
-            encoding="utf-8"
-        )
+        dart = (
+            REPO / "lib/audio/native/lazer_audio_library_io.dart"
+        ).read_text(encoding="utf-8")
         required = set(re.findall(r"'(lazer_bridge_reader_\w+)'", dart))
         self.assertEqual(set(VERIFY.BRIDGE_SYMBOLS), required)
         # Every reader entry point the Dart side binds, including the ones it

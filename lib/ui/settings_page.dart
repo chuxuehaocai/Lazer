@@ -5,7 +5,7 @@ import '../storage/storage_settings.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform;
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../animation/apple_modal.dart';
@@ -679,6 +679,57 @@ class _SettingsOverview extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
+                  if (!kIsWeb &&
+                      (defaultTargetPlatform == TargetPlatform.windows ||
+                          defaultTargetPlatform == TargetPlatform.macOS ||
+                          defaultTargetPlatform == TargetPlatform.linux)) ...[
+                    _AppSwitchRow(
+                      key: const ValueKey('floating-lyrics-switch'),
+                      label: '悬浮歌词',
+                      subtitle: '在桌面上显示可拖动的歌词窗口',
+                      value: state.floatingLyricsEnabled,
+                      onChanged: (bool value) => unawaited(
+                        state.setFloatingLyricsEnabled(value),
+                      ),
+                    ),
+                    if (!kIsWeb &&
+                        defaultTargetPlatform == TargetPlatform.windows)
+                      _AppSwitchRow(
+                        key: const ValueKey('desktop-lyrics-switch'),
+                        label: '桌面歌词',
+                        subtitle: '把歌词固定在壁纸上，位于其他窗口下方；左侧把手可拖动位置',
+                        value: state.desktopLyricsEnabled,
+                        onChanged: (bool value) => unawaited(
+                          state.setDesktopLyricsEnabled(value),
+                        ),
+                      ),
+                    _AppSettingRow(
+                      label: '歌词窗口行数',
+                      subtitle: '悬浮和桌面歌词显示的行数',
+                      trailing: SizedBox(
+                        width: 104,
+                        child: SettingsChoice<int>(
+                          key: const ValueKey('lyrics-overlay-lines'),
+                          value: state.lyricsOverlayLines,
+                          items: <DropdownMenuItem<int>>[
+                            for (
+                              int lines = kLyricsOverlayMinLines;
+                              lines <= kLyricsOverlayMaxLines;
+                              lines++
+                            )
+                              DropdownMenuItem<int>(
+                                value: lines,
+                                child: Text('$lines 行'),
+                              ),
+                          ],
+                          onChanged: (int? value) {
+                            if (value == null) return;
+                            unawaited(state.setLyricsOverlayLines(value));
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
                   _AppSwitchRow(
                     label: '歌词模糊',
                     subtitle: '距离当前歌词越远，模糊越强；手动浏览时渐隐',
