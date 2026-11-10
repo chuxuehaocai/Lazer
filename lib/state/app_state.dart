@@ -4268,7 +4268,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   int _unavailableSkipCount = 0;
 
   bool _skipUnavailableTrack() {
-    if (!skipUnavailableSongs || _queue.length <= 1) return false;
+    if (!skipUnavailableSongs || audioEngine == null || _queue.length <= 1) return false;
     if (_unavailableSkipCount >= _queue.length - 1) {
       _unavailableSkipCount = 0;
       return false;
