@@ -507,6 +507,14 @@ class _SettingsOverview extends StatelessWidget {
                         unawaited(state.setIndependentPlayback(value)),
                   ),
                   _AppSwitchRow(
+                    key: const ValueKey('skip-unavailable-songs'),
+                    label: '自动跳过无法播放歌曲',
+                    subtitle: '遇到 VIP 歌曲或服务器错误等无法播放时自动跳到下一首',
+                    value: state.skipUnavailableSongs,
+                    onChanged: (bool value) =>
+                        unawaited(state.setSkipUnavailableSongs(value)),
+                  ),
+                  _AppSwitchRow(
                     key: const ValueKey('auto-mix'),
                     label: '自动混音',
                     subtitle: state.autoMixError ?? '在当前歌曲结束前平滑衔接下一首',
