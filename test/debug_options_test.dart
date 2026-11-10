@@ -29,7 +29,7 @@ Future<AppState> _pumpSettings(
   WidgetTester tester, {
   AppState? existing,
 }) async {
-  tester.view.physicalSize = const Size(1280, 4200);
+  tester.view.physicalSize = const Size(1280, 4600);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final AppState state = existing ?? _newState();

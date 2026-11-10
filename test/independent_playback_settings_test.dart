@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
@@ -93,6 +94,26 @@ void main() {
     }
   });
 
+  test('skip unavailable songs defaults to true and persists both choices', () async {
+    final state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+    expect(state.skipUnavailableSongs, isTrue);
+    await state.bootstrap();
+    expect(state.skipUnavailableSongs, isTrue);
+
+    final prefs = await SharedPreferences.getInstance();
+    for (final enabled in <bool>[false, true]) {
+      await state.setSkipUnavailableSongs(enabled);
+      expect(state.skipUnavailableSongs, enabled);
+      expect(prefs.getBool('lazer_skip_unavailable_songs'), enabled);
+
+      final restored = AppState(catalog: _Catalog());
+      addTearDown(restored.dispose);
+      await restored.bootstrap();
+      expect(restored.skipUnavailableSongs, enabled);
+    }
+  });
+
   for (final enabled in <bool>[true, false]) {
     test(
       'bootstrap restores $enabled before the home feed completes',
@@ -162,6 +183,108 @@ void main() {
         expect(prefs.getBool(_preferenceKey), enabled);
       }
       expect(tester.takeException(), isNull);
+
+      final skipSwitch = find.descendant(
+        of: find.byKey(const ValueKey('skip-unavailable-songs')),
+        matching: find.byType(Switch),
+      );
+      expect(skipSwitch, findsOneWidget);
+      expect(tester.widget<Switch>(skipSwitch).value, isTrue);
+
+      await tester.tap(skipSwitch);
+      await tester.pumpAndSettle();
+      expect(state.skipUnavailableSongs, isFalse);
+      expect(prefs.getBool('lazer_skip_unavailable_songs'), isFalse);
+
+      await tester.tap(skipSwitch);
+      await tester.pumpAndSettle();
+      expect(state.skipUnavailableSongs, isTrue);
+      expect(prefs.getBool('lazer_skip_unavailable_songs'), isTrue);
     },
   );
+
+  test('auto skips unavailable tracks when server error occurs', () async {
+    final catalog = _FailingCatalog();
+    final engine = _TestAudioEngine();
+    final state = AppState(catalog: catalog, audioEngine: engine);
+    addTearDown(state.dispose);
+    expect(state.skipUnavailableSongs, isTrue);
+
+    final track1 = Track(
+      id: 'song-1',
+      title: 'VIP Locked Song',
+      artist: 'Singer',
+      album: 'Album',
+      duration: const Duration(minutes: 3),
+      coverSeed: 1,
+    );
+    final track2 = Track(
+      id: 'song-2',
+      title: 'Free Available Song',
+      artist: 'Singer',
+      album: 'Album',
+      duration: const Duration(minutes: 3),
+      coverSeed: 2,
+    );
+
+    state.playQueue([track1, track2]);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(state.current?.id, 'song-2');
+    expect(state.playbackError, isNull);
+
+    // When disabled, the error is kept and playback is stopped on the failed song.
+    await state.setSkipUnavailableSongs(false);
+    state.playQueue([track1, track2]);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(state.current?.id, 'song-1');
+    expect(state.playbackError, '这首歌暂时无法播放，请换一首。');
+  });
+}
+
+class _TestAudioEngine implements AudioEngine {
+  @override
+  bool active = true;
+  @override
+  Duration position = Duration.zero;
+  Duration get bufferedPosition => Duration.zero;
+  @override
+  Duration? get duration => const Duration(minutes: 3);
+  @override
+  Stream<void> get completed => const Stream<void>.empty();
+
+  @override
+  Future<void> setUrl(String url, {Map<String, String>? headers}) async {}
+  @override
+  Future<void> play() async {}
+  @override
+  Future<void> pause() async {}
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> setVolume(double volume) async {}
+  @override
+  Future<void> seek(Duration position) async {}
+  @override
+  void dispose() {}
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FailingCatalog extends Catalog {
+  _FailingCatalog() : super(gateway: _Gateway());
+
+  @override
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+  }) async {
+    if (track.id == 'song-1') {
+      return null;
+    }
+    return 'https://example.com/audio.mp3';
+  }
+
+  @override
+  Future<GatewayLyrics?> lyricsFor(Track track) async =>
+      const GatewayLyrics(lrc: '');
 }
