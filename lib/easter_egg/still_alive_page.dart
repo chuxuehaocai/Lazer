@@ -3,7 +3,6 @@ import '../widgets/spring_buttons.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../animation/view_transitions.dart';
 
@@ -11,6 +10,11 @@ import '../state/app_state.dart';
 import '../l10n/app_localizations.dart';
 import 'still_alive_audio.dart';
 import 'still_alive_score.dart';
+
+// Bundled so the terminal keeps a real monospace face in CanvasKit too;
+// MiSans covers the CJK report lines that Roboto Mono does not carry.
+const _monoFamily = 'LazerMono';
+const _monoFallback = <String>['MiSans', 'Consolas', 'Menlo', 'monospace'];
 
 Future<void> openStillAlive(BuildContext context, AppState state) {
   state.pause();
@@ -271,11 +275,6 @@ class _StillAlivePageState extends State<StillAlivePage>
 
   @override
   Widget build(BuildContext context) {
-    final mono = switch (defaultTargetPlatform) {
-      TargetPlatform.windows => 'Consolas',
-      TargetPlatform.iOS || TargetPlatform.macOS => 'Menlo',
-      _ => 'monospace',
-    };
     return PopScope(
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) {
@@ -293,7 +292,8 @@ class _StillAlivePageState extends State<StillAlivePage>
             brightness: Brightness.dark,
           ),
           scaffoldBackgroundColor: _background,
-          fontFamily: mono,
+          fontFamily: _monoFamily,
+          fontFamilyFallback: _monoFallback,
           iconButtonTheme: IconButtonThemeData(
             style: IconButton.styleFrom(foregroundColor: _amber),
           ),
@@ -313,7 +313,6 @@ class _StillAlivePageState extends State<StillAlivePage>
                       '${_frame.text}${_frame.cursorVisible && !_frame.finished && !_ended ? '_' : ' '}',
                   columns: _score.maxTextColumns + 1,
                   rows: _score.maxTextRows + 1,
-                  mono: mono,
                   amber: _amber,
                 );
                 final art = _TerminalPanel(
@@ -322,7 +321,6 @@ class _StillAlivePageState extends State<StillAlivePage>
                   text: _frame.asciiArt,
                   columns: _score.maxArtColumns,
                   rows: _score.maxArtRows,
-                  mono: mono,
                   amber: _amber,
                   centered: true,
                 );
@@ -332,7 +330,6 @@ class _StillAlivePageState extends State<StillAlivePage>
                   text: _frame.creditsText,
                   columns: _score.maxCreditsColumns,
                   rows: small ? 2 : 6,
-                  mono: mono,
                   amber: _amber,
                   rolling: true,
                   showLabel: !small,
@@ -512,14 +509,13 @@ class _TerminalPanel extends StatelessWidget {
     required this.text,
     required this.columns,
     required this.rows,
-    required this.mono,
     required this.amber,
     this.centered = false,
     this.rolling = false,
     this.showLabel = true,
     this.padding = 8,
   });
-  final String label, text, mono;
+  final String label, text;
   final int columns, rows;
   final Color amber;
   final bool centered;
@@ -528,11 +524,16 @@ class _TerminalPanel extends StatelessWidget {
   final double padding;
   static final Map<String, double> _glyphWidths = {};
 
-  double get _glyphWidth => _glyphWidths.putIfAbsent(mono, () {
+  double get _glyphWidth => _glyphWidths.putIfAbsent(_monoFamily, () {
     final sample = TextPainter(
       text: TextSpan(
         text: 'M',
-        style: TextStyle(fontFamily: mono, fontSize: 10, height: 1.2),
+        style: TextStyle(
+          fontFamily: _monoFamily,
+          fontFamilyFallback: _monoFallback,
+          fontSize: 10,
+          height: 1.2,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -580,7 +581,8 @@ class _TerminalPanel extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   textScaler: TextScaler.noScaling,
                   style: TextStyle(
-                    fontFamily: mono,
+                    fontFamily: _monoFamily,
+                    fontFamilyFallback: _monoFallback,
                     color: amber.withValues(alpha: .6),
                     fontSize: math.min(10, math.max(5, fontSize)),
                     letterSpacing: .5,
@@ -599,7 +601,8 @@ class _TerminalPanel extends StatelessWidget {
                     softWrap: false,
                     textScaler: TextScaler.noScaling,
                     style: TextStyle(
-                      fontFamily: mono,
+                      fontFamily: _monoFamily,
+                      fontFamilyFallback: _monoFallback,
                       fontSize: fontSize,
                       height: 1.2,
                       color: amber,

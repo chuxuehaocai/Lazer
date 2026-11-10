@@ -129,6 +129,7 @@ vercel project protection disable lazer_demo --sso --yes
 Notes:
 
 - The static output comes from this repository's `build/web`; `lazer_demo` only holds the Vercel Function and packing script. The packer content-hashes the CanvasKit directory and `main.dart.js` and serves them with an immutable cache, so return visits do not download those megabytes again.
+- The packer also replaces the full MiSans files with the subsets in `web/assets/assets/fonts/` (about 2.3 MB per weight, covering GB2312, Big5 level 1, JIS level 1 and the UI strings; the full files are about 8 MB per weight). Flutter copies the `web/` overlay over the generated bundle last, so a plain `flutter build web` ships them too; rerun `python tool/subset_web_fonts.py` to rebuild them. Native builds keep the full fonts.
 - `api/plugin-http.js` only accepts HTTPS hosts declared by the calling plugin manifest and rejects loopback, private, link-local and metadata addresses. Forwarded requests carry `X-Real-IP` / `X-Forwarded-For` generated from api-enhanced's mainland China ranges; browsers cannot override those headers.
 - Uploaded Lua is untrusted. A production deployment should still keep a domain allowlist, rate limits, and redacted logs.
 

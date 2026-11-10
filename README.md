@@ -104,6 +104,7 @@ vercel project protection disable lazer_demo --sso --yes
 说明：
 
 - 静态产物来自本仓库的 `build/web`；`lazer_demo` 只保留 Vercel Function 和打包脚本。打包脚本会给 CanvasKit 目录和 `main.dart.js` 生成内容哈希文件名，并配置 `immutable` 缓存，回访不再重复下载这几 MB 资源。
+- 打包脚本还会用 `web/assets/assets/fonts/` 里的字体子集替换 Web 构建中的完整 MiSans（约 2.3 MB/字重，覆盖 GB2312、Big5 一级、JIS 一级和界面字符串；完整字体约 8 MB/字重）。Flutter 构建最后会把这层 `web/` 资源覆盖到产物上，所以普通 `flutter build web` 也会自动带上子集；需要重新生成时运行 `python tool/subset_web_fonts.py`。原生构建继续使用完整字体。
 - `api/plugin-http.js` 只接受调用方插件清单声明的 HTTPS 域名，拒绝 loopback、私网、链路本地和 metadata 地址；转发时附加从 api-enhanced 国内网段生成的 `X-Real-IP` / `X-Forwarded-For`，浏览器不能自行覆盖这两个头。
 - 上传的 Lua 插件按不受信任代码处理；生产环境仍应配置域名白名单、限流和日志脱敏。
 

@@ -49,6 +49,13 @@ AGPL license:
 
 <https://hyperos.mi.com/font/en/download/>
 
+## Roboto Mono
+
+`assets/fonts/RobotoMono-Regular.ttf` contains Roboto Mono, Copyright 2015 The
+Roboto Mono Project Authors, used under the Apache License 2.0:
+
+<https://github.com/googlefonts/RobotoMono>
+
 ## Twilight Echo crossfeed
 
 The crossfeed algorithms and related settings are ported from the Twilight Echo
