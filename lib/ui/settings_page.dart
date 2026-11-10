@@ -719,7 +719,7 @@ class _SettingsOverview extends StatelessWidget {
                             )
                               DropdownMenuItem<int>(
                                 value: lines,
-                                child: Text('$lines 行'),
+                                child: Text(context.tr('$lines 行')),
                               ),
                           ],
                           onChanged: (int? value) {
