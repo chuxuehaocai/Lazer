@@ -82,6 +82,9 @@ class AudioCache {
     Object? quality,
     String? format,
     Map<String, String> headers = const <String, String>{},
+    // A browser writes nothing to disk, so there is no partial file to cancel;
+    // the argument stays so the shared catalogue path compiles for both targets.
+    bool Function()? isCancelled,
   }) async => null;
 
   Future<void> removeTrack(Object trackId, {Object? exceptFile}) async {}
