@@ -83,18 +83,26 @@ Web 版直接由本仓库的 `lib/main.dart` 编译，和桌面、移动端共�
 
 > 中国大陆访问：Flutter Web 默认从 `www.gstatic.com` 加载 CanvasKit，该域名在大陆不可达，首次打开会一直停在加载页。构建时必须加 `--no-web-resources-cdn`，让 CanvasKit 跟随站点一起部署到 `build/web/canvaskit/`。
 
+### 自动部署
+
+`.github/workflows/web-demo.yml` 在每次推送 `nextgen`（以及 `v*` 标签）时编译 Web 构建、打包成 Vercel Build Output API 目录并 `vercel deploy --prebuilt --prod`，站点 [lazerdemo.vercel.app](https://lazerdemo.vercel.app) 不需要本机参与。仓库需要配置 `VERCEL_TOKEN`（Vercel → Account Settings → Tokens）；未配置时工作流只构建不部署，并在日志里给出告警。PR 只跑构建和产物校验。
+
+### 本机部署
+
+Vercel 的构建机没有 Flutter，Windows 上的 `vercel build` 也会在拉起构建命令时失败，所以先在本机编出 `build/web`，再打包成预构建目录：
+
 ```sh
-# 1. 在本仓库构建静态站点
+# 1. 构建静态站点
 flutter pub get
 flutter build web --release --no-web-resources-cdn
 
-# 2. 用 lazer_demo 壳工程打包 Vercel 预构建产物
-#    （它提供 /api/plugin-http 同源转发函数）
-cd ../lazer_ncm/lazer_demo
-node tool/prepare-vercel-output.js
+# 2. 打包成 Build Output API 目录（写入本仓库 .vercel/output）
+node ci/vercel-web/prepare-output.js
 
-# 3. 部署到 Vercel（CLI 已登录）
-vercel deploy --prebuilt --prod --project lazer_demo
+# 3. 部署到 Vercel（CLI 已登录；项目与团队从这两个变量取，不依赖 .vercel/project.json）
+export VERCEL_ORG_ID=team_38TeUJcXlno06LvmAuureTRh
+export VERCEL_PROJECT_ID=prj_4G5sAItdYPHxXo6DX0Dfjy2bvr7v
+vercel deploy --prebuilt --prod
 ```
 
 首次在新账号部署需要先建项目并关闭 SSO 保护，否则公开域名会被登录页挡住：
@@ -106,7 +114,7 @@ vercel project protection disable lazer_demo --sso --yes
 
 说明：
 
-- 静态产物来自本仓库的 `build/web`；`lazer_demo` 只保留 Vercel Function 和打包脚本。打包脚本会给 CanvasKit 目录和 `main.dart.js` 生成内容哈希文件名，并配置 `immutable` 缓存，回访不再重复下载这几 MB 资源。
+- 静态产物来自本仓库的 `build/web`；`lazer_demo` 只保留 Vercel Function 和打包入口，它的 `tool/prepare-vercel-output.js` 只是转发到本仓库的 `ci/vercel-web/prepare-output.js`。`ci/vercel-web/api/` 是 CI 部署的函数副本，本机壳工程用 `../lazer_ncm/lazer_demo/api/` 里的同名文件，改动需要同步两处。打包脚本会给 CanvasKit 目录和 `main.dart.js` 生成内容哈希文件名，并配置 `immutable` 缓存，回访不再重复下载这几 MB 资源。
 - 打包脚本还会用 `web/assets/assets/fonts/` 里的字体子集替换 Web 构建中的完整 MiSans（约 2.3 MB/字重，覆盖 GB2312、Big5 一级、JIS 一级和界面字符串；完整字体约 8 MB/字重）。Flutter 构建最后会把这层 `web/` 资源覆盖到产物上，所以普通 `flutter build web` 也会自动带上子集；需要重新生成时运行 `python tool/subset_web_fonts.py`。原生构建继续使用完整字体。
 - `api/plugin-http.js` 只接受调用方插件清单声明的 HTTPS 域名，拒绝 loopback、私网、链路本地和 metadata 地址；转发时附加从 api-enhanced 国内网段生成的 `X-Real-IP` / `X-Forwarded-For`，浏览器不能自行覆盖这两个头。
 - 上传的 Lua 插件按不受信任代码处理；生产环境仍应配置域名白名单、限流和日志脱敏。

@@ -1,0 +1,90 @@
+name: Web demo
+
+# Every commit on the release branch rebuilds https://lazerdemo.vercel.app from
+# this checkout. Vercel's own builders have no Flutter, so the bundle is compiled
+# here and only the finished Build Output directory is uploaded.
+on:
+  push:
+    branches: [nextgen]
+    tags: ['v*']
+  pull_request:
+    branches: [nextgen]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.0'
+  VERCEL_CLI_VERSION: '65'
+  # The deploy directory is linked from these instead of a checked-in
+  # .vercel/project.json, so no account state lands in the repository.
+  VERCEL_ORG_ID: team_38TeUJcXlno06LvmAuureTRh
+  VERCEL_PROJECT_ID: prj_4G5sAItdYPHxXo6DX0Dfjy2bvr7v
+  # Tags stamp the release version; the branch name is rejected by BuildInfo,
+  # which then keeps its pubspec fallback. Same rule as build.yml.
+  LAZER_VERSION: ${{ github.ref_name }}
+
+jobs:
+  web:
+    name: Build and deploy the browser build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Build the browser bundle
+        run: >-
+          flutter build web --release --no-web-resources-cdn
+          --dart-define=LAZER_COMMIT=${{ github.sha }}
+          --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
+      - name: Check the bundle is self-contained
+        run: |
+          set -euo pipefail
+          test -f build/web/index.html
+          test -f build/web/main.dart.js
+          test -f build/web/canvaskit/canvaskit.wasm
+          # `--no-web-resources-cdn` is the difference between a page that loads
+          # in mainland China and one that waits on www.gstatic.com forever: the
+          # loader must be configured to resolve CanvasKit from this origin.
+          grep -q '"useLocalCanvasKit":true' build/web/flutter_bootstrap.js
+          # The packer rewrites this placeholder into a content-hashed directory.
+          grep -q '__LAZER_CANVASKIT_BASE__' build/web/flutter_bootstrap.js
+      - name: Pack the Vercel Build Output directory
+        run: node ci/vercel-web/prepare-output.js
+      - name: Verify the packed directory
+        run: node ci/vercel-web/verify-output.js
+      - name: Link the Vercel project
+        if: github.event_name != 'pull_request'
+        # The CLI reads either .vercel/project.json or these two variables; write
+        # the file so a change in that behaviour cannot break the deploy.
+        run: |
+          mkdir -p .vercel
+          printf '{"projectId":"%s","orgId":"%s"}' "$VERCEL_PROJECT_ID" "$VERCEL_ORG_ID" > .vercel/project.json
+          cat .vercel/project.json
+      - name: Deploy the prebuilt output
+        if: github.event_name != 'pull_request'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VERCEL_TOKEN:-}" ]; then
+            echo "::warning::VERCEL_TOKEN is not configured; the site was built and packed but not deployed."
+            exit 0
+          fi
+          npx --yes --package "vercel@${VERCEL_CLI_VERSION}" \
+            vercel deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN"
+      - name: Note the deployed address
+        if: github.event_name != 'pull_request'
+        run: echo "https://lazerdemo.vercel.app" >> "$GITHUB_STEP_SUMMARY"

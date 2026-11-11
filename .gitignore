@@ -59,3 +59,6 @@ app.*.map.json
 
 # Kotlin Gradle caches
 **/.kotlin/
+
+# Vercel Build Output API directory produced by ci/vercel-web/prepare-output.js
+/.vercel/
