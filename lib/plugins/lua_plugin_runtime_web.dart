@@ -13,6 +13,8 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 import 'plugin_manifest.dart';
+import 'lua_console_evaluator.dart';
+import '../diagnostics/app_log.dart';
 
 /// Browser implementation of the Lua gateway runtime.
 ///
@@ -48,6 +50,7 @@ class LuaPluginRuntime {
 
   Future<void> _start() async {
     if (_closed) throw const PluginException('插件已停止。');
+    AppLog.shared.event('lua', 'starting', {'plugin': manifest.id});
     final host = _WebPluginHost(
       manifest,
       sources,
@@ -59,6 +62,7 @@ class LuaPluginRuntime {
     await host.initialize();
     _host = host;
     _lua = host.lua;
+    AppLog.shared.event('lua', 'started', {'plugin': manifest.id});
   }
 
   Future<Object?> invoke(
@@ -68,10 +72,38 @@ class LuaPluginRuntime {
   ]) {
     final result = Completer<Object?>();
     _calls = _calls.then((_) async {
+      final clock = Stopwatch()..start();
+      AppLog.shared.event('lua', 'call', {
+        'plugin': manifest.id,
+        'operation': operation,
+      });
       try {
         await start();
         if (_closed) throw const PluginException('插件已停止，请重新启用。');
         result.complete(await _host!.invoke(operation, args));
+        AppLog.shared.event('lua', 'completed', {
+          'plugin': manifest.id,
+          'operation': operation,
+          'elapsed_ms': clock.elapsedMilliseconds,
+        });
+      } catch (error, stack) {
+        AppLog.shared.event('lua', 'failed', {
+          'plugin': manifest.id,
+          'operation': operation,
+        });
+        result.completeError(error, stack);
+      }
+    });
+    return result.future.timeout(timeout);
+  }
+
+  Future<List<String>> evaluate(String source, [Duration? budget]) {
+    final result = Completer<List<String>>();
+    _calls = _calls.then((_) async {
+      try {
+        await start();
+        if (_closed) throw const PluginException('插件已停止。');
+        result.complete(await _host!.lua.evaluate(source));
       } catch (error, stack) {
         result.completeError(error, stack);
       }
@@ -82,6 +114,7 @@ class LuaPluginRuntime {
   void close() {
     if (_closed) return;
     _closed = true;
+    AppLog.shared.event('lua', 'closed', {'plugin': manifest.id});
     _client.close();
     _lua?.setTop(0);
   }
@@ -104,7 +137,7 @@ class _WebPluginHost {
   final http.Client client;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   externalHttp;
-  final LuaState lua = LuaState.newState();
+  final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   Map<String, dynamic> storage = <String, dynamic>{};
 
   String get _cookieName =>
@@ -143,10 +176,10 @@ class _WebPluginHost {
     sync('_now', (_) => DateTime.now().millisecondsSinceEpoch);
     sync('_url_encode', (state) => Uri.encodeComponent(state.checkString(1)!));
     sync('_cookie_compact', (state) => _compactCookie(state.checkString(1)!));
-    sync('_cookie_field', (state) => _cookieField(
-          state.checkString(1)!,
-          state.checkString(2)!,
-        ));
+    sync(
+      '_cookie_field',
+      (state) => _cookieField(state.checkString(1)!, state.checkString(2)!),
+    );
     sync('_cookie_merge', (state) {
       final previous = state.isNoneOrNil(1) ? '' : state.checkString(1)!;
       final updates = state.isNoneOrNil(2) ? '' : _cookieText(_read(state, 2));
@@ -160,9 +193,10 @@ class _WebPluginHost {
         (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
       ).join();
     });
-    sync('_crypto', (state) => _crypt(
-          Map<String, dynamic>.from(_read(state, 1) as Map),
-        ));
+    sync(
+      '_crypto',
+      (state) => _crypt(Map<String, dynamic>.from(_read(state, 1) as Map)),
+    );
     sync('_module_source', (state) {
       final name = state.checkString(1)!;
       final path = '${name.replaceAll('.', '/')}.lua';
@@ -171,9 +205,10 @@ class _WebPluginHost {
       }
       return sources[path];
     });
-    sync('_storage_get', (state) => manifest.storage
-        ? storage[state.checkString(1)]
-        : null);
+    sync(
+      '_storage_get',
+      (state) => manifest.storage ? storage[state.checkString(1)] : null,
+    );
     sync('_storage_set', (state) {
       if (!manifest.storage) {
         throw const FormatException('Storage permission required');
@@ -203,8 +238,7 @@ class _WebPluginHost {
       return state.getTop();
     });
 
-    final moduleBuffers = StringBuffer()
-      ..writeln('local module_loaders = {}');
+    final moduleBuffers = StringBuffer()..writeln('local module_loaders = {}');
     for (final entry in sources.entries.where(
       (entry) => entry.key != manifest.entry,
     )) {
@@ -216,7 +250,8 @@ class _WebPluginHost {
         ..writeln(entry.value)
         ..writeln('end');
     }
-    final bootstrap = '''
+    final bootstrap =
+        '''
       host = { json_encode = _json_encode, json_decode = _json_decode,
         now = _now, url_encode = _url_encode, random_hex = _random_hex,
         cookie_compact = _cookie_compact, cookie_field = _cookie_field,
@@ -334,9 +369,8 @@ class _WebPluginHost {
     return null;
   }
 
-  String _cookieText(Object? value) => value is List
-      ? value.map((item) => '$item').join('\n')
-      : '$value';
+  String _cookieText(Object? value) =>
+      value is List ? value.map((item) => '$item').join('\n') : '$value';
 
   String? _compactCookie(String value) {
     const attributes = {
@@ -367,7 +401,9 @@ class _WebPluginHost {
       }
     }
     if (values.isEmpty) return null;
-    return values.entries.map((entry) => '${entry.key}=${entry.value}').join('; ');
+    return values.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join('; ');
   }
 
   String? _cookieField(String value, String field) {
@@ -399,7 +435,10 @@ class _WebPluginHost {
             ? input.split('').reversed.join()
             : input;
         final hex = spec['inputEncoding'] == 'utf8'
-            ? utf8.encode(text).map((b) => b.toRadixString(16).padLeft(2, '0')).join()
+            ? utf8
+                  .encode(text)
+                  .map((b) => b.toRadixString(16).padLeft(2, '0'))
+                  .join()
             : text;
         return BigInt.parse(hex, radix: 16)
             .modPow(BigInt.from(spec['exponent'] as int? ?? 65537), modulus)
@@ -444,10 +483,14 @@ class _WebPluginHost {
           : pc.CBCBlockCipher(pc.AESEngine()),
     );
     final pc.CipherParameters parameters = iv == null
-        ? pc.PaddedBlockCipherParameters<pc.CipherParameters,
-              pc.CipherParameters>(pc.KeyParameter(Uint8List.fromList(key)), null)
-        : pc.PaddedBlockCipherParameters<pc.CipherParameters,
-              pc.CipherParameters>(
+        ? pc.PaddedBlockCipherParameters<
+            pc.CipherParameters,
+            pc.CipherParameters
+          >(pc.KeyParameter(Uint8List.fromList(key)), null)
+        : pc.PaddedBlockCipherParameters<
+            pc.CipherParameters,
+            pc.CipherParameters
+          >(
             pc.ParametersWithIV(
               pc.KeyParameter(Uint8List.fromList(key)),
               Uint8List.fromList(iv),

@@ -2,6 +2,7 @@
 
 #include <desktop_multi_window/desktop_multi_window_plugin.h>
 #include <flutter_linux/flutter_linux.h>
+#include <file_selector_linux/file_selector_plugin.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <screen_retriever_linux/screen_retriever_linux_plugin.h>
 #include <window_manager/window_manager_plugin.h>
@@ -102,6 +103,8 @@ static void my_application_activate(GApplication* application) {
   // Subwindows created by desktop_multi_window skip the generated registrant.
   desktop_multi_window_plugin_set_window_created_callback(
       [](FlPluginRegistry* registry) {
+        file_selector_plugin_register_with_registrar(
+            fl_plugin_registry_get_registrar_for_plugin(registry, "FileSelectorPlugin"));
         FlPluginRegistrar* registrar = fl_plugin_registry_get_registrar_for_plugin(
             registry, "WindowManagerPlugin");
         if (registrar != nullptr) {

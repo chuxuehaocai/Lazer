@@ -27,4 +27,6 @@ class LuaPluginRuntime {
     Duration? budget,
   ]) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   void close() {}
+  Future<List<String>> evaluate(String source) =>
+      Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
 }

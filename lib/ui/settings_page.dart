@@ -15,6 +15,8 @@ import '../audio/audio_device_report.dart';
 import '../cache/playback_cache_settings.dart';
 import '../data/audio_quality.dart';
 import '../diagnostics/build_info.dart';
+import '../diagnostics/console_window.dart';
+import '../diagnostics/app_log.dart';
 import '../diagnostics/export_logs.dart';
 import '../downloads/download_queue_sheet.dart';
 import '../easter_egg/still_alive_page.dart';
@@ -45,6 +47,7 @@ import 'shortcut_settings_page.dart';
 import 'scheduled_pause_settings.dart';
 import '../widgets/music_provider_badge.dart';
 import 'plugin_manager_page.dart';
+import 'developer_console_page.dart';
 
 /// A single-column, inset-grouped Settings page, following the iOS Settings
 /// information architecture rather than a desktop form grid.
@@ -863,6 +866,64 @@ class _SettingsOverview extends StatelessWidget {
               margin: EdgeInsets.zero,
               child: Column(
                 children: <Widget>[
+                  _AppSwitchRow(
+                    label: '启用开发者控制台',
+                    subtitle: '运行 Lua、检查播放状态和查看调试日志',
+                    value: state.developerConsoleEnabled,
+                    onChanged: (bool value) =>
+                        unawaited(state.setDeveloperConsoleEnabled(value)),
+                  ),
+                  if (state.developerConsoleEnabled)
+                    _AppSettingRow(
+                      label: 'Lua 开发者控制台',
+                      subtitle: 'Lua 表达式、调试指令和实时日志',
+                      trailing: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          SpringOutlinedButton(
+                            key: const ValueKey('open-developer-console'),
+                            onPressed: () => SettingsDetailHost.open(
+                              context,
+                              page: (_) =>
+                                  DeveloperConsolePage(state: state),
+                              view: (_) =>
+                                  DeveloperConsoleView(state: state),
+                            ),
+                            child: const TrText('打开'),
+                          ),
+                          if (supportsConsoleWindow &&
+                              ConsoleWindowController.instance != null)
+                            SpringOutlinedButton(
+                              key: const ValueKey('open-console-window'),
+                              onPressed: () async {
+                                try {
+                                  await ConsoleWindowController.instance
+                                      ?.open();
+                                } catch (error, stack) {
+                                  AppLog.shared.record(
+                                    'console window: $error\n$stack',
+                                  );
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(
+                                      context,
+                                    ).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          context.tr(
+                                            '无法打开独立窗口，请在应用内打开控制台。',
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              child: const TrText('独立窗口'),
+                            ),
+                        ],
+                      ),
+                    ),
                   _AppSwitchRow(
                     label: '显示帧数',
                     subtitle: '实时显示 UI、GPU、低帧和 100 fps 帧预算',

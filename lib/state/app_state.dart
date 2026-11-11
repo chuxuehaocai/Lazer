@@ -16,6 +16,8 @@ import '../audio/hifi_controller.dart';
 import '../cache/playback_cache.dart';
 import '../cache/current_artwork.dart';
 import '../diagnostics/build_info.dart';
+import '../diagnostics/app_log.dart';
+import '../diagnostics/developer_console.dart';
 import '../downloads/download_manager.dart';
 import '../interaction/app_haptics.dart';
 import '../data/audio_quality.dart';
@@ -1067,6 +1069,23 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool lyricBlurEnabled = true;
   double lyricBlurIntensity = 1;
   bool showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
+  bool _developerConsoleEnabled = false;
+  bool get developerConsoleEnabled => _developerConsoleEnabled;
+  DeveloperConsole? _developerConsole;
+  DeveloperConsole get developerConsole =>
+      _developerConsole ??= DeveloperConsole(this);
+
+  Future<void> setDeveloperConsoleEnabled(bool value) async {
+    if (_developerConsoleEnabled == value) return;
+    _developerConsoleEnabled = value;
+    if (!value) _developerConsole?.disable();
+    AppLog.shared.event('settings', 'developer_console', {'enabled': value});
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      'lazer_developer_console',
+      value,
+    );
+  }
 
   static const String floatingLyricsKey = 'lazer_floating_lyrics';
   static const String desktopLyricsKey = 'lazer_desktop_lyrics';
@@ -1080,8 +1099,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
   Future<void> setFloatingLyricsEnabled(bool value) async {
-    if (floatingLyricsEnabled == value &&
-        (!value || !desktopLyricsEnabled)) {
+    if (floatingLyricsEnabled == value && (!value || !desktopLyricsEnabled)) {
       return;
     }
     floatingLyricsEnabled = value;
@@ -1094,8 +1112,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> setDesktopLyricsEnabled(bool value) async {
     if (value && !desktopLyricsSupported) return;
-    if (desktopLyricsEnabled == value &&
-        (!value || !floatingLyricsEnabled)) {
+    if (desktopLyricsEnabled == value && (!value || !floatingLyricsEnabled)) {
       return;
     }
     desktopLyricsEnabled = value;
@@ -1654,6 +1671,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Restores any persisted gateway session, then loads the home feed.
   Future<void> bootstrap() async {
+    final bootClock = Stopwatch()..start();
+    AppLog.shared.event('app', 'bootstrap_started');
     final int initialQueueActivity = _queueActivity;
     final initialPlayModeRevision = _playModeRevision;
     try {
@@ -1818,6 +1837,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           .clamp(0.0, 1.0);
       showFrameStats =
           prefs.getBool('lazer_show_frame_stats') ?? showFrameStats;
+      _developerConsoleEnabled =
+          prefs.getBool('lazer_developer_console') ?? false;
       lyricFontSize = (prefs.getDouble('lazer_lyric_font_size') ?? 22).clamp(
         14,
         40,
@@ -1901,6 +1922,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _restoreCatalogSession(),
     ]);
     unawaited(_refreshMissingArtwork());
+    AppLog.shared.event('app', 'bootstrap_completed', {
+      'elapsed_ms': bootClock.elapsedMilliseconds,
+      'queue_length': queueLength,
+      'plugins': pluginManager.plugins.length,
+    });
   }
 
   Future<void> _refreshMissingArtwork() async {
@@ -2784,6 +2810,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void togglePlay() {
+    AppLog.shared.event('playback', 'toggle', {'playing': _playing});
     final shouldPlay = !_playing;
     checkScheduledPause();
     if (current == null) return;
@@ -2808,6 +2835,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void play() {
+    AppLog.shared.event('playback', 'play', {'queue_index': _queueIndex});
     checkScheduledPause();
     if (current == null || _playing) return;
     _playing = true;
@@ -2836,6 +2864,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void pause() {
+    AppLog.shared.event('playback', 'pause', {
+      'position_ms': _position.inMilliseconds,
+    });
     if (!_playing) return;
     _sampleListening();
     listeningStatistics.suspend();
@@ -2890,6 +2921,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void stop() {
+    AppLog.shared.event('playback', 'stop');
     _finishListening();
     _finishPlaySession();
     ++_generation;
@@ -2906,6 +2938,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void next() {
+    AppLog.shared.event('playback', 'next', {'queue_index': _queueIndex});
     if (_queue.isEmpty) return;
     _unavailableSkipCount = 0;
     _finishPlaySession();
@@ -2921,6 +2954,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void previous() {
+    AppLog.shared.event('playback', 'previous', {'queue_index': _queueIndex});
     if (_queue.isEmpty) return;
     _unavailableSkipCount = 0;
     final bool restart = _position.inSeconds > 3;
@@ -3202,6 +3236,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// for [playQueue] to finish opening its first source and then seeks once,
   /// which is what makes "continue listening" land where it stopped.
   Future<void> seekTo(Duration target) async {
+    AppLog.shared.event('playback', 'seek', {
+      'target_ms': target.inMilliseconds,
+    });
     final Track? track = current;
     if (track == null) return;
     final String trackId = track.id;
@@ -3489,6 +3526,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final AudioEngine? engine = audioEngine;
     final Track? track = current;
     if (track == null) return;
+    AppLog.shared.event('playback', 'open', {
+      'track_id': track.id,
+      'resume_ms': resumeAt?.inMilliseconds,
+      'recovering': recovering,
+      'engine': engine?.runtimeType.toString(),
+    });
     final int generation = ++_generation;
     _realActive = false;
     _clearQueuedNext();
@@ -4521,6 +4564,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _failPlayback(String message) {
+    AppLog.shared.event('playback', 'failed', {'message': message});
     // The engine may already be stopped on a terminal error. Keep only
     // progress observed before the failure, never a final fabricated position.
     ++_listeningRevision;
@@ -4545,6 +4589,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// A terminal failure also ends the HiFi promise for this session — the output
   /// that produced it is gone — so the path notice says so.
   void _onEngineFailure(AudioFailure failure) {
+    AppLog.shared.event('playback', 'engine_failure', {
+      'kind': failure.kind.name,
+      'message': failure.message,
+      'device_retries': _deviceRetries,
+      'stream_retries': _streamRetries,
+    });
     final String message = failure.message;
     final bool pathChanged =
         hifiPathNotice == null && audioEngine is FailureReportingAudioEngine;
@@ -5151,6 +5201,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   @override
   void dispose() {
     _playFlushTimer?.cancel();
+    _developerConsole?.dispose();
     _sampleListening();
     listeningStatistics.dispose();
     _pauseSchedule.dispose();

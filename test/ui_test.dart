@@ -705,6 +705,7 @@ void main() {
     // The DPI slider writes a manual scale.
     final Finder dpi = controlFor<Slider>('DPI 缩放');
     await tester.ensureVisible(dpi);
+    await tester.pump();
     await tester.drag(dpi, const Offset(120, 0));
     await tester.pumpAndSettle();
     expect(state.dpiScale, greaterThan(1.0));
@@ -713,6 +714,8 @@ void main() {
     await tester.ensureVisible(
       find.byKey(const ValueKey('open-font-settings')),
     );
+    // ensureVisible jumps the offset; the transform lands on the next frame.
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('open-font-settings')));
     await tester.pumpAndSettle();
     final lyricCard = find.byKey(const ValueKey('font-card-lyrics'));
@@ -731,6 +734,7 @@ void main() {
       matching: find.byType(Slider),
     );
     await tester.ensureVisible(lyricSize);
+    await tester.pump();
     await tester.drag(lyricSize, const Offset(200, 0));
     await tester.pumpAndSettle();
     expect(state.lyricFontSize, greaterThan(22));
@@ -749,6 +753,7 @@ void main() {
     await tester.ensureVisible(find.text('歌词模糊'));
     final Finder blurStrength = controlFor<Slider>('歌词模糊强度');
     await tester.ensureVisible(blurStrength);
+    await tester.pump();
     await tester.drag(blurStrength, const Offset(-120, 0));
     await tester.pumpAndSettle();
     expect(state.lyricBlurIntensity, lessThan(1));

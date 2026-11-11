@@ -13,6 +13,8 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:path/path.dart' as p;
 
 import 'plugin_manifest.dart';
+import 'lua_console_evaluator.dart';
+import '../diagnostics/app_log.dart';
 
 /// Each VM has its own isolate, session, serial call queue and time budget.
 /// No executable, dynamic library, JIT or platform-specific Lua installation.
@@ -59,7 +61,8 @@ class LuaPluginRuntime {
   }
 
   Future<void> _start() async {
-    if (_disposed) throw const PluginException('插件已停止。');
+    if (_disposed || _closed) throw const PluginException('插件已停止。');
+    AppLog.shared.event('lua', 'starting', {'plugin': manifest.id});
     final ready = Completer<void>();
     final port = _port = ReceivePort();
     port.listen((dynamic message) async {
@@ -120,7 +123,9 @@ class LuaPluginRuntime {
       }
       _isolate = isolate;
       await ready.future.timeout(timeout);
+      AppLog.shared.event('lua', 'started', {'plugin': manifest.id});
     } catch (_) {
+      AppLog.shared.event('lua', 'startup_failed', {'plugin': manifest.id});
       close();
       rethrow;
     }
@@ -156,26 +161,71 @@ class LuaPluginRuntime {
     await start();
     if (_closed) throw const PluginException('插件已停止，请重新启用。');
     final id = ++_serial;
+    final clock = Stopwatch()..start();
+    AppLog.shared.event('lua', 'call', {
+      'plugin': manifest.id,
+      'operation': operation,
+      'request': id,
+    });
     final result = Completer<Object?>();
     _pending[id] = result;
     _commands!.send({'id': id, 'operation': operation, 'args': args});
     try {
-      return await result.future.timeout(budget ?? timeout);
+      final value = await result.future.timeout(budget ?? timeout);
+      AppLog.shared.event('lua', 'completed', {
+        'plugin': manifest.id,
+        'operation': operation,
+        'request': id,
+        'elapsed_ms': clock.elapsedMilliseconds,
+      });
+      return value;
     } on TimeoutException {
       // The VM is unresponsive, not gone: drop the isolate and let the next call
       // start a fresh one. The answer to this call is gone, so it reports the
       // timeout and the caller may repeat it once against the new VM.
       _pending.remove(id);
       _reset();
+      AppLog.shared.event('lua', 'timeout', {
+        'plugin': manifest.id,
+        'operation': operation,
+        'request': id,
+      });
       throw const PluginException(
         '插件响应超时，已自动重启插件。',
         code: PluginException.timeoutCode,
       );
+    } catch (_) {
+      AppLog.shared.event('lua', 'failed', {
+        'plugin': manifest.id,
+        'operation': operation,
+        'request': id,
+        'elapsed_ms': clock.elapsedMilliseconds,
+      });
+      rethrow;
     }
   }
 
-  /// Shuts the plugin down for good. Used when it is disabled, removed, or its
-  /// sources cannot start at all.
+  /// Runs an interactive chunk on the same serial queue as plugin operations.
+  Future<List<String>> evaluate(String source) async {
+    final result = Completer<List<String>>();
+    _calls = _calls.then((_) async {
+      try {
+        await start();
+        if (_closed) throw const PluginException('插件已停止。');
+        final id = ++_serial;
+        final pending = Completer<Object?>();
+        _pending[id] = pending;
+        _commands!.send({'id': id, 'source': source});
+        final value = await pending.future.timeout(timeout);
+        result.complete(List<String>.from(value as List));
+      } catch (error, stack) {
+        if (error is TimeoutException) close();
+        result.completeError(error, stack);
+      }
+    });
+    return result.future;
+  }
+
   void close() {
     if (_disposed) return;
     _disposed = true;
@@ -192,6 +242,7 @@ class LuaPluginRuntime {
 
   void _teardown() {
     _closed = true;
+    AppLog.shared.event('lua', 'closed', {'plugin': manifest.id});
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _port?.close();
@@ -241,10 +292,12 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
     if (request is! Map) return;
     tail = tail.then((_) async {
       try {
-        final value = await host.invoke(
-          request['operation'] as String,
-          request['args'],
-        );
+        final value = request['source'] is String
+            ? await host.lua.evaluate(request['source'] as String)
+            : await host.invoke(
+                request['operation'] as String,
+                request['args'],
+              );
         if (value is Map && value['__error'] is Map) {
           output.send({
             'id': request['id'],
@@ -263,7 +316,7 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
         output.send({
           'id': request['id'],
           'error': true,
-          'detail': '插件请求失败，请重试或更新插件。',
+          'detail': request['source'] is String ? '$error' : '插件请求失败，请重试或更新插件。',
           'code': int.tryParse(code ?? ''),
         });
       }
@@ -278,7 +331,7 @@ class _PluginHost {
   final String dataPath;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   externalHttp;
-  final LuaState lua = LuaState.newState();
+  final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   final HttpClient client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 20);
   final Random random = Random.secure();
@@ -575,10 +628,14 @@ end
           : pc.CBCBlockCipher(pc.AESEngine()),
     );
     final pc.CipherParameters parameters = iv == null
-        ? pc.PaddedBlockCipherParameters<pc.CipherParameters,
-              pc.CipherParameters>(pc.KeyParameter(Uint8List.fromList(key)), null)
-        : pc.PaddedBlockCipherParameters<pc.CipherParameters,
-              pc.CipherParameters>(
+        ? pc.PaddedBlockCipherParameters<
+            pc.CipherParameters,
+            pc.CipherParameters
+          >(pc.KeyParameter(Uint8List.fromList(key)), null)
+        : pc.PaddedBlockCipherParameters<
+            pc.CipherParameters,
+            pc.CipherParameters
+          >(
             pc.ParametersWithIV(
               pc.KeyParameter(Uint8List.fromList(key)),
               Uint8List.fromList(iv),

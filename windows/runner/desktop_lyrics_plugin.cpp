@@ -1,5 +1,6 @@
 #include "desktop_lyrics_plugin.h"
 
+#include <file_selector_windows/file_selector_windows.h>
 #include <flutter/flutter_engine.h>
 #include <flutter/flutter_view.h>
 #include <flutter/flutter_view_controller.h>
@@ -362,6 +363,10 @@ void DesktopLyricsRegisterSubwindowPlugins(void* flutter_view_controller) {
   if (window_manager_registrar != nullptr) {
     WindowManagerPluginRegisterWithRegistrar(window_manager_registrar);
   }
+
+  // The developer console exports the main engine's diagnostic report.
+  FileSelectorWindowsRegisterWithRegistrar(
+      engine->GetRegistrarForPlugin("FileSelectorWindows"));
 
   // window_manager.setAlignment asks screen_retriever for the display under
   // the cursor. A subwindow engine does not run the generated registrant, so

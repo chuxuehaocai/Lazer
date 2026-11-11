@@ -21,6 +21,8 @@ import 'desktop_lyrics/lyrics_overlay.dart';
 import 'desktop_lyrics/overlay_protocol.dart';
 import 'diagnostics/frame_stats.dart';
 import 'diagnostics/app_log.dart';
+import 'diagnostics/console_window.dart';
+import 'diagnostics/crash_dump.dart';
 import 'ui/shell.dart';
 import 'theme/apple_design.dart';
 import 'state/app_state.dart';
@@ -60,16 +62,38 @@ bool _isMutedLog(Object? line) {
   return _mutedLogMarkers.any(text.contains);
 }
 
+bool _debugPrintBridgeInstalled = false;
+
+void _installDebugPrintBridge() {
+  if (_debugPrintBridgeInstalled) return;
+  _debugPrintBridgeInstalled = true;
+  final previous = debugPrint;
+  debugPrint = (String? message, {int? wrapWidth}) {
+    if (_isMutedLog(message)) return;
+    AppLog.shared.record('[debugPrint] ${message ?? ""}');
+    Zone.root.run(() => previous(message, wrapWidth: wrapWidth));
+  };
+}
+
 Future<void> main(List<String> args) async {
   // runZoned guards runApp and every later print from the audio backend:
   // the zone stays current for callbacks scheduled from here onward.
-  await runZoned<Future<void>>(
+  await runZonedGuarded<Future<void>>(
     () async {
       LazerWidgetsBinding();
+      _installDebugPrintBridge();
       final previousFlutterError = FlutterError.onError;
       FlutterError.onError = (details) {
         AppLog.shared.record(
           '${details.exceptionAsString()}\n${details.stack ?? ""}',
+        );
+        unawaited(
+          writeCrashDump(
+            _activeAppState,
+            details.exception,
+            details.stack ?? StackTrace.current,
+            phase: 'flutter_error',
+          ),
         );
         previousFlutterError?.call(details);
       };
@@ -77,8 +101,20 @@ Future<void> main(List<String> args) async {
       final previousPlatformError = dispatcher.onError;
       dispatcher.onError = (error, stack) {
         AppLog.shared.record('$error\n$stack');
+        unawaited(
+          writeCrashDump(
+            _activeAppState,
+            error,
+            stack,
+            phase: 'platform_error',
+          ),
+        );
         return previousPlatformError?.call(error, stack) ?? false;
       };
+      if (isConsoleWindow(args)) {
+        await runConsoleWindow(args[1]);
+        return;
+      }
       if (await _runLyricsOverlay(args)) return;
       // Queue playback hands the next track to libmpv while the current one is
       // still playing, but mpv only opens that entry early with
@@ -174,6 +210,7 @@ Future<void> main(List<String> args) async {
           // so a fallback this launch cannot be mistaken for a HiFi session.
           hifiPathNotice: selection.path.notice,
         );
+        _activeAppState = state;
         final session = PlaybackSession(state, audio);
         final media = SystemMediaController(state);
         runApp(
@@ -184,8 +221,17 @@ Future<void> main(List<String> args) async {
         // failed plugin channel, engine start-up or storage initialisation
         // escaped the zone and left a window with no content and no log record.
         AppLog.shared.record('startup failed: $error\n$stack');
+        unawaited(
+          writeCrashDump(_activeAppState, error, stack, phase: 'startup'),
+        );
         runApp(_StartupFailureApp(error: '$error'));
       }
+    },
+    (Object error, StackTrace stack) {
+      AppLog.shared.record('uncaught: $error\n$stack');
+      unawaited(
+        writeCrashDump(_activeAppState, error, stack, phase: 'uncaught'),
+      );
     },
     zoneSpecification: ZoneSpecification(
       print: (Zone self, ZoneDelegate parent, Zone zone, String line) {
@@ -197,18 +243,20 @@ Future<void> main(List<String> args) async {
   );
 }
 
+AppState? _activeAppState;
+
 Future<bool> _runLyricsOverlay(List<String> args) async {
   if (args.length < 3 || args.first != 'multi_window') return false;
   final LyricsOverlayLaunch? launch = LyricsOverlayLaunch.tryParse(args[2]);
   if (launch == null) return false;
   try {
-    await runLyricsOverlay(
-      WindowController.fromWindowId(args[1]),
-      launch,
-    );
+    await runLyricsOverlay(WindowController.fromWindowId(args[1]), launch);
     return true;
   } catch (error, stack) {
     AppLog.shared.record('desktop lyrics startup: $error\n$stack');
+    unawaited(
+      writeCrashDump(_activeAppState, error, stack, phase: 'lyrics_overlay'),
+    );
     return false;
   }
 }
@@ -256,6 +304,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   late final AppLifecycleListener _playbackLifecycle;
   late final LanRemoteController _remote;
   late final DesktopLyricsController _desktopLyrics;
+  ConsoleWindowController? _consoleWindow;
 
   _RootUiSignature get _rootUiSignature => (
     _state.accentSeed,
@@ -288,6 +337,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     );
     _state.bootstrap();
     _desktopLyrics = DesktopLyricsController(_state);
+    if (supportsConsoleWindow) _consoleWindow = ConsoleWindowController(_state);
     _remote = LanRemoteController(_state);
     unawaited(_remote.initialize());
     unawaited(AppSystemTray.instance.initialize(_state));
@@ -321,6 +371,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     AppSystemTray.instance.dispose();
     _playbackLifecycle.dispose();
     _desktopLyrics.dispose();
+    _consoleWindow?.dispose();
     _remote.dispose();
     _browseNavigation.dispose();
     _state.removeListener(_onRootUiChanged);

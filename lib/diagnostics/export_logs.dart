@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -16,9 +17,10 @@ String diagnosticReport(AppState state) => AppLog.redact(
   [
     'Lazer ${BuildInfo.displayVersion} (${BuildInfo.commit})',
     'Generated: ${DateTime.now().toUtc().toIso8601String()}',
-    'Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
-    'Dart: ${Platform.version}',
+    'Platform: ${kIsWeb ? "web" : Platform.operatingSystem} ${kIsWeb ? "" : Platform.operatingSystemVersion}',
+    'Dart: ${kIsWeb ? "web" : Platform.version}',
     'Audio engine: ${state.hifi?.status.engineDescription ?? "system"}',
+    'Developer console: ${state.developerConsoleEnabled ? "enabled" : "disabled"}',
     'Background: ${state.backgroundMode.name}, ${state.browseBackgroundFps} fps',
     'Player background: ${state.playerBackground.name}, ${state.playerBackgroundFps == 0 ? "display refresh rate" : state.playerBackgroundFps} fps',
     'Queue length: ${state.queueLength}',
@@ -31,14 +33,23 @@ String diagnosticReport(AppState state) => AppLog.redact(
 );
 
 Future<void> exportLogs(BuildContext context, AppState state) async {
-  final text = diagnosticReport(state);
+  await exportLogText(context, diagnosticReport(state));
+}
+
+Future<void> exportLogText(BuildContext context, String text) async {
   final stamp = DateTime.now().toUtc().toIso8601String().replaceAll(
     RegExp(r'[:.]'),
     '-',
   );
   final name = 'Lazer-log-$stamp.txt';
   try {
-    if (Platform.isAndroid) {
+    if (kIsWeb) {
+      await XFile.fromData(
+        Uint8List.fromList(utf8.encode(text)),
+        mimeType: 'text/plain',
+        name: name,
+      ).saveTo(name);
+    } else if (Platform.isAndroid) {
       final saved = await const MethodChannel(
         'dev.naominet.lazer/logs',
       ).invokeMethod<bool>('export', {'name': name, 'text': text});

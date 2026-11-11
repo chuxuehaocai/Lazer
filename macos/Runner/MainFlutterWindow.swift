@@ -1,6 +1,7 @@
 import Cocoa
 import FlutterMacOS
 import desktop_multi_window
+import file_selector_macos
 import screen_retriever_macos
 import window_manager
 
@@ -14,6 +15,7 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in
+      FileSelectorPlugin.register(with: controller.registrar(forPlugin: "FileSelectorPlugin"))
       WindowManagerPlugin.register(
         with: controller.registrar(forPlugin: "WindowManagerPlugin"))
       ScreenRetrieverMacosPlugin.register(

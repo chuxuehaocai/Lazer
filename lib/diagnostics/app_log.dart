@@ -1,4 +1,6 @@
 import 'dart:collection';
+import 'dart:async';
+import 'dart:convert';
 
 class AppLog {
   AppLog({this.maximumLines = 1500, this.maximumCharacters = 512 * 1024});
@@ -6,6 +8,19 @@ class AppLog {
   final int maximumLines, maximumCharacters;
   final ListQueue<String> _lines = ListQueue();
   int _characters = 0;
+  int revision = 0;
+  final _changes = StreamController<void>.broadcast();
+  Stream<void> get changes => _changes.stream;
+
+  /// Structured lifecycle records; callers must omit request bodies and secrets.
+  void event(
+    String scope,
+    String event, [
+    Map<String, Object?> fields = const {},
+  ]) {
+    record('[$scope] $event ${jsonEncode(fields)}');
+  }
+
   static final _headers = RegExp(
     r'(authorization|set-cookie|cookie)\s*[:=][^\r\n]*',
     caseSensitive: false,
@@ -42,7 +57,16 @@ class AppLog {
     while (_lines.length > maximumLines || _characters > maximumCharacters) {
       _characters -= _lines.removeFirst().length;
     }
+    revision++;
+    if (_changes.hasListener) _changes.add(null);
   }
 
   String snapshot() => _lines.join('\n');
+
+  void clear() {
+    _lines.clear();
+    _characters = 0;
+    revision++;
+    if (_changes.hasListener) _changes.add(null);
+  }
 }

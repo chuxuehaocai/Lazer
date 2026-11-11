@@ -65,11 +65,36 @@ void main() {
       expect(find.text('调试'), findsOneWidget);
       expect(find.text('显示帧数'), findsOneWidget);
       expect(find.text('音频设备'), findsOneWidget);
+      expect(state.developerConsoleEnabled, isFalse);
+      expect(find.text('启用开发者控制台'), findsOneWidget);
       // The frame switch moved out of the performance group.
       expect(find.text('显示帧率'), findsNothing);
 
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       expect(prefs.containsKey('lazer_debug_options'), isFalse);
+    },
+  );
+
+  testWidgets(
+    'developer console can be enabled and opened from settings',
+    (tester) async {
+      final state = await _pumpSettings(tester);
+      final toggle = find.descendant(
+        of: find.byWidgetPredicate(
+          (widget) => widget is SettingsRow && widget.label == '启用开发者控制台',
+        ),
+        matching: find.byType(Switch),
+      );
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(state.developerConsoleEnabled, isTrue);
+      expect(find.byKey(const ValueKey('open-developer-console')), findsOneWidget);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('lazer_developer_console'), isTrue);
+      await tester.tap(find.byKey(const ValueKey('open-developer-console')));
+      await tester.pumpAndSettle();
+      expect(find.text('Lua 开发者控制台'), findsOneWidget);
+      expect(find.byKey(const ValueKey('developer-console-input')), findsOneWidget);
     },
   );
 
