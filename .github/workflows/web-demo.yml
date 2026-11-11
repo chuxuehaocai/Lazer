@@ -1,6 +1,6 @@
 name: Web demo
 
-# Every commit on the release branch rebuilds https://lazerdemo.vercel.app from
+# Every commit on the release branch rebuilds https://player.naominet.dev from
 # this checkout. Vercel's own builders have no Flutter, so the bundle is compiled
 # here and only the finished Build Output directory is uploaded.
 on:
@@ -87,4 +87,14 @@ jobs:
             vercel deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN"
       - name: Note the deployed address
         if: github.event_name != 'pull_request'
-        run: echo "https://lazerdemo.vercel.app" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "https://player.naominet.dev" >> "$GITHUB_STEP_SUMMARY"
+          # The custom domain is assigned to the lazer_demo project, so a
+          # production deployment serves it without an alias step. Report the
+          # response instead of failing the run on a stale DNS record.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -L --max-time 20 \
+            https://player.naominet.dev || true)
+          echo "player.naominet.dev responded with $code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::player.naominet.dev returned $code; check the domain assignment on the lazer_demo project."
+          fi

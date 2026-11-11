@@ -85,7 +85,7 @@ Web 版直接由本仓库的 `lib/main.dart` 编译，和桌面、移动端共�
 
 ### 自动部署
 
-`.github/workflows/web-demo.yml` 在每次推送 `nextgen`（以及 `v*` 标签）时编译 Web 构建、打包成 Vercel Build Output API 目录并 `vercel deploy --prebuilt --prod`，站点 [lazerdemo.vercel.app](https://lazerdemo.vercel.app) 不需要本机参与。仓库需要配置 `VERCEL_TOKEN`（Vercel → Account Settings → Tokens）；未配置时工作流只构建不部署，并在日志里给出告警。PR 只跑构建和产物校验。
+`.github/workflows/web-demo.yml` 在每次推送 `nextgen`（以及 `v*` 标签）时编译 Web 构建、打包成 Vercel Build Output API 目录并 `vercel deploy --prebuilt --prod`，站点 [player.naominet.dev](https://player.naominet.dev)（Vercel 项目 `lazer_demo` 的自定义域名）不需要本机参与。仓库需要配置 `VERCEL_TOKEN`（Vercel → Account Settings → Tokens）；未配置时工作流只构建不部署，并在日志里给出告警。PR 只跑构建和产物校验。
 
 ### 本机部署
 
