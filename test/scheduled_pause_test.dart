@@ -25,6 +25,7 @@ class _Catalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) => urlGate?.future ?? Future.value('fixture://schedule');
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => null;

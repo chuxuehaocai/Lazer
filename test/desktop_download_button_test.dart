@@ -37,6 +37,7 @@ class _Catalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async => null;
 }
 
@@ -48,6 +49,7 @@ class _HangingCatalog extends Catalog {
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool useCache = true,
+    bool Function()? isCancelled,
   }) => Completer<AudioSource?>().future;
 }
 

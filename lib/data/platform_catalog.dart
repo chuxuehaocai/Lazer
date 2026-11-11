@@ -324,17 +324,25 @@ class _PlatformCatalog {
   Future<AudioSource?> audioSource(
     Track track,
     AudioQuality quality,
-    bool useCache,
-  ) async {
+    bool useCache, {
+    bool Function()? isCancelled,
+  }) async {
     final id = reference(track.id, MusicEntityKind.song);
     Object? failure;
     var requestRemote = true;
+    bool cancelled() => isCancelled?.call() ?? false;
     for (final tier in quality.fallbackChain) {
+      // A resolve the user already moved past must not keep the plugin busy:
+      // every remaining tier, the lyrics lookup and the whole-file download
+      // queue ahead of the stream the new track is waiting for, and one
+      // stream call can take as long as the network takes.
+      if (cancelled()) return null;
       if (useCache) {
         final cached = await catalog.audioCache.find(
           id.cacheKey,
           quality: tier,
         );
+        if (cancelled()) return null;
         if (cached != null) {
           unawaited(catalog.cacheLyrics(track, audioPath: cached.path));
           return AudioSource(
@@ -355,24 +363,22 @@ class _PlatformCatalog {
             AudioQuality.standard => MusicStreamQuality.low,
           },
         );
+        if (cancelled()) return null;
         final actual = AudioQualityInfo.fromBitrate(source.bitRate) ?? tier;
         MediaRequestRules.rememberStream(source.uri.toString(), source.headers);
         if (useCache) {
           unawaited(catalog.cacheLyrics(track));
           unawaited(
-            catalog.audioCache
-                .store(
-                  id.cacheKey,
-                  source.uri.toString(),
-                  quality: actual,
-                  format: source.suffix,
-                  headers: source.headers,
-                )
-                .then((file) async {
-                  if (file != null) {
-                    await catalog.cacheLyrics(track, audioPath: file.path);
-                  }
-                }),
+            _storeAfterStartup(
+              catalog: catalog,
+              track: track,
+              key: id.cacheKey,
+              url: source.uri.toString(),
+              quality: actual,
+              format: source.suffix,
+              headers: source.headers,
+              isCancelled: isCancelled,
+            ),
           );
         }
         return AudioSource(
@@ -383,12 +389,16 @@ class _PlatformCatalog {
           headers: source.headers,
         );
       } catch (error) {
+        if (cancelled()) return null;
         failure ??= error;
-        requestRemote =
-            Catalog.isRateLimited(error) ||
-            error is MusicGatewayException && error.code == 70;
+        // Rate limiting is the account or the address, not this quality:
+        // trying the next tier down just adds requests to the throttle and
+        // delays the error the user needs to see.
+        if (Catalog.isRateLimited(error)) break;
+        requestRemote = error is MusicGatewayException && error.code == 70;
       }
     }
+    if (cancelled()) return null;
     if (failure != null) throw failure;
     return null;
   }
@@ -416,4 +426,33 @@ class _PlatformCatalog {
       ytlrc: value.wordTranslation,
     );
   }
+}
+
+/// Waits for the track to start before pulling a second full copy of it.
+///
+/// The cache write used to start in the same breath as playback, so the first
+/// seconds of a song competed with a whole-file download for the same bytes.
+/// Ten seconds is enough for the stream to fill its buffer, and a track the
+/// listener has already left is skipped instead of downloaded.
+Future<void> _storeAfterStartup({
+  required Catalog catalog,
+  required Track track,
+  required String key,
+  required String url,
+  required AudioQuality quality,
+  required String? format,
+  required Map<String, String> headers,
+  required bool Function()? isCancelled,
+}) async {
+  await Future<void>.delayed(const Duration(seconds: 10));
+  if (isCancelled?.call() ?? false) return;
+  final file = await catalog.audioCache.store(
+    key,
+    url,
+    quality: quality,
+    format: format,
+    headers: headers,
+    isCancelled: isCancelled,
+  );
+  if (file != null) await catalog.cacheLyrics(track, audioPath: file.path);
 }

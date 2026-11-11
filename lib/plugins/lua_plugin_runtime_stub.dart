@@ -24,6 +24,7 @@ class LuaPluginRuntime {
   Future<Object?> invoke(
     String operation, [
     Map<String, dynamic> args = const {},
+    Duration? budget,
   ]) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   void close() {}
 }

@@ -38,6 +38,7 @@ class _Catalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async => unavailable ? null : 'file:///${track.id}.mp3';
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();

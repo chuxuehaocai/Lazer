@@ -37,6 +37,7 @@ class _LocalCatalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async => null;
 }
 
@@ -49,7 +50,8 @@ class _PayloadCatalog extends Catalog {
   _PayloadCatalog(CachedLyricsStore store,this.response):super(lyricsCache:store);
   final Future<GatewayLyrics?> response;
   @override Future<GatewayLyrics?> lyricsFor(Track track)=>response;
-  @override Future<String?> audioUrlFor(Track track,{AudioQuality quality=AudioQuality.exhigh})async=>null;
+  @override Future<String?> audioUrlFor(Track track,{AudioQuality quality=AudioQuality.exhigh,
+    bool Function()? isCancelled,})async=>null;
 }
 
 void main() {

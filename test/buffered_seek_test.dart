@@ -22,6 +22,7 @@ class _Catalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async => 'https://cdn.test/${track.id}.mp3';
 
   @override

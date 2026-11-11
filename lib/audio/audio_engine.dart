@@ -284,6 +284,7 @@ class JustAudioEngine
         QueueAudioEngine,
         QueuedSourceReportingAudioEngine,
         FocusAwareAudioEngine,
+        StreamingBufferHealthAudioEngine,
         FailureReportingAudioEngine {
   JustAudioEngine({
     AudioPlayer? player,
@@ -300,6 +301,34 @@ class JustAudioEngine
       if (state != ProcessingState.completed) _completionSent = false;
       if (state == ProcessingState.completed) _emitCompletion();
     });
+    // Source errors surface as errors on the playback event stream; without this
+    // subscription the failure only reaches whoever awaits the open, and a
+    // stream that dies mid-playback is never reported at all. Small injected
+    // players (and embedders that only implement transport) may expose neither
+    // stream, so both are optional.
+    try {
+      _errorSubscription = _player.playbackEventStream.listen(
+        (PlaybackEvent _) {},
+        onError: (Object error, StackTrace stack) {
+          _streamFailure = true;
+          reportFailure('$error');
+        },
+      );
+    } on NoSuchMethodError {
+      // No event stream to watch: failures then only come from the open call.
+    }
+    try {
+      _positionSubscription = _player.positionStream.listen((
+        Duration position,
+      ) {
+        if (position == _lastProgressPosition) return;
+        _lastProgressPosition = position;
+        _progressAt = DateTime.now();
+      });
+    } on NoSuchMethodError {
+      // Without a position stream there is no stall signal; the app's own
+      // watchdog still covers the native path.
+    }
   }
 
   /// Optional application-owned focus policy; absent in independent playback.
@@ -371,6 +400,27 @@ class JustAudioEngine
   /// must never append to a queue that was already replaced.
   Future<void> _operations = Future<void>.value();
 
+  /// Last position the platform reported and when it changed.
+  ///
+  /// This engine has no downloader to ask, so a decoder parked on a socket that
+  /// stopped delivering is only visible as a position that stopped moving.
+  Duration _lastProgressPosition = Duration.zero;
+  DateTime? _progressAt;
+  bool _streamFailure = false;
+  bool _restarting = false;
+  StreamSubscription<PlaybackEvent>? _errorSubscription;
+  StreamSubscription<Duration>? _positionSubscription;
+
+  /// How long a platform open may take before the serialized chain is released.
+  ///
+  /// Without this a server that accepts the connection and never answers holds
+  /// the chain forever, and every later load — including the song the listener
+  /// just picked — queues behind it with nothing on screen explaining why.
+  static const Duration _openTimeout = Duration(seconds: 30);
+
+  /// How long the position may stand still before playback counts as stalled.
+  static const Duration _stallAfter = Duration(seconds: 25);
+
   void _emitCompletion() {
     if (!_hadSource || _completionSent || _completed.isClosed) return;
     _completionSent = true;
@@ -418,6 +468,33 @@ class JustAudioEngine
     return scheme == 'http' || scheme == 'https';
   }
 
+  /// `just_audio` keeps its download inside the platform, so there is no byte
+  /// counter to report; the position clock below is what this engine can offer.
+  @override
+  int? get streamedBytes => null;
+
+  @override
+  bool get streamFailed => _streamFailure;
+
+  @override
+  bool get streamStalled {
+    if (_streamFailure || !_hadSource || !_player.playing) return false;
+    final DateTime? at = _progressAt;
+    if (at == null) return false;
+    return DateTime.now().difference(at) > _stallAfter;
+  }
+
+  @override
+  bool restartStream() {
+    if (_currentUrl == null || _restarting) return false;
+    _restarting = true;
+    // The caller reloads the source as soon as this returns true, which is what
+    // actually reopens the socket; pausing here keeps the platform from reading
+    // the dead one in the meantime.
+    unawaited(_player.pause().catchError((Object _) {}));
+    return true;
+  }
+
   @override
   String? get queuedSourceUrl {
     final int? index = _player.currentIndex;
@@ -460,12 +537,23 @@ class JustAudioEngine
       // now would tear down whatever the newer call is opening.
       if (generation != _generation) return;
       final uri = Uri.parse(url);
-      if (uri.scheme == 'file') {
-        await _player.setFilePath(uri.toFilePath());
-      } else {
-        await _player.setUrl(url, headers: MediaRequestRules.headers(url));
+      try {
+        if (uri.scheme == 'file') {
+          await _player.setFilePath(uri.toFilePath()).timeout(_openTimeout);
+        } else {
+          await _player
+              .setUrl(url, headers: MediaRequestRules.headers(url))
+              .timeout(_openTimeout);
+        }
+      } on TimeoutException {
+        _streamFailure = true;
+        rethrow;
       }
       if (generation != _generation) return;
+      _streamFailure = false;
+      _restarting = false;
+      _progressAt = DateTime.now();
+      _lastProgressPosition = _player.position;
       _commandedIndex = 0;
       _hadSource = true;
       if (_player.processingState == ProcessingState.completed) {
@@ -504,9 +592,20 @@ class JustAudioEngine
             ),
         ],
       );
-      await _player.setAudioSource(source, initialIndex: startIndex);
+      try {
+        await _player
+            .setAudioSource(source, initialIndex: startIndex)
+            .timeout(_openTimeout);
+      } on TimeoutException {
+        _streamFailure = true;
+        rethrow;
+      }
       if (generation != _generation) return queueId;
       _queue = source;
+      _streamFailure = false;
+      _restarting = false;
+      _progressAt = DateTime.now();
+      _lastProgressPosition = _player.position;
       _commandedIndex = startIndex;
       _hadSource = true;
       if (_player.processingState == ProcessingState.completed) {
@@ -594,6 +693,10 @@ class JustAudioEngine
     _queue = null;
     _queueUrls = <String>[];
     _currentUrl = null;
+    _streamFailure = false;
+    _restarting = false;
+    _progressAt = null;
+    _lastProgressPosition = Duration.zero;
     _commandedIndex = null;
     // `AudioPlayer.stop()` deactivates the platform, which for media_kit means
     // releasing the native mpv player. Ordered behind the source mutations so
@@ -611,6 +714,8 @@ class JustAudioEngine
     _currentUrl = null;
     _completionSubscription.cancel();
     _indexSubscription?.cancel();
+    _errorSubscription?.cancel();
+    _positionSubscription?.cancel();
     _completed.close();
     _advanced.close();
     _failures.close();

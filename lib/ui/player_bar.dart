@@ -64,6 +64,7 @@ typedef _PlayerBarSignature = (
   LoopMode,
   double,
   bool,
+  String?,
 );
 
 class _AppPlayerBarState extends State<AppPlayerBar>
@@ -80,6 +81,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
     state.repeat,
     state.volume,
     state.signedIn,
+    state.playbackError,
   );
 
   @override
@@ -133,6 +135,65 @@ class _AppPlayerBarState extends State<AppPlayerBar>
   @override
   Widget build(BuildContext context) => _bar ??= _buildBar(context);
 
+  /// The failure note the bar shows when playback stopped without the listener
+  /// asking it to.
+  ///
+  /// `playbackError` used to reach only the now-playing page, so a failed resolve
+  /// from a playlist looked like a track that simply would not start. The bar is
+  /// on screen for every route, so this is where the reason belongs.
+  Widget _withErrorStrip(
+    AppleSemanticColors apple,
+    Widget bar, {
+    required bool compact,
+  }) {
+    final String? error = state.playbackError;
+    if (error == null) return bar;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: double.infinity,
+          color: apple.accentSoft,
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 12 : 20,
+            vertical: 6,
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.error_outline_rounded, size: 16, color: apple.accent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  error,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: apple.label),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                // Pressing play is already "retry this source from where the
+                // listener was"; the note should not need a second path.
+                onPressed: state.current == null ? null : state.retryPlayback,
+                style: TextButton.styleFrom(
+                  foregroundColor: apple.accent,
+                  minimumSize: const Size(0, 26),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  context.tr('重试'),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        bar,
+      ],
+    );
+  }
+
   Widget _buildBar(BuildContext context) {
     final Track? track = state.current;
     if (widget.compact) {
@@ -146,9 +207,11 @@ class _AppPlayerBarState extends State<AppPlayerBar>
         border: widget.floating
             ? Border.all(color: apple.separator, width: .5)
             : Border(top: BorderSide(color: apple.separator, width: .5)),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minHeight: widget.floating ? 56 : 60,
+        child: _withErrorStrip(
+          apple,
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: widget.floating ? 56 : 60,
             maxHeight: widget.floating ? double.infinity : 60,
           ),
           child: Padding(
@@ -190,6 +253,8 @@ class _AppPlayerBarState extends State<AppPlayerBar>
             ),
           ),
         ),
+          compact: true,
+        ),
       );
     }
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
@@ -198,7 +263,9 @@ class _AppPlayerBarState extends State<AppPlayerBar>
       blurSigma: 16,
       color: apple.glassStrong,
       border: Border(top: BorderSide(color: apple.separator, width: .5)),
-      child: SizedBox(
+      child: _withErrorStrip(
+        apple,
+        SizedBox(
         height: 84,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -300,6 +367,8 @@ class _AppPlayerBarState extends State<AppPlayerBar>
             ],
           ),
         ),
+        ),
+        compact: false,
       ),
     );
   }

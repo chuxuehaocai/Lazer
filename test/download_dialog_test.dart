@@ -26,6 +26,7 @@ class _UnavailableCatalog extends Catalog {
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool useCache = true,
+    bool Function()? isCancelled,
   }) async => null;
 }
 

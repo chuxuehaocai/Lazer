@@ -44,6 +44,7 @@ import 'ui_preferences.dart';
 import 'scheduled_pause.dart';
 import '../theme/font_preferences.dart';
 import '../theme/imported_font.dart';
+import '../plugins/plugin_manifest.dart' show PluginException;
 import '../plugins/plugin_manager.dart';
 
 part 'music_platform_state.dart';
@@ -1522,7 +1523,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     try {
       // Push anything queued offline before reading the record back, so the
       // counts the library shows include this device's latest plays.
-      await _flushPlayUploads();
+      await _flushPlayUploads(force: true);
       if (!stillCurrent()) return;
       final List<TrackPlayStat> loaded = await catalog.playStats(
         uid,
@@ -2440,6 +2441,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool _playSessionSent = false;
   final List<_PlayReport> _playUploads = <_PlayReport>[];
   bool _playUploadInFlight = false;
+  Timer? _playFlushTimer;
+
+  /// Stream resolves currently queued on the plugin.
+  ///
+  /// The plugin runs one call at a time. While a resolve is in flight the upload
+  /// pump stands aside, so a report — which the listener cannot see — never sits
+  /// in front of the song they just picked.
+  int _streamResolves = 0;
 
   /// App queue index of the track already appended to the engine's queue.
   ///
@@ -2454,6 +2463,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// successor a racing preparation replaced.
   String? _queuedNextUrl;
 
+  /// When [_queuedNextUrl] was resolved.
+  ///
+  /// Stream URLs are signed and expire, so a successor prepared long ago (a
+  /// paused app, a very long track) is not the same thing as a fresh one.
+  DateTime? _queuedNextAt;
+
   /// Serialises successor preparations: only the newest one may bind the index.
   int _prefetchGeneration = 0;
 
@@ -2465,6 +2480,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void _clearQueuedNext() {
     _queuedNextIndex = null;
     _queuedNextUrl = null;
+    _queuedNextAt = null;
   }
 
   /// Whether the engine really has a successor prepared to cross into.
@@ -2828,6 +2844,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _ticker?.cancel();
     if (_realActive) unawaited(audioEngine!.pause());
     _flushQualifiedSession();
+    // Pausing is a settled moment: nothing is competing for the plugin lane, so
+    // the queue that just grew can be drained now instead of on a later tick.
+    unawaited(_flushPlayUploads(force: true));
     notifyListeners();
   }
 
@@ -2984,14 +3003,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     unawaited(_saveQueue());
     _position = Duration.zero;
     _resumePositionOnOpen = false;
-    unawaited(_loadLyrics());
-    // Artwork follows the selection even while paused or when the engine
-    // crosses directly into its prepared source without calling _startAudio.
-    unawaited(_loadCurrentArtwork());
     if (_playing) {
       if (gapless && audioEngine?.active == true) {
         unawaited(_crossIntoQueuedTrack());
       } else {
+        // Lyrics and artwork are plugin calls too, and the plugin answers one
+        // call at a time. The load path asks for them once the stream request
+        // has gone out, so they can never delay the song itself.
         unawaited(_startAudio());
       }
       _ensureTicker();
@@ -3002,6 +3020,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _realActive = false;
       _queueId = null;
       _resumePositionOnOpen = false;
+      // Nothing is loading, so there is no lane to contend with.
+      unawaited(_loadLyrics());
+      unawaited(_loadCurrentArtwork());
     }
     notifyListeners();
     unawaited(_ensureStationBuffer());
@@ -3011,9 +3032,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final int before = _queue.length;
     await _waitForStationLoad();
     if (_queue.length <= before) await _ensureStationBuffer(force: true);
-    if (!_playing || _queue.length <= before) return;
-    _finishListening(manualTarget: _queue[before]);
-    _moveTo(before, direction: 1);
+    if (_queue.length > before) {
+      if (!_playing) return;
+      _finishListening(manualTarget: _queue[before]);
+      _moveTo(before, direction: 1);
+      return;
+    }
+    if (!_playing) return;
+    // Next at the end of a station that has nothing new to add used to return
+    // without a word, which reads as a dead button.
+    playbackError = '暂时没有更多歌曲，请稍后重试。';
+    notifyListeners();
   }
 
   Future<void> _waitForStationLoad() async {
@@ -3390,7 +3419,35 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
     if (stillCurrent != null && !stillCurrent()) return null;
     if (local != null) return local;
-    return catalog.audioUrlFor(track, quality: quality);
+    // `stillCurrent` answers "does the caller still want this", while the
+    // catalogue asks "should this stop" — the two are inverses, and passing
+    // the predicate through unchanged aborts every resolve.
+    final bool Function()? cancelled = stillCurrent == null
+        ? null
+        : () => !stillCurrent();
+    return catalog.audioUrlFor(
+      track,
+      quality: quality,
+      isCancelled: cancelled,
+    );
+  }
+
+  /// Resolves a stream URL while holding the upload pump back.
+  ///
+  /// The plugin answers one call at a time, so a queued scrobble delays the song
+  /// the listener asked for. Counting the resolve in flight lets the pump wait
+  /// instead of taking the lane.
+  Future<String?> _resolveTrackUrl(
+    Track track, {
+    bool Function()? stillCurrent,
+  }) async {
+    _streamResolves++;
+    try {
+      return await _trackUrl(track, stillCurrent: stillCurrent);
+    } finally {
+      _streamResolves--;
+      if (_streamResolves == 0 && _playUploads.isNotEmpty) _schedulePlayFlush();
+    }
   }
 
   /// Loads the stream URL. A locked or unavailable song stops playback and
@@ -3429,7 +3486,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     ++_listeningRevision;
     _pendingListeningSeek = null;
     listeningStatistics.suspend();
-    unawaited(_loadCurrentArtwork());
     final AudioEngine? engine = audioEngine;
     final Track? track = current;
     if (track == null) return;
@@ -3440,19 +3496,31 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _clearOptimisticSeek();
     String? url;
     try {
-      url = await _trackUrl(
+      url = await _resolveTrackUrl(
         track,
         stillCurrent: () => generation == _generation,
       );
     } catch (error) {
       if (generation == _generation) {
-        if (!_skipUnavailableTrack()) {
+        // A dead session is not a property of this song. Skipping through the
+        // queue looking for one that plays turns "log in again" into a player
+        // that appears to jump tracks on its own.
+        if (error is MusicGatewayException && error.authenticationFailure) {
+          _failPlayback('登录已过期，请重新登录后重试。');
+        } else if (!_skipUnavailableTrack()) {
           _failPlayback(_friendly(error));
         }
+        unawaited(_loadLyrics());
+        unawaited(_loadCurrentArtwork());
       }
       return;
     }
     if (generation != _generation) return;
+    // Optional metadata runs on the same serial lane as the stream request, so
+    // it is asked for only after that request has gone out: a lyric call that
+    // slipped in first would make the song wait for it.
+    unawaited(_loadLyrics());
+    unawaited(_loadCurrentArtwork());
     if (url == null || url.isEmpty) {
       if (!_skipUnavailableTrack()) {
         _failPlayback('这首歌暂时无法播放，请换一首。');
@@ -3661,6 +3729,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             clock.elapsed >= startupBufferDeadline) {
           break;
         }
+        if (_streamBroken(engine)) {
+          // The download is already dead (or delivering nothing) and the bytes
+          // will not arrive: starting the decoder on it parks the read thread for
+          // another forty-five seconds. Leave the wait so the stall watchdog can
+          // reload the source instead of holding the track silent to the deadline.
+          return;
+        }
         await Future<void>.delayed(_startupBufferPoll);
       }
     } finally {
@@ -3670,7 +3745,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       }
     }
     if (_presentationDisposed || generation != _generation) return;
-    if (_playing) await _resumeAudio();
+    if (_playing && !_streamBroken(engine)) await _resumeAudio();
   }
 
   /// Whether the startup wait is satisfied.
@@ -3710,6 +3785,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       // A test double that only answers transport is not a streaming engine.
     }
     return null;
+  }
+
+  /// Whether the download behind [engine] has already failed or stopped
+  /// delivering bytes.
+  ///
+  /// Waiting out the startup deadline on a broken download only delays the
+  /// reload: the decoder cannot start on bytes that are not coming, and the
+  /// watchdog is the path that recovers a source.
+  static bool _streamBroken(AudioEngine engine) {
+    if (engine is! StreamingBufferHealthAudioEngine) return false;
+    try {
+      final StreamingBufferHealthAudioEngine health =
+          engine as StreamingBufferHealthAudioEngine;
+      return health.streamFailed || health.streamStalled;
+    } catch (_) {
+      // An injected double that only answers transport is not a streaming engine.
+      return false;
+    }
   }
 
   /// How much [engine] has buffered ahead of the playhead, or null when it
@@ -3760,7 +3853,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // end in a named error, not an endless reload loop.
     if (_streamRetries >= maxStreamRetries) {
       _clearStreamStall(quiet: true);
-      _failPlayback('网络不佳，无法继续播放这首歌曲。');
+      // A source that died twice will not come back on a third try; moving on is
+      // the only outcome that keeps the queue playing.
+      if (!_skipUnavailableTrack()) {
+        _failPlayback('网络不佳，无法继续播放这首歌曲。');
+      }
       return;
     }
     if (!wasStalled) {
@@ -3863,9 +3960,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _clearQueuedNext();
       return;
     }
+    // The prefetch is a second `stream` call on the plugin's single lane, so it
+    // stays out of the way while a resolve is still in flight: the song the
+    // listener is waiting for goes first, and whatever path opens the next
+    // track asks for its successor again.
+    if (_streamResolves > 0) return;
     String? url;
     try {
-      url = await _trackUrl(
+      url = await _resolveTrackUrl(
         _queue[next],
         stillCurrent: () => queueId == _queueId && _realActive,
       );
@@ -3893,12 +3995,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (!appended || queueId != _queueId) return;
     _queuedNextIndex = next;
     _queuedNextUrl = url;
+    _queuedNextAt = DateTime.now();
   }
+
+  /// How long a prepared successor may sit unused before it is re-resolved.
+  static const Duration _queuedNextLifetime = Duration(minutes: 15);
 
   /// Crosses into the track the engine already holds next, without reloading.
   Future<void> _crossIntoQueuedTrack() async {
     final QueueAudioEngine? engine = _queueEngine;
     if (engine == null) return;
+    final DateTime? queuedAt = _queuedNextAt;
+    if (queuedAt != null &&
+        DateTime.now().difference(queuedAt) > _queuedNextLifetime) {
+      // The plugin hands out signed URLs that expire. Crossing into one that
+      // was resolved when the queue was built — after a long pause, or after a
+      // very long track — opens a source the CDN will refuse.
+      _clearQueuedNext();
+      unawaited(_startAudio());
+      return;
+    }
     final int generation = _generation;
     final int targetIndex = _queueIndex;
     var crossed = false;
@@ -3925,6 +4041,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _streamRetries = 0;
     _streamRetryTrack = -1;
     _clearStreamStall(quiet: true);
+    // The hand-off opened no new source, so there is no stream request to stay
+    // behind: lyrics and artwork can go out right away.
+    unawaited(_loadLyrics());
+    unawaited(_loadCurrentArtwork());
     unawaited(_resumeAudio());
     if (engine is! SerialQueueAudioEngine) unawaited(_prefetchNext());
   }
@@ -4370,9 +4490,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   int _unavailableSkipCount = 0;
 
+  /// How many songs in a row may be skipped for being unavailable.
+  ///
+  /// One unplayable song is normal (a removed track, a region lock). Three in a
+  /// row means the account, the session or the network is the problem, and
+  /// skipping through the rest of the queue hides that behind a player that
+  /// appears to race through a playlist.
+  static const int _maxConsecutiveSkips = 3;
+
   bool _skipUnavailableTrack() {
-    if (!skipUnavailableSongs || audioEngine == null || _queue.length <= 1) return false;
-    if (_unavailableSkipCount >= _queue.length - 1) {
+    if (!skipUnavailableSongs || audioEngine == null || _queue.length <= 1) {
+      return false;
+    }
+    if (_unavailableSkipCount >= _maxConsecutiveSkips ||
+        _unavailableSkipCount >= _queue.length - 1) {
       _unavailableSkipCount = 0;
       return false;
     }
@@ -4468,6 +4599,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       unawaited(_recoverFailedStream(message));
       return;
     }
+    // A download that died for good is a source problem, not a lost device or a
+    // decode error: the queue can move on instead of parking the player on a
+    // track that will not play.
+    if (health != null && health.streamFailed && _skipUnavailableTrack()) {
+      return;
+    }
     _failPlayback(message);
   }
 
@@ -4490,10 +4627,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// position the listener was at. Gives up with the engine's own message when
   /// the reload itself fails.
   Future<void> _recoverFailedStream(String message) async {
-    final String? url = _lastStreamUrl;
     final AudioEngine? engine = audioEngine;
-    if (url == null || engine is! StreamingBufferHealthAudioEngine) {
-      _failPlayback(message);
+    final Track? track = current;
+    if (engine is! StreamingBufferHealthAudioEngine || track == null) {
+      if (!_skipUnavailableTrack()) _failPlayback(message);
       return;
     }
     final StreamingBufferHealthAudioEngine health =
@@ -4501,8 +4638,25 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // Unblocks the parked decode thread and restarts the download from the
     // bytes already on disk.
     health.restartStream();
-    final bool reloaded = await _reloadStream(url);
-    if (!reloaded) _failPlayback(message);
+    final int generation = _generation;
+    String? url;
+    try {
+      // The address that just died is usually a signed CDN URL whose signature
+      // may already have expired; reopening the same string is what turned one
+      // dead download into a terminal "网络不佳" even though the service could
+      // hand out a fresh address.
+      url = await _resolveTrackUrl(
+        track,
+        stillCurrent: () => generation == _generation,
+      );
+    } catch (_) {
+      url = null;
+    }
+    if (generation != _generation) return;
+    final bool reloaded = url != null && url.isNotEmpty
+        ? await _reloadStream(url)
+        : false;
+    if (!reloaded && !_skipUnavailableTrack()) _failPlayback(message);
   }
 
   /// Opens [url] again at the position the rail is showing, routing through the
@@ -4616,16 +4770,49 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<void> _continueStationAfterEnd() async {
     final int before = _queue.length;
     await _waitForStationLoad();
-    final bool added =
+    bool added =
         _queue.length > before || await _ensureStationBuffer(force: true);
-    if (!_playing || !added || _queue.length <= before) {
-      _playing = false;
-      _ticker?.cancel();
-      await audioEngine?.stop();
-      notifyListeners();
+    if (!added && _playing) {
+      // A tail request that lost a race with the queue snapshot looks exactly
+      // like a station that ran dry; one short retry tells them apart.
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      added =
+          _queue.length > before || await _ensureStationBuffer(force: true);
+    }
+    if (_queue.length > before) {
+      if (!_playing) return;
+      _moveTo(before, direction: 1);
       return;
     }
-    _moveTo(before, direction: 1);
+    // A listener who stopped gets no error; anything else is a station with
+    // nothing left to play, and stopping silently there looks like a freeze.
+    if (!_playing) return;
+    _playing = false;
+    _ticker?.cancel();
+    await audioEngine?.stop();
+    playbackError = '暂时没有更多歌曲，请稍后重试。';
+    notifyListeners();
+  }
+
+  /// Re-attempts playback after a failure the listener can press on.
+  ///
+  /// A station that ran dry has no source left to resume, so it asks for
+  /// another batch; everything else reopens the track it failed on.
+  Future<void> retryPlayback() async {
+    if (playbackError == null) return;
+    playbackError = null;
+    notifyListeners();
+    if (current == null) return;
+    _playing = true;
+    _ensureTicker();
+    if (_stationLoader != null) {
+      await _advanceStationFromTail();
+      if (playbackError == null && !_realActive && current != null) {
+        await _startAudio();
+      }
+      return;
+    }
+    await _startAudio();
   }
 
   void _ensureTicker() {
@@ -4771,7 +4958,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (_playUploads.length >= 50) _playUploads.removeAt(0);
     _playUploads.add(report);
     unawaited(_persistPlayUploads());
-    unawaited(_flushPlayUploads());
+    _schedulePlayFlush();
+  }
+
+  /// Uploads reports once the queue has had a moment to settle.
+  ///
+  /// Reporting used to fire the instant the track changed, which put the
+  /// previous song's scrobble in front of the next song's resolve on the
+  /// plugin's single call lane — a slow upload host then delayed the song the
+  /// listener had just picked. A short delay keeps their action first and still
+  /// uploads promptly.
+  void _schedulePlayFlush() {
+    _playFlushTimer?.cancel();
+    _playFlushTimer = Timer(const Duration(seconds: 5), () {
+      _playFlushTimer = null;
+      unawaited(_flushPlayUploads());
+    });
   }
 
   /// Restores plays that qualified while the app was offline or closing, so a
@@ -4830,15 +5032,33 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {}
   }
 
-  /// Drains the upload queue. A failed request stays at the head and is retried
+  /// Drains the upload queue. A failed request stays in the queue and is retried
   /// on the next track boundary or the next library refresh, so an offline
   /// spell does not silently lose plays.
-  Future<void> _flushPlayUploads() async {
+  ///
+  /// [force] is for a caller that must show counts including this device's
+  /// plays; it uploads even while a resolve is queued on the plugin.
+  Future<void> _flushPlayUploads({bool force = false}) async {
+    _playFlushTimer?.cancel();
+    _playFlushTimer = null;
     if (_playUploadInFlight) return;
+    if (_streamResolves > 0 && !force) {
+      // A resolve is waiting on the plugin right now. Uploading first would make
+      // the listener wait on a report they cannot see, so try again after it.
+      _schedulePlayFlush();
+      return;
+    }
     _playUploadInFlight = true;
     var changed = false;
     try {
       for (final report in List<_PlayReport>.of(_playUploads)) {
+        if (_streamResolves > 0 && !force) {
+          // A resolve was requested while this batch was uploading. Stop after
+          // the report in flight rather than make the listener wait through the
+          // rest of the backlog.
+          _schedulePlayFlush();
+          break;
+        }
         try {
           final id = MusicId.tryParse(report.songId);
           if (id == null) {
@@ -4916,6 +5136,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   static String _friendly(Object error) {
     if (Catalog.isRateLimited(error)) return '操作过于频繁，请稍后再试。';
+    if (error is PluginException) {
+      return '音乐插件无响应，请在插件管理中重新启用。';
+    }
     if (error is MusicGatewayException) {
       return error.authenticationFailure
           ? '服务器拒绝了登录，请检查用户名和密码。'
@@ -4927,6 +5150,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _playFlushTimer?.cancel();
     _sampleListening();
     listeningStatistics.dispose();
     _pauseSchedule.dispose();

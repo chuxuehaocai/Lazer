@@ -16,6 +16,7 @@ class _Runtime extends Fake implements LuaPluginRuntime {
   Future<Object?> invoke(
     String operation, [
     Map<String, dynamic> args = const {},
+    Duration? budget,
   ]) async {
     if (operation == 'loginPassword' || operation == 'loginCookie') {
       return login.future;

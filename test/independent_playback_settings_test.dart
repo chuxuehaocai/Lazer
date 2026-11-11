@@ -47,6 +47,7 @@ class _Catalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async => null;
 
   @override
@@ -277,6 +278,7 @@ class _FailingCatalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async {
     if (track.id == 'song-1') {
       return null;

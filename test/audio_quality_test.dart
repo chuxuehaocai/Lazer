@@ -224,7 +224,9 @@ void main() {
           ),
           throwsA(predicate(Catalog.isRateLimited)),
         );
-        expect(gateway.levels, hasLength(4));
+        // The throttle is the account or the address, not this quality: asking
+        // the three lower tiers immediately only deepens it.
+        expect(gateway.levels, hasLength(1));
       },
     );
     test('lower-tier disk audio plays after a transport failure', () async {

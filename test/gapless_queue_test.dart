@@ -180,6 +180,7 @@ class _Catalog extends Catalog {
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
   }) async => 'url-${track.id}';
 
   @override
@@ -407,6 +408,9 @@ void main() {
     expect(state.accentSeed, Colors.red);
 
     state.next();
+    await tester.pump();
+    // Artwork is requested once the hand-off has been adopted, so the metadata
+    // call no longer competes with the track the listener is waiting for.
     await tester.pump();
 
     expect(state.playing, isTrue);
