@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../animation/view_transitions.dart';
 import 'package:flutter/services.dart';
 import '../animation/apple_spring.dart';
+import '../navigation/system_back_gesture.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
@@ -49,6 +50,22 @@ class SettingsDetailHost extends StatefulWidget {
 class _SettingsDetailHostState extends State<SettingsDetailHost>
     with SingleTickerProviderStateMixin, BuildSafeState<SettingsDetailHost> {
   final _storage = PageStorageBucket();
+  final _backProgress = ValueNotifier<double?>(null);
+  @override
+  void initState() {
+    super.initState();
+    _backProgress.addListener(_backChanged);
+  }
+
+  void _backChanged() {
+    final progress = _backProgress.value;
+    if (progress != null &&
+        _history != null &&
+        !MediaQuery.disableAnimationsOf(context)) {
+      _transition.value = 1 - progress;
+    }
+  }
+
   late final _transition = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 260),
@@ -94,7 +111,9 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
   void _closed() {
     _history = null;
     if (!mounted || _disposing) return;
-    final immediate = MediaQuery.disableAnimationsOf(context);
+    final immediate =
+        MediaQuery.disableAnimationsOf(context) ||
+        (_backProgress.value ?? 0) >= 1;
     setState(() {
       if (immediate || _transition.isDismissed) _detail = null;
     });
@@ -119,6 +138,7 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
   void dispose() {
     _disposing = true;
     _history?.remove();
+    _backProgress.dispose();
     _transition.dispose();
     super.dispose();
   }
@@ -127,68 +147,79 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
   Widget build(BuildContext context) {
     final detail = _detail;
     final active = _history != null;
-    return _SettingsDetailScope(
-      open: widget.compact ? null : _open,
-      close: null,
-      child: CallbackShortcuts(
-        bindings: {
-          if (active) const SingleActivator(LogicalKeyboardKey.escape): _close,
-        },
-        child: PageStorage(
-          bucket: _storage,
-          child: ClipRect(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Keep the overview mounted so its scroll and controls do not
-                // have to restore themselves on the first return frame.
-                AnimatedBuilder(
-                  animation: _transition,
-                  builder: (context, child) => Offstage(
-                    offstage: _overviewOpacity.value == 0,
-                    child: TickerMode(
-                      enabled: _overviewOpacity.value != 0,
-                      child: child!,
+    return SystemBackGesture(
+      canStart: () =>
+          mounted &&
+          _history != null &&
+          _transition.isCompleted &&
+          (ModalRoute.of(context)?.isCurrent ?? false),
+      progress: _backProgress,
+      onStart: _transition.stop,
+      onCommit: _close,
+      child: _SettingsDetailScope(
+        open: widget.compact ? null : _open,
+        close: null,
+        child: CallbackShortcuts(
+          bindings: {
+            if (active)
+              const SingleActivator(LogicalKeyboardKey.escape): _close,
+          },
+          child: PageStorage(
+            bucket: _storage,
+            child: ClipRect(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Keep the overview mounted so its scroll and controls do not
+                  // have to restore themselves on the first return frame.
+                  AnimatedBuilder(
+                    animation: _transition,
+                    builder: (context, child) => Offstage(
+                      offstage: _overviewOpacity.value == 0,
+                      child: TickerMode(
+                        enabled: _overviewOpacity.value != 0,
+                        child: child!,
+                      ),
                     ),
-                  ),
-                  child: ExcludeFocus(
-                    excluding: active,
-                    child: ExcludeSemantics(
+                    child: ExcludeFocus(
                       excluding: active,
-                      child: IgnorePointer(
-                        ignoring: active,
-                        child: FadeTransition(
-                          opacity: _overviewOpacity,
-                          child: SlideTransition(
-                            position: _overviewPosition,
-                            child: RepaintBoundary(child: widget.child),
+                      child: ExcludeSemantics(
+                        excluding: active,
+                        child: IgnorePointer(
+                          ignoring: active,
+                          child: FadeTransition(
+                            opacity: _overviewOpacity,
+                            child: SlideTransition(
+                              position: _overviewPosition,
+                              child: RepaintBoundary(child: widget.child),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                if (detail != null)
-                  ExcludeFocus(
-                    excluding: !active,
-                    child: ExcludeSemantics(
+                  if (detail != null)
+                    ExcludeFocus(
                       excluding: !active,
-                      child: IgnorePointer(
-                        ignoring: !active,
-                        child: FadeTransition(
-                          opacity: _detailOpacity,
-                          child: SlideTransition(
-                            position: _detailPosition,
-                            child: RepaintBoundary(
-                              // Retain the embedded scope until the exit has
-                              // finished, never replacing it with a Scaffold.
-                              child: _SettingsDetailScope(
-                                key: ValueKey(_generation),
-                                open: _open,
-                                close: _close,
-                                child: Focus(
-                                  autofocus: true,
-                                  child: Builder(builder: detail),
+                      child: ExcludeSemantics(
+                        excluding: !active,
+                        child: IgnorePointer(
+                          ignoring: !active,
+                          child: FadeTransition(
+                            opacity: _detailOpacity,
+                            child: SlideTransition(
+                              position: _detailPosition,
+                              child: RepaintBoundary(
+                                // Retain the embedded scope until the exit has
+                                // finished, never replacing it with a Scaffold.
+                                child: _SettingsDetailScope(
+                                  key: ValueKey(_generation),
+                                  open: _open,
+                                  close: _close,
+                                  child: Focus(
+                                    autofocus: true,
+                                    child: Builder(builder: detail),
+                                  ),
                                 ),
                               ),
                             ),
@@ -196,8 +227,8 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

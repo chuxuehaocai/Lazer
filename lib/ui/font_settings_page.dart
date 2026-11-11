@@ -123,12 +123,13 @@ class FontSettingsView extends StatelessWidget {
                     desktop ? 1000.0 : 760.0,
                   );
                   final twoColumns = desktop && width >= 700;
-                  final cardWidth = (width - 56) / 2;
+                  final inset = desktop ? 32.0 : 20.0;
+                  final cardWidth = (width - inset * 2 - 16) / 2;
                   return Center(
                     child: SizedBox(
                       width: width,
                       child: ListView(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
+                        padding: EdgeInsets.fromLTRB(inset, 12, inset, 36),
                         children: [
                           _FontFamilyCard(state: state),
                           const SizedBox(height: 16),

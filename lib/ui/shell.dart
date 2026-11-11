@@ -412,6 +412,24 @@ class _AppShellState extends State<AppShell>
     if (oldWidget.state != widget.state) {
       _browseHistory.clear();
       cancelCoverTransitions();
+      // A shell can be reused by widget-test variants and by an app-level
+      // account/source replacement. Do not carry a retained settings detail
+      // or browse destination into the new state instance.
+      _section = _AppSection.home;
+      _playlist = null;
+      _album = null;
+      _artist = null;
+      _chart = null;
+      _artistSongs = false;
+      _artistReleases = null;
+      _comments = false;
+      _localMusic = false;
+      _savedAlbums = false;
+      _networkSources = false;
+      _networkSourceId = null;
+      _networkSourcePath = null;
+      _networkPodcastId = null;
+      _nowPlayingOpen = false;
       oldWidget.state.removeListener(_onAppStateChanged);
       widget.state.addListener(_onAppStateChanged);
       _playerPage = null;
@@ -840,6 +858,7 @@ class _AppShellState extends State<AppShell>
 
   bool _canStartSystemBack() =>
       mounted &&
+      !(ModalRoute.of(context)?.willHandlePopInternally ?? false) &&
       (ModalRoute.of(context)?.isCurrent ?? false) &&
       !TvOverlayStack.instance.hasOpen &&
       !largeScreenModeOf(context) &&

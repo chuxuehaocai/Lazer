@@ -70,6 +70,11 @@ class AppSettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SettingsDetailHost(
+    // AppShell may retain the settings page while its AppState source is
+    // replaced (for example when switching test variants or accounts). A
+    // detail host owns local-history state, so it must not carry an open
+    // subview into the new state instance.
+    key: ObjectKey(state),
     compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
     child: _SettingsOverview(
       state: state,

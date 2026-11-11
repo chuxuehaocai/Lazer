@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -45,7 +46,82 @@ Widget _host({bool reducedMotion = false}) => MaterialApp(
   ),
 );
 
+Future<void> _backEvent(
+  WidgetTester tester,
+  String method, [
+  double? progress,
+]) async {
+  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+    'flutter/backgesture',
+    const StandardMethodCodec().encodeMethodCall(
+      MethodCall(
+        method,
+        progress == null
+            ? null
+            : {
+                'touchOffset': <double>[5, 200],
+                'progress': progress,
+                'swipeEdge': 0,
+              },
+      ),
+    ),
+    (_) {},
+  );
+  await tester.pump();
+}
+
 void main() {
+  testWidgets(
+    'embedded detail previews Android back, cancels, then commits once',
+    (tester) async {
+      await tester.pumpWidget(_host());
+      await tester.tap(find.byKey(_openKey));
+      await tester.pumpAndSettle();
+      final element = tester.element(find.byKey(_detailKey));
+      await _backEvent(tester, 'startBackGesture', 0);
+      await _backEvent(tester, 'updateBackGestureProgress', .6);
+      final fade = tester.widget<FadeTransition>(
+        find
+            .ancestor(
+              of: find.byKey(_detailKey),
+              matching: find.byType(FadeTransition),
+            )
+            .first,
+      );
+      expect(fade.opacity.value, inExclusiveRange(0, 1));
+      await _backEvent(tester, 'cancelBackGesture');
+      await tester.pumpAndSettle();
+      expect(tester.element(find.byKey(_detailKey)), same(element));
+      await _backEvent(tester, 'startBackGesture', 0);
+      await _backEvent(tester, 'updateBackGestureProgress', .7);
+      await _backEvent(tester, 'commitBackGesture');
+      await tester.pumpAndSettle();
+      expect(find.byKey(_detailKey), findsNothing);
+      expect(find.byKey(_overviewKey), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  testWidgets('embedded detail accepts an iOS leading-edge return gesture', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host());
+    await tester.tap(find.byKey(_openKey));
+    await tester.pumpAndSettle();
+    final rect = tester.getRect(find.byKey(_detailKey));
+    final gesture = await tester.startGesture(Offset(2, rect.center.dy));
+    await gesture.moveBy(const Offset(30, 0));
+    await tester.pump();
+    await gesture.moveBy(Offset(rect.width * .7, 0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.byKey(_detailKey), findsNothing);
+    expect(find.byKey(_overviewKey), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
   testWidgets('overview and detail never paint over one another', (
     tester,
   ) async {
