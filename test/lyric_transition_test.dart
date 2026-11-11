@@ -14,6 +14,7 @@ import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/lyric_edge_fade.dart';
 import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'support/serialized_semantics.dart';
 
 class _Catalog extends Catalog {
   @override
@@ -36,9 +37,12 @@ class _Catalog extends Catalog {
 }
 
 void main() {
+  final binding = RecordingSemanticsBinding();
   testWidgets(
     'lyrics use AMLL blur levels and manual browsing clears blur gradually',
     (tester) async {
+      final semantics = tester.ensureSemantics();
+      binding.recorder.reset();
       SharedPreferences.setMockInitialValues({});
       await (FontLoader('MiSans')
             ..addFont(rootBundle.load('assets/fonts/MiSans-Regular.ttf'))
@@ -117,6 +121,34 @@ void main() {
           image.dispose();
         });
       }
+      final row = find.byKey(const ValueKey('lyric-line-15'));
+      final semanticRow = find.descendant(
+        of: row,
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Semantics && widget.properties.onTap != null,
+        ),
+      );
+      final nodeId = tester.getSemantics(semanticRow).id;
+      final rowX = tester.getTopLeft(row).dx;
+      state.seek(32 / 120);
+      for (var frame = 0; frame < 15; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        expect(tester.getSemantics(semanticRow).id, nodeId);
+        expect(tester.getTopLeft(row).dx, rowX);
+        final transforms = tester.widgetList<Transform>(
+          find.descendant(of: row, matching: find.byType(Transform)),
+        );
+        for (final transform in transforms) {
+          expect(
+            transform.transform.entry(0, 0),
+            1,
+            reason: 'focus motion must preserve horizontal glyph advances',
+          );
+          expect(transform.transform.entry(0, 3), 0);
+        }
+      }
+      state.seek(30 / 120);
+      await tester.pumpAndSettle();
       final before = tester.widget<ImageFiltered>(adjacent).imageFilter;
       final gesture = await tester.startGesture(tester.getCenter(viewport));
       await gesture.moveBy(const Offset(0, -30));
@@ -133,6 +165,9 @@ void main() {
       expect(tester.widget<ImageFiltered>(focused).enabled, false);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
+      expect(binding.recorder.errors, isEmpty);
+      expect(binding.recorder.commits, greaterThan(0));
+      semantics.dispose();
     },
   );
 }

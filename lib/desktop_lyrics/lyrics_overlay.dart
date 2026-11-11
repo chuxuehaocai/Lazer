@@ -13,6 +13,7 @@ import '../animation/apple_spring.dart';
 import '../animation/lyric_spring.dart';
 import '../diagnostics/app_log.dart';
 import '../lyrics/interlude.dart';
+import '../lyrics/line_content.dart';
 import '../lyrics/lyric_document.dart';
 import '../lyrics/spring.dart';
 import 'overlay_protocol.dart';
@@ -25,7 +26,7 @@ const double _dragHandleWidth = 24;
 const double _dragHandleHeight = 56;
 
 double lyricsOverlaySlotHeight(double fontSize) =>
-    (fontSize * 1.9).clamp(34.0, 96.0);
+    (fontSize * 3.0).clamp(48.0, 144.0);
 
 Size lyricsOverlayWindowSize(LyricsOverlayLaunch launch) => Size(
   _overlayWidth,
@@ -180,7 +181,6 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   Duration _lastTick = Duration.zero;
   Size? _windowSize;
   bool _windowConfigured = false;
-  bool _hasLayout = false;
   bool _seekPending = false;
   bool _playing = false;
   bool _dragHovered = false;
@@ -253,12 +253,10 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   }
 
   void _applyPayload(LyricsOverlayPayload payload) {
-    final bool reset =
-        !_hasLayout ||
-        payload.lines.length != _lines.length ||
-        (payload.lines.isNotEmpty &&
-            _lines.isNotEmpty &&
-            payload.lines.first.time != _lines.first.time);
+    // Payloads describe a new document. Index keys alone must not carry the
+    // previous track's springs or accessibility nodes into it.
+    const reset = true;
+    _motions.clear();
     setState(() {
       _payload = payload;
       _settings = payload.settings;
@@ -273,7 +271,6 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     });
     _retarget(instant: reset);
     _seekPending = false;
-    _hasLayout = true;
     unawaited(_loadFont(payload.settings));
     unawaited(_resizeOverlay());
     _ensureTicker();
@@ -476,7 +473,10 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         }
       }
     }
-    if (moving) _frames.value++;
+    if (moving ||
+        (_playing && _lines.isNotEmpty && _lines[_focus].words.isNotEmpty)) {
+      _frames.value++;
+    }
     if (!_playing && !moving) {
       _ticker?.stop();
       _lastTick = Duration.zero;
@@ -548,25 +548,33 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
   TextStyle _textStyle(double scale) {
     final int weight = (_settings.fontWeight ~/ 100 - 1).clamp(0, 6);
-    return TextStyle(
-      fontFamily: _settings.fontFamily,
-      fontFamilyFallback: const <String>[
-        'MiSans',
-        'Microsoft YaHei',
-        'PingFang SC',
-        'Noto Sans CJK SC',
-      ],
-      fontSize: _settings.fontSize * scale,
-      fontWeight: FontWeight.values[weight],
-      height: 1.25,
-      color: Colors.white,
-      letterSpacing: .2,
-      decoration: TextDecoration.none,
-      shadows: const <Shadow>[
-        Shadow(color: Color(0xE6000000), blurRadius: 14, offset: Offset(0, 2)),
-        Shadow(color: Color(0xB3000000), blurRadius: 4),
-        Shadow(color: Color(0x80000000), blurRadius: 1),
-      ],
+    return lyricTextStyle(
+      TextStyle(
+        fontFamily: _settings.fontFamily,
+        fontFamilyFallback: const <String>[
+          'MiSans',
+          'Microsoft YaHei',
+          'PingFang SC',
+          'Noto Sans CJK SC',
+        ],
+        fontSize: _settings.fontSize * scale,
+        fontWeight: FontWeight.values[weight],
+        height: 1.5,
+        color: Colors.white,
+        letterSpacing: 0,
+        decoration: TextDecoration.none,
+        shadows: const <Shadow>[
+          Shadow(
+            color: Color(0xE6000000),
+            blurRadius: 14,
+            offset: Offset(0, 2),
+          ),
+          Shadow(color: Color(0xB3000000), blurRadius: 4),
+          Shadow(color: Color(0x80000000), blurRadius: 1),
+        ],
+      ),
+      _settings.fontSize * scale,
+      _settings.fontWeight,
     );
   }
 
@@ -625,12 +633,41 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     if (_lines[index].text.trim().isEmpty) {
       return _interludeRow(index, motion, slot, inset, active);
     }
-    final Widget text = Text(
-      _lines[index].text,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      textAlign: TextAlign.center,
-      style: _lyricStyle,
+    double emphasis() => ((motion.scale.value - 97) / 3).clamp(0.0, 1.0);
+    final line = _lines[index];
+    final Widget text = Semantics(
+      container: true,
+      excludeSemantics: true,
+      label: lyricSemanticLabel(line),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          LyricLineContent(
+            line: line,
+            style: _lyricStyle,
+            active: active,
+            position: () =>
+                Duration(microseconds: (_currentPositionMs * 1000).round()),
+            repaint: _frames,
+            emphasis: emphasis,
+            maxLines: 1,
+          ),
+          if (line.translation != null) ...[
+            const SizedBox(height: 5),
+            Text(
+              line.translation!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _lyricStyle.copyWith(
+                fontSize: (_settings.fontSize * 16 / 22).clamp(12, 30),
+                height: 1.45,
+                color: Colors.white.withValues(alpha: .58),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
     final double activeY = _verticalPadding + (_settings.lineCount ~/ 2) * slot;
     return Positioned(
@@ -654,21 +691,14 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             final double sigma = _settings.blurEnabled
                 ? (distance * 1.25 * _settings.blurIntensity).clamp(0.0, 6.0)
                 : 0.0;
-            Widget content = child!;
-            if (sigma > .03) {
-              content = ImageFiltered(
-                imageFilter: _blur(sigma),
-                child: content,
-              );
-            }
             return Transform.translate(
               offset: Offset(0, motion.y.value),
-              child: Transform.scale(
-                scale: motion.scale.value / 100,
-                alignment: Alignment.center,
+              child: ImageFiltered(
+                enabled: sigma > .03,
+                imageFilter: _blur(sigma),
                 child: Opacity(
                   opacity: opacity,
-                  child: Center(child: content),
+                  child: RepaintBoundary(child: child!),
                 ),
               ),
             );
@@ -694,20 +724,17 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       child: RepaintBoundary(
         child: AnimatedBuilder(
           animation: _frames,
-          child: _OverlayInterludeDots(
+          child: LyricInterludeDots(
             line: _lines[index],
             position: () => Duration(milliseconds: _currentPositionMs.round()),
             repaint: _frames,
             diameter: _settings.fontSize * .3,
+            presence: () => ((motion.scale.value - 97) / 3).clamp(0.0, 1.0),
           ),
           builder: (BuildContext context, Widget? child) {
             return Transform.translate(
               offset: Offset(0, motion.y.value),
-              child: Transform.scale(
-                scale: motion.scale.value / 100,
-                alignment: Alignment.center,
-                child: Opacity(opacity: active ? 1 : 0, child: child),
-              ),
+              child: child,
             );
           },
         ),
@@ -810,84 +837,6 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       ),
     );
   }
-}
-
-class _OverlayInterludeDots extends StatelessWidget {
-  const _OverlayInterludeDots({
-    required this.line,
-    required this.position,
-    required this.repaint,
-    required this.diameter,
-  });
-
-  final LyricLine line;
-  final Duration Function() position;
-  final Listenable repaint;
-  final double diameter;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox.expand(
-      child: CustomPaint(
-        painter: _OverlayInterludePainter(line, position, diameter, repaint),
-      ),
-    );
-  }
-}
-
-class _OverlayInterludePainter extends CustomPainter {
-  _OverlayInterludePainter(
-    this.line,
-    this.position,
-    this.diameter,
-    Listenable repaint,
-  ) : super(repaint: repaint);
-
-  final LyricLine line;
-  final Duration Function() position;
-  final double diameter;
-  int? _lastPosition;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final int start = line.time.inMilliseconds;
-    final int end =
-        (line.end ?? line.time + const Duration(seconds: 5)).inMilliseconds;
-    final int now = position().inMilliseconds;
-    if (now < end) _lastPosition = now;
-    final snapshot = lyricInterludeSnapshot(
-      start,
-      end,
-      now < end ? now : (_lastPosition ?? end),
-    );
-    final double scale = snapshot.scale;
-    final Offset center = Offset(size.width / 2, size.height / 2);
-    for (var i = 0; i < 3; i++) {
-      final double alpha = (snapshot.dotOpacities[i] * snapshot.opacity).clamp(
-        0.0,
-        1.0,
-      );
-      if (alpha == 0) continue;
-      final Offset offset =
-          center + Offset((i - 1) * diameter * 1.6 * scale, 0);
-      canvas.drawCircle(
-        offset,
-        diameter / 2 * scale,
-        Paint()
-          ..color = Colors.white.withValues(alpha: alpha * .58)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 11),
-      );
-      canvas.drawCircle(
-        offset,
-        diameter / 2 * scale,
-        Paint()..color = Colors.white.withValues(alpha: alpha),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_OverlayInterludePainter oldDelegate) =>
-      oldDelegate.line != line || oldDelegate.diameter != diameter;
 }
 
 class _LineMotion {

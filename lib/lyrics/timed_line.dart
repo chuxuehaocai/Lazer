@@ -15,7 +15,9 @@ class TimedLyricText extends StatefulWidget {
     required this.position,
     required this.repaint,
     this.emphasis,
+    this.maxLines,
   });
+  final int? maxLines;
   final LyricLine line;
   final TextStyle style;
   final bool active;
@@ -41,7 +43,14 @@ class _TimedLyricTextState extends State<TimedLyricText> {
       builder: (context, box) {
         final scaler = MediaQuery.textScalerOf(context);
         final locale = Localizations.maybeLocaleOf(context);
-        final key = (widget.line, widget.style, box.maxWidth, scaler, locale);
+        final key = (
+          widget.line,
+          widget.style,
+          box.maxWidth,
+          scaler,
+          locale,
+          widget.maxLines,
+        );
         if (_layoutKey != key) {
           _layout?.dispose();
           _layout = _WordLayout(
@@ -50,6 +59,7 @@ class _TimedLyricTextState extends State<TimedLyricText> {
             box.maxWidth,
             scaler,
             locale,
+            widget.maxLines,
           );
           _layoutKey = key;
         }
@@ -118,12 +128,22 @@ class _Word {
 }
 
 class _WordLayout {
-  _WordLayout(this.line, this.style, this.width, this.scaler, this.locale) {
+  final int? maxLines;
+  _WordLayout(
+    this.line,
+    this.style,
+    this.width,
+    this.scaler,
+    this.locale,
+    this.maxLines,
+  ) {
     bright = TextPainter(
       text: TextSpan(text: line.text, style: style),
       textDirection: TextDirection.ltr,
       textScaler: scaler,
       locale: locale,
+      maxLines: maxLines,
+      ellipsis: maxLines == null ? null : "…",
     )..layout(maxWidth: width);
     fontSize = scaler.scale(style.fontSize ?? 22);
   }
@@ -142,6 +162,8 @@ class _WordLayout {
       textDirection: TextDirection.ltr,
       textScaler: scaler,
       locale: locale,
+      maxLines: maxLines,
+      ellipsis: maxLines == null ? null : "…",
     )..layout(maxWidth: width);
     var offset = 0;
     for (var wi = 0; wi < line.words.length; wi++) {
@@ -402,12 +424,10 @@ class _WordPainter extends CustomPainter {
             segment.consumed;
         final fade = math.max(1.0, rect.height * .5);
         canvas.save();
-        canvas.translate(
-          motion.xEm * layout.fontSize * focus,
-          motion.yEm * layout.fontSize * focus,
-        );
+        canvas.translate(0, motion.yEm * layout.fontSize * focus);
         canvas.translate(rect.center.dx, rect.center.dy);
-        canvas.scale(1 + (motion.scale - 1) * focus);
+        // Keep glyph advances fixed: horizontal expansion made line changes wobble.
+        canvas.scale(1, 1 + (motion.scale - 1) * focus);
         canvas.translate(-rect.center.dx, -rect.center.dy);
         final clip = Rect.fromLTRB(
           rect.left,

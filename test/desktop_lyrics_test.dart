@@ -1,4 +1,8 @@
-import 'dart:ui' show Size;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:lazer_nextgen/lyrics/line_content.dart';
+import 'package:lazer_nextgen/lyrics/timed_line.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/desktop_lyrics/lyrics_overlay.dart';
@@ -9,6 +13,69 @@ LyricsOverlaySettings settingsWithLines(int lines) =>
     LyricsOverlaySettings.fromMap(<String, Object?>{'lineCount': lines});
 
 void main() {
+  testWidgets(
+    'overlay shares timed text and translation rendering across documents',
+    (tester) async {
+      final bridge = OverlayBridge();
+      final settings = settingsWithLines(3);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LyricsOverlayApp(
+            controller: WindowController.fromWindowId('test'),
+            launch: LyricsOverlayLaunch(
+              mode: LyricsOverlayMode.floating,
+              settings: settings,
+            ),
+            channel: const WindowMethodChannel('test-overlay'),
+            bridge: bridge,
+          ),
+        ),
+      );
+      Future<void> show(String text) async {
+        await bridge.handler!(
+          MethodCall(
+            'state',
+            LyricsOverlayPayload(
+              title: text,
+              artist: '',
+              notice: null,
+              lines: [
+                LyricLine(
+                  Duration.zero,
+                  text,
+                  translation: 'Translation',
+                  words: [
+                    LyricWord(Duration.zero, const Duration(seconds: 2), text),
+                  ],
+                ),
+              ],
+              settings: settings,
+              position: const Duration(seconds: 1),
+              duration: const Duration(seconds: 3),
+              playing: false,
+            ).toMap(),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await show('First track');
+      expect(find.byType(LyricLineContent), findsOneWidget);
+      expect(
+        tester.widget<TimedLyricText>(find.byType(TimedLyricText)).line.text,
+        'First track',
+      );
+      expect(find.text('Translation'), findsOneWidget);
+      await show('Second track');
+      expect(
+        tester.widget<TimedLyricText>(find.byType(TimedLyricText)).line.text,
+        'Second track',
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   test('line count is clamped to the one-to-five range', () {
     expect(settingsWithLines(-4).lineCount, 1);
     expect(settingsWithLines(0).lineCount, 1);
@@ -92,9 +159,9 @@ void main() {
   });
 
   test('slot height stays inside the legible range', () {
-    expect(lyricsOverlaySlotHeight(1), 34);
-    expect(lyricsOverlaySlotHeight(22), closeTo(41.8, 0.001));
-    expect(lyricsOverlaySlotHeight(200), 96);
+    expect(lyricsOverlaySlotHeight(1), 48);
+    expect(lyricsOverlaySlotHeight(22), closeTo(66, 0.001));
+    expect(lyricsOverlaySlotHeight(200), 144);
   });
 
   test('state payload round-trips lyric lines and position', () {
@@ -107,6 +174,14 @@ void main() {
         LyricLine(
           const Duration(milliseconds: 4200),
           '第二句',
+          translation: 'Second line',
+          words: const [
+            LyricWord(
+              Duration(milliseconds: 4200),
+              Duration(milliseconds: 1500),
+              '第二句',
+            ),
+          ],
           end: const Duration(milliseconds: 6200),
         ),
       ],
@@ -126,6 +201,16 @@ void main() {
       '第二句',
     ]);
     expect(parsed.lines.first.time, const Duration(milliseconds: 1200));
+    expect(parsed.lines.last.translation, 'Second line');
+    expect(parsed.lines.last.words.single.text, '第二句');
+    expect(
+      parsed.lines.last.words.single.start,
+      const Duration(milliseconds: 4200),
+    );
+    expect(
+      parsed.lines.last.words.single.duration,
+      const Duration(milliseconds: 1500),
+    );
     expect(parsed.lines.last.end, const Duration(milliseconds: 6200));
     expect(parsed.position, const Duration(milliseconds: 2500));
     expect(parsed.duration, const Duration(minutes: 4));

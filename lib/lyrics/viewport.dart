@@ -25,7 +25,7 @@ import 'interlude.dart';
 import '../widgets/lyric_selection_toolbar.dart';
 import '../widgets/lyric_image_dialog.dart';
 import '../widgets/lyric_edge_fade.dart';
-import '../widgets/timed_lyric_text.dart';
+import 'line_content.dart';
 import '../widgets/lyric_text_hit_region.dart';
 
 /// children stay cached while the ticker only updates their transforms.
@@ -169,12 +169,16 @@ class _LyricViewportState extends State<LyricViewport>
       return;
     }
     final active = _activeAt(position);
-    if (active == _active) return;
+    if (active <= _active) return;
     setState(() {
+      _rowCache.remove(_active);
+      _rowCache.remove(active);
       _active = active;
-      _rowCache.clear();
-      _targets();
-      _scaleTargets();
+      if (_manual) {
+        _scaleTargets();
+      } else {
+        _targets();
+      }
     });
   }
 
@@ -202,7 +206,7 @@ class _LyricViewportState extends State<LyricViewport>
     _lastWall = now;
     if (old == null) return false;
     final delta = (media - old).inMilliseconds;
-    return delta < 0 ||
+    return delta < -150 ||
         delta - (widget.state.playing ? wallDelta : 0) >
             (widget.state.playing ? math.max(150, wallDelta * 0.5) : 150);
   }
@@ -210,8 +214,11 @@ class _LyricViewportState extends State<LyricViewport>
   void _onLane() {
     if (!mounted) return;
     _paintPosition = widget.state.precisePosition;
-    final active = _activeAt(_paintPosition);
+    final candidate = _activeAt(_paintPosition);
     final seeking = _isSeek();
+    final active = widget.state.playing && !seeking && candidate < _active
+        ? _active
+        : candidate;
     final changed =
         !identical(_sourceLines, widget.state.lyrics) ||
         _timelineDuration != widget.state.current?.duration;
@@ -248,10 +255,18 @@ class _LyricViewportState extends State<LyricViewport>
     }
     if (changed || typographyChanged || active != _active) {
       setState(() {
+        if (changed || typographyChanged) {
+          _rowCache.clear();
+        } else {
+          _rowCache.remove(_active);
+          _rowCache.remove(active);
+        }
         _active = active;
-        _rowCache.clear();
-        if (!changed && !_manual) _targets(seeking: seeking);
-        _scaleTargets();
+        if (!changed && !_manual) {
+          _targets(seeking: seeking);
+        } else {
+          _scaleTargets();
+        }
       });
       MotionSnapshot.invalidate(context);
     }
@@ -534,10 +549,10 @@ class _LyricViewportState extends State<LyricViewport>
     _start();
   }
 
-  TextStyle get _originalStyle => context.type.bodySm.copyWith(
-    fontSize: widget.state.lyricFontSize,
-    height: 1.5,
-    fontWeight: FontWeight.values[widget.state.lyricFontWeight ~/ 100 - 1],
+  TextStyle get _originalStyle => lyricTextStyle(
+    context.type.bodySm,
+    widget.state.lyricFontSize,
+    widget.state.lyricFontWeight,
   );
   TextStyle get _translationStyle => context.type.bodySm.copyWith(
     fontSize: (widget.state.lyricFontSize * 16 / 22).clamp(12, 30),
@@ -856,6 +871,21 @@ class _LyricViewportState extends State<LyricViewport>
   Widget _cachedRow(int index) => _rowCache[index] ??= _row(index);
 
   Widget _row(int index) => Semantics(
+    // One stable accessibility node per line, independent of word masks,
+    // opacity layers and translations entering/leaving the paint subtree.
+    container: true,
+    excludeSemantics: true,
+    label: _lines[index].text.trim().isEmpty
+        ? context.tr('间奏')
+        : lyricSemanticLabel(_lines[index]),
+    onTap: _lines[index].text.trim().isEmpty
+        ? null
+        : () => _selection.active
+              ? _changeSelection(_selection.toggle(_lines, index))
+              : _tapLine(index),
+    onLongPress: _lines[index].text.trim().isEmpty
+        ? null
+        : () => _selectLyrics(index),
     selected: _selection.active
         ? _selection.keys.contains(lyricSelectionKey(_lines[index]))
         : null,
@@ -923,21 +953,14 @@ class _LyricViewportState extends State<LyricViewport>
               index,
               _lines[index].text,
               style,
-              _lines[index].words.isNotEmpty
-                  ? TimedLyricText(
-                      line: _lines[index],
-                      style: style,
-                      active: focused,
-                      emphasis: emphasis,
-                      position: () => _paintPosition,
-                      repaint: rowFrames,
-                    )
-                  : Text(
-                      _lines[index].text.isEmpty ? ' ' : _lines[index].text,
-                      textAlign: TextAlign.left,
-                      textDirection: TextDirection.ltr,
-                      style: style,
-                    ),
+              LyricLineContent(
+                line: _lines[index],
+                style: style,
+                active: focused,
+                emphasis: emphasis,
+                position: () => _paintPosition,
+                repaint: rowFrames,
+              ),
             ),
           ),
           if (_lines[index].translation != null) ...[
@@ -982,17 +1005,13 @@ class _LyricViewportState extends State<LyricViewport>
       height: _baseHeights[index],
       child: Transform.translate(
         offset: Offset(0, _ys[index].value),
-        child: Transform.scale(
-          scale: _scales[index].value / 100,
-          alignment: Alignment.centerLeft,
-          child: ImageFiltered(
-            key: ValueKey('lyric-blur-$index'),
-            enabled: sigma > 0.02,
-            imageFilter: _blurFilter(sigma),
-            // Every row gets its own layer: a per-word row otherwise repaints
-            // the whole lyric stack on each of its animation frames.
-            child: RepaintBoundary(child: _cachedRow(index)),
-          ),
+        child: ImageFiltered(
+          key: ValueKey('lyric-blur-$index'),
+          enabled: sigma > 0.02,
+          imageFilter: _blurFilter(sigma),
+          // Every row gets its own layer: a per-word row otherwise repaints
+          // the whole lyric stack on each of its animation frames.
+          child: RepaintBoundary(child: _cachedRow(index)),
         ),
       ),
     );

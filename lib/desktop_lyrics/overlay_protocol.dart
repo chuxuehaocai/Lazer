@@ -157,6 +157,15 @@ class LyricsOverlayPayload {
           'time': line.time.inMilliseconds,
           'end': line.end?.inMilliseconds,
           'text': line.text,
+          'translation': line.translation,
+          'words': [
+            for (final word in line.words)
+              {
+                'start': word.start.inMicroseconds,
+                'duration': word.duration.inMicroseconds,
+                'text': word.text,
+              },
+          ],
         },
     ],
     'settings': settings.toMap(),
@@ -180,6 +189,20 @@ class LyricsOverlayPayload {
             Duration(milliseconds: time.toInt()),
             text,
             end: end is num ? Duration(milliseconds: end.toInt()) : null,
+            translation: raw['translation'] as String?,
+            words: [
+              if (raw['words'] is List)
+                for (final word in raw['words'] as List)
+                  if (word is Map &&
+                      word['start'] is num &&
+                      word['duration'] is num &&
+                      word['text'] is String)
+                    LyricWord(
+                      Duration(microseconds: (word['start'] as num).toInt()),
+                      Duration(microseconds: (word['duration'] as num).toInt()),
+                      word['text'] as String,
+                    ),
+            ],
           ),
         );
       }
