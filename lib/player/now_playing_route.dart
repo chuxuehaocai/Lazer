@@ -210,7 +210,11 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   }
 
   @override
-  bool get opaque => true;
+  // The player moves off the screen during the system back gesture. Keeping
+  // the route opaque makes Navigator stop painting the page underneath, so
+  // the exposed area falls through to a black window instead of the browse
+  // page's configured background.
+  bool get opaque => false;
 
   @override
   Duration get transitionDuration => PlayerPageMotion.spring.duration;
@@ -276,7 +280,6 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
         final page = Stack(
           fit: StackFit.expand,
           children: [
-            if (travelled > 1) const ColoredBox(color: Colors.black),
             FractionalTranslation(
               translation: Offset(
                 0,

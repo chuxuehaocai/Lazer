@@ -83,6 +83,13 @@ void main() {
     },
   );
 
+  test('player route keeps the configured page paintable during back', () {
+    final state = AppState();
+    final route = _PlayerRoute(state);
+    expect(route.opaque, isFalse);
+    state.dispose();
+  });
+
   testWidgets('player entrance and exit follow the same physical spring', (
     tester,
   ) async {
@@ -278,7 +285,13 @@ void main() {
     nav.currentState!.push(route);
     await tester.pumpAndSettle();
     expect(route.openness, 1);
-    expect(find.byType(FractionalTranslation), findsNothing);
+    expect(
+      find.ancestor(
+        of: find.byKey(_bodyKey),
+        matching: find.byType(FractionalTranslation),
+      ),
+      findsNothing,
+    );
     route.startPull();
     route.updatePull(.1);
     route.endPull(0);
