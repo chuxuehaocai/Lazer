@@ -120,11 +120,13 @@ class _MixQueueEngine extends _Engine
     indexes.add(1);
   }
 
-  /// The outgoing source ended: the incoming decoder is promoted.
-  void finishMix() {
+  /// The outgoing source ended: the incoming decoder is promoted. A real
+  /// announcement already advanced the index, so a promotion that follows one
+  /// reports nothing new: [silent] models that second, eventless moment.
+  void finishMix({bool silent = false}) {
     presented = false;
     _successor = null;
-    indexes.add(1);
+    if (!silent) indexes.add(1);
   }
 
   /// A preparation that lost its race: the successor is gone.
@@ -353,6 +355,42 @@ void main() {
     await tester.pump();
     expect(state.current?.id, '2');
     expect(engine.prepared.last, 'url-3');
+    state.dispose();
+  });
+
+  testWidgets('an announced hand-off still prepares the song after it', (
+    tester,
+  ) async {
+    final engine = _MixQueueEngine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      autoMixEnabled: true,
+    );
+    addTearDown(engine.dispose);
+    state.playQueue(<Track>[_track('1'), _track('2'), _track('3')]);
+    await tester.pump();
+    expect(engine.prepared, <String>['url-2']);
+
+    // The overlap starts and its announcement arrives: the engine now holds the
+    // song being mixed in as its successor and refuses another one.
+    engine.advanceAt(const Duration(seconds: 6));
+    await tester.pump();
+    await tester.pump();
+    expect(state.current?.id, '2');
+    expect(engine.prepared, <String>['url-2']);
+
+    // The incoming decoder takes over with no further index event. That is what
+    // the real engine reports after an announcement, so the app has to notice
+    // the end of the overlap by itself: otherwise the next boundary has nothing
+    // to cross into and falls back to a reload, which is the click and the
+    // sliver of silence this playback mode exists to remove.
+    engine.finishMix(silent: true);
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump();
+    await tester.pump();
+    expect(engine.prepared, <String>['url-2', 'url-3']);
+    expect(engine.queueLoads, <String>['url-1']);
     state.dispose();
   });
 

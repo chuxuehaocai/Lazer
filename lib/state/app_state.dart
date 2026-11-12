@@ -2527,11 +2527,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// return to exactly that song (shuffle is not `index - 1`).
   int? _mixFromIndex;
 
+  /// Whether an announced hand-off still owes the queue a successor.
+  ///
+  /// The engine reports the hand-off when the incoming song becomes audible,
+  /// which is exactly when it refuses a second successor. The preparation for
+  /// the song after it has to wait until the mixed-in song owns the engine, and
+  /// no index event marks that moment, so the app asks again on its own
+  /// playback tick. Without that retry every other album boundary would have
+  /// nothing to cross into and would fall back to a reload.
+  bool _successorAfterHandoff = false;
+
   /// Forgets the successor the app believes the engine holds.
   void _clearQueuedNext() {
     _queuedNextIndex = null;
     _queuedNextUrl = null;
     _queuedNextAt = null;
+    _successorAfterHandoff = false;
   }
 
   /// Whether the queue entry after the current song continues the same album.
@@ -4185,6 +4196,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (audio is MixPresentingAudioEngine &&
         (audio as MixPresentingAudioEngine).mixPresented) {
       _mixFromIndex = _queueIndex;
+      // The engine holds the song being mixed in as its successor until the
+      // overlap ends, so the one after it can only be prepared once the mix has
+      // landed. Wait for the overlap to end instead of asking now and losing.
+      _successorAfterHandoff = true;
     } else {
       _mixFromIndex = null;
     }
@@ -4213,6 +4228,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _ensureTicker();
     _tickNotifier.pulse();
     notifyListeners();
+    unawaited(_prefetchNext());
+  }
+
+  /// Asks for the successor an announced hand-off could not request yet.
+  ///
+  /// The engine refuses a second successor while an overlap is audible, and
+  /// nothing tells the app when that overlap ends, so this runs on the playback
+  /// tick. It is a single retry: if the preparation loses again (a resolve still
+  /// in flight, a URL that will not resolve) the boundary falls back to the
+  /// normal completion path, which is what happened before this existed.
+  void _settleHandoffSuccessor() {
+    if (!_successorAfterHandoff) return;
+    final QueueAudioEngine? engine = _queueEngine;
+    if (engine is MixPresentingAudioEngine &&
+        (engine as MixPresentingAudioEngine).mixPresented) {
+      return;
+    }
+    _successorAfterHandoff = false;
     unawaited(_prefetchNext());
   }
 
@@ -4926,6 +4959,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? t = current;
     if (t == null || !_playing) return;
     if (_realActive) {
+      _settleHandoffSuccessor();
       final Duration position = audioEngine!.position;
       if (position != _position) {
         _notePlayheadMoved();
