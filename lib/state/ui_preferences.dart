@@ -17,6 +17,13 @@ const double kCompactBreakpoint = 720;
 /// pane, while still needing the narrower tablet composition.
 const double kTabletBreakpoint = 1024;
 
+const double kBackgroundImageAlignmentMin = -1;
+const double kBackgroundImageAlignmentMax = 1;
+const double kBackgroundImageScaleMin = 1;
+const double kBackgroundImageScaleMax = 3;
+const double kBackgroundBlurMin = 0;
+const double kBackgroundBlurMax = 32;
+
 /// How many cards the library lays its playlists out in per row.
 ///
 /// `0` asks the grid to follow the window width — the density the library

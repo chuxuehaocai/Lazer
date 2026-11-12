@@ -157,7 +157,7 @@ void main() {
     TickerMode backdrop() => tester.widget<TickerMode>(
       find
           .ancestor(
-            of: find.byType(AppAlbumBackdrop),
+            of: find.byType(AlbumBlurFlowCanvas),
             matching: find.byType(TickerMode),
           )
           .first,

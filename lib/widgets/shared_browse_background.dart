@@ -44,6 +44,10 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
       (track?.id, track?.coverUrl, track?.coverSeed),
       state.backgroundMode,
       state.backgroundImagePath,
+      state.backgroundImageAlignmentX,
+      state.backgroundImageAlignmentY,
+      state.backgroundImageScale,
+      state.backgroundBlur,
       state.uiAlpha,
       state.dynamicBackgroundQuality,
       state.browseBackgroundFps,
@@ -119,11 +123,18 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
                     !(state.browseTransitionActive.value &&
                         navigation.rootVisible.value &&
                         !navigation.moving.value),
-                child: AppAlbumBackdrop(
+                child: AlbumBlurFlowCanvas(
                   track: state.current,
                   mode: state.backgroundMode,
+                  pageColor: Colors.transparent,
+                  animationsEnabled:
+                      state.backgroundMode == AppBackgroundMode.nowPlayingDynamic,
                   imagePath: state.backgroundImagePath,
                   uiAlpha: state.uiAlpha,
+                  imageAlignmentX: state.backgroundImageAlignmentX,
+                  imageAlignmentY: state.backgroundImageAlignmentY,
+                  imageScale: state.backgroundImageScale,
+                  blurSigma: state.backgroundBlur,
                   quality: state.dynamicBackgroundQuality,
                   frameRate: state.browseBackgroundFps,
                   solidColor: state.browseBackgroundColor,

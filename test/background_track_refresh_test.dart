@@ -153,7 +153,7 @@ void main() {
                     animation: state,
                     builder: (_, _) => RepaintBoundary(
                       key: boundaryKey,
-                      child: AppAlbumBackdrop(
+                      child: AlbumBlurFlowCanvas(
                         track: state.current,
                         mode: AppBackgroundMode.nowPlayingDynamic,
                         uiAlpha: 0,

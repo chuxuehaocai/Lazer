@@ -1,7 +1,5 @@
 import '../state/build_safe_notifier.dart';
-import '../widgets/build_safe_state.dart';
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -14,10 +12,10 @@ import '../data/models.dart';
 import '../state/ui_preferences.dart';
 import '../utils/artwork.dart';
 import '../theme/tokens.dart';
-import '../theme/adaptive_contrast.dart';
 import 'palette_pixels.dart';
 
-export '../player/player_backdrop.dart' show AlbumBlurFlow;
+export '../player/player_backdrop.dart' show AlbumBlurFlow, AlbumBlurFlowCanvas;
+export 'custom_image_backdrop.dart' show CustomImageBackdrop;
 
 /// Every flow surface uses these motion and palette constants.
 const albumFlowConfiguration = AlbumFlowConfiguration();
@@ -1352,172 +1350,5 @@ Future<ui.Image?> decodeAlbumPaletteImage(String url) async {
     codec?.dispose();
     descriptor?.dispose();
     buffer?.dispose();
-  }
-}
-
-/// The album-tinted page backdrop: flowing palette derived from the current
-/// track, softened by the content-opacity veil.
-class AppAlbumBackdrop extends StatefulWidget {
-  const AppAlbumBackdrop({
-    super.key,
-    required this.track,
-    required this.mode,
-    required this.uiAlpha,
-    this.imagePath,
-    this.veil,
-    this.pageColor,
-    this.quality = kDynamicBackgroundQualityDefault,
-    this.onSeed,
-    this.frameRate = 30,
-    this.solidColor,
-    this.paletteLoader = albumPaletteForCover,
-  });
-
-  final Track? track;
-  final AppBackgroundMode mode;
-
-  /// Stored copy of the listener's picture, painted in
-  /// [AppBackgroundMode.customImage].
-  final String? imagePath;
-
-  /// `内容不透明度` — 0.4 … 1.0. The veil over the palette is its square.
-  final double uiAlpha;
-
-  /// When set, the flow carries this veil itself and no content scrim is drawn
-  /// — the now-playing page uses the compatibility `background @ 0.38`.
-  final Color? veil;
-
-  /// Painted under the flow (compatibility `colors.background`), and on its own when
-  /// the backdrop is off.
-  final Color? pageColor;
-
-  /// `动态背景渲染精度` from Settings, handed to the flow canvas.
-  final double quality;
-
-  /// Reports the extracted artwork seed so the shell can seed its palette even
-  /// when the backdrop itself is off.
-  final ValueChanged<Color>? onSeed;
-  final double? frameRate;
-  final Color? solidColor;
-  final AlbumPaletteLoader paletteLoader;
-
-  @override
-  State<AppAlbumBackdrop> createState() => _AppAlbumBackdropState();
-}
-
-class _AppAlbumBackdropState extends State<AppAlbumBackdrop>
-    with BuildSafeState<AppAlbumBackdrop> {
-  List<Color> _colors = albumFlowColors(kAlbumDefaultSeed);
-  int _generation = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_load());
-  }
-
-  @override
-  void didUpdateWidget(AppAlbumBackdrop oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.track?.id != widget.track?.id ||
-        oldWidget.track?.coverUrl != widget.track?.coverUrl) {
-      unawaited(_load());
-    }
-  }
-
-  Future<void> _load() async {
-    final int generation = ++_generation;
-    final String? coverUrl = widget.track?.coverUrl;
-    final cached = widget.paletteLoader == albumPaletteForCover
-        ? cachedAlbumPaletteForCover(coverUrl)
-        : null;
-    _colors =
-        cached?.mesh ??
-        albumFlowColors(albumFallbackSeedForTrack(widget.track));
-    final palette = await albumPaletteForCoverWhenReady(
-      widget.paletteLoader,
-      coverUrl,
-    );
-    if (!mounted || generation != _generation) return;
-    if (palette != null) setState(() => _colors = palette.mesh);
-    widget.onSeed?.call(palette?.seed ?? kAlbumDefaultSeed);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final Color? pageColor = widget.pageColor;
-    if (widget.mode == AppBackgroundMode.off) {
-      return pageColor == null
-          ? const SizedBox.shrink()
-          : ColoredBox(color: pageColor);
-    }
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    if (widget.mode == AppBackgroundMode.solidColor) {
-      return ColoredBox(
-        color:
-            widget.solidColor ??
-            backgroundFromTheme(scheme.primary, scheme.brightness),
-      );
-    }
-    if (widget.mode == AppBackgroundMode.customImage) {
-      return CustomImageBackdrop(
-        path: widget.imagePath,
-        pageColor: pageColor ?? scheme.surface,
-      );
-    }
-    final double veil = (widget.uiAlpha * widget.uiAlpha).clamp(0.0, 1.0);
-    return Stack(
-      fit: StackFit.expand,
-      children: <Widget>[
-        if (pageColor != null) ColoredBox(color: pageColor),
-        AlbumFlowBackground(
-          colors: _colors,
-          animated: widget.mode == AppBackgroundMode.nowPlayingDynamic,
-          solid: false,
-          frameRate: widget.frameRate,
-          quality: widget.quality,
-          veil: widget.veil ?? const Color(0x00000000),
-        ),
-        if (widget.veil == null)
-          ColoredBox(color: scheme.surface.withValues(alpha: veil)),
-      ],
-    );
-  }
-}
-
-/// Paints the listener's picture edge to edge.
-///
-/// A missing or undecodable file falls back to [pageColor], so a stale
-/// preference never leaves a hole in the window. The content veil that keeps
-/// labels readable is drawn by the shell above this widget.
-class CustomImageBackdrop extends StatelessWidget {
-  const CustomImageBackdrop({
-    super.key,
-    required this.path,
-    required this.pageColor,
-  });
-
-  final String? path;
-  final Color pageColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final String? source = path;
-    return RepaintBoundary(
-      child: ColoredBox(
-        color: pageColor,
-        child: source == null || source.isEmpty
-            ? const SizedBox.expand()
-            : Image.file(
-                File(source),
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.medium,
-                gaplessPlayback: true,
-                errorBuilder:
-                    (BuildContext context, Object error, StackTrace? stack) =>
-                        const SizedBox.expand(),
-              ),
-      ),
-    );
   }
 }

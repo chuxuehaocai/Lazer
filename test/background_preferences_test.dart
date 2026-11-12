@@ -49,6 +49,30 @@ Track _track(String id) => Track(
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('custom background crop and blur settings persist', () async {
+    final state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+    await state.setBackgroundImageTransform(
+      player: false,
+      alignmentX: 2,
+      alignmentY: -.5,
+      scale: 4,
+    );
+    await state.setBackgroundBlur(18, player: false);
+    expect(state.backgroundImageAlignmentX, 1);
+    expect(state.backgroundImageAlignmentY, -.5);
+    expect(state.backgroundImageScale, 3);
+    expect(state.backgroundBlur, 18);
+
+    final restored = AppState(catalog: _Catalog());
+    addTearDown(restored.dispose);
+    await restored.bootstrap();
+    expect(restored.backgroundImageAlignmentX, 1);
+    expect(restored.backgroundImageAlignmentY, -.5);
+    expect(restored.backgroundImageScale, 3);
+    expect(restored.backgroundBlur, 18);
+  });
+
   test(
     'background modes, frame rates and colors restore independently',
     () async {
@@ -287,7 +311,7 @@ void main() {
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          home: AppAlbumBackdrop(
+          home: AlbumBlurFlowCanvas(
             track: null,
             mode: AppBackgroundMode.nowPlayingStatic,
             uiAlpha: .7,

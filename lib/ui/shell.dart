@@ -1028,11 +1028,18 @@ class _AppShellState extends State<AppShell>
                         // hands the frame budget to the transition.
                         TickerMode(
                           enabled: !_contentSwitching,
-                          child: AppAlbumBackdrop(
+                          child: AlbumBlurFlowCanvas(
                             track: state.current,
                             mode: state.backgroundMode,
+                            pageColor: apple.background,
+                            animationsEnabled: state.backgroundMode ==
+                                AppBackgroundMode.nowPlayingDynamic,
                             imagePath: state.backgroundImagePath,
                             uiAlpha: state.uiAlpha,
+                            imageAlignmentX: state.backgroundImageAlignmentX,
+                            imageAlignmentY: state.backgroundImageAlignmentY,
+                            imageScale: state.backgroundImageScale,
+                            blurSigma: state.backgroundBlur,
                             quality: state.dynamicBackgroundQuality,
                             frameRate: state.browseBackgroundFps,
                             solidColor: state.browseBackgroundColor,

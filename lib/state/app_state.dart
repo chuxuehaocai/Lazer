@@ -863,6 +863,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Stored copy of the picture used by [AppBackgroundMode.customImage].
   /// Null until the listener picks one; the canvas still renders without it.
   String? backgroundImagePath;
+  double backgroundImageAlignmentX = 0;
+  double backgroundImageAlignmentY = 0;
+  double backgroundImageScale = 1;
+  double backgroundBlur = 0;
 
   /// `内容不透明度` of the app shell — how much of the backdrop the content
   /// veil hides.
@@ -872,6 +876,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   AppBackgroundMode playerBackground = AppBackgroundMode.nowPlayingDynamic;
   Color? browseBackgroundColor, playerBackgroundColor;
   String? playerBackgroundImagePath;
+  double playerBackgroundImageAlignmentX = 0;
+  double playerBackgroundImageAlignmentY = 0;
+  double playerBackgroundImageScale = 1;
+  double playerBackgroundBlur = 0;
 
   Future<void> setBackgroundFps(double fps, {bool player = false}) async {
     if (!fps.isFinite) return;
@@ -956,6 +964,63 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         backgroundImageStore.preferenceValue(path),
       );
     }
+  }
+
+  Future<void> setBackgroundImageTransform({
+    required bool player,
+    double? alignmentX,
+    double? alignmentY,
+    double? scale,
+  }) async {
+    final double nextX =
+        (alignmentX ??
+                (player
+                    ? playerBackgroundImageAlignmentX
+                    : backgroundImageAlignmentX))
+            .clamp(kBackgroundImageAlignmentMin, kBackgroundImageAlignmentMax);
+    final double nextY =
+        (alignmentY ??
+                (player
+                    ? playerBackgroundImageAlignmentY
+                    : backgroundImageAlignmentY))
+            .clamp(kBackgroundImageAlignmentMin, kBackgroundImageAlignmentMax);
+    final double nextScale =
+        (scale ?? (player ? playerBackgroundImageScale : backgroundImageScale))
+            .clamp(kBackgroundImageScaleMin, kBackgroundImageScaleMax);
+    if (player) {
+      playerBackgroundImageAlignmentX = nextX;
+      playerBackgroundImageAlignmentY = nextY;
+      playerBackgroundImageScale = nextScale;
+    } else {
+      backgroundImageAlignmentX = nextX;
+      backgroundImageAlignmentY = nextY;
+      backgroundImageScale = nextScale;
+    }
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    final String prefix = player
+        ? 'lazer_player_background'
+        : 'lazer_background';
+    await prefs.setDouble('${prefix}_image_alignment_x', nextX);
+    await prefs.setDouble('${prefix}_image_alignment_y', nextY);
+    await prefs.setDouble('${prefix}_image_scale', nextScale);
+  }
+
+  Future<void> setBackgroundBlur(double value, {required bool player}) async {
+    final double next = value.clamp(kBackgroundBlurMin, kBackgroundBlurMax);
+    if (player ? playerBackgroundBlur == next : backgroundBlur == next) {
+      return;
+    }
+    if (player) {
+      playerBackgroundBlur = next;
+    } else {
+      backgroundBlur = next;
+    }
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      player ? 'lazer_player_background_blur' : 'lazer_background_blur',
+      next,
+    );
   }
 
   Future<void> setAppUiAlpha(double value) async {
@@ -1829,6 +1894,47 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       final String? restoredBackgroundImage = await backgroundImageStore
           .restore(storedBackgroundImage);
       backgroundImagePath = restoredBackgroundImage;
+      backgroundImageAlignmentX =
+          (prefs.getDouble('lazer_background_image_alignment_x') ?? 0).clamp(
+            kBackgroundImageAlignmentMin,
+            kBackgroundImageAlignmentMax,
+          );
+      backgroundImageAlignmentY =
+          (prefs.getDouble('lazer_background_image_alignment_y') ?? 0).clamp(
+            kBackgroundImageAlignmentMin,
+            kBackgroundImageAlignmentMax,
+          );
+      backgroundImageScale =
+          (prefs.getDouble('lazer_background_image_scale') ?? 1).clamp(
+            kBackgroundImageScaleMin,
+            kBackgroundImageScaleMax,
+          );
+      backgroundBlur = (prefs.getDouble('lazer_background_blur') ?? 0).clamp(
+        kBackgroundBlurMin,
+        kBackgroundBlurMax,
+      );
+      playerBackgroundImageAlignmentX =
+          (prefs.getDouble('lazer_player_background_image_alignment_x') ?? 0)
+              .clamp(
+                kBackgroundImageAlignmentMin,
+                kBackgroundImageAlignmentMax,
+              );
+      playerBackgroundImageAlignmentY =
+          (prefs.getDouble('lazer_player_background_image_alignment_y') ?? 0)
+              .clamp(
+                kBackgroundImageAlignmentMin,
+                kBackgroundImageAlignmentMax,
+              );
+      playerBackgroundImageScale =
+          (prefs.getDouble('lazer_player_background_image_scale') ?? 1).clamp(
+            kBackgroundImageScaleMin,
+            kBackgroundImageScaleMax,
+          );
+      playerBackgroundBlur =
+          (prefs.getDouble('lazer_player_background_blur') ?? 0).clamp(
+            kBackgroundBlurMin,
+            kBackgroundBlurMax,
+          );
       mediaShortcuts = MediaShortcutSettings.decode(
         prefs.getString('lazer_media_shortcuts'),
       );

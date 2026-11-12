@@ -168,7 +168,7 @@ void main() {
     );
     expect(scaffold.backgroundColor, AppleColors.darkCanvas);
     expect(scaffold.backgroundColor, isNot(Colors.black));
-    expect(find.byType(AppAlbumBackdrop), findsNothing);
+    expect(find.byType(AlbumBlurFlowCanvas), findsNothing);
 
     // The light theme keeps the system background, which is already not black.
     await tester.pumpWidget(
@@ -201,7 +201,7 @@ void main() {
 
     await tester.pumpWidget(_app(AppShell(state: state)));
     await tester.pump();
-    expect(find.byType(AppAlbumBackdrop), findsOneWidget);
+    expect(find.byType(AlbumBlurFlowCanvas), findsOneWidget);
     expect(find.byType(AlbumFlowBackground), findsNothing);
     final Image painted = tester.widget<Image>(find.byType(Image).first);
     expect(painted.image, isA<FileImage>());

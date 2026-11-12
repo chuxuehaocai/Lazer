@@ -84,7 +84,7 @@ void main() {
       expect(find.byType(NowPlayingPage), findsOneWidget);
       final player = tester.element(find.byType(NowPlayingPage));
       final backdrop = tester.element(find.byType(AlbumBlurFlow));
-      final browse = tester.element(find.byType(AppAlbumBackdrop));
+      final browse = tester.element(find.byType(AlbumBlurFlowCanvas).first);
       expect(
         tester.widget<AlbumBlurFlow>(find.byType(AlbumBlurFlow)).track,
         _first,
@@ -103,7 +103,7 @@ void main() {
         isTrue,
       );
       expect(
-        identical(tester.element(find.byType(AppAlbumBackdrop)), browse),
+        identical(tester.element(find.byType(AlbumBlurFlowCanvas).first), browse),
         isTrue,
       );
       expect(
@@ -111,7 +111,7 @@ void main() {
         _second,
       );
       expect(
-        tester.widget<AppAlbumBackdrop>(find.byType(AppAlbumBackdrop)).track,
+        tester.widget<AlbumBlurFlowCanvas>(find.byType(AlbumBlurFlowCanvas).first).track,
         _second,
       );
       expect(tester.takeException(), isNull);

@@ -109,7 +109,7 @@ void main() {
     tester,
   ) async {
     Widget page(Track track) => MaterialApp(
-      home: AppAlbumBackdrop(
+      home: AlbumBlurFlowCanvas(
         track: track,
         mode: AppBackgroundMode.nowPlayingStatic,
         uiAlpha: .7,
@@ -131,7 +131,7 @@ void main() {
   ) async {
     final List<Color> seeds = <Color>[];
     Widget page(Track track) => MaterialApp(
-      home: AppAlbumBackdrop(
+      home: AlbumBlurFlowCanvas(
         track: track,
         mode: AppBackgroundMode.nowPlayingStatic,
         uiAlpha: .7,

@@ -3,6 +3,7 @@ import '../widgets/spring_buttons.dart';
 import '../storage/app_storage.dart';
 import '../storage/storage_settings.dart';
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
@@ -340,6 +341,14 @@ class _SettingsOverview extends StatelessWidget {
                                 unawaited(deleteCustomBackgroundImage(path));
                               },
                               child: const TrText('移除'),
+                            ),
+                          if (state.backgroundImagePath != null)
+                            SpringTextButton(
+                              key: const ValueKey('background-image-position'),
+                              onPressed: () => unawaited(
+                                _editBackgroundImageCrop(context, state),
+                              ),
+                              child: const TrText('调整位置'),
                             ),
                           SpringOutlinedButton(
                             key: const ValueKey('background-image-pick'),
@@ -1605,6 +1614,157 @@ Future<void> _pickBackgroundImage(
   }
 }
 
+Future<void> _editBackgroundImageCrop(
+  BuildContext context,
+  AppState state, {
+  bool player = false,
+}) async {
+  final String? path =
+      player ? state.playerBackgroundImagePath : state.backgroundImagePath;
+  if (path == null || path.isEmpty) return;
+  final result = await showAppleDialog<({double x, double y, double scale})>(
+    context: context,
+    builder: (_) => _BackgroundImageCropDialog(
+      path: path,
+      alignmentX: player
+          ? state.playerBackgroundImageAlignmentX
+          : state.backgroundImageAlignmentX,
+      alignmentY: player
+          ? state.playerBackgroundImageAlignmentY
+          : state.backgroundImageAlignmentY,
+      scale: player ? state.playerBackgroundImageScale : state.backgroundImageScale,
+    ),
+  );
+  if (result == null) return;
+  await state.setBackgroundImageTransform(
+    player: player,
+    alignmentX: result.x,
+    alignmentY: result.y,
+    scale: result.scale,
+  );
+}
+
+class _BackgroundImageCropDialog extends StatefulWidget {
+  const _BackgroundImageCropDialog({
+    required this.path,
+    required this.alignmentX,
+    required this.alignmentY,
+    required this.scale,
+  });
+
+  final String path;
+  final double alignmentX;
+  final double alignmentY;
+  final double scale;
+
+  @override
+  State<_BackgroundImageCropDialog> createState() =>
+      _BackgroundImageCropDialogState();
+}
+
+class _BackgroundImageCropDialogState
+    extends State<_BackgroundImageCropDialog> {
+  late double _x = widget.alignmentX;
+  late double _y = widget.alignmentY;
+  late double _scale = widget.scale;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: const Text('调整背景图片'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final double width = constraints.maxWidth;
+                final double height = width * .56;
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: SizedBox(
+                    width: width,
+                    height: height,
+                    child: GestureDetector(
+                      onPanUpdate: (DragUpdateDetails details) {
+                        setState(() {
+                          _x = (_x - details.delta.dx / width * 2).clamp(
+                            kBackgroundImageAlignmentMin,
+                            kBackgroundImageAlignmentMax,
+                          );
+                          _y = (_y - details.delta.dy / height * 2).clamp(
+                            kBackgroundImageAlignmentMin,
+                            kBackgroundImageAlignmentMax,
+                          );
+                        });
+                      },
+                      child: ColoredBox(
+                        color: scheme.surfaceContainerHighest,
+                        child: Transform.scale(
+                          scale: _scale,
+                          alignment: Alignment(_x, _y),
+                          child: Image.file(
+                            File(widget.path),
+                            width: width,
+                            height: height,
+                            fit: BoxFit.cover,
+                            alignment: Alignment(_x, _y),
+                            errorBuilder: (context, error, stack) =>
+                                const Center(child: Icon(Icons.broken_image)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: <Widget>[
+                const Text('放大'),
+                Expanded(
+                  child: Slider(
+                    value: _scale,
+                    min: kBackgroundImageScaleMin,
+                    max: kBackgroundImageScaleMax,
+                    divisions: 20,
+                    label: '${_scale.toStringAsFixed(1)}×',
+                    onChanged: (double value) => setState(() => _scale = value),
+                  ),
+                ),
+                Text('${_scale.toStringAsFixed(1)}×'),
+              ],
+            ),
+            Text(
+              '拖动图片选择要展示的区域',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop((
+            x: _x,
+            y: _y,
+            scale: _scale,
+          )),
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
+}
+
 class _BackgroundPreferences extends StatelessWidget {
   const _BackgroundPreferences({
     required this.state,
@@ -1672,6 +1832,14 @@ class _BackgroundPreferences extends StatelessWidget {
                     },
                     child: const TrText('移除'),
                   ),
+                if (state.playerBackgroundImagePath != null)
+                  SpringTextButton(
+                    key: const ValueKey('player-background-image-position'),
+                    onPressed: () => unawaited(
+                      _editBackgroundImageCrop(context, state, player: true),
+                    ),
+                    child: const TrText('调整位置'),
+                  ),
                 SpringOutlinedButton(
                   key: const ValueKey('player-background-image-pick'),
                   onPressed: () => unawaited(
@@ -1712,6 +1880,21 @@ class _BackgroundPreferences extends StatelessWidget {
                   },
                 ),
               ],
+            ),
+          ),
+        if (mode == AppBackgroundMode.customImage)
+          _AppSliderRow(
+            key: ValueKey(player ? 'player-background-blur' : 'background-blur'),
+            label: '背景模糊强度',
+            valueText:
+                '${(player ? state.playerBackgroundBlur : state.backgroundBlur).round()} px',
+            subtitle: '只影响自定义图片背景',
+            value: player ? state.playerBackgroundBlur : state.backgroundBlur,
+            min: kBackgroundBlurMin,
+            max: kBackgroundBlurMax,
+            divisions: 16,
+            onChanged: (double value) => unawaited(
+              state.setBackgroundBlur(value, player: player),
             ),
           ),
         if (player)

@@ -744,6 +744,12 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                         : widget.state.playerBackgroundFps,
                     solidColor: widget.state.playerBackgroundColor,
                     imagePath: widget.state.playerBackgroundImagePath,
+                    imageAlignmentX:
+                        widget.state.playerBackgroundImageAlignmentX,
+                    imageAlignmentY:
+                        widget.state.playerBackgroundImageAlignmentY,
+                    imageScale: widget.state.playerBackgroundImageScale,
+                    blurSigma: widget.state.playerBackgroundBlur,
                     pageColor: Colors.black,
                     animationsEnabled: widget.state.playing,
                     // Reads the live preference: the shell rebuilds this page on

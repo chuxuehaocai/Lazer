@@ -331,7 +331,7 @@ void main() {
     await state.setAppBackground(AppBackgroundMode.off);
     await tester.pumpWidget(_app(_reducedMotion(AppShell(state: state))));
     await tester.pumpAndSettle();
-    expect(find.byType(AppAlbumBackdrop), findsNothing);
+    expect(find.byType(AlbumBlurFlowCanvas), findsNothing);
     expect(
       tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor,
       isNot(Colors.transparent),
@@ -339,7 +339,7 @@ void main() {
 
     await state.setAppBackground(AppBackgroundMode.nowPlayingDynamic);
     await tester.pumpAndSettle();
-    expect(find.byType(AppAlbumBackdrop), findsOneWidget);
+    expect(find.byType(AlbumBlurFlowCanvas), findsOneWidget);
     expect(find.byType(AlbumFlowBackground), findsOneWidget);
   });
 
@@ -389,7 +389,7 @@ void main() {
     await tester.tap(find.text('不使用').last);
     await tester.pumpAndSettle();
     expect(state.backgroundMode, AppBackgroundMode.off);
-    expect(find.byType(AppAlbumBackdrop), findsNothing);
+    expect(find.byType(AlbumBlurFlowCanvas), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('browse-background-mode')));
     await tester.pumpAndSettle();

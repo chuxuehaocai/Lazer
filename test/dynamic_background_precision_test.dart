@@ -239,7 +239,7 @@ void main() {
 
     AlbumFlowBackground flow() => tester.widget<AlbumFlowBackground>(
       find.descendant(
-        of: find.byType(AppAlbumBackdrop),
+        of: find.byType(AlbumBlurFlowCanvas),
         matching: find.byType(AlbumFlowBackground),
       ),
     );

@@ -144,7 +144,7 @@ void main() {
                   ),
                 ),
                 Expanded(
-                  child: AppAlbumBackdrop(
+                  child: AlbumBlurFlowCanvas(
                     track: current,
                     mode: AppBackgroundMode.nowPlayingDynamic,
                     uiAlpha: 0,

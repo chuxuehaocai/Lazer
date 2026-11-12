@@ -296,14 +296,14 @@ void main() {
           ),
         ),
       );
-      final original = tester.widget<AppAlbumBackdrop>(
-        find.byType(AppAlbumBackdrop),
+      final original = tester.widget<AlbumBlurFlowCanvas>(
+        find.byType(AlbumBlurFlowCanvas),
       );
       for (var report = 0; report < 100; report++) {
         state.report();
         await tester.pump(const Duration(milliseconds: 20));
         expect(
-          tester.widget<AppAlbumBackdrop>(find.byType(AppAlbumBackdrop)),
+          tester.widget<AlbumBlurFlowCanvas>(find.byType(AlbumBlurFlowCanvas)),
           same(original),
         );
       }
@@ -311,13 +311,13 @@ void main() {
       state.report();
       await tester.pump();
       expect(
-        tester.widget<AppAlbumBackdrop>(find.byType(AppAlbumBackdrop)).track,
+        tester.widget<AlbumBlurFlowCanvas>(find.byType(AlbumBlurFlowCanvas)).track,
         same(_second),
       );
       await state.setDynamicBackgroundQuality(.3);
       await tester.pump();
       expect(
-        tester.widget<AppAlbumBackdrop>(find.byType(AppAlbumBackdrop)).quality,
+        tester.widget<AlbumBlurFlowCanvas>(find.byType(AlbumBlurFlowCanvas)).quality,
         .3,
       );
       state.playerPresented.value = true;
@@ -325,7 +325,7 @@ void main() {
       final tickerMode = tester.widget<TickerMode>(
         find
             .ancestor(
-              of: find.byType(AppAlbumBackdrop),
+              of: find.byType(AlbumBlurFlowCanvas),
               matching: find.byType(TickerMode),
             )
             .first,

@@ -11,12 +11,12 @@ import '../theme/adaptive_contrast.dart';
 
 /// The immersive player canvas: album-colour flow + a real, heavily blurred
 /// cover bloom + Apple Music's dark vignette.
-class AlbumBlurFlow extends StatefulWidget {
-  const AlbumBlurFlow({
+class AlbumBlurFlowCanvas extends StatefulWidget {
+  const AlbumBlurFlowCanvas({
     super.key,
     required this.track,
     required this.mode,
-    required this.pageColor,
+    this.pageColor = Colors.transparent,
     this.animationsEnabled = true,
     this.quality = kDynamicBackgroundQualityDefault,
     this.preview = false,
@@ -25,14 +25,24 @@ class AlbumBlurFlow extends StatefulWidget {
     this.frameRate,
     this.solidColor,
     this.imagePath,
+    this.uiAlpha = 0.7,
+    this.imageAlignmentX = 0,
+    this.imageAlignmentY = 0,
+    this.imageScale = 1,
+    this.blurSigma = 0,
     this.paletteLoader = albumPaletteForCover,
   });
 
   final Track? track;
-  final ValueChanged<Color?>? onSeed;
+  final ValueChanged<Color>? onSeed;
   final double? frameRate;
   final Color? solidColor;
   final String? imagePath;
+  final double uiAlpha;
+  final double imageAlignmentX;
+  final double imageAlignmentY;
+  final double imageScale;
+  final double blurSigma;
   final AppBackgroundMode mode;
   final Color pageColor;
   final bool animationsEnabled;
@@ -52,11 +62,79 @@ class AlbumBlurFlow extends StatefulWidget {
   final AlbumPaletteLoader paletteLoader;
 
   @override
-  State<AlbumBlurFlow> createState() => _AlbumBlurFlowState();
+  State<AlbumBlurFlowCanvas> createState() => _AlbumBlurFlowCanvasState();
 }
 
-class _AlbumBlurFlowState extends State<AlbumBlurFlow>
-    with BuildSafeState<AlbumBlurFlow> {
+
+/// Public player background surface. Browse uses [AlbumBlurFlowCanvas] directly
+/// so a shell can keep one player surface and one browse surface without
+/// confusing widget identity or palette lifetimes.
+class AlbumBlurFlow extends StatelessWidget {
+  const AlbumBlurFlow({
+    super.key,
+    required this.track,
+    required this.mode,
+    required this.pageColor,
+    this.animationsEnabled = true,
+    this.quality = kDynamicBackgroundQualityDefault,
+    this.preview = false,
+    this.boundaryKey,
+    this.onSeed,
+    this.frameRate,
+    this.solidColor,
+    this.imagePath,
+    this.uiAlpha = .7,
+    this.imageAlignmentX = 0,
+    this.imageAlignmentY = 0,
+    this.imageScale = 1,
+    this.blurSigma = 0,
+    this.paletteLoader = albumPaletteForCover,
+  });
+
+  final Track? track;
+  final AppBackgroundMode mode;
+  final Color pageColor;
+  final bool animationsEnabled;
+  final double quality;
+  final bool preview;
+  final Key? boundaryKey;
+  final ValueChanged<Color?>? onSeed;
+  final double? frameRate;
+  final Color? solidColor;
+  final String? imagePath;
+  final double uiAlpha;
+  final double imageAlignmentX;
+  final double imageAlignmentY;
+  final double imageScale;
+  final double blurSigma;
+  final AlbumPaletteLoader paletteLoader;
+
+  @override
+  Widget build(BuildContext context) => AlbumBlurFlowCanvas(
+    track: track,
+    mode: mode,
+    pageColor: pageColor,
+    animationsEnabled: animationsEnabled,
+    quality: quality,
+    preview: preview,
+    boundaryKey: boundaryKey,
+    onSeed: onSeed == null
+        ? null
+        : (Color color) => onSeed!(color),
+    frameRate: frameRate,
+    solidColor: solidColor,
+    imagePath: imagePath,
+    uiAlpha: uiAlpha,
+    imageAlignmentX: imageAlignmentX,
+    imageAlignmentY: imageAlignmentY,
+    imageScale: imageScale,
+    blurSigma: blurSigma,
+    paletteLoader: paletteLoader,
+  );
+}
+
+class _AlbumBlurFlowCanvasState extends State<AlbumBlurFlowCanvas>
+    with BuildSafeState<AlbumBlurFlowCanvas> {
   List<Color> _colors = albumFlowColors(kAlbumDefaultSeed);
   int _generation = 0;
 
@@ -67,7 +145,7 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow>
   }
 
   @override
-  void didUpdateWidget(covariant AlbumBlurFlow oldWidget) {
+  void didUpdateWidget(covariant AlbumBlurFlowCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.track?.id != widget.track?.id ||
         oldWidget.track?.coverUrl != widget.track?.coverUrl) {
@@ -83,15 +161,19 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow>
     final cached = widget.paletteLoader == albumPaletteForCover
         ? cachedAlbumPaletteForCover(coverUrl)
         : null;
-    _colors =
-        cached?.mesh ??
-        albumFlowColors(albumFallbackSeedForTrack(widget.track));
+    final List<Color> fallback =
+        cached?.mesh ?? albumFlowColors(albumFallbackSeedForTrack(widget.track));
+    if (mounted) {
+      setState(() => _colors = fallback);
+    } else {
+      _colors = fallback;
+    }
     final AlbumCoverPalette? palette = await albumPaletteForCoverWhenReady(
       widget.paletteLoader,
       coverUrl,
     );
     if (!mounted || generation != _generation) return;
-    widget.onSeed?.call(palette?.seed);
+    widget.onSeed?.call(palette?.seed ?? kAlbumDefaultSeed);
     if (palette != null && !identical(_colors, palette.mesh)) {
       setState(() => _colors = palette.mesh);
       MotionSnapshot.invalidate(context);
@@ -120,9 +202,14 @@ class _AlbumBlurFlowState extends State<AlbumBlurFlow>
               CustomImageBackdrop(
                 path: widget.imagePath,
                 pageColor: widget.pageColor,
+                alignmentX: widget.imageAlignmentX,
+                alignmentY: widget.imageAlignmentY,
+                scale: widget.imageScale,
+                blurSigma: widget.blurSigma,
               )
             else if (widget.mode != AppBackgroundMode.off)
               AlbumFlowBackground(
+                key: ValueKey<String?>(widget.track?.id),
                 colors: _colors,
                 animated:
                     widget.animationsEnabled &&

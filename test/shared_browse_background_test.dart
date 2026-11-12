@@ -36,12 +36,12 @@ void main() {
         ),
       );
       await tester.pump();
-      final original = tester.element(find.byType(AppAlbumBackdrop));
+      final original = tester.element(find.byType(AlbumBlurFlowCanvas));
       bool running() => tester
           .widget<TickerMode>(
             find
                 .ancestor(
-                  of: find.byType(AppAlbumBackdrop),
+                  of: find.byType(AlbumBlurFlowCanvas),
                   matching: find.byType(TickerMode),
                 )
                 .first,
@@ -76,9 +76,9 @@ void main() {
         expect(albumFlowRenderer.debugFrameBuilds, greaterThan(frames));
         await tester.pump(const Duration(seconds: 2));
         await tester.pump();
-        expect(find.byType(AppAlbumBackdrop), findsOneWidget);
+        expect(find.byType(AlbumBlurFlowCanvas), findsOneWidget);
         expect(
-          identical(tester.element(find.byType(AppAlbumBackdrop)), original),
+          identical(tester.element(find.byType(AlbumBlurFlowCanvas)), original),
           isTrue,
         );
         expect(navigation.rootVisible.value, isFalse);

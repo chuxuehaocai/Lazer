@@ -18,6 +18,9 @@ class SystemWidgetsBridge {
       // Native widgets are optional on desktop and on older app installs.
     } on PlatformException {
       // A widget update must never affect playback or statistics persistence.
+    } catch (_) {
+      // Tests and early startup can invoke this before the Flutter binding has
+      // a binary messenger. Widgets remain optional in that phase.
     }
   }
 }
