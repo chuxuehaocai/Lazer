@@ -119,7 +119,7 @@ end
 | `radio` | `radio({kind,seed,playlist,limit})`；kind 为 `personal`、`heart` 或 `artist`，返回歌曲数组 |
 | `charts` | `charts` 返回排行榜的歌单模型，歌曲通过 `playlistSongs` 分页取得 |
 | `comments` | `comments({id,limit,offset})` 返回 `{hot,latest,total,hasMore}`；`setCommentLiked({id,commentId,liked})` 设置点赞 |
-| `listenTogether` | `listenTogether({operation,...})` 支持 `create/join/status/leave/heartbeat/command`，返回 `{roomId,inviterId,members}` |
+| `listenTogether` | `listenTogether({operation,...})` 支持 `create/createMulti/join/status/leave/heartbeat/command`，以及可选的 `syncPlaylist/syncList`；返回 `{roomId,inviterId,members}` |
 
 `artistSongs({id,limit,offset})` 返回歌手歌曲当前页。评论使用字符串 ID：
 `{id,content,author,authorId,avatarUrl,time,location,liked,likedCount,replies}`，
@@ -135,8 +135,9 @@ end
 | operation | 参数 | 说明 |
 | --- | --- | --- |
 | `create` | 无 | 创建房间，返回 `roomId`、`inviterId` |
+| `createMulti` | `songId`、`playedTime`、`nextSongIds` | 可选，用当前曲目建房；没有 `songId` 时按 `create` 处理 |
 | `join` | `roomId`、`inviterId` | 接受邀请 |
-| `status` | `roomId` | 查询房间状态与成员 |
+| `status` | `roomId` | 查询房间状态与成员；不带 `roomId` 时取当前账号仍在的房间 |
 | `leave` | `roomId` | 结束或退出房间 |
 | `heartbeat` | `roomId`、`songId`、`playStatus`、`progress` | 每 5 秒一次；`playStatus` 为 `PLAY`/`PAUSE`，`progress` 为毫秒 |
 | `command` | `roomId`、`command` | 播放指令：`{clientSeq,commandType,formerSongId,playStatus,progress,targetSongId,triggerType}` |
