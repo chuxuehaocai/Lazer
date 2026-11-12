@@ -29,6 +29,7 @@ import '../network/network_sources_controller.dart';
 import '../scrolling/scroll_motion.dart';
 import '../l10n/app_language.dart';
 import '../data/models.dart';
+import '../data/track_transition.dart';
 import '../gateway/gateway.dart';
 import '../lyrics/imported_lyrics_store.dart';
 import '../listening/listening_statistics.dart';
@@ -170,7 +171,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        _shuffleOrder = ShuffleOrder(random: shuffleRandom) {
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
     this.pluginManager.afterChange = _musicPlatforms.synchronizePlugins;
-    _autoMixEnabled = autoMixEnabled;
+    _trackTransition = TrackTransition.fromAutoMix(autoMixEnabled);
     MotionTiming.speed = animationSpeed;
     if (deviceIsWatch) {
       backgroundMode = AppBackgroundMode.nowPlayingStatic;
@@ -459,36 +460,58 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await prefs.setBool('lazer_skip_unavailable_songs', skipUnavailableSongs);
   }
 
-  /// Overlaps a prepared next song in the selected audio engine.
-  bool _autoMixEnabled = false;
-  bool get autoMixEnabled => _autoMixEnabled;
+  /// How the current song hands over to the next one in the queue.
+  TrackTransition _trackTransition = TrackTransition.albumGapless;
+  TrackTransition get trackTransition => _trackTransition;
+
+  /// Whether AutoMix replaces album gapless playback.
+  bool get autoMixEnabled => _trackTransition.mixes;
+
+  /// Subtitle of the settings row; an engine that refused the mode wins, so the
+  /// listener is told why the choice did not stick.
+  String get trackTransitionDetail => autoMixError ?? _trackTransition.detail;
+
   String? autoMixError;
   Future<void> _autoMixOperations = Future<void>.value();
 
-  Future<void> setAutoMixEnabled(bool value) {
+  Future<void> setAutoMixEnabled(bool value) =>
+      setTrackTransition(TrackTransition.fromAutoMix(value));
+
+  Future<void> setTrackTransition(TrackTransition value) {
     final result = _autoMixOperations.then((_) async {
-      if (_autoMixEnabled == value && autoMixError == null) return;
+      if (_trackTransition == value && autoMixError == null) return;
       final engine = audioEngine;
       final resumeAt = precisePosition;
       try {
         if (engine is AutoMixConfigurableAudioEngine) {
           await (engine as AutoMixConfigurableAudioEngine).setAutoMixEnabled(
-            value,
+            value.mixes,
           );
         }
-        _autoMixEnabled = value;
+        _trackTransition = value;
         autoMixError = null;
-        // Switching between passthrough/integer and mixed PCM requires the
-        // native decoder to reopen, using the same engine and output device.
-        if (engine != null &&
-            isNativeAudioEngine(engine) &&
-            _realActive &&
-            current != null) {
-          await _startAudio(resumeAt: resumeAt);
+        if (engine != null && _realActive && current != null) {
+          if (isNativeAudioEngine(engine)) {
+            // Switching between passthrough/integer and mixed PCM requires the
+            // native decoder to reopen, using the same engine and output device.
+            await _startAudio(resumeAt: resumeAt);
+          } else if (!autoMixEnabled &&
+              _engineHoldsSuccessor &&
+              !nextTrackContinuesAlbum) {
+            // AutoMix prepared a song from another album; album gapless playback
+            // must cut into it instead of crossing, and only reopening the
+            // current source takes a successor back from the engine.
+            await _startAudio(resumeAt: resumeAt);
+          } else {
+            // The successor already held fits the new policy (or AutoMix has to
+            // prepare one it refused before), so the queue script is redone
+            // without interrupting the song.
+            unawaited(_prefetchNext());
+          }
         }
         await (await SharedPreferences.getInstance()).setBool(
           'lazer_automix_enabled',
-          value,
+          value.mixes,
         );
       } catch (_) {
         autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
@@ -1699,14 +1722,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           prefs.getBool('lazer_independent_playback') ?? _independentPlayback;
       skipUnavailableSongs =
           prefs.getBool('lazer_skip_unavailable_songs') ?? skipUnavailableSongs;
-      _autoMixEnabled =
-          prefs.getBool('lazer_automix_enabled') ?? _autoMixEnabled;
+      _trackTransition = TrackTransition.fromAutoMix(
+        prefs.getBool('lazer_automix_enabled') ?? autoMixEnabled,
+      );
       if (audioEngine is AutoMixConfigurableAudioEngine) {
         try {
-          await (audioEngine as AutoMixConfigurableAudioEngine)
-              .setAutoMixEnabled(_autoMixEnabled);
+          await (audioEngine as AutoMixConfigurableAudioEngine).setAutoMixEnabled(
+            autoMixEnabled,
+          );
         } catch (_) {
-          _autoMixEnabled = false;
+          _trackTransition = TrackTransition.albumGapless;
           autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
         }
       }
@@ -2507,6 +2532,25 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queuedNextIndex = null;
     _queuedNextUrl = null;
     _queuedNextAt = null;
+  }
+
+  /// Whether the queue entry after the current song continues the same album.
+  ///
+  /// This is what album gapless playback crosses without a reload; a different
+  /// album is a normal track change.
+  bool get nextTrackContinuesAlbum {
+    final int? next = _autoAdvanceIndex();
+    return next != null && _continuesAlbum(next);
+  }
+
+  /// Whether the engine really holds the following song for a gapless hand-off.
+  bool get successorPrepared => _engineHoldsSuccessor;
+
+  /// Whether queue entry [next] runs straight on from the current album.
+  bool _continuesAlbum(int next) {
+    final Track? playing = current;
+    if (playing == null || next < 0 || next >= _queue.length) return false;
+    return playing.continuesInto(_queue[next]);
   }
 
   /// Whether the engine really has a successor prepared to cross into.
@@ -3374,7 +3418,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _shuffle = !_shuffle;
     _shuffleOrder.reset();
     _savePlayMode();
-    _refreshAutoMixQueue();
+    _refreshQueueSuccessor();
     notifyListeners();
   }
 
@@ -3394,7 +3438,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _shuffle = true;
     }
     _savePlayMode();
-    _refreshAutoMixQueue();
+    _refreshQueueSuccessor();
     notifyListeners();
   }
 
@@ -3405,11 +3449,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       LoopMode.one => LoopMode.off,
     };
     _savePlayMode();
-    _refreshAutoMixQueue();
+    _refreshQueueSuccessor();
     notifyListeners();
   }
 
-  void _refreshAutoMixQueue() {
+  void _refreshQueueSuccessor() {
     // A prepared decoder belongs to the old play mode. Rebuild from the current
     // playhead so repeat/shuffle changes cannot mix the wrong successor.
     if (_realActive && current != null && _queueEngine != null) {
@@ -4000,6 +4044,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final int generation = ++_prefetchGeneration;
     final int? next = _autoAdvanceIndex();
     if (next == null) {
+      _clearQueuedNext();
+      return;
+    }
+    // Album gapless playback only hands the engine a song that continues the
+    // album being heard. A different album is started by the normal load, which
+    // is also what keeps the queue index and the audible song in step across
+    // that cut. AutoMix replaces the policy and prepares whatever follows.
+    if (!autoMixEnabled && !_continuesAlbum(next)) {
       _clearQueuedNext();
       return;
     }

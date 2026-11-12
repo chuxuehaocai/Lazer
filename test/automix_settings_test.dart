@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/audio/automix_audio_engine.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
+import 'package:lazer_nextgen/data/track_transition.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
 void main() {
@@ -33,8 +34,10 @@ void main() {
     final AppState state = AppState(catalog: Catalog());
     addTearDown(state.dispose);
     expect(state.autoMixEnabled, isFalse);
+    expect(state.trackTransition, TrackTransition.albumGapless);
     await state.setAutoMixEnabled(true);
     expect(state.autoMixEnabled, isTrue);
+    expect(state.trackTransition, TrackTransition.autoMix);
     expect(
       (await SharedPreferences.getInstance()).getBool('lazer_automix_enabled'),
       isTrue,
@@ -44,5 +47,6 @@ void main() {
     addTearDown(restored.dispose);
     await restored.bootstrap();
     expect(restored.autoMixEnabled, isTrue);
+    expect(restored.trackTransition, TrackTransition.autoMix);
   });
 }

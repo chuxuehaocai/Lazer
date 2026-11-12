@@ -6,6 +6,7 @@ import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
+import 'package:lazer_nextgen/data/track_transition.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -132,6 +133,13 @@ class _MixQueueEngine extends _Engine
     _successor = null;
   }
 
+  /// The engine crossed into its queued successor by itself, without an overlap:
+  /// a gapless hand-off inside an album.
+  void crossIntoNext() {
+    _successor = null;
+    indexes.add(1);
+  }
+
   @override
   void dispose() {
     unawaited(indexes.close());
@@ -155,13 +163,23 @@ class _Catalog extends Catalog {
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();
 }
 
-Track _track(String id) => Track(
+Track _track(
+  String id, {
+  String album = 'Album',
+  String artist = 'Artist',
+  int albumId = 0,
+  String? albumKey,
+  String? localPath,
+}) => Track(
   id: id,
   title: 'Track $id',
-  artist: 'Artist',
-  album: 'Album',
+  artist: artist,
+  album: album,
   duration: const Duration(minutes: 3),
   coverSeed: 1,
+  albumId: albumId,
+  albumKey: albumKey,
+  localPath: localPath,
 );
 
 void main() {
@@ -418,6 +436,155 @@ void main() {
     expect(engine.prepared.last, 'url-1');
     expect(state.current?.id, '1');
     expect(engine.position, const Duration(seconds: 40));
+    expect(state.playing, isTrue);
+    state.dispose();
+  });
+
+  test('album identity follows the catalogue, then the tags', () {
+    expect(
+      _track('a', albumId: 7).continuesInto(_track('b', albumId: 7)),
+      isTrue,
+    );
+    expect(
+      _track('a', albumId: 7).continuesInto(_track('b', albumId: 8)),
+      isFalse,
+    );
+    expect(
+      _track(
+        'a',
+        albumKey: 'netmusic:user:album:12',
+      ).continuesInto(_track('b', albumKey: 'netmusic:user:album:12')),
+      isTrue,
+    );
+    // A downloaded file keeps the album of the release it came from, so the
+    // catalogue identity still decides.
+    expect(
+      _track('a', albumId: 7).continuesInto(
+        _track('b', albumId: 7, localPath: '/music/b.flac'),
+      ),
+      isTrue,
+    );
+    // A scanned file only kept the tags: album name and performer stand in.
+    expect(
+      _track('a', album: 'Kind of Blue', artist: 'Miles Davis').continuesInto(
+        _track('b', album: 'Kind of Blue', artist: 'Miles Davis'),
+      ),
+      isTrue,
+    );
+    expect(
+      _track('a', album: 'Kind of Blue', artist: 'Miles Davis').continuesInto(
+        _track('b', album: 'Kind of Blue', artist: 'Bill Evans'),
+      ),
+      isFalse,
+    );
+    // Untagged files would otherwise all count as one album.
+    expect(
+      _track('a', album: Track.unknownAlbum).continuesInto(
+        _track('b', album: Track.unknownAlbum),
+      ),
+      isFalse,
+    );
+    // One known and one unknown album never share an identity.
+    expect(
+      _track('a', albumId: 7).continuesInto(
+        _track('b', album: 'Kind of Blue', artist: 'Miles Davis'),
+      ),
+      isFalse,
+    );
+    expect(_track('a', albumId: 7).continuesInto(null), isFalse);
+  });
+
+  testWidgets('album gapless playback prepares only the next song of the album', (
+    tester,
+  ) async {
+    final engine = _MixQueueEngine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    addTearDown(engine.dispose);
+    state.playQueue(<Track>[
+      _track('1', albumId: 7),
+      _track('2', albumId: 7),
+      _track('3', albumId: 9),
+    ]);
+    await tester.pump();
+
+    expect(state.trackTransition, TrackTransition.albumGapless);
+    expect(state.nextTrackContinuesAlbum, isTrue);
+    expect(state.successorPrepared, isTrue);
+    expect(engine.prepared, <String>['url-2']);
+
+    // The engine runs join to join inside the album: no reload, no gap.
+    engine.crossIntoNext();
+    await tester.pump();
+    expect(state.current?.id, '2');
+    expect(engine.queueLoads, <String>['url-1']);
+
+    // The following song is another album, so the engine is given nothing to
+    // cross into and the queue advances by loading it.
+    expect(state.nextTrackContinuesAlbum, isFalse);
+    expect(state.successorPrepared, isFalse);
+    expect(engine.prepared, <String>['url-2']);
+
+    engine.completions.add(null);
+    await tester.pump();
+    expect(state.current?.id, '3');
+    expect(engine.queueLoads, <String>['url-1', 'url-3']);
+    expect(state.playing, isTrue);
+    state.dispose();
+  });
+
+  testWidgets('AutoMix replaces album gapless playback across albums', (
+    tester,
+  ) async {
+    final engine = _MixQueueEngine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      autoMixEnabled: true,
+    );
+    addTearDown(engine.dispose);
+    state.playQueue(<Track>[
+      _track('1', albumId: 7),
+      _track('2', albumId: 7),
+      _track('3', albumId: 9),
+    ]);
+    await tester.pump();
+    expect(state.trackTransition, TrackTransition.autoMix);
+    expect(engine.prepared, <String>['url-2']);
+
+    engine.crossIntoNext();
+    await tester.pump();
+
+    expect(state.current?.id, '2');
+    // AutoMix keeps the hand-off going even though the next song belongs to
+    // another album: that is what it replaces album gapless playback with.
+    expect(state.nextTrackContinuesAlbum, isFalse);
+    expect(engine.prepared, <String>['url-2', 'url-3']);
+    state.dispose();
+  });
+
+  testWidgets('leaving AutoMix takes back a successor from another album', (
+    tester,
+  ) async {
+    final engine = _MixQueueEngine();
+    final state = AppState(
+      catalog: _Catalog(),
+      audioEngine: engine,
+      autoMixEnabled: true,
+    );
+    addTearDown(engine.dispose);
+    state.playQueue(<Track>[_track('1', albumId: 7), _track('2', albumId: 9)]);
+    await tester.pump();
+    expect(engine.prepared, <String>['url-2']);
+
+    await state.setAutoMixEnabled(false);
+    await tester.pump();
+
+    expect(state.trackTransition, TrackTransition.albumGapless);
+    // Only reopening the source takes a prepared successor back from the engine,
+    // and the boundary then cuts as a different album should.
+    expect(engine.queueLoads, <String>['url-1', 'url-1']);
+    expect(engine.queuedSourceUrl, isNull);
+    expect(state.successorPrepared, isFalse);
     expect(state.playing, isTrue);
     state.dispose();
   });
