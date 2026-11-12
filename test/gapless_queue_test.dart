@@ -1,5 +1,6 @@
 import 'support/music_gateway.dart';
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart' show Colors;
@@ -187,6 +188,21 @@ class _Catalog extends Catalog {
   Future<GatewayLyrics?> lyricsFor(Track track) async => const GatewayLyrics();
 }
 
+class _FlakyCatalog extends _Catalog {
+  int resolves = 0;
+
+  @override
+  Future<String?> audioUrlFor(
+    Track track, {
+    AudioQuality quality = AudioQuality.exhigh,
+    bool Function()? isCancelled,
+  }) async {
+    resolves++;
+    if (resolves == 1) throw const SocketException('temporary network miss');
+    return super.audioUrlFor(track, quality: quality, isCancelled: isCancelled);
+  }
+}
+
 Track _track(String id) => Track(
   id: id,
   title: 'Track $id',
@@ -229,6 +245,23 @@ void main() {
       await tester.pump();
     },
   );
+
+  testWidgets('a transient source resolve retries before showing an error', (
+    tester,
+  ) async {
+    final _FlakyCatalog catalog = _FlakyCatalog();
+    final state = AppState(catalog: catalog, audioEngine: _PlainEngine());
+    addTearDown(state.dispose);
+
+    state.playQueue(<Track>[_track('retry')]);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(catalog.resolves, 2);
+    expect(state.playbackError, isNull);
+    expect(state.playing, isTrue);
+    state.pause();
+  });
 
   testWidgets(
     'shuffle Previous follows history and Next resumes the shuffled round',

@@ -46,6 +46,7 @@ class _CachedCatalog extends Catalog {
   final List<Completer<UserCollections>> collectionRequests =
       <Completer<UserCollections>>[];
   final Completer<List<Track>> liveTracks = Completer<List<Track>>();
+  int livePageCalls = 0;
   int userCollectionCalls = 0;
 
   @override
@@ -70,6 +71,7 @@ class _CachedCatalog extends Catalog {
 
   @override
   Stream<List<Track>> playlistTrackPages(String id) async* {
+    livePageCalls++;
     yield await playlistTracks(id);
   }
 
@@ -277,6 +279,38 @@ void main() {
     expect(find.text('Fresh song'), findsOneWidget);
     expect(find.text('Stored song'), findsNothing);
   });
+
+  testWidgets(
+    'a playlist retries its cloud read after returning from background',
+    (tester) async {
+      final _CachedCatalog catalog = _CachedCatalog();
+      final AppState state = AppState(catalog: catalog);
+      addTearDown(state.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppleTheme(),
+          home: Scaffold(
+            body: AppPlaylistPage(
+              state: state,
+              playlist: _playlist('12', 'Playlist fixture'),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(catalog.livePageCalls, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(catalog.livePageCalls, 2);
+
+      catalog.liveTracks.complete(<Track>[_track('fresh', 'Fresh song')]);
+      await tester.pump();
+      expect(find.text('Fresh song'), findsOneWidget);
+    },
+  );
 
   testWidgets('switching playlists ignores an older live response', (
     tester,

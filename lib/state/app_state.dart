@@ -3535,11 +3535,34 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }) async {
     _streamResolves++;
     try {
-      return await _trackUrl(track, stillCurrent: stillCurrent);
+      for (var attempt = 0; ; attempt++) {
+        try {
+          return await _trackUrl(track, stillCurrent: stillCurrent);
+        } catch (error) {
+          final bool current = stillCurrent?.call() ?? true;
+          if (!current || attempt != 0 || !_retryableStreamResolve(error)) {
+            rethrow;
+          }
+          // A signed URL/plugin request can fail while the app is switching
+          // routes or waking from the background. Give the provider a brief
+          // chance to recover before surfacing a playback error.
+          await Future<void>.delayed(const Duration(milliseconds: 180));
+        }
+      }
     } finally {
       _streamResolves--;
       if (_streamResolves == 0 && _playUploads.isNotEmpty) _schedulePlayFlush();
     }
+  }
+
+  static bool _retryableStreamResolve(Object error) {
+    if (error is MusicGatewayException) {
+      return !error.authenticationFailure &&
+          !Catalog.isRateLimited(error) &&
+          error.code != 70;
+    }
+    if (error is PluginException) return true;
+    return error is SocketException || error is TimeoutException;
   }
 
   /// Loads the stream URL. A locked or unavailable song stops playback and
@@ -3573,6 +3596,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<void> _startAudioImpl({
     Duration? resumeAt,
     bool recovering = false,
+    bool retrying = false,
   }) async {
     _sampleListening();
     ++_listeningRevision;
@@ -3667,6 +3691,28 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         _position = reached ? resumeAt : Duration.zero;
       }
     } catch (error) {
+      final bool retryable =
+          _retryableStreamResolve(error) || error is StateError;
+      if (generation == _generation && !retrying && retryable) {
+        // Opening a freshly resolved URL can still fail once when the CDN or
+        // decoder is waking up from the background. Re-resolve and reopen one
+        // time before turning that transient miss into a visible error.
+        try {
+          await engine.stop();
+        } catch (_) {
+          // The failed open may already have released the decoder.
+        }
+        if (error is! StateError) {
+          await Future<void>.delayed(const Duration(milliseconds: 180));
+        }
+        if (generation != _generation || _presentationDisposed) return;
+        await _startAudioImpl(
+          resumeAt: resumeAt,
+          recovering: recovering,
+          retrying: true,
+        );
+        return;
+      }
       if (generation == _generation) _failPlayback('音频加载失败，请重试。');
       return;
     }

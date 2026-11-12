@@ -92,7 +92,7 @@ class AppPlaylistPage extends StatefulWidget {
 }
 
 class _AppPlaylistPageState extends State<AppPlaylistPage>
-    with BuildSafeState<AppPlaylistPage> {
+    with BuildSafeState<AppPlaylistPage>, WidgetsBindingObserver {
   final ScrollController _scroll = ScrollController();
   final GlobalKey _headerKey = GlobalKey();
   final ValueNotifier<bool> _showLocate = BuildSafeValueNotifier<bool>(false);
@@ -108,12 +108,14 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
   String? _rowIndexTrackId;
   int _rowIndexCache = -1;
   int _requestSerial = 0;
+  bool _refreshOnResume = false;
   bool _selecting = false;
   final Set<String> _selected = <String>{};
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_scheduleLocateRefresh);
     widget.state.addListener(_scheduleLocateRefresh);
     unawaited(_load());
@@ -158,11 +160,26 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scroll.removeListener(_scheduleLocateRefresh);
     widget.state.removeListener(_scheduleLocateRefresh);
     _showLocate.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _refreshOnResume = true;
+      return;
+    }
+    if (!_refreshOnResume || !mounted) return;
+    _refreshOnResume = false;
+    // A request that was in flight while the app was backgrounded can be left
+    // behind by the platform/network stack. Start a new generation on resume;
+    // _load's serial makes any late page from the old request harmless.
+    unawaited(_load(force: true));
   }
 
   Future<void> _load({bool force = false}) async {
