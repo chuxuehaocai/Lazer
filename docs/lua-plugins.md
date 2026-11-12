@@ -126,6 +126,32 @@ end
 其中回复为 `{author,content}`，时间为 Unix 毫秒。一起听成员为
 `{userId,name,avatarUrl}`，所有远程 ID 都应当视作不透明字符串。
 
+### 一起听
+
+一起听是可选能力，是否支持由插件决定：只有在清单或 `describe` 的 `capabilities` 里声明
+`listenTogether` 的平台才会出现「创建一起听」入口，没有声明的旧插件行为完全不变。
+客户端只做房间状态与心跳，不解析任何平台字段。
+
+| operation | 参数 | 说明 |
+| --- | --- | --- |
+| `create` | 无 | 创建房间，返回 `roomId`、`inviterId` |
+| `join` | `roomId`、`inviterId` | 接受邀请 |
+| `status` | `roomId` | 查询房间状态与成员 |
+| `leave` | `roomId` | 结束或退出房间 |
+| `heartbeat` | `roomId`、`songId`、`playStatus`、`progress` | 每 5 秒一次；`playStatus` 为 `PLAY`/`PAUSE`，`progress` 为毫秒 |
+| `command` | `roomId`、`command` | 播放指令：`{clientSeq,commandType,formerSongId,playStatus,progress,targetSongId,triggerType}` |
+| `syncPlaylist` | `roomId` | 可选，读取房间队列 |
+| `syncList` | `roomId`、`playlistParam` | 可选，上报房间队列变化 |
+
+返回值使用 `{roomId,inviterId,members}`，成员为 `{userId,name,avatarUrl}`；也可以返回
+`users` 或 `participants`，字段名可用 `uid`、`nickname`、`avatar`。返回 `code` 时非 200
+表示失败。`command` 里的账号标识由插件补全，客户端只给出通用字段。
+
+兼容性：旧插件可以只实现 `create/join/status/leave/heartbeat/command`，返回值也可以不带
+`code`；客户端把缺失的 `code` 当作成功，成员列表为空时保留上一次结果。反过来，新插件
+跑在旧客户端上也只会收到这六个操作。能力名不区分大小写与分隔符，`listenTogether`、
+`listen_together` 和 `listen-together` 等价；`describe` 没有给出 `capabilities` 时沿用清单。
+
 `session` 和登录结果可附带 `signature`、`membership`，供客户端展示资料与会员名称。
 可选认证能力 `exportCookie` 启用用户主动导出入口；对应操作返回当前平台 Cookie 字符串。
 没有声明该能力时，客户端不会提供导出入口。

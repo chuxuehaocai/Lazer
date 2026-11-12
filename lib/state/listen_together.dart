@@ -94,23 +94,34 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     error = null;
     _notify();
     try {
-      final Map<String, dynamic> body = await _selectedOwner.listenTogether('create');
+      final Map<String, dynamic> body = await _selectedOwner.listenTogether(
+        'create',
+      );
       final Map<String, dynamic> data = _dataOf(body);
+      // A plugin that predates the room protocol answers with a bare room
+      // object, so a missing `code` still means success; only an explicit
+      // failure code or a missing room id rejects the room.
+      final int code = (body['code'] as num?)?.toInt() ?? 200;
       final String id = '${data['roomId'] ?? data['roomid'] ?? ''}'.trim();
-      if (id.isEmpty) {
+      if (code != 200 || id.isEmpty) {
         error = '创建一起听房间失败，请稍后重试。'; // i18n:key
         return false;
       }
       _roomOwner = _selectedOwner;
       roomId = id;
       inviterId =
-          '${data['inviterId'] ?? _owner.user?.id.value ?? ''}';
+          '${data['inviterId'] ?? data['userId'] ?? _selectedOwner.user?.id.value ?? ''}';
       active = true;
       members = _membersOf(body);
       _startHeartbeat();
       _primePlayback();
       _sendPlayCommand(state.playing ? 'PLAY' : 'PAUSE');
       return true;
+    } on MusicGatewayException catch (failure) {
+      error = failure.authenticationFailure
+          ? '请先登录后再一起听' // i18n:key
+          : '创建一起听房间失败，请稍后重试。'; // i18n:key
+      return false;
     } catch (_) {
       error = '创建一起听房间失败，请稍后重试。'; // i18n:key
       return false;
@@ -153,6 +164,11 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
       // against which the next local pause/seek/track change is compared.
       _primePlayback();
       return true;
+    } on MusicGatewayException catch (failure) {
+      error = failure.authenticationFailure
+          ? '请先登录后再一起听' // i18n:key
+          : '加入一起听失败，请检查邀请码。'; // i18n:key
+      return false;
     } catch (_) {
       error = '加入一起听失败，请检查邀请码。'; // i18n:key
       return false;
@@ -331,20 +347,25 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     return data is Map<String, dynamic> ? data : body;
   }
 
+  /// Reads the roster from a room response.
+  ///
+  /// Gateways name the list and its fields differently (`members`/`users`/
+  /// `participants`, `userId`/`uid`, `nickname`/`userName`), and a plugin may
+  /// answer with any of them; ids stay opaque strings either way.
   static List<ListenTogetherMember> _membersOf(Map<String, dynamic> body) {
     final Map<String, dynamic> data = _dataOf(body);
     final dynamic list =
-        data['members'];
+        data['members'] ?? data['users'] ?? data['participants'];
     if (list is! List) return const <ListenTogetherMember>[];
     final List<ListenTogetherMember> members = <ListenTogetherMember>[];
     for (final item in list.whereType<Map<String, dynamic>>()) {
-      final dynamic rawId = item['userId'];
+      final dynamic rawId = item['userId'] ?? item['uid'];
       if (rawId == null) continue;
       members.add(
         ListenTogetherMember(
           userId: rawId.toString(),
-          name: '${item['name'] ?? ''}',
-          avatarUrl: item['avatarUrl'] as String?,
+          name: '${item['name'] ?? item['nickname'] ?? item['userName'] ?? ''}',
+          avatarUrl: (item['avatarUrl'] ?? item['avatar']) as String?,
         ),
       );
     }

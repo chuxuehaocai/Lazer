@@ -137,19 +137,17 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             provider: MusicProvider(id: providerId, name: name),
             connectionId: plugin.manifest.id,
             authenticationMethods: Set<String>.from(
-              descriptor['auth'] is List ? descriptor['auth'] as List : const [],
+              descriptor['auth'] is List
+                  ? descriptor['auth'] as List
+                  : plugin.manifest.auth,
             ),
             loginHint: descriptor['loginHint'] as String?,
             cookieHint: descriptor['cookieHint'] as String?,
             forgotPasswordUrl: descriptor['forgotPasswordUrl'] as String?,
-            declaredCapabilities: {
-              for (final capabilityName
-                  in descriptor['capabilities'] is List
-                      ? descriptor['capabilities'] as List
-                      : const [])
-                for (final capability in MusicCapability.values)
-                  if (capability.name == capabilityName) capability,
-            },
+            declaredCapabilities: MusicCapability.parseAll(
+              descriptor['capabilities'],
+              fallback: plugin.manifest.capabilities,
+            ),
           ),
         );
       }

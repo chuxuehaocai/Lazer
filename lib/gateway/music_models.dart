@@ -17,7 +17,40 @@ enum MusicCapability {
   listenTogether,
   radio,
   charts,
-  homeFeed,
+  homeFeed;
+
+  /// Reads a capability name out of plugin data.
+  ///
+  /// Capabilities travel as strings in a manifest or a `describe` descriptor,
+  /// so the same feature arrives as `listenTogether` from one plugin and
+  /// `listen_together` from another. Names are compared with separators and
+  /// case folded away; anything unknown is ignored instead of failing the
+  /// whole platform description.
+  static MusicCapability? parse(Object? name) {
+    if (name is! String) return null;
+    final String key = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    if (key.isEmpty) return null;
+    for (final MusicCapability capability in MusicCapability.values) {
+      if (capability.name.toLowerCase() == key) return capability;
+    }
+    return null;
+  }
+
+  /// Declared capabilities for a plugin platform.
+  ///
+  /// A plugin that predates `describe.capabilities` keeps the capabilities it
+  /// shipped in its manifest; a descriptor that lists capabilities overrides
+  /// them so one plugin can narrow what a single platform offers.
+  static Set<MusicCapability> parseAll(
+    Object? declared, {
+    Iterable<String> fallback = const <String>[],
+  }) {
+    final Iterable<Object?> names = declared is List ? declared : fallback;
+    return <MusicCapability>{
+      for (final Object? name in names)
+        if (parse(name) case final MusicCapability capability) capability,
+    };
+  }
 }
 
 class MusicProvider {
