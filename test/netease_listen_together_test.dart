@@ -55,16 +55,21 @@ void main() {
     Platform.environment['LAZER_NCM_PLUGIN'] ??
         p.join(r'E:\projects', 'lazer_ncm', 'netease-cloud'),
   );
+  // Both layouts ship: the flat 1.1 line and the modular 1.2 line.
   final bool present =
       plugin.existsSync() &&
-      File(p.join(plugin.path, 'netease.lua')).existsSync() &&
-      File(p.join(plugin.path, 'main.lua')).existsSync();
+      File(p.join(plugin.path, 'main.lua')).existsSync() &&
+      (File(p.join(plugin.path, 'netease.lua')).existsSync() ||
+          File(p.join(plugin.path, 'ncm', 'social.lua')).existsSync());
 
   test('the shipped plugin speaks the documented room contract', () async {
     final Map<String, String> sources = <String, String>{};
-    for (final FileSystemEntity entity in plugin.listSync()) {
+    for (final FileSystemEntity entity in plugin.listSync(recursive: true)) {
       if (entity is File && entity.path.endsWith('.lua')) {
-        sources[p.basename(entity.path)] = entity.readAsStringSync();
+        final String relative = p
+            .relative(entity.path, from: plugin.path)
+            .replaceAll(r'\', '/');
+        sources[relative] = entity.readAsStringSync();
       }
     }
     final PluginManifest manifest = PluginManifest.decode(
