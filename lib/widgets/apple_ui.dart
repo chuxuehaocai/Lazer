@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../theme/adaptive_contrast.dart';
 import '../theme/font_preferences.dart';
@@ -81,7 +82,7 @@ class ApplePageTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
-    final bool compact = MediaQuery.sizeOf(context).width < 720;
+    final bool compact = MediaQuery.sizeOf(context).width < kTabletBreakpoint;
     final TextStyle style = context.fonts.apply(
       FontCategory.pageTitle,
       (theme.textTheme.displayLarge ?? const TextStyle()).copyWith(

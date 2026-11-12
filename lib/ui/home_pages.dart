@@ -13,6 +13,7 @@ import '../data/catalog.dart';
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
+import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../widgets/app_scroll_behavior.dart';
 import '../widgets/catalog_links.dart';
@@ -147,7 +148,7 @@ class _AppHomePageState extends State<AppHomePage>
         .where((artist) => artist.hasIdentity)
         .firstOrNull;
     final double inset = pageInset(context);
-    final bool compact = MediaQuery.sizeOf(context).width < 720;
+    final bool compact = MediaQuery.sizeOf(context).width < kTabletBreakpoint;
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -507,7 +508,7 @@ class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf>
 
   @override
   Widget build(BuildContext context) {
-    final bool desktop = MediaQuery.sizeOf(context).width >= 720;
+    final bool desktop = MediaQuery.sizeOf(context).width >= kTabletBreakpoint;
     return SizedBox(
       height: widget.height,
       child: Stack(

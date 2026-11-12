@@ -1395,10 +1395,23 @@ class _AppShellState extends State<AppShell>
     return Row(
       children: <Widget>[
         NavigationRail(
+          backgroundColor: apple.glass.withValues(alpha: .92),
+          minWidth: 84,
           selectedIndex: selected,
           onDestinationSelected: (int index) => _select(sections[index]),
           labelType: NavigationRailLabelType.selected,
           groupAlignment: -.82,
+          trailing: Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                _accountButton(apple, radius: 18),
+                const SizedBox(height: 8),
+                _themeToggleButton(),
+              ],
+            ),
+          ),
           leading: Padding(
             padding: const EdgeInsets.only(bottom: 18),
             child: Text(
