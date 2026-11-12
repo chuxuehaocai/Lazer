@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../lyrics/lyric_document.dart';
+import '../lyrics/spacing.dart';
 
 const String kLyricsOverlayKind = 'lazer-lyrics-overlay';
 const String kLyricsOverlayReadyChannel = 'lazer.lyrics.overlay.ready';
@@ -51,6 +52,7 @@ class LyricsOverlaySettings {
     required this.blurEnabled,
     required this.blurIntensity,
     required this.animationSpeed,
+    required this.lineSpacing,
   });
 
   final int lineCount;
@@ -61,6 +63,7 @@ class LyricsOverlaySettings {
   final bool blurEnabled;
   final double blurIntensity;
   final double animationSpeed;
+  final double lineSpacing;
 
   Map<String, Object?> toMap() => <String, Object?>{
     'lineCount': lineCount,
@@ -71,6 +74,7 @@ class LyricsOverlaySettings {
     'blurEnabled': blurEnabled,
     'blurIntensity': blurIntensity,
     'animationSpeed': animationSpeed,
+    'lineSpacing': lineSpacing,
   };
 
   factory LyricsOverlaySettings.fromMap(Map<dynamic, dynamic> map) {
@@ -81,6 +85,9 @@ class LyricsOverlaySettings {
     final num animationSpeed = map['animationSpeed'] is num
         ? map['animationSpeed'] as num
         : 1;
+    final num lineSpacing = map['lineSpacing'] is num
+        ? map['lineSpacing'] as num
+        : kLyricsLineSpacingDefault;
     return LyricsOverlaySettings(
       lineCount: (map['lineCount'] is num ? map['lineCount'] as num : 3)
           .toInt()
@@ -98,6 +105,10 @@ class LyricsOverlaySettings {
           : true,
       blurIntensity: blurIntensity.toDouble().clamp(0.0, 1.0),
       animationSpeed: animationSpeed.toDouble().clamp(0.5, 2.0),
+      lineSpacing: lineSpacing.toDouble().clamp(
+        kLyricsLineSpacingMin,
+        kLyricsLineSpacingMax,
+      ),
     );
   }
 
@@ -111,7 +122,8 @@ class LyricsOverlaySettings {
       fontPath == other.fontPath &&
       blurEnabled == other.blurEnabled &&
       blurIntensity == other.blurIntensity &&
-      animationSpeed == other.animationSpeed;
+      animationSpeed == other.animationSpeed &&
+      lineSpacing == other.lineSpacing;
 
   @override
   int get hashCode => Object.hash(
@@ -123,6 +135,7 @@ class LyricsOverlaySettings {
     blurEnabled,
     blurIntensity,
     animationSpeed,
+    lineSpacing,
   );
 }
 
@@ -224,6 +237,7 @@ class LyricsOverlayPayload {
               blurEnabled: true,
               blurIntensity: 1,
               animationSpeed: 1,
+              lineSpacing: kLyricsLineSpacingDefault,
             ),
       position: Duration(
         milliseconds: map['position'] is num

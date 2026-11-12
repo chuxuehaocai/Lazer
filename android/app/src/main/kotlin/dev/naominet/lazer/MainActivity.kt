@@ -124,6 +124,20 @@ class MainActivity : AudioServiceActivity() {
                 }
                 result.success(openInBrowser(url))
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SYSTEM_WIDGETS_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "updatePlayCount") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val count = (call.argument<Number>("count") ?: 0).toInt().coerceAtLeast(0)
+                getSharedPreferences(PlayCountWidgetProvider.PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putInt(PlayCountWidgetProvider.PLAY_COUNT, count)
+                    .apply()
+                PlayCountWidgetProvider.refresh(this)
+                result.success(null)
+            }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -335,6 +349,7 @@ class MainActivity : AudioServiceActivity() {
         const val LOCAL_MEDIA_CHANNEL = "dev.naominet.lazer/local_media"
         const val TV_CHANNEL = "dev.naominet.lazer/tv"
         const val UPDATES_CHANNEL = "dev.naominet.lazer/updates"
+        const val SYSTEM_WIDGETS_CHANNEL = "dev.naominet.lazer/system_widgets"
         const val TELEVISION_FEATURE = "android.hardware.type.television"
         const val PERMISSION_REQUEST = 4101
         const val STORAGE_REQUEST = 4103

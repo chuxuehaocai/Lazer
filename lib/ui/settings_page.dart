@@ -25,6 +25,7 @@ import '../l10n/app_language.dart';
 import '../l10n/app_localizations.dart';
 import '../scrolling/scroll_motion.dart';
 import '../state/app_state.dart';
+import '../lyrics/spacing.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../widgets/accessible_controls.dart';
@@ -781,6 +782,18 @@ class _SettingsOverview extends StatelessWidget {
                     value: state.lyricBlurEnabled,
                     onChanged: (bool value) =>
                         unawaited(state.setLyricBlurEnabled(value)),
+                  ),
+                  _AppSliderRow(
+                    key: const ValueKey('lyric-line-spacing'),
+                    label: '歌词行间距',
+                    valueText: '${state.lyricLineSpacing.round()} dp',
+                    subtitle: '正在播放和悬浮歌词使用相同的行间距',
+                    value: state.lyricLineSpacing,
+                    min: kLyricsLineSpacingMin,
+                    max: kLyricsLineSpacingMax,
+                    divisions: 24,
+                    onChanged: (double value) =>
+                        unawaited(state.setLyricLineSpacing(value)),
                   ),
                   _AppSliderRow(
                     label: '歌词模糊强度',

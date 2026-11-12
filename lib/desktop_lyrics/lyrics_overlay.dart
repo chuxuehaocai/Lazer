@@ -15,22 +15,33 @@ import '../diagnostics/app_log.dart';
 import '../lyrics/interlude.dart';
 import '../lyrics/line_content.dart';
 import '../lyrics/lyric_document.dart';
+import '../lyrics/spacing.dart';
 import '../lyrics/spring.dart';
 import 'overlay_protocol.dart';
 
 const double _horizontalPadding = 26;
 const double _verticalPadding = 18;
 const double _floatingBottomGap = 72;
-const double _overlayWidth = 640;
+const double _overlayMinWidth = 320;
+const double _overlayDefaultWidth = 420;
+const double _overlayMaxWidth = 760;
 const double _dragHandleWidth = 24;
 const double _dragHandleHeight = 56;
 
 double lyricsOverlaySlotHeight(double fontSize) =>
     (fontSize * 3.0).clamp(48.0, 144.0);
 
+double lyricsOverlaySlotHeightWithSpacing(
+  double fontSize, {
+  double lineSpacing = kLyricsLineSpacingDefault,
+}) => (fontSize * 2.0 + lineSpacing).clamp(48.0, 160.0);
+
 Size lyricsOverlayWindowSize(LyricsOverlayLaunch launch) => Size(
-  _overlayWidth,
-  lyricsOverlaySlotHeight(launch.settings.fontSize) *
+  _overlayDefaultWidth,
+  lyricsOverlaySlotHeightWithSpacing(
+        launch.settings.fontSize,
+        lineSpacing: launch.settings.lineSpacing,
+      ) *
           launch.settings.lineCount +
       _verticalPadding * 2,
 );
@@ -342,7 +353,10 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     }
     final int count = _settings.lineCount.clamp(1, 5);
     final int leading = count ~/ 2;
-    final double slot = lyricsOverlaySlotHeight(_settings.fontSize);
+    final double slot = lyricsOverlaySlotHeightWithSpacing(
+      _settings.fontSize,
+      lineSpacing: _settings.lineSpacing,
+    );
     final int focus = _focus.clamp(0, _lines.length - 1);
     final bool atEdge = focus == 0 || focus == _lines.length - 1;
     final bool interlude =
@@ -498,8 +512,14 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
   Future<void> _resizeOverlay() async {
     if (!_windowConfigured) return;
-    final Size size = lyricsOverlayWindowSize(
-      LyricsOverlayLaunch(mode: _mode, settings: _settings),
+    final double width = _desiredOverlayWidth();
+    final double slot = lyricsOverlaySlotHeightWithSpacing(
+      _settings.fontSize,
+      lineSpacing: _settings.lineSpacing,
+    );
+    final Size size = Size(
+      width,
+      slot * _settings.lineCount + _verticalPadding * 2,
     );
     final Size? previous = _windowSize;
     if (previous == size) return;
@@ -510,7 +530,11 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         await windowManager.setSize(size);
         if (previous != null) {
           await windowManager.setPosition(
-            position - Offset(0, size.height - previous.height),
+            position +
+                Offset(
+                  (previous.width - size.width) / 2,
+                  -(size.height - previous.height),
+                ),
           );
         }
       } else {
@@ -520,6 +544,32 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     } catch (error) {
       AppLog.shared.record('desktop lyrics resize: $error');
     }
+  }
+
+  double _desiredOverlayWidth() {
+    double widest = 0;
+    final TextPainter painter = TextPainter(
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    );
+    try {
+      for (final LyricLine line in _lines) {
+        for (final String text in <String?>[
+          line.text,
+          line.translation,
+        ].whereType<String>()) {
+          painter.text = TextSpan(text: text, style: _lyricStyle);
+          painter.layout();
+          widest = math.max(widest, painter.width);
+        }
+      }
+    } finally {
+      painter.dispose();
+    }
+    return (widest + _horizontalPadding * 2).clamp(
+      _overlayMinWidth,
+      _overlayMaxWidth,
+    );
   }
 
   Future<void> _loadFont(LyricsOverlaySettings settings) async {
@@ -581,12 +631,13 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   @override
   Widget build(BuildContext context) {
     final bool desktop = _mode == LyricsOverlayMode.desktop;
-    final double slot = lyricsOverlaySlotHeight(_settings.fontSize);
+    final double slot = lyricsOverlaySlotHeightWithSpacing(
+      _settings.fontSize,
+      lineSpacing: _settings.lineSpacing,
+    );
     final int count = _settings.lineCount.clamp(1, 5);
     final Size window = MediaQuery.sizeOf(context);
-    final double inset = desktop
-        ? math.max(_horizontalPadding, (window.width - _overlayWidth) / 2)
-        : _horizontalPadding;
+    final double inset = _horizontalPadding;
     final bool hasText = _lines.any(
       (LyricLine line) => line.text.trim().isNotEmpty,
     );

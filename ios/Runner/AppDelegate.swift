@@ -1,10 +1,12 @@
 import Flutter
 import UIKit
+import WidgetKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var hapticsChannel: FlutterMethodChannel?
   private var updatesChannel: FlutterMethodChannel?
+  private var systemWidgetsChannel: FlutterMethodChannel?
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -62,6 +64,24 @@ import UIKit
       UIApplication.shared.open(url, options: [:]) { opened in
         result(opened)
       }
+    }
+
+    guard let widgetsRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "LazerSystemWidgets") else { return }
+    let widgets = FlutterMethodChannel(
+      name: "dev.naominet.lazer/system_widgets",
+      binaryMessenger: widgetsRegistrar.messenger()
+    )
+    systemWidgetsChannel = widgets
+    widgets.setMethodCallHandler { call, result in
+      guard call.method == "updatePlayCount" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let args = call.arguments as? [String: Any] ?? [:]
+      let count = max(0, (args["count"] as? NSNumber)?.intValue ?? 0)
+      UserDefaults(suiteName: "group.dev.naominet.lazer")?.set(count, forKey: "play_count")
+      WidgetCenter.shared.reloadAllTimelines()
+      result(nil)
     }
   }
 }

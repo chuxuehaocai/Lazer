@@ -593,7 +593,7 @@ class _LyricViewportState extends State<LyricViewport>
                                 translationStyle,
                                 translationHeights,
                               )) +
-                    20,
+                    widget.state.lyricLineSpacing,
       ];
     } finally {
       painter.dispose();

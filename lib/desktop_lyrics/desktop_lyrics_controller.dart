@@ -72,6 +72,7 @@ class DesktopLyricsController {
       blurEnabled: _state.lyricBlurEnabled,
       blurIntensity: _state.lyricBlurIntensity,
       animationSpeed: _state.animationSpeed,
+      lineSpacing: _state.lyricLineSpacing,
     );
   }
 

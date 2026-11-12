@@ -26,12 +26,14 @@ import '../data/lyrics.dart';
 import '../local/coalescing_writer.dart';
 import '../local/local_library.dart';
 import '../network/network_sources_controller.dart';
+import '../platform/system_widgets.dart';
 import '../scrolling/scroll_motion.dart';
 import '../l10n/app_language.dart';
 import '../data/models.dart';
 import '../data/track_transition.dart';
 import '../gateway/gateway.dart';
 import '../lyrics/imported_lyrics_store.dart';
+import '../lyrics/spacing.dart';
 import '../listening/listening_statistics.dart';
 import '../updates/release_version.dart';
 import '../updates/update_checker.dart';
@@ -169,6 +171,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        updateChecker = updateChecker ?? UpdateChecker(),
        pluginManager = pluginManager ?? PluginManager(),
        _shuffleOrder = ShuffleOrder(random: shuffleRandom) {
+    this.listeningStatistics.addListener(_updateSystemWidgetPlayCount);
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
     this.pluginManager.afterChange = _musicPlatforms.synchronizePlugins;
     _trackTransition = TrackTransition.fromAutoMix(autoMixEnabled);
@@ -1113,10 +1116,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   static const String floatingLyricsKey = 'lazer_floating_lyrics';
   static const String desktopLyricsKey = 'lazer_desktop_lyrics';
   static const String lyricsOverlayLinesKey = 'lazer_lyrics_overlay_lines';
+  static const String lyricLineSpacingKey = 'lazer_lyric_line_spacing';
 
   bool floatingLyricsEnabled = false;
   bool desktopLyricsEnabled = false;
   int lyricsOverlayLines = kLyricsOverlayDefaultLines;
+  double lyricLineSpacing = kLyricsLineSpacingDefault;
 
   bool get desktopLyricsSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -1156,6 +1161,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
     await (await SharedPreferences.getInstance()).setInt(
       lyricsOverlayLinesKey,
+      next,
+    );
+  }
+
+  Future<void> setLyricLineSpacing(double value) async {
+    final double next = value.clamp(
+      kLyricsLineSpacingMin,
+      kLyricsLineSpacingMax,
+    );
+    if (lyricLineSpacing == next) return;
+    lyricLineSpacing = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      lyricLineSpacingKey,
       next,
     );
   }
@@ -1898,6 +1917,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricsOverlayLines =
           (prefs.getInt(lyricsOverlayLinesKey) ?? kLyricsOverlayDefaultLines)
               .clamp(kLyricsOverlayMinLines, kLyricsOverlayMaxLines);
+      lyricLineSpacing =
+          (prefs.getDouble(lyricLineSpacingKey) ?? kLyricsLineSpacingDefault)
+              .clamp(kLyricsLineSpacingMin, kLyricsLineSpacingMax);
       importedEnginePath = prefs.getString('lazer_native_engine_path');
       systemMediaLyrics = prefs.getBool('lazer_system_media_lyrics') ?? true;
       await prefs.remove('lazer_show_artwork_with_lyrics');
@@ -1946,6 +1968,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _restorePlaybackSnapshot(initialQueueActivity),
       _restoreCatalogSession(),
     ]);
+    _updateSystemWidgetPlayCount();
     unawaited(_refreshMissingArtwork());
     AppLog.shared.event('app', 'bootstrap_completed', {
       'elapsed_ms': bootClock.elapsedMilliseconds,
@@ -2455,6 +2478,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   int _listeningRevision = 0;
   int? _pendingListeningSeek;
   int _queueActivity = 0;
+
+  void _updateSystemWidgetPlayCount() {
+    unawaited(
+      SystemWidgetsBridge.updatePlayCount(
+        listeningStatistics.snapshot(ListeningRange.allTime).playCount,
+      ),
+    );
+  }
+
   List<Track> _recentTracks = <Track>[];
   int _queueIndex = 0;
   Duration _position = Duration.zero;
@@ -5335,6 +5367,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _playFlushTimer?.cancel();
     _developerConsole?.dispose();
     _sampleListening();
+    listeningStatistics.removeListener(_updateSystemWidgetPlayCount);
     listeningStatistics.dispose();
     _pauseSchedule.dispose();
     _musicPlatforms.cancelPending();

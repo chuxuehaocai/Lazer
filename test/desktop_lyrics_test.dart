@@ -115,6 +115,24 @@ void main() {
     );
   });
 
+  test('line spacing is clamped and carried through overlay settings', () {
+    expect(
+      LyricsOverlaySettings.fromMap(<String, Object?>{'lineSpacing': -1})
+          .lineSpacing,
+      0,
+    );
+    expect(
+      LyricsOverlaySettings.fromMap(<String, Object?>{'lineSpacing': 100})
+          .lineSpacing,
+      48,
+    );
+    expect(
+      LyricsOverlaySettings.fromMap(<String, Object?>{'lineSpacing': 12})
+          .lineSpacing,
+      12,
+    );
+  });
+
   test('launch payload round-trips mode and settings', () {
     final LyricsOverlayLaunch launch = LyricsOverlayLaunch(
       mode: LyricsOverlayMode.desktop,
