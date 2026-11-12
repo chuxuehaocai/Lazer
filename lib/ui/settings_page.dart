@@ -14,6 +14,7 @@ import '../animation/apple_spring.dart';
 import '../audio/audio_device_report.dart';
 import '../cache/playback_cache_settings.dart';
 import '../data/audio_quality.dart';
+import '../data/track_transition.dart';
 import '../diagnostics/build_info.dart';
 import '../diagnostics/console_window.dart';
 import '../diagnostics/app_log.dart';
@@ -522,13 +523,29 @@ class _SettingsOverview extends StatelessWidget {
                     onChanged: (bool value) =>
                         unawaited(state.setSkipUnavailableSongs(value)),
                   ),
-                  _AppSwitchRow(
-                    key: const ValueKey('auto-mix'),
-                    label: '自动混音',
-                    subtitle: state.autoMixError ?? '在当前歌曲结束前平滑衔接下一首',
-                    value: state.autoMixEnabled,
-                    onChanged: (bool value) =>
-                        unawaited(state.setAutoMixEnabled(value)),
+                  _AppSettingRow(
+                    key: const ValueKey('track-transition'),
+                    label: '切歌衔接',
+                    subtitle: state.trackTransitionDetail,
+                    trailing: DropdownButton<TrackTransition>(
+                      key: const ValueKey('track-transition-mode'),
+                      value: state.trackTransition,
+                      underline: const SizedBox.shrink(),
+                      borderRadius: BorderRadius.circular(12),
+                      items: <DropdownMenuItem<TrackTransition>>[
+                        for (final TrackTransition mode
+                            in TrackTransition.values)
+                          DropdownMenuItem<TrackTransition>(
+                            value: mode,
+                            child: TrText(mode.label),
+                          ),
+                      ],
+                      onChanged: (TrackTransition? value) {
+                        if (value != null) {
+                          unawaited(state.setTrackTransition(value));
+                        }
+                      },
+                    ),
                   ),
                   AppleListTile(
                     padding: SettingsSpacing.rowPadding,
@@ -1175,6 +1192,7 @@ class _AppSectionLabel extends StatelessWidget {
 
 class _AppSettingRow extends SettingsRow {
   const _AppSettingRow({
+    super.key,
     required super.label,
     required super.subtitle,
     required super.trailing,

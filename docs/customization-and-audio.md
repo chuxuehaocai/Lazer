@@ -102,6 +102,27 @@ preamp, limiter and reset. Native-engine adjustments apply live and persist;
 bit-perfect mode bypasses EQ. System engines without DSP support can save a
 curve for use after switching to Audio Engine and restarting.
 
+Settings → 播放 → 切歌衔接 chooses how the end of one song reaches the next.
+`专辑无缝播放` (the default) hands the following song to the engine only when it
+belongs to the same album: adjacent tracks of an album run join to join without
+a reload, while a different album starts with the normal cut. The album is the
+one the catalogue reports; a file read from disk has no album id, so its album
+name and performer stand in, and an untagged album never chains files together.
+`自动混音` replaces that policy with AutoMix: the next song is prepared whatever
+album it comes from, and an engine that can mix overlaps it before the current
+song ends. Changing the mode rebuilds the queue hand-off — a prepared song from
+another album is taken back — without interrupting the song unless the native
+decoder has to reopen. An engine that refuses the mode falls back to album
+gapless playback and the row says why.
+
+Album gapless playback sounds different on the two families of engine, and both
+are intended. The native engine queues the following song into the same playback
+clock, so the join is sample to sample and nothing is overlapped. The system
+engine runs one decoder per song and cannot make two of them share a clock: it
+starts the following song inside the last 200 ms of the current one and crosses
+the gains there, because waiting for the first decoder to stop and then opening
+the second leaves the device dry and the join is heard as a click.
+
 ## Diagnostics
 
 Settings → About → Export logs saves a bounded runtime log and playback report.

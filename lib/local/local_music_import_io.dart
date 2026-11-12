@@ -153,8 +153,8 @@ class LocalMusicImporter {
         track: Track(
           id: localTrackIdForPath(absolute),
           title: title,
-          artist: artist.isEmpty ? '未知歌手' : artist,
-          album: album.isEmpty ? '未知专辑' : album,
+          artist: artist.isEmpty ? Track.unknownArtist : artist,
+          album: album.isEmpty ? Track.unknownAlbum : album,
           duration: metadata.duration,
           coverSeed: _coverSeed(absolute),
           localPath: absolute,

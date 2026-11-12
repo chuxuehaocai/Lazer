@@ -103,6 +103,31 @@ class Track {
   bool get hasAlbum =>
       albumId > 0 ||
       MusicId.tryParse(albumIdentity)?.kind == MusicEntityKind.album;
+  /// Album name a locally read file falls back to when it has no tag.
+  static const String unknownAlbum = '未知专辑'; // i18n:key
+
+  /// Artist a track falls back to when nothing names one.
+  static const String unknownArtist = '未知歌手';
+
+  /// Whether [other] is the queue entry that follows this one inside one album,
+  /// the pair album gapless playback hands to the engine without a reload.
+  ///
+  /// Service tracks carry the album they came from, so the identity the catalogue
+  /// reports decides. A file read from disk kept only the album name, so the name
+  /// and the performing artist stand in for that identity — and the scanner's
+  /// "unknown album" placeholder identifies nothing, because matching it would
+  /// chain every untagged file into one album.
+  bool continuesInto(Track? other) {
+    if (other == null) return false;
+    if (hasAlbum && other.hasAlbum) return albumIdentity == other.albumIdentity;
+    if (hasAlbum || other.hasAlbum) return false;
+    final String name = album.trim();
+    if (name.isEmpty || name == unknownAlbum || name != other.album.trim()) {
+      return false;
+    }
+    return artist.trim() == other.artist.trim();
+  }
+
   String? get persistedCoverUrl =>
       MusicId.tryParse(id) == null ? coverUrl : persistableArtworkUrl(coverUrl);
   bool get isServiceTrack =>

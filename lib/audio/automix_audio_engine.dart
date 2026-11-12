@@ -457,13 +457,23 @@ class AutoMixAudioEngine
       await _active.setVolume(_volume);
       return;
     }
-    final (double outgoingGain, double incomingGain) = _planner.gains(
-      _transitionProgress,
-    );
+    final (double outgoingGain, double incomingGain) = _gains;
     await Future.wait(<Future<void>>[
       _active.setVolume(_volume * outgoingGain),
       incoming.setVolume(_volume * incomingGain),
     ]);
+  }
+
+  /// Gains for the transition in progress.
+  ///
+  /// AutoMix uses the planner's equal-power curve, which is right for two songs
+  /// sharing the stage. The album hand-off is a cut, not a mix: the incoming
+  /// song keeps its first attack at full gain and the outgoing tail yields
+  /// instead, so a track that opens on a downbeat still lands on the beat.
+  (double, double) get _gains {
+    final double progress = _transitionProgress;
+    if (_enabled) return _planner.gains(progress);
+    return (1 - progress, 1);
   }
 
   @override
@@ -515,14 +525,31 @@ class AutoMixAudioEngine
     }
   }
 
+  /// How far before the end of the outgoing song the successor is started when
+  /// AutoMix is off.
+  ///
+  /// Two decoders cannot share one playback clock, so a hand-off that waits for
+  /// the outgoing decoder to report completion always opens the successor a few
+  /// milliseconds late: the tail ends, the device runs dry, and the next track
+  /// starts with a click or a sliver of silence. Starting the swap inside the
+  /// outgoing tail hides that in the hand-off itself, which is the difference
+  /// between "tracks change" and an album that plays as one piece.
+  static const Duration seamOverlap = Duration(milliseconds: 200);
+
   void _tick() {
     if (_disposed ||
         _tickPending ||
         !_sourceLoaded ||
         !_playing ||
-        !_enabled ||
         _incoming == null) {
       return;
+    }
+    if (!_enabled) {
+      // A quiet song has no hand-off to prepare. Bail out before queueing work
+      // on the serialized lane, so the seam costs nothing until it is due.
+      final Duration? total = _active.duration;
+      if (total == null || total <= Duration.zero) return;
+      if (total - _active.position > seamOverlap) return;
     }
     _tickPending = true;
     final int generation = _generation;
@@ -532,17 +559,21 @@ class AutoMixAudioEngine
                 generation != _generation ||
                 !_sourceLoaded ||
                 !_playing ||
-                !_enabled ||
                 _incoming == null) {
               return;
             }
             if (!_transitioning) {
               final Duration? total = _active.duration;
               if (total == null || total <= Duration.zero) return;
-              final Duration overlap = _planner.duration(
-                outgoing: total,
-                incoming: _incoming!.duration,
-              );
+              // AutoMix picks a musical length for the overlap. With AutoMix
+              // off the fade only has to cover the decoder switch, so it stays
+              // short enough to be inaudible on a hard album cut.
+              final Duration overlap = _enabled
+                  ? _planner.duration(
+                      outgoing: total,
+                      incoming: _incoming!.duration,
+                    )
+                  : seamOverlap;
               final Duration remaining = total - _active.position;
               if (remaining > overlap || remaining <= Duration.zero) return;
               final Uri? nextUri = Uri.tryParse(_queueUrls[_currentIndex + 1]);
@@ -560,7 +591,12 @@ class AutoMixAudioEngine
               _incomingStartPosition = _incoming!.position;
               _transitioning = true;
               _announceIncoming();
-              await _incoming!.setVolume(0);
+              // AutoMix opens the successor silently so the reused decoder can
+              // never expose the previous track's gain mid-ramp. The album
+              // hand-off is a cut and wants the opening attack instead, so the
+              // decoder starts at the listening gain with only the outgoing
+              // tail yielding below it.
+              await _incoming!.setVolume(_enabled ? 0 : _volume);
               if (!_playing || generation != _generation) return;
               _startPlayer(_incoming!, generation);
             }

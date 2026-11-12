@@ -367,6 +367,44 @@ void main() {
     expect(f.b.position, const Duration(seconds: 100));
   });
 
+  _engineTest('AutoMix off swaps inside the outgoing tail, not after it', (
+    tester,
+  ) async {
+    final f = _Fixture(enabled: false);
+    addTearDown(f.engine.dispose);
+    await f.load();
+    expect(f.a.duration, const Duration(seconds: 40));
+    // A hard boundary would wait for completion, then open the successor and
+    // leave the device dry for however long that takes.
+    f.a.advance(const Duration(milliseconds: 39900));
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(
+      f.a.playing,
+      isTrue,
+      reason: 'the outgoing still owns its tail while the successor starts',
+    );
+    expect(f.b.playing, isTrue);
+    expect(f.a.position, lessThan(f.a.duration!));
+    expect(f.indexes, <int>[1]);
+
+    // The incoming song keeps its own attack; the outgoing tail yields.
+    f.a.advance(const Duration(milliseconds: 50));
+    f.b.advance(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(f.a.playing, isTrue);
+    expect(f.a.gain, closeTo(.5, .0001));
+    expect(f.b.gain, 1);
+
+    f.a.advance(const Duration(milliseconds: 50));
+    f.b.advance(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 40));
+    expect(f.a.playing, isFalse);
+    expect(f.b.playing, isTrue);
+    expect(f.b.gain, 1);
+    expect(f.indexes, <int>[1]);
+    expect(f.engine.duration, const Duration(seconds: 100));
+  });
+
   _engineTest('enable during playback starts an already prepared overlap', (
     tester,
   ) async {
