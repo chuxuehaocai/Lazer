@@ -1073,14 +1073,17 @@ class _AppShellState extends State<AppShell>
                             track: state.current,
                             mode: state.backgroundMode,
                             pageColor: apple.background,
-                            animationsEnabled: state.backgroundMode ==
+                            animationsEnabled:
+                                state.backgroundMode ==
                                 AppBackgroundMode.nowPlayingDynamic,
                             imagePath: state.backgroundImagePath,
                             uiAlpha: state.uiAlpha,
                             imageAlignmentX: state.backgroundImageAlignmentX,
                             imageAlignmentY: state.backgroundImageAlignmentY,
                             imageScale: state.backgroundImageScale,
-                            blurSigma: state.backgroundBlur,
+                            blurSigma: state.backgroundBlurEnabled
+                                ? state.backgroundBlur
+                                : 0,
                             quality: state.dynamicBackgroundQuality,
                             frameRate: state.browseBackgroundFps,
                             solidColor: state.browseBackgroundColor,
@@ -1790,23 +1793,14 @@ class _AppShellState extends State<AppShell>
               const SizedBox(width: 8),
             ],
             Expanded(
-              child: Text(
-                context.tr(_pageTitle),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: apple.label,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              child: _animatedHeaderTitle(apple, desktop: true),
             ),
             if (kIsWeb) ...<Widget>[
               _ToolbarButton(
                 tooltip: 'GitHub 项目',
                 icon: Icons.code_rounded,
-                onPressed: () => unawaited(
-                  openExternalUrl(UpdateChecker.repositoryUrl),
-                ),
+                onPressed: () =>
+                    unawaited(openExternalUrl(UpdateChecker.repositoryUrl)),
               ),
               const SizedBox(width: 2),
             ],
@@ -1841,15 +1835,7 @@ class _AppShellState extends State<AppShell>
             ] else
               const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                context.tr(_pageTitle),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: apple.label,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              child: _animatedHeaderTitle(apple),
             ),
             _ToolbarButton(
               tooltip: Theme.of(context).brightness == Brightness.dark
@@ -1871,9 +1857,8 @@ class _AppShellState extends State<AppShell>
               _ToolbarButton(
                 tooltip: 'GitHub 项目',
                 icon: Icons.code_rounded,
-                onPressed: () => unawaited(
-                  openExternalUrl(UpdateChecker.repositoryUrl),
-                ),
+                onPressed: () =>
+                    unawaited(openExternalUrl(UpdateChecker.repositoryUrl)),
               ),
             ],
             const SizedBox(width: 2),
@@ -1890,7 +1875,9 @@ class _AppShellState extends State<AppShell>
     // AppSavedAlbumsPage owns the large page title. Keeping a shell title here
     // creates a second “收藏的专辑” header above it.
     if (_savedAlbums) return '';
-    if (_networkSources || _networkSourceId != null || _networkPodcastId != null) {
+    if (_networkSources ||
+        _networkSourceId != null ||
+        _networkPodcastId != null) {
       return '';
     }
     if (_chart != null) return _chart!.title;
@@ -1906,10 +1893,53 @@ class _AppShellState extends State<AppShell>
     return switch (_section) {
       _AppSection.home => '发现', // i18n:key
       _AppSection.search => '搜索', // i18n:key
-      _AppSection.library => '资料库', // i18n:key
-      _AppSection.likes => '我喜欢的音乐', // i18n:key
-      _AppSection.settings => '设置', // i18n:key
+      _AppSection.library => '',
+      _AppSection.likes => '',
+      _AppSection.settings => '',
     };
+  }
+
+  Widget _animatedHeaderTitle(
+    AppleSemanticColors apple, {
+    bool desktop = false,
+  }) {
+    final String title = _pageTitle;
+    final TextStyle style = Theme.of(context).textTheme.titleMedium!.copyWith(
+      color: apple.label,
+      fontWeight: FontWeight.w700,
+    );
+    return ClipRect(
+      child: AnimatedSwitcher(
+        duration: MotionTiming.scale(const Duration(milliseconds: 280)),
+        switchInCurve: const AppleSpringCurve(),
+        switchOutCurve: const AppleSpringCurve(),
+        transitionBuilder: (Widget child, Animation<double> animation) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: const AppleSpringCurve(),
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: Offset(desktop ? -.03 : 0, -.18),
+                end: Offset.zero,
+              ).animate(curved),
+              child: child,
+            ),
+          );
+        },
+        child: title.isEmpty
+            ? const SizedBox(key: ValueKey<String>('empty-header-title'))
+            : Text(
+                context.tr(title),
+                key: ValueKey<String>(title),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+      ),
+    );
   }
 
   Widget _railPlaylists(AppleSemanticColors apple) {

@@ -552,40 +552,12 @@ class _TvFocusHighlightState extends State<TvFocusHighlight>
         child: Stack(
           children: <Widget>[
             widget.child,
-            Positioned.fill(
-              child: IgnorePointer(
-                child: AnimatedSwitcher(
-                  duration: MediaQuery.disableAnimationsOf(context)
-                      ? Duration.zero
-                      : AppleSpring.responsive.duration,
-                  switchInCurve: const AppleSpringCurve(),
-                  switchOutCurve: const AppleSpringCurve(),
-                  transitionBuilder:
-                      (Widget child, Animation<double> animation) {
-                        final curved = CurvedAnimation(
-                          parent: animation,
-                          curve: const AppleSpringCurve(),
-                        );
-                        return FadeTransition(
-                          opacity: curved,
-                          child: ScaleTransition(
-                            scale: Tween<double>(
-                              begin: .96,
-                              end: 1,
-                            ).animate(curved),
-                            child: child,
-                          ),
-                        );
-                      },
-                  child: _focused
-                      ? TvFocusOutline(
-                          key: const ValueKey<String>('tv-focus-outline'),
-                          borderRadius: widget.borderRadius,
-                        )
-                      : const SizedBox.shrink(),
+            if (_focused)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: TvFocusOutline(borderRadius: widget.borderRadius),
                 ),
               ),
-            ),
           ],
         ),
       ),

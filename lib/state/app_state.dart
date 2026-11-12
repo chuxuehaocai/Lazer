@@ -871,6 +871,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double backgroundImageAlignmentY = 0;
   double backgroundImageScale = 1;
   double backgroundBlur = 0;
+  bool backgroundBlurEnabled = false;
 
   /// `内容不透明度` of the app shell — how much of the backdrop the content
   /// veil hides.
@@ -884,6 +885,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double playerBackgroundImageAlignmentY = 0;
   double playerBackgroundImageScale = 1;
   double playerBackgroundBlur = 0;
+  bool playerBackgroundBlurEnabled = false;
 
   Future<void> setBackgroundFps(double fps, {bool player = false}) async {
     if (!fps.isFinite) return;
@@ -1024,6 +1026,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await (await SharedPreferences.getInstance()).setDouble(
       player ? 'lazer_player_background_blur' : 'lazer_background_blur',
       next,
+    );
+  }
+
+  Future<void> setBackgroundBlurEnabled(
+    bool value, {
+    required bool player,
+  }) async {
+    if (player) {
+      if (playerBackgroundBlurEnabled == value) return;
+      playerBackgroundBlurEnabled = value;
+    } else {
+      if (backgroundBlurEnabled == value) return;
+      backgroundBlurEnabled = value;
+    }
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      player
+          ? 'lazer_player_background_blur_enabled'
+          : 'lazer_background_blur_enabled',
+      value,
     );
   }
 
@@ -1854,9 +1876,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       if (audioEngine is AutoMixConfigurableAudioEngine) {
         try {
-          await (audioEngine as AutoMixConfigurableAudioEngine).setAutoMixEnabled(
-            autoMixEnabled,
-          );
+          await (audioEngine as AutoMixConfigurableAudioEngine)
+              .setAutoMixEnabled(autoMixEnabled);
         } catch (_) {
           _trackTransition = TrackTransition.albumGapless;
           autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
@@ -1930,6 +1951,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         kBackgroundBlurMin,
         kBackgroundBlurMax,
       );
+      backgroundBlurEnabled =
+          prefs.getBool('lazer_background_blur_enabled') ?? false;
       playerBackgroundImageAlignmentX =
           (prefs.getDouble('lazer_player_background_image_alignment_x') ?? 0)
               .clamp(
@@ -1952,6 +1975,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             kBackgroundBlurMin,
             kBackgroundBlurMax,
           );
+      playerBackgroundBlurEnabled =
+          prefs.getBool('lazer_player_background_blur_enabled') ?? false;
       mediaShortcuts = MediaShortcutSettings.decode(
         prefs.getString('lazer_media_shortcuts'),
       );
@@ -3708,11 +3733,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final bool Function()? cancelled = stillCurrent == null
         ? null
         : () => !stillCurrent();
-    return catalog.audioUrlFor(
-      track,
-      quality: quality,
-      isCancelled: cancelled,
-    );
+    return catalog.audioUrlFor(track, quality: quality, isCancelled: cancelled);
   }
 
   /// Resolves a stream URL while holding the upload pump back.
@@ -5148,8 +5169,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       // A tail request that lost a race with the queue snapshot looks exactly
       // like a station that ran dry; one short retry tells them apart.
       await Future<void>.delayed(const Duration(milliseconds: 800));
-      added =
-          _queue.length > before || await _ensureStationBuffer(force: true);
+      added = _queue.length > before || await _ensureStationBuffer(force: true);
     }
     if (_queue.length > before) {
       if (!_playing) return;

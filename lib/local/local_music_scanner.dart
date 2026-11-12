@@ -134,6 +134,7 @@ class LocalMusicScanner {
                   : metadata.title.trim();
               final String artist = metadata.artist.trim();
               final String album = metadata.album.trim();
+              final String? artwork = await LocalAudioProbe.artworkUriFor(path);
               entry = LocalTrack(
                 track: Track(
                   id: localTrackIdForPath(path),
@@ -142,6 +143,7 @@ class LocalMusicScanner {
                   album: album.isEmpty ? Track.unknownAlbum : album,
                   duration: metadata.duration,
                   coverSeed: _seedFor(path),
+                  coverUrl: artwork,
                   localPath: path,
                 ),
                 path: path,

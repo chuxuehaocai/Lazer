@@ -149,6 +149,7 @@ class LocalMusicImporter {
           : metadata.title.trim();
       final String artist = metadata.artist.trim();
       final String album = metadata.album.trim();
+      final String? artwork = await LocalAudioProbe.artworkUriFor(absolute);
       return LocalTrack(
         track: Track(
           id: localTrackIdForPath(absolute),
@@ -157,6 +158,7 @@ class LocalMusicImporter {
           album: album.isEmpty ? Track.unknownAlbum : album,
           duration: metadata.duration,
           coverSeed: _coverSeed(absolute),
+          coverUrl: artwork,
           localPath: absolute,
         ),
         path: absolute,

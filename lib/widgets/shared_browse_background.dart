@@ -47,7 +47,7 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
       state.backgroundImageAlignmentX,
       state.backgroundImageAlignmentY,
       state.backgroundImageScale,
-      state.backgroundBlur,
+      state.backgroundBlurEnabled ? state.backgroundBlur : 0,
       state.uiAlpha,
       state.dynamicBackgroundQuality,
       state.browseBackgroundFps,
@@ -128,13 +128,16 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
                   mode: state.backgroundMode,
                   pageColor: Colors.transparent,
                   animationsEnabled:
-                      state.backgroundMode == AppBackgroundMode.nowPlayingDynamic,
+                      state.backgroundMode ==
+                      AppBackgroundMode.nowPlayingDynamic,
                   imagePath: state.backgroundImagePath,
                   uiAlpha: state.uiAlpha,
                   imageAlignmentX: state.backgroundImageAlignmentX,
                   imageAlignmentY: state.backgroundImageAlignmentY,
                   imageScale: state.backgroundImageScale,
-                  blurSigma: state.backgroundBlur,
+                  blurSigma: state.backgroundBlurEnabled
+                      ? state.backgroundBlur
+                      : 0,
                   quality: state.dynamicBackgroundQuality,
                   frameRate: state.browseBackgroundFps,
                   solidColor: state.browseBackgroundColor,

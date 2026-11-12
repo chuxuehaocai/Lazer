@@ -100,8 +100,8 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
     final apple = AppleSemanticColors.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final selectedColor = Color.alphaBlend(
-      apple.accent.withValues(alpha: .045),
-      apple.label.withValues(alpha: dark ? .18 : .07),
+      apple.accent.withValues(alpha: .12),
+      apple.label.withValues(alpha: dark ? .28 : .14),
     );
     return RepaintBoundary(
       child: AppleGlass(
@@ -133,6 +133,10 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
                       decoration: BoxDecoration(
                         color: selectedColor,
                         borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: apple.accent.withValues(alpha: .28),
+                          width: .75,
+                        ),
                       ),
                     ),
                   ),
@@ -238,11 +242,7 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
 
   Widget _withTooltip(String message, Widget child) => kIsWeb
       ? child
-      : Tooltip(
-          message: message,
-          excludeFromSemantics: true,
-          child: child,
-        );
+      : Tooltip(message: message, excludeFromSemantics: true, child: child);
 }
 
 class _CapsuleLayout extends MultiChildLayoutDelegate {

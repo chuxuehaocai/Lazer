@@ -91,6 +91,36 @@ class LocalAudioProbe {
     );
   }
 
+  /// Finds the common sidecar artwork names used by music folders. The
+  /// returned URI is consumed by the shared artwork cache without copying the
+  /// user's image into memory or the app cache.
+  static Future<String?> artworkUriFor(String audioPath) async {
+    final String normalized = audioPath.replaceAll('\\', '/');
+    final int slash = normalized.lastIndexOf('/');
+    final String directory = slash < 0 ? '' : normalized.substring(0, slash);
+    final String name = slash < 0
+        ? normalized
+        : normalized.substring(slash + 1);
+    final int dot = name.lastIndexOf('.');
+    final String stem = dot > 0 ? name.substring(0, dot) : name;
+    final List<String> candidates = <String>[
+      for (final String extension in <String>['jpg', 'jpeg', 'png', 'webp'])
+        '$directory/$stem.$extension',
+      for (final String base in <String>['cover', 'folder', 'front'])
+        for (final String extension in <String>['jpg', 'jpeg', 'png', 'webp'])
+          '$directory/$base.$extension',
+    ];
+    for (final String candidate in candidates) {
+      try {
+        final File file = File(candidate);
+        if (await file.exists() && await file.length() > 0) {
+          return Uri.file(file.absolute.path).toString();
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
   Future<LocalAudioMetadata> _mp3(
     RandomAccessFile raf,
     int length,
@@ -148,7 +178,9 @@ class LocalAudioProbe {
           : major == 4
           ? _syncSafe(header, 4)
           : _u32be(header, 4);
-      if (id.trim().isEmpty || size <= 0 || offset + headerLength + size > bodyLength) {
+      if (id.trim().isEmpty ||
+          size <= 0 ||
+          offset + headerLength + size > bodyLength) {
         break;
       }
       if (_isTextFrame(id) && size <= _maxTextFrameBytes) {
@@ -263,10 +295,12 @@ class LocalAudioProbe {
     }
     Duration duration = Duration.zero;
     if (streamInfo != null && streamInfo.length >= 18) {
-      final int sampleRate = (streamInfo[10] << 12) |
+      final int sampleRate =
+          (streamInfo[10] << 12) |
           (streamInfo[11] << 4) |
           (streamInfo[12] >> 4);
-      final int totalSamples = ((streamInfo[13] & 0x0F) << 32) |
+      final int totalSamples =
+          ((streamInfo[13] & 0x0F) << 32) |
           (streamInfo[14] << 24) |
           (streamInfo[15] << 16) |
           (streamInfo[16] << 8) |
@@ -339,9 +373,7 @@ class LocalAudioProbe {
           );
           if (data.length >= 20) {
             final bool v1 = data[0] == 1;
-            final int timescale = v1
-                ? _u32be(data, 20)
-                : _u32be(data, 12);
+            final int timescale = v1 ? _u32be(data, 20) : _u32be(data, 12);
             final int units = v1 && data.length >= 32
                 ? (_u32be(data, 24) << 32) | _u32be(data, 28)
                 : _u32be(data, 16);
@@ -400,11 +432,12 @@ class LocalAudioProbe {
                         .trim();
                     if (text.isNotEmpty) {
                       tags[switch (name) {
-                        '©nam' => 'title',
-                        '©ART' || 'aART' => 'artist',
-                        '©alb' => 'album',
-                        _ => name,
-                      }] = text;
+                            '©nam' => 'title',
+                            '©ART' || 'aART' => 'artist',
+                            '©alb' => 'album',
+                            _ => name,
+                          }] =
+                          text;
                     }
                   }
                 }
@@ -484,10 +517,7 @@ class LocalAudioProbe {
       }
       if (size < headerSize || offset + size > end) return null;
       if (name == type) {
-        return _Atom(
-          contentStart: offset + headerSize,
-          end: offset + size,
-        );
+        return _Atom(contentStart: offset + headerSize, end: offset + size);
       }
       offset += size;
     }
@@ -562,19 +592,89 @@ class _MpegFrame {
 
   static int _bitrate(int version, int layer, int index) {
     const List<int> layer1V1 = <int>[
-      0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448,
+      0,
+      32,
+      64,
+      96,
+      128,
+      160,
+      192,
+      224,
+      256,
+      288,
+      320,
+      352,
+      384,
+      416,
+      448,
     ];
     const List<int> layer2V1 = <int>[
-      0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384,
+      0,
+      32,
+      48,
+      56,
+      64,
+      80,
+      96,
+      112,
+      128,
+      160,
+      192,
+      224,
+      256,
+      320,
+      384,
     ];
     const List<int> layer3V1 = <int>[
-      0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+      0,
+      32,
+      40,
+      48,
+      56,
+      64,
+      80,
+      96,
+      112,
+      128,
+      160,
+      192,
+      224,
+      256,
+      320,
     ];
     const List<int> layer1V2 = <int>[
-      0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256,
+      0,
+      32,
+      48,
+      56,
+      64,
+      80,
+      96,
+      112,
+      128,
+      144,
+      160,
+      176,
+      192,
+      224,
+      256,
     ];
     const List<int> layer23V2 = <int>[
-      0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160,
+      0,
+      8,
+      16,
+      24,
+      32,
+      40,
+      48,
+      56,
+      64,
+      80,
+      96,
+      112,
+      128,
+      144,
+      160,
     ];
     final List<int> table;
     if (version == 1) {
