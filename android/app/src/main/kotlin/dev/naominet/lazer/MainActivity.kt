@@ -111,6 +111,27 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_LIFECYCLE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "background" -> {
+                        result.success(moveTaskToBack(true))
+                    }
+                    "exit" -> {
+                        // Dart stops the engine first; stop the foreground
+                        // service as a second line of defence before removing
+                        // the TV activity from recents.
+                        stopService(Intent(this, AudioService::class.java))
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            finishAndRemoveTask()
+                        } else {
+                            finish()
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, UPDATES_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method != "openUrl") {
@@ -348,6 +369,7 @@ class MainActivity : AudioServiceActivity() {
         const val HAPTICS_CHANNEL = "dev.naominet.lazer/haptics"
         const val LOCAL_MEDIA_CHANNEL = "dev.naominet.lazer/local_media"
         const val TV_CHANNEL = "dev.naominet.lazer/tv"
+        const val APP_LIFECYCLE_CHANNEL = "dev.naominet.lazer/app_lifecycle"
         const val UPDATES_CHANNEL = "dev.naominet.lazer/updates"
         const val SYSTEM_WIDGETS_CHANNEL = "dev.naominet.lazer/system_widgets"
         const val TELEVISION_FEATURE = "android.hardware.type.television"

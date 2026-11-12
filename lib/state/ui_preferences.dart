@@ -235,6 +235,26 @@ enum AppUiMode {
 /// What closing the desktop window should do when the choice was remembered.
 enum DesktopCloseAction { ask, background, exit }
 
+/// What the TV remote's double-back action does at the browse root.
+enum TvExitAction { background, exit }
+
+extension TvExitActionLabels on TvExitAction {
+  static TvExitAction parse(String? value) => TvExitAction.values.firstWhere(
+    (TvExitAction action) => action.name == value,
+    orElse: () => TvExitAction.background,
+  );
+
+  String get label => switch (this) {
+    TvExitAction.background => '退到后台并继续播放',
+    TvExitAction.exit => '退出应用并停止播放',
+  };
+
+  String get detail => switch (this) {
+    TvExitAction.background => '双击返回后隐藏应用，音乐继续播放',
+    TvExitAction.exit => '双击返回后关闭应用和当前播放',
+  };
+}
+
 extension DesktopCloseActionLabels on DesktopCloseAction {
   static DesktopCloseAction parse(String? value) =>
       DesktopCloseAction.values.firstWhere(

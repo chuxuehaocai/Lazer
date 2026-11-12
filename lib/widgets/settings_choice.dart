@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/apple_design.dart';
+import '../tv/tv_mode.dart';
 import 'accessible_controls.dart';
 
 /// Both the closed control and its overlay use the app's grouped material.
@@ -22,29 +23,32 @@ class SettingsChoice<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final apple = AppleSemanticColors.of(context);
     return SemanticsPortal(
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: apple.fill,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: apple.separator, width: .5),
-        ),
-        child: DropdownButton<T>(
-          value: value,
-          items: items,
-          onChanged: onChanged,
-          hint: hint,
-          isExpanded: true,
-          // Both the button and menu can wrap a complete translated choice.
-          itemHeight: null,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          underline: const SizedBox.shrink(),
-          borderRadius: BorderRadius.circular(12),
-          dropdownColor: apple.tertiaryBackground,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: apple.label),
-          icon: Icon(Icons.unfold_more_rounded, color: apple.secondaryLabel),
-          menuMaxHeight: 360,
+      child: TvFocusHighlight(
+        borderRadius: BorderRadius.circular(10),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: apple.fill,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: apple.separator, width: .5),
+          ),
+          child: DropdownButton<T>(
+            value: value,
+            items: items,
+            onChanged: onChanged,
+            hint: hint,
+            isExpanded: true,
+            // Both the button and menu can wrap a complete translated choice.
+            itemHeight: null,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            underline: const SizedBox.shrink(),
+            borderRadius: BorderRadius.circular(12),
+            dropdownColor: apple.tertiaryBackground,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: apple.label),
+            icon: Icon(Icons.unfold_more_rounded, color: apple.secondaryLabel),
+            menuMaxHeight: 360,
+          ),
         ),
       ),
     );

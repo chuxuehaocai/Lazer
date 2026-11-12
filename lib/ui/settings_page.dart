@@ -676,6 +676,18 @@ class _SettingsOverview extends StatelessWidget {
                       onChanged: (bool value) =>
                           unawaited(state.setMinimizeToTaskbarOnClose(value)),
                     ),
+                  if (state.deviceIsTelevision || state.surface == AppSurface.tv)
+                    _AppSwitchRow(
+                      key: const ValueKey('tv-exit-action'),
+                      label: '电视端双击返回退到后台',
+                      subtitle: state.tvExitAction.detail,
+                      value: state.tvExitAction == TvExitAction.background,
+                      onChanged: (bool value) => unawaited(
+                        state.setTvExitAction(
+                          value ? TvExitAction.background : TvExitAction.exit,
+                        ),
+                      ),
+                    ),
                   _AppSwitchRow(
                     label: '震动反馈',
                     subtitle: '点击可操作的元素和拖动进度条、数值条时反馈',

@@ -480,7 +480,31 @@ class _TvFocusHighlightState extends State<TvFocusHighlight>
   bool _focused = false;
 
   @override
+  void initState() {
+    super.initState();
+    // Focus changes in a DropdownButton/Switch can be delivered to the
+    // descendant after the wrapper's own Focus callback. Listening to the
+    // manager makes the wash deterministic for every Material control.
+    FocusManager.instance.addListener(_syncFocus);
+  }
+
+  void _syncFocus() {
+    if (!mounted || !TvScope.isActive(context)) return;
+    FocusNode? current = FocusManager.instance.primaryFocus;
+    bool inside = false;
+    while (current != null) {
+      if (current == _watcher) {
+        inside = true;
+        break;
+      }
+      current = current.parent;
+    }
+    if (inside != _focused) setState(() => _focused = inside);
+  }
+
+  @override
   void dispose() {
+    FocusManager.instance.removeListener(_syncFocus);
     _watcher.dispose();
     super.dispose();
   }
@@ -494,6 +518,7 @@ class _TvFocusHighlightState extends State<TvFocusHighlight>
       skipTraversal: true,
       onFocusChange: (bool value) {
         if (mounted && value != _focused) setState(() => _focused = value);
+        _syncFocus();
       },
       child: AnimatedContainer(
         duration: MediaQuery.disableAnimationsOf(context)
@@ -502,9 +527,27 @@ class _TvFocusHighlightState extends State<TvFocusHighlight>
         curve: const AppleSpringCurve(),
         decoration: BoxDecoration(
           color: _focused
-              ? AppleSemanticColors.of(context).fill
+              ? AppleSemanticColors.of(context).fill.withValues(alpha: .92)
               : Colors.transparent,
           borderRadius: widget.borderRadius,
+          border: _focused
+              ? Border.all(
+                  color: AppleSemanticColors.of(
+                    context,
+                  ).accent.withValues(alpha: .8),
+                  width: 2,
+                )
+              : null,
+          boxShadow: _focused
+              ? <BoxShadow>[
+                  BoxShadow(
+                    color: AppleSemanticColors.of(
+                      context,
+                    ).accent.withValues(alpha: .2),
+                    blurRadius: 10,
+                  ),
+                ]
+              : null,
         ),
         child: Stack(
           children: <Widget>[

@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
@@ -106,6 +107,10 @@ class _BrowseLocation {
 
 class _AppShellState extends State<AppShell>
     with TickerProviderStateMixin, BuildSafeState<AppShell> {
+  static const MethodChannel _tvExitChannel = MethodChannel(
+    'dev.naominet.lazer/app_lifecycle',
+  );
+  DateTime? _lastTvRootBack;
   _AppSection _section = _AppSection.home;
   final List<_BrowseLocation> _browseHistory = <_BrowseLocation>[];
   final ValueNotifier<double?> _backProgress = BuildSafeValueNotifier(null);
@@ -857,6 +862,42 @@ class _AppShellState extends State<AppShell>
     if (_section != _AppSection.home) _select(_AppSection.home);
   }
 
+  bool get _atTvExitRoot =>
+      largeScreenModeOf(context) &&
+      !TvOverlayStack.instance.hasOpen &&
+      !_nowPlayingOpen &&
+      !_hasOpenDetail &&
+      _section == _AppSection.home;
+
+  void _handleTvRootBack() {
+    final DateTime now = DateTime.now();
+    final DateTime? previous = _lastTvRootBack;
+    if (previous == null ||
+        now.difference(previous) > const Duration(seconds: 2)) {
+      _lastTvRootBack = now;
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('再按一次返回退出'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      return;
+    }
+    _lastTvRootBack = null;
+    if (state.tvExitAction == TvExitAction.background) {
+      unawaited(
+        _tvExitChannel.invokeMethod<void>('background').catchError((_) {}),
+      );
+      return;
+    }
+    // Stop Dart playback before removing the activity so the media service
+    // cannot keep the old queue alive after a deliberate exit.
+    state.stop();
+    unawaited(_tvExitChannel.invokeMethod<void>('exit').catchError((_) {}));
+  }
+
   bool _canStartSystemBack() =>
       mounted &&
       !(ModalRoute.of(context)?.willHandlePopInternally ?? false) &&
@@ -1100,15 +1141,22 @@ class _AppShellState extends State<AppShell>
               onStart: _startSystemBack,
               onCommit: _commitSystemBack,
               child: PopScope<void>(
-                // Back is handled in-app while a page or the player is open; at
-                // the browse root it keeps the platform's default (leave the app).
+                // TV remotes need an explicit double-back guard at the browse
+                // root; phones and desktop retain the platform default there.
                 canPop:
+                    !largeScreen &&
                     !TvOverlayStack.instance.hasOpen &&
                     !_nowPlayingOpen &&
                     !_hasOpenDetail &&
                     _section == _AppSection.home,
                 onPopInvokedWithResult: (bool didPop, void _) {
-                  if (!didPop) _handleBack();
+                  if (!didPop) {
+                    if (_atTvExitRoot) {
+                      _handleTvRootBack();
+                    } else {
+                      _handleBack();
+                    }
+                  }
                 },
                 child: Semantics(
                   key: const ValueKey<String>('app-semantics-root'),

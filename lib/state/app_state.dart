@@ -651,6 +651,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool minimizeToTaskbarOnClose = false;
   DesktopCloseAction desktopCloseAction = DesktopCloseAction.ask;
 
+  /// TV's double-back action at the browse root. Background is the safer
+  /// default for a remote: playback stays alive while the app is hidden.
+  TvExitAction tvExitAction = TvExitAction.background;
+
   final AppHaptics haptics = AppHaptics();
   Future<void> feedback({bool detent = false, bool boundary = false}) =>
       haptics.pulse(
@@ -1589,6 +1593,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
   }
 
+  Future<void> setTvExitAction(TvExitAction action) async {
+    if (tvExitAction == action) return;
+    tvExitAction = action;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_tv_exit_action',
+      action.name,
+    );
+  }
+
   Future<void> setLyricControlsSeconds(double value) async {
     lyricControlsSeconds = value.clamp(1, 10);
     notifyListeners();
@@ -1858,6 +1872,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           minimizeToTaskbarOnClose) {
         desktopCloseAction = DesktopCloseAction.background;
       }
+      tvExitAction = TvExitActionLabels.parse(
+        prefs.getString('lazer_tv_exit_action'),
+      );
       hapticIntensity = (prefs.getDouble('lazer_haptic_intensity') ?? 0.5)
           .clamp(0, 1);
       themeMode = ThemeMode.values.firstWhere(
