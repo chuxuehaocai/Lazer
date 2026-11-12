@@ -649,6 +649,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Whether closing the desktop window minimizes it to the taskbar instead of
   /// terminating the process.
   bool minimizeToTaskbarOnClose = false;
+  DesktopCloseAction desktopCloseAction = DesktopCloseAction.ask;
 
   final AppHaptics haptics = AppHaptics();
   Future<void> feedback({bool detent = false, bool boundary = false}) =>
@@ -1488,11 +1489,39 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> setMinimizeToTaskbarOnClose(bool value) async {
-    if (minimizeToTaskbarOnClose == value) return;
+    if (minimizeToTaskbarOnClose == value &&
+        (value
+            ? desktopCloseAction == DesktopCloseAction.background
+            : desktopCloseAction != DesktopCloseAction.background)) {
+      return;
+    }
     minimizeToTaskbarOnClose = value;
+    desktopCloseAction = value
+        ? DesktopCloseAction.background
+        : DesktopCloseAction.ask;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('lazer_minimize_to_taskbar_on_close', value);
+    await prefs.setString(
+      'lazer_desktop_close_action',
+      desktopCloseAction.name,
+    );
+  }
+
+  Future<void> setDesktopCloseAction(DesktopCloseAction action) async {
+    if (desktopCloseAction == action &&
+        minimizeToTaskbarOnClose == (action == DesktopCloseAction.background)) {
+      return;
+    }
+    desktopCloseAction = action;
+    minimizeToTaskbarOnClose = action == DesktopCloseAction.background;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lazer_desktop_close_action', action.name);
+    await prefs.setBool(
+      'lazer_minimize_to_taskbar_on_close',
+      minimizeToTaskbarOnClose,
+    );
   }
 
   Future<void> setLyricControlsSeconds(double value) async {
@@ -1757,6 +1786,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       hapticsEnabled = prefs.getBool('lazer_haptics') ?? true;
       minimizeToTaskbarOnClose =
           prefs.getBool('lazer_minimize_to_taskbar_on_close') ?? false;
+      desktopCloseAction = DesktopCloseActionLabels.parse(
+        prefs.getString('lazer_desktop_close_action'),
+      );
+      if (prefs.getString('lazer_desktop_close_action') == null &&
+          minimizeToTaskbarOnClose) {
+        desktopCloseAction = DesktopCloseAction.background;
+      }
       hapticIntensity = (prefs.getDouble('lazer_haptic_intensity') ?? 0.5)
           .clamp(0, 1);
       themeMode = ThemeMode.values.firstWhere(

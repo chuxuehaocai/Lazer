@@ -13,6 +13,10 @@ import 'package:flutter/foundation.dart' show TargetPlatform;
 /// (phone) presentation: bottom tab bar, floating transport, pushed details.
 const double kCompactBreakpoint = 720;
 
+/// Width at which the shell has enough room for a tablet rail and content
+/// pane, while still needing the narrower tablet composition.
+const double kTabletBreakpoint = 1024;
+
 /// How many cards the library lays its playlists out in per row.
 ///
 /// `0` asks the grid to follow the window width — the density the library
@@ -221,6 +225,17 @@ enum AppUiMode {
   mobile,
 }
 
+/// What closing the desktop window should do when the choice was remembered.
+enum DesktopCloseAction { ask, background, exit }
+
+extension DesktopCloseActionLabels on DesktopCloseAction {
+  static DesktopCloseAction parse(String? value) =>
+      DesktopCloseAction.values.firstWhere(
+        (DesktopCloseAction action) => action.name == value,
+        orElse: () => DesktopCloseAction.ask,
+      );
+}
+
 extension AppUiModeLabels on AppUiMode {
   /// Chinese source string, translated through `context.tr`.
   String get label => switch (this) {
@@ -251,6 +266,14 @@ bool useCompactLayout(AppUiMode mode, double width) => switch (mode) {
   AppUiMode.desktop => false,
   AppUiMode.auto => width < kCompactBreakpoint,
 };
+
+/// Tablet keeps a navigation rail and a full content pane without spending
+/// the width of the desktop source list. Forced desktop/mobile modes retain
+/// their explicit choice.
+bool useTabletLayout(AppUiMode mode, double width) =>
+    mode == AppUiMode.auto &&
+    width >= kCompactBreakpoint &&
+    width < kTabletBreakpoint;
 
 // ---------------------------------------------------------------------------
 // DPI scaling

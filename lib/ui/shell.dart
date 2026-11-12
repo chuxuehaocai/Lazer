@@ -182,6 +182,7 @@ class _AppShellState extends State<AppShell>
   Brightness? _coveredShellBrightness;
   Color? _coveredShellAccent;
   bool? _coveredShellCompact;
+  bool? _coveredShellTablet;
   bool? _coveredShellCompactBar;
   bool? _coveredShellBackdrop;
   bool? _coveredShellLargeScreen;
@@ -970,6 +971,9 @@ class _AppShellState extends State<AppShell>
           final Size window = MediaQuery.sizeOf(context);
           final bool largeScreen = largeScreenModeOf(context);
           final bool compact = useCompactLayout(state.uiMode, window.width);
+          final bool tablet =
+              useTabletLayout(state.uiMode, window.width) &&
+              (state.autoDpiScale || state.dpiScale >= .95);
           final bool compactBar = window.width < 1_000;
           final bool paintedBackdrop =
               state.backgroundMode != AppBackgroundMode.off;
@@ -989,6 +993,7 @@ class _AppShellState extends State<AppShell>
               _coveredShellBrightness == brightness &&
               _coveredShellAccent == accent &&
               _coveredShellCompact == compact &&
+              _coveredShellTablet == tablet &&
               _coveredShellCompactBar == compactBar &&
               _coveredShellBackdrop == backdrop &&
               _coveredShellLargeScreen == largeScreen;
@@ -1056,6 +1061,8 @@ class _AppShellState extends State<AppShell>
                         minimum: tvSafeInsets(context),
                         child: largeScreen
                             ? _largeScreenLayout(apple)
+                            : tablet
+                            ? _tabletLayout(apple)
                             : compact
                             ? _compactLayout(apple)
                             : _desktopLayout(apple, compactBar: compactBar),
@@ -1069,6 +1076,7 @@ class _AppShellState extends State<AppShell>
             _coveredShellBrightness = brightness;
             _coveredShellAccent = accent;
             _coveredShellCompact = compact;
+            _coveredShellTablet = tablet;
             _coveredShellCompactBar = compactBar;
             _coveredShellBackdrop = backdrop;
             _coveredShellLargeScreen = largeScreen;
@@ -1367,6 +1375,88 @@ class _AppShellState extends State<AppShell>
       children: <Widget>[
         _mobileToolbar(apple),
         Expanded(child: RepaintBoundary(child: _content())),
+      ],
+    );
+  }
+
+  /// A tablet has enough room for a persistent destination rail, but a full
+  /// desktop source list would crowd the content pane in portrait mode.
+  Widget _tabletLayout(AppleSemanticColors apple) {
+    final List<_AppSection> sections = <_AppSection>[
+      _AppSection.home,
+      _AppSection.search,
+      _AppSection.library,
+      if (!state.isLocalPlayback) _AppSection.likes,
+      _AppSection.settings,
+    ];
+    final int selected = sections
+        .indexOf(_section)
+        .clamp(0, sections.length - 1);
+    return Row(
+      children: <Widget>[
+        NavigationRail(
+          selectedIndex: selected,
+          onDestinationSelected: (int index) => _select(sections[index]),
+          labelType: NavigationRailLabelType.selected,
+          groupAlignment: -.82,
+          leading: Padding(
+            padding: const EdgeInsets.only(bottom: 18),
+            child: Text(
+              'Lazer',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: apple.label,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          destinations: <NavigationRailDestination>[
+            NavigationRailDestination(
+              icon: const Icon(Icons.home_outlined),
+              selectedIcon: const Icon(Icons.home_rounded),
+              label: Text(context.tr('主页')),
+            ),
+            NavigationRailDestination(
+              icon: const Icon(Icons.search_outlined),
+              selectedIcon: const Icon(Icons.search_rounded),
+              label: Text(context.tr('搜索')),
+            ),
+            NavigationRailDestination(
+              icon: const Icon(Icons.library_music_outlined),
+              selectedIcon: const Icon(Icons.library_music_rounded),
+              label: Text(context.tr('音乐库')),
+            ),
+            if (!state.isLocalPlayback)
+              NavigationRailDestination(
+                icon: const Icon(Icons.favorite_border_rounded),
+                selectedIcon: const Icon(Icons.favorite_rounded),
+                label: Text(context.tr('我喜欢')),
+              ),
+            NavigationRailDestination(
+              icon: const Icon(Icons.settings_outlined),
+              selectedIcon: const Icon(Icons.settings_rounded),
+              label: Text(context.tr('设置')),
+            ),
+          ],
+        ),
+        VerticalDivider(width: .5, color: apple.separator),
+        Expanded(
+          child: Column(
+            children: <Widget>[
+              _desktopToolbar(apple),
+              Container(height: .5, color: apple.separator),
+              Expanded(child: RepaintBoundary(child: _content())),
+              RepaintBoundary(
+                child: AppPlayerBar(
+                  state: state,
+                  compact: true,
+                  comments: _comments,
+                  onComments: _toggleComments,
+                  onOpen: _openNowPlaying,
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }

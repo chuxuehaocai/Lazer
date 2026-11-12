@@ -189,6 +189,9 @@ class AppSystemTray with TrayListener {
       if (kSupportsSystemTray) {
         await TrayManager.instance.destroy();
       }
+      try {
+        await windowManager.setPreventClose(false);
+      } catch (_) {}
       await windowManager.destroy();
     } catch (_) {}
   }

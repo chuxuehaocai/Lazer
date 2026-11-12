@@ -86,6 +86,9 @@ void main() {
       expect(useCompactLayout(AppUiMode.auto, kCompactBreakpoint), isFalse);
       expect(useCompactLayout(AppUiMode.desktop, 320), isFalse);
       expect(useCompactLayout(AppUiMode.mobile, 1920), isTrue);
+      expect(useTabletLayout(AppUiMode.auto, 800), isTrue);
+      expect(useTabletLayout(AppUiMode.auto, kTabletBreakpoint), isFalse);
+      expect(useTabletLayout(AppUiMode.desktop, 800), isFalse);
       expect(AppUiModeLabels.parse('mobile'), AppUiMode.mobile);
       expect(AppUiModeLabels.parse('nope'), AppUiMode.auto);
       expect(AppUiModeLabels.parse(null), AppUiMode.auto);
@@ -231,17 +234,33 @@ void main() {
       expect(state.minimizeToTaskbarOnClose, isFalse);
       await state.setMinimizeToTaskbarOnClose(true);
       expect(state.minimizeToTaskbarOnClose, isTrue);
+      expect(state.desktopCloseAction, DesktopCloseAction.background);
 
       final restarted = AppState(catalog: _Catalog());
       addTearDown(restarted.dispose);
       expect(restarted.minimizeToTaskbarOnClose, isFalse);
       await restarted.bootstrap();
       expect(restarted.minimizeToTaskbarOnClose, isTrue);
+      expect(restarted.desktopCloseAction, DesktopCloseAction.background);
 
       await restarted.setMinimizeToTaskbarOnClose(false);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('lazer_minimize_to_taskbar_on_close'), isFalse);
     });
+
+    test(
+      'desktop close action can remember exiting instead of backgrounding',
+      () async {
+      final state = AppState(catalog: _Catalog());
+      addTearDown(state.dispose);
+      await state.setDesktopCloseAction(DesktopCloseAction.exit);
+      expect(state.desktopCloseAction, DesktopCloseAction.exit);
+      expect(state.minimizeToTaskbarOnClose, isFalse);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('lazer_desktop_close_action'), 'exit');
+      },
+    );
 
     test('tray menu items have translations across supported locales', () async {
       TestWidgetsFlutterBinding.ensureInitialized();

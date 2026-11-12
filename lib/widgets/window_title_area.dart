@@ -6,6 +6,8 @@ import 'package:window_manager/window_manager.dart';
 
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
+import '../state/ui_preferences.dart';
+import 'app_system_tray.dart';
 
 /// Window title shown in the title area — also pushed to the native window so
 /// the taskbar and Alt+Tab agree with the bar.
@@ -50,6 +52,7 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
   bool _maximized = false;
   bool _fullScreen = false;
   bool _focused = true;
+  bool _closePromptOpen = false;
 
   @override
   void initState() {
@@ -91,8 +94,9 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
 
   void _syncPreventClose() {
     try {
-      final bool minimize = widget.state?.minimizeToTaskbarOnClose ?? false;
-      windowManager.setPreventClose(minimize);
+      // Keep the native close event in Flutter so the user can choose between
+      // exiting and continuing playback in the tray.
+      windowManager.setPreventClose(true);
     } catch (_) {}
   }
 
@@ -123,13 +127,90 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
 
   @override
   void onWindowClose() async {
+    await _requestClose();
+  }
+
+  Future<void> _requestClose() async {
+    if (_closePromptOpen) return;
+    final DesktopCloseAction remembered =
+        widget.state?.desktopCloseAction ?? DesktopCloseAction.ask;
+    if (remembered != DesktopCloseAction.ask) {
+      await _applyCloseAction(remembered);
+      return;
+    }
+    if (!mounted || !kSupportsSystemTray) {
+      await _applyCloseAction(DesktopCloseAction.exit);
+      return;
+    }
+    _closePromptOpen = true;
     try {
-      final bool minimize = widget.state?.minimizeToTaskbarOnClose ?? false;
-      if (minimize) {
-        await windowManager.hide();
-      } else {
-        await windowManager.destroy();
+      bool remember = false;
+      final result =
+          await showDialog<({DesktopCloseAction action, bool remember})>(
+            context: context,
+            barrierDismissible: true,
+            builder: (BuildContext dialogContext) => StatefulBuilder(
+              builder: (BuildContext context, StateSetter setDialogState) =>
+                  AlertDialog(
+                    title: Text(context.tr('关闭 Lazer')),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(context.tr('请选择关闭窗口后的操作。')),
+                        const SizedBox(height: 12),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: remember,
+                          onChanged: (bool? value) =>
+                              setDialogState(() => remember = value ?? false),
+                          title: Text(context.tr('记住我的选择')),
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                      ],
+                    ),
+                    actions: <Widget>[
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: Text(context.tr('取消')),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop((
+                          action: DesktopCloseAction.exit,
+                          remember: remember,
+                        )),
+                        child: Text(context.tr('退出')),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.of(dialogContext).pop((
+                          action: DesktopCloseAction.background,
+                          remember: remember,
+                        )),
+                        child: Text(context.tr('后台运行')),
+                      ),
+                    ],
+                  ),
+            ),
+          );
+      if (result == null) return;
+      if (result.remember) {
+        await widget.state?.setDesktopCloseAction(result.action);
       }
+      await _applyCloseAction(result.action);
+    } catch (_) {
+    } finally {
+      _closePromptOpen = false;
+    }
+  }
+
+  Future<void> _applyCloseAction(DesktopCloseAction action) async {
+    try {
+      if (action == DesktopCloseAction.background) {
+        await windowManager.hide();
+        return;
+      }
+      await windowManager.setPreventClose(false);
+      await windowManager.destroy();
     } catch (_) {}
   }
 
@@ -173,12 +254,7 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
 
   Future<void> _close() async {
     try {
-      final bool minimize = widget.state?.minimizeToTaskbarOnClose ?? false;
-      if (minimize) {
-        await windowManager.hide();
-      } else {
-        await windowManager.close();
-      }
+      await windowManager.close();
     } catch (_) {
       // Ignore: the window may be gone mid-teardown.
     }
