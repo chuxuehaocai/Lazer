@@ -115,6 +115,14 @@ another album is taken back — without interrupting the song unless the native
 decoder has to reopen. An engine that refuses the mode falls back to album
 gapless playback and the row says why.
 
+Album gapless playback sounds different on the two families of engine, and both
+are intended. The native engine queues the following song into the same playback
+clock, so the join is sample to sample and nothing is overlapped. The system
+engine runs one decoder per song and cannot make two of them share a clock: it
+starts the following song inside the last 200 ms of the current one and crosses
+the gains there, because waiting for the first decoder to stop and then opening
+the second leaves the device dry and the join is heard as a click.
+
 ## Diagnostics
 
 Settings → About → Export logs saves a bounded runtime log and playback report.
