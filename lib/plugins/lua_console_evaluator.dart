@@ -8,6 +8,22 @@ import 'package:lua_dardo_plus/src/state/lua_state_impl.dart';
 class ConsoleCapableLuaState extends LuaStateImpl {
   int? _remaining;
 
+  /// Bounds normal plugin calls as well as interactive console snippets. A
+  /// malformed provider must fail its request and release the playback lane
+  /// instead of spinning the VM until the outer timeout expires.
+  Future<T> withInstructionBudget<T>(
+    int budget,
+    Future<T> Function() action,
+  ) async {
+    final int? previous = _remaining;
+    _remaining = budget;
+    try {
+      return await action();
+    } finally {
+      _remaining = previous;
+    }
+  }
+
   @override
   int fetch() {
     final remaining = _remaining;

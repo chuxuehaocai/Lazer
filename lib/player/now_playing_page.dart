@@ -463,6 +463,9 @@ class _NowPlayingPageState extends State<NowPlayingPage>
           Expanded(
             child: _settledGate(
               LyricViewport(
+                key: ValueKey<String>(
+                  'mobile-lyrics-${widget.state.current?.id ?? ''}',
+                ),
                 state: widget.state,
                 backdropKey: _backdropKey,
                 onSelectionChanged: _selectionChanged,
@@ -793,6 +796,9 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                                 artwork: _cover(track),
                                 lyrics: _settledGate(
                                   LyricViewport(
+                                    key: ValueKey<String>(
+                                      'desktop-lyrics-${track.id}',
+                                    ),
                                     state: widget.state,
                                     backdropKey: _backdropKey,
                                     onSelectionChanged: _selectionChanged,

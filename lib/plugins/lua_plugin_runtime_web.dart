@@ -284,21 +284,23 @@ class _WebPluginHost {
   }
 
   Future<Object?> invoke(String operation, Object? args) async {
-    lua.setTop(0);
-    try {
-      lua.getGlobal('_plugin');
-      lua.getField(-1, 'call');
-      lua.remove(-2);
-      if (!lua.isFunction(-1)) {
-        throw const PluginException('插件缺少 call 入口。');
-      }
-      lua.pushString(operation);
-      _push(lua, args);
-      await lua.callAsync(2, 1);
-      return _read(lua, -1);
-    } finally {
+    return lua.withInstructionBudget(250000, () async {
       lua.setTop(0);
-    }
+      try {
+        lua.getGlobal('_plugin');
+        lua.getField(-1, 'call');
+        lua.remove(-2);
+        if (!lua.isFunction(-1)) {
+          throw const PluginException('插件缺少 call 入口。');
+        }
+        lua.pushString(operation);
+        _push(lua, args);
+        await lua.callAsync(2, 1);
+        return _read(lua, -1);
+      } finally {
+        lua.setTop(0);
+      }
+    });
   }
 
   Future<Map<String, dynamic>> _http(Map<String, dynamic> spec) async {

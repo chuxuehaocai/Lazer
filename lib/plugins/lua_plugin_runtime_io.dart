@@ -194,6 +194,26 @@ class LuaPluginRuntime {
         '插件响应超时，已自动重启插件。',
         code: PluginException.timeoutCode,
       );
+    } on PluginException catch (error) {
+      if (error.code == PluginException.timeoutCode) {
+        // Instruction-budget failures leave the Lua stack in the same state as
+        // a wall-clock timeout. Recreate the isolate before the next stream
+        // resolve instead of reusing a poisoned VM.
+        _reset();
+        AppLog.shared.event('lua', 'timeout', {
+          'plugin': manifest.id,
+          'operation': operation,
+          'request': id,
+        });
+      } else {
+        AppLog.shared.event('lua', 'failed', {
+          'plugin': manifest.id,
+          'operation': operation,
+          'request': id,
+          'elapsed_ms': clock.elapsedMilliseconds,
+        });
+      }
+      rethrow;
     } catch (_) {
       AppLog.shared.event('lua', 'failed', {
         'plugin': manifest.id,
@@ -317,7 +337,11 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
           'id': request['id'],
           'error': true,
           'detail': request['source'] is String ? '$error' : '插件请求失败，请重试或更新插件。',
-          'code': int.tryParse(code ?? ''),
+          'code':
+              error is StateError &&
+                  error.message == 'Lua instruction limit exceeded'
+              ? PluginException.timeoutCode
+              : int.tryParse(code ?? ''),
         });
       }
     });
@@ -493,19 +517,23 @@ end
   }
 
   Future<Object?> invoke(String operation, Object? args) async {
-    lua.setTop(0);
-    try {
-      lua.getGlobal('_plugin');
-      lua.getField(-1, 'call');
-      lua.remove(-2);
-      if (!lua.isFunction(-1)) throw const PluginException('插件缺少 call 入口。');
-      lua.pushString(operation);
-      _push(lua, args);
-      await lua.callAsync(2, 1);
-      return _read(lua, -1);
-    } finally {
+    return lua.withInstructionBudget(250000, () async {
       lua.setTop(0);
-    }
+      try {
+        lua.getGlobal('_plugin');
+        lua.getField(-1, 'call');
+        lua.remove(-2);
+        if (!lua.isFunction(-1)) {
+          throw const PluginException('插件缺少 call 入口。');
+        }
+        lua.pushString(operation);
+        _push(lua, args);
+        await lua.callAsync(2, 1);
+        return _read(lua, -1);
+      } finally {
+        lua.setTop(0);
+      }
+    });
   }
 
   Future<Map<String, dynamic>> _http(Map<String, dynamic> spec) async {

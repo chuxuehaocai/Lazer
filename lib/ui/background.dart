@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 
@@ -241,7 +242,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   /// Mesh density and frame rate have separate controls, so lowering detail
   /// preserves the chosen background cadence.
   late DynamicBackgroundPrecision _precision = DynamicBackgroundPrecision.of(
-    widget.quality,
+    kIsWeb ? math.min(widget.quality, .55) : widget.quality,
   );
 
   late List<Color> _from = normalizeFlowPalette(widget.colors);
@@ -341,8 +342,13 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   void _configureFrameRate() {
     final double reported = _view?.display.refreshRate ?? 60;
     final double refresh = reported.isFinite && reported > 0 ? reported : 60;
-    final double requested = widget.frameRate?.clamp(10, 1000) ?? refresh;
-    _paintEveryVsync = widget.frameRate == null || requested >= refresh;
+    final double requestedRaw = widget.frameRate?.clamp(10, 1000) ?? refresh;
+    // Canvas mesh recording and browser compositing compete on the same UI
+    // thread. A 30 fps cap keeps scrolling and text input responsive on web;
+    // native surfaces retain the requested display cadence.
+    final double requested = kIsWeb ? math.min(requestedRaw, 30) : requestedRaw;
+    _paintEveryVsync =
+        !kIsWeb && (widget.frameRate == null || requested >= refresh);
     _frameInterval = Duration(
       microseconds: (1000000 / math.min(refresh, requested)).round(),
     );
@@ -380,7 +386,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
       _frames.value++;
     }
     final DynamicBackgroundPrecision precision = DynamicBackgroundPrecision.of(
-      widget.quality,
+      kIsWeb ? math.min(widget.quality, .55) : widget.quality,
     );
     if (precision != _precision) {
       _precision = precision;
