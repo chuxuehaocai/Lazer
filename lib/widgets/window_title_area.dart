@@ -198,6 +198,9 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
       }
       await _applyCloseAction(result.action);
     } catch (_) {
+      // A native dialog/channel failure must not turn the close button into a
+      // no-op. Exiting is the safe fallback when the choice UI cannot open.
+      await _applyCloseAction(DesktopCloseAction.exit);
     } finally {
       _closePromptOpen = false;
     }
@@ -247,14 +250,6 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
   Future<void> _minimize() async {
     try {
       await windowManager.minimize();
-    } catch (_) {
-      // Ignore: the window may be gone mid-teardown.
-    }
-  }
-
-  Future<void> _close() async {
-    try {
-      await windowManager.close();
     } catch (_) {
       // Ignore: the window may be gone mid-teardown.
     }
@@ -340,7 +335,7 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
                       key: const ValueKey<String>('window-title-close'),
                       glyph: _CaptionGlyph.close,
                       label: context.tr('关闭窗口'),
-                      onPressed: _close,
+                      onPressed: _requestClose,
                       destructive: true,
                     ),
                   ],

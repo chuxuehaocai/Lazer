@@ -172,7 +172,7 @@ class _SettingsCategoryHome extends StatelessWidget {
         onOpenLocalMusic: onOpenLocalMusic,
         backgroundImagePicker: backgroundImagePicker,
       ),
-      view: (_) => _SettingsOverview(
+      view: (_) => _SettingsCategoryScaffold(
         category: category,
         state: state,
         onOpenLocalMusic: onOpenLocalMusic,

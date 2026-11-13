@@ -130,7 +130,7 @@ Future<void> main(List<String> args) async {
       // another. Start them together so a platform round trip does not postpone
       // opening the audio engine and restoring the usable application.
       try {
-        final Future<void> windowReady = initWindowFrame();
+        final Future<void> windowReady = initWindowFrame(preventClose: true);
         // The television input model (D-pad focus) needs this before the first
         // frame: a television with no pointer would otherwise boot into a screen
         // where nothing can be operated.
