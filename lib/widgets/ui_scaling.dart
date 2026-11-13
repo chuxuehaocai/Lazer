@@ -134,11 +134,13 @@ class UiScaling extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final DeviceProfile profile = resolveDeviceProfile(
-      state.surface,
-      television: state.deviceIsTelevision,
-      car: detectCarDisplay(context),
-    );
+    final DeviceProfile profile = state.layoutStyle == AppLayoutStyle.tv
+        ? DeviceProfile.tv
+        : resolveDeviceProfile(
+            state.surface,
+            television: state.deviceIsTelevision,
+            car: detectCarDisplay(context),
+          );
     final bool car = profile == DeviceProfile.car;
     final bool tv = profile == DeviceProfile.tv;
     final double floor = dpiScaleFloor(car: car);
@@ -159,7 +161,11 @@ class UiScaling extends StatelessWidget {
     return TvScope(
       // Remote navigation follows the input device, not the density choice: a
       // television told to use standard density still has no touch screen.
-      active: tv || state.deviceIsTelevision || state.surface == AppSurface.tv,
+      active:
+          tv ||
+          state.deviceIsTelevision ||
+          state.surface == AppSurface.tv ||
+          state.layoutStyle == AppLayoutStyle.tv,
       // The traversal policy itself is installed by the shell, inside the
       // route: MaterialApp's navigator puts its own traversal group around
       // every page, so a group at this level would never be consulted.
@@ -174,7 +180,10 @@ class UiScaling extends StatelessWidget {
           car: car,
           tv: tv,
           child:
-              tv || state.deviceIsTelevision || state.surface == AppSurface.tv
+              tv ||
+                  state.deviceIsTelevision ||
+                  state.surface == AppSurface.tv ||
+                  state.layoutStyle == AppLayoutStyle.tv
               ? Builder(
                   builder: (context) => MediaQuery(
                     data: MediaQuery.of(

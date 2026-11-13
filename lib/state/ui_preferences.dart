@@ -232,6 +232,49 @@ enum AppUiMode {
   mobile,
 }
 
+/// The single layout choice exposed to users. `auto` follows the operating
+/// system and available window size; the other values are useful when a
+/// detachable tablet or desktop window should keep one composition.
+enum AppLayoutStyle { auto, phone, tablet, desktop, tv }
+
+enum AppTabletRailPosition { left, right }
+
+extension AppTabletRailPositionLabels on AppTabletRailPosition {
+  String get label => switch (this) {
+    AppTabletRailPosition.left => '左侧',
+    AppTabletRailPosition.right => '右侧',
+  };
+
+  static AppTabletRailPosition parse(String? name) =>
+      AppTabletRailPosition.values.firstWhere(
+        (AppTabletRailPosition position) => position.name == name,
+        orElse: () => AppTabletRailPosition.left,
+      );
+}
+
+extension AppLayoutStyleLabels on AppLayoutStyle {
+  String get label => switch (this) {
+    AppLayoutStyle.auto => '自动选择',
+    AppLayoutStyle.phone => '手机端',
+    AppLayoutStyle.tablet => '平板端',
+    AppLayoutStyle.desktop => '桌面端',
+    AppLayoutStyle.tv => '电视端',
+  };
+
+  String get detail => switch (this) {
+    AppLayoutStyle.auto => '由系统与窗口尺寸选择最合适的布局',
+    AppLayoutStyle.phone => '底部胶囊导航与紧凑播放条',
+    AppLayoutStyle.tablet => '左侧胶囊导航与内容分栏',
+    AppLayoutStyle.desktop => '桌面侧栏与完整播放控制',
+    AppLayoutStyle.tv => '适合遥控器与远距离观看的大屏布局',
+  };
+
+  static AppLayoutStyle parse(String? name) => AppLayoutStyle.values.firstWhere(
+    (AppLayoutStyle style) => style.name == name,
+    orElse: () => AppLayoutStyle.auto,
+  );
+}
+
 /// What closing the desktop window should do when the choice was remembered.
 enum DesktopCloseAction { ask, background, exit }
 
@@ -288,19 +331,34 @@ extension AppUiModeLabels on AppUiMode {
 /// Whether the shell should draw its compact presentation.
 ///
 /// [width] is the width available to the shell in logical pixels.
-bool useCompactLayout(AppUiMode mode, double width) => switch (mode) {
-  AppUiMode.mobile => true,
-  AppUiMode.desktop => false,
-  AppUiMode.auto => width < kCompactBreakpoint,
+bool useCompactLayout(
+  AppUiMode mode,
+  double width, {
+  AppLayoutStyle layoutStyle = AppLayoutStyle.auto,
+}) => switch (layoutStyle) {
+  AppLayoutStyle.phone => true,
+  AppLayoutStyle.tablet || AppLayoutStyle.desktop || AppLayoutStyle.tv => false,
+  AppLayoutStyle.auto => switch (mode) {
+    AppUiMode.mobile => true,
+    AppUiMode.desktop => false,
+    AppUiMode.auto => width < kCompactBreakpoint,
+  },
 };
 
 /// Tablet keeps a navigation rail and a full content pane without spending
 /// the width of the desktop source list. Forced desktop/mobile modes retain
 /// their explicit choice.
-bool useTabletLayout(AppUiMode mode, double width) =>
-    mode == AppUiMode.auto &&
-    width >= kCompactBreakpoint &&
-    width < kTabletBreakpoint;
+bool useTabletLayout(
+  AppUiMode mode,
+  double width, {
+  AppLayoutStyle layoutStyle = AppLayoutStyle.auto,
+}) {
+  if (layoutStyle == AppLayoutStyle.tablet) return true;
+  if (layoutStyle != AppLayoutStyle.auto) return false;
+  // Android and iOS tablets use the tablet composition by default. In a
+  // desktop window the same breakpoint keeps the layout from becoming airy.
+  return mode == AppUiMode.auto && width >= 600 && width < kTabletBreakpoint;
+}
 
 // ---------------------------------------------------------------------------
 // DPI scaling

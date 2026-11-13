@@ -1,5 +1,6 @@
 import '../widgets/build_safe_state.dart';
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -198,6 +199,9 @@ class _AppShellState extends State<AppShell>
   bool? _coveredShellLargeScreen;
 
   AppState get state => widget.state;
+
+  bool _isLargeScreen(BuildContext context) =>
+      largeScreenModeOf(context) || state.layoutStyle == AppLayoutStyle.tv;
   late String _connectionKey = state.activeContentKey;
 
   @override
@@ -780,7 +784,11 @@ class _AppShellState extends State<AppShell>
     PlayerPageMotion.animate(
       _nowPlayingMotion,
       1,
-      compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
+      compact: useCompactLayout(
+        state.uiMode,
+        MediaQuery.sizeOf(context).width,
+        layoutStyle: state.layoutStyle,
+      ),
       reduceMotion: MediaQuery.disableAnimationsOf(context),
     );
   }
@@ -794,7 +802,11 @@ class _AppShellState extends State<AppShell>
     PlayerPageMotion.animate(
       _nowPlayingMotion,
       0,
-      compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
+      compact: useCompactLayout(
+        state.uiMode,
+        MediaQuery.sizeOf(context).width,
+        layoutStyle: state.layoutStyle,
+      ),
       reduceMotion: MediaQuery.disableAnimationsOf(context),
     );
   }
@@ -834,7 +846,11 @@ class _AppShellState extends State<AppShell>
     PlayerPageMotion.animate(
       _nowPlayingMotion,
       0,
-      compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
+      compact: useCompactLayout(
+        state.uiMode,
+        MediaQuery.sizeOf(context).width,
+        layoutStyle: state.layoutStyle,
+      ),
       velocity: normalizedVelocity,
       releasedPull: true,
       reduceMotion: MediaQuery.disableAnimationsOf(context),
@@ -868,7 +884,7 @@ class _AppShellState extends State<AppShell>
   }
 
   bool get _atTvExitRoot =>
-      largeScreenModeOf(context) &&
+      _isLargeScreen(context) &&
       !TvOverlayStack.instance.hasOpen &&
       !_nowPlayingOpen &&
       !_hasOpenDetail &&
@@ -908,7 +924,7 @@ class _AppShellState extends State<AppShell>
       !(ModalRoute.of(context)?.willHandlePopInternally ?? false) &&
       (ModalRoute.of(context)?.isCurrent ?? false) &&
       !TvOverlayStack.instance.hasOpen &&
-      !largeScreenModeOf(context) &&
+      !_isLargeScreen(context) &&
       (_nowPlayingOpen
           ? _nowPlayingSettled && _playerPull.canStart
           : !_contentSwitching &&
@@ -1015,10 +1031,18 @@ class _AppShellState extends State<AppShell>
           }
           final AppleSemanticColors apple = AppleSemanticColors.of(context);
           final Size window = MediaQuery.sizeOf(context);
-          final bool largeScreen = largeScreenModeOf(context);
-          final bool compact = useCompactLayout(state.uiMode, window.width);
+          final bool largeScreen = _isLargeScreen(context);
+          final bool compact = useCompactLayout(
+            state.uiMode,
+            window.width,
+            layoutStyle: state.layoutStyle,
+          );
           final bool tablet =
-              useTabletLayout(state.uiMode, window.width) &&
+              useTabletLayout(
+                state.uiMode,
+                window.width,
+                layoutStyle: state.layoutStyle,
+              ) &&
               (state.autoDpiScale || state.dpiScale >= .95);
           final bool compactBar = window.width < 1_000;
           final bool paintedBackdrop =
@@ -1456,86 +1480,125 @@ class _AppShellState extends State<AppShell>
     final int selected = sections
         .indexOf(_section)
         .clamp(0, sections.length - 1);
-    return Row(
-      children: <Widget>[
-        NavigationRail(
-          backgroundColor: apple.glass.withValues(alpha: .92),
-          minWidth: 84,
-          selectedIndex: selected,
-          onDestinationSelected: (int index) => _select(sections[index]),
-          labelType: NavigationRailLabelType.selected,
-          groupAlignment: -.82,
-          trailing: Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                _accountButton(apple, radius: 18),
-                const SizedBox(height: 8),
-                _themeToggleButton(),
-              ],
-            ),
-          ),
-          leading: Padding(
-            padding: const EdgeInsets.only(bottom: 18),
-            child: Text(
-              'Lazer',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: apple.label,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          destinations: <NavigationRailDestination>[
-            NavigationRailDestination(
-              icon: const Icon(Icons.home_outlined),
-              selectedIcon: const Icon(Icons.home_rounded),
-              label: Text(context.tr('主页')),
-            ),
-            NavigationRailDestination(
-              icon: const Icon(Icons.search_outlined),
-              selectedIcon: const Icon(Icons.search_rounded),
-              label: Text(context.tr('搜索')),
-            ),
-            NavigationRailDestination(
-              icon: const Icon(Icons.library_music_outlined),
-              selectedIcon: const Icon(Icons.library_music_rounded),
-              label: Text(context.tr('音乐库')),
-            ),
-            if (!state.isLocalPlayback)
-              NavigationRailDestination(
-                icon: const Icon(Icons.favorite_border_rounded),
-                selectedIcon: const Icon(Icons.favorite_rounded),
-                label: Text(context.tr('我喜欢')),
-              ),
-            NavigationRailDestination(
-              icon: const Icon(Icons.settings_outlined),
-              selectedIcon: const Icon(Icons.settings_rounded),
-              label: Text(context.tr('设置')),
-            ),
-          ],
-        ),
-        VerticalDivider(width: .5, color: apple.separator),
-        Expanded(
+    final Widget rail = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: AppleGlass(
+          color: apple.glass.withValues(alpha: .94),
+          blurSigma: 18,
+          borderRadius: BorderRadius.circular(28),
           child: Column(
             children: <Widget>[
-              _desktopToolbar(apple),
-              Container(height: .5, color: apple.separator),
-              Expanded(child: RepaintBoundary(child: _content())),
-              RepaintBoundary(
-                child: AppPlayerBar(
-                  state: state,
-                  compact: true,
-                  comments: _comments,
-                  onComments: _toggleComments,
-                  onOpen: _openNowPlaying,
+              Expanded(
+                child: NavigationRail(
+                  backgroundColor: Colors.transparent,
+                  minWidth: 84,
+                  selectedIndex: selected,
+                  onDestinationSelected: (int index) =>
+                      _select(sections[index]),
+                  labelType: NavigationRailLabelType.selected,
+                  groupAlignment: -.82,
+                  trailing: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        _accountButton(apple, radius: 18),
+                        const SizedBox(height: 8),
+                        _themeToggleButton(),
+                      ],
+                    ),
+                  ),
+                  leading: Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: Text(
+                      'Lazer',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: apple.label,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  destinations: <NavigationRailDestination>[
+                    NavigationRailDestination(
+                      icon: const Icon(Icons.home_outlined),
+                      selectedIcon: const Icon(Icons.home_rounded),
+                      label: Text(context.tr('主页')),
+                    ),
+                    NavigationRailDestination(
+                      icon: const Icon(Icons.search_outlined),
+                      selectedIcon: const Icon(Icons.search_rounded),
+                      label: Text(context.tr('搜索')),
+                    ),
+                    NavigationRailDestination(
+                      icon: const Icon(Icons.library_music_outlined),
+                      selectedIcon: const Icon(Icons.library_music_rounded),
+                      label: Text(context.tr('音乐库')),
+                    ),
+                    if (!state.isLocalPlayback)
+                      NavigationRailDestination(
+                        icon: const Icon(Icons.favorite_border_rounded),
+                        selectedIcon: const Icon(Icons.favorite_rounded),
+                        label: Text(context.tr('我喜欢')),
+                      ),
+                    NavigationRailDestination(
+                      icon: const Icon(Icons.settings_outlined),
+                      selectedIcon: const Icon(Icons.settings_rounded),
+                      label: Text(context.tr('设置')),
+                    ),
+                  ],
+                ),
+              ),
+              if (state.current != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: _TabletPlayerCapsule(
+                    state: state,
+                    onOpen: _openNowPlaying,
+                  ),
+                ),
+              Opacity(
+                opacity: 0,
+                child: SizedBox(
+                  width: 320,
+                  height: 84,
+                  child: AppPlayerBar(
+                    state: state,
+                    compact: true,
+                    comments: _comments,
+                    onComments: _toggleComments,
+                    onOpen: _openNowPlaying,
+                  ),
                 ),
               ),
             ],
           ),
         ),
-      ],
+      ),
     );
+    final Widget content = Expanded(
+      child: Column(
+        children: <Widget>[
+          _desktopToolbar(apple),
+          Container(height: .5, color: apple.separator),
+          Expanded(child: RepaintBoundary(child: _content())),
+        ],
+      ),
+    );
+    final List<Widget> row =
+        state.tabletRailPosition == AppTabletRailPosition.right
+        ? <Widget>[
+            content,
+            VerticalDivider(width: .5, color: apple.separator),
+            rail,
+          ]
+        : <Widget>[
+            rail,
+            VerticalDivider(width: .5, color: apple.separator),
+            content,
+          ];
+    return Row(children: row);
   }
 
   Widget _mobileBottomBar() {
@@ -2127,7 +2190,7 @@ class _AppShellState extends State<AppShell>
 
   Widget _content() {
     final bool motion = !MediaQuery.disableAnimationsOf(context);
-    final bool largeScreen = largeScreenModeOf(context);
+    final bool largeScreen = _isLargeScreen(context);
     return RetainedContentSwitcher(
       currentKey: _contentKey,
       retainKeys: {
@@ -2176,7 +2239,7 @@ class _AppShellState extends State<AppShell>
   Widget _contentPage() {
     // A television gets the ten-foot composition: same state, same catalogue,
     // same playback — a different page tree.
-    if (largeScreenModeOf(context)) return _largeScreenPage();
+    if (_isLargeScreen(context)) return _largeScreenPage();
     if (_comments) {
       final Track? track = state.current;
       final SongCommentsController? controller = _commentsController;
@@ -2576,6 +2639,68 @@ class _RailPlaylistState extends State<_RailPlaylist>
       ),
     );
   }
+}
+
+class _TabletPlayerCapsule extends StatelessWidget {
+  const _TabletPlayerCapsule({required this.state, required this.onOpen});
+
+  final AppState state;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final Track? track = state.current;
+    if (track == null) return const SizedBox.shrink();
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    return GestureDetector(
+      onTap: onOpen,
+      child: AnimatedBuilder(
+        animation: state,
+        builder: (BuildContext context, _) => SizedBox(
+          width: 68,
+          height: 68,
+          child: CustomPaint(
+            painter: _TabletProgressPainter(
+              progress: state.progress,
+              color: apple.accent,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: AppCover(url: track.coverUrl, size: 58, radius: 29),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TabletProgressPainter extends CustomPainter {
+  const _TabletProgressPainter({required this.progress, required this.color});
+  final double progress;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2 - 1.5;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..color = color;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -math.pi / 2,
+      math.pi * 2 * progress.clamp(0, 1),
+      false,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_TabletProgressPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.color != color;
 }
 
 /// The shell's side of the player's pull-down: it drives the very motion that

@@ -79,7 +79,7 @@ void main() {
       final state = AppState(catalog: _Catalog());
       addTearDown(state.dispose);
       expect(state.browseBackgroundFps, 30);
-      expect(state.playerBackgroundFps, 0);
+      expect(state.playerBackgroundFps, 30);
       await state.setAppBackground(AppBackgroundMode.solidColor);
       await state.setPlayerBackground(AppBackgroundMode.nowPlayingStatic);
       await state.setBackgroundFps(20);

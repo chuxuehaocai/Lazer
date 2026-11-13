@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/chuxuehaocai/Lazer/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/badge/build-GitHub%20Actions-6C8EBF"></a>
   <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.47.0-54C5F8?logo=flutter&logoColor=white">
-  <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.100-8E7CC3">
+  <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.200-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
   <img alt="web demo" src="https://img.shields.io/badge/Web%20Demo-Vercel-000000">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-4C9A7A"></a>

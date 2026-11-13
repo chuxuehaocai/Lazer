@@ -83,7 +83,11 @@ class AppSettingsPage extends StatelessWidget {
     // detail host owns local-history state, so it must not carry an open
     // subview into the new state instance.
     key: ObjectKey(state),
-    compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
+    compact: useCompactLayout(
+      state.uiMode,
+      MediaQuery.sizeOf(context).width,
+      layoutStyle: state.layoutStyle,
+    ),
     child: categorized
         ? _SettingsCategoryHome(
             state: state,
@@ -308,6 +312,11 @@ class _SettingsOverview extends StatelessWidget {
     final double minScale = UiMetrics.minScaleOf(context);
     final double shownScale = UiMetrics.scaleOf(context);
     final bool car = UiMetrics.carOf(context);
+    final bool tablet = useTabletLayout(
+      state.uiMode,
+      MediaQuery.sizeOf(context).width,
+      layoutStyle: state.layoutStyle,
+    );
     final DynamicBackgroundPrecision flowPrecision =
         DynamicBackgroundPrecision.of(state.dynamicBackgroundQuality);
     final double inset = pageInset(context);
@@ -407,6 +416,59 @@ class _SettingsOverview extends StatelessWidget {
                                       unawaited(_pickAppAccent(context, state)),
                                 ),
                               ],
+                            ),
+                          ),
+                        _AppSettingRow(
+                          key: const ValueKey('layout-style-setting'),
+                          label: '布局样式',
+                          subtitle: state.layoutStyle.detail,
+                          trailing: DropdownButton<AppLayoutStyle>(
+                            key: ValueKey<AppLayoutStyle>(state.layoutStyle),
+                            value: state.layoutStyle,
+                            underline: const SizedBox.shrink(),
+                            borderRadius: BorderRadius.circular(12),
+                            items: <DropdownMenuItem<AppLayoutStyle>>[
+                              for (final AppLayoutStyle style
+                                  in AppLayoutStyle.values)
+                                DropdownMenuItem<AppLayoutStyle>(
+                                  value: style,
+                                  child: TrText(style.label),
+                                ),
+                            ],
+                            onChanged: (AppLayoutStyle? value) {
+                              if (value != null) {
+                                unawaited(state.setLayoutStyle(value));
+                              }
+                            },
+                          ),
+                        ),
+                        if (state.layoutStyle == AppLayoutStyle.tablet ||
+                            (state.layoutStyle == AppLayoutStyle.auto &&
+                                tablet))
+                          _AppSettingRow(
+                            key: const ValueKey('tablet-rail-position-setting'),
+                            label: '平板胶囊栏位置',
+                            subtitle: '选择左侧或右侧显示导航与迷你播放器',
+                            trailing: DropdownButton<AppTabletRailPosition>(
+                              key: ValueKey<AppTabletRailPosition>(
+                                state.tabletRailPosition,
+                              ),
+                              value: state.tabletRailPosition,
+                              underline: const SizedBox.shrink(),
+                              borderRadius: BorderRadius.circular(12),
+                              items: <DropdownMenuItem<AppTabletRailPosition>>[
+                                for (final AppTabletRailPosition position
+                                    in AppTabletRailPosition.values)
+                                  DropdownMenuItem<AppTabletRailPosition>(
+                                    value: position,
+                                    child: TrText(position.label),
+                                  ),
+                              ],
+                              onChanged: (AppTabletRailPosition? value) {
+                                if (value != null) {
+                                  unawaited(state.setTabletRailPosition(value));
+                                }
+                              },
                             ),
                           ),
                         _AppSettingRow(
@@ -1035,6 +1097,18 @@ class _SettingsOverview extends StatelessWidget {
                               state.setFloatingLyricsEnabled(value),
                             ),
                           ),
+                          if (state.floatingLyricsEnabled)
+                            _AppSwitchRow(
+                              key: const ValueKey(
+                                'floating-lyrics-lock-switch',
+                              ),
+                              label: '锁定悬浮歌词',
+                              subtitle: '锁定位置并穿透鼠标点击，关闭后可再次拖动',
+                              value: state.floatingLyricsLocked,
+                              onChanged: (bool value) => unawaited(
+                                state.setFloatingLyricsLocked(value),
+                              ),
+                            ),
                           if (!kIsWeb &&
                               defaultTargetPlatform == TargetPlatform.windows)
                             _AppSwitchRow(

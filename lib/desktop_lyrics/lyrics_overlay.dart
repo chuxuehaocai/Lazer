@@ -126,6 +126,7 @@ Future<void> _configureOverlayWindow(LyricsOverlayLaunch launch) async {
         await windowManager.show(inactive: true);
       }
     } else {
+      await windowManager.setIgnoreMouseEvents(launch.settings.locked);
       await windowManager.waitUntilReadyToShow(
         WindowOptions(
           size: size,
@@ -304,6 +305,9 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       _applyAnimationSpeed(settings);
       _refreshTextStyles();
     });
+    if (_mode == LyricsOverlayMode.floating) {
+      unawaited(windowManager.setIgnoreMouseEvents(settings.locked));
+    }
     _retarget(instant: true);
     unawaited(_loadFont(settings));
     unawaited(_resizeOverlay());

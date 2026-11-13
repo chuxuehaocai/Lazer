@@ -52,6 +52,7 @@ class _MotionSnapshotState extends State<MotionSnapshot> {
             notification.direction != ScrollDirection.idle)) {
       // A returning page is already interactive while its spring settles.
       finishReturningCoverOnScroll(context);
+      finishOpeningCoverOnScroll(context);
       if (_snapshot.allowSnapshotting) {
         _scrolling = true;
         _snapshot.allowSnapshotting = false;

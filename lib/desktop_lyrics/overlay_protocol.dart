@@ -54,6 +54,7 @@ class LyricsOverlaySettings {
     required this.blurIntensity,
     required this.animationSpeed,
     required this.lineSpacing,
+    this.locked = false,
     this.theme,
   });
 
@@ -66,6 +67,7 @@ class LyricsOverlaySettings {
   final double blurIntensity;
   final double animationSpeed;
   final double lineSpacing;
+  final bool locked;
   final Map<String, Object?>? theme;
 
   Map<String, Object?> toMap() => <String, Object?>{
@@ -78,6 +80,7 @@ class LyricsOverlaySettings {
     'blurIntensity': blurIntensity,
     'animationSpeed': animationSpeed,
     'lineSpacing': lineSpacing,
+    'locked': locked,
     if (theme != null) 'theme': theme,
   };
 
@@ -113,6 +116,7 @@ class LyricsOverlaySettings {
         kLyricsLineSpacingMin,
         kLyricsLineSpacingMax,
       ),
+      locked: map['locked'] is bool ? map['locked'] as bool : false,
       theme: map['theme'] is Map
           ? LazerThemeTokens.fromJson(<String, Object?>{
               for (final entry in (map['theme'] as Map).entries)
@@ -134,6 +138,7 @@ class LyricsOverlaySettings {
       blurIntensity == other.blurIntensity &&
       animationSpeed == other.animationSpeed &&
       lineSpacing == other.lineSpacing &&
+      locked == other.locked &&
       theme?.toString() == other.theme?.toString();
 
   @override
@@ -147,6 +152,7 @@ class LyricsOverlaySettings {
     blurIntensity,
     animationSpeed,
     lineSpacing,
+    locked,
     theme?.toString(),
   );
 }

@@ -430,6 +430,25 @@ void finishReturningCoverOnScroll(BuildContext pageContext) {
   if (belongsToPage) complete();
 }
 
+/// Scrolling during an opening collection transition means the destination
+/// has become interactive. Finish any flight owned by that page immediately so
+/// the overlay cannot keep using stale coordinates and appear to fly away from
+/// its card while the list moves underneath it.
+void finishOpeningCoverOnScroll(BuildContext pageContext) {
+  for (final target in _targets.values.toList()) {
+    if (!target.mounted || !target._flying) continue;
+    var belongsToPage = false;
+    target.context.visitAncestorElements((element) {
+      if (element == pageContext) {
+        belongsToPage = true;
+        return false;
+      }
+      return true;
+    });
+    if (belongsToPage) target._cancelFlight();
+  }
+}
+
 /// Records the exact artwork bounds before the content pane changes. Unlike a
 /// route Hero, this also works with the shell's in-place page transitions.
 void rememberCoverTransition(

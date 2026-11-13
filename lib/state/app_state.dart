@@ -894,6 +894,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Which presentation the shell forces; [AppUiMode.auto] follows the width.
   AppUiMode uiMode = AppUiMode.auto;
 
+  /// Unified layout selector. The legacy [uiMode] and [surface] preferences
+  /// remain readable for migration, while new settings use this value.
+  AppLayoutStyle layoutStyle = AppLayoutStyle.auto;
+  AppTabletRailPosition tabletRailPosition = AppTabletRailPosition.left;
+
   /// Which device form the density is tuned for; [AppSurface.auto] recognises
   /// a car head unit from the platform.
   AppSurface surface = AppSurface.auto;
@@ -916,6 +921,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
       'lazer_ui_mode',
+      value.name,
+    );
+  }
+
+  Future<void> setLayoutStyle(AppLayoutStyle value) async {
+    if (layoutStyle == value) return;
+    layoutStyle = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_layout_style',
+      value.name,
+    );
+  }
+
+  Future<void> setTabletRailPosition(AppTabletRailPosition value) async {
+    if (tabletRailPosition == value) return;
+    tabletRailPosition = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_tablet_rail_position',
       value.name,
     );
   }
@@ -979,7 +1004,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// veil hides.
   double uiAlpha = 0.7;
   double browseBackgroundFps = 30;
-  double playerBackgroundFps = 0;
+  double playerBackgroundFps = 30;
   AppBackgroundMode playerBackground = AppBackgroundMode.nowPlayingDynamic;
   Color? browseBackgroundColor, playerBackgroundColor;
   String? playerBackgroundImagePath;
@@ -1313,6 +1338,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   static const String lyricLineSpacingKey = 'lazer_lyric_line_spacing';
 
   bool floatingLyricsEnabled = false;
+  bool floatingLyricsLocked = false;
   bool desktopLyricsEnabled = false;
   int lyricsOverlayLines = kLyricsOverlayDefaultLines;
   double lyricLineSpacing = kLyricsLineSpacingDefault;
@@ -1330,6 +1356,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(floatingLyricsKey, value);
     if (value) await prefs.setBool(desktopLyricsKey, false);
+  }
+
+  Future<void> setFloatingLyricsLocked(bool value) async {
+    if (floatingLyricsLocked == value) return;
+    floatingLyricsLocked = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      'lazer_floating_lyrics_locked',
+      value,
+    );
   }
 
   Future<void> setDesktopLyricsEnabled(bool value) async {
@@ -2019,10 +2055,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       final browseFps = prefs.getDouble('lazer_browse_background_fps') ?? 30;
       browseBackgroundFps = browseFps.isFinite ? browseFps.clamp(10, 1000) : 30;
-      final playerFps = prefs.getDouble('lazer_player_background_fps') ?? 0;
+      final playerFps = prefs.getDouble('lazer_player_background_fps') ?? 30;
       playerBackgroundFps = playerFps.isFinite
-          ? (playerFps == 0 ? 0 : playerFps.clamp(10, 1000))
-          : 0;
+          ? (playerFps == 0 ? 30 : playerFps.clamp(10, 1000))
+          : 30;
       final browseColor = prefs.getInt('lazer_browse_background_color');
       browseBackgroundColor = browseColor == null ? null : Color(browseColor);
       final playerColor = prefs.getInt('lazer_player_background_color');
@@ -2106,6 +2142,21 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             kDynamicBackgroundQualityDefault,
       );
       uiMode = AppUiModeLabels.parse(prefs.getString('lazer_ui_mode'));
+      layoutStyle = AppLayoutStyleLabels.parse(
+        prefs.getString('lazer_layout_style'),
+      );
+      tabletRailPosition = AppTabletRailPositionLabels.parse(
+        prefs.getString('lazer_tablet_rail_position'),
+      );
+      // Older installs only had the two independent selectors. Preserve the
+      // effective choice until the listener picks the new unified setting.
+      if (!prefs.containsKey('lazer_layout_style')) {
+        layoutStyle = switch (uiMode) {
+          AppUiMode.mobile => AppLayoutStyle.phone,
+          AppUiMode.desktop => AppLayoutStyle.desktop,
+          AppUiMode.auto => AppLayoutStyle.auto,
+        };
+      }
       playlistColumns = (prefs.getInt('lazer_playlist_columns') ?? 0).clamp(
         0,
         kPlaylistColumnsMax,
@@ -2199,6 +2250,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         }
       }
       floatingLyricsEnabled = prefs.getBool(floatingLyricsKey) ?? false;
+      floatingLyricsLocked =
+          prefs.getBool('lazer_floating_lyrics_locked') ?? false;
       desktopLyricsEnabled =
           desktopLyricsSupported && (prefs.getBool(desktopLyricsKey) ?? false);
       if (desktopLyricsEnabled) floatingLyricsEnabled = false;

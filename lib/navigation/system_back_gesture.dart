@@ -82,9 +82,13 @@ class _SystemBackGestureState extends State<SystemBackGesture>
       if (!mounted || generation != _generation) return;
       if (commit) widget.onCommit();
     } on TickerCanceled {
-      // Removing the host cancels the in-flight continuation.
+      // Removing the host cancels the in-flight continuation. If the host is
+      // still mounted, clear the gesture synchronously so a cancelled spring
+      // cannot leave the edge recognizer permanently in its settling state.
     } finally {
       if (mounted && generation == _generation) {
+        _motion.stop(canceled: false);
+        _motion.value = commit ? 1 : 0;
         _active = false;
         _settling = false;
         widget.progress.value = null;
@@ -118,6 +122,7 @@ class _SystemBackGestureState extends State<SystemBackGesture>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _generation++;
+    widget.progress.value = null;
     _motion.dispose();
     super.dispose();
   }

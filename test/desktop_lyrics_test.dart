@@ -146,6 +146,19 @@ void main() {
     expect(parsed.settings, launch.settings);
   });
 
+  test('locked floating lyrics round-trip through the launch payload', () {
+    final LyricsOverlayLaunch launch = LyricsOverlayLaunch(
+      mode: LyricsOverlayMode.floating,
+      settings: LyricsOverlaySettings.fromMap(
+        const <String, Object?>{'locked': true},
+      ),
+    );
+    final LyricsOverlayLaunch? parsed = LyricsOverlayLaunch.tryParse(
+      launch.encode(),
+    );
+    expect(parsed?.settings.locked, isTrue);
+  });
+
   test('a normal multi-window argument is not treated as a lyrics overlay', () {
     expect(LyricsOverlayLaunch.tryParse(''), isNull);
     expect(LyricsOverlayLaunch.tryParse('{"kind":"other"}'), isNull);
