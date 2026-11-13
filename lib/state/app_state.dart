@@ -47,6 +47,7 @@ import 'shuffle_order.dart';
 import 'hifi_settings.dart';
 import 'ui_preferences.dart';
 import 'scheduled_pause.dart';
+import 'sleep_timer.dart';
 import '../theme/font_preferences.dart';
 import '../theme/imported_font.dart';
 import '../theme/lazer_theme.dart';
@@ -270,6 +271,73 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void checkScheduledPause() => _pauseSchedule.check();
+
+  Timer? _sleepTimer;
+  DateTime? _sleepTimerDeadline;
+  SleepTimerAction _sleepTimerAction = SleepTimerAction.releaseAudio;
+  bool _audioResourcesSuppressed = false;
+
+  /// A one-shot timer belongs to the current listening session and is not
+  /// persisted across launches.
+  Duration? get sleepTimerRemaining {
+    final deadline = _sleepTimerDeadline;
+    if (deadline == null) return null;
+    final remaining = deadline.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  bool get sleepTimerActive => _sleepTimer != null;
+  SleepTimerAction get sleepTimerAction => _sleepTimerAction;
+  bool get audioResourcesSuppressed => _audioResourcesSuppressed;
+
+  void startSleepTimer(
+    Duration duration, {
+    SleepTimerAction action = SleepTimerAction.releaseAudio,
+  }) {
+    if (duration <= Duration.zero) {
+      cancelSleepTimer();
+      return;
+    }
+    _sleepTimer?.cancel();
+    _sleepTimerAction = action;
+    _sleepTimerDeadline = DateTime.now().add(duration);
+    _sleepTimer = Timer(duration, _expireSleepTimer);
+    notifyListeners();
+  }
+
+  void cancelSleepTimer() {
+    if (_sleepTimer == null && _sleepTimerDeadline == null) return;
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    _sleepTimerDeadline = null;
+    notifyListeners();
+  }
+
+  void _expireSleepTimer() {
+    _sleepTimer = null;
+    _sleepTimerDeadline = null;
+    final action = _sleepTimerAction;
+    _finishListening();
+    _finishPlaySession();
+    ++_generation;
+    _playing = false;
+    _realActive = false;
+    _clearQueuedNext();
+    _queueId = null;
+    _resumePositionOnOpen = _position > Duration.zero;
+    _ticker?.cancel();
+    if (action == SleepTimerAction.releaseAudio) {
+      _audioResourcesSuppressed = true;
+    }
+    unawaited(audioEngine?.stop() ?? Future<void>.value());
+    notifyListeners();
+  }
+
+  void _resumeAudioResources() {
+    if (!_audioResourcesSuppressed) return;
+    _audioResourcesSuppressed = false;
+    notifyListeners();
+  }
 
   /// Reconcile the UI with audio that kept running while frames were suspended.
   void synchronizePlaybackAfterResume() {
@@ -3073,6 +3141,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void _replaceQueue(List<Track> tracks, {int startIndex = 0}) {
     checkScheduledPause();
     if (tracks.isEmpty) return;
+    _resumeAudioResources();
     _finishListening(
       manualTarget: tracks[startIndex.clamp(0, tracks.length - 1)],
     );
@@ -3099,6 +3168,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final shouldPlay = !_playing;
     checkScheduledPause();
     if (current == null) return;
+    if (shouldPlay) _resumeAudioResources();
     if (!shouldPlay) {
       _sampleListening();
       listeningStatistics.suspend();
@@ -3123,6 +3193,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     AppLog.shared.event('playback', 'play', {'queue_index': _queueIndex});
     checkScheduledPause();
     if (current == null || _playing) return;
+    _resumeAudioResources();
     _playing = true;
     _ensureTicker();
     if (_realActive) {
@@ -3219,6 +3290,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     playbackError = null;
     _ticker?.cancel();
     unawaited(audioEngine?.stop() ?? Future<void>.value());
+    _audioResourcesSuppressed = false;
     notifyListeners();
   }
 
@@ -3705,6 +3777,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void playTrackAt(int index) {
     checkScheduledPause();
     if (index < 0 || index >= _queue.length) return;
+    _resumeAudioResources();
     _shuffleOrder.visit(index);
     _finishListening(manualTarget: _queue[index]);
     _finishPlaySession();
@@ -4892,11 +4965,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// How many songs in a row may be skipped for being unavailable.
   ///
-  /// One unplayable song is normal (a removed track, a region lock). Three in a
-  /// row means the account, the session or the network is the problem, and
-  /// skipping through the rest of the queue hides that behind a player that
-  /// appears to race through a playlist.
-  static const int _maxConsecutiveSkips = 3;
+  /// VIP-only tracks often occur in short runs in imported playlists. A fixed
+  /// limit of three made the player stop before it reached the first playable
+  /// song. Walk the current queue once (capped for repeat-mode/network loops)
+  /// before surfacing a real failure.
+  static const int _maxConsecutiveSkips = 12;
 
   bool _skipUnavailableTrack() {
     if (!skipUnavailableSongs || audioEngine == null || _queue.length <= 1) {
@@ -5557,6 +5630,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _sleepTimer?.cancel();
     _playFlushTimer?.cancel();
     _developerConsole?.dispose();
     _sampleListening();

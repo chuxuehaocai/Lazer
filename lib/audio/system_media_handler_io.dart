@@ -91,7 +91,8 @@ class SystemMediaController {
   Future<void> get settled => _pending;
 
   void _changed() {
-    final enabled = !state.independentPlayback;
+    final enabled =
+        !state.independentPlayback && !state.audioResourcesSuppressed;
     final playing = enabled && state.playing && state.current != null;
     final playbackStarted = playing && !_wasPlaying;
     _wasPlaying = playing;

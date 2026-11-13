@@ -369,6 +369,58 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     _armHide();
   }
 
+  Future<void> _showSleepTimer() async {
+    _hideTimer?.cancel();
+    final Duration? duration = await showAppleModalBottomSheet<Duration>(
+      context: context,
+      backgroundColor: context.colors.ivoryLight,
+      showDragHandle: true,
+      builder: (BuildContext sheetContext) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const InlineLabel('睡眠定时'),
+              const SizedBox(height: 8),
+              const TrText('结束后暂停播放并释放音频焦点，移除播放器前台通知。'),
+              const SizedBox(height: 8),
+              for (final Duration value in const <Duration>[
+                Duration(minutes: 15),
+                Duration(minutes: 30),
+                Duration(hours: 1),
+                Duration(hours: 2),
+              ])
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.schedule_rounded),
+                  title: Text(_sleepTimerLabel(value)),
+                  onTap: () => Navigator.of(sheetContext).pop(value),
+                ),
+              if (widget.state.sleepTimerActive)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.close_rounded),
+                  title: const TrText('取消睡眠定时'),
+                  onTap: () => Navigator.of(sheetContext).pop(Duration.zero),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || duration == null) return;
+    if (duration == Duration.zero) {
+      widget.state.cancelSleepTimer();
+    } else {
+      widget.state.startSleepTimer(duration);
+    }
+    _wakeControls();
+    _armHide();
+  }
+
   void _closePage() {
     final VoidCallback? onClose = widget.onClose;
     if (onClose != null) {
@@ -707,6 +759,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             onQueue: () {
               Navigator.of(sheetContext).pop();
               unawaited(_queue());
+            },
+            onSleepTimer: () {
+              Navigator.of(sheetContext).pop();
+              unawaited(_showSleepTimer());
             },
           );
         },
@@ -1243,6 +1299,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
     required this.onDownload,
     required this.onComments,
     required this.onQueue,
+    required this.onSleepTimer,
   });
 
   final AppState state;
@@ -1256,6 +1313,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
   final VoidCallback onDownload;
   final VoidCallback onComments;
   final VoidCallback onQueue;
+  final VoidCallback onSleepTimer;
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -1397,6 +1455,14 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 label: context.tr('播放队列'),
                 onTap: onQueue,
               ),
+              _MoreAction(
+                icon: Icons.bedtime_outlined,
+                label: state.sleepTimerActive
+                    ? context.tr('睡眠定时（已设置）')
+                    : context.tr('睡眠定时'),
+                selected: state.sleepTimerActive,
+                onTap: onSleepTimer,
+              ),
             ],
           ),
         ),
@@ -1438,6 +1504,11 @@ class _DetailLine extends StatelessWidget {
       ],
     ),
   );
+}
+
+String _sleepTimerLabel(Duration duration) {
+  if (duration.inMinutes < 60) return '${duration.inMinutes} 分钟后';
+  return '${duration.inHours} 小时后';
 }
 
 /// A row of the sheet's action list; the selected one carries a check so the

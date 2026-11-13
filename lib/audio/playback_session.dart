@@ -33,6 +33,7 @@ class PlaybackSession {
   StreamSubscription<void>? _noisy;
   bool _closed = false;
   bool _independent = false;
+  bool _suppressed = false;
   bool _resume = false;
   String? _interruptedTrack;
   int _generation = 0;
@@ -48,11 +49,16 @@ class PlaybackSession {
   }
 
   void _changed() {
-    if (_closed || _independent == state.independentPlayback) return;
+    if (_closed ||
+        (_independent == state.independentPlayback &&
+            _suppressed == state.audioResourcesSuppressed)) {
+      return;
+    }
     _independent = state.independentPlayback;
+    _suppressed = state.audioResourcesSuppressed;
     ++_generation;
     _resume = false;
-    if (_independent) {
+    if (_independent || _suppressed) {
       unawaited(_interruptions?.cancel());
       unawaited(_noisy?.cancel());
       _interruptions = null;

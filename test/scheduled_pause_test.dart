@@ -177,6 +177,27 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('sleep timer stops playback and suppresses system resources', (
+    tester,
+  ) async {
+    final engine = _Engine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    addTearDown(state.dispose);
+    state.playQueue([track]);
+    await tester.pump();
+    expect(state.playing, isTrue);
+    state.startSleepTimer(const Duration(minutes: 1));
+    await tester.pump(const Duration(minutes: 1));
+    expect(state.playing, isFalse);
+    expect(state.audioResourcesSuppressed, isTrue);
+    expect(engine.active, isFalse);
+    state.play();
+    await tester.pump();
+    expect(state.audioResourcesSuppressed, isFalse);
+    expect(state.playing, isTrue);
+    state.pause();
+  });
+
   testWidgets('foreground resume catches a point missed while suspended', (
     tester,
   ) async {
