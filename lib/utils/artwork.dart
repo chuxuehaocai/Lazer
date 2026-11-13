@@ -30,6 +30,19 @@ String? persistableArtworkUrl(String? raw) {
     'imageid',
     'v',
     'version',
+    // Public CDN transform chains, not credentials: NetEase decorates
+    // editorial covers with `imageView/thumbnail/enlarge/watermark` and a
+    // repeated `type/image/dx/dy` pair. Keeping them lets a cached shelf show
+    // the same cover it showed live; anything unknown is still treated as
+    // possibly signed and is dropped from snapshots.
+    'imageview',
+    'thumbnail',
+    'enlarge',
+    'watermark',
+    'type',
+    'image',
+    'dx',
+    'dy',
   };
   if (uri.queryParameters.keys.any(
     (key) => !publicParameters.contains(key.toLowerCase()),
@@ -62,17 +75,57 @@ String? enlargedArtworkUrl(String? raw, {int sizePx = 1024}) {
       hint['value'] is! String) {
     return url;
   }
-  return uri
-      .replace(
-        queryParameters: {
-          ...uri.queryParameters,
-          hint['parameter'] as String: (hint['value'] as String).replaceAll(
-            '{size}',
-            '$sizePx',
-          ),
-        },
-      )
-      .toString();
+  return _withQueryParameter(
+    url,
+    hint['parameter'] as String,
+    (hint['value'] as String).replaceAll('{size}', '$sizePx'),
+  );
+}
+
+/// Sets or removes one query parameter without touching the rest of the URL.
+///
+/// CDN artwork is not always a plain `?w=…`: NetEase's editorial covers carry
+/// a transform chain that repeats keys (`type`, `image`, `dx`, `dy`) and keeps
+/// encoded separators inside values (`enlarge=1%7CimageView=1`). Rebuilding the
+/// query from a decoded map collapses those repeats and re-encodes `%7C`/`==`,
+/// and the service answers 400 — which is why those covers never loaded. Editing
+/// the raw string keeps every byte the service produced.
+String _withQueryParameter(String url, String name, String? value) {
+  final int hash = url.indexOf('#');
+  final String body = hash < 0 ? url : url.substring(0, hash);
+  final String fragment = hash < 0 ? '' : url.substring(hash);
+  final int mark = body.indexOf('?');
+  final String head = mark < 0 ? body : body.substring(0, mark);
+  final String query = mark < 0 ? '' : body.substring(mark + 1);
+  final List<String> kept = <String>[];
+  bool written = false;
+  for (final String part in query.split('&')) {
+    if (part.isEmpty) continue;
+    final int equals = part.indexOf('=');
+    final String key = equals < 0 ? part : part.substring(0, equals);
+    if (_sameQueryKey(key, name)) {
+      if (value != null && !written) {
+        kept.add('$key=$value');
+        written = true;
+      }
+      continue;
+    }
+    kept.add(part);
+  }
+  if (value != null && !written) kept.add('$name=$value');
+  if (kept.isEmpty) return '$head$fragment';
+  return '$head?${kept.join('&')}$fragment';
+}
+
+bool _sameQueryKey(String raw, String name) {
+  if (raw == name) return true;
+  try {
+    return Uri.decodeQueryComponent(raw) == name;
+  } on ArgumentError {
+    return false;
+  } on FormatException {
+    return false;
+  }
 }
 
 /// Renditions the CDN is asked for. Quantising to this ladder keeps one
@@ -122,25 +175,25 @@ List<String> artworkCandidates(String? raw) {
   final rule = MediaRequestRules.rule(uri);
   if (rule == null) return [preferred];
   final parameter = (rule['artworkResize'] as Map?)?['parameter'];
-  final query = Map<String, String>.of(uri.queryParameters);
-  if (parameter is String) query.remove(parameter);
-  final original = Uri(
-    scheme: uri.scheme,
-    host: uri.host,
-    port: uri.hasPort ? uri.port : null,
-    path: uri.path,
-    queryParameters: query.isEmpty ? null : query,
-    fragment: uri.hasFragment ? uri.fragment : null,
-  );
+  final String original = parameter is String
+      ? _withQueryParameter(preferred, parameter, null)
+      : preferred;
   return <String>{
     preferred,
-    original.toString(),
+    original,
     for (final host
         in (rule['fallbackHosts'] as List? ?? const [])
             .whereType<String>()
             .take(4))
-      original.replace(host: host).toString(),
+      _withHost(original, host),
   }.toList(growable: false);
+}
+
+/// Moves an artwork URL to a sibling CDN host, keeping its raw query.
+String _withHost(String url, String host) {
+  final Uri? uri = Uri.tryParse(url);
+  if (uri == null) return url;
+  return uri.replace(host: host).toString();
 }
 
 String? _localArtworkUrl(String? raw) {

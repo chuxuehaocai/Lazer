@@ -66,6 +66,43 @@ void main() {
     );
   });
 
+  test('watermark covers keep their signed query when a size is asked for', () {
+    const String watermarked =
+        'https://p1.images.test/Xgxfl8qPlwjRIoBDI-cPrg==/109951173819308049.jpg'
+        '?imageView=1&thumbnail=800y800&enlarge=1%7CimageView=1&watermark'
+        '&type=1&image=abc%3D%3D&dx=0&dy=0%7Cwatermark&type=1&image=def=='
+        '&dx=0&dy=0%7CimageView=1';
+    final String sized = artworkUrlForSize(
+      watermarked,
+      logicalEdge: 384,
+      devicePixelRatio: 2,
+    )!;
+    // Every original byte survives: the repeated keys and %7C separators are
+    // what the CDN signs, and rebuilding the query is what answered 400.
+    expect(sized, startsWith(watermarked));
+    expect(sized, endsWith('&param=768y768'));
+    expect('&param='.allMatches(sized).length, 1);
+    // The transform chain is public, so a cached shelf keeps the same cover.
+    expect(persistableArtworkUrl(watermarked), watermarked);
+    final List<String> candidates = artworkCandidates(sized);
+    expect(candidates.first, sized);
+    expect(candidates, contains(watermarked));
+    expect(
+      candidates.every(
+        (String url) =>
+            url.contains('type=1&image=abc%3D%3D&dx=0&dy=0%7Cwatermark'),
+      ),
+      isTrue,
+    );
+    // A sibling host keeps the same raw query instead of re-encoding it.
+    expect(
+      candidates.where(
+        (String url) => url.startsWith('https://p2.images.test/'),
+      ),
+      hasLength(1),
+    );
+  });
+
   testWidgets(
     'artwork failure keeps one provider and changing cover updates its cache key',
     (tester) async {
