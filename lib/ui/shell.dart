@@ -1081,7 +1081,7 @@ class _AppShellState extends State<AppShell>
                   // their height as bottom padding for each scroll view's tail.
                   extendBody: (compact || tablet) && !largeScreen,
                   bottomNavigationBar: (compact || tablet) && !largeScreen
-                      ? _mobileBottomBar()
+                      ? _mobileBottomBar(tablet: tablet)
                       : null,
                   backgroundColor: sharedBackground || tablet
                       ? Colors.transparent
@@ -1477,7 +1477,7 @@ class _AppShellState extends State<AppShell>
     );
   }
 
-  Widget _mobileBottomBar() {
+  Widget _mobileBottomBar({bool tablet = false}) {
     final sections = [
       _AppSection.home,
       _AppSection.search,
@@ -1498,7 +1498,7 @@ class _AppShellState extends State<AppShell>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              if (state.current != null) ...<Widget>[
+              if (state.current != null && !tablet) ...<Widget>[
                 RepaintBoundary(
                   child: AppPlayerBar(
                     state: state,
@@ -1511,38 +1511,65 @@ class _AppShellState extends State<AppShell>
                 ),
                 const SizedBox(height: 16),
               ],
-              CapsuleNavigationBar(
-                selectedIndex: sections
-                    .indexOf(_section)
-                    .clamp(0, sections.length - 1),
-                onDestinationSelected: (int index) => _select(sections[index]),
-                destinations: <NavigationDestination>[
-                  NavigationDestination(
-                    icon: const Icon(Icons.home_outlined),
-                    selectedIcon: const Icon(Icons.home_rounded),
-                    label: context.tr('主页'),
-                  ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.search_outlined),
-                    selectedIcon: const Icon(Icons.search_rounded),
-                    label: context.tr('搜索'),
-                  ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.library_music_outlined),
-                    selectedIcon: const Icon(Icons.library_music_rounded),
-                    label: context.tr('音乐库'),
-                  ),
-                  if (!state.isLocalPlayback)
-                    NavigationDestination(
-                      icon: const Icon(Icons.favorite_border_rounded),
-                      selectedIcon: const Icon(Icons.favorite_rounded),
-                      label: context.tr('我喜欢'),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  Expanded(
+                    child: CapsuleNavigationBar(
+                      selectedIndex: sections
+                          .indexOf(_section)
+                          .clamp(0, sections.length - 1),
+                      onDestinationSelected: (int index) =>
+                          _select(sections[index]),
+                      destinations: <NavigationDestination>[
+                        NavigationDestination(
+                          icon: const Icon(Icons.home_outlined),
+                          selectedIcon: const Icon(Icons.home_rounded),
+                          label: context.tr('主页'),
+                        ),
+                        NavigationDestination(
+                          icon: const Icon(Icons.search_outlined),
+                          selectedIcon: const Icon(Icons.search_rounded),
+                          label: context.tr('搜索'),
+                        ),
+                        NavigationDestination(
+                          icon: const Icon(Icons.library_music_outlined),
+                          selectedIcon: const Icon(Icons.library_music_rounded),
+                          label: context.tr('音乐库'),
+                        ),
+                        if (!state.isLocalPlayback)
+                          NavigationDestination(
+                            icon: const Icon(Icons.favorite_border_rounded),
+                            selectedIcon: const Icon(Icons.favorite_rounded),
+                            label: context.tr('我喜欢'),
+                          ),
+                        NavigationDestination(
+                          icon: const Icon(Icons.settings_outlined),
+                          selectedIcon: const Icon(Icons.settings_rounded),
+                          label: context.tr('设置'),
+                        ),
+                      ],
                     ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.settings_outlined),
-                    selectedIcon: const Icon(Icons.settings_rounded),
-                    label: context.tr('设置'),
                   ),
+                  if (tablet && state.current != null) ...<Widget>[
+                    const SizedBox(width: 10),
+                    _BottomTrackCover(state: state, onOpen: _openNowPlaying),
+                    Opacity(
+                      opacity: 0,
+                      child: SizedBox(
+                        width: 1,
+                        height: 1,
+                        child: AppPlayerBar(
+                          state: state,
+                          compact: true,
+                          floating: true,
+                          comments: _comments,
+                          onComments: _toggleComments,
+                          onOpen: _openNowPlaying,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -2438,6 +2465,45 @@ class _PlayerPull implements PlayerPullDown {
   void cancelPull() {
     _dragging = false;
     _shell._settlePlayerPull(0, cancel: true);
+  }
+}
+
+class _BottomTrackCover extends StatelessWidget {
+  const _BottomTrackCover({required this.state, required this.onOpen});
+
+  final AppState state;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final track = state.current;
+    if (track == null) return const SizedBox.shrink();
+    final apple = AppleSemanticColors.of(context);
+    return GestureDetector(
+      onTap: onOpen,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedBuilder(
+        animation: state,
+        builder: (BuildContext context, _) => SizedBox.square(
+          dimension: 56,
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.all(3),
+                child: AppCover(url: track.coverUrl, size: 50, radius: 25),
+              ),
+              CircularProgressIndicator(
+                value: state.progress.clamp(0, 1),
+                strokeWidth: 2.5,
+                color: apple.accent,
+                backgroundColor: apple.separator.withValues(alpha: .45),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
