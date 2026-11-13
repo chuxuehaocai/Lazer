@@ -179,14 +179,14 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
                           action: DesktopCloseAction.exit,
                           remember: remember,
                         )),
-                        child: Text(context.tr('退出')),
+                        child: Text(context.tr('退出进程')),
                       ),
                       FilledButton(
                         onPressed: () => Navigator.of(dialogContext).pop((
                           action: DesktopCloseAction.background,
                           remember: remember,
                         )),
-                        child: Text(context.tr('后台运行')),
+                        child: Text(context.tr('仅关闭窗口')),
                       ),
                     ],
                   ),

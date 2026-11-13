@@ -81,7 +81,11 @@ abstract final class LargeScreenMetrics {
       (width * .13).clamp(172.0, 238.0);
 
   /// Height of an artwork card with its two caption lines.
-  static double artworkCardHeight(double width) => artworkCardWidth(width) + 96;
+  // Leave enough room for a two-line title, the artist line and the focus
+  // spring. The previous 96dp tail clipped the lower glyphs on narrow TV
+  // windows when a title wrapped (for example, a title ending in “第三章”).
+  static double artworkCardHeight(double width) =>
+      artworkCardWidth(width) + 112;
 }
 
 /// A large-screen control: a remote focus stop and a pointer tap target.

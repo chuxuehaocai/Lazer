@@ -81,6 +81,20 @@
       font-size: 12px;
       opacity: .62;
     }
+    #lazer-boot .lazer-boot__retry {
+      display: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 9px 16px;
+      background: #FA2D48;
+      color: #FFFFFF;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    #lazer-boot.lazer-boot--failed .lazer-boot__retry {
+      display: inline-flex;
+    }
   </style>
   <script>
     (function () {
@@ -100,20 +114,49 @@
       }
     })();
   </script>
+  <script>
+    // Older releases registered Flutter's generated service worker. The
+    // Vercel build now uses immutable, content-hashed assets instead; remove
+    // the old worker once so it cannot serve an index that points at a stale
+    // entrypoint after a deployment.
+    (function () {
+      if (!('serviceWorker' in navigator)) return;
+      var marker = 'lazer-flutter-sw-cleared';
+      var alreadyReloaded = false;
+      try { alreadyReloaded = sessionStorage.getItem(marker) === '1'; } catch (e) {}
+      navigator.serviceWorker.getRegistrations().then(function (registrations) {
+        var stale = registrations.filter(function (registration) {
+          var worker = registration.active || registration.waiting || registration.installing;
+          return worker && /flutter_service_worker\.js/.test(worker.scriptURL);
+        });
+        if (!stale.length) return;
+        return Promise.all(stale.map(function (registration) {
+          return registration.unregister();
+        })).then(function () {
+          if (alreadyReloaded) return;
+          try { sessionStorage.setItem(marker, '1'); } catch (e) {}
+          window.location.reload();
+        });
+      }).catch(function () {});
+    })();
+  </script>
 </head>
 <body>
   <div id="lazer-boot" role="status" aria-live="polite">
     <div class="lazer-boot__brand">Lazer</div>
     <div class="lazer-boot__track"><div class="lazer-boot__fill" id="lazer-boot-fill"></div></div>
     <div class="lazer-boot__hint" id="lazer-boot-hint">正在加载…</div>
+    <button class="lazer-boot__retry" id="lazer-boot-retry" type="button">重新加载</button>
   </div>
   <script>
     (function () {
       var fill = document.getElementById('lazer-boot-fill');
       var hint = document.getElementById('lazer-boot-hint');
       var boot = document.getElementById('lazer-boot');
+      var retry = document.getElementById('lazer-boot-retry');
       var progress = 0;
       var done = false;
+      var failed = false;
 
       function setProgress(value) {
         progress = Math.max(progress, Math.min(100, value));
@@ -131,9 +174,11 @@
       }, 220);
 
       function finish() {
-        if (done) return;
+        if (done || failed) return;
         done = true;
         clearInterval(creep);
+        window.removeEventListener('error', onResourceError, true);
+        window.removeEventListener('unhandledrejection', onBootstrapRejection);
         setProgress(100);
         boot.classList.add('lazer-boot--done');
         setTimeout(function () {
@@ -141,10 +186,41 @@
         }, 320);
       }
 
+      function fail(message) {
+        if (done || failed) return;
+        failed = true;
+        clearInterval(creep);
+        setProgress(100);
+        boot.classList.add('lazer-boot--failed');
+        hint.textContent = message || '网页资源加载失败，请重试。';
+      }
+
+      function onResourceError(event) {
+        var target = event && event.target;
+        var source = target && (target.src || target.href || '');
+        if (source && /flutter_bootstrap|main(?:\.[0-9a-f]+)?\.js|canvaskit|skwasm/.test(source)) {
+          fail('网页资源加载失败，请检查网络后重试。');
+        }
+      }
+
+      function onBootstrapRejection() {
+        fail('网页引擎启动失败，请重试。');
+      }
+
+      retry.addEventListener('click', function () {
+        window.location.reload();
+      });
+
       setProgress(4);
       window.addEventListener('flutter-first-frame', finish, { once: true });
-      // Safety net: never trap the page behind the loader.
-      setTimeout(finish, 30000);
+      window.addEventListener('error', onResourceError, true);
+      window.addEventListener('unhandledrejection', onBootstrapRejection);
+      // Never trap the page behind the loader when Vercel or an upstream CDN
+      // is unreachable. A retry action is more useful than an infinite
+      // “preparing interface” screen on mainland networks.
+      setTimeout(function () {
+        if (!done) fail('网页加载超时，请检查网络后重试。');
+      }, 20000);
     })();
   </script>
   <script src="flutter_bootstrap.js" async></script>

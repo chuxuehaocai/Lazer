@@ -10,9 +10,10 @@ _flutter.loader.load({
     // the engine can be cached immutably instead of revalidated every visit.
     canvasKitBaseUrl: '__LAZER_CANVASKIT_BASE__'
   },
-  serviceWorkerSettings: {
-    serviceWorkerVersion: {{flutter_service_worker_version}}
-  },
+  // Vercel serves the content-hashed engine and entrypoint directly. Keeping
+  // Flutter's generated service worker here can resurrect an older bootstrap
+  // after a deployment and leave the page waiting for a file that no longer
+  // exists. The browser and Vercel already cache the immutable files safely.
   onEntrypointLoaded: async function (engineInitializer) {
     const appRunner = await engineInitializer.initializeEngine({
       fontFallbackBaseUrl: 'fonts/'

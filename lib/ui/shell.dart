@@ -1139,7 +1139,9 @@ class _AppShellState extends State<AppShell>
                           final EdgeInsets overscan = tvSafeInsets(context);
                           return EdgeInsets.fromLTRB(
                             overscan.left,
-                            overscan.top + (compact || tablet ? 20 : 0),
+                            largeScreen
+                                ? 0
+                                : overscan.top + (compact || tablet ? 20 : 0),
                             overscan.right,
                             overscan.bottom,
                           );
@@ -1306,23 +1308,7 @@ class _AppShellState extends State<AppShell>
           data: media.copyWith(size: constraints.biggest),
           child: Column(
             children: <Widget>[
-              LargeScreenNavBar(
-                showLikes: !state.isLocalPlayback,
-                selected: _largeScreenTab,
-                searchActive: _section == _AppSection.search && !_hasOpenDetail,
-                canGoBack: _hasOpenDetail,
-                onBack: _backToRoot,
-                onTab: (LargeScreenTab tab) => _select(switch (tab) {
-                  LargeScreenTab.home => _AppSection.home,
-                  LargeScreenTab.library => _AppSection.library,
-                  LargeScreenTab.likes => _AppSection.likes,
-                  LargeScreenTab.settings => _AppSection.settings,
-                }),
-                onSearch: () => _select(_AppSection.search),
-                onNowPlaying: _openNowPlaying,
-                account: _accountButton(apple, radius: 22),
-                playing: state.playing,
-              ),
+              _largeScreenHeader(apple),
               // The page owns the whole area under the capsule; the transport
               // strip is painted over it, with no panel of its own. Pages end
               // their scroll content with `floatingBarInset` so the last row
@@ -1350,6 +1336,56 @@ class _AppShellState extends State<AppShell>
           ),
         );
       },
+    );
+  }
+
+  /// Keeps the TV header flush to the top while a quiet gradient lets it
+  /// dissolve into the page instead of ending as a hard horizontal edge.
+  Widget _largeScreenHeader(AppleSemanticColors apple) {
+    return SizedBox(
+      height: LargeScreenMetrics.navBarHeight + 10,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          IgnorePointer(
+            child: AnimatedContainer(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 260),
+              curve: const AppleSpringCurve(),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[
+                    apple.background.withValues(alpha: .98),
+                    apple.background.withValues(alpha: .82),
+                    apple.background.withValues(alpha: 0),
+                  ],
+                  stops: const <double>[0, .56, 1],
+                ),
+              ),
+            ),
+          ),
+          LargeScreenNavBar(
+            showLikes: !state.isLocalPlayback,
+            selected: _largeScreenTab,
+            searchActive: _section == _AppSection.search && !_hasOpenDetail,
+            canGoBack: _hasOpenDetail,
+            onBack: _backToRoot,
+            onTab: (LargeScreenTab tab) => _select(switch (tab) {
+              LargeScreenTab.home => _AppSection.home,
+              LargeScreenTab.library => _AppSection.library,
+              LargeScreenTab.likes => _AppSection.likes,
+              LargeScreenTab.settings => _AppSection.settings,
+            }),
+            onSearch: () => _select(_AppSection.search),
+            onNowPlaying: _openNowPlaying,
+            account: _accountButton(apple, radius: 22),
+            playing: state.playing,
+          ),
+        ],
+      ),
     );
   }
 

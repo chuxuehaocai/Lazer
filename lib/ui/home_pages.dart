@@ -20,6 +20,7 @@ import '../widgets/catalog_links.dart';
 import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
 import '../tv/tv_mode.dart';
+import '../tv/large_screen_widgets.dart';
 import '../widgets/ui_scaling.dart';
 import 'widgets.dart';
 
@@ -1077,128 +1078,143 @@ class ChartShelf extends StatelessWidget {
       final chart = charts[index];
       return StableCoverKey(
         key: ValueKey<String>('chart:${chart.id}'),
-        builder: (GlobalKey coverKey) => SizedBox(
-          width: large ? 336 : (compact ? 246 : 278),
-          child: Material(
-            color: Colors.black,
-            borderRadius: BorderRadius.circular(18),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: feedbackAction(context, () {
-                rememberCoverTransition('chart:${chart.id}', coverKey);
-                onOpen(chart);
-              }),
-              child: CoverTransitionSource(
-                key: coverKey,
-                identity: 'chart:${chart.id}',
-                morphArtwork: true,
-                radius: 18,
-                child: ColoredBox(
-                  color: Colors.black,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: <Widget>[
-                      Transform.scale(
-                        scale: 1.32,
-                        child: _MovingCoverMosaic(
-                          covers: chart.entries
-                              .map(chartEntryCover)
-                              .toList(growable: false),
-                          angle: -.11,
-                          reverse: true,
-                          rows: 4,
-                          tile: 82,
-                          diagonal: -.55,
-                        ),
-                      ),
-                      ColoredBox(color: Colors.black.withValues(alpha: .68)),
-                      const DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: <Color>[
-                              Color(0x12000000),
-                              Color(0xF2000000),
-                            ],
-                            stops: <double>[.22, 1],
+        builder: (GlobalKey coverKey) {
+          void open() {
+            rememberCoverTransition('chart:${chart.id}', coverKey);
+            onOpen(chart);
+          }
+
+          final Widget card = SizedBox(
+            width: large ? 336 : (compact ? 246 : 278),
+            child: Material(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(18),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: feedbackAction(context, open),
+                child: CoverTransitionSource(
+                  key: coverKey,
+                  identity: 'chart:${chart.id}',
+                  morphArtwork: true,
+                  radius: 18,
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: <Widget>[
+                        Transform.scale(
+                          scale: 1.32,
+                          child: _MovingCoverMosaic(
+                            covers: chart.entries
+                                .map(chartEntryCover)
+                                .toList(growable: false),
+                            angle: -.11,
+                            reverse: true,
+                            rows: 4,
+                            tile: 82,
+                            diagonal: -.55,
                           ),
                         ),
-                      ),
-                      Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          large ? 22 : 18,
-                          large ? 22 : 18,
-                          large ? 22 : 18,
-                          large ? 20 : 16,
+                        ColoredBox(color: Colors.black.withValues(alpha: .68)),
+                        const DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: <Color>[
+                                Color(0x12000000),
+                                Color(0xF2000000),
+                              ],
+                              stops: <double>[.22, 1],
+                            ),
+                          ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            ChartLogo(chart: chart, large: large),
-                            const Spacer(),
-                            Text(
-                              chart.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.headlineSmall
-                                  ?.copyWith(
-                                    fontSize: large ? 27 : null,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -.6,
-                                  ),
-                            ),
-                            TrText(
-                              chart.issueLabel,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    fontSize: large ? 16 : null,
-                                    color: Colors.white70,
-                                  ),
-                            ),
-                            SizedBox(height: large ? 12 : 9),
-                            for (final entry in chart.entries.take(3))
-                              Padding(
-                                padding: EdgeInsets.only(top: large ? 7 : 5),
-                                child: Row(
-                                  children: <Widget>[
-                                    SizedBox(
-                                      width: large ? 32 : 24,
-                                      child: Text(
-                                        '${entry.rank}',
-                                        style: TextStyle(
-                                          fontSize: large ? 17 : null,
-                                          color: Colors.white60,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            large ? 22 : 18,
+                            large ? 22 : 18,
+                            large ? 22 : 18,
+                            large ? 20 : 16,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              ChartLogo(chart: chart, large: large),
+                              const Spacer(),
+                              Text(
+                                chart.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.headlineSmall
+                                    ?.copyWith(
+                                      fontSize: large ? 27 : null,
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -.6,
                                     ),
-                                    Expanded(
-                                      child: Text(
-                                        entry.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: large ? 17 : null,
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
                               ),
-                          ],
+                              TrText(
+                                chart.issueLabel,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      fontSize: large ? 16 : null,
+                                      color: Colors.white70,
+                                    ),
+                              ),
+                              SizedBox(height: large ? 12 : 9),
+                              for (final entry in chart.entries.take(3))
+                                Padding(
+                                  padding: EdgeInsets.only(top: large ? 7 : 5),
+                                  child: Row(
+                                    children: <Widget>[
+                                      SizedBox(
+                                        width: large ? 32 : 24,
+                                        child: Text(
+                                          '${entry.rank}',
+                                          style: TextStyle(
+                                            fontSize: large ? 17 : null,
+                                            color: Colors.white60,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          entry.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: large ? 17 : null,
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+          // Chart cards used InkWell only, so a TV remote could pass over them
+          // without a focus stop or visible selection. Give the large layout
+          // the same focus ring and spring lift as every other TV card.
+          return large
+              ? LargeScreenTapTarget(
+                  onTap: feedbackAction(context, open),
+                  borderRadius: BorderRadius.circular(18),
+                  focusScale: 1.035,
+                  child: card,
+                )
+              : card;
+        },
       );
     },
   );

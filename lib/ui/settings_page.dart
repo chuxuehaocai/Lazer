@@ -1006,6 +1006,36 @@ class _SettingsOverview extends StatelessWidget {
                               state.setMinimizeToTaskbarOnClose(value),
                             ),
                           ),
+                        if (!kIsWeb &&
+                            (defaultTargetPlatform == TargetPlatform.windows ||
+                                defaultTargetPlatform == TargetPlatform.linux ||
+                                defaultTargetPlatform == TargetPlatform.macOS))
+                          _AppSettingRow(
+                            key: const ValueKey('desktop-close-action-choice'),
+                            label: '关闭窗口默认行为',
+                            subtitle: state.desktopCloseAction.detail,
+                            trailing: SizedBox(
+                              width: 220,
+                              child: SettingsChoice<DesktopCloseAction>(
+                                value: state.desktopCloseAction,
+                                items: <DropdownMenuItem<DesktopCloseAction>>[
+                                  for (final DesktopCloseAction action
+                                      in DesktopCloseAction.values)
+                                    DropdownMenuItem<DesktopCloseAction>(
+                                      value: action,
+                                      child: Text(context.tr(action.label)),
+                                    ),
+                                ],
+                                onChanged: (DesktopCloseAction? action) {
+                                  if (action != null) {
+                                    unawaited(
+                                      state.setDesktopCloseAction(action),
+                                    );
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
                         if (state.deviceIsTelevision ||
                             state.surface == AppSurface.tv)
                           _AppSwitchRow(

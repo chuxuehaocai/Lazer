@@ -304,6 +304,18 @@ extension DesktopCloseActionLabels on DesktopCloseAction {
         (DesktopCloseAction action) => action.name == value,
         orElse: () => DesktopCloseAction.ask,
       );
+
+  String get label => switch (this) {
+    DesktopCloseAction.ask => '每次询问',
+    DesktopCloseAction.background => '仅关闭窗口并后台运行',
+    DesktopCloseAction.exit => '退出进程',
+  };
+
+  String get detail => switch (this) {
+    DesktopCloseAction.ask => '点击关闭按钮时询问操作',
+    DesktopCloseAction.background => '关闭窗口后继续播放并保留系统托盘控制',
+    DesktopCloseAction.exit => '关闭窗口时退出 Lazer 和播放服务',
+  };
 }
 
 extension AppUiModeLabels on AppUiMode {
