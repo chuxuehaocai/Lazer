@@ -5,10 +5,6 @@ import 'package:flutter/services.dart';
 import '../animation/apple_spring.dart';
 import '../navigation/system_back_gesture.dart';
 
-import '../l10n/app_localizations.dart';
-import '../theme/apple_design.dart';
-import 'apple_ui.dart';
-import 'spring_buttons.dart';
 import 'accessible_controls.dart';
 import 'shared_browse_background.dart';
 
@@ -274,11 +270,33 @@ class SettingsDetailScaffold extends StatelessWidget {
         backgroundColor: BrowseBackgroundScope.contains(context)
             ? Colors.transparent
             : null,
-        appBar: AppBar(title: TrText(title), actions: actions),
-        body: child,
+        body: SafeArea(
+          child: Stack(
+            children: <Widget>[
+              if (Navigator.of(context).canPop())
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: AccessibleIconButton(
+                    key: const ValueKey('settings-detail-back'),
+                    tooltip: '返回',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: const Icon(Icons.chevron_left_rounded),
+                  ),
+                ),
+              Positioned.fill(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    top: Navigator.of(context).canPop() ? 56 : 0,
+                  ),
+                  child: child,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
-    final apple = AppleSemanticColors.of(context);
     return Material(
       type: MaterialType.transparency,
       child: LayoutBuilder(
@@ -289,7 +307,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: EdgeInsets.fromLTRB(inset - 12, 12, inset, 0),
+                padding: EdgeInsets.fromLTRB(inset - 12, 8, inset, 0),
                 child: Row(
                   children: [
                     AccessibleIconButton(
@@ -298,24 +316,9 @@ class SettingsDetailScaffold extends StatelessWidget {
                       onPressed: close,
                       icon: const Icon(Icons.chevron_left_rounded),
                     ),
-                    SpringTextButton(
-                      onPressed: close,
-                      child: TrText(
-                        '设置',
-                        style: TextStyle(color: apple.secondaryLabel),
-                      ),
-                    ),
                   ],
                 ),
               ),
-              ApplePageTitle(
-                title: title,
-                padding: EdgeInsets.fromLTRB(inset, 4, inset, 20),
-                trailing: actions.isEmpty
-                    ? null
-                    : Wrap(spacing: 8, children: actions),
-              ),
-              Divider(height: 1, thickness: .5, color: apple.separator),
               Expanded(child: child),
             ],
           );
