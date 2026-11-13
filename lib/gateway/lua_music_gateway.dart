@@ -51,7 +51,6 @@ class LuaMusicGateway extends MusicAccountGateway {
         MusicCapability.favorites,
         MusicCapability.lyrics,
         MusicCapability.scrobble,
-        MusicCapability.recommendations,
       };
 
   /// Per-operation wall clock for the shared plugin queue.

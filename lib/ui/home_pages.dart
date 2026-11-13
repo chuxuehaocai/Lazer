@@ -141,7 +141,23 @@ class _AppHomePageState extends State<AppHomePage>
               ),
       );
     }
-    final List<Playlist> recommendations = uniquePlaylists(feed.recommended);
+    final bool supportsHomeFeed = widget.state.supportsMusic(
+      MusicCapability.homeFeed,
+    );
+    final bool supportsRecommendations = widget.state.supportsMusic(
+      MusicCapability.recommendations,
+    );
+    final bool supportsRadio = widget.state.supportsMusic(
+      MusicCapability.radio,
+    );
+    final bool supportsCharts = widget.state.supportsMusic(
+      MusicCapability.charts,
+    );
+    final bool showPluginHome =
+        supportsHomeFeed || supportsRecommendations || supportsRadio;
+    final List<Playlist> recommendations = supportsRecommendations
+        ? uniquePlaylists(feed.recommended)
+        : const <Playlist>[];
     final List<Track> recent = widget.state.recentTracks;
     final ArtistRef? stationArtist = recent
         .expand((track) => track.artists)
@@ -161,41 +177,42 @@ class _AppHomePageState extends State<AppHomePage>
               padding: EdgeInsets.fromLTRB(inset, 8, inset, 0),
               sliver: SliverList(
                 delegate: SliverChildListDelegate(<Widget>[
-                  HomeActionShelf(
-                    serverLibrary: !widget.state.supportsMusic(
-                      MusicCapability.recommendations,
-                    ),
-                    busy: _startingStation,
-                    covers: <String?>[
-                      ...recent.map((track) => track.coverUrl),
-                      ...feed.quick.map((track) => track.coverUrl),
-                      ...feed.albums.map((album) => album.coverUrl),
-                    ],
-                    onDaily:
-                        !widget.state.signedIn ||
-                            (feed.quick.isEmpty && feed.daily.isEmpty)
-                        ? null
-                        : () => widget.onOpenPlaylist(
-                            dailyRecommendationsPlaylist(
-                              feed,
-                              serverLibrary: !widget.state.supportsMusic(
-                                MusicCapability.recommendations,
+                  if (showPluginHome) ...<Widget>[
+                    HomeActionShelf(
+                      serverLibrary: !supportsRecommendations,
+                      busy: _startingStation,
+                      covers: <String?>[
+                        ...recent.map((track) => track.coverUrl),
+                        ...feed.quick.map((track) => track.coverUrl),
+                        ...feed.albums.map((album) => album.coverUrl),
+                      ],
+                      onDaily:
+                          (supportsHomeFeed || supportsRecommendations) &&
+                              widget.state.signedIn &&
+                              (feed.quick.isNotEmpty || feed.daily.isNotEmpty)
+                          ? () => widget.onOpenPlaylist(
+                              dailyRecommendationsPlaylist(
+                                feed,
+                                serverLibrary: !supportsRecommendations,
                               ),
-                            ),
-                          ),
-                    onFm: widget.state.signedIn
-                        ? () => _playStation(
-                            widget.state.catalog.personalFmTracks,
-                          )
-                        : null,
-                    onHeart: widget.state.collections.liked == null
-                        ? null
-                        : () => unawaited(_startHeartMode()),
-                    onReplay: recent.isEmpty
-                        ? null
-                        : () => widget.state.playQueue(recent),
-                  ),
-                  const SizedBox(height: 34),
+                            )
+                          : null,
+                      onFm: supportsRadio && widget.state.signedIn
+                          ? () => _playStation(
+                              widget.state.catalog.personalFmTracks,
+                            )
+                          : null,
+                      onHeart:
+                          supportsRadio &&
+                              widget.state.collections.liked != null
+                          ? () => unawaited(_startHeartMode())
+                          : null,
+                      onReplay: recent.isEmpty
+                          ? null
+                          : () => widget.state.playQueue(recent),
+                    ),
+                    const SizedBox(height: 34),
+                  ],
                   AppSectionHeader(title: '最近播放'),
                   const SizedBox(height: 10),
                   if (recent.isNotEmpty)
@@ -206,7 +223,8 @@ class _AppHomePageState extends State<AppHomePage>
                     )
                   else
                     const AppNotice(message: '还没有最近播放记录'),
-                  if (feed.albums.isNotEmpty) ...<Widget>[
+                  if ((supportsHomeFeed || supportsRecommendations) &&
+                      feed.albums.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 36),
                     const AppSectionHeader(title: '为你推荐的新发行'),
                     const SizedBox(height: 14),
@@ -216,7 +234,8 @@ class _AppHomePageState extends State<AppHomePage>
                       compact: compact,
                     ),
                   ],
-                  if (feed.editorialPlaylists.isNotEmpty) ...<Widget>[
+                  if (supportsHomeFeed &&
+                      feed.editorialPlaylists.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 38),
                     const AppSectionHeader(title: '编辑精选'),
                     const SizedBox(height: 14),
@@ -226,9 +245,9 @@ class _AppHomePageState extends State<AppHomePage>
                       compact: compact,
                     ),
                   ],
-                  if (widget.state.supportsMusic(
-                    MusicCapability.recommendations,
-                  )) ...[
+                  if (widget.state.enableExternalCharts ||
+                      supportsCharts ||
+                      widget.state.discoveryCharts.isNotEmpty) ...[
                     const SizedBox(height: 38),
                     const AppSectionHeader(title: '排行榜'),
                     const SizedBox(height: 14),
@@ -247,7 +266,8 @@ class _AppHomePageState extends State<AppHomePage>
                         ),
                       ),
                   ],
-                  if (recommendations.isNotEmpty) ...<Widget>[
+                  if (supportsRecommendations &&
+                      recommendations.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 38),
                     const AppSectionHeader(title: '猜你喜欢'),
                     const SizedBox(height: 14),
@@ -257,39 +277,41 @@ class _AppHomePageState extends State<AppHomePage>
                       compact: compact,
                     ),
                   ],
-                  const SizedBox(height: 38),
-                  AppSectionHeader(title: '为你创建的电台'),
-                  const SizedBox(height: 14),
-                  _StationStrip(
-                    enabled: widget.state.signedIn,
-                    covers: <String?>[
-                      ...recent.map((track) => track.coverUrl),
-                      ...feed.quick.map((track) => track.coverUrl),
-                      ...feed.albums.map((album) => album.coverUrl),
-                    ],
-                    onFm: () =>
-                        _playStation(widget.state.catalog.personalFmTracks),
-                    onLiked: widget.state.collections.liked == null
-                        ? null
-                        : () => _playStation(() async {
-                            final tracks = await widget.state.catalog
-                                .playlistTracks(
-                                  widget.state.collections.liked!.id,
-                                );
-                            return List<Track>.of(tracks)..shuffle();
-                          }),
-                    onHeart: widget.state.collections.liked == null
-                        ? null
-                        : () => unawaited(_startHeartMode()),
-                    artistName: stationArtist?.name,
-                    onArtist: stationArtist == null
-                        ? null
-                        : () => _playStation(
-                            () => widget.state.catalog.artistStationTracks(
-                              stationArtist,
+                  if (supportsRadio) ...<Widget>[
+                    const SizedBox(height: 38),
+                    AppSectionHeader(title: '为你创建的电台'),
+                    const SizedBox(height: 14),
+                    _StationStrip(
+                      enabled: widget.state.signedIn,
+                      covers: <String?>[
+                        ...recent.map((track) => track.coverUrl),
+                        ...feed.quick.map((track) => track.coverUrl),
+                        ...feed.albums.map((album) => album.coverUrl),
+                      ],
+                      onFm: () =>
+                          _playStation(widget.state.catalog.personalFmTracks),
+                      onLiked: widget.state.collections.liked == null
+                          ? null
+                          : () => _playStation(() async {
+                              final tracks = await widget.state.catalog
+                                  .playlistTracks(
+                                    widget.state.collections.liked!.id,
+                                  );
+                              return List<Track>.of(tracks)..shuffle();
+                            }),
+                      onHeart: widget.state.collections.liked == null
+                          ? null
+                          : () => unawaited(_startHeartMode()),
+                      artistName: stationArtist?.name,
+                      onArtist: stationArtist == null
+                          ? null
+                          : () => _playStation(
+                              () => widget.state.catalog.artistStationTracks(
+                                stationArtist,
+                              ),
                             ),
-                          ),
-                  ),
+                    ),
+                  ],
                 ]),
               ),
             ),
@@ -367,7 +389,7 @@ class HomeActionShelf extends StatelessWidget {
             icon: Icons.replay_rounded,
             tap: onReplay,
           ),
-        ];
+        ].where((item) => item.tap != null).toList();
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         // The four shortcuts share the browse width on a television instead of

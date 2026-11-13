@@ -228,7 +228,19 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
     final double featureWidth = LargeScreenMetrics.featureCardWidth(width);
     final double artWidth = LargeScreenMetrics.artworkCardWidth(width);
     final List<Track> recent = _state.recentTracks;
-    final List<Playlist> recommendations = _uniquePlaylists(feed.recommended);
+    final bool supportsHomeFeed = _state.supportsMusic(
+      MusicCapability.homeFeed,
+    );
+    final bool supportsRecommendations = _state.supportsMusic(
+      MusicCapability.recommendations,
+    );
+    final bool supportsRadio = _state.supportsMusic(MusicCapability.radio);
+    final bool supportsCharts = _state.supportsMusic(MusicCapability.charts);
+    final bool showPluginHome =
+        supportsHomeFeed || supportsRecommendations || supportsRadio;
+    final List<Playlist> recommendations = supportsRecommendations
+        ? _uniquePlaylists(feed.recommended)
+        : const <Playlist>[];
     final List<MusicChart> charts = _state.discoveryCharts;
     // The mosaic on the 为你打造 cards uses the same cover pool as the desktop
     // home: recent tracks, today's picks and the recommended albums.
@@ -264,9 +276,9 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
     }
 
     for (final Playlist playlist in <Playlist>[
-      ...feed.recommended,
-      ...feed.playlists,
-      ...feed.editorialPlaylists,
+      if (supportsRecommendations) ...feed.recommended,
+      if (supportsHomeFeed) ...feed.playlists,
+      if (supportsHomeFeed) ...feed.editorialPlaylists,
     ]) {
       addFeature(
         key: 'playlist-${playlist.id}',
@@ -280,7 +292,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
         onTap: () => widget.actions.onOpenPlaylist(playlist),
       );
     }
-    if (feed.featured != null) {
+    if (supportsHomeFeed && feed.featured != null) {
       final Album album = feed.featured!;
       addFeature(
         key: 'album-${album.id}',
@@ -294,7 +306,10 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
         icon: Icons.album_rounded,
       );
     }
-    for (final Album album in feed.albums) {
+    for (final Album album
+        in (supportsHomeFeed || supportsRecommendations)
+            ? feed.albums
+            : const <Album>[]) {
       addFeature(
         key: 'album-${album.id}',
         title: album.title,
@@ -316,55 +331,61 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
       sections.add(shelf);
     }
 
-    addSection(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: inset),
-            child: const LargeScreenSectionHeader(title: '为你打造'),
-          ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: inset),
-            // The same filled card as the 电台 strip, on every platform: the
-            // cover mosaic and the two caption lines fill the whole tile. A
-            // guest gets the login sheet instead of a dead tile, and keeping
-            // the top shelf actionable also gives the page a focus anchor.
-            child: HomeActionShelf(
-              serverLibrary: !_state.supportsMusic(
-                MusicCapability.recommendations,
-              ),
-              dailyOpensPlaylist: _state.signedIn,
-              busy: _startingStation,
-              covers: covers,
-              large: true,
-              onDaily: !_state.signedIn
-                  ? () => unawaited(showAppLoginDialog(context, _state))
-                  : feed.quick.isEmpty && feed.daily.isEmpty
-                  ? null
-                  : () => widget.actions.onOpenPlaylist(
-                      dailyRecommendationsPlaylist(
-                        feed,
-                        serverLibrary: !_state.supportsMusic(
-                          MusicCapability.recommendations,
-                        ),
-                      ),
-                    ),
-              onFm: _state.signedIn
-                  ? () => _playStation(_state.catalog.personalFmTracks)
-                  : () => unawaited(showAppLoginDialog(context, _state)),
-              onHeart: !_state.signedIn
-                  ? () => unawaited(showAppLoginDialog(context, _state))
-                  : _state.collections.liked == null
-                  ? null
-                  : () => unawaited(_startHeartMode()),
-              onReplay: recent.isEmpty ? null : () => _state.playQueue(recent),
+    if (showPluginHome) {
+      addSection(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: inset),
+              child: const LargeScreenSectionHeader(title: '为你打造'),
             ),
-          ),
-        ],
-      ),
-    );
+            const SizedBox(height: 16),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: inset),
+              // The same filled card as the 电台 strip, on every platform: the
+              // cover mosaic and the two caption lines fill the whole tile. A
+              // guest gets the login sheet instead of a dead tile, and keeping
+              // the top shelf actionable also gives the page a focus anchor.
+              child: HomeActionShelf(
+                serverLibrary: !supportsRecommendations,
+                dailyOpensPlaylist: _state.signedIn,
+                busy: _startingStation,
+                covers: covers,
+                large: true,
+                onDaily: (supportsHomeFeed || supportsRecommendations)
+                    ? !_state.signedIn
+                          ? () => unawaited(showAppLoginDialog(context, _state))
+                          : feed.quick.isEmpty && feed.daily.isEmpty
+                          ? null
+                          : () => widget.actions.onOpenPlaylist(
+                              dailyRecommendationsPlaylist(
+                                feed,
+                                serverLibrary: !supportsRecommendations,
+                              ),
+                            )
+                    : null,
+                onFm: supportsRadio
+                    ? !_state.signedIn
+                          ? () => unawaited(showAppLoginDialog(context, _state))
+                          : () => _playStation(_state.catalog.personalFmTracks)
+                    : null,
+                onHeart: supportsRadio
+                    ? !_state.signedIn
+                          ? () => unawaited(showAppLoginDialog(context, _state))
+                          : _state.collections.liked == null
+                          ? null
+                          : () => unawaited(_startHeartMode())
+                    : null,
+                onReplay: recent.isEmpty
+                    ? null
+                    : () => _state.playQueue(recent),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     if (features.isNotEmpty) {
       addSection(
@@ -409,7 +430,8 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
       );
     }
 
-    if (feed.albums.isNotEmpty) {
+    if ((supportsHomeFeed || supportsRecommendations) &&
+        feed.albums.isNotEmpty) {
       addSection(
         LargeScreenShelf(
           title: '新发行',
@@ -432,7 +454,9 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
       );
     }
 
-    if (_state.supportsMusic(MusicCapability.recommendations)) {
+    if (_state.enableExternalCharts ||
+        supportsCharts ||
+        _state.discoveryCharts.isNotEmpty) {
       addSection(
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
