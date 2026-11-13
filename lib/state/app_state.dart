@@ -49,6 +49,8 @@ import 'ui_preferences.dart';
 import 'scheduled_pause.dart';
 import '../theme/font_preferences.dart';
 import '../theme/imported_font.dart';
+import '../theme/lazer_theme.dart';
+import '../ui/layout_system.dart';
 import '../plugins/plugin_manifest.dart' show PluginException;
 import '../plugins/plugin_manager.dart';
 
@@ -174,6 +176,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.listeningStatistics.addListener(_updateSystemWidgetPlayCount);
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
     this.pluginManager.afterChange = _musicPlatforms.synchronizePlugins;
+    this.pluginManager.addListener(_onPluginManagerChanged);
     _trackTransition = TrackTransition.fromAutoMix(autoMixEnabled);
     MotionTiming.speed = animationSpeed;
     if (deviceIsWatch) {
@@ -228,6 +231,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Installed Lua providers and extensions. Its lifecycle follows the app,
   /// while each plugin VM remains isolated from playback and UI state.
   final PluginManager pluginManager;
+
+  /// The first enabled plugin skin is the active declarative UI overlay.
+  /// Music plugins remain isolated from Flutter widgets and can only provide
+  /// bounded theme/layout data through the Lua theme engine.
+  LazerThemeTokens? get pluginTheme => pluginManager.activeTheme;
+  LazerLayoutDefinition? get pluginLayout => pluginManager.activeLayout;
+  int get pluginSkinRevision => pluginManager.skinRevision;
+
+  void _onPluginManagerChanged() {
+    if (!_presentationDisposed) notifyListeners();
+  }
 
   static const scheduledPauseKey = 'lazer_scheduled_pause';
   ScheduledPauseSettings scheduledPause = ScheduledPauseSettings();
@@ -5550,6 +5564,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     listeningStatistics.dispose();
     _pauseSchedule.dispose();
     _musicPlatforms.cancelPending();
+    pluginManager.removeListener(_onPluginManagerChanged);
     pluginManager.dispose();
     catalog.connections.close();
     _presentationDisposed = true;

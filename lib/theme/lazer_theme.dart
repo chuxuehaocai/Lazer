@@ -17,6 +17,11 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     this.pageTitleCompactSize = 34,
     this.pageTitleRegularSize = 32,
     this.sectionHeaderSize = 20,
+    this.displayWeight = 700,
+    this.headingWeight = 700,
+    this.titleWeight = 600,
+    this.bodyWeight = 400,
+    this.labelWeight = 500,
     this.controlRadius = 12,
     this.glassBlurSigma = 16,
   });
@@ -30,6 +35,11 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   final double pageTitleCompactSize;
   final double pageTitleRegularSize;
   final double sectionHeaderSize;
+  final int displayWeight;
+  final int headingWeight;
+  final int titleWeight;
+  final int bodyWeight;
+  final int labelWeight;
   final double controlRadius;
   final double glassBlurSigma;
 
@@ -46,6 +56,11 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       'pageTitleCompactSize': pageTitleCompactSize,
       'pageTitleRegularSize': pageTitleRegularSize,
       'sectionHeaderSize': sectionHeaderSize,
+      'displayWeight': displayWeight,
+      'headingWeight': headingWeight,
+      'titleWeight': titleWeight,
+      'bodyWeight': bodyWeight,
+      'labelWeight': labelWeight,
       'controlRadius': controlRadius,
       'glassBlurSigma': glassBlurSigma,
     },
@@ -73,6 +88,13 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       return value.isFinite ? value.clamp(min, max) : fallback;
     }
 
+    int weight(String key, int fallback) {
+      final value = elements[key] is num
+          ? (elements[key]! as num).round()
+          : fallback;
+      return value.clamp(100, 900);
+    }
+
     return LazerThemeTokens(
       id: text(json['id'], 'custom.unnamed'),
       name: text(json['name'], 'Custom'),
@@ -83,6 +105,11 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       pageTitleCompactSize: number('pageTitleCompactSize', 34, max: 72),
       pageTitleRegularSize: number('pageTitleRegularSize', 32, max: 72),
       sectionHeaderSize: number('sectionHeaderSize', 20, max: 48),
+      displayWeight: weight('displayWeight', 700),
+      headingWeight: weight('headingWeight', 700),
+      titleWeight: weight('titleWeight', 600),
+      bodyWeight: weight('bodyWeight', 400),
+      labelWeight: weight('labelWeight', 500),
       controlRadius: number('controlRadius', 12, max: 40),
       glassBlurSigma: number('glassBlurSigma', 16, max: 48),
     );
@@ -102,6 +129,11 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     double? pageTitleCompactSize,
     double? pageTitleRegularSize,
     double? sectionHeaderSize,
+    int? displayWeight,
+    int? headingWeight,
+    int? titleWeight,
+    int? bodyWeight,
+    int? labelWeight,
     double? controlRadius,
     double? glassBlurSigma,
   }) => LazerThemeTokens(
@@ -115,6 +147,11 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     pageTitleCompactSize: pageTitleCompactSize ?? this.pageTitleCompactSize,
     pageTitleRegularSize: pageTitleRegularSize ?? this.pageTitleRegularSize,
     sectionHeaderSize: sectionHeaderSize ?? this.sectionHeaderSize,
+    displayWeight: displayWeight ?? this.displayWeight,
+    headingWeight: headingWeight ?? this.headingWeight,
+    titleWeight: titleWeight ?? this.titleWeight,
+    bodyWeight: bodyWeight ?? this.bodyWeight,
+    labelWeight: labelWeight ?? this.labelWeight,
     controlRadius: controlRadius ?? this.controlRadius,
     glassBlurSigma: glassBlurSigma ?? this.glassBlurSigma,
   );
@@ -145,10 +182,31 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
         other.pageTitleRegularSize,
       ),
       sectionHeaderSize: mix(sectionHeaderSize, other.sectionHeaderSize),
+      displayWeight: _lerpWeight(displayWeight, other.displayWeight, t),
+      headingWeight: _lerpWeight(headingWeight, other.headingWeight, t),
+      titleWeight: _lerpWeight(titleWeight, other.titleWeight, t),
+      bodyWeight: _lerpWeight(bodyWeight, other.bodyWeight, t),
+      labelWeight: _lerpWeight(labelWeight, other.labelWeight, t),
       controlRadius: mix(controlRadius, other.controlRadius),
       glassBlurSigma: mix(glassBlurSigma, other.glassBlurSigma),
     );
   }
+
+  static int _lerpWeight(int a, int b, double t) =>
+      (a + (b - a) * t).round().clamp(100, 900);
+
+  static FontWeight fontWeight(int value) {
+    final clamped = value.clamp(100, 900);
+    return FontWeight.values.reduce(
+      (a, b) => (a.value - clamped).abs() <= (b.value - clamped).abs() ? a : b,
+    );
+  }
+
+  FontWeight get displayFontWeight => fontWeight(displayWeight);
+  FontWeight get headingFontWeight => fontWeight(headingWeight);
+  FontWeight get titleFontWeight => fontWeight(titleWeight);
+  FontWeight get bodyFontWeight => fontWeight(bodyWeight);
+  FontWeight get labelFontWeight => fontWeight(labelWeight);
 }
 
 /// Registry boundary for built-in and future plugin-provided skins.

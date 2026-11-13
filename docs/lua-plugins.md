@@ -132,6 +132,39 @@ end
 代码。皮肤可以覆盖主题令牌和布局令牌，未知字段会被忽略，越界数值会回退到宿主允许的
 范围。这样同一套页面可以换皮，插件也不能绕过宿主的权限、无障碍和输入安全边界。
 
+插件可以在 `describe` 顶层声明 `theme=true`，客户端随后调用 `theme` 操作；也可以直接
+把令牌放在 `theme` 字段中。操作返回值示例：
+
+```lua
+if operation == "theme" then
+  return {
+    theme = {
+      id = "example.dark",
+      name = "Example Dark",
+      elements = {
+        pageTitleCompactSize = 36,
+        groupedCardRadius = 18,
+        displayWeight = 800,
+        titleWeight = 700,
+        bodyWeight = 400,
+        labelWeight = 600,
+      }
+    },
+    layout = {
+      id = "example.compact",
+      name = "Example Compact",
+      compactInset = 18,
+      regularInset = 28,
+      maxContentWidth = 1080,
+    }
+  }
+end
+```
+
+`displayWeight`、`headingWeight`、`titleWeight`、`bodyWeight` 和 `labelWeight` 会覆盖
+对应的 Material 文本层级；宿主会把数值限制在 100–900 并映射到 Flutter 可用字重。
+主题操作失败只会忽略皮肤，不会让音乐平台启动失败。
+
 `artistSongs({id,limit,offset})` 返回歌手歌曲当前页。评论使用字符串 ID：
 `{id,content,author,authorId,avatarUrl,time,location,liked,likedCount,replies}`，
 其中回复为 `{author,content}`，时间为 Unix 毫秒。一起听成员为

@@ -231,6 +231,34 @@ void main() {
   });
 
   test(
+    'Lua theme operation installs bounded theme and layout tokens',
+    () async {
+      final source = _source
+          .replaceFirst('return {providers={', 'return {theme=true,providers={')
+          .replaceFirst(
+            '  if op == "session" then',
+            '''  if op == "theme" then return {
+    theme={id="fixture.theme",name="Fixture Theme",elements={displayWeight=850}},
+    layout={id="fixture.layout",name="Fixture Layout",compactInset=20}
+  } end
+  if op == "session" then''',
+          );
+      final plugins = manager();
+      final app = state(plugins);
+      try {
+        await app.bootstrap();
+        await plugins.importZip(_package(source: source));
+        expect(app.pluginTheme?.id, 'fixture.theme');
+        expect(app.pluginTheme?.displayWeight, 850);
+        expect(app.pluginLayout?.id, 'fixture.layout');
+        expect(app.pluginLayout?.compactInset, 20);
+      } finally {
+        app.dispose();
+      }
+    },
+  );
+
+  test(
     'plugin import activates immediately; sessions and selection survive restart',
     () async {
       final plugins = manager();

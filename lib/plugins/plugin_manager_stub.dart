@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 
 import 'plugin_manifest.dart';
 import '../gateway/music_gateway.dart';
+import '../theme/lazer_theme.dart';
+import '../ui/layout_system.dart';
 import 'lua_plugin_runtime.dart';
 
 class InstalledPlugin {
@@ -17,6 +19,8 @@ class InstalledPlugin {
   final PluginManifest manifest;
   bool enabled;
   LuaPluginRuntime? runtime;
+  LazerThemeTokens? theme;
+  LazerLayoutDefinition? layout;
   String? error;
 }
 
@@ -26,6 +30,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   final List<InstalledPlugin> _plugins = [];
   List<InstalledPlugin> get plugins => List.unmodifiable(_plugins);
   List<MusicGateway> get gateways => const [];
+  LazerThemeTokens? get activeTheme => null;
+  LazerLayoutDefinition? get activeLayout => null;
+  int get skinRevision => 0;
   bool busy = false;
   Future<void> Function(String pluginId)? beforeChange;
   Future<void> Function()? afterChange;

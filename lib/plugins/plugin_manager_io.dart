@@ -11,7 +11,10 @@ import '../storage/app_storage.dart';
 import '../gateway/lua_music_gateway.dart';
 import '../gateway/music_gateway.dart';
 import '../utils/media_requests.dart';
+import '../theme/lazer_theme.dart';
+import '../ui/layout_system.dart';
 import 'lua_plugin_runtime.dart';
+import 'lua_theme_engine.dart';
 import 'plugin_manifest.dart';
 
 class InstalledPlugin {
@@ -25,6 +28,8 @@ class InstalledPlugin {
   bool enabled;
   LuaPluginRuntime? runtime;
   final List<LuaMusicGateway> gateways = [];
+  LazerThemeTokens? theme;
+  LazerLayoutDefinition? layout;
   MusicGateway? get gateway => gateways.firstOrNull;
 
   String? error;
@@ -39,6 +44,20 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     for (final plugin in _plugins)
       if (plugin.enabled && plugin.runtime != null) ...plugin.gateways,
   ];
+  LazerThemeTokens? get activeTheme => _plugins
+      .where((plugin) => plugin.enabled && plugin.runtime != null)
+      .map((plugin) => plugin.theme)
+      .whereType<LazerThemeTokens>()
+      .firstOrNull;
+  LazerLayoutDefinition? get activeLayout => _plugins
+      .where((plugin) => plugin.enabled && plugin.runtime != null)
+      .map((plugin) => plugin.layout)
+      .whereType<LazerLayoutDefinition>()
+      .firstOrNull;
+  int get skinRevision => Object.hash(
+    activeTheme?.toJson().toString(),
+    activeLayout?.toJson().toString(),
+  );
   bool busy = false;
   bool _disposed = false;
   Future<void>? _restoring;
@@ -109,17 +128,16 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.runtime = runtime;
       await runtime.start();
       final description = await runtime.invoke('describe');
-      MediaRequestRules.register(
-        plugin.manifest.id,
-        [
-          for (final rule
-              in description is Map && description['media'] is List
-                  ? description['media'] as List
-                  : const [])
-            if (rule is Map) Map<String, dynamic>.from(rule),
-        ],
-        permittedDomains: plugin.manifest.domains,
-      );
+      final skin = await LuaThemeEngine.load(runtime, description);
+      plugin.theme = skin?.theme;
+      plugin.layout = skin?.layout;
+      MediaRequestRules.register(plugin.manifest.id, [
+        for (final rule
+            in description is Map && description['media'] is List
+                ? description['media'] as List
+                : const [])
+          if (rule is Map) Map<String, dynamic>.from(rule),
+      ], permittedDomains: plugin.manifest.domains);
       final declared = description is Map ? description['providers'] : null;
       final providers = declared is List
           ? declared.whereType<Map>().toList()
@@ -173,6 +191,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.runtime?.close();
       plugin.runtime = null;
       plugin.gateways.clear();
+      plugin.theme = null;
+      plugin.layout = null;
       plugin.error = '插件启动失败，请检查插件版本或重新导入。';
     }
   }

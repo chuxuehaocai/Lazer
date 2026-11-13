@@ -248,7 +248,11 @@ const List<String> appleFontFallback = <String>[
   'sans-serif',
 ];
 
-TextTheme appleTextTheme({Color? color, String? fontFamily = AppFonts.sans}) {
+TextTheme appleTextTheme({
+  Color? color,
+  String? fontFamily = AppFonts.sans,
+  LazerThemeTokens ui = LazerThemeTokens.apple,
+}) {
   TextStyle s(
     double size,
     double height,
@@ -265,21 +269,21 @@ TextTheme appleTextTheme({Color? color, String? fontFamily = AppFonts.sans}) {
   );
 
   return TextTheme(
-    displayLarge: s(34, 41, FontWeight.w700, spacing: .37),
-    displayMedium: s(28, 34, FontWeight.w700, spacing: .36),
-    displaySmall: s(24, 30, FontWeight.w700, spacing: .35),
-    headlineLarge: s(34, 41, FontWeight.w700, spacing: .37),
-    headlineMedium: s(28, 34, FontWeight.w700, spacing: .36),
-    headlineSmall: s(22, 28, FontWeight.w700, spacing: .35),
-    titleLarge: s(20, 25, FontWeight.w600, spacing: .38),
-    titleMedium: s(17, 22, FontWeight.w600, spacing: -.24),
-    titleSmall: s(15, 20, FontWeight.w600, spacing: -.23),
-    bodyLarge: s(17, 22, FontWeight.w400, spacing: -.24),
-    bodyMedium: s(15, 20, FontWeight.w400, spacing: -.23),
-    bodySmall: s(13, 18, FontWeight.w400, spacing: -.18),
-    labelLarge: s(15, 20, FontWeight.w500, spacing: -.23),
-    labelMedium: s(13, 18, FontWeight.w500, spacing: -.18),
-    labelSmall: s(11, 13, FontWeight.w500, spacing: .06),
+    displayLarge: s(34, 41, ui.displayFontWeight, spacing: .37),
+    displayMedium: s(28, 34, ui.displayFontWeight, spacing: .36),
+    displaySmall: s(24, 30, ui.displayFontWeight, spacing: .35),
+    headlineLarge: s(34, 41, ui.headingFontWeight, spacing: .37),
+    headlineMedium: s(28, 34, ui.headingFontWeight, spacing: .36),
+    headlineSmall: s(22, 28, ui.headingFontWeight, spacing: .35),
+    titleLarge: s(20, 25, ui.titleFontWeight, spacing: .38),
+    titleMedium: s(17, 22, ui.titleFontWeight, spacing: -.24),
+    titleSmall: s(15, 20, ui.titleFontWeight, spacing: -.23),
+    bodyLarge: s(17, 22, ui.bodyFontWeight, spacing: -.24),
+    bodyMedium: s(15, 20, ui.bodyFontWeight, spacing: -.23),
+    bodySmall: s(13, 18, ui.bodyFontWeight, spacing: -.18),
+    labelLarge: s(15, 20, ui.labelFontWeight, spacing: -.23),
+    labelMedium: s(13, 18, ui.labelFontWeight, spacing: -.18),
+    labelSmall: s(11, 13, ui.labelFontWeight, spacing: .06),
   );
 }
 
@@ -357,10 +361,10 @@ ThemeData buildAppleTheme({
   );
   final String uiFont = fonts.family.resolvedFamily;
   final TextTheme text = fonts.applyTo(
-    appleTextTheme(color: apple.label, fontFamily: uiFont),
+    appleTextTheme(color: apple.label, fontFamily: uiFont, ui: ui),
   );
   final TextTheme hintText = fonts.applyTo(
-    appleTextTheme(color: apple.secondaryLabel, fontFamily: uiFont),
+    appleTextTheme(color: apple.secondaryLabel, fontFamily: uiFont, ui: ui),
   );
   return ThemeData(
     useMaterial3: true,

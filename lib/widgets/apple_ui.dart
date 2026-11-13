@@ -96,7 +96,7 @@ class ApplePageTitle extends StatelessWidget {
         height:
             (compact ? 41 : 38) /
             (compact ? ui.pageTitleCompactSize : ui.pageTitleRegularSize),
-        fontWeight: FontWeight.w700,
+        fontWeight: ui.displayFontWeight,
         letterSpacing: .37,
         color: apple.label,
       ),
@@ -180,7 +180,7 @@ class AppleSectionHeader extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleLarge?.copyWith(
                       color: apple.label,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: ui.titleFontWeight,
                       fontSize: ui.sectionHeaderSize,
                       letterSpacing: -.4,
                     ),
@@ -311,6 +311,7 @@ class _AppleListTileState extends State<AppleListTile>
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyLarge?.copyWith(
                         color: apple.label,
+                        fontWeight: ui.bodyFontWeight,
                       ),
                     ),
                     if (widget.subtitle != null &&
@@ -322,6 +323,7 @@ class _AppleListTileState extends State<AppleListTile>
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: apple.secondaryLabel,
+                          fontWeight: ui.bodyFontWeight,
                         ),
                       ),
                     ],

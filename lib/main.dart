@@ -25,6 +25,7 @@ import 'diagnostics/console_window.dart';
 import 'diagnostics/crash_dump.dart';
 import 'ui/shell.dart';
 import 'theme/apple_design.dart';
+import 'theme/lazer_theme.dart';
 import 'state/app_state.dart';
 import 'state/ui_preferences.dart';
 import 'theme/font_preferences.dart';
@@ -294,6 +295,7 @@ typedef _RootUiSignature = (
   bool,
   bool,
   FontPreferences,
+  int,
 );
 
 class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
@@ -318,6 +320,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _state.deviceIsTelevision,
     _state.showFrameStats,
     _state.fontPreferences,
+    _state.pluginSkinRevision,
   );
 
   @override
@@ -403,11 +406,13 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
             brightness: Brightness.light,
             seedAccent: seed,
             fonts: _state.fontPreferences,
+            ui: _state.pluginTheme ?? LazerThemeTokens.apple,
           ),
           darkTheme: buildAppleTheme(
             brightness: Brightness.dark,
             seedAccent: seed,
             fonts: _state.fontPreferences,
+            ui: _state.pluginTheme ?? LazerThemeTokens.apple,
           ),
           themeMode: _state.themeMode,
           locale: _state.language.locale,

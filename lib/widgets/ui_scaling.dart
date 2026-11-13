@@ -164,7 +164,9 @@ class UiScaling extends StatelessWidget {
       // route: MaterialApp's navigator puts its own traversal group around
       // every page, so a group at this level would never be consulted.
       child: LazerLayoutScope(
-        layout: tv ? BuiltinLayouts.television : BuiltinLayouts.adaptive,
+        layout:
+            state.pluginLayout ??
+            (tv ? BuiltinLayouts.television : BuiltinLayouts.adaptive),
         child: UiMetrics(
           scale: scale,
           autoScale: autoScale,
