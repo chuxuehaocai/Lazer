@@ -2309,6 +2309,7 @@ class LargeScreenSettingsPage extends StatelessWidget {
     required this.state,
     required this.onOpenLocalMusic,
     this.backgroundImagePicker,
+    this.categorized = false,
   });
 
   final AppState state;
@@ -2317,6 +2318,7 @@ class LargeScreenSettingsPage extends StatelessWidget {
   /// Forwarded to [AppSettingsPage]; the television UI shares the same
   /// picture picker so a big-screen install can change its backdrop too.
   final Future<String?> Function()? backgroundImagePicker;
+  final bool categorized;
 
   @override
   Widget build(BuildContext context) => LargeScreenReusedPage(
@@ -2324,6 +2326,7 @@ class LargeScreenSettingsPage extends StatelessWidget {
     bottomInset: LargeScreenMetrics.floatingBarInset,
     child: AppSettingsPage(
       state: state,
+      categorized: categorized,
       onOpenLocalMusic: onOpenLocalMusic,
       backgroundImagePicker: backgroundImagePicker,
     ),

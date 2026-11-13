@@ -61,6 +61,7 @@ class AppShell extends StatefulWidget {
     super.key,
     required this.state,
     this.autoCheckUpdates = false,
+    this.categorizedSettings = false,
   });
 
   final AppState state;
@@ -70,6 +71,10 @@ class AppShell extends StatefulWidget {
   /// Only production enables this: widget tests pump the shell directly and
   /// must not spawn network work or a pending timer.
   final bool autoCheckUpdates;
+
+  /// Production enables the category landing page. Direct embedders keep the
+  /// overview surface for compatibility with existing settings integrations.
+  final bool categorizedSettings;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -1423,6 +1428,7 @@ class _AppShellState extends State<AppShell>
       _AppSection.likes => LargeScreenLikesPage(state: state),
       _AppSection.settings => LargeScreenSettingsPage(
         state: state,
+        categorized: widget.categorizedSettings,
         onOpenLocalMusic: _openLocalMusic,
       ),
     };
@@ -1792,9 +1798,7 @@ class _AppShellState extends State<AppShell>
               ),
               const SizedBox(width: 8),
             ],
-            Expanded(
-              child: _animatedHeaderTitle(apple, desktop: true),
-            ),
+            Expanded(child: _animatedHeaderTitle(apple, desktop: true)),
             if (kIsWeb) ...<Widget>[
               _ToolbarButton(
                 tooltip: 'GitHub 项目',
@@ -1834,9 +1838,7 @@ class _AppShellState extends State<AppShell>
               const SizedBox(width: 10),
             ] else
               const SizedBox(width: 8),
-            Expanded(
-              child: _animatedHeaderTitle(apple),
-            ),
+            Expanded(child: _animatedHeaderTitle(apple)),
             _ToolbarButton(
               tooltip: Theme.of(context).brightness == Brightness.dark
                   ? '浅色外观'
@@ -2297,6 +2299,7 @@ class _AppShellState extends State<AppShell>
       _AppSection.likes => AppLikesPage(state: state),
       _AppSection.settings => AppSettingsPage(
         state: state,
+        categorized: widget.categorizedSettings,
         onOpenLocalMusic: _openLocalMusic,
       ),
     };

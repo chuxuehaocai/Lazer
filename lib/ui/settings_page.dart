@@ -60,6 +60,7 @@ class AppSettingsPage extends StatelessWidget {
     required this.state,
     this.onOpenLocalMusic,
     this.backgroundImagePicker,
+    this.categorized = false,
   });
 
   final AppState state;
@@ -71,6 +72,10 @@ class AppSettingsPage extends StatelessWidget {
   /// supply a stored file without opening a system dialog.
   final Future<String?> Function()? backgroundImagePicker;
 
+  /// The shell uses the category landing page. Embedded callers retain the
+  /// complete overview surface unless they explicitly opt into categories.
+  final bool categorized;
+
   @override
   Widget build(BuildContext context) => SettingsDetailHost(
     // AppShell may retain the settings page while its AppState source is
@@ -79,11 +84,17 @@ class AppSettingsPage extends StatelessWidget {
     // subview into the new state instance.
     key: ObjectKey(state),
     compact: useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width),
-    child: _SettingsCategoryHome(
-      state: state,
-      onOpenLocalMusic: onOpenLocalMusic,
-      backgroundImagePicker: backgroundImagePicker,
-    ),
+    child: categorized
+        ? _SettingsCategoryHome(
+            state: state,
+            onOpenLocalMusic: onOpenLocalMusic,
+            backgroundImagePicker: backgroundImagePicker,
+          )
+        : _SettingsOverview(
+            state: state,
+            onOpenLocalMusic: onOpenLocalMusic,
+            backgroundImagePicker: backgroundImagePicker,
+          ),
   );
 }
 
@@ -225,6 +236,26 @@ class _SettingsCategoryHome extends StatelessWidget {
                   ],
                 );
               },
+            ),
+            const SizedBox(height: 14),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: AppleListTile(
+                key: const ValueKey('open-github-project'),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                minHeight: 72,
+                leading: AppleIconTile(
+                  icon: Icons.open_in_new_rounded,
+                  color: apple.accent,
+                ),
+                title: context.tr('GitHub 项目'),
+                subtitle: UpdateChecker.repositoryUrl,
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => unawaited(_openProjectRepository(context)),
+              ),
             ),
           ],
         ),
@@ -473,6 +504,7 @@ class _SettingsOverview extends StatelessWidget {
                             child: const TrText('恢复默认'),
                           ),
                         ),
+                        const _AppSectionLabel('动态背景'),
                         _AppSettingRow(
                           label: '背景',
                           subtitle: state.backgroundMode.detail,
@@ -686,7 +718,7 @@ class _SettingsOverview extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const _AppSectionLabel('动态背景'),
+                  _AppSectionLabel(category == null ? '外观' : '动态背景'),
                   AppleGroupedCard(
                     margin: EdgeInsets.zero,
                     child: _BackgroundPreferences(

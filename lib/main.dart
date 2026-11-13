@@ -469,6 +469,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                     key: const ValueKey('app-shell'),
                     state: _state,
                     autoCheckUpdates: true,
+                    categorizedSettings: true,
                   ),
           ),
         ),
