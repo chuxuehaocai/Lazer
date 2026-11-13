@@ -2,15 +2,28 @@ import 'package:flutter/material.dart';
 
 import 'lyric_document.dart';
 import 'timed_line.dart';
+import '../theme/lazer_theme.dart';
 
 /// Shared typography and text painting for the player and desktop lyrics.
-TextStyle lyricTextStyle(TextStyle base, double size, int weight) =>
-    base.copyWith(
-      fontSize: size,
-      fontWeight: FontWeight.values[(weight ~/ 100 - 1).clamp(0, 8)],
-      height: 1.5,
-      color: Colors.white,
-    );
+TextStyle lyricTextStyle(
+  TextStyle base,
+  double size,
+  int weight, {
+  LazerThemeTokens? theme,
+  bool translation = false,
+}) {
+  final tokens = theme ?? LazerThemeTokens.apple;
+  return base.copyWith(
+    fontSize: size,
+    fontWeight: translation
+        ? tokens.lyricTranslationFontWeight(weight)
+        : tokens.lyricFontWeight(weight),
+    height: translation
+        ? tokens.lyricTranslationLineHeight
+        : tokens.lyricLineHeight,
+    color: Colors.white,
+  );
+}
 
 String lyricSemanticLabel(LyricLine line) =>
     [line.text, if (line.translation != null) line.translation!].join('\n');
@@ -45,11 +58,12 @@ class LyricLineContent extends StatelessWidget {
           repaint: repaint,
           emphasis: emphasis,
           maxLines: maxLines,
+          textAlign: LazerThemeTokens.of(context).lyricAlignment,
         )
       : Text(
           line.text.isEmpty ? ' ' : line.text,
           style: style,
-          textAlign: TextAlign.left,
+          textAlign: LazerThemeTokens.of(context).lyricAlignment,
           textDirection: TextDirection.ltr,
           maxLines: maxLines,
           overflow: maxLines == null ? null : TextOverflow.ellipsis,

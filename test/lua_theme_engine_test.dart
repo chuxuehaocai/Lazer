@@ -13,6 +13,9 @@ void main() {
           'displayWeight': 850,
           'groupedCardRadius': 18,
           'glassBlurSigma': 1000,
+          'lyricSpringStiffnessScale': 1.4,
+          'lyricStaggerDelay': .08,
+          'lyricFocusScaleDelta': 5,
         },
       },
       'layout': {
@@ -27,6 +30,9 @@ void main() {
     expect(bundle.theme!.displayWeight, 850);
     expect(bundle.theme!.displayFontWeight, FontWeight.w800);
     expect(bundle.theme!.glassBlurSigma, 48);
+    expect(bundle.theme!.lyricSpringStiffnessScale, 1.4);
+    expect(bundle.theme!.lyricStaggerDelay, .08);
+    expect(bundle.theme!.lyricFocusScaleDelta, 5);
     expect(bundle.layout!.id, 'lua.compact');
     expect(bundle.layout!.maxContentWidth, 980);
   });

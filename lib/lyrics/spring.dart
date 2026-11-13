@@ -128,20 +128,31 @@ LyricSpringParams lyricPositionPolicy({
   bool interlude = false,
   int? intervalMs,
   bool endOfSong = false,
+  double massScale = 1,
+  double stiffnessScale = 1,
+  double dampingScale = 1,
 }) {
   if (seeking || interlude || (!endOfSong && intervalMs == null)) {
-    return const LyricSpringParams(mass: 0.9, stiffness: 90, damping: 15);
+    return LyricSpringParams(
+      mass: .9 * massScale,
+      stiffness: 90 * stiffnessScale,
+      damping: 15 * dampingScale,
+    );
   }
   if (endOfSong) {
-    return const LyricSpringParams(mass: 0.9, stiffness: 140, damping: 22);
+    return LyricSpringParams(
+      mass: .9 * massScale,
+      stiffness: 140 * stiffnessScale,
+      damping: 22 * dampingScale,
+    );
   }
   final interval = intervalMs!.clamp(100, 800);
   final ratio = math.pow(1 - (interval - 100) / 700, 0.2).toDouble();
   final stiffness = 170 + ratio * 50;
   return LyricSpringParams(
-    mass: 0.9,
-    stiffness: stiffness,
-    damping: math.sqrt(stiffness) * 2.2,
+    mass: .9 * massScale,
+    stiffness: stiffness * stiffnessScale,
+    damping: math.sqrt(stiffness) * 2.2 * dampingScale,
   );
 }
 
@@ -151,14 +162,16 @@ List<double> lyricStaggerDelays(
   List<double> heights,
   int active, {
   bool disabled = false,
+  double baseDelay = .05,
+  double decay = 1.05,
 }) {
   var delay = 0.0;
-  var base = disabled ? 0.0 : 0.05;
+  var base = disabled ? 0.0 : baseDelay;
   return List.generate(positions.length, (index) {
     final result = delay;
     if (positions[index] + heights[index] >= 0) {
       delay += base;
-      if (index >= active) base /= 1.05;
+      if (index >= active) base /= decay;
     }
     return result;
   });

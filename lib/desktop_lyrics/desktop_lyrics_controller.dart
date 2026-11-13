@@ -73,6 +73,7 @@ class DesktopLyricsController {
       blurIntensity: _state.lyricBlurIntensity,
       animationSpeed: _state.animationSpeed,
       lineSpacing: _state.lyricLineSpacing,
+      theme: _state.pluginTheme?.toJson(),
     );
   }
 

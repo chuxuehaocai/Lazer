@@ -27,6 +27,7 @@ import '../widgets/lyric_image_dialog.dart';
 import '../widgets/lyric_edge_fade.dart';
 import 'line_content.dart';
 import '../widgets/lyric_text_hit_region.dart';
+import '../theme/lazer_theme.dart';
 
 /// children stay cached while the ticker only updates their transforms.
 class LyricViewport extends StatefulWidget {
@@ -492,7 +493,9 @@ class _LyricViewportState extends State<LyricViewport>
 
   void _scaleTargets() {
     for (var i = 0; i < _scales.length; i++) {
-      _scales[i].setTarget(i == _active ? 100 : 97);
+      _scales[i].setTarget(
+        i == _active ? 100 : 100 - _theme.lyricFocusScaleDelta,
+      );
     }
     if (_scales.isNotEmpty) _start();
   }
@@ -512,7 +515,11 @@ class _LyricViewportState extends State<LyricViewport>
     // keeps its intentionally soft animation.
     final bool atEdge = focus == 0 || focus == _lines.length - 1;
     final params = !seeking && atEdge
-        ? const LyricSpringParams(mass: .9, stiffness: 170, damping: 29)
+        ? LyricSpringParams(
+            mass: .9 * _theme.lyricSpringMassScale,
+            stiffness: 170 * _theme.lyricSpringStiffnessScale,
+            damping: 29 * _theme.lyricSpringDampingScale,
+          )
         : lyricPositionPolicy(
             seeking: seeking,
             interlude: _activeInterlude,
@@ -522,12 +529,17 @@ class _LyricViewportState extends State<LyricViewport>
             endOfSong:
                 widget.state.position >=
                 (widget.state.current?.duration ?? const Duration(days: 1)),
+            massScale: _theme.lyricSpringMassScale,
+            stiffnessScale: _theme.lyricSpringStiffnessScale,
+            dampingScale: _theme.lyricSpringDampingScale,
           );
     final delays = lyricStaggerDelays(
       positions,
       _heights,
       focus,
       disabled: seeking || !stagger,
+      baseDelay: _theme.lyricStaggerDelay,
+      decay: _theme.lyricStaggerDecay,
     );
     for (var i = 0; i < _ys.length; i++) {
       _ys[i].setParameters(params);
@@ -549,15 +561,19 @@ class _LyricViewportState extends State<LyricViewport>
     _start();
   }
 
+  LazerThemeTokens get _theme => LazerThemeTokens.of(context);
   TextStyle get _originalStyle => lyricTextStyle(
     context.type.bodySm,
-    widget.state.lyricFontSize,
+    widget.state.lyricFontSize * _theme.lyricFontScale,
     widget.state.lyricFontWeight,
+    theme: _theme,
   );
-  TextStyle get _translationStyle => context.type.bodySm.copyWith(
-    fontSize: (widget.state.lyricFontSize * 16 / 22).clamp(12, 30),
-    height: 1.45,
-    color: Colors.white,
+  TextStyle get _translationStyle => lyricTextStyle(
+    context.type.bodySm,
+    (widget.state.lyricFontSize * _theme.lyricTranslationScale).clamp(12, 30),
+    widget.state.lyricFontWeight,
+    theme: _theme,
+    translation: true,
   );
   List<double> _measureHeights(TextScaler scaler) {
     final originalStyle = _originalStyle;
@@ -587,7 +603,7 @@ class _LyricViewportState extends State<LyricViewport>
               : measure(line.text, originalStyle, originalHeights) +
                     (line.translation == null
                         ? 0
-                        : 5 +
+                        : _theme.lyricTranslationGap +
                               measure(
                                 line.translation!,
                                 translationStyle,
@@ -922,12 +938,16 @@ class _LyricViewportState extends State<LyricViewport>
           position: () => _interludePosition(index),
           presence: () => _presence(index),
           repaint: rowFrames,
-          diameter: widget.state.lyricFontSize * .3,
+          diameter: widget.state.lyricFontSize * _theme.lyricFontScale * .3,
         ),
       );
     }
-    double emphasis() => ((_scales[index].value - 97) / 3).clamp(0.0, 1.0);
-    double mainAlpha() => 0.48 + emphasis() * 0.52;
+    double emphasis() =>
+        ((_scales[index].value - (100 - _theme.lyricFocusScaleDelta)) /
+                _theme.lyricFocusScaleDelta)
+            .clamp(0.0, 1.0);
+    double mainAlpha() =>
+        _theme.lyricDimAlpha + emphasis() * (1 - _theme.lyricDimAlpha);
     final style = _originalStyle.copyWith(color: Colors.white);
     return SizedBox(
       width: _textWidth,
@@ -964,12 +984,14 @@ class _LyricViewportState extends State<LyricViewport>
             ),
           ),
           if (_lines[index].translation != null) ...[
-            const SizedBox(height: 5),
+            SizedBox(height: _theme.lyricTranslationGap),
             AnimatedBuilder(
               animation: _emphasisFrames,
               builder: (context, child) => ColorFiltered(
                 colorFilter: ColorFilter.mode(
-                  Colors.white.withValues(alpha: mainAlpha() * 0.58),
+                  Colors.white.withValues(
+                    alpha: mainAlpha() * _theme.lyricTranslationAlpha,
+                  ),
                   BlendMode.srcIn,
                 ),
                 child: child,

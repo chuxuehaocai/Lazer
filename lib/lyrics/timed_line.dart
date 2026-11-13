@@ -16,6 +16,7 @@ class TimedLyricText extends StatefulWidget {
     required this.repaint,
     this.emphasis,
     this.maxLines,
+    this.textAlign = TextAlign.start,
   });
   final int? maxLines;
   final LyricLine line;
@@ -24,6 +25,7 @@ class TimedLyricText extends StatefulWidget {
   final Duration Function() position;
   final Listenable repaint;
   final double Function()? emphasis;
+  final TextAlign textAlign;
   @override
   State<TimedLyricText> createState() => _TimedLyricTextState();
 }
@@ -50,6 +52,7 @@ class _TimedLyricTextState extends State<TimedLyricText> {
           scaler,
           locale,
           widget.maxLines,
+          widget.textAlign,
         );
         if (_layoutKey != key) {
           _layout?.dispose();
@@ -60,6 +63,7 @@ class _TimedLyricTextState extends State<TimedLyricText> {
             scaler,
             locale,
             widget.maxLines,
+            widget.textAlign,
           );
           _layoutKey = key;
         }
@@ -136,6 +140,7 @@ class _WordLayout {
     this.scaler,
     this.locale,
     this.maxLines,
+    this.textAlign,
   ) {
     bright = TextPainter(
       text: TextSpan(text: line.text, style: style),
@@ -143,6 +148,7 @@ class _WordLayout {
       textScaler: scaler,
       locale: locale,
       maxLines: maxLines,
+      textAlign: textAlign,
       ellipsis: maxLines == null ? null : "…",
     )..layout(maxWidth: width);
     fontSize = scaler.scale(style.fontSize ?? 22);
@@ -163,6 +169,7 @@ class _WordLayout {
       textScaler: scaler,
       locale: locale,
       maxLines: maxLines,
+      textAlign: textAlign,
       ellipsis: maxLines == null ? null : "…",
     )..layout(maxWidth: width);
     var offset = 0;
@@ -264,6 +271,7 @@ class _WordLayout {
   final double width;
   final TextScaler scaler;
   final Locale? locale;
+  final TextAlign textAlign;
   late final TextPainter bright;
   TextPainter? _dim;
   TextPainter get dim => _dim!;

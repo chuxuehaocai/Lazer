@@ -22,6 +22,22 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     this.titleWeight = 600,
     this.bodyWeight = 400,
     this.labelWeight = 500,
+    this.lyricWeight = -1,
+    this.lyricTranslationWeight = -1,
+    this.lyricFontScale = 1,
+    this.lyricTranslationScale = .7272727,
+    this.lyricLineHeight = 1.5,
+    this.lyricTranslationLineHeight = 1.45,
+    this.lyricTranslationGap = 5,
+    this.lyricDimAlpha = .48,
+    this.lyricTranslationAlpha = .58,
+    this.lyricTextAlign = 'start',
+    this.lyricSpringMassScale = 1,
+    this.lyricSpringStiffnessScale = 1,
+    this.lyricSpringDampingScale = 1,
+    this.lyricStaggerDelay = .05,
+    this.lyricStaggerDecay = 1.05,
+    this.lyricFocusScaleDelta = 3,
     this.controlRadius = 12,
     this.glassBlurSigma = 16,
   });
@@ -40,6 +56,22 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   final int titleWeight;
   final int bodyWeight;
   final int labelWeight;
+  final int lyricWeight;
+  final int lyricTranslationWeight;
+  final double lyricFontScale;
+  final double lyricTranslationScale;
+  final double lyricLineHeight;
+  final double lyricTranslationLineHeight;
+  final double lyricTranslationGap;
+  final double lyricDimAlpha;
+  final double lyricTranslationAlpha;
+  final String lyricTextAlign;
+  final double lyricSpringMassScale;
+  final double lyricSpringStiffnessScale;
+  final double lyricSpringDampingScale;
+  final double lyricStaggerDelay;
+  final double lyricStaggerDecay;
+  final double lyricFocusScaleDelta;
   final double controlRadius;
   final double glassBlurSigma;
 
@@ -61,6 +93,22 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       'titleWeight': titleWeight,
       'bodyWeight': bodyWeight,
       'labelWeight': labelWeight,
+      'lyricWeight': lyricWeight,
+      'lyricTranslationWeight': lyricTranslationWeight,
+      'lyricFontScale': lyricFontScale,
+      'lyricTranslationScale': lyricTranslationScale,
+      'lyricLineHeight': lyricLineHeight,
+      'lyricTranslationLineHeight': lyricTranslationLineHeight,
+      'lyricTranslationGap': lyricTranslationGap,
+      'lyricDimAlpha': lyricDimAlpha,
+      'lyricTranslationAlpha': lyricTranslationAlpha,
+      'lyricTextAlign': lyricTextAlign,
+      'lyricSpringMassScale': lyricSpringMassScale,
+      'lyricSpringStiffnessScale': lyricSpringStiffnessScale,
+      'lyricSpringDampingScale': lyricSpringDampingScale,
+      'lyricStaggerDelay': lyricStaggerDelay,
+      'lyricStaggerDecay': lyricStaggerDecay,
+      'lyricFocusScaleDelta': lyricFocusScaleDelta,
       'controlRadius': controlRadius,
       'glassBlurSigma': glassBlurSigma,
     },
@@ -95,6 +143,17 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       return value.clamp(100, 900);
     }
 
+    int optionalWeight(String key) {
+      final value = elements[key];
+      return value is num ? value.round().clamp(-1, 900) : -1;
+    }
+
+    String alignment(Object? value) =>
+        value is String &&
+            const <String>{'start', 'center', 'end', 'justify'}.contains(value)
+        ? value
+        : 'start';
+
     return LazerThemeTokens(
       id: text(json['id'], 'custom.unnamed'),
       name: text(json['name'], 'Custom'),
@@ -110,6 +169,42 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       titleWeight: weight('titleWeight', 600),
       bodyWeight: weight('bodyWeight', 400),
       labelWeight: weight('labelWeight', 500),
+      lyricWeight: optionalWeight('lyricWeight'),
+      lyricTranslationWeight: optionalWeight('lyricTranslationWeight'),
+      lyricFontScale: number('lyricFontScale', 1, min: .5, max: 2),
+      lyricTranslationScale: number(
+        'lyricTranslationScale',
+        .7272727,
+        min: .4,
+        max: 1.5,
+      ),
+      lyricLineHeight: number('lyricLineHeight', 1.5, min: .8, max: 3),
+      lyricTranslationLineHeight: number(
+        'lyricTranslationLineHeight',
+        1.45,
+        min: .8,
+        max: 3,
+      ),
+      lyricTranslationGap: number('lyricTranslationGap', 5, min: 0, max: 48),
+      lyricDimAlpha: number('lyricDimAlpha', .48, max: 1),
+      lyricTranslationAlpha: number('lyricTranslationAlpha', .58, max: 1),
+      lyricTextAlign: alignment(elements['lyricTextAlign']),
+      lyricSpringMassScale: number('lyricSpringMassScale', 1, min: .25, max: 4),
+      lyricSpringStiffnessScale: number(
+        'lyricSpringStiffnessScale',
+        1,
+        min: .25,
+        max: 4,
+      ),
+      lyricSpringDampingScale: number(
+        'lyricSpringDampingScale',
+        1,
+        min: .25,
+        max: 4,
+      ),
+      lyricStaggerDelay: number('lyricStaggerDelay', .05, max: .5),
+      lyricStaggerDecay: number('lyricStaggerDecay', 1.05, min: 1, max: 2),
+      lyricFocusScaleDelta: number('lyricFocusScaleDelta', 3, min: .5, max: 20),
       controlRadius: number('controlRadius', 12, max: 40),
       glassBlurSigma: number('glassBlurSigma', 16, max: 48),
     );
@@ -134,6 +229,22 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     int? titleWeight,
     int? bodyWeight,
     int? labelWeight,
+    int? lyricWeight,
+    int? lyricTranslationWeight,
+    double? lyricFontScale,
+    double? lyricTranslationScale,
+    double? lyricLineHeight,
+    double? lyricTranslationLineHeight,
+    double? lyricTranslationGap,
+    double? lyricDimAlpha,
+    double? lyricTranslationAlpha,
+    String? lyricTextAlign,
+    double? lyricSpringMassScale,
+    double? lyricSpringStiffnessScale,
+    double? lyricSpringDampingScale,
+    double? lyricStaggerDelay,
+    double? lyricStaggerDecay,
+    double? lyricFocusScaleDelta,
     double? controlRadius,
     double? glassBlurSigma,
   }) => LazerThemeTokens(
@@ -152,6 +263,26 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     titleWeight: titleWeight ?? this.titleWeight,
     bodyWeight: bodyWeight ?? this.bodyWeight,
     labelWeight: labelWeight ?? this.labelWeight,
+    lyricWeight: lyricWeight ?? this.lyricWeight,
+    lyricTranslationWeight:
+        lyricTranslationWeight ?? this.lyricTranslationWeight,
+    lyricFontScale: lyricFontScale ?? this.lyricFontScale,
+    lyricTranslationScale: lyricTranslationScale ?? this.lyricTranslationScale,
+    lyricLineHeight: lyricLineHeight ?? this.lyricLineHeight,
+    lyricTranslationLineHeight:
+        lyricTranslationLineHeight ?? this.lyricTranslationLineHeight,
+    lyricTranslationGap: lyricTranslationGap ?? this.lyricTranslationGap,
+    lyricDimAlpha: lyricDimAlpha ?? this.lyricDimAlpha,
+    lyricTranslationAlpha: lyricTranslationAlpha ?? this.lyricTranslationAlpha,
+    lyricTextAlign: lyricTextAlign ?? this.lyricTextAlign,
+    lyricSpringMassScale: lyricSpringMassScale ?? this.lyricSpringMassScale,
+    lyricSpringStiffnessScale:
+        lyricSpringStiffnessScale ?? this.lyricSpringStiffnessScale,
+    lyricSpringDampingScale:
+        lyricSpringDampingScale ?? this.lyricSpringDampingScale,
+    lyricStaggerDelay: lyricStaggerDelay ?? this.lyricStaggerDelay,
+    lyricStaggerDecay: lyricStaggerDecay ?? this.lyricStaggerDecay,
+    lyricFocusScaleDelta: lyricFocusScaleDelta ?? this.lyricFocusScaleDelta,
     controlRadius: controlRadius ?? this.controlRadius,
     glassBlurSigma: glassBlurSigma ?? this.glassBlurSigma,
   );
@@ -187,6 +318,47 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       titleWeight: _lerpWeight(titleWeight, other.titleWeight, t),
       bodyWeight: _lerpWeight(bodyWeight, other.bodyWeight, t),
       labelWeight: _lerpWeight(labelWeight, other.labelWeight, t),
+      lyricWeight: _lerpOptionalWeight(lyricWeight, other.lyricWeight, t),
+      lyricTranslationWeight: _lerpOptionalWeight(
+        lyricTranslationWeight,
+        other.lyricTranslationWeight,
+        t,
+      ),
+      lyricFontScale: mix(lyricFontScale, other.lyricFontScale),
+      lyricTranslationScale: mix(
+        lyricTranslationScale,
+        other.lyricTranslationScale,
+      ),
+      lyricLineHeight: mix(lyricLineHeight, other.lyricLineHeight),
+      lyricTranslationLineHeight: mix(
+        lyricTranslationLineHeight,
+        other.lyricTranslationLineHeight,
+      ),
+      lyricTranslationGap: mix(lyricTranslationGap, other.lyricTranslationGap),
+      lyricDimAlpha: mix(lyricDimAlpha, other.lyricDimAlpha),
+      lyricTranslationAlpha: mix(
+        lyricTranslationAlpha,
+        other.lyricTranslationAlpha,
+      ),
+      lyricTextAlign: t < .5 ? lyricTextAlign : other.lyricTextAlign,
+      lyricSpringMassScale: mix(
+        lyricSpringMassScale,
+        other.lyricSpringMassScale,
+      ),
+      lyricSpringStiffnessScale: mix(
+        lyricSpringStiffnessScale,
+        other.lyricSpringStiffnessScale,
+      ),
+      lyricSpringDampingScale: mix(
+        lyricSpringDampingScale,
+        other.lyricSpringDampingScale,
+      ),
+      lyricStaggerDelay: mix(lyricStaggerDelay, other.lyricStaggerDelay),
+      lyricStaggerDecay: mix(lyricStaggerDecay, other.lyricStaggerDecay),
+      lyricFocusScaleDelta: mix(
+        lyricFocusScaleDelta,
+        other.lyricFocusScaleDelta,
+      ),
       controlRadius: mix(controlRadius, other.controlRadius),
       glassBlurSigma: mix(glassBlurSigma, other.glassBlurSigma),
     );
@@ -194,6 +366,9 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
 
   static int _lerpWeight(int a, int b, double t) =>
       (a + (b - a) * t).round().clamp(100, 900);
+
+  static int _lerpOptionalWeight(int a, int b, double t) =>
+      (a < 0 && b < 0) ? -1 : _lerpWeight(a < 0 ? b : a, b < 0 ? a : b, t);
 
   static FontWeight fontWeight(int value) {
     final clamped = value.clamp(100, 900);
@@ -207,6 +382,18 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   FontWeight get titleFontWeight => fontWeight(titleWeight);
   FontWeight get bodyFontWeight => fontWeight(bodyWeight);
   FontWeight get labelFontWeight => fontWeight(labelWeight);
+  FontWeight lyricFontWeight(int fallback) =>
+      fontWeight(lyricWeight < 0 ? fallback : lyricWeight);
+  FontWeight lyricTranslationFontWeight(int fallback) => fontWeight(
+    lyricTranslationWeight < 0 ? fallback : lyricTranslationWeight,
+  );
+
+  TextAlign get lyricAlignment => switch (lyricTextAlign) {
+    'center' => TextAlign.center,
+    'end' => TextAlign.end,
+    'justify' => TextAlign.justify,
+    _ => TextAlign.start,
+  };
 }
 
 /// Registry boundary for built-in and future plugin-provided skins.

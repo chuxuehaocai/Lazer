@@ -17,6 +17,7 @@ import '../lyrics/line_content.dart';
 import '../lyrics/lyric_document.dart';
 import '../lyrics/spacing.dart';
 import '../lyrics/spring.dart';
+import '../theme/lazer_theme.dart';
 import 'overlay_protocol.dart';
 
 const double _horizontalPadding = 26;
@@ -39,9 +40,9 @@ double lyricsOverlaySlotHeightWithSpacing(
 Size lyricsOverlayWindowSize(LyricsOverlayLaunch launch) => Size(
   _overlayDefaultWidth,
   lyricsOverlaySlotHeightWithSpacing(
-        launch.settings.fontSize,
-        lineSpacing: launch.settings.lineSpacing,
-      ) *
+            launch.settings.fontSize,
+            lineSpacing: launch.settings.lineSpacing,
+          ) *
           launch.settings.lineCount +
       _verticalPadding * 2,
 );
@@ -71,6 +72,9 @@ Future<void> runLyricsOverlay(
     if (handler == null) return null;
     return handler(call);
   });
+  final LazerThemeTokens ui = launch.settings.theme == null
+      ? LazerThemeTokens.apple
+      : LazerThemeTokens.fromJson(launch.settings.theme!);
   runApp(
     MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -80,6 +84,7 @@ Future<void> runLyricsOverlay(
         scaffoldBackgroundColor: Colors.transparent,
         canvasColor: Colors.transparent,
         fontFamily: launch.settings.fontFamily,
+        extensions: <ThemeExtension<dynamic>>[ui],
       ),
       home: LyricsOverlayApp(
         controller: controller,
@@ -219,6 +224,12 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
   void _refreshTextStyles() {
     _lyricStyle = _textStyle(1);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _refreshTextStyles();
   }
 
   @override
@@ -597,7 +608,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   }
 
   TextStyle _textStyle(double scale) {
-    final int weight = (_settings.fontWeight ~/ 100 - 1).clamp(0, 6);
+    final theme = LazerThemeTokens.of(context);
     return lyricTextStyle(
       TextStyle(
         fontFamily: _settings.fontFamily,
@@ -607,9 +618,9 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
           'PingFang SC',
           'Noto Sans CJK SC',
         ],
-        fontSize: _settings.fontSize * scale,
-        fontWeight: FontWeight.values[weight],
-        height: 1.5,
+        fontSize: _settings.fontSize * scale * theme.lyricFontScale,
+        fontWeight: theme.lyricFontWeight(_settings.fontWeight),
+        height: theme.lyricLineHeight,
         color: Colors.white,
         letterSpacing: 0,
         decoration: TextDecoration.none,
@@ -625,6 +636,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       ),
       _settings.fontSize * scale,
       _settings.fontWeight,
+      theme: theme,
     );
   }
 
@@ -684,7 +696,11 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     if (_lines[index].text.trim().isEmpty) {
       return _interludeRow(index, motion, slot, inset, active);
     }
-    double emphasis() => ((motion.scale.value - 97) / 3).clamp(0.0, 1.0);
+    final theme = LazerThemeTokens.of(context);
+    double emphasis() =>
+        ((motion.scale.value - (100 - theme.lyricFocusScaleDelta)) /
+                theme.lyricFocusScaleDelta)
+            .clamp(0.0, 1.0);
     final line = _lines[index];
     final Widget text = Semantics(
       container: true,
@@ -705,15 +721,21 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             maxLines: 1,
           ),
           if (line.translation != null) ...[
-            const SizedBox(height: 5),
+            SizedBox(height: theme.lyricTranslationGap),
             Text(
               line.translation!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: _lyricStyle.copyWith(
-                fontSize: (_settings.fontSize * 16 / 22).clamp(12, 30),
-                height: 1.45,
-                color: Colors.white.withValues(alpha: .58),
+                fontSize: (_settings.fontSize * theme.lyricTranslationScale)
+                    .clamp(12, 30),
+                height: theme.lyricTranslationLineHeight,
+                fontWeight: theme.lyricTranslationFontWeight(
+                  _settings.fontWeight,
+                ),
+                color: Colors.white.withValues(
+                  alpha: theme.lyricTranslationAlpha,
+                ),
               ),
             ),
           ],
@@ -732,11 +754,12 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
           animation: _frames,
           child: text,
           builder: (BuildContext context, Widget? child) {
-            final double emphasis = ((motion.scale.value - 97) / 3).clamp(
-              0.0,
-              1.0,
-            );
-            final double opacity = 0.48 + 0.52 * emphasis;
+            final double emphasis =
+                ((motion.scale.value - (100 - theme.lyricFocusScaleDelta)) /
+                        theme.lyricFocusScaleDelta)
+                    .clamp(0.0, 1.0);
+            final double opacity =
+                theme.lyricDimAlpha + (1 - theme.lyricDimAlpha) * emphasis;
             final double distance = ((motion.y.value - activeY).abs() / slot)
                 .clamp(0.0, 6.0);
             final double sigma = _settings.blurEnabled
@@ -779,8 +802,18 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             line: _lines[index],
             position: () => Duration(milliseconds: _currentPositionMs.round()),
             repaint: _frames,
-            diameter: _settings.fontSize * .3,
-            presence: () => ((motion.scale.value - 97) / 3).clamp(0.0, 1.0),
+            diameter:
+                _settings.fontSize *
+                LazerThemeTokens.of(context).lyricFontScale *
+                .3,
+            presence: () =>
+                ((motion.scale.value -
+                            (100 -
+                                LazerThemeTokens.of(
+                                  context,
+                                ).lyricFocusScaleDelta)) /
+                        LazerThemeTokens.of(context).lyricFocusScaleDelta)
+                    .clamp(0.0, 1.0),
           ),
           builder: (BuildContext context, Widget? child) {
             return Transform.translate(

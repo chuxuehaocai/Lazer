@@ -148,6 +148,14 @@ if operation == "theme" then
         titleWeight = 700,
         bodyWeight = 400,
         labelWeight = 600,
+        lyricWeight = 500,
+        lyricTranslationWeight = 400,
+        lyricLineHeight = 1.55,
+        lyricTranslationGap = 6,
+        lyricSpringStiffnessScale = 1.1,
+        lyricSpringDampingScale = 0.95,
+        lyricStaggerDelay = 0.04,
+        lyricFocusScaleDelta = 4,
       }
     },
     layout = {

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../lyrics/lyric_document.dart';
 import '../lyrics/spacing.dart';
+import '../theme/lazer_theme.dart';
 
 const String kLyricsOverlayKind = 'lazer-lyrics-overlay';
 const String kLyricsOverlayReadyChannel = 'lazer.lyrics.overlay.ready';
@@ -53,6 +54,7 @@ class LyricsOverlaySettings {
     required this.blurIntensity,
     required this.animationSpeed,
     required this.lineSpacing,
+    this.theme,
   });
 
   final int lineCount;
@@ -64,6 +66,7 @@ class LyricsOverlaySettings {
   final double blurIntensity;
   final double animationSpeed;
   final double lineSpacing;
+  final Map<String, Object?>? theme;
 
   Map<String, Object?> toMap() => <String, Object?>{
     'lineCount': lineCount,
@@ -75,6 +78,7 @@ class LyricsOverlaySettings {
     'blurIntensity': blurIntensity,
     'animationSpeed': animationSpeed,
     'lineSpacing': lineSpacing,
+    if (theme != null) 'theme': theme,
   };
 
   factory LyricsOverlaySettings.fromMap(Map<dynamic, dynamic> map) {
@@ -109,6 +113,12 @@ class LyricsOverlaySettings {
         kLyricsLineSpacingMin,
         kLyricsLineSpacingMax,
       ),
+      theme: map['theme'] is Map
+          ? LazerThemeTokens.fromJson(<String, Object?>{
+              for (final entry in (map['theme'] as Map).entries)
+                if (entry.key is String) entry.key as String: entry.value,
+            }).toJson()
+          : null,
     );
   }
 
@@ -123,7 +133,8 @@ class LyricsOverlaySettings {
       blurEnabled == other.blurEnabled &&
       blurIntensity == other.blurIntensity &&
       animationSpeed == other.animationSpeed &&
-      lineSpacing == other.lineSpacing;
+      lineSpacing == other.lineSpacing &&
+      theme?.toString() == other.theme?.toString();
 
   @override
   int get hashCode => Object.hash(
@@ -136,6 +147,7 @@ class LyricsOverlaySettings {
     blurIntensity,
     animationSpeed,
     lineSpacing,
+    theme?.toString(),
   );
 }
 
