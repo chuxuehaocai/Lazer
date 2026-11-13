@@ -1079,8 +1079,8 @@ class _AppShellState extends State<AppShell>
               : Scaffold(
                   // Keep the page visible around the capsules. Scaffold exposes
                   // their height as bottom padding for each scroll view's tail.
-                  extendBody: compact && !largeScreen && !tablet,
-                  bottomNavigationBar: compact && !largeScreen && !tablet
+                  extendBody: (compact || tablet) && !largeScreen,
+                  bottomNavigationBar: (compact || tablet) && !largeScreen
                       ? _mobileBottomBar()
                       : null,
                   backgroundColor: sharedBackground || tablet
@@ -1473,79 +1473,7 @@ class _AppShellState extends State<AppShell>
       children: <Widget>[
         _mobileToolbar(apple),
         Expanded(child: RepaintBoundary(child: _content())),
-        _tabletBottomBar(),
       ],
-    );
-  }
-
-  Widget _tabletBottomBar() {
-    final List<_AppSection> sections = <_AppSection>[
-      _AppSection.home,
-      _AppSection.search,
-      _AppSection.library,
-      if (!state.isLocalPlayback) _AppSection.likes,
-      _AppSection.settings,
-    ];
-    return SafeArea(
-      top: false,
-      minimum: const EdgeInsets.fromLTRB(24, 10, 24, 18),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              if (state.current != null) ...<Widget>[
-                RepaintBoundary(
-                  child: AppPlayerBar(
-                    state: state,
-                    compact: true,
-                    floating: true,
-                    comments: _comments,
-                    onComments: _toggleComments,
-                    onOpen: _openNowPlaying,
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ],
-              CapsuleNavigationBar(
-                selectedIndex: sections
-                    .indexOf(_section)
-                    .clamp(0, sections.length - 1),
-                onDestinationSelected: (int index) => _select(sections[index]),
-                destinations: <NavigationDestination>[
-                  NavigationDestination(
-                    icon: const Icon(Icons.home_outlined),
-                    selectedIcon: const Icon(Icons.home_rounded),
-                    label: context.tr('主页'),
-                  ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.search_outlined),
-                    selectedIcon: const Icon(Icons.search_rounded),
-                    label: context.tr('搜索'),
-                  ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.library_music_outlined),
-                    selectedIcon: const Icon(Icons.library_music_rounded),
-                    label: context.tr('音乐库'),
-                  ),
-                  if (!state.isLocalPlayback)
-                    NavigationDestination(
-                      icon: const Icon(Icons.favorite_border_rounded),
-                      selectedIcon: const Icon(Icons.favorite_rounded),
-                      label: context.tr('我喜欢'),
-                    ),
-                  NavigationDestination(
-                    icon: const Icon(Icons.settings_outlined),
-                    selectedIcon: const Icon(Icons.settings_rounded),
-                    label: context.tr('设置'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
