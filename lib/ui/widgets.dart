@@ -4,10 +4,10 @@ import '../animation/apple_spring.dart';
 
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
-import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
+import 'layout_system.dart';
 import '../widgets/interaction_feedback.dart';
 import '../utils/artwork.dart';
 import '../widgets/apple_ui.dart';
@@ -37,8 +37,7 @@ String artistNames(Track track) {
 
 /// Horizontal page margin for compact and tablet layouts; wide desktop pages
 /// keep a little more breathing room around their reading column.
-double pageInset(BuildContext context) =>
-    MediaQuery.sizeOf(context).width < kTabletBreakpoint ? 16 : 24;
+double pageInset(BuildContext context) => lazerPageInset(context);
 
 /// Rounded album artwork with an Apple-like neutral placeholder.
 class AppCover extends StatelessWidget {

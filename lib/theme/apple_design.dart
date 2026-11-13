@@ -7,6 +7,7 @@ import 'adaptive_contrast.dart';
 import '../animation/view_transitions.dart';
 
 import 'tokens.dart';
+import 'lazer_theme.dart';
 
 /// Apple-platform semantic colours and typography.
 ///
@@ -291,6 +292,7 @@ ThemeData buildAppleTheme({
   Brightness brightness = Brightness.light,
   Color? seedAccent,
   FontPreferences fonts = const FontPreferences(),
+  LazerThemeTokens ui = LazerThemeTokens.apple,
 }) {
   final AppleSemanticColors base = brightness == Brightness.dark
       ? AppleSemanticColors.dark
@@ -378,7 +380,7 @@ ThemeData buildAppleTheme({
     highlightColor: apple.fill,
     visualDensity: VisualDensity.standard,
     materialTapTargetSize: MaterialTapTargetSize.padded,
-    extensions: <ThemeExtension<dynamic>>[apple, fonts],
+    extensions: <ThemeExtension<dynamic>>[apple, fonts, ui],
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: <TargetPlatform, PageTransitionsBuilder>{
         // Both sides must use the same fade-through contract. Platform-default

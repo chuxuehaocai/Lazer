@@ -121,6 +121,17 @@ end
 | `comments` | `comments({id,limit,offset})` 返回 `{hot,latest,total,hasMore}`；`setCommentLiked({id,commentId,liked})` 设置点赞 |
 | `listenTogether` | `listenTogether({operation,...})` 支持 `create/createMulti/join/status/leave/heartbeat/command`，以及可选的 `syncPlaylist/syncList`；返回 `{roomId,inviterId,members}` |
 
+### 主题与页面布局（预留接口）
+
+客户端的通用 UI 已经通过内置主题和布局定义集中提供。当前默认主题是
+`builtin.apple`，默认布局是 `builtin.adaptive`，电视使用 `builtin.television`。
+卡片圆角、列表行高度、页面标题字号、玻璃模糊强度、页面边距和内容最大宽度等值由
+声明式令牌控制；页面仍由宿主负责创建 Widget、焦点、语义树和平台交互。
+
+后续 Lua 皮肤会复用同一组 JSON 形状的令牌，而不是返回 Flutter Widget 或执行任意 UI
+代码。皮肤可以覆盖主题令牌和布局令牌，未知字段会被忽略，越界数值会回退到宿主允许的
+范围。这样同一套页面可以换皮，插件也不能绕过宿主的权限、无障碍和输入安全边界。
+
 `artistSongs({id,limit,offset})` 返回歌手歌曲当前页。评论使用字符串 ID：
 `{id,content,author,authorId,avatarUrl,time,location,liked,likedCount,replies}`，
 其中回复为 `{author,content}`，时间为 Unix 毫秒。一起听成员为

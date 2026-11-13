@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
+import '../theme/lazer_theme.dart';
 import '../theme/adaptive_contrast.dart';
 import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
@@ -21,19 +22,20 @@ class AppleGlass extends StatelessWidget {
     required this.child,
     this.color,
     this.borderRadius = BorderRadius.zero,
-    this.blurSigma = 16,
+    this.blurSigma,
     this.border,
   });
 
   final Widget child;
   final Color? color;
   final BorderRadius borderRadius;
-  final double blurSigma;
+  final double? blurSigma;
   final Border? border;
 
   @override
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final LazerThemeTokens themeTokens = LazerThemeTokens.of(context);
     final Color tint = color ?? apple.glass;
     final Widget decorated = DecoratedBox(
       decoration: BoxDecoration(
@@ -50,7 +52,10 @@ class AppleGlass extends StatelessWidget {
       return ClipRRect(borderRadius: borderRadius, child: decorated);
     }
     final Widget material = BackdropFilter(
-      filter: ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+      filter: ui.ImageFilter.blur(
+        sigmaX: blurSigma ?? themeTokens.glassBlurSigma,
+        sigmaY: blurSigma ?? themeTokens.glassBlurSigma,
+      ),
       child: decorated,
     );
     // The clip is not decoration: a BackdropFilter applies to the whole
@@ -82,12 +87,15 @@ class ApplePageTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final LazerThemeTokens ui = LazerThemeTokens.of(context);
     final bool compact = MediaQuery.sizeOf(context).width < kTabletBreakpoint;
     final TextStyle style = context.fonts.apply(
       FontCategory.pageTitle,
       (theme.textTheme.displayLarge ?? const TextStyle()).copyWith(
-        fontSize: compact ? 34 : 32,
-        height: (compact ? 41 : 38) / (compact ? 34 : 32),
+        fontSize: compact ? ui.pageTitleCompactSize : ui.pageTitleRegularSize,
+        height:
+            (compact ? 41 : 38) /
+            (compact ? ui.pageTitleCompactSize : ui.pageTitleRegularSize),
         fontWeight: FontWeight.w700,
         letterSpacing: .37,
         color: apple.label,
@@ -155,6 +163,7 @@ class AppleSectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final LazerThemeTokens ui = LazerThemeTokens.of(context);
     return Padding(
       padding: padding,
       child: Row(
@@ -172,6 +181,7 @@ class AppleSectionHeader extends StatelessWidget {
                     style: theme.textTheme.titleLarge?.copyWith(
                       color: apple.label,
                       fontWeight: FontWeight.w700,
+                      fontSize: ui.sectionHeaderSize,
                       letterSpacing: -.4,
                     ),
                   ),
@@ -208,24 +218,25 @@ class AppleGroupedCard extends StatelessWidget {
     this.margin = const EdgeInsets.symmetric(horizontal: 24),
     this.padding = EdgeInsets.zero,
     this.color,
-    this.radius = 14,
+    this.radius,
   });
 
   final Widget child;
   final EdgeInsetsGeometry margin;
   final EdgeInsetsGeometry padding;
   final Color? color;
-  final double radius;
+  final double? radius;
 
   @override
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final LazerThemeTokens ui = LazerThemeTokens.of(context);
     return Container(
       margin: margin,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: color ?? apple.secondaryGroupedBackground,
-        borderRadius: BorderRadius.circular(radius),
+        borderRadius: BorderRadius.circular(radius ?? ui.groupedCardRadius),
         border: Border.all(color: apple.separator, width: .5),
       ),
       child: Padding(padding: padding, child: child),
@@ -244,8 +255,8 @@ class AppleListTile extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.showChevron = false,
-    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-    this.minHeight = 50,
+    this.padding,
+    this.minHeight,
   });
 
   final String title;
@@ -255,8 +266,8 @@ class AppleListTile extends StatefulWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool showChevron;
-  final EdgeInsetsGeometry padding;
-  final double minHeight;
+  final EdgeInsetsGeometry? padding;
+  final double? minHeight;
 
   @override
   State<AppleListTile> createState() => _AppleListTileState();
@@ -270,10 +281,18 @@ class _AppleListTileState extends State<AppleListTile>
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final LazerThemeTokens ui = LazerThemeTokens.of(context);
     final Widget row = ConstrainedBox(
-      constraints: BoxConstraints(minHeight: widget.minHeight),
+      constraints: BoxConstraints(
+        minHeight: widget.minHeight ?? ui.listTileMinHeight,
+      ),
       child: Padding(
-        padding: widget.padding,
+        padding:
+            widget.padding ??
+            EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: ui.listTileVerticalPadding,
+            ),
         child: LayoutBuilder(
           builder: (context, constraints) => Row(
             children: <Widget>[

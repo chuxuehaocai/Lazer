@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../tv/tv_mode.dart';
+import '../ui/layout_system.dart';
 
 /// Estimates the automatic interface scale for the window's workspace.
 ///
@@ -47,7 +48,7 @@ bool carSurfaceOf(BuildContext context, AppSurface surface) =>
 /// browse grids use a wider column and fit more artwork per row without
 /// touching the interface scale.
 double adaptiveContentMaxWidth(BuildContext context, double standard) =>
-    TvScope.isActive(context) ? 1560 : standard;
+    lazerContentMaxWidth(context, standard);
 
 /// Clamps a scale to the profile floor and the slider ceiling.
 double profileDpiScale(double value, {required double floor}) =>
@@ -162,22 +163,26 @@ class UiScaling extends StatelessWidget {
       // The traversal policy itself is installed by the shell, inside the
       // route: MaterialApp's navigator puts its own traversal group around
       // every page, so a group at this level would never be consulted.
-      child: UiMetrics(
-        scale: scale,
-        autoScale: autoScale,
-        minScale: floor,
-        car: car,
-        tv: tv,
-        child: tv || state.deviceIsTelevision || state.surface == AppSurface.tv
-            ? Builder(
-                builder: (context) => MediaQuery(
-                  data: MediaQuery.of(
-                    context,
-                  ).copyWith(navigationMode: NavigationMode.directional),
-                  child: scaled,
-                ),
-              )
-            : scaled,
+      child: LazerLayoutScope(
+        layout: tv ? BuiltinLayouts.television : BuiltinLayouts.adaptive,
+        child: UiMetrics(
+          scale: scale,
+          autoScale: autoScale,
+          minScale: floor,
+          car: car,
+          tv: tv,
+          child:
+              tv || state.deviceIsTelevision || state.surface == AppSurface.tv
+              ? Builder(
+                  builder: (context) => MediaQuery(
+                    data: MediaQuery.of(
+                      context,
+                    ).copyWith(navigationMode: NavigationMode.directional),
+                    child: scaled,
+                  ),
+                )
+              : scaled,
+        ),
       ),
     );
   }
