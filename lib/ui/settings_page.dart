@@ -678,6 +678,30 @@ class _SettingsOverview extends StatelessWidget {
                               : (double value) =>
                                     unawaited(state.setAppUiAlpha(value)),
                         ),
+                        _AppSliderRow(
+                          key: const ValueKey('header-opacity'),
+                          label: 'Header 不透明度',
+                          valueText: '${(state.headerOpacity * 100).round()}%',
+                          subtitle: '数值越小，页面内容越容易透过 Header 显示',
+                          value: state.headerOpacity,
+                          min: kHeaderOpacityMin,
+                          max: kHeaderOpacityMax,
+                          divisions: 15,
+                          onChanged: (double value) =>
+                              unawaited(state.setHeaderOpacity(value)),
+                        ),
+                        _AppSliderRow(
+                          key: const ValueKey('header-blur'),
+                          label: 'Header 背景模糊',
+                          valueText: '${state.headerBlur.round()} px',
+                          subtitle: '只影响移动端和平板端 Header',
+                          value: state.headerBlur,
+                          min: kHeaderBlurMin,
+                          max: kHeaderBlurMax,
+                          divisions: 16,
+                          onChanged: (double value) =>
+                              unawaited(state.setHeaderBlur(value)),
+                        ),
                         _BackgroundPreferences(state: state, player: false),
                         // The flowing canvas is the app's only continuously
                         // repainting surface, so its precision is the setting a

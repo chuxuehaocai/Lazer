@@ -1003,6 +1003,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// `内容不透明度` of the app shell — how much of the backdrop the content
   /// veil hides.
   double uiAlpha = 0.7;
+
+  /// Opacity and backdrop blur used by the compact/tablet page header.
+  double headerOpacity = kHeaderOpacityDefault;
+  double headerBlur = kHeaderBlurDefault;
   double browseBackgroundFps = 30;
   double playerBackgroundFps = 30;
   AppBackgroundMode playerBackground = AppBackgroundMode.nowPlayingDynamic;
@@ -1183,6 +1187,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await (await SharedPreferences.getInstance()).setDouble(
       'lazer_legacy_ui_alpha',
       uiAlpha,
+    );
+  }
+
+  Future<void> setHeaderOpacity(double value) async {
+    if (!value.isFinite) return;
+    headerOpacity = value.clamp(kHeaderOpacityMin, kHeaderOpacityMax);
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_header_opacity',
+      headerOpacity,
+    );
+  }
+
+  Future<void> setHeaderBlur(double value) async {
+    if (!value.isFinite) return;
+    headerBlur = value.clamp(kHeaderBlurMin, kHeaderBlurMax);
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_header_blur',
+      headerBlur,
     );
   }
 
@@ -2133,6 +2157,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         0.4,
         1.0,
       );
+      headerOpacity =
+          (prefs.getDouble('lazer_header_opacity') ?? kHeaderOpacityDefault)
+              .clamp(kHeaderOpacityMin, kHeaderOpacityMax);
+      headerBlur = (prefs.getDouble('lazer_header_blur') ?? kHeaderBlurDefault)
+          .clamp(kHeaderBlurMin, kHeaderBlurMax);
       dynamicBackgroundQuality = normalizeDynamicBackgroundQuality(
         prefs.getDouble('lazer_dynamic_background_quality') ??
             kDynamicBackgroundQualityDefault,

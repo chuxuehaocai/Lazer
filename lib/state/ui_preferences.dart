@@ -23,6 +23,12 @@ const double kBackgroundImageScaleMin = 1;
 const double kBackgroundImageScaleMax = 3;
 const double kBackgroundBlurMin = 0;
 const double kBackgroundBlurMax = 32;
+const double kHeaderOpacityMin = 0.25;
+const double kHeaderOpacityMax = 1;
+const double kHeaderOpacityDefault = 0.72;
+const double kHeaderBlurMin = 0;
+const double kHeaderBlurMax = 32;
+const double kHeaderBlurDefault = 14;
 
 /// How many cards the library lays its playlists out in per row.
 ///

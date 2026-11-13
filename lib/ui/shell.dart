@@ -49,8 +49,8 @@ import 'widgets.dart';
 
 /// The app shell, rebuilt around Apple's adaptive navigation model.
 ///
-/// Desktop gets a translucent source-list sidebar, a content toolbar and the
-/// full transport, while phones get a compact toolbar and floating capsules
+/// Desktop gets a translucent source-list sidebar and the full transport,
+/// while phones get a compact toolbar and floating capsules
 /// for navigation and playback. Both compositions share one content tree, one
 /// search page and one set of playback controls, so switching layouts never
 /// loses context.
@@ -1268,8 +1268,6 @@ class _AppShellState extends State<AppShell>
               Expanded(
                 child: Column(
                   children: <Widget>[
-                    _desktopToolbar(apple),
-                    Container(height: .5, color: apple.separator),
                     Expanded(child: RepaintBoundary(child: _content())),
                   ],
                 ),
@@ -1768,37 +1766,6 @@ class _AppShellState extends State<AppShell>
     );
   }
 
-  Widget _desktopToolbar(AppleSemanticColors apple) {
-    final bool canGoBack =
-        _playlist != null ||
-        _artist != null ||
-        _chart != null ||
-        _comments ||
-        _localMusic ||
-        _savedAlbums ||
-        _networkSources;
-    return SizedBox(
-      height: 50,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        child: Row(
-          children: <Widget>[
-            if (canGoBack) ...<Widget>[
-              _ToolbarButton(
-                tooltip: '返回',
-                icon: Icons.chevron_left_rounded,
-                onPressed: _backToRoot,
-              ),
-              const SizedBox(width: 8),
-            ],
-            const Spacer(),
-            _accountButton(apple, radius: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _mobileToolbar(AppleSemanticColors apple) {
     final bool canGoBack =
         _playlist != null ||
@@ -1810,21 +1777,32 @@ class _AppShellState extends State<AppShell>
         _networkSources;
     return SizedBox(
       height: 50,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Row(
-          children: <Widget>[
-            if (canGoBack) ...<Widget>[
-              _ToolbarButton(
-                tooltip: '返回',
-                icon: Icons.chevron_left_rounded,
-                onPressed: _backToRoot,
-              ),
-              const SizedBox(width: 10),
+      child: AppleGlass(
+        borderRadius: BorderRadius.zero,
+        blurSigma: state.headerBlur,
+        color: apple.background.withValues(alpha: state.headerOpacity),
+        border: Border(
+          bottom: BorderSide(
+            color: apple.separator.withValues(alpha: .45),
+            width: .5,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: <Widget>[
+              if (canGoBack) ...<Widget>[
+                _ToolbarButton(
+                  tooltip: '返回',
+                  icon: Icons.chevron_left_rounded,
+                  onPressed: _backToRoot,
+                ),
+                const SizedBox(width: 10),
+              ],
+              const Spacer(),
+              _accountButton(apple, radius: 15),
             ],
-            const Spacer(),
-            _accountButton(apple, radius: 15),
-          ],
+          ),
         ),
       ),
     );
