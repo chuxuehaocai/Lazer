@@ -275,7 +275,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             children: <Widget>[
               if (Navigator.of(context).canPop())
                 Positioned(
-                  top: 8,
+                  top: 16,
                   left: 8,
                   child: AccessibleIconButton(
                     key: const ValueKey('settings-detail-back'),
@@ -287,7 +287,7 @@ class SettingsDetailScaffold extends StatelessWidget {
               Positioned.fill(
                 child: Padding(
                   padding: EdgeInsets.only(
-                    top: Navigator.of(context).canPop() ? 56 : 0,
+                    top: Navigator.of(context).canPop() ? 68 : 0,
                   ),
                   child: child,
                 ),
@@ -307,7 +307,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: EdgeInsets.fromLTRB(inset - 12, 8, inset, 0),
+                padding: EdgeInsets.fromLTRB(inset - 12, 20, inset, 0),
                 child: Row(
                   children: [
                     AccessibleIconButton(
