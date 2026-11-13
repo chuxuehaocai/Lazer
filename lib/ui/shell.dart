@@ -1081,8 +1081,8 @@ class _AppShellState extends State<AppShell>
               : Scaffold(
                   // Keep the page visible around the capsules. Scaffold exposes
                   // their height as bottom padding for each scroll view's tail.
-                  extendBody: compact && !largeScreen,
-                  bottomNavigationBar: compact && !largeScreen
+                  extendBody: compact && !largeScreen && !tablet,
+                  bottomNavigationBar: compact && !largeScreen && !tablet
                       ? _mobileBottomBar()
                       : null,
                   backgroundColor: sharedBackground

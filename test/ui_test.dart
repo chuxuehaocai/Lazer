@@ -580,6 +580,20 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('tablet layout renders one floating bottom capsule', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final AppState state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+    await tester.pumpWidget(_legacyApp(state));
+    await tester.pumpAndSettle();
+    expect(find.byType(CapsuleNavigationBar), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the legacy shell lays out at every window size', (tester) async {
     addTearDown(tester.view.reset);
     final AppState state = AppState(catalog: _Catalog());
