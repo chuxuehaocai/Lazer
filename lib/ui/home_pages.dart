@@ -174,7 +174,17 @@ class _AppHomePageState extends State<AppHomePage>
           key: const PageStorageKey<String>('discovery-scroll'),
           slivers: <Widget>[
             SliverPadding(
-              padding: EdgeInsets.fromLTRB(inset, 8, inset, 0),
+              // Keep a real scroll tail beneath the floating mobile bar. A
+              // short home feed otherwise leaves the retained route with no
+              // scroll extent at all; an interrupted cover return then cannot
+              // hand the gesture back to the page and the lower half appears
+              // frozen behind the navigation capsule.
+              padding: EdgeInsets.fromLTRB(
+                inset,
+                8,
+                inset,
+                MediaQuery.sizeOf(context).height * .45,
+              ),
               sliver: SliverList(
                 delegate: SliverChildListDelegate(<Widget>[
                   if (showPluginHome) ...<Widget>[
@@ -188,14 +198,21 @@ class _AppHomePageState extends State<AppHomePage>
                       ],
                       onDaily:
                           (supportsHomeFeed || supportsRecommendations) &&
-                              widget.state.signedIn &&
                               (feed.quick.isNotEmpty || feed.daily.isNotEmpty)
-                          ? () => widget.onOpenPlaylist(
-                              dailyRecommendationsPlaylist(
-                                feed,
-                                serverLibrary: !supportsRecommendations,
-                              ),
-                            )
+                          ? () {
+                              if (!widget.state.signedIn) {
+                                unawaited(
+                                  showAppLoginDialog(context, widget.state),
+                                );
+                                return;
+                              }
+                              widget.onOpenPlaylist(
+                                dailyRecommendationsPlaylist(
+                                  feed,
+                                  serverLibrary: !supportsRecommendations,
+                                ),
+                              );
+                            }
                           : null,
                       onFm: supportsRadio && widget.state.signedIn
                           ? () => _playStation(

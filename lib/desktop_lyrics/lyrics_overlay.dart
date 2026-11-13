@@ -213,7 +213,6 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     _windowSize = lyricsOverlayWindowSize(widget.launch);
     _windowConfigured = true;
     _applyAnimationSpeed(_settings);
-    _refreshTextStyles();
     widget.bridge.handler = _handle;
     unawaited(_announceReady());
   }
