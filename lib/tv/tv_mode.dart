@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 
 import '../animation/apple_spring.dart';
 import '../state/build_safe_notifier.dart';
-import '../theme/apple_design.dart';
 
 /// Native bridge for Android TV recognition.
 ///
@@ -448,14 +447,15 @@ class _TvFocusRingPainter extends CustomPainter {
       oldDelegate.borderRadius != borderRadius || oldDelegate.width != width;
 }
 
-/// Draws a TV selection wash and ring around a group of Material controls.
+/// Draws the TV focus ring around a group of Material controls.
 ///
 /// Material's own focus overlay is a faint tint that disappears at ten feet,
 /// and a dropdown or switch owns its focus node, so a [TvTapTarget] cannot be
 /// placed around it without stealing the key handling. This wrapper watches
 /// focus in its subtree without becoming a focus stop itself: the control
 /// keeps its own Select/arrow behaviour while the whole row shows where the
-/// remote is.
+/// remote is. The focus state stays neutral so TV selection does not add a
+/// theme-coloured wash or border over the control.
 class TvFocusHighlight extends StatefulWidget {
   const TvFocusHighlight({
     super.key,
@@ -484,7 +484,7 @@ class _TvFocusHighlightState extends State<TvFocusHighlight>
     super.initState();
     // Focus changes in a DropdownButton/Switch can be delivered to the
     // descendant after the wrapper's own Focus callback. Listening to the
-    // manager makes the wash deterministic for every Material control.
+    // manager keeps the ring deterministic for every Material control.
     FocusManager.instance.addListener(_syncFocus);
   }
 
@@ -525,30 +525,7 @@ class _TvFocusHighlightState extends State<TvFocusHighlight>
             ? Duration.zero
             : AppleSpring.responsive.duration,
         curve: const AppleSpringCurve(),
-        decoration: BoxDecoration(
-          color: _focused
-              ? AppleSemanticColors.of(context).fill.withValues(alpha: .92)
-              : Colors.transparent,
-          borderRadius: widget.borderRadius,
-          border: _focused
-              ? Border.all(
-                  color: AppleSemanticColors.of(
-                    context,
-                  ).accent.withValues(alpha: .8),
-                  width: 2,
-                )
-              : null,
-          boxShadow: _focused
-              ? <BoxShadow>[
-                  BoxShadow(
-                    color: AppleSemanticColors.of(
-                      context,
-                    ).accent.withValues(alpha: .2),
-                    blurRadius: 10,
-                  ),
-                ]
-              : null,
-        ),
+        decoration: BoxDecoration(borderRadius: widget.borderRadius),
         child: Stack(
           children: <Widget>[
             widget.child,
