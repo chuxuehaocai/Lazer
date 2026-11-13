@@ -317,6 +317,9 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   late final LanRemoteController _remote;
   late final DesktopLyricsController _desktopLyrics;
   ConsoleWindowController? _consoleWindow;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>(
+    debugLabel: 'lazer-root-navigator',
+  );
 
   _RootUiSignature get _rootUiSignature => (
     _state.accentSeed,
@@ -408,6 +411,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
         child: MaterialApp(
           title: 'Lazer',
           debugShowCheckedModeBanner: false,
+          navigatorKey: _navigatorKey,
           navigatorObservers: [_browseNavigation],
           themeAnimationCurve: const AppleSpringCurve(),
           // One Apple surface theme drives the custom window frame, root
@@ -453,6 +457,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                 child: CarMetrics(
                   child: WindowFrame(
                     state: _state,
+                    navigatorKey: _navigatorKey,
                     child: Builder(
                       builder: (context) => Theme(
                         data: Theme.of(

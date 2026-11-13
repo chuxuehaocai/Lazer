@@ -61,10 +61,16 @@ Future<void> syncWindowPreventClose(bool preventClose) async {
 /// lights in the same strip. Falls through to the plain child wherever the
 /// system frame is in charge.
 class WindowFrame extends StatelessWidget {
-  const WindowFrame({super.key, required this.child, this.state});
+  const WindowFrame({
+    super.key,
+    required this.child,
+    this.state,
+    this.navigatorKey,
+  });
 
   final Widget child;
   final AppState? state;
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +79,7 @@ class WindowFrame extends StatelessWidget {
       textDirection: TextDirection.ltr,
       child: Column(
         children: <Widget>[
-          WindowTitleArea(state: state),
+          WindowTitleArea(state: state, navigatorKey: navigatorKey),
           Expanded(child: child),
         ],
       ),

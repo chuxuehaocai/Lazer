@@ -7,7 +7,6 @@ import 'package:window_manager/window_manager.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
-import 'app_system_tray.dart';
 
 /// Window title shown in the title area — also pushed to the native window so
 /// the taskbar and Alt+Tab agree with the bar.
@@ -39,9 +38,10 @@ double get _titleInset => usesNativeWindowButtons ? 84 : 16;
 /// sits outside the navigator (see `WindowFrame`), so pushed routes and the
 /// now-playing page never cover or move it.
 class WindowTitleArea extends StatefulWidget {
-  const WindowTitleArea({super.key, this.state});
+  const WindowTitleArea({super.key, this.state, this.navigatorKey});
 
   final AppState? state;
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   State<WindowTitleArea> createState() => _WindowTitleAreaState();
@@ -138,16 +138,23 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
       await _applyCloseAction(remembered);
       return;
     }
-    if (!mounted || !kSupportsSystemTray) {
+    if (!mounted) {
       await _applyCloseAction(DesktopCloseAction.exit);
       return;
     }
     _closePromptOpen = true;
     try {
       bool remember = false;
+      final BuildContext? dialogContext =
+          widget.navigatorKey?.currentContext ??
+          Navigator.maybeOf(context)?.context;
+      if (dialogContext == null) {
+        await _applyCloseAction(DesktopCloseAction.exit);
+        return;
+      }
       final result =
           await showDialog<({DesktopCloseAction action, bool remember})>(
-            context: context,
+            context: dialogContext,
             barrierDismissible: true,
             builder: (BuildContext dialogContext) => StatefulBuilder(
               builder: (BuildContext context, StateSetter setDialogState) =>
