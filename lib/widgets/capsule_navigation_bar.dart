@@ -16,12 +16,17 @@ class CapsuleNavigationBar extends StatefulWidget {
     required this.selectedIndex,
     required this.onDestinationSelected,
     required this.destinations,
+    this.iconOnly = false,
   }) : assert(destinations.length >= 2),
        assert(selectedIndex >= 0 && selectedIndex < destinations.length);
 
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
   final List<NavigationDestination> destinations;
+
+  /// When the available width is tight, keep every tab equal and show only
+  /// the selected icon with a circular highlight.
+  final bool iconOnly;
 
   @override
   State<CapsuleNavigationBar> createState() => _CapsuleNavigationBarState();
@@ -103,73 +108,83 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
       apple.accent.withValues(alpha: .12),
       apple.label.withValues(alpha: dark ? .28 : .14),
     );
-    return RepaintBoundary(
-      child: AppleGlass(
-        borderRadius: BorderRadius.circular(999),
-        color: apple.glassStrong,
-        border: Border.all(color: apple.separator, width: .5),
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: SizedBox(
-            height: 44,
-            child: Semantics(
-              container: true,
-              role: SemanticsRole.tabBar,
-              explicitChildNodes: true,
-              child: CustomMultiChildLayout(
-                // One clock moves the indicator and all tabs. Ticks lay out
-                // this small bar without rebuilding text, icons or the page.
-                delegate: _CapsuleLayout(
-                  progress: _progress,
-                  from: _from,
-                  selectedIndex: widget.selectedIndex,
-                  indicatorFrom: _indicatorFrom,
-                ),
-                children: [
-                  LayoutId(
-                    id: 'indicator',
-                    child: DecoratedBox(
-                      key: const ValueKey('capsule-navigation-indicator'),
-                      decoration: BoxDecoration(
-                        color: selectedColor,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: apple.accent.withValues(alpha: .28),
-                          width: .75,
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool iconOnly =
+            widget.iconOnly ||
+            (constraints.maxWidth.isFinite && constraints.maxWidth < 280);
+        return RepaintBoundary(
+          child: AppleGlass(
+            borderRadius: BorderRadius.circular(999),
+            color: apple.glassStrong,
+            border: Border.all(color: apple.separator, width: .5),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: SizedBox(
+                height: 44,
+                child: Semantics(
+                  container: true,
+                  role: SemanticsRole.tabBar,
+                  explicitChildNodes: true,
+                  child: CustomMultiChildLayout(
+                    // One clock moves the indicator and all tabs. Ticks lay out
+                    // this small bar without rebuilding text, icons or the page.
+                    delegate: _CapsuleLayout(
+                      progress: _progress,
+                      from: _from,
+                      selectedIndex: widget.selectedIndex,
+                      indicatorFrom: _indicatorFrom,
+                      iconOnly: iconOnly,
+                    ),
+                    children: [
+                      LayoutId(
+                        id: 'indicator',
+                        child: DecoratedBox(
+                          key: const ValueKey('capsule-navigation-indicator'),
+                          decoration: BoxDecoration(
+                            color: selectedColor,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: apple.accent.withValues(alpha: .28),
+                              width: .75,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      for (
+                        var index = 0;
+                        index < widget.destinations.length;
+                        index++
+                      )
+                        LayoutId(
+                          id: index,
+                          child: _destination(
+                            context,
+                            index,
+                            Tween<double>(
+                              begin: _from[index],
+                              end: index == widget.selectedIndex ? 1 : 0,
+                            ).animate(_progress),
+                            iconOnly: iconOnly,
+                          ),
+                        ),
+                    ],
                   ),
-                  for (
-                    var index = 0;
-                    index < widget.destinations.length;
-                    index++
-                  )
-                    LayoutId(
-                      id: index,
-                      child: _destination(
-                        context,
-                        index,
-                        Tween<double>(
-                          begin: _from[index],
-                          end: index == widget.selectedIndex ? 1 : 0,
-                        ).animate(_progress),
-                      ),
-                    ),
-                ],
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
   Widget _destination(
     BuildContext context,
     int index,
-    Animation<double> weight,
-  ) {
+    Animation<double> weight, {
+    required bool iconOnly,
+  }) {
     final destination = widget.destinations[index];
     final selected = index == widget.selectedIndex;
     final apple = AppleSemanticColors.of(context);
@@ -203,34 +218,35 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
                   selected
                       ? destination.selectedIcon ?? destination.icon
                       : destination.icon,
-                  Flexible(
-                    child: SizeTransition(
-                      axis: Axis.horizontal,
-                      alignment: Alignment.centerLeft,
-                      sizeFactor: weight,
-                      child: FadeTransition(
-                        opacity: weight,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                destination.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelLarge
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                      color: color,
-                                    ),
+                  if (!iconOnly)
+                    Flexible(
+                      child: SizeTransition(
+                        axis: Axis.horizontal,
+                        alignment: Alignment.centerLeft,
+                        sizeFactor: weight,
+                        child: FadeTransition(
+                          opacity: weight,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  destination.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.labelLarge
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: color,
+                                      ),
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -251,15 +267,41 @@ class _CapsuleLayout extends MultiChildLayoutDelegate {
     required this.from,
     required this.selectedIndex,
     required this.indicatorFrom,
+    required this.iconOnly,
   }) : super(relayout: progress);
 
   final Animation<double> progress;
   final List<double> from;
   final int selectedIndex;
   final double indicatorFrom;
+  final bool iconOnly;
 
   @override
   void performLayout(Size size) {
+    if (iconOnly) {
+      final cell = size.width / from.length;
+      layoutChild(
+        'indicator',
+        BoxConstraints.tightFor(width: size.height, height: size.height),
+      );
+      positionChild(
+        'indicator',
+        Offset(
+          lerpDouble(indicatorFrom, selectedIndex.toDouble(), progress.value)! *
+                  cell +
+              (cell - size.height) / 2,
+          0,
+        ),
+      );
+      for (var index = 0; index < from.length; index++) {
+        layoutChild(
+          index,
+          BoxConstraints.tightFor(width: cell, height: size.height),
+        );
+        positionChild(index, Offset(index * cell, 0));
+      }
+      return;
+    }
     final minimum = math.min(44.0, size.width / from.length);
     final selectedWidth = math.min(
       108.0,
@@ -300,5 +342,6 @@ class _CapsuleLayout extends MultiChildLayoutDelegate {
       progress != oldDelegate.progress ||
       from != oldDelegate.from ||
       selectedIndex != oldDelegate.selectedIndex ||
-      indicatorFrom != oldDelegate.indicatorFrom;
+      indicatorFrom != oldDelegate.indicatorFrom ||
+      iconOnly != oldDelegate.iconOnly;
 }

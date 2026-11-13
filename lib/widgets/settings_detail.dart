@@ -271,6 +271,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             ? Colors.transparent
             : null,
         body: SafeArea(
+          minimum: const EdgeInsets.only(top: 8),
           child: Stack(
             children: <Widget>[
               if (Navigator.of(context).canPop())
@@ -307,7 +308,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: EdgeInsets.fromLTRB(inset - 12, 20, inset, 0),
+                padding: EdgeInsets.fromLTRB(inset - 12, 28, inset, 0),
                 child: Row(
                   children: [
                     AccessibleIconButton(

@@ -1135,7 +1135,15 @@ class _AppShellState extends State<AppShell>
                         // Televisions overscan: keep the chrome inside the
                         // panel's visible box even though Android reports no
                         // safe insets.
-                        minimum: tvSafeInsets(context),
+                        minimum: () {
+                          final EdgeInsets overscan = tvSafeInsets(context);
+                          return EdgeInsets.fromLTRB(
+                            overscan.left,
+                            overscan.top + 20,
+                            overscan.right,
+                            overscan.bottom,
+                          );
+                        }(),
                         child: largeScreen
                             ? _largeScreenLayout(apple)
                             : tablet
