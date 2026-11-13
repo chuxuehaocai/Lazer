@@ -1081,7 +1081,7 @@ class _AppShellState extends State<AppShell>
                   // their height as bottom padding for each scroll view's tail.
                   extendBody: (compact || tablet) && !largeScreen,
                   bottomNavigationBar: (compact || tablet) && !largeScreen
-                      ? _mobileBottomBar(tablet: tablet)
+                      ? _mobileBottomBar()
                       : null,
                   backgroundColor: sharedBackground || tablet
                       ? Colors.transparent
@@ -1477,7 +1477,7 @@ class _AppShellState extends State<AppShell>
     );
   }
 
-  Widget _mobileBottomBar({bool tablet = false}) {
+  Widget _mobileBottomBar() {
     final sections = [
       _AppSection.home,
       _AppSection.search,
@@ -1498,19 +1498,6 @@ class _AppShellState extends State<AppShell>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              if (state.current != null && !tablet) ...<Widget>[
-                RepaintBoundary(
-                  child: AppPlayerBar(
-                    state: state,
-                    compact: true,
-                    floating: true,
-                    comments: _comments,
-                    onComments: _toggleComments,
-                    onOpen: _openNowPlaying,
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
@@ -1551,7 +1538,7 @@ class _AppShellState extends State<AppShell>
                       ],
                     ),
                   ),
-                  if (tablet && state.current != null) ...<Widget>[
+                  if (state.current != null) ...<Widget>[
                     const SizedBox(width: 10),
                     _BottomTrackCover(state: state, onOpen: _openNowPlaying),
                     Opacity(
