@@ -1083,7 +1083,7 @@ class _AppShellState extends State<AppShell>
                   bottomNavigationBar: compact && !largeScreen && !tablet
                       ? _mobileBottomBar()
                       : null,
-                  backgroundColor: sharedBackground
+                  backgroundColor: sharedBackground || tablet
                       ? Colors.transparent
                       : canvas,
                   body: Stack(
