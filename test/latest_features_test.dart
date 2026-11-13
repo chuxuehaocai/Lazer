@@ -244,6 +244,7 @@ void main() {
     await tester.pumpAndSettle();
     final dropdown = find.byType(DropdownButton<AppLanguage>);
     await tester.ensureVisible(dropdown);
+    await tester.pumpAndSettle();
     await tester.tap(dropdown);
     await tester.pumpAndSettle();
     await tester.tap(find.text('日本語').last);

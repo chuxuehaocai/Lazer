@@ -11,10 +11,11 @@ import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/library_page.dart';
-import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/widgets/retained_content_switcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'support/player_transition.dart';
 
 /// The browse page is the *background* of the player's back gesture: the
 /// player slides down over it. It has no destination to return to, so the
@@ -73,12 +74,7 @@ Future<void> _openPlayer(WidgetTester tester) async {
   await tester.tap(find.byTooltip('音乐库'));
   await _settle(tester);
   expect(find.byType(AppLibraryPage), findsOneWidget);
-  await tester.tap(
-    find.descendant(
-      of: find.byType(AppPlayerBar),
-      matching: find.text(_track.title),
-    ),
-  );
+  await tapNowPlayingControl(tester, title: _track.title);
   await _settle(tester);
   expect(find.byType(NowPlayingPage), findsOneWidget);
 }

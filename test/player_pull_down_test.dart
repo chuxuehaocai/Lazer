@@ -6,7 +6,6 @@ import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
-import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/navigation/pull_down_to_close.dart';
@@ -15,6 +14,8 @@ import 'package:lazer_nextgen/player/now_playing_route.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
+
+import 'support/player_transition.dart';
 
 const Track _track = Track(
   id: 'pull-down-fixture',
@@ -96,12 +97,7 @@ Future<void> _openPlayer(WidgetTester tester, {Size size = _phone}) async {
   await tester.pumpWidget(_app(AppShell(state: state)));
   await tester.pump(const Duration(milliseconds: 120));
 
-  await tester.tap(
-    find.descendant(
-      of: find.byType(AppPlayerBar),
-      matching: find.text(_track.title),
-    ),
-  );
+  await tapNowPlayingControl(tester, title: _track.title);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 1200));
   expect(find.byType(NowPlayingPage), findsOneWidget);
@@ -210,12 +206,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsNothing);
 
-    await tester.tap(
-      find.descendant(
-        of: find.byType(AppPlayerBar),
-        matching: find.text(_track.title),
-      ),
-    );
+    await tapNowPlayingControl(tester, title: _track.title);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1200));
     expect(find.byType(NowPlayingPage), findsOneWidget);

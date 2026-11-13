@@ -89,7 +89,9 @@ void main() {
           if (compact) {
             expect(navigation.pushes, pushed + 1);
             expect(find.byType(page), findsOneWidget);
-            await tester.pageBack();
+            await tester.tap(
+              find.byKey(const ValueKey('settings-detail-back')),
+            );
           } else {
             expect(find.byType(Scaffold), findsOneWidget);
             if (entry == 'open-shortcut-settings') {

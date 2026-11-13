@@ -163,11 +163,7 @@ void main() {
           find.byKey(const ValueKey('settings-detail-subview')),
           mobile ? findsNothing : findsOneWidget,
         );
-        if (mobile) {
-          await tester.pageBack();
-        } else {
-          await tester.tap(find.byKey(const ValueKey('settings-detail-back')));
-        }
+        await tester.tap(find.byKey(const ValueKey('settings-detail-back')));
         await tester.pumpAndSettle();
         expect(find.byType(ScheduledPauseSettingsPage), findsNothing);
         expect(tester.takeException(), isNull);

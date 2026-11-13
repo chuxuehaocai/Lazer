@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
+import 'package:lazer_nextgen/ui/player_bar.dart';
 
 Animation<Offset> playerSlideAnimation(WidgetTester tester) => tester
     .widget<SlideTransition>(
@@ -35,4 +36,23 @@ Future<void> pumpPlayerTransition(
     reason: 'The player transition must finish within $deadline.',
   );
   await tester.pump();
+}
+
+/// Taps whatever the shell presents as its now-playing control: the transport
+/// bar on windows wide enough for it, otherwise the cover beside the capsule.
+Future<void> tapNowPlayingControl(WidgetTester tester, {String? title}) async {
+  final Finder cover = find.byKey(const ValueKey<String>('bottom-track-cover'));
+  if (cover.evaluate().isNotEmpty) {
+    await tester.tap(cover);
+    return;
+  }
+  final Finder bar = find.byType(AppPlayerBar);
+  expect(
+    bar,
+    findsOneWidget,
+    reason: 'the shell must expose one now-playing control',
+  );
+  await tester.tap(
+    title == null ? bar : find.descendant(of: bar, matching: find.text(title)),
+  );
 }

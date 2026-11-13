@@ -96,6 +96,8 @@ void main() {
       const ValueKey('open-local-music-settings'),
     );
     expect(manage, findsOneWidget);
+    await tester.ensureVisible(manage);
+    await tester.pumpAndSettle();
     await tester.tap(manage);
     expect(opened, 1);
   });

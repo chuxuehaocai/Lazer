@@ -221,7 +221,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(state.fontPreferences[FontCategory.pageTitle].scale, greaterThan(1));
-    await tester.pageBack();
+    await tester.tap(find.byKey(const ValueKey('settings-detail-back')));
     await tester.pumpAndSettle();
     expect(find.text('歌词字号'), findsNothing);
     expect(tester.takeException(), isNull);

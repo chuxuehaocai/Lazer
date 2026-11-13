@@ -5,7 +5,9 @@ import 'package:flutter/services.dart';
 import '../animation/apple_spring.dart';
 import '../navigation/system_back_gesture.dart';
 
+import '../theme/apple_design.dart';
 import 'accessible_controls.dart';
+import 'apple_ui.dart';
 import 'shared_browse_background.dart';
 
 /// Keeps desktop settings inside the shell, including its navigation and player.
@@ -265,6 +267,10 @@ class SettingsDetailScaffold extends StatelessWidget {
     final close = context
         .dependOnInheritedWidgetOfExactType<_SettingsDetailScope>()
         ?.close;
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final Widget? trailing = actions.isEmpty
+        ? null
+        : Wrap(spacing: 8, children: actions);
     if (close == null) {
       return Scaffold(
         backgroundColor: BrowseBackgroundScope.contains(context)
@@ -290,7 +296,20 @@ class SettingsDetailScaffold extends StatelessWidget {
                   padding: EdgeInsets.only(
                     top: Navigator.of(context).canPop() ? 68 : 0,
                   ),
-                  child: child,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      ApplePageTitle(
+                        title: title,
+                        // The pushed form is the compact one, so the
+                        // heading shares the pages' 20 dp gutter.
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+                        trailing: trailing,
+                      ),
+                      Divider(height: 1, thickness: .5, color: apple.separator),
+                      Expanded(child: child),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -320,6 +339,12 @@ class SettingsDetailScaffold extends StatelessWidget {
                   ],
                 ),
               ),
+              ApplePageTitle(
+                title: title,
+                padding: EdgeInsets.fromLTRB(inset, 4, inset, 20),
+                trailing: trailing,
+              ),
+              Divider(height: 1, thickness: .5, color: apple.separator),
               Expanded(child: child),
             ],
           );

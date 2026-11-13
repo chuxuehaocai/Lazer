@@ -16,9 +16,10 @@ import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/home_pages.dart';
 import 'package:lazer_nextgen/ui/library_page.dart';
 import 'package:lazer_nextgen/ui/listening_statistics_page.dart';
-import 'package:lazer_nextgen/ui/player_bar.dart';
 import 'package:lazer_nextgen/ui/shell.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'support/player_transition.dart';
 
 const _track = Track(
   id: 'shell-system-back',
@@ -234,12 +235,7 @@ void main() {
     'Android player tracks back progress, restores on cancel and closes once',
     (tester) async {
       await _openLibrary(tester, track: true);
-      await tester.tap(
-        find.descendant(
-          of: find.byType(AppPlayerBar),
-          matching: find.text(_track.title),
-        ),
-      );
+      await tapNowPlayingControl(tester, title: _track.title);
       await _settle(tester);
       expect(find.byType(NowPlayingPage), findsOneWidget);
       await _android(tester, 'startBackGesture', 0);

@@ -1083,7 +1083,10 @@ class _AppShellState extends State<AppShell>
                   bottomNavigationBar: (compact || tablet) && !largeScreen
                       ? _mobileBottomBar()
                       : null,
-                  backgroundColor: sharedBackground || tablet
+                  // Only a shared browse backdrop needs the page to show
+                  // through: the body paints the canvas itself, so the
+                  // scaffold must not turn the off-mode background into a hole.
+                  backgroundColor: sharedBackground
                       ? Colors.transparent
                       : canvas,
                   body: Stack(
@@ -1131,6 +1134,7 @@ class _AppShellState extends State<AppShell>
                           ),
                         ),
                       SafeArea(
+                        top: false,
                         bottom: false,
                         // Televisions overscan: keep the chrome inside the
                         // panel's visible box even though Android reports no
@@ -1139,9 +1143,7 @@ class _AppShellState extends State<AppShell>
                           final EdgeInsets overscan = tvSafeInsets(context);
                           return EdgeInsets.fromLTRB(
                             overscan.left,
-                            largeScreen
-                                ? 0
-                                : overscan.top + (compact || tablet ? 20 : 0),
+                            largeScreen ? 0 : overscan.top,
                             overscan.right,
                             overscan.bottom,
                           );
@@ -1818,8 +1820,9 @@ class _AppShellState extends State<AppShell>
         _localMusic ||
         _savedAlbums ||
         _networkSources;
+    final double topInset = MediaQuery.paddingOf(context).top;
     return SizedBox(
-      height: 50,
+      height: 50 + topInset,
       child: AppleGlass(
         borderRadius: BorderRadius.zero,
         blurSigma: state.headerBlur,
@@ -1831,7 +1834,7 @@ class _AppShellState extends State<AppShell>
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: EdgeInsets.fromLTRB(8, topInset, 8, 0),
           child: Row(
             children: <Widget>[
               if (canGoBack) ...<Widget>[
@@ -2532,27 +2535,38 @@ class _BottomTrackCover extends StatelessWidget {
     final track = state.current;
     if (track == null) return const SizedBox.shrink();
     final apple = AppleSemanticColors.of(context);
-    return GestureDetector(
+    // This cover is the only now-playing control the capsule bar keeps, so it
+    // announces itself: the track title is the label and opening the player is
+    // the action. The gesture detector stays out of semantics so the cover is
+    // one node instead of a labelled button wrapping an unlabelled tap target.
+    return Semantics(
+      key: const ValueKey<String>('bottom-track-cover'),
+      button: true,
+      label: track.title,
       onTap: onOpen,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedBuilder(
-        animation: state,
-        builder: (BuildContext context, _) => SizedBox.square(
-          dimension: 56,
-          child: Stack(
-            fit: StackFit.expand,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.all(3),
-                child: AppCover(url: track.coverUrl, size: 50, radius: 25),
-              ),
-              CircularProgressIndicator(
-                value: state.progress.clamp(0, 1),
-                strokeWidth: 2.5,
-                color: apple.accent,
-                backgroundColor: apple.separator.withValues(alpha: .45),
-              ),
-            ],
+      child: GestureDetector(
+        onTap: onOpen,
+        behavior: HitTestBehavior.opaque,
+        excludeFromSemantics: true,
+        child: AnimatedBuilder(
+          animation: state,
+          builder: (BuildContext context, _) => SizedBox.square(
+            dimension: 56,
+            child: Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.all(3),
+                  child: AppCover(url: track.coverUrl, size: 50, radius: 25),
+                ),
+                CircularProgressIndicator(
+                  value: state.progress.clamp(0, 1),
+                  strokeWidth: 2.5,
+                  color: apple.accent,
+                  backgroundColor: apple.separator.withValues(alpha: .45),
+                ),
+              ],
+            ),
           ),
         ),
       ),
