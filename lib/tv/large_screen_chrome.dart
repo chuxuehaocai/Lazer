@@ -278,9 +278,9 @@ class _NavBackButton extends StatelessWidget {
 ///
 /// It keeps the things a listener reaches for from a sofa: what is playing
 /// (open the player), previous/play/next in the centre, and like / queue /
-/// expand on the right. The strip itself is a rounded translucent card with a
-/// soft shadow: it floats over the page, so the artwork scrolled underneath
-/// stays part of the canvas. The seek rail lives in the player.
+/// expand on the right. The strip itself is a floating capsule with a soft
+/// shadow: it floats over the page, so the artwork scrolled underneath stays
+/// part of the canvas. The seek rail lives in the player.
 class LargeScreenTransport extends StatelessWidget {
   const LargeScreenTransport({
     super.key,
@@ -297,7 +297,12 @@ class LargeScreenTransport extends StatelessWidget {
     final double inset = LargeScreenMetrics.pageInset(
       MediaQuery.sizeOf(context).width,
     );
-    final BorderRadius radius = BorderRadius.circular(26);
+    // Keep the transport a true pill at every TV scale. A fixed corner radius
+    // left the 88dp bar looking like a rounded rectangle on large screens,
+    // while half the height keeps both ends fully circular.
+    final BorderRadius radius = BorderRadius.circular(
+      LargeScreenMetrics.transportHeight / 2,
+    );
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: inset),
       child: DecoratedBox(
