@@ -1268,6 +1268,7 @@ class _AppShellState extends State<AppShell>
               Expanded(
                 child: Column(
                   children: <Widget>[
+                    _desktopToolbar(apple),
                     Expanded(child: RepaintBoundary(child: _content())),
                   ],
                 ),
@@ -1285,6 +1286,48 @@ class _AppShellState extends State<AppShell>
           ),
         ),
       ],
+    );
+  }
+
+  Widget _desktopToolbar(AppleSemanticColors apple) {
+    final bool canGoBack =
+        _playlist != null ||
+        _artist != null ||
+        _chart != null ||
+        _comments ||
+        _localMusic ||
+        _savedAlbums ||
+        _networkSources;
+    return SizedBox(
+      height: 50,
+      child: AppleGlass(
+        borderRadius: BorderRadius.zero,
+        blurSigma: state.headerBlur,
+        color: apple.background.withValues(alpha: state.headerOpacity),
+        border: Border(
+          bottom: BorderSide(
+            color: apple.separator.withValues(alpha: .45),
+            width: .5,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: Row(
+            children: <Widget>[
+              if (canGoBack) ...<Widget>[
+                _ToolbarButton(
+                  tooltip: '返回',
+                  icon: Icons.chevron_left_rounded,
+                  onPressed: _backToRoot,
+                ),
+                const SizedBox(width: 8),
+              ],
+              const Spacer(),
+              _accountButton(apple, radius: 16),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
