@@ -29,6 +29,7 @@ class LuaPluginRuntime {
     required this.dataDirectory,
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
+    this.websocketGranted = false,
   });
 
   final PluginManifest manifest;
@@ -37,6 +38,7 @@ class LuaPluginRuntime {
   final Duration timeout;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
+  final bool websocketGranted;
 
   final Random _random = Random.secure();
   final http.Client _client = http.Client();
@@ -58,6 +60,7 @@ class LuaPluginRuntime {
       random: _random,
       client: _client,
       externalHttp: httpHandler,
+      websocketGranted: websocketGranted,
     );
     await host.initialize();
     _host = host;
@@ -116,6 +119,7 @@ class LuaPluginRuntime {
     _closed = true;
     AppLog.shared.event('lua', 'closed', {'plugin': manifest.id});
     _client.close();
+    _host?.closeSockets();
     _lua?.setTop(0);
   }
 }
@@ -128,6 +132,7 @@ class _WebPluginHost {
     required this.random,
     required this.client,
     this.externalHttp,
+    this.websocketGranted = false,
   });
 
   final PluginManifest manifest;
@@ -137,8 +142,17 @@ class _WebPluginHost {
   final http.Client client;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   externalHttp;
+  final bool websocketGranted;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   Map<String, dynamic> storage = <String, dynamic>{};
+  final Map<String, html.WebSocket> _websockets = <String, html.WebSocket>{};
+
+  void closeSockets() {
+    for (final socket in _websockets.values) {
+      socket.close();
+    }
+    _websockets.clear();
+  }
 
   String get _cookieName =>
       'lazer_plugin_${base64Url.encode(utf8.encode(dataKey)).replaceAll('=', '')}';
@@ -231,6 +245,47 @@ class _WebPluginHost {
       _push(state, result);
       return 1;
     });
+    lua.registerAsync('_websocket', (state) async {
+      if (!websocketGranted) {
+        throw const FormatException('WebSocket permission required');
+      }
+      final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
+      final operation = spec['operation'] as String? ?? 'open';
+      final id = spec['id'] as String? ?? 'default';
+      if (operation == 'open') {
+        final uri = Uri.parse(spec['url'] as String);
+        if (!manifest.permitsWebSocket(uri)) {
+          throw const FormatException('WebSocket permission denied');
+        }
+        _websockets[id]?.close();
+        final socket = html.WebSocket(uri.toString());
+        await socket.onOpen.first;
+        _websockets[id] = socket;
+        _push(state, true);
+        return 1;
+      }
+      final socket = _websockets[id];
+      if (socket == null) throw const FormatException('WebSocket is not open');
+      if (operation == 'send') {
+        socket.send(spec['data'] ?? '');
+        _push(state, true);
+        return 1;
+      }
+      if (operation == 'receive') {
+        final event = await socket.onMessage.first.timeout(
+          const Duration(seconds: 30),
+        );
+        _push(state, event.data);
+        return 1;
+      }
+      if (operation == 'close') {
+        socket.close();
+        _websockets.remove(id);
+        _push(state, true);
+        return 1;
+      }
+      throw const FormatException('Unsupported WebSocket operation');
+    });
     lua.registerAsync('pcall', (state) async {
       final status = await state.pCallAsync(state.getTop() - 1, luaMultret, 0);
       state.pushBoolean(status == ThreadStatus.luaOk);
@@ -256,6 +311,7 @@ class _WebPluginHost {
         now = _now, url_encode = _url_encode, random_hex = _random_hex,
         cookie_compact = _cookie_compact, cookie_field = _cookie_field,
         cookie_merge = _cookie_merge, crypto = _crypto, http = _http,
+        websocket = _websocket,
         storage_get = _storage_get, storage_set = _storage_set }
       $moduleBuffers
       local modules = {}

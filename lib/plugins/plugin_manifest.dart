@@ -18,6 +18,9 @@ class PluginManifest {
       domains = List<String>.from(
         (json['permissions'] as Map?)?['network'] as List? ?? [],
       ),
+      websocketDomains = List<String>.from(
+        (json['permissions'] as Map?)?['websocket'] as List? ?? [],
+      ),
       storage = (json['permissions'] as Map?)?['storage'] == true {
     if (!RegExp(r'^[a-z][a-z0-9_.-]{2,79}$').hasMatch(id) ||
         !RegExp(r'^[a-z][a-z0-9_-]{1,39}$').hasMatch(provider) ||
@@ -29,7 +32,9 @@ class PluginManifest {
         !safePath(entry) ||
         !entry.endsWith('.lua') ||
         domains.length > 32 ||
-        domains.any(invalidNetworkRule)) {
+        websocketDomains.length > 32 ||
+        domains.any(invalidNetworkRule) ||
+        websocketDomains.any(invalidNetworkRule)) {
       throw const FormatException('插件清单无效，或不支持该插件 API 版本。');
     }
   }
@@ -86,7 +91,7 @@ class PluginManifest {
 
   final String id, name, version, description, author, entry, provider;
   final int apiVersion;
-  final List<String> capabilities, auth, domains;
+  final List<String> capabilities, auth, domains, websocketDomains;
   final bool storage;
 
   static bool safePath(String path) =>
@@ -118,6 +123,17 @@ class PluginManifest {
             : uri.host == rule.host;
       });
 
+  bool permitsWebSocket(Uri uri) =>
+      (uri.scheme == 'ws' || uri.scheme == 'wss') &&
+      uri.userInfo.isEmpty &&
+      websocketDomains.any((domain) {
+        final rule = Uri.parse('https://${domain.replaceFirst('*.', '')}');
+        if (rule.hasPort && uri.port != rule.port) return false;
+        return domain.startsWith('*.')
+            ? uri.host == rule.host || uri.host.endsWith('.${rule.host}')
+            : uri.host == rule.host;
+      });
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
@@ -129,7 +145,11 @@ class PluginManifest {
     'provider': provider,
     'capabilities': capabilities,
     'auth': auth,
-    'permissions': {'network': domains, 'storage': storage},
+    'permissions': {
+      'network': domains,
+      'websocket': websocketDomains,
+      'storage': storage,
+    },
   };
 }
 

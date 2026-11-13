@@ -122,6 +122,22 @@ void main() {
     );
   });
 
+  test('WebSocket permissions are separate and require an explicit scope', () {
+    final manifest = PluginManifest.fromJson({
+      'id': 'demo.socket',
+      'name': 'Demo',
+      'version': '1.0.0',
+      'provider': 'demo',
+      'apiVersion': 1,
+      'permissions': {
+        'websocket': ['socket.example.com'],
+      },
+    });
+    expect(manifest.permitsWebSocket(Uri.parse('wss://socket.example.com')), isTrue);
+    expect(manifest.permits(Uri.parse('https://socket.example.com')), isFalse);
+    expect(manifest.permitsWebSocket(Uri.parse('wss://other.example.com')), isFalse);
+  });
+
   test('Lua entrypoint and module calls remain data-only', () async {
     final runtime = LuaPluginRuntime(
       manifest: PluginManifest.fromJson(const {

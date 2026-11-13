@@ -228,10 +228,13 @@ class _PluginRow extends StatelessWidget {
                   ),
                 ),
                 if (plugin.manifest.domains.isNotEmpty ||
+                    plugin.manifest.websocketDomains.isNotEmpty ||
                     plugin.manifest.storage)
                   Text(
                     context.tr(
-                      plugin.manifest.storage
+                      plugin.manifest.websocketDomains.isNotEmpty
+                          ? '网络：$hosts · WebSocket 需授权${plugin.manifest.storage ? ' · 本地存储' : ''}'
+                          : plugin.manifest.storage
                           ? '网络：$hosts · 本地存储'
                           : '网络：$hosts',
                     ),
@@ -254,6 +257,15 @@ class _PluginRow extends StatelessWidget {
                 : (value) =>
                       unawaited(manager.setEnabled(plugin.manifest.id, value)),
           ),
+          if (plugin.manifest.websocketDomains.isNotEmpty)
+            Switch(
+              value: plugin.websocketGranted,
+              onChanged: manager.busy
+                  ? null
+                  : (value) => unawaited(
+                      manager.setWebsocketPermission(plugin.manifest.id, value),
+                    ),
+            ),
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'remove') {

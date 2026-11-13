@@ -16,6 +16,7 @@ import 'audio/hifi_controller.dart';
 import 'audio/system_media_handler.dart';
 import 'audio/native/lazer_audio_library.dart';
 import 'audio/playback_session.dart';
+import 'integrations/discord_rpc.dart';
 import 'desktop_lyrics/desktop_lyrics_controller.dart';
 import 'desktop_lyrics/lyrics_overlay.dart';
 import 'desktop_lyrics/overlay_protocol.dart';
@@ -214,8 +215,15 @@ Future<void> main(List<String> args) async {
         _activeAppState = state;
         final session = PlaybackSession(state, audio);
         final media = SystemMediaController(state);
+        final discord = DiscordRpcController(state);
         runApp(
-          LazerApp(state: state, audio: audio, media: media, session: session),
+          LazerApp(
+            state: state,
+            audio: audio,
+            media: media,
+            session: session,
+            discord: discord,
+          ),
         );
       } catch (error, stack) {
         // Nothing above this point has a widget tree yet. Without this catch a
@@ -269,11 +277,13 @@ class LazerApp extends StatefulWidget {
     required this.state,
     required this.audio,
     required this.media,
+    this.discord,
     this.session,
   });
   final AppState state;
   final AudioEngine audio;
   final SystemMediaController media;
+  final DiscordRpcController? discord;
   final PlaybackSession? session;
 
   @override
@@ -379,6 +389,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _browseNavigation.dispose();
     _state.removeListener(_onRootUiChanged);
     widget.media.close();
+    widget.discord?.dispose();
     widget.session?.close();
     _state.dispose();
     widget.audio.dispose();

@@ -25,12 +25,13 @@ README.md
   "auth": ["cookie"],
   "permissions": {
     "network": ["api.example.com"],
+    "websocket": ["socket.example.com"],
     "storage": true
   }
 }
 ```
 
-`id`、`provider` 和版本号必须符合规范；入口与 Lua 模块路径只能使用正斜杠，不能包含 `..`。网络权限只允许 HTTPS，并且请求的主机必须精确匹配 `permissions.network`，或匹配以 `*.` 开头的子域规则。插件 ZIP 最大 16 MB，解压后最大 8 MB，单个文件最大 2 MB。
+`id`、`provider` 和版本号必须符合规范；入口与 Lua 模块路径只能使用正斜杠，不能包含 `..`。网络权限只允许 HTTPS，并且请求的主机必须精确匹配 `permissions.network`，或匹配以 `*.` 开头的子域规则。WebSocket 使用单独的 `permissions.websocket` 域名列表，并且必须由用户在插件管理中明确授予权限后才能连接。插件 ZIP 最大 16 MB，解压后最大 8 MB，单个文件最大 2 MB。
 
 入口文件返回一个带 `call(operation, args)` 的表。`args` 和返回值只能是 `nil`、布尔值、数字、字符串、数组或字符串键表：
 
@@ -87,6 +88,7 @@ end
 | 接口 | 用途 |
 | --- | --- |
 | `host.http({url, method, headers, body})` | 访问清单声明的 HTTPS 域名；禁止重定向，响应最多 8 MB |
+| `host.websocket({operation, id, url, data})` | 打开、发送、接收或关闭 WebSocket；需要用户授予 WebSocket 权限 |
 | `host.crypto({operation=..., ...})` | `md5`、`sha256`、`base64`、`base64_decode`、`aes`、`rsa_modpow` |
 | `host.json_encode(value)` / `host.json_decode(text)` | JSON 编解码 |
 | `host.url_encode(text)` | URL 百分号编码 |

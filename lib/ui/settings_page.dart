@@ -358,6 +358,7 @@ class _SettingsOverview extends StatelessWidget {
                           label: '配色',
                           subtitle: state.paletteMode.detail,
                           trailing: DropdownButton<AppPaletteMode>(
+                            key: ValueKey<AppPaletteMode>(state.paletteMode),
                             value: state.paletteMode,
                             underline: const SizedBox.shrink(),
                             borderRadius: BorderRadius.circular(12),
@@ -412,6 +413,7 @@ class _SettingsOverview extends StatelessWidget {
                           label: '设备形态',
                           subtitle: state.surface.detail,
                           trailing: DropdownButton<AppSurface>(
+                            key: ValueKey<AppSurface>(state.surface),
                             value: state.surface,
                             underline: const SizedBox.shrink(),
                             borderRadius: BorderRadius.circular(12),
@@ -434,6 +436,7 @@ class _SettingsOverview extends StatelessWidget {
                           label: '界面布局',
                           subtitle: state.uiMode.detail,
                           trailing: DropdownButton<AppUiMode>(
+                            key: ValueKey<AppUiMode>(state.uiMode),
                             value: state.uiMode,
                             underline: const SizedBox.shrink(),
                             borderRadius: BorderRadius.circular(12),
@@ -667,6 +670,7 @@ class _SettingsOverview extends StatelessWidget {
                             ThemeMode.dark => '深色',
                           },
                           trailing: DropdownButton<ThemeMode>(
+                            key: ValueKey<ThemeMode>(state.themeMode),
                             value: state.themeMode,
                             underline: const SizedBox.shrink(),
                             borderRadius: BorderRadius.circular(12),
@@ -695,6 +699,7 @@ class _SettingsOverview extends StatelessWidget {
                           label: '语言',
                           subtitle: state.language.name,
                           trailing: DropdownButton<AppLanguage>(
+                            key: ValueKey<AppLanguage>(state.language),
                             value: state.language,
                             underline: const SizedBox.shrink(),
                             borderRadius: BorderRadius.circular(12),
@@ -837,26 +842,29 @@ class _SettingsOverview extends StatelessWidget {
                           subtitle: state.audioQualityDetail(
                             state.downloadQuality,
                           ),
-                          trailing: DropdownButton<AudioQuality>(
-                            key: const ValueKey('download-quality'),
-                            value: state.downloadQuality,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
-                            items: <DropdownMenuItem<AudioQuality>>[
-                              for (final AudioQuality quality
-                                  in AudioQuality.values)
-                                DropdownMenuItem<AudioQuality>(
-                                  value: quality,
-                                  child: TrText(
-                                    state.audioQualityLabel(quality),
+                          trailing: KeyedSubtree(
+                            key: ValueKey<AudioQuality>(state.downloadQuality),
+                            child: DropdownButton<AudioQuality>(
+                              key: const ValueKey('download-quality'),
+                              value: state.downloadQuality,
+                              underline: const SizedBox.shrink(),
+                              borderRadius: BorderRadius.circular(12),
+                              items: <DropdownMenuItem<AudioQuality>>[
+                                for (final AudioQuality quality
+                                    in AudioQuality.values)
+                                  DropdownMenuItem<AudioQuality>(
+                                    value: quality,
+                                    child: TrText(
+                                      state.audioQualityLabel(quality),
+                                    ),
                                   ),
-                                ),
-                            ],
-                            onChanged: (AudioQuality? value) {
-                              if (value != null) {
-                                unawaited(state.setDownloadQuality(value));
-                              }
-                            },
+                              ],
+                              onChanged: (AudioQuality? value) {
+                                if (value != null) {
+                                  unawaited(state.setDownloadQuality(value));
+                                }
+                              },
+                            ),
                           ),
                         ),
                         _AppSettingRow(
@@ -1340,6 +1348,27 @@ class _SettingsOverview extends StatelessWidget {
                               child: const TrText('复制'),
                             ),
                           ),
+                        _AppSettingRow(
+                          label: 'Discord Rich Presence',
+                          subtitle: state.discordClientId.isEmpty
+                              ? '填写 Discord 应用 ID 后显示歌曲与进度'
+                              : state.discordRpcEnabled
+                              ? '已启用 · 桌面端显示当前播放'
+                              : '已配置但未启用',
+                          trailing: state.discordClientId.isEmpty
+                              ? SpringOutlinedButton(
+                                  onPressed: () => unawaited(
+                                    _editDiscordRpc(context, state),
+                                  ),
+                                  child: const TrText('配置'),
+                                )
+                              : Switch(
+                                  value: state.discordRpcEnabled,
+                                  onChanged: (value) => unawaited(
+                                    state.setDiscordRpcEnabled(value),
+                                  ),
+                                ),
+                        ),
                       ],
                     ),
                   ),
@@ -1494,6 +1523,34 @@ Future<void> _copySessionCookie(BuildContext context, AppState state) async {
         ),
       ),
     );
+}
+
+Future<void> _editDiscordRpc(BuildContext context, AppState state) async {
+  final controller = TextEditingController(text: state.discordClientId);
+  final value = await showAppleDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const TrText('Discord 应用 ID'),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        decoration: const InputDecoration(hintText: 'Client ID'),
+      ),
+      actions: [
+        SpringTextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const TrText('取消'),
+        ),
+        SpringFilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+          child: const TrText('保存'),
+        ),
+      ],
+    ),
+  );
+  controller.dispose();
+  if (!context.mounted || value == null) return;
+  await state.setDiscordClientId(value);
 }
 
 class _AppSectionLabel extends StatelessWidget {

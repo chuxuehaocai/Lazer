@@ -731,6 +731,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Whether closing the desktop window minimizes it to the taskbar instead of
   /// terminating the process.
   bool minimizeToTaskbarOnClose = false;
+  bool discordRpcEnabled = false;
+  String discordClientId = '';
+
+  Future<void> setDiscordRpcEnabled(bool value) async {
+    if (discordRpcEnabled == value) return;
+    discordRpcEnabled = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lazer_discord_rpc_enabled', value);
+  }
+
+  Future<void> setDiscordClientId(String value) async {
+    final next = value.trim();
+    if (discordClientId == next) return;
+    discordClientId = next;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lazer_discord_client_id', next);
+  }
+
   DesktopCloseAction desktopCloseAction = DesktopCloseAction.ask;
 
   /// TV's double-back action at the browse root. Background is the safer
@@ -1951,6 +1971,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _pauseSchedule.update(scheduledPause);
       _independentPlayback =
           prefs.getBool('lazer_independent_playback') ?? _independentPlayback;
+      discordRpcEnabled = prefs.getBool('lazer_discord_rpc_enabled') ?? false;
+      discordClientId = prefs.getString('lazer_discord_client_id') ?? '';
       skipUnavailableSongs =
           prefs.getBool('lazer_skip_unavailable_songs') ?? skipUnavailableSongs;
       _trackTransition = TrackTransition.fromAutoMix(

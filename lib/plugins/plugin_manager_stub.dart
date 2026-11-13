@@ -18,6 +18,7 @@ class InstalledPlugin {
   });
   final PluginManifest manifest;
   bool enabled;
+  bool websocketGranted = false;
   LuaPluginRuntime? runtime;
   LazerThemeTokens? theme;
   LazerLayoutDefinition? layout;
@@ -43,6 +44,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     String? expectedVersion,
   }) => Future.error(const PluginException('当前平台不支持 ZIP 插件安装。'));
   Future<void> setEnabled(String id, bool enabled) =>
+      Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> setWebsocketPermission(String id, bool granted) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> uninstall(String id) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));

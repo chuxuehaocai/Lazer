@@ -25,6 +25,7 @@ class LuaPluginRuntime {
     required this.dataDirectory,
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
+    this.websocketGranted = false,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -35,6 +36,7 @@ class LuaPluginRuntime {
   /// still validates every URL against the manifest before reaching it.
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
+  final bool websocketGranted;
   Isolate? _isolate;
   ReceivePort? _port;
   SendPort? _commands;
@@ -112,6 +114,7 @@ class LuaPluginRuntime {
           'sources': sources,
           'data': dataDirectory,
           'externalHttp': httpHandler != null,
+          'websocketGranted': websocketGranted,
         },
         onError: port.sendPort,
         onExit: port.sendPort,
@@ -298,6 +301,7 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
             }
           }
         : null,
+    websocketGranted: config['websocketGranted'] == true,
   );
   try {
     await host.initialize();
@@ -349,17 +353,32 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
 }
 
 class _PluginHost {
-  _PluginHost(this.manifest, this.sources, this.dataPath, {this.externalHttp});
+  _PluginHost(
+    this.manifest,
+    this.sources,
+    this.dataPath, {
+    this.externalHttp,
+    this.websocketGranted = false,
+  });
   final PluginManifest manifest;
   final Map<String, String> sources;
   final String dataPath;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   externalHttp;
+  final bool websocketGranted;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   final HttpClient client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 20);
   final Random random = Random.secure();
   Map<String, dynamic> storage = {};
+  final Map<String, WebSocket> _websockets = <String, WebSocket>{};
+
+  void closeSockets() {
+    for (final socket in _websockets.values) {
+      socket.close();
+    }
+    _websockets.clear();
+  }
 
   Future<void> initialize() async {
     if (manifest.storage) {
@@ -463,6 +482,42 @@ class _PluginHost {
       _push(l, result);
       return 1;
     });
+    lua.registerAsync('_websocket', (l) async {
+      final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
+      if (!websocketGranted) {
+        throw const FormatException('WebSocket permission required');
+      }
+      final String operation = spec['operation'] as String? ?? 'open';
+      final String id = spec['id'] as String? ?? 'default';
+      if (operation == 'open') {
+        final uri = Uri.parse(spec['url'] as String);
+        if (!manifest.permitsWebSocket(uri)) {
+          throw const FormatException('WebSocket permission denied');
+        }
+        await _websockets[id]?.close();
+        _websockets[id] = await WebSocket.connect(uri.toString());
+        _push(l, true);
+        return 1;
+      }
+      final socket = _websockets[id];
+      if (socket == null) throw const FormatException('WebSocket is not open');
+      if (operation == 'send') {
+        socket.add(spec['data'] ?? '');
+        _push(l, true);
+        return 1;
+      }
+      if (operation == 'receive') {
+        _push(l, await socket.first.timeout(const Duration(seconds: 30)));
+        return 1;
+      }
+      if (operation == 'close') {
+        await socket.close();
+        _websockets.remove(id);
+        _push(l, true);
+        return 1;
+      }
+      throw const FormatException('Unsupported WebSocket operation');
+    });
     lua.registerAsync('pcall', (l) async {
       final status = await l.pCallAsync(l.getTop() - 1, luaMultret, 0);
       l.pushBoolean(status == ThreadStatus.luaOk);
@@ -489,7 +544,8 @@ host = { json_encode = _json_encode, json_decode = _json_decode,
   now = _now, url_encode = _url_encode, random_hex = _random_hex,
   cookie_compact = _cookie_compact, cookie_field = _cookie_field,
   cookie_merge = _cookie_merge,
-  crypto = _crypto, http = _http, storage_get = _storage_get, storage_set = _storage_set }
+  crypto = _crypto, http = _http, websocket = _websocket,
+  storage_get = _storage_get, storage_set = _storage_set }
 $moduleBuffers
 local modules = {}
 function require(name)

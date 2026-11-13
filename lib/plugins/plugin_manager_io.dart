@@ -26,6 +26,7 @@ class InstalledPlugin {
   });
   final PluginManifest manifest;
   bool enabled;
+  bool websocketGranted = false;
   LuaPluginRuntime? runtime;
   final List<LuaMusicGateway> gateways = [];
   LazerThemeTokens? theme;
@@ -85,6 +86,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           if (p.basename(item.path) != manifest.id) continue;
           final disabled = await File(p.join(item.path, '.disabled')).exists();
           final plugin = InstalledPlugin(manifest, enabled: !disabled);
+          plugin.websocketGranted = await File(
+            p.join(item.path, '.websocket-enabled'),
+          ).exists();
           _plugins.add(plugin);
           if (!disabled) await _start(plugin);
         } catch (_) {
@@ -124,6 +128,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           'lua_plugin_data',
           plugin.manifest.id,
         ),
+        websocketGranted: plugin.websocketGranted,
       );
       plugin.runtime = runtime;
       await runtime.start();
@@ -314,6 +319,32 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         await marker.writeAsString('');
         plugin.error = null;
       }
+      await afterChange?.call();
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> setWebsocketPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    final plugin = _plugins.firstWhere((v) => v.manifest.id == id);
+    if (plugin.websocketGranted == granted) return;
+    busy = true;
+    _notify();
+    try {
+      await beforeChange?.call(id);
+      plugin.runtime?.close();
+      plugin.runtime = null;
+      plugin.gateways.clear();
+      plugin.websocketGranted = granted;
+      final marker = File(p.join((await root).path, id, '.websocket-enabled'));
+      if (granted) {
+        await marker.writeAsString('');
+      } else if (await marker.exists()) {
+        await marker.delete();
+      }
+      if (plugin.enabled) await _start(plugin);
       await afterChange?.call();
     } finally {
       busy = false;
