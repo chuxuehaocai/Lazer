@@ -1139,7 +1139,7 @@ class _AppShellState extends State<AppShell>
                           final EdgeInsets overscan = tvSafeInsets(context);
                           return EdgeInsets.fromLTRB(
                             overscan.left,
-                            overscan.top + 20,
+                            overscan.top + (compact || tablet ? 20 : 0),
                             overscan.right,
                             overscan.bottom,
                           );
@@ -1741,7 +1741,6 @@ class _AppShellState extends State<AppShell>
         _localMusic ||
         _savedAlbums ||
         _networkSources;
-    if (!canGoBack) return const SizedBox.shrink();
     return SizedBox(
       height: 50,
       child: Padding(
@@ -1756,6 +1755,8 @@ class _AppShellState extends State<AppShell>
               ),
               const SizedBox(width: 8),
             ],
+            const Spacer(),
+            _accountButton(apple, radius: 16),
           ],
         ),
       ),
@@ -1771,7 +1772,6 @@ class _AppShellState extends State<AppShell>
         _localMusic ||
         _savedAlbums ||
         _networkSources;
-    if (!canGoBack) return const SizedBox.shrink();
     return SizedBox(
       height: 50,
       child: Padding(
@@ -1785,8 +1785,9 @@ class _AppShellState extends State<AppShell>
                 onPressed: _backToRoot,
               ),
               const SizedBox(width: 10),
-            ] else
-              const SizedBox(width: 8),
+            ],
+            const Spacer(),
+            _accountButton(apple, radius: 15),
           ],
         ),
       ),
