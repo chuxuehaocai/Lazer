@@ -1,7 +1,6 @@
 import '../widgets/build_safe_state.dart';
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -29,7 +28,6 @@ import '../tv/large_screen_widgets.dart';
 import '../tv/tv_mode.dart';
 import '../updates/update_checker.dart';
 import '../updates/update_dialog.dart';
-import '../updates/open_external.dart';
 import '../utils/artwork.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/artwork_image.dart';
@@ -1751,11 +1749,7 @@ class _AppShellState extends State<AppShell>
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 8, 8, 10),
               child: Row(
-                children: <Widget>[
-                  Expanded(child: _accountRow(apple)),
-                  const SizedBox(width: 6),
-                  _themeToggleButton(),
-                ],
+                children: <Widget>[Expanded(child: _accountRow(apple))],
               ),
             ),
             // A direct way into settings, right under the account block; the
@@ -1797,8 +1791,9 @@ class _AppShellState extends State<AppShell>
         _localMusic ||
         _savedAlbums ||
         _networkSources;
+    if (!canGoBack) return const SizedBox.shrink();
     return SizedBox(
-      height: 64,
+      height: 50,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 18),
         child: Row(
@@ -1810,16 +1805,6 @@ class _AppShellState extends State<AppShell>
                 onPressed: _backToRoot,
               ),
               const SizedBox(width: 8),
-            ],
-            Expanded(child: _animatedHeaderTitle(apple, desktop: true)),
-            if (kIsWeb) ...<Widget>[
-              _ToolbarButton(
-                tooltip: 'GitHub 项目',
-                icon: Icons.code_rounded,
-                onPressed: () =>
-                    unawaited(openExternalUrl(UpdateChecker.repositoryUrl)),
-              ),
-              const SizedBox(width: 2),
             ],
           ],
         ),
@@ -1836,6 +1821,7 @@ class _AppShellState extends State<AppShell>
         _localMusic ||
         _savedAlbums ||
         _networkSources;
+    if (!canGoBack) return const SizedBox.shrink();
     return SizedBox(
       height: 50,
       child: Padding(
@@ -1851,108 +1837,8 @@ class _AppShellState extends State<AppShell>
               const SizedBox(width: 10),
             ] else
               const SizedBox(width: 8),
-            Expanded(child: _animatedHeaderTitle(apple)),
-            _ToolbarButton(
-              tooltip: Theme.of(context).brightness == Brightness.dark
-                  ? '浅色外观'
-                  : '深色外观',
-              icon: Theme.of(context).brightness == Brightness.dark
-                  ? Icons.light_mode_rounded
-                  : Icons.dark_mode_rounded,
-              onPressed: () => unawaited(
-                state.setThemeMode(
-                  Theme.of(context).brightness == Brightness.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark,
-                ),
-              ),
-            ),
-            if (kIsWeb) ...<Widget>[
-              const SizedBox(width: 2),
-              _ToolbarButton(
-                tooltip: 'GitHub 项目',
-                icon: Icons.code_rounded,
-                onPressed: () =>
-                    unawaited(openExternalUrl(UpdateChecker.repositoryUrl)),
-              ),
-            ],
-            const SizedBox(width: 2),
-            _accountButton(apple, radius: 15),
           ],
         ),
-      ),
-    );
-  }
-
-  String get _pageTitle {
-    if (_comments) return '评论'; // i18n:key
-    if (_localMusic) return '本地音乐'; // i18n:key
-    // AppSavedAlbumsPage owns the large page title. Keeping a shell title here
-    // creates a second “收藏的专辑” header above it.
-    if (_savedAlbums) return '';
-    if (_networkSources ||
-        _networkSourceId != null ||
-        _networkPodcastId != null) {
-      return '';
-    }
-    if (_chart != null) return _chart!.title;
-    if (_playlist != null) return _playlist!.name;
-    if (_artist != null) {
-      if (_artistSongs) return '全部歌曲'; // i18n:key
-      if (_artistReleases == AlbumReleaseGroup.album) return '全部专辑'; // i18n:key
-      if (_artistReleases == AlbumReleaseGroup.singleEp) {
-        return '全部单曲 / EP'; // i18n:key
-      }
-      return _artist!.name;
-    }
-    return switch (_section) {
-      _AppSection.home => '发现', // i18n:key
-      _AppSection.search => '搜索', // i18n:key
-      _AppSection.library => '',
-      _AppSection.likes => '',
-      _AppSection.settings => '',
-    };
-  }
-
-  Widget _animatedHeaderTitle(
-    AppleSemanticColors apple, {
-    bool desktop = false,
-  }) {
-    final String title = _pageTitle;
-    final TextStyle style = Theme.of(context).textTheme.titleMedium!.copyWith(
-      color: apple.label,
-      fontWeight: FontWeight.w700,
-    );
-    return ClipRect(
-      child: AnimatedSwitcher(
-        duration: MotionTiming.scale(const Duration(milliseconds: 280)),
-        switchInCurve: const AppleSpringCurve(),
-        switchOutCurve: const AppleSpringCurve(),
-        transitionBuilder: (Widget child, Animation<double> animation) {
-          final curved = CurvedAnimation(
-            parent: animation,
-            curve: const AppleSpringCurve(),
-          );
-          return FadeTransition(
-            opacity: curved,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: Offset(desktop ? -.03 : 0, -.18),
-                end: Offset.zero,
-              ).animate(curved),
-              child: child,
-            ),
-          );
-        },
-        child: title.isEmpty
-            ? const SizedBox(key: ValueKey<String>('empty-header-title'))
-            : Text(
-                context.tr(title),
-                key: ValueKey<String>(title),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: style,
-              ),
       ),
     );
   }
@@ -2101,17 +1987,6 @@ class _AppShellState extends State<AppShell>
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _themeToggleButton() {
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
-    return _ToolbarButton(
-      tooltip: dark ? '浅色外观' : '深色外观',
-      icon: dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-      onPressed: () => unawaited(
-        state.setThemeMode(dark ? ThemeMode.light : ThemeMode.dark),
       ),
     );
   }
