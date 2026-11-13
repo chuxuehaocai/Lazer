@@ -2165,7 +2165,7 @@ class _BackgroundImageCropDialogState
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: const Text('调整背景图片'),
+      title: Text(context.tr('调整背景图片')),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -2217,7 +2217,7 @@ class _BackgroundImageCropDialogState
             const SizedBox(height: 14),
             Row(
               children: <Widget>[
-                const Text('放大'),
+                Text(context.tr('放大')),
                 Expanded(
                   child: Slider(
                     value: _scale,
@@ -2232,7 +2232,7 @@ class _BackgroundImageCropDialogState
               ],
             ),
             Text(
-              '拖动图片选择要展示的区域',
+              context.tr('拖动图片选择要展示的区域'),
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
@@ -2243,12 +2243,12 @@ class _BackgroundImageCropDialogState
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(context.tr('取消')),
         ),
         FilledButton(
           onPressed: () =>
               Navigator.of(context).pop((x: _x, y: _y, scale: _scale)),
-          child: const Text('保存'),
+          child: Text(context.tr('保存')),
         ),
       ],
     );

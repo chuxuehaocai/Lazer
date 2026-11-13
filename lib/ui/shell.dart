@@ -896,9 +896,9 @@ class _AppShellState extends State<AppShell>
       ScaffoldMessenger.maybeOf(context)
         ?..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('再按一次返回退出'),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text(context.tr('再按一次返回退出')),
+            duration: const Duration(seconds: 2),
           ),
         );
       return;
