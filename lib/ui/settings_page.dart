@@ -130,7 +130,7 @@ extension _SettingsCategoryLabels on _SettingsCategory {
   };
 
   String get detail => switch (this) {
-    _SettingsCategory.interface => '设备形态、布局、字体和缩放',
+    _SettingsCategory.interface => '布局、字体和缩放',
     _SettingsCategory.appearance => '主题、配色和动态背景',
     _SettingsCategory.playback => '音质、切歌衔接和滚动手感',
     _SettingsCategory.lyrics => '歌词显示、间距和歌词窗口',
@@ -473,51 +473,6 @@ class _SettingsOverview extends StatelessWidget {
                               },
                             ),
                           ),
-                        _AppSettingRow(
-                          label: '设备形态',
-                          subtitle: state.surface.detail,
-                          trailing: DropdownButton<AppSurface>(
-                            key: ValueKey<AppSurface>(state.surface),
-                            value: state.surface,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
-                            items: <DropdownMenuItem<AppSurface>>[
-                              for (final AppSurface surface
-                                  in AppSurface.values)
-                                DropdownMenuItem<AppSurface>(
-                                  value: surface,
-                                  child: TrText(surface.label),
-                                ),
-                            ],
-                            onChanged: (AppSurface? value) {
-                              if (value != null) {
-                                unawaited(state.setSurface(value));
-                              }
-                            },
-                          ),
-                        ),
-                        _AppSettingRow(
-                          label: '界面布局',
-                          subtitle: state.uiMode.detail,
-                          trailing: DropdownButton<AppUiMode>(
-                            key: ValueKey<AppUiMode>(state.uiMode),
-                            value: state.uiMode,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
-                            items: <DropdownMenuItem<AppUiMode>>[
-                              for (final AppUiMode mode in AppUiMode.values)
-                                DropdownMenuItem<AppUiMode>(
-                                  value: mode,
-                                  child: TrText(mode.label),
-                                ),
-                            ],
-                            onChanged: (AppUiMode? value) {
-                              if (value != null) {
-                                unawaited(state.setUiMode(value));
-                              }
-                            },
-                          ),
-                        ),
                         const LanRemoteSettings(),
                         _AppSliderRow(
                           key: const ValueKey('dpi-scale-slider'),
@@ -679,30 +634,6 @@ class _SettingsOverview extends StatelessWidget {
                               ? null
                               : (double value) =>
                                     unawaited(state.setAppUiAlpha(value)),
-                        ),
-                        _AppSliderRow(
-                          key: const ValueKey('header-opacity'),
-                          label: 'Header 不透明度',
-                          valueText: '${(state.headerOpacity * 100).round()}%',
-                          subtitle: '数值越小，页面内容越容易透过 Header 显示',
-                          value: state.headerOpacity,
-                          min: kHeaderOpacityMin,
-                          max: kHeaderOpacityMax,
-                          divisions: 15,
-                          onChanged: (double value) =>
-                              unawaited(state.setHeaderOpacity(value)),
-                        ),
-                        _AppSliderRow(
-                          key: const ValueKey('header-blur'),
-                          label: 'Header 背景模糊',
-                          valueText: '${state.headerBlur.round()} px',
-                          subtitle: '只影响移动端和平板端 Header',
-                          value: state.headerBlur,
-                          min: kHeaderBlurMin,
-                          max: kHeaderBlurMax,
-                          divisions: 16,
-                          onChanged: (double value) =>
-                              unawaited(state.setHeaderBlur(value)),
                         ),
                         _BackgroundPreferences(state: state, player: false),
                         // The flowing canvas is the app's only continuously
@@ -1788,7 +1719,7 @@ class _VersionSecretTileState extends State<_VersionSecretTile> {
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(7),
         child: Image.asset(
-          'assets/app_icon.png',
+          'assets/zako.png',
           width: 30,
           height: 30,
           fit: BoxFit.cover,

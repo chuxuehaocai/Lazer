@@ -112,6 +112,7 @@ flutter:
   assets:
     - assets/l10n/
     - assets/app_icon.png
+    - assets/zako.png
     - windows/runner/resources/app_icon.ico
     - assets/antiresell.png
     - assets/chart_logos/

@@ -251,43 +251,46 @@ void main() {
     test(
       'desktop close action can remember exiting instead of backgrounding',
       () async {
-      final state = AppState(catalog: _Catalog());
-      addTearDown(state.dispose);
-      await state.setDesktopCloseAction(DesktopCloseAction.exit);
-      expect(state.desktopCloseAction, DesktopCloseAction.exit);
-      expect(state.minimizeToTaskbarOnClose, isFalse);
+        final state = AppState(catalog: _Catalog());
+        addTearDown(state.dispose);
+        await state.setDesktopCloseAction(DesktopCloseAction.exit);
+        expect(state.desktopCloseAction, DesktopCloseAction.exit);
+        expect(state.minimizeToTaskbarOnClose, isFalse);
 
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('lazer_desktop_close_action'), 'exit');
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('lazer_desktop_close_action'), 'exit');
       },
     );
 
-    test('tray menu items have translations across supported locales', () async {
-      TestWidgetsFlutterBinding.ensureInitialized();
-      final en = await AppLocalizations.loadLocale(const Locale('en'));
-      expect(en.text('播放'), 'Play');
-      expect(en.text('暂停'), 'Pause');
-      expect(en.text('上一首'), 'Previous');
-      expect(en.text('下一首'), 'Next');
-      expect(en.text('显示主界面'), 'Show Lazer');
-      expect(en.text('退出 Lazer'), 'Quit Lazer');
-      expect(en.text('暂未播放歌曲'), 'No track playing');
+    test(
+      'tray menu items have translations across supported locales',
+      () async {
+        TestWidgetsFlutterBinding.ensureInitialized();
+        final en = await AppLocalizations.loadLocale(const Locale('en'));
+        expect(en.text('播放'), 'Play');
+        expect(en.text('暂停'), 'Pause');
+        expect(en.text('上一首'), 'Previous');
+        expect(en.text('下一首'), 'Next');
+        expect(en.text('显示主界面'), 'Show Lazer');
+        expect(en.text('退出 Lazer'), 'Quit Lazer');
+        expect(en.text('暂未播放歌曲'), 'No track playing');
 
-      final zhHant = await AppLocalizations.loadLocale(
-        const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
-      );
-      expect(zhHant.text('暂停'), '暫停');
-      expect(zhHant.text('显示主界面'), '顯示主畫面');
-      expect(zhHant.text('退出 Lazer'), '結束 Lazer');
+        final zhHant = await AppLocalizations.loadLocale(
+          const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
+        );
+        expect(zhHant.text('暂停'), '暫停');
+        expect(zhHant.text('显示主界面'), '顯示主畫面');
+        expect(zhHant.text('退出 Lazer'), '結束 Lazer');
 
-      final ja = await AppLocalizations.loadLocale(const Locale('ja'));
-      expect(ja.text('播放'), '再生');
-      expect(ja.text('暂停'), '一時停止');
-      expect(ja.text('上一首'), '前の曲');
-      expect(ja.text('下一首'), '次の曲');
-      expect(ja.text('显示主界面'), 'Lazer を表示');
-      expect(ja.text('退出 Lazer'), 'Lazer を終了');
-    });
+        final ja = await AppLocalizations.loadLocale(const Locale('ja'));
+        expect(ja.text('播放'), '再生');
+        expect(ja.text('暂停'), '一時停止');
+        expect(ja.text('上一首'), '前の曲');
+        expect(ja.text('下一首'), '次の曲');
+        expect(ja.text('显示主界面'), 'Lazer を表示');
+        expect(ja.text('退出 Lazer'), 'Lazer を終了');
+      },
+    );
   });
 
   testWidgets('ui scaling lays the interface out at workspace / scale', (
@@ -462,160 +465,126 @@ void main() {
     expect(UiMetrics.autoScaleOf(probe!), kDpiScaleDefault);
   });
 
-  testWidgets('the legacy settings drive device form, layout and dpi scale', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(900, 2400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final state = AppState(catalog: _Catalog());
-    addTearDown(state.dispose);
-    await tester.pumpWidget(
-      AnimatedBuilder(
-        animation: state,
-        builder: (BuildContext context, _) => MaterialApp(
-          theme: buildAppleTheme(),
-          builder: (BuildContext context, Widget? child) =>
-              UiScaling(state: state, child: child!),
-          home: Scaffold(body: AppSettingsPage(state: state)),
+  testWidgets(
+    'the unified layout settings drive rail placement and dpi scale',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final state = AppState(catalog: _Catalog());
+      addTearDown(state.dispose);
+      await tester.pumpWidget(
+        AnimatedBuilder(
+          animation: state,
+          builder: (BuildContext context, _) => MaterialApp(
+            theme: buildAppleTheme(),
+            builder: (BuildContext context, Widget? child) =>
+                UiScaling(state: state, child: child!),
+            home: Scaffold(body: AppSettingsPage(state: state)),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    // Layout dropdown: the forced modes are the three documented choices.
-    final layoutDropdown = find.byType(DropdownButton<AppUiMode>);
-    expect(layoutDropdown, findsOneWidget);
-    await tester.tap(layoutDropdown);
-    await tester.pumpAndSettle();
-    expect(find.text('强制桌面端'), findsOneWidget);
-    await tester.tap(find.text('强制移动端').last);
-    await tester.pumpAndSettle();
-    expect(state.uiMode, AppUiMode.mobile);
-    expect(
-      (await SharedPreferences.getInstance()).getString('lazer_ui_mode'),
-      'mobile',
-    );
+      final layoutDropdown = find.byType(DropdownButton<AppLayoutStyle>);
+      expect(layoutDropdown, findsOneWidget);
+      await tester.tap(layoutDropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('手机端').last);
+      await tester.pumpAndSettle();
+      expect(state.layoutStyle, AppLayoutStyle.phone);
+      expect(
+        (await SharedPreferences.getInstance()).getString('lazer_layout_style'),
+        'phone',
+      );
+      expect(find.byType(DropdownButton<AppUiMode>), findsNothing);
+      expect(find.byType(DropdownButton<AppSurface>), findsNothing);
 
-    // Dragging the slider pins a manual scale and turns the auto mode off.
-    expect(state.autoDpiScale, isTrue);
-    final dpiSlider = find.descendant(
-      of: find.byKey(const ValueKey('dpi-scale-slider')),
-      matching: find.byType(Slider),
-    );
-    await tester.drag(dpiSlider, const Offset(60, 0));
-    await tester.pumpAndSettle();
-    expect(state.autoDpiScale, isFalse);
-    expect(state.dpiScale, greaterThan(1));
+      // Dragging the slider pins a manual scale and turns the auto mode off.
+      expect(state.autoDpiScale, isTrue);
+      final dpiSlider = find.descendant(
+        of: find.byKey(const ValueKey('dpi-scale-slider')),
+        matching: find.byType(Slider),
+      );
+      await tester.drag(dpiSlider, const Offset(60, 0));
+      await tester.pumpAndSettle();
+      expect(state.autoDpiScale, isFalse);
+      expect(state.dpiScale, greaterThan(1));
 
-    // The switch works in both directions.
-    await tester.tap(
-      find.descendant(
-        of: find.byKey(const ValueKey('auto-dpi-switch')),
-        matching: find.byType(Switch),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(state.autoDpiScale, isTrue);
-    await tester.tap(
-      find.descendant(
-        of: find.byKey(const ValueKey('auto-dpi-switch')),
-        matching: find.byType(Switch),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(state.autoDpiScale, isFalse);
+      // The switch works in both directions.
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('auto-dpi-switch')),
+          matching: find.byType(Switch),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(state.autoDpiScale, isTrue);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('auto-dpi-switch')),
+          matching: find.byType(Switch),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(state.autoDpiScale, isFalse);
 
-    // Device form: choosing the car raises the floor the slider may reach.
-    expect(tester.widget<Slider>(dpiSlider).min, kDpiScaleMin);
-    final surfaceDropdown = find.byType(DropdownButton<AppSurface>);
-    await tester.tap(surfaceDropdown);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('车机').last);
-    await tester.pumpAndSettle();
-    expect(state.surface, AppSurface.car);
-    expect(
-      (await SharedPreferences.getInstance()).getString('lazer_surface'),
-      'car',
-    );
-    expect(UiMetrics.carOf(tester.element(surfaceDropdown)), isTrue);
-    expect(find.textContaining('车机形态已把界面放大到'), findsOneWidget);
-    expect(tester.widget<Slider>(dpiSlider).min, kCarScaleMin);
-    expect(
-      tester.widget<Slider>(dpiSlider).value,
-      greaterThanOrEqualTo(kCarScaleMin),
-    );
+      await tester.tap(layoutDropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('平板端').last);
+      await tester.pumpAndSettle();
+      expect(state.layoutStyle, AppLayoutStyle.tablet);
+      expect(
+        (await SharedPreferences.getInstance()).getString('lazer_layout_style'),
+        'tablet',
+      );
+      final railDropdown = find.byType(DropdownButton<AppTabletRailPosition>);
+      expect(railDropdown, findsOneWidget);
+      await tester.tap(railDropdown);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('右侧').last);
+      await tester.pumpAndSettle();
+      expect(state.tabletRailPosition, AppTabletRailPosition.right);
+      expect(
+        (await SharedPreferences.getInstance()).getString(
+          'lazer_tablet_rail_position',
+        ),
+        'right',
+      );
 
-    // The floor holds whatever the manual value is: the applied scale can
-    // never fall back to desktop density on a head unit.
-    BuildContext settingsContext = tester.element(surfaceDropdown);
-    expect(UiMetrics.scaleOf(settingsContext), kCarScaleMin);
-    await state.setDpiScale(0.9);
-    await tester.pumpAndSettle();
-    settingsContext = tester.element(surfaceDropdown);
-    expect(state.dpiScale, 0.9);
-    expect(
-      UiMetrics.scaleOf(settingsContext),
-      kCarScaleMin,
-      reason: 'the car floor overrides a smaller manual value',
-    );
-    expect(tester.widget<Slider>(dpiSlider).value, kCarScaleMin);
-    expect(find.text('135%'), findsWidgets);
+      // Reset returns to the shipped scale default.
+      await tester.tap(find.byKey(const ValueKey('dpi-scale-reset')));
+      await tester.pumpAndSettle();
+      expect(state.dpiScale, kDpiScaleDefault);
+      expect(state.autoDpiScale, isTrue);
 
-    // 大屏幕模式 keeps the standard density: no car-style floor is applied,
-    // while the remote input model is layered on top.
-    await tester.tap(surfaceDropdown);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('大屏幕模式').last);
-    await tester.pumpAndSettle();
-    expect(state.surface, AppSurface.tv);
-    expect(UiMetrics.tvOf(tester.element(surfaceDropdown)), isTrue);
-    expect(find.textContaining('车机形态已把界面放大到'), findsNothing);
-    expect(tester.widget<Slider>(dpiSlider).min, kDpiScaleMin);
-    settingsContext = tester.element(surfaceDropdown);
-    expect(
-      UiMetrics.scaleOf(settingsContext),
-      0.9,
-      reason: 'the manual scale survives; television adds no floor',
-    );
-
-    // Reset returns to the shipped 100% default, and standard restores 80%.
-    await tester.tap(find.byKey(const ValueKey('dpi-scale-reset')));
-    await tester.pumpAndSettle();
-    expect(state.dpiScale, kDpiScaleDefault);
-    expect(state.autoDpiScale, isTrue);
-
-    final speedSlider = find.descendant(
-      of: find.byKey(const ValueKey('animation-speed-slider')),
-      matching: find.byType(Slider),
-    );
-    expect(tester.widget<Slider>(speedSlider).min, MotionTiming.minSpeed);
-    expect(tester.widget<Slider>(speedSlider).max, MotionTiming.maxSpeed);
-    expect(tester.widget<Slider>(speedSlider).value, MotionTiming.defaultSpeed);
-    await tester.drag(speedSlider, const Offset(80, 0));
-    await tester.pumpAndSettle();
-    expect(state.animationSpeed, greaterThan(1));
-    expect(MotionTiming.speed, state.animationSpeed);
-    expect(
-      (await SharedPreferences.getInstance()).getDouble(
-        AppState.animationSpeedKey,
-      ),
-      state.animationSpeed,
-    );
-    await tester.tap(find.byKey(const ValueKey('animation-speed-reset')));
-    await tester.pumpAndSettle();
-    expect(state.animationSpeed, MotionTiming.defaultSpeed);
-    expect(MotionTiming.speed, MotionTiming.defaultSpeed);
-
-    await tester.tap(surfaceDropdown);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('标准').last);
-    await tester.pumpAndSettle();
-    settingsContext = tester.element(surfaceDropdown);
-    expect(UiMetrics.carOf(settingsContext), isFalse);
-    expect(tester.widget<Slider>(dpiSlider).min, kDpiScaleMin);
-    expect(tester.takeException(), isNull);
-  });
+      final speedSlider = find.descendant(
+        of: find.byKey(const ValueKey('animation-speed-slider')),
+        matching: find.byType(Slider),
+      );
+      expect(tester.widget<Slider>(speedSlider).min, MotionTiming.minSpeed);
+      expect(tester.widget<Slider>(speedSlider).max, MotionTiming.maxSpeed);
+      expect(
+        tester.widget<Slider>(speedSlider).value,
+        MotionTiming.defaultSpeed,
+      );
+      await tester.drag(speedSlider, const Offset(80, 0));
+      await tester.pumpAndSettle();
+      expect(state.animationSpeed, greaterThan(1));
+      expect(MotionTiming.speed, state.animationSpeed);
+      expect(
+        (await SharedPreferences.getInstance()).getDouble(
+          AppState.animationSpeedKey,
+        ),
+        state.animationSpeed,
+      );
+      await tester.tap(find.byKey(const ValueKey('animation-speed-reset')));
+      await tester.pumpAndSettle();
+      expect(state.animationSpeed, MotionTiming.defaultSpeed);
+      expect(MotionTiming.speed, MotionTiming.defaultSpeed);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('minimize to taskbar switch toggles setting on desktop', (
     tester,

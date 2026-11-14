@@ -29,6 +29,15 @@ Playlist _playlist(int index) => Playlist(
   trackCount: 3,
 );
 
+const Album _album = Album(
+  id: 'album-1',
+  title: '新发行专辑',
+  artist: '测试歌手',
+  year: '2026',
+  coverSeed: 2,
+  note: '',
+);
+
 MusicChart _chart(int index) => MusicChart(
   id: 'chart$index',
   title: '榜单 $index',
@@ -46,7 +55,8 @@ class _Catalog extends Catalog {
     featuredTracks: const <Track>[_track],
     quick: const <Track>[_track],
     playlists: <Playlist>[for (int i = 0; i < 12; i++) _playlist(i)],
-    albums: const <Album>[],
+    albums: const <Album>[_album],
+    editorialPlaylists: <Playlist>[_playlist(20)],
   );
 
   @override
@@ -212,4 +222,32 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('plugin shelves render without optional capability flags', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final AppState state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+
+    expect(state.supportsMusic(MusicCapability.homeFeed), isFalse);
+    await tester.pumpWidget(_app(state));
+    await tester.pumpAndSettle();
+
+    final Finder homeScroll = find
+        .descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    for (final String label in <String>['为你推荐的新发行', '编辑精选']) {
+      final Finder section = find.text(label).first;
+      await tester.scrollUntilVisible(section, 300, scrollable: homeScroll);
+      await tester.pumpAndSettle();
+      expect(section, findsOneWidget);
+    }
+    expect(tester.takeException(), isNull);
+  });
 }

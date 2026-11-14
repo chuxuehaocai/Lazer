@@ -154,11 +154,19 @@ class _AppHomePageState extends State<AppHomePage>
     final bool supportsCharts = widget.state.supportsMusic(
       MusicCapability.charts,
     );
+    final bool hasFeedShelves =
+        feed.quick.isNotEmpty ||
+        feed.daily.isNotEmpty ||
+        feed.recommended.isNotEmpty ||
+        feed.playlists.isNotEmpty ||
+        feed.albums.isNotEmpty ||
+        feed.editorialPlaylists.isNotEmpty;
     final bool showPluginHome =
-        supportsHomeFeed || supportsRecommendations || supportsRadio;
-    final List<Playlist> recommendations = supportsRecommendations
-        ? uniquePlaylists(feed.recommended)
-        : const <Playlist>[];
+        supportsHomeFeed ||
+        supportsRecommendations ||
+        supportsRadio ||
+        hasFeedShelves;
+    final List<Playlist> recommendations = uniquePlaylists(feed.recommended);
     final List<Track> recent = widget.state.recentTracks;
     final ArtistRef? stationArtist = recent
         .expand((track) => track.artists)
@@ -198,7 +206,10 @@ class _AppHomePageState extends State<AppHomePage>
                         ...feed.albums.map((album) => album.coverUrl),
                       ],
                       onDaily:
-                          (supportsHomeFeed || supportsRecommendations) &&
+                          (supportsHomeFeed ||
+                                  supportsRecommendations ||
+                                  feed.quick.isNotEmpty ||
+                                  feed.daily.isNotEmpty) &&
                               (feed.quick.isNotEmpty || feed.daily.isNotEmpty)
                           ? () {
                               if (!widget.state.signedIn) {
@@ -241,8 +252,7 @@ class _AppHomePageState extends State<AppHomePage>
                     )
                   else
                     const AppNotice(message: '还没有最近播放记录'),
-                  if ((supportsHomeFeed || supportsRecommendations) &&
-                      feed.albums.isNotEmpty) ...<Widget>[
+                  if (feed.albums.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 36),
                     const AppSectionHeader(title: '为你推荐的新发行'),
                     const SizedBox(height: 14),
@@ -252,8 +262,7 @@ class _AppHomePageState extends State<AppHomePage>
                       compact: compact,
                     ),
                   ],
-                  if (supportsHomeFeed &&
-                      feed.editorialPlaylists.isNotEmpty) ...<Widget>[
+                  if (feed.editorialPlaylists.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 38),
                     const AppSectionHeader(title: '编辑精选'),
                     const SizedBox(height: 14),
@@ -284,8 +293,7 @@ class _AppHomePageState extends State<AppHomePage>
                         ),
                       ),
                   ],
-                  if (supportsRecommendations &&
-                      recommendations.isNotEmpty) ...<Widget>[
+                  if (recommendations.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 38),
                     const AppSectionHeader(title: '猜你喜欢'),
                     const SizedBox(height: 14),

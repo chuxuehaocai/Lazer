@@ -126,6 +126,39 @@ void main() {
     expect(seekBar().progress, closeTo(.5, 0.001));
   });
 
+  testWidgets('compact cover accent follows playback ticks', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final state = _TickState();
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(brightness: Brightness.dark),
+        home: AppShell(state: state),
+      ),
+    );
+    await tester.pump();
+
+    final Finder cover = find.byKey(
+      const ValueKey<String>('bottom-track-cover'),
+    );
+    expect(cover, findsOneWidget);
+    CircularProgressIndicator ring() =>
+        tester.widget<CircularProgressIndicator>(
+          find.descendant(
+            of: cover,
+            matching: find.byType(CircularProgressIndicator),
+          ),
+        );
+    expect(ring().value, closeTo(0, 0.001));
+
+    state.tick(const Duration(seconds: 30));
+    await tester.pump();
+    expect(ring().value, closeTo(1 / 6, 0.001));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('player bar skips unrelated reports and parent rebuilds', (
     tester,
   ) async {

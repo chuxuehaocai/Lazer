@@ -632,8 +632,7 @@ void main() {
 
     for (final String label in <String>[
       '配色',
-      '设备形态',
-      '界面布局',
+      '布局样式',
       'DPI 缩放',
       '自动调节 DPI 缩放',
       '动画速率',
@@ -654,6 +653,10 @@ void main() {
     ]) {
       expect(find.text(label), findsOneWidget, reason: 'missing $label');
     }
+    expect(find.text('设备形态'), findsNothing);
+    expect(find.text('界面布局'), findsNothing);
+    expect(find.text('Header 不透明度'), findsNothing);
+    expect(find.text('Header 背景模糊'), findsNothing);
     expect(find.text('歌词同时显示封面'), findsNothing);
     expect(find.text('70%'), findsOneWidget);
     // The precision slider reads its stored percentage and reports the mesh
@@ -688,7 +691,7 @@ void main() {
           (Widget widget) =>
               widget is Image &&
               widget.image is AssetImage &&
-              (widget.image as AssetImage).assetName == 'assets/app_icon.png',
+              (widget.image as AssetImage).assetName == 'assets/zako.png',
         ),
       ),
       findsOneWidget,

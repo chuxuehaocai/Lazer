@@ -2546,7 +2546,7 @@ class _BottomTrackCover extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         excludeFromSemantics: true,
         child: AnimatedBuilder(
-          animation: state,
+          animation: state.all,
           builder: (BuildContext context, _) => SizedBox.square(
             dimension: 56,
             child: Stack(
