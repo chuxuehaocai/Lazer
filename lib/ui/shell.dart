@@ -1270,7 +1270,6 @@ class _AppShellState extends State<AppShell>
               Expanded(
                 child: Column(
                   children: <Widget>[
-                    _desktopToolbar(apple),
                     Expanded(child: RepaintBoundary(child: _content())),
                   ],
                 ),
@@ -1288,48 +1287,6 @@ class _AppShellState extends State<AppShell>
           ),
         ),
       ],
-    );
-  }
-
-  Widget _desktopToolbar(AppleSemanticColors apple) {
-    final bool canGoBack =
-        _playlist != null ||
-        _artist != null ||
-        _chart != null ||
-        _comments ||
-        _localMusic ||
-        _savedAlbums ||
-        _networkSources;
-    return SizedBox(
-      height: 50,
-      child: AppleGlass(
-        borderRadius: BorderRadius.zero,
-        blurSigma: state.headerBlur,
-        color: apple.background.withValues(alpha: _headerTintAlpha),
-        border: Border(
-          bottom: BorderSide(
-            color: apple.separator.withValues(alpha: .45),
-            width: .5,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          child: Row(
-            children: <Widget>[
-              if (canGoBack) ...<Widget>[
-                _ToolbarButton(
-                  tooltip: '返回',
-                  icon: Icons.chevron_left_rounded,
-                  onPressed: _backToRoot,
-                ),
-                const SizedBox(width: 8),
-              ],
-              const Spacer(),
-              _accountButton(apple, radius: 16),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -1826,7 +1783,7 @@ class _AppShellState extends State<AppShell>
       child: AppleGlass(
         borderRadius: BorderRadius.zero,
         blurSigma: state.headerBlur,
-        color: apple.background.withValues(alpha: _headerTintAlpha),
+        color: apple.background.withValues(alpha: state.headerOpacity * .04),
         border: Border(
           bottom: BorderSide(
             color: apple.separator.withValues(alpha: .45),
@@ -1853,12 +1810,6 @@ class _AppShellState extends State<AppShell>
       ),
     );
   }
-
-  /// Matches the page veil so the header reads as the same surface over the
-  /// album backdrop instead of becoming a separate dark strip.
-  double get _headerTintAlpha => state.backgroundMode == AppBackgroundMode.off
-      ? 1
-      : (state.headerOpacity * .15).clamp(0.0, 1.0);
 
   Widget _railPlaylists(AppleSemanticColors apple) {
     final collections = state.collections;
