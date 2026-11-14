@@ -5,9 +5,7 @@ import 'package:flutter/services.dart';
 import '../animation/apple_spring.dart';
 import '../navigation/system_back_gesture.dart';
 
-import '../theme/apple_design.dart';
 import 'accessible_controls.dart';
-import 'apple_ui.dart';
 import 'shared_browse_background.dart';
 
 /// Keeps desktop settings inside the shell, including its navigation and player.
@@ -267,7 +265,6 @@ class SettingsDetailScaffold extends StatelessWidget {
     final close = context
         .dependOnInheritedWidgetOfExactType<_SettingsDetailScope>()
         ?.close;
-    final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final Widget? trailing = actions.isEmpty
         ? null
         : Wrap(spacing: 8, children: actions);
@@ -280,35 +277,32 @@ class SettingsDetailScaffold extends StatelessWidget {
           minimum: const EdgeInsets.only(top: 8),
           child: Stack(
             children: <Widget>[
-              if (Navigator.of(context).canPop())
-                Positioned(
-                  top: 16,
-                  left: 8,
-                  child: AccessibleIconButton(
-                    key: const ValueKey('settings-detail-back'),
-                    tooltip: '返回',
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    icon: const Icon(Icons.chevron_left_rounded),
-                  ),
+              Positioned(
+                top: 8,
+                left: 8,
+                right: 8,
+                child: Row(
+                  children: <Widget>[
+                    if (Navigator.of(context).canPop())
+                      AccessibleIconButton(
+                        key: const ValueKey('settings-detail-back'),
+                        tooltip: '返回',
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.chevron_left_rounded),
+                      ),
+                    const Spacer(),
+                    ?trailing,
+                  ],
                 ),
+              ),
               Positioned.fill(
                 child: Padding(
                   padding: EdgeInsets.only(
-                    top: Navigator.of(context).canPop() ? 68 : 0,
+                    top: Navigator.of(context).canPop() ? 56 : 0,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      ApplePageTitle(
-                        title: title,
-                        // The pushed form is the compact one, so the
-                        // heading shares the pages' 20 dp gutter.
-                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-                        trailing: trailing,
-                      ),
-                      Divider(height: 1, thickness: .5, color: apple.separator),
-                      Expanded(child: child),
-                    ],
+                    children: <Widget>[Expanded(child: child)],
                   ),
                 ),
               ),
@@ -327,7 +321,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: EdgeInsets.fromLTRB(inset - 12, 28, inset, 0),
+                padding: EdgeInsets.fromLTRB(inset - 12, 12, inset, 0),
                 child: Row(
                   children: [
                     AccessibleIconButton(
@@ -336,15 +330,11 @@ class SettingsDetailScaffold extends StatelessWidget {
                       onPressed: close,
                       icon: const Icon(Icons.chevron_left_rounded),
                     ),
+                    const Spacer(),
+                    ?trailing,
                   ],
                 ),
               ),
-              ApplePageTitle(
-                title: title,
-                padding: EdgeInsets.fromLTRB(inset, 4, inset, 20),
-                trailing: trailing,
-              ),
-              Divider(height: 1, thickness: .5, color: apple.separator),
               Expanded(child: child),
             ],
           );

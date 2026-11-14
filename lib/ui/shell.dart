@@ -1305,7 +1305,7 @@ class _AppShellState extends State<AppShell>
       child: AppleGlass(
         borderRadius: BorderRadius.zero,
         blurSigma: state.headerBlur,
-        color: apple.background.withValues(alpha: state.headerOpacity),
+        color: apple.background.withValues(alpha: _headerTintAlpha),
         border: Border(
           bottom: BorderSide(
             color: apple.separator.withValues(alpha: .45),
@@ -1826,7 +1826,7 @@ class _AppShellState extends State<AppShell>
       child: AppleGlass(
         borderRadius: BorderRadius.zero,
         blurSigma: state.headerBlur,
-        color: apple.background.withValues(alpha: state.headerOpacity),
+        color: apple.background.withValues(alpha: _headerTintAlpha),
         border: Border(
           bottom: BorderSide(
             color: apple.separator.withValues(alpha: .45),
@@ -1853,6 +1853,12 @@ class _AppShellState extends State<AppShell>
       ),
     );
   }
+
+  /// Matches the page veil so the header reads as the same surface over the
+  /// album backdrop instead of becoming a separate dark strip.
+  double get _headerTintAlpha => state.backgroundMode == AppBackgroundMode.off
+      ? 1
+      : (state.uiAlpha * state.headerOpacity).clamp(0.0, 1.0);
 
   Widget _railPlaylists(AppleSemanticColors apple) {
     final collections = state.collections;
