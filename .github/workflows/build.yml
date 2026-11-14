@@ -621,6 +621,8 @@ jobs:
             --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Verify the app exports the native engine ABI
         run: python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
+      - name: Verify app and extension bundle metadata
+        run: python3 ci/verify-ios-bundle.py --app build/ios/iphoneos/Runner.app
       - name: Create unsigned IPA with the required Payload directory
         shell: bash
         run: |
@@ -631,6 +633,7 @@ jobs:
           (cd dist/ios && zip -qry ../Lazer-iOS-aarch64.ipa Payload)
           unzip -l dist/Lazer-iOS-aarch64.ipa | grep 'Payload/Runner.app/Info.plist'
           # Gate on the binary from the finished IPA, not only the build tree.
+          python3 ci/verify-ios-bundle.py --ipa dist/Lazer-iOS-aarch64.ipa
           python3 ci/verify-ios-audio.py --ipa dist/Lazer-iOS-aarch64.ipa
           python3 ci/verify-package-contents.py dist/Lazer-iOS-aarch64.ipa
           (cd dist && shasum -a 256 Lazer-iOS-aarch64.ipa > Lazer-iOS-aarch64.ipa.sha256)
