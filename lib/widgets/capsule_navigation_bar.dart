@@ -117,7 +117,6 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
           child: AppleGlass(
             borderRadius: BorderRadius.circular(999),
             color: apple.glassStrong,
-            border: Border.all(color: apple.separator, width: .5),
             child: Padding(
               padding: const EdgeInsets.all(6),
               child: SizedBox(
@@ -144,10 +143,6 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
                           decoration: BoxDecoration(
                             color: selectedColor,
                             borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: apple.accent.withValues(alpha: .28),
-                              width: .75,
-                            ),
                           ),
                         ),
                       ),

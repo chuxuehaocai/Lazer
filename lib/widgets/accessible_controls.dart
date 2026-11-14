@@ -61,12 +61,42 @@ class AccessibleSlider extends StatefulWidget {
 class _AccessibleSliderState extends State<AccessibleSlider> {
   SliderDetents? _detents;
   final Set<int> _dragPointers = <int>{};
+  bool _sliderDragging = false;
   late double _displayValue = widget.value;
 
   @override
   void didUpdateWidget(covariant AccessibleSlider oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.value != oldWidget.value) _displayValue = widget.value;
+    // During a drag the parent may rebuild with the value from the previous
+    // frame (for example while a setting is being persisted). Do not replace
+    // the thumb's local value with that stale value until the gesture ends.
+    if (widget.value != oldWidget.value &&
+        !_sliderDragging &&
+        _dragPointers.isEmpty) {
+      _displayValue = widget.value;
+    }
+  }
+
+  void _handleChangeStart(double value, FeedbackCallback? feedback) {
+    _sliderDragging = true;
+    _displayValue = value.clamp(widget.min, widget.max);
+    if (widget.detentFeedback) {
+      _detents = SliderDetents(
+        min: widget.min,
+        max: widget.max,
+        steps: widget.divisions,
+      )..begin(value);
+      if (feedback != null) unawaited(feedback(detent: true));
+    }
+    widget.onChangeStart?.call(value);
+  }
+
+  void _handleChangeEnd(double value) {
+    _detents?.end();
+    _detents = null;
+    widget.onChangeEnd?.call(value);
+    _sliderDragging = false;
+    if (mounted) setState(() {});
   }
 
   void _handleChanged(double value, FeedbackCallback? feedback) {
@@ -120,14 +150,19 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
                   onPointerDown: (PointerDownEvent event) {
                     if (widget.onChanged != null) {
                       _dragPointers.add(event.pointer);
+                      _sliderDragging = true;
                     }
                   },
                   onPointerMove: (PointerMoveEvent event) =>
                       _updateFromPointer(event, constraints.maxWidth, feedback),
-                  onPointerUp: (PointerUpEvent event) =>
-                      _dragPointers.remove(event.pointer),
-                  onPointerCancel: (PointerCancelEvent event) =>
-                      _dragPointers.remove(event.pointer),
+                  onPointerUp: (PointerUpEvent event) {
+                    _dragPointers.remove(event.pointer);
+                    if (_dragPointers.isEmpty) _sliderDragging = false;
+                  },
+                  onPointerCancel: (PointerCancelEvent event) {
+                    _dragPointers.remove(event.pointer);
+                    if (_dragPointers.isEmpty) _sliderDragging = false;
+                  },
                   child: Slider(
                     value: _displayValue.clamp(widget.min, widget.max),
                     min: widget.min,
@@ -137,30 +172,12 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
                     label: widget.label == null
                         ? null
                         : context.tr(widget.label!),
-                    onChangeStart: widget.detentFeedback
-                        ? (value) {
-                            _detents = SliderDetents(
-                              min: widget.min,
-                              max: widget.max,
-                              steps: widget.divisions,
-                            );
-                            _detents!.begin(value);
-                            if (feedback != null) {
-                              unawaited(feedback(detent: true));
-                            }
-                            widget.onChangeStart?.call(value);
-                          }
-                        : widget.onChangeStart,
+                    onChangeStart: (value) =>
+                        _handleChangeStart(value, feedback),
                     onChanged: onChanged == null
                         ? null
                         : (value) => _handleChanged(value, feedback),
-                    onChangeEnd: widget.detentFeedback
-                        ? (value) {
-                            _detents?.end();
-                            _detents = null;
-                            widget.onChangeEnd?.call(value);
-                          }
-                        : widget.onChangeEnd,
+                    onChangeEnd: _handleChangeEnd,
                     semanticFormatterCallback:
                         widget.semanticFormatterCallback == null
                         ? null

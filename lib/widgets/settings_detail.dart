@@ -273,8 +273,11 @@ class SettingsDetailScaffold extends StatelessWidget {
         backgroundColor: BrowseBackgroundScope.contains(context)
             ? Colors.transparent
             : null,
+        // The route already receives the system inset from SafeArea. The
+        // previous minimum top inset was added on top of the back-row's own
+        // 8 px margin, leaving every mobile secondary page with a visible
+        // blank band below the status bar.
         body: SafeArea(
-          minimum: const EdgeInsets.only(top: 8),
           child: Stack(
             children: <Widget>[
               Positioned(

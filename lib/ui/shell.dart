@@ -1781,12 +1781,16 @@ class _AppShellState extends State<AppShell>
     return SizedBox(
       height: 50 + topInset,
       child: AppleGlass(
-        borderRadius: BorderRadius.zero,
+        // Use the semantic glass colour instead of the pure page background.
+        // In dark mode a black tint composites into an opaque-looking strip
+        // even at low alpha; the glass surface keeps the backdrop visible.
+        color: apple.glass.withValues(alpha: state.headerOpacity),
         blurSigma: state.headerBlur,
-        color: apple.background.withValues(alpha: state.headerOpacity * .04),
         border: Border(
           bottom: BorderSide(
-            color: apple.separator.withValues(alpha: .45),
+            color: apple.separator.withValues(
+              alpha: (state.headerOpacity * .35).clamp(0.0, .35),
+            ),
             width: .5,
           ),
         ),
