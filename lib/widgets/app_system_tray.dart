@@ -192,7 +192,11 @@ class AppSystemTray with TrayListener {
       try {
         await windowManager.setPreventClose(false);
       } catch (_) {}
-      await windowManager.destroy();
+      try {
+        await windowManager.close();
+      } catch (_) {
+        await windowManager.destroy();
+      }
     } catch (_) {}
   }
 

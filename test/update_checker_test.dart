@@ -150,16 +150,44 @@ void main() {
   });
 
   group('AppState update flow', () {
-    test('a future check timestamp does not suppress updates', () {
+    test('a persisted timestamp does not suppress a new launch', () {
       final state = AppState();
       addTearDown(state.dispose);
-      final now = DateTime(2026, 11, 4);
-      state.updateCheckedAt = now
-          .add(const Duration(days: 30))
-          .millisecondsSinceEpoch;
-      expect(state.autoUpdateCheckDue(now: now), isTrue);
+      state.updateCheckedAt = DateTime(2026, 11, 4).millisecondsSinceEpoch;
+      expect(state.autoUpdateCheckDue, isTrue);
     });
-    test('a skip silences automatic checks but not the manual button', () async {
+    test(
+      'a skip silences automatic checks but not the manual button',
+      () async {
+        int calls = 0;
+        final UpdateChecker checker = UpdateChecker(
+          fetch: (Uri _) async {
+            calls++;
+            return _releases(<Map<String, Object?>>[_release('v2.1.0')]);
+          },
+        );
+        final AppState state = AppState(updateChecker: checker);
+        addTearDown(state.dispose);
+
+        final AppRelease? release = await state.checkForUpdates();
+        expect(release?.version.normalized, '2.1.0');
+        expect(state.updateError, isNull);
+        await state.skipUpdate(release!);
+        expect(state.skippedUpdateVersion, '2.1.0');
+        final SharedPreferences prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('lazer_skipped_update'), '2.1.0');
+
+        // A later launch checks again, but the saved exact version stays quiet.
+        final restarted = AppState(updateChecker: checker);
+        addTearDown(restarted.dispose);
+        expect(restarted.autoUpdateCheckDue, isTrue);
+        expect(await restarted.checkForUpdates(), isNull);
+        expect(await restarted.checkForUpdates(manual: true), isNotNull);
+        expect(calls, 3);
+      },
+    );
+
+    test('automatic checks run once per process but every launch', () async {
       int calls = 0;
       final UpdateChecker checker = UpdateChecker(
         fetch: (Uri _) async {
@@ -169,40 +197,20 @@ void main() {
       );
       final AppState state = AppState(updateChecker: checker);
       addTearDown(state.dispose);
-
-      final AppRelease? release = await state.checkForUpdates();
-      expect(release?.version.normalized, '2.1.0');
-      expect(state.updateError, isNull);
-      await state.skipUpdate(release!);
-      expect(state.skippedUpdateVersion, '2.1.0');
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('lazer_skipped_update'), '2.1.0');
-
-      // Pretend the daily interval elapsed so the cadence is not what filters.
-      state.updateCheckedAt = 0;
-      expect(await state.checkForUpdates(), isNull);
-      expect(await state.checkForUpdates(manual: true), isNotNull);
-      expect(calls, 3);
-    });
-
-    test('the daily cadence prevents repeat requests', () async {
-      int calls = 0;
-      final UpdateChecker checker = UpdateChecker(
-        fetch: (Uri _) async {
-          calls++;
-          return _releases(<Map<String, Object?>>[_release('v2.1.0')]);
-        },
-      );
-      final AppState state = AppState(updateChecker: checker);
-      addTearDown(state.dispose);
-      expect(state.autoUpdateCheckDue(), isTrue);
+      expect(state.autoUpdateCheckDue, isTrue);
       expect(await state.checkForUpdates(), isNotNull);
-      expect(state.autoUpdateCheckDue(), isFalse);
+      expect(state.autoUpdateCheckDue, isFalse);
       expect(await state.checkForUpdates(), isNull);
       expect(calls, 1);
       // A manual check always reaches the network.
       expect(await state.checkForUpdates(manual: true), isNotNull);
       expect(calls, 2);
+
+      final restarted = AppState(updateChecker: checker);
+      addTearDown(restarted.dispose);
+      expect(restarted.autoUpdateCheckDue, isTrue);
+      expect(await restarted.checkForUpdates(), isNotNull);
+      expect(calls, 3);
     });
 
     test('a network failure is recorded without throwing', () async {
@@ -214,8 +222,8 @@ void main() {
       expect(await state.checkForUpdates(), isNull);
       expect(state.updateError, isNotNull);
       expect(state.updateChecking, isFalse);
-      // A failed check stays due, so the next launch retries.
-      expect(state.autoUpdateCheckDue(), isTrue);
+      // A failed check stays due so the startup flow can retry it.
+      expect(state.autoUpdateCheckDue, isTrue);
     });
   });
 

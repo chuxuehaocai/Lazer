@@ -41,12 +41,6 @@ class _PluginMarketViewState extends State<PluginMarketView>
     unawaited(market.restore());
   }
 
-  @override
-  void dispose() {
-    if (widget.market == null) market.dispose();
-    super.dispose();
-  }
-
   Future<void> _editSource() async {
     var source = market.source;
     final value = await showDialog<String>(

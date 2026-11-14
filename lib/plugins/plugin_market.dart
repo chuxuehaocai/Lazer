@@ -95,20 +95,81 @@ class PluginMarket extends ChangeNotifier with BuildSafeNotifier {
   final PluginManager manager;
   final http.Client _client;
   static const _sourceKey = 'lazer_plugin_market_source';
+  static const _skippedUpdatesKey = 'lazer_skipped_plugin_updates';
   String source = defaultPluginSource;
   List<MarketPlugin> plugins = const [];
+  Map<String, String> _skippedUpdates = const {};
   bool loading = false;
   String? error, installing;
   double? progress;
   bool _disposed = false;
   int _request = 0, _download = 0;
   StreamIterator<List<int>>? _downloadReader;
+  Future<void>? _restoring;
 
-  Future<void> restore() async {
+  Future<void> restore() => _restoring ??= _restore();
+
+  Future<void> _restore() async {
     final prefs = await SharedPreferences.getInstance();
     if (_disposed) return;
     source = prefs.getString(_sourceKey) ?? defaultPluginSource;
+    _skippedUpdates = _decodeSkippedUpdates(
+      prefs.getString(_skippedUpdatesKey),
+    );
     await refresh();
+  }
+
+  static Map<String, String> _decodeSkippedUpdates(String? encoded) {
+    if (encoded == null || encoded.trim().isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map) return const {};
+      return {
+        for (final entry in decoded.entries)
+          if (entry.key is String &&
+              entry.value is String &&
+              ReleaseVersion.parse(entry.value as String) != null)
+            entry.key as String: ReleaseVersion.parse(
+              entry.value as String,
+            )!.normalized,
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Whether automatic startup checks should stay quiet about this exact
+  /// market version. A newer version has a different value and prompts again.
+  bool isUpdateSkipped(MarketPlugin plugin) {
+    final normalized =
+        ReleaseVersion.parse(plugin.version)?.normalized ?? plugin.version;
+    return _skippedUpdates[plugin.id] == normalized;
+  }
+
+  /// Remembers a version skip across launches without suppressing later ones.
+  Future<void> skipUpdate(MarketPlugin plugin) async {
+    final normalized =
+        ReleaseVersion.parse(plugin.version)?.normalized ?? plugin.version;
+    if (_skippedUpdates[plugin.id] == normalized) return;
+    _skippedUpdates = Map<String, String>.unmodifiable({
+      ..._skippedUpdates,
+      plugin.id: normalized,
+    });
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_skippedUpdatesKey, jsonEncode(_skippedUpdates));
+  }
+
+  Future<void> _clearSkippedUpdate(String pluginId) async {
+    if (!_skippedUpdates.containsKey(pluginId)) return;
+    final next = Map<String, String>.of(_skippedUpdates)..remove(pluginId);
+    _skippedUpdates = Map<String, String>.unmodifiable(next);
+    final prefs = await SharedPreferences.getInstance();
+    if (next.isEmpty) {
+      await prefs.remove(_skippedUpdatesKey);
+    } else {
+      await prefs.setString(_skippedUpdatesKey, jsonEncode(next));
+    }
   }
 
   Future<void> setSource(String value) async {
@@ -214,13 +275,14 @@ class PluginMarket extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
   }
 
-  Future<void> install(MarketPlugin plugin) async {
-    if (installing != null || manager.busy) return;
+  Future<bool> install(MarketPlugin plugin) async {
+    if (installing != null || manager.busy) return false;
     final transfer = ++_download;
     installing = plugin.id;
     progress = null;
     error = null;
     notifyListeners();
+    var installed = false;
     try {
       final bytes = await _read(
         plugin.download,
@@ -232,12 +294,14 @@ class PluginMarket extends ChangeNotifier with BuildSafeNotifier {
       if (sha256.convert(bytes).toString() != plugin.checksum!.toLowerCase()) {
         throw const FormatException('插件校验失败，请刷新插件源后重试。');
       }
-      if (_disposed || transfer != _download) return;
+      if (_disposed || transfer != _download) return false;
       await manager.importZip(
         bytes,
         expectedId: plugin.id,
         expectedVersion: plugin.version,
       );
+      installed = true;
+      await _clearSkippedUpdate(plugin.id);
     } on _Cancelled {
       // Cancelling a download must leave the installed version intact.
     } catch (failure) {
@@ -251,6 +315,7 @@ class PluginMarket extends ChangeNotifier with BuildSafeNotifier {
         notifyListeners();
       }
     }
+    return installed;
   }
 
   @override

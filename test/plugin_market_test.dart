@@ -153,6 +153,53 @@ void main() {
       expect(restarted.source, 'https://example.test/custom/');
     },
   );
+  test('update skips persist by exact plugin version', () async {
+    final market = PluginMarket(
+      manager,
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'schemaVersion': 1,
+            'plugins': [entry(version: '1.1.0')],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ),
+      ),
+    );
+    addTearDown(market.dispose);
+    await market.refresh();
+    final skipped = market.plugins.single;
+    await market.skipUpdate(skipped);
+    expect(market.isUpdateSkipped(skipped), isTrue);
+
+    final restarted = PluginMarket(
+      manager,
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'schemaVersion': 1,
+            'plugins': [entry(version: '1.1.0')],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ),
+      ),
+    );
+    addTearDown(restarted.dispose);
+    await restarted.restore();
+    expect(restarted.isUpdateSkipped(skipped), isTrue);
+    expect(
+      restarted.isUpdateSkipped(
+        MarketPlugin.fromJson(
+          entry(version: '1.2.0'),
+          pluginIndexUri(defaultPluginSource),
+        ),
+      ),
+      isFalse,
+      reason: 'a newer market version must prompt again',
+    );
+  });
   test('market download installs and updates real Lua ZIPs', () async {
     var version = '1.0.0';
     final packages = <String, Uint8List>{
@@ -192,9 +239,7 @@ void main() {
     final Uint8List other = package(id: 'other.plugin', version: '1.1.0');
     final market = PluginMarket(
       manager,
-      client: MockClient(
-        (_) async => http.Response.bytes(other, 200),
-      ),
+      client: MockClient((_) async => http.Response.bytes(other, 200)),
     );
     addTearDown(market.dispose);
     await market.install(
