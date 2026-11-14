@@ -1858,7 +1858,7 @@ class _AppShellState extends State<AppShell>
   /// album backdrop instead of becoming a separate dark strip.
   double get _headerTintAlpha => state.backgroundMode == AppBackgroundMode.off
       ? 1
-      : (state.uiAlpha * state.headerOpacity).clamp(0.0, 1.0);
+      : (state.headerOpacity * .15).clamp(0.0, 1.0);
 
   Widget _railPlaylists(AppleSemanticColors apple) {
     final collections = state.collections;

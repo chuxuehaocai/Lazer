@@ -60,6 +60,20 @@ class AccessibleSlider extends StatefulWidget {
 
 class _AccessibleSliderState extends State<AccessibleSlider> {
   SliderDetents? _detents;
+  final Set<int> _dragPointers = <int>{};
+
+  void _updateFromPointer(PointerMoveEvent event, double width) {
+    if (!_dragPointers.contains(event.pointer) || widget.onChanged == null) {
+      return;
+    }
+    if (width <= 0) return;
+    double fraction = (event.localPosition.dx / width).clamp(0.0, 1.0);
+    final int? divisions = widget.divisions;
+    if (divisions != null && divisions > 0) {
+      fraction = (fraction * divisions).round() / divisions;
+    }
+    widget.onChanged!(widget.min + (widget.max - widget.min) * fraction);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,56 +87,79 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
           label: widget.semanticLabel == null
               ? null
               : context.tr(widget.semanticLabel!),
-          child: Slider(
-            value: widget.value,
-            min: widget.min,
-            max: widget.max,
-            secondaryTrackValue: widget.secondaryTrackValue,
-            divisions: widget.divisions,
-            label: widget.label == null ? null : context.tr(widget.label!),
-            onChangeStart: widget.detentFeedback
-                ? (value) {
-                    _detents = SliderDetents(
-                      min: widget.min,
-                      max: widget.max,
-                      steps: widget.divisions,
-                    );
-                    _detents!.begin(value);
-                    if (feedback != null) {
-                      unawaited(feedback(detent: true));
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) =>
+                Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (PointerDownEvent event) {
+                    if (widget.onChanged != null) {
+                      _dragPointers.add(event.pointer);
                     }
-                    widget.onChangeStart?.call(value);
-                  }
-                : widget.onChangeStart,
-            onChanged: !widget.detentFeedback || onChanged == null
-                ? onChanged
-                : (value) {
-                    final detents = _detents;
-                    if (detents != null &&
-                        feedback != null &&
-                        detents.update(value)) {
-                      unawaited(
-                        feedback(
-                          detent: true,
-                          boundary: value <= widget.min || value >= widget.max,
-                        ),
-                      );
-                    }
-                    onChanged(value);
                   },
-            onChangeEnd: widget.detentFeedback
-                ? (value) {
-                    _detents?.end();
-                    _detents = null;
-                    widget.onChangeEnd?.call(value);
-                  }
-                : widget.onChangeEnd,
-            semanticFormatterCallback: widget.semanticFormatterCallback == null
-                ? null
-                : (value) =>
-                      context.tr(widget.semanticFormatterCallback!(value)),
-            focusNode: widget.focusNode,
-            autofocus: widget.autofocus,
+                  onPointerMove: (PointerMoveEvent event) =>
+                      _updateFromPointer(event, constraints.maxWidth),
+                  onPointerUp: (PointerUpEvent event) =>
+                      _dragPointers.remove(event.pointer),
+                  onPointerCancel: (PointerCancelEvent event) =>
+                      _dragPointers.remove(event.pointer),
+                  child: Slider(
+                    value: widget.value,
+                    min: widget.min,
+                    max: widget.max,
+                    secondaryTrackValue: widget.secondaryTrackValue,
+                    divisions: widget.divisions,
+                    label: widget.label == null
+                        ? null
+                        : context.tr(widget.label!),
+                    onChangeStart: widget.detentFeedback
+                        ? (value) {
+                            _detents = SliderDetents(
+                              min: widget.min,
+                              max: widget.max,
+                              steps: widget.divisions,
+                            );
+                            _detents!.begin(value);
+                            if (feedback != null) {
+                              unawaited(feedback(detent: true));
+                            }
+                            widget.onChangeStart?.call(value);
+                          }
+                        : widget.onChangeStart,
+                    onChanged: !widget.detentFeedback || onChanged == null
+                        ? onChanged
+                        : (value) {
+                            final detents = _detents;
+                            if (detents != null &&
+                                feedback != null &&
+                                detents.update(value)) {
+                              unawaited(
+                                feedback(
+                                  detent: true,
+                                  boundary:
+                                      value <= widget.min ||
+                                      value >= widget.max,
+                                ),
+                              );
+                            }
+                            onChanged(value);
+                          },
+                    onChangeEnd: widget.detentFeedback
+                        ? (value) {
+                            _detents?.end();
+                            _detents = null;
+                            widget.onChangeEnd?.call(value);
+                          }
+                        : widget.onChangeEnd,
+                    semanticFormatterCallback:
+                        widget.semanticFormatterCallback == null
+                        ? null
+                        : (value) => context.tr(
+                            widget.semanticFormatterCallback!(value),
+                          ),
+                    focusNode: widget.focusNode,
+                    autofocus: widget.autofocus,
+                  ),
+                ),
           ),
         ),
       ),
