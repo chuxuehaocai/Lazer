@@ -320,6 +320,82 @@ void main() {
     );
   });
 
+  testWidgets('background blur controls are disabled until a picture is selected', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final AppState state = AppState(catalog: _Catalog());
+    addTearDown(state.dispose);
+    await state.setAppBackground(AppBackgroundMode.customImage);
+
+    await tester.pumpWidget(
+      _app(
+        AnimatedBuilder(
+          animation: state,
+          builder: (BuildContext context, _) =>
+              Scaffold(body: AppSettingsPage(state: state)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final switchFinder = find.byKey(const ValueKey('background-blur-enabled'));
+    final sliderFinder = find.byKey(const ValueKey('background-blur'));
+    expect(switchFinder, findsOneWidget);
+    expect(sliderFinder, findsOneWidget);
+    expect(
+      tester
+          .widget<Switch>(
+            find.descendant(of: switchFinder, matching: find.byType(Switch)),
+          )
+          .onChanged,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<Slider>(
+            find.descendant(of: sliderFinder, matching: find.byType(Slider)),
+          )
+          .onChanged,
+      isNull,
+    );
+
+    await state.setAppBackgroundImage('/tmp/backdrop.png');
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Switch>(
+            find.descendant(of: switchFinder, matching: find.byType(Switch)),
+          )
+          .onChanged,
+      isNotNull,
+    );
+    expect(
+      tester
+          .widget<Slider>(
+            find.descendant(of: sliderFinder, matching: find.byType(Slider)),
+          )
+          .onChanged,
+      isNotNull,
+    );
+
+    await tester.drag(
+      find.descendant(of: sliderFinder, matching: find.byType(Slider)),
+      const Offset(1000, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(state.backgroundBlur, kBackgroundBlurMax);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('background-blur')),
+        matching: find.text('32 px'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('large-screen settings can replace the backdrop too', (
     tester,
   ) async {

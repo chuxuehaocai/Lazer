@@ -547,9 +547,11 @@ class _SettingsOverview extends StatelessWidget {
                             ],
                             onChanged: (AppBackgroundMode? value) {
                               if (value == null) return;
-                              unawaited(state.setAppBackground(value));
                               if (value == AppBackgroundMode.customImage &&
                                   state.backgroundImagePath == null) {
+                                // Do not leave the app in custom-image mode
+                                // when the picker is cancelled. The mode is
+                                // switched after a file has been stored.
                                 unawaited(
                                   _pickBackgroundImage(
                                     context,
@@ -557,6 +559,8 @@ class _SettingsOverview extends StatelessWidget {
                                     backgroundImagePicker,
                                   ),
                                 );
+                              } else {
+                                unawaited(state.setAppBackground(value));
                               }
                             },
                           ),
@@ -2219,6 +2223,11 @@ class _BackgroundPreferences extends StatelessWidget {
     final color = player
         ? state.playerBackgroundColor
         : state.browseBackgroundColor;
+    final String? imagePath = player
+        ? state.playerBackgroundImagePath
+        : state.backgroundImagePath;
+    final bool hasCustomImage =
+        mode == AppBackgroundMode.customImage && imagePath != null;
     return Column(
       children: [
         if (player)
@@ -2234,10 +2243,11 @@ class _BackgroundPreferences extends StatelessWidget {
               ],
               onChanged: (value) {
                 if (value == null) return;
-                unawaited(state.setPlayerBackground(value));
                 if (value == AppBackgroundMode.customImage &&
                     state.playerBackgroundImagePath == null) {
                   unawaited(_pickBackgroundImage(context, state, picker, true));
+                } else {
+                  unawaited(state.setPlayerBackground(value));
                 }
               },
             ),
@@ -2325,9 +2335,11 @@ class _BackgroundPreferences extends StatelessWidget {
             value: player
                 ? state.playerBackgroundBlurEnabled
                 : state.backgroundBlurEnabled,
-            onChanged: (bool value) => unawaited(
-              state.setBackgroundBlurEnabled(value, player: player),
-            ),
+            onChanged: hasCustomImage
+                ? (bool value) => unawaited(
+                    state.setBackgroundBlurEnabled(value, player: player),
+                  )
+                : null,
           ),
         if (mode == AppBackgroundMode.customImage)
           _AppSliderRow(
@@ -2336,14 +2348,16 @@ class _BackgroundPreferences extends StatelessWidget {
             ),
             label: '背景模糊强度',
             valueText:
-                '${(player ? state.playerBackgroundBlur : state.backgroundBlur).round()} px',
+                '${(player ? state.playerBackgroundBlur : state.backgroundBlur).clamp(kBackgroundBlurMin, kBackgroundBlurMax).round()} px',
             subtitle: '只影响自定义图片背景',
             value: player ? state.playerBackgroundBlur : state.backgroundBlur,
             min: kBackgroundBlurMin,
             max: kBackgroundBlurMax,
             divisions: 16,
-            onChanged: (double value) =>
-                unawaited(state.setBackgroundBlur(value, player: player)),
+            onChanged: hasCustomImage
+                ? (double value) =>
+                      unawaited(state.setBackgroundBlur(value, player: player))
+                : null,
           ),
         if (player)
           _AppSwitchRow(

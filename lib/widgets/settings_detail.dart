@@ -4,10 +4,10 @@ import '../animation/view_transitions.dart';
 import 'package:flutter/services.dart';
 import '../animation/apple_spring.dart';
 import '../navigation/system_back_gesture.dart';
+import '../theme/apple_design.dart';
 import 'apple_ui.dart';
 
 import 'accessible_controls.dart';
-import 'shared_browse_background.dart';
 
 /// Keeps desktop settings inside the shell, including its navigation and player.
 class SettingsDetailHost extends StatefulWidget {
@@ -273,9 +273,11 @@ class SettingsDetailScaffold extends StatelessWidget {
       final bool canPop = Navigator.of(context).canPop();
       final bool hasTopBar = canPop || trailing != null;
       return Scaffold(
-        backgroundColor: BrowseBackgroundScope.contains(context)
-            ? Colors.transparent
-            : null,
+        // Detail pages own an opaque surface during their route transition.
+        // A transparent scaffold lets the previous settings page show through
+        // while the incoming controls are fading in, which is especially
+        // visible when opening a third-level page such as the plugin market.
+        backgroundColor: AppleSemanticColors.of(context).background,
         // The route already receives the system inset from SafeArea. The
         // previous minimum top inset was added on top of the back-row's own
         // 8 px margin, leaving every mobile secondary page with a visible
@@ -317,7 +319,7 @@ class SettingsDetailScaffold extends StatelessWidget {
       );
     }
     return Material(
-      type: MaterialType.transparency,
+      color: AppleSemanticColors.of(context).background,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final inset = constraints.maxWidth < 600 ? 20.0 : 32.0;
