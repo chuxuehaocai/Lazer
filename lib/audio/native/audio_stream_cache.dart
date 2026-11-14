@@ -17,6 +17,7 @@
 library;
 
 import '../../utils/media_requests.dart';
+import '../../utils/system_http.dart';
 
 import 'dart:async';
 import 'dart:developer' as developer;
@@ -360,7 +361,9 @@ class AudioStreamCache {
            client ??
            // Keep-alive client with a bounded connect timeout; `close()` forces
            // it shut. Injectable so a check can drive it.
-           (HttpClient()..connectionTimeout = const Duration(seconds: 15));
+           (HttpClient()
+             ..connectionTimeout = const Duration(seconds: 15)
+             ..findProxy = SystemHttpProxy.currentFindProxyRule);
 
   final CacheDirectoryProvider _directory;
   final HttpClient _client;

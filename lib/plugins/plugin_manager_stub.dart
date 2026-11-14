@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'plugin_manifest.dart';
 import '../gateway/music_gateway.dart';
+import '../utils/system_http.dart';
 import '../theme/lazer_theme.dart';
 import '../ui/layout_system.dart';
 import 'lua_plugin_runtime.dart';
@@ -35,6 +36,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   LazerLayoutDefinition? get activeLayout => null;
   int get skinRevision => 0;
   bool busy = false;
+
+  void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {}
   Future<void> Function(String pluginId)? beforeChange;
   Future<void> Function()? afterChange;
   Future<void> restore() async {}

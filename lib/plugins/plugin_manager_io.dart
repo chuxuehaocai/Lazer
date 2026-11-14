@@ -11,6 +11,7 @@ import '../storage/app_storage.dart';
 import '../gateway/lua_music_gateway.dart';
 import '../gateway/music_gateway.dart';
 import '../utils/media_requests.dart';
+import '../utils/system_http.dart';
 import '../theme/lazer_theme.dart';
 import '../ui/layout_system.dart';
 import 'lua_plugin_runtime.dart';
@@ -62,6 +63,12 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   bool busy = false;
   bool _disposed = false;
   Future<void>? _restoring;
+
+  void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {
+    for (final plugin in _plugins) {
+      plugin.runtime?.updateProxy(mode: mode, endpoint: endpoint);
+    }
+  }
 
   /// Stop owned playback and detach gateways before shutting down a VM.
   Future<void> Function(String pluginId)? beforeChange;

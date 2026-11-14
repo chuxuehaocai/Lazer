@@ -1,6 +1,7 @@
 // i18n:data — platform-support messages are interface keys shown by the plugin
 // UI through `context.tr`.
 import 'plugin_manifest.dart';
+import '../utils/system_http.dart';
 
 /// Web-safe facade. Browser deployments can still inspect plugin metadata;
 /// network plugins are enabled by the native client where ZIP storage and
@@ -29,6 +30,7 @@ class LuaPluginRuntime {
     Duration? budget,
   ]) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   void close() {}
+  void updateProxy({required ProxyMode mode, String? endpoint}) {}
   Future<List<String>> evaluate(String source) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
 }

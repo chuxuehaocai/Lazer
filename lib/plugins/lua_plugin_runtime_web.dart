@@ -15,6 +15,7 @@ import 'package:pointycastle/export.dart' as pc;
 import 'plugin_manifest.dart';
 import 'lua_console_evaluator.dart';
 import '../diagnostics/app_log.dart';
+import '../utils/system_http.dart';
 
 /// Browser implementation of the Lua gateway runtime.
 ///
@@ -49,6 +50,8 @@ class LuaPluginRuntime {
   bool _closed = false;
 
   Future<void> start() => _starting ??= _start();
+
+  void updateProxy({required ProxyMode mode, String? endpoint}) {}
 
   Future<void> _start() async {
     if (_closed) throw const PluginException('插件已停止。');
