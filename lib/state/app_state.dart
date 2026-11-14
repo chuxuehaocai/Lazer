@@ -54,6 +54,7 @@ import '../theme/lazer_theme.dart';
 import '../ui/layout_system.dart';
 import '../plugins/plugin_manifest.dart' show PluginException;
 import '../plugins/plugin_manager.dart';
+import '../plugins/plugin_market.dart';
 
 part 'music_platform_state.dart';
 
@@ -163,6 +164,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.startupBufferDeadline = startupBufferTimeout,
     this.startupByteTarget = startupBytes,
     PluginManager? pluginManager,
+    PluginMarket? pluginMarket,
     this.scheduledPauseClock = DateTime.now,
     math.Random? shuffleRandom,
   }) : catalog = catalog ?? Catalog(),
@@ -173,6 +175,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
            listeningStatistics ?? ListeningStatisticsController(),
        updateChecker = updateChecker ?? UpdateChecker(),
        pluginManager = pluginManager ?? PluginManager(),
+       _injectedPluginMarket = pluginMarket,
        _shuffleOrder = ShuffleOrder(random: shuffleRandom) {
     this.listeningStatistics.addListener(_updateSystemWidgetPlayCount);
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
@@ -232,6 +235,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Installed Lua providers and extensions. Its lifecycle follows the app,
   /// while each plugin VM remains isolated from playback and UI state.
   final PluginManager pluginManager;
+  final PluginMarket? _injectedPluginMarket;
+  PluginMarket? _pluginMarketInstance;
+
+  /// One market instance serves startup checks and the market page. Reusing it
+  /// preserves a custom source, skips and in-flight download state instead of
+  /// creating a second network client whenever the page is reopened.
+  PluginMarket get pluginMarket => _pluginMarketInstance ??=
+      _injectedPluginMarket ?? PluginMarket(pluginManager);
 
   /// The first enabled plugin skin is the active declarative UI overlay.
   /// Music plugins remain isolated from Flutter widgets and can only provide
@@ -400,11 +411,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Finds newer GitHub releases for this build.
   final UpdateChecker updateChecker;
 
-  /// How often a launch may ask GitHub for a new release. A daily cadence
-  /// keeps the unauthenticated API comfortably inside its rate limit and
-  /// avoids a network round trip on every start.
-  static const Duration updateCheckInterval = Duration(hours: 24);
-
   /// Whether a release check is in flight.
   bool updateChecking = false;
 
@@ -421,23 +427,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   String? updateDialogVersion;
 
   /// When the last successful check happened, in milliseconds since epoch.
+  /// This remains useful for diagnostics and settings, but no longer suppresses
+  /// the first automatic check of a later app launch.
   int updateCheckedAt = 0;
 
-  /// Whether an automatic check is due for [now].
-  bool autoUpdateCheckDue({DateTime? now}) {
-    final DateTime moment = now ?? DateTime.now();
-    if (updateCheckedAt <= 0) return true;
-    final elapsed = moment.millisecondsSinceEpoch - updateCheckedAt;
-    // A corrected device clock must not suppress checks until a future date.
-    return elapsed < 0 || elapsed >= updateCheckInterval.inMilliseconds;
-  }
+  bool _updateCheckedThisLaunch = false;
+
+  /// Whether this launch still needs its automatic update check.
+  ///
+  /// Each [AppState] represents one process launch, so the first automatic
+  /// check is always due. A persisted timestamp from an earlier launch is kept
+  /// for display, but cannot delay this launch's check by a day.
+  bool get autoUpdateCheckDue => !_updateCheckedThisLaunch;
 
   /// Asks GitHub for a newer release.
   ///
   /// Returns null when the build is current, when an automatic check is not
   /// due, when the newest release was skipped, or when the network failed
-  /// ([updateError] then says why). A [manual] check ignores both the daily
-  /// cadence and a previous skip, because the user explicitly asked.
+  /// ([updateError] then says why). A [manual] check ignores both the
+  /// once-per-launch gate and a previous skip, because the user explicitly
+  /// asked.
   ///
   /// A manual call made while an automatic check is running joins that request
   /// instead of returning immediately: "null" used to mean both "no update" and
@@ -448,7 +457,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (pending != null) {
       return manual ? pending : Future<AppRelease?>.value(null);
     }
-    if (!manual && !autoUpdateCheckDue()) {
+    if (!manual && !autoUpdateCheckDue) {
       return Future<AppRelease?>.value(null);
     }
     final Future<AppRelease?> check = _runUpdateCheck(manual: manual);
@@ -475,11 +484,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         current,
         includePrerelease: current.isPreRelease,
       );
+      _updateCheckedThisLaunch = true;
       updateCheckedAt = DateTime.now().millisecondsSinceEpoch;
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setInt('lazer_update_checked_at', updateCheckedAt);
       if (release == null) return null;
-      final String? skipped = skippedUpdateVersion;
+      // Bootstrap and the startup checker run concurrently. Read the skip
+      // directly as well so a fast network response cannot prompt for a
+      // version saved by the previous launch before bootstrap has copied it
+      // into memory.
+      final String? skipped =
+          skippedUpdateVersion ?? prefs.getString('lazer_skipped_update');
+      skippedUpdateVersion = skipped;
       if (!manual && skipped != null && release.version.normalized == skipped) {
         return null;
       }
@@ -5743,6 +5759,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _pauseSchedule.dispose();
     _musicPlatforms.cancelPending();
     pluginManager.removeListener(_onPluginManagerChanged);
+    if (_injectedPluginMarket == null) _pluginMarketInstance?.dispose();
     pluginManager.dispose();
     catalog.connections.close();
     _presentationDisposed = true;

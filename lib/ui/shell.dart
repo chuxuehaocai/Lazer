@@ -1,16 +1,19 @@
 import '../widgets/build_safe_state.dart';
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../data/models.dart';
+import '../diagnostics/build_info.dart';
 import '../l10n/app_localizations.dart';
 import '../local/local_music_page.dart';
 import '../network/network_browse_page.dart';
 import '../network/network_sources_page.dart';
 import '../network/podcast_pages.dart';
+import '../plugins/plugin_market.dart';
 import '../state/app_state.dart';
 import '../state/build_safe_notifier.dart';
 import '../state/song_comments_controller.dart';
@@ -28,6 +31,8 @@ import '../tv/large_screen_widgets.dart';
 import '../tv/tv_mode.dart';
 import '../updates/update_checker.dart';
 import '../updates/update_dialog.dart';
+import '../updates/plugin_update_dialog.dart';
+import '../updates/release_version.dart';
 import '../utils/artwork.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/artwork_image.dart';
@@ -238,6 +243,10 @@ class _AppShellState extends State<AppShell>
 
   Timer? _updateTimer;
   AppRelease? _pendingUpdate;
+  List<MarketPlugin>? _pendingPluginUpdates;
+  bool _clientUpdateCheckRunning = false;
+  bool _pluginUpdateCheckRunning = false;
+  bool _pluginUpdatesCheckedThisLaunch = false;
 
   /// Says once why this launch is not on the native HiFi path.
   ///
@@ -264,42 +273,165 @@ class _AppShellState extends State<AppShell>
     _updateTimer = Timer(delay, () => unawaited(_checkForUpdates()));
   }
 
-  /// Gives the catalogue time to land before talking to GitHub. A failure is
-  /// already silent inside [AppState]; a found release opens the same prompt
-  /// the settings button uses.
-  Future<void> _checkForUpdates() async {
-    final AppRelease? release = _pendingUpdate ?? await state.checkForUpdates();
-    if (!mounted) return;
-    if (release == null) {
-      // Startup is often the least reliable moment to reach GitHub. Retry a
-      // failure in this session; a successful check keeps the daily cadence.
-      _scheduleUpdateCheck(
-        state.updateError == null
-            ? const Duration(hours: 1)
-            : const Duration(minutes: 5),
-      );
-      return;
-    }
-    // A manual check can skip this release while an automatic prompt is
-    // waiting behind another route. Apply that decision to the retained result.
-    if (state.skippedUpdateVersion == release.version.normalized) {
-      _pendingUpdate = null;
-      _scheduleUpdateCheck(const Duration(hours: 1));
-      return;
-    }
-    _pendingUpdate = release;
-    // Retain the result while another dialog is visible. Previously this
-    // marked the day as checked and silently dropped the update prompt.
+  bool _canPresentStartupPrompt() {
     final ModalRoute<dynamic>? route = ModalRoute.of(context);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
-    if (route != null && !route.isCurrent ||
-        lifecycle != null && lifecycle != AppLifecycleState.resumed) {
+    return (route == null || route.isCurrent) &&
+        (lifecycle == null || lifecycle == AppLifecycleState.resumed);
+  }
+
+  /// Checks both the client and installed plugins once per launch.
+  ///
+  /// The client result is shown first, then plugin updates are processed one at
+  /// a time. An unavailable network keeps the client check due so it can retry
+  /// in this session; a completed check is never repeated until the next
+  /// process launch.
+  Future<void> _checkForUpdates() async {
+    if (_clientUpdateCheckRunning || !mounted) return;
+    _clientUpdateCheckRunning = true;
+    var retryClientCheck = false;
+    var checkPlugins = false;
+    try {
+      final AppRelease? release =
+          _pendingUpdate ?? await state.checkForUpdates();
+      if (!mounted) return;
+      retryClientCheck =
+          release == null &&
+          state.updateError != null &&
+          _pendingUpdate == null;
+      if (release != null) {
+        // A manual check can skip this release while an automatic prompt is
+        // waiting behind another route. Apply that decision to the result.
+        if (state.skippedUpdateVersion == release.version.normalized) {
+          _pendingUpdate = null;
+        } else {
+          _pendingUpdate = release;
+        }
+      }
+      if (_pendingUpdate != null) {
+        // Retain the result while another dialog is visible instead of marking
+        // the launch complete and silently dropping the update prompt.
+        if (!_canPresentStartupPrompt()) {
+          _scheduleUpdateCheck(const Duration(seconds: 5));
+          return;
+        }
+        final AppRelease pending = _pendingUpdate!;
+        _pendingUpdate = null;
+        await showUpdateDialog(context, state, pending);
+        if (!mounted) return;
+      }
+
+      checkPlugins = true;
+      if (retryClientCheck) {
+        _scheduleUpdateCheck(const Duration(minutes: 5));
+      }
+    } finally {
+      _clientUpdateCheckRunning = false;
+    }
+    if (!mounted || !checkPlugins) return;
+
+    // GitHub and the plugin source can fail independently. The client retry
+    // timer is already armed, so the asynchronous plugin check cannot suppress
+    // it during a long market request.
+    await _checkForPluginUpdates();
+    // A plugin dialog may have consumed the launch while the client retry was
+    // due. Restore it now that the modal has closed. A deferred plugin prompt
+    // has already scheduled a shorter retry, so leave that timer alone.
+    if (retryClientCheck && mounted && _pluginUpdatesCheckedThisLaunch) {
+      _scheduleUpdateCheck(const Duration(minutes: 5));
+    }
+  }
+
+  Future<void> _checkForPluginUpdates() async {
+    if (_pluginUpdatesCheckedThisLaunch ||
+        _pluginUpdateCheckRunning ||
+        !mounted) {
+      return;
+    }
+    _pluginUpdateCheckRunning = true;
+    try {
+      await _runPluginUpdateCheck();
+    } finally {
+      _pluginUpdateCheckRunning = false;
+    }
+  }
+
+  Future<void> _runPluginUpdateCheck() async {
+    await state.pluginManager.restore();
+    if (!mounted) return;
+    // Avoid a market request for users who have no plugins installed.
+    if (state.pluginManager.plugins.isEmpty) {
+      _pluginUpdatesCheckedThisLaunch = true;
+      return;
+    }
+
+    final PluginMarket market = state.pluginMarket;
+    await market.restore();
+    if (!mounted) return;
+    final List<MarketPlugin> updates =
+        _pendingPluginUpdates ?? _availablePluginUpdates(market);
+    _pendingPluginUpdates = updates;
+    if (updates.isEmpty) {
+      _pluginUpdatesCheckedThisLaunch = true;
+      return;
+    }
+    if (!_canPresentStartupPrompt()) {
       _scheduleUpdateCheck(const Duration(seconds: 5));
       return;
     }
-    _pendingUpdate = null;
-    await showUpdateDialog(context, state, release);
-    _scheduleUpdateCheck(const Duration(hours: 1));
+
+    while (mounted && _pendingPluginUpdates!.isNotEmpty) {
+      final MarketPlugin plugin = _pendingPluginUpdates!.first;
+      final installed = state.pluginManager.plugins
+          .where((entry) => entry.manifest.id == plugin.id)
+          .firstOrNull;
+      if (installed == null ||
+          market.isUpdateSkipped(plugin) ||
+          !_isPluginUpdate(plugin, installed.manifest.version)) {
+        _pendingPluginUpdates!.removeAt(0);
+        continue;
+      }
+      if (!_canPresentStartupPrompt()) {
+        _scheduleUpdateCheck(const Duration(seconds: 5));
+        return;
+      }
+      _pendingPluginUpdates!.removeAt(0);
+      final PluginUpdateResult result = await showPluginUpdateDialog(
+        context,
+        market: market,
+        plugin: plugin,
+        installedVersion: installed.manifest.version,
+      );
+      if (result == PluginUpdateResult.later) {
+        _pendingPluginUpdates!.clear();
+        break;
+      }
+    }
+    _pendingPluginUpdates = null;
+    _pluginUpdatesCheckedThisLaunch = true;
+  }
+
+  List<MarketPlugin> _availablePluginUpdates(PluginMarket market) {
+    final installedVersions = <String, String>{
+      for (final plugin in state.pluginManager.plugins)
+        plugin.manifest.id: plugin.manifest.version,
+    };
+    final platform = defaultTargetPlatform.name.toLowerCase();
+    final updates = <MarketPlugin>[
+      for (final plugin in market.plugins)
+        if (installedVersions[plugin.id] case final installed?)
+          if (!market.isUpdateSkipped(plugin) &&
+              _isPluginUpdate(plugin, installed) &&
+              plugin.incompatibility(platform, BuildInfo.version) == null)
+            plugin,
+    ]..sort((left, right) => left.id.compareTo(right.id));
+    return updates;
+  }
+
+  bool _isPluginUpdate(MarketPlugin plugin, String installedVersion) {
+    final latest = ReleaseVersion.parse(plugin.version);
+    final installed = ReleaseVersion.parse(installedVersion);
+    return latest != null && installed != null && latest > installed;
   }
 
   bool _overlayRefreshScheduled = false;
