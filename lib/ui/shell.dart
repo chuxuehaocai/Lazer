@@ -1270,6 +1270,7 @@ class _AppShellState extends State<AppShell>
               Expanded(
                 child: Column(
                   children: <Widget>[
+                    if (_hasOpenDetail) _desktopToolbar(apple),
                     Expanded(child: RepaintBoundary(child: _content())),
                   ],
                 ),
@@ -1287,6 +1288,41 @@ class _AppShellState extends State<AppShell>
           ),
         ),
       ],
+    );
+  }
+
+  /// Detail views keep a compact desktop back affordance in the content pane.
+  /// The browse root stays chrome-free, while an open artist, playlist or
+  /// network pane never leaves keyboard and mouse users without a way back.
+  Widget _desktopToolbar(AppleSemanticColors apple) {
+    return SizedBox(
+      height: 50,
+      child: AppleGlass(
+        color: apple.glass.withValues(alpha: state.headerOpacity),
+        blurSigma: state.headerBlur,
+        border: Border(
+          bottom: BorderSide(
+            color: apple.separator.withValues(
+              alpha: (state.headerOpacity * .35).clamp(0.0, .35),
+            ),
+            width: .5,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: Row(
+            children: <Widget>[
+              _ToolbarButton(
+                tooltip: '返回',
+                icon: Icons.chevron_left_rounded,
+                onPressed: _backToRoot,
+              ),
+              const Spacer(),
+              _accountButton(apple, radius: 16),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

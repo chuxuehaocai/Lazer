@@ -4,6 +4,7 @@ import '../animation/view_transitions.dart';
 import 'package:flutter/services.dart';
 import '../animation/apple_spring.dart';
 import '../navigation/system_back_gesture.dart';
+import 'apple_ui.dart';
 
 import 'accessible_controls.dart';
 import 'shared_browse_background.dart';
@@ -269,6 +270,8 @@ class SettingsDetailScaffold extends StatelessWidget {
         ? null
         : Wrap(spacing: 8, children: actions);
     if (close == null) {
+      final bool canPop = Navigator.of(context).canPop();
+      final bool hasTopBar = canPop || trailing != null;
       return Scaffold(
         backgroundColor: BrowseBackgroundScope.contains(context)
             ? Colors.transparent
@@ -280,29 +283,28 @@ class SettingsDetailScaffold extends StatelessWidget {
         body: SafeArea(
           child: Stack(
             children: <Widget>[
-              Positioned(
-                top: 8,
-                left: 8,
-                right: 8,
-                child: Row(
-                  children: <Widget>[
-                    if (Navigator.of(context).canPop())
-                      AccessibleIconButton(
-                        key: const ValueKey('settings-detail-back'),
-                        tooltip: '返回',
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        icon: const Icon(Icons.chevron_left_rounded),
-                      ),
-                    const Spacer(),
-                    ?trailing,
-                  ],
+              if (hasTopBar)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  right: 8,
+                  child: Row(
+                    children: <Widget>[
+                      if (canPop)
+                        AccessibleIconButton(
+                          key: const ValueKey('settings-detail-back'),
+                          tooltip: '返回',
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          icon: const Icon(Icons.chevron_left_rounded),
+                        ),
+                      const Spacer(),
+                      ?trailing,
+                    ],
+                  ),
                 ),
-              ),
               Positioned.fill(
                 child: Padding(
-                  padding: EdgeInsets.only(
-                    top: Navigator.of(context).canPop() ? 56 : 0,
-                  ),
+                  padding: EdgeInsets.only(top: hasTopBar ? 56 : 0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[Expanded(child: child)],
@@ -338,6 +340,11 @@ class SettingsDetailScaffold extends StatelessWidget {
                   ],
                 ),
               ),
+              ApplePageTitle(
+                title: title,
+                padding: EdgeInsets.fromLTRB(inset, 4, inset, 20),
+              ),
+              const SizedBox(height: 8),
               Expanded(child: child),
             ],
           );

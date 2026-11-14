@@ -15,8 +15,14 @@ class SemanticsPortal extends StatelessWidget {
   const SemanticsPortal({super.key, required this.child});
   final Widget child;
   @override
-  Widget build(BuildContext context) =>
-      Semantics(container: true, child: child);
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    child: Overlay.wrap(
+      alwaysSizeToContent: true,
+      clipBehavior: Clip.none,
+      child: child,
+    ),
+  );
 }
 
 /// A semantics-labelled Material slider. [detentFeedback] opts into the app's
@@ -161,7 +167,20 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
                   },
                   onPointerCancel: (PointerCancelEvent event) {
                     _dragPointers.remove(event.pointer);
-                    if (_dragPointers.isEmpty) _sliderDragging = false;
+                    if (_dragPointers.isEmpty) {
+                      _sliderDragging = false;
+                      // A lifecycle change can cancel a seek after the
+                      // parent has already restored its live value. Clear the
+                      // optimistic thumb when the pointer is cancelled so a
+                      // stale preview cannot remain painted on screen.
+                      if (mounted) {
+                        setState(
+                          () => _displayValue = widget.value
+                              .clamp(widget.min, widget.max)
+                              .toDouble(),
+                        );
+                      }
+                    }
                   },
                   child: Slider(
                     value: _displayValue.clamp(widget.min, widget.max),
