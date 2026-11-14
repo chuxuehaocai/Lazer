@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
+import 'app_system_tray.dart';
 
 /// Window title shown in the title area — also pushed to the native window so
 /// the taskbar and Alt+Tab agree with the bar.
@@ -219,9 +220,12 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
         await windowManager.hide();
         return;
       }
-      await windowManager.setPreventClose(false);
-      await windowManager.destroy();
-    } catch (_) {}
+      await AppSystemTray.exitApp();
+    } catch (_) {
+      try {
+        await windowManager.destroy();
+      } catch (_) {}
+    }
   }
 
   void _apply({bool? maximized, bool? fullScreen, bool? focused}) {
