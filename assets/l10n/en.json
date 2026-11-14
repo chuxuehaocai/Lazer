@@ -1249,5 +1249,14 @@
   "放大": "Zoom",
   "拖动图片选择要展示的区域": "Drag the picture to choose the area to show",
   "调整位置": "Adjust position",
-  "按分类整理常用选项，减少滚动和查找。": "Grouped by category so common options need less scrolling and searching."
+  "按分类整理常用选项，减少滚动和查找。": "Grouped by category so common options need less scrolling and searching.",
+  "网络与代理": "Network & Proxy",
+  "不使用代理": "No Proxy",
+  "直接连接到网络目标": "Connect directly without a proxy",
+  "使用系统代理": "Use System Proxy",
+  "遵循操作系统的网络代理设置（默认）": "Follow operating system proxy settings (Default)",
+  "手动配置代理": "Manual Proxy",
+  "通过指定的 HTTP 或 SOCKS 代理路由外部流量": "Route external traffic through a specified HTTP or SOCKS proxy",
+  "代理服务器地址": "Proxy Server Address",
+  "输入代理地址，例如 http://127.0.0.1:7890": "Enter proxy address, e.g. http://127.0.0.1:7890"
 }

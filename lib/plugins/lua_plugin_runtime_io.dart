@@ -15,6 +15,7 @@ import 'package:path/path.dart' as p;
 import 'plugin_manifest.dart';
 import 'lua_console_evaluator.dart';
 import '../diagnostics/app_log.dart';
+import '../utils/system_http.dart';
 
 /// Each VM has its own isolate, session, serial call queue and time budget.
 /// No executable, dynamic library, JIT or platform-specific Lua installation.
@@ -115,6 +116,9 @@ class LuaPluginRuntime {
           'data': dataDirectory,
           'externalHttp': httpHandler != null,
           'websocketGranted': websocketGranted,
+          'proxyMode': SystemHttpProxy.currentMode.name,
+          'proxyEndpoint': SystemHttpProxy.customEndpoint,
+          'cachedSystemRules': SystemHttpProxy.cachedSystemRules,
         },
         onError: port.sendPort,
         onExit: port.sendPort,
@@ -132,6 +136,14 @@ class LuaPluginRuntime {
       close();
       rethrow;
     }
+  }
+
+  void updateProxy({required ProxyMode mode, String? endpoint}) {
+    _commands?.send({
+      'action': 'setProxy',
+      'mode': mode.name,
+      'endpoint': endpoint,
+    });
   }
 
   /// Runs one plugin operation on the serialized VM queue.
@@ -280,6 +292,17 @@ class LuaPluginRuntime {
 }
 
 Future<void> _runPlugin(Map<String, dynamic> config) async {
+  if (config['proxyMode'] is String) {
+    final mode = ProxyMode.values.firstWhere(
+      (m) => m.name == config['proxyMode'],
+      orElse: () => ProxyMode.system,
+    );
+    SystemHttpProxy.setMode(
+      mode,
+      endpoint: config['proxyEndpoint'] as String?,
+      initialSystemRules: config['cachedSystemRules'] as String?,
+    );
+  }
   final output = config['port'] as SendPort;
   final commands = ReceivePort();
   final host = _PluginHost(
@@ -314,6 +337,17 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
   Future<void> tail = Future.value();
   commands.listen((dynamic request) {
     if (request is! Map) return;
+    if (request['action'] == 'setProxy') {
+      final mode = ProxyMode.values.firstWhere(
+        (m) => m.name == request['mode'],
+        orElse: () => ProxyMode.system,
+      );
+      SystemHttpProxy.setMode(
+        mode,
+        endpoint: request['endpoint'] as String?,
+      );
+      return;
+    }
     tail = tail.then((_) async {
       try {
         final value = request['source'] is String
@@ -368,7 +402,8 @@ class _PluginHost {
   final bool websocketGranted;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   final HttpClient client = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 20);
+    ..connectionTimeout = const Duration(seconds: 20)
+    ..findProxy = SystemHttpProxy.currentFindProxyRule;
   final Random random = Random.secure();
   Map<String, dynamic> storage = {};
   final Map<String, WebSocket> _websockets = <String, WebSocket>{};

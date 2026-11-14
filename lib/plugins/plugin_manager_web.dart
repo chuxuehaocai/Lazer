@@ -9,6 +9,7 @@ import '../gateway/lua_music_gateway.dart';
 import '../gateway/music_gateway.dart';
 import '../state/build_safe_notifier.dart';
 import '../utils/media_requests.dart';
+import '../utils/system_http.dart';
 import '../theme/lazer_theme.dart';
 import '../ui/layout_system.dart';
 import 'lua_plugin_runtime.dart';
@@ -67,6 +68,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   );
   bool busy = false;
   bool _disposed = false;
+
+  void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {}
   Future<void>? _restoring;
 
   Future<void> Function(String pluginId)? beforeChange;
