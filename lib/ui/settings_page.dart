@@ -113,6 +113,7 @@ enum _SettingsCategory {
   interaction,
   performance,
   account,
+  network,
   about,
 }
 
@@ -126,6 +127,7 @@ extension _SettingsCategoryLabels on _SettingsCategory {
     _SettingsCategory.interaction => '交互与快捷键',
     _SettingsCategory.performance => '性能与调试',
     _SettingsCategory.account => '账户与扩展',
+    _SettingsCategory.network => '网络与代理',
     _SettingsCategory.about => '关于 Lazer',
   };
 
@@ -138,6 +140,7 @@ extension _SettingsCategoryLabels on _SettingsCategory {
     _SettingsCategory.interaction => '震动、返回行为和快捷键',
     _SettingsCategory.performance => '动画、开发者控制台和诊断',
     _SettingsCategory.account => '登录、平台连接和插件',
+    _SettingsCategory.network => '直连、系统代理与自定义端点',
     _SettingsCategory.about => '版本、更新、日志和开源信息',
   };
 
@@ -150,6 +153,7 @@ extension _SettingsCategoryLabels on _SettingsCategory {
     _SettingsCategory.interaction => Icons.touch_app_outlined,
     _SettingsCategory.performance => Icons.speed_outlined,
     _SettingsCategory.account => Icons.account_circle_outlined,
+    _SettingsCategory.network => Icons.lan_outlined,
     _SettingsCategory.about => Icons.info_outline_rounded,
   };
 }
@@ -1454,6 +1458,8 @@ class _SettingsOverview extends StatelessWidget {
                       ),
                     ),
                   ),
+                ],
+                if (show(_SettingsCategory.network)) ...[
                   const _AppSectionLabel('网络与代理'),
                   _NetworkProxySection(state: state),
                 ],
