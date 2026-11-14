@@ -153,7 +153,7 @@ extension _SettingsCategoryLabels on _SettingsCategory {
     _SettingsCategory.interaction => Icons.touch_app_outlined,
     _SettingsCategory.performance => Icons.speed_outlined,
     _SettingsCategory.account => Icons.account_circle_outlined,
-    _SettingsCategory.network => Icons.lan_outlined,
+    _SettingsCategory.network => Icons.public_outlined,
     _SettingsCategory.about => Icons.info_outline_rounded,
   };
 }
