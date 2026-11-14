@@ -127,7 +127,7 @@ extension _SettingsCategoryLabels on _SettingsCategory {
     _SettingsCategory.interaction => '交互与快捷键',
     _SettingsCategory.performance => '性能与调试',
     _SettingsCategory.account => '账户与扩展',
-    _SettingsCategory.network => '网络与代理',
+    _SettingsCategory.network => '网络代理',
     _SettingsCategory.about => '关于 Lazer',
   };
 
@@ -1460,7 +1460,7 @@ class _SettingsOverview extends StatelessWidget {
                   ),
                 ],
                 if (show(_SettingsCategory.network)) ...[
-                  const _AppSectionLabel('网络与代理'),
+                  const _AppSectionLabel('网络代理'),
                   _NetworkProxySection(state: state),
                 ],
                 if (show(_SettingsCategory.about)) ...[
