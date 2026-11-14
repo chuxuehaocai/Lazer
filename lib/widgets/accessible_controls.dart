@@ -5,22 +5,18 @@ import '../interaction/app_haptics.dart';
 import '../l10n/app_localizations.dart';
 import 'interaction_feedback.dart';
 
-/// Keep a control's OverlayPortal and its anchor in the same semantics island.
-/// Flutter 3.47 can otherwise serialize orphan nodes during route transitions
-/// and tooltip changes (flutter/flutter#190357 and #182444).
-/// This preserves the real control's semantics, focus and keyboard actions.
+/// Keep a control and its semantics in the same island.
+///
+/// Putting every slider and dropdown inside a nested [Overlay] can make the
+/// overlay's render layer win hit testing on touch surfaces: sliders remain
+/// visible but cannot be dragged. A semantics container is sufficient here;
+/// controls keep their own native popup and gesture handling.
 class SemanticsPortal extends StatelessWidget {
   const SemanticsPortal({super.key, required this.child});
   final Widget child;
   @override
-  Widget build(BuildContext context) => Semantics(
-    container: true,
-    child: Overlay.wrap(
-      alwaysSizeToContent: true,
-      clipBehavior: Clip.none,
-      child: child,
-    ),
-  );
+  Widget build(BuildContext context) =>
+      Semantics(container: true, child: child);
 }
 
 /// A semantics-labelled Material slider. [detentFeedback] opts into the app's
