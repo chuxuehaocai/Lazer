@@ -61,8 +61,34 @@ class AccessibleSlider extends StatefulWidget {
 class _AccessibleSliderState extends State<AccessibleSlider> {
   SliderDetents? _detents;
   final Set<int> _dragPointers = <int>{};
+  late double _displayValue = widget.value;
 
-  void _updateFromPointer(PointerMoveEvent event, double width) {
+  @override
+  void didUpdateWidget(covariant AccessibleSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != oldWidget.value) _displayValue = widget.value;
+  }
+
+  void _handleChanged(double value, FeedbackCallback? feedback) {
+    if (!mounted || widget.onChanged == null) return;
+    final double next = value.clamp(widget.min, widget.max);
+    setState(() => _displayValue = next);
+    if (_detents != null && feedback != null && _detents!.update(next)) {
+      unawaited(
+        feedback(
+          detent: true,
+          boundary: next <= widget.min || next >= widget.max,
+        ),
+      );
+    }
+    widget.onChanged!(next);
+  }
+
+  void _updateFromPointer(
+    PointerMoveEvent event,
+    double width,
+    FeedbackCallback? feedback,
+  ) {
     if (!_dragPointers.contains(event.pointer) || widget.onChanged == null) {
       return;
     }
@@ -72,7 +98,7 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
     if (divisions != null && divisions > 0) {
       fraction = (fraction * divisions).round() / divisions;
     }
-    widget.onChanged!(widget.min + (widget.max - widget.min) * fraction);
+    _handleChanged(widget.min + (widget.max - widget.min) * fraction, feedback);
   }
 
   @override
@@ -97,13 +123,13 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
                     }
                   },
                   onPointerMove: (PointerMoveEvent event) =>
-                      _updateFromPointer(event, constraints.maxWidth),
+                      _updateFromPointer(event, constraints.maxWidth, feedback),
                   onPointerUp: (PointerUpEvent event) =>
                       _dragPointers.remove(event.pointer),
                   onPointerCancel: (PointerCancelEvent event) =>
                       _dragPointers.remove(event.pointer),
                   child: Slider(
-                    value: widget.value,
+                    value: _displayValue.clamp(widget.min, widget.max),
                     min: widget.min,
                     max: widget.max,
                     secondaryTrackValue: widget.secondaryTrackValue,
@@ -125,24 +151,9 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
                             widget.onChangeStart?.call(value);
                           }
                         : widget.onChangeStart,
-                    onChanged: !widget.detentFeedback || onChanged == null
-                        ? onChanged
-                        : (value) {
-                            final detents = _detents;
-                            if (detents != null &&
-                                feedback != null &&
-                                detents.update(value)) {
-                              unawaited(
-                                feedback(
-                                  detent: true,
-                                  boundary:
-                                      value <= widget.min ||
-                                      value >= widget.max,
-                                ),
-                              );
-                            }
-                            onChanged(value);
-                          },
+                    onChanged: onChanged == null
+                        ? null
+                        : (value) => _handleChanged(value, feedback),
                     onChangeEnd: widget.detentFeedback
                         ? (value) {
                             _detents?.end();
