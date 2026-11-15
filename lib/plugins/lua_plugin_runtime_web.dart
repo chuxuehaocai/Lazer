@@ -7,6 +7,7 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'dart:html' as html;
 
+import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:http/http.dart' as http;
 import 'package:lua_dardo_plus/lua.dart';
@@ -490,6 +491,63 @@ class _WebPluginHost {
         return base64Encode(utf8.encode(input));
       case 'base64_decode':
         return utf8.decode(base64Decode(input));
+      case 'sha1':
+        return crypto.sha1.convert(utf8.encode(input)).toString();
+      case 'hmac':
+        final key = utf8.encode(spec['key'] as String? ?? '');
+        final algorithm = (spec['algorithm'] as String? ?? 'sha256').toLowerCase();
+        final hashAlgorithm = switch (algorithm) {
+          'sha1' => crypto.sha1,
+          'md5' => crypto.md5,
+          _ => crypto.sha256,
+        };
+        return crypto.Hmac(hashAlgorithm, key).convert(utf8.encode(input)).toString();
+      case 'xor':
+        final raw = spec['encoding'] == 'hex'
+            ? Uint8List.fromList([
+                for (var i = 0; i < input.length; i += 2)
+                  int.parse(input.substring(i, i + 2), radix: 16),
+              ])
+            : base64Decode(input);
+        final keyBytes = spec['key'] is List
+            ? List<int>.from(spec['key'] as List)
+            : utf8.encode(spec['key'] as String? ?? '');
+        if (keyBytes.isEmpty) return input;
+        final output = Uint8List(raw.length);
+        for (var i = 0; i < raw.length; i++) {
+          output[i] = raw[i] ^ keyBytes[i % keyBytes.length];
+        }
+        return spec['outputEncoding'] == 'hex'
+            ? output.map((b) => b.toRadixString(16).padLeft(2, '0')).join()
+            : (spec['outputEncoding'] == 'utf8'
+                ? utf8.decode(output, allowMalformed: true)
+                : base64Encode(output));
+      case 'zlib_inflate':
+        try {
+          final raw = base64Decode(input);
+          return utf8.decode(ZLibDecoder().decodeBytes(raw), allowMalformed: true);
+        } catch (_) {
+          return '';
+        }
+      case 'zlib_deflate':
+        try {
+          return base64Encode(ZLibEncoder().encode(utf8.encode(input)));
+        } catch (_) {
+          return '';
+        }
+      case 'krc_decode':
+        try {
+          final raw = base64Decode(input);
+          if (raw.length <= 4) return '';
+          const enKey = [64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105];
+          final payload = Uint8List(raw.length - 4);
+          for (var i = 0; i < payload.length; i++) {
+            payload[i] = raw[i + 4] ^ enKey[i % enKey.length];
+          }
+          return utf8.decode(ZLibDecoder().decodeBytes(payload), allowMalformed: true);
+        } catch (_) {
+          return '';
+        }
       case 'rsa_modpow':
         final modulus = BigInt.parse(spec['modulus'] as String, radix: 16);
         final text = spec['reverse'] == true
