@@ -2684,13 +2684,13 @@ class _BottomTrackCover extends StatelessWidget {
         child: AnimatedBuilder(
           animation: state.all,
           builder: (BuildContext context, _) => SizedBox.square(
-            dimension: 56,
+            dimension: 48,
             child: Stack(
               fit: StackFit.expand,
               children: <Widget>[
                 Padding(
-                  padding: const EdgeInsets.all(3),
-                  child: AppCover(url: track.coverUrl, size: 50, radius: 25),
+                  padding: const EdgeInsets.all(2),
+                  child: AppCover(url: track.coverUrl, size: 44, radius: 22),
                 ),
                 CircularProgressIndicator(
                   value: state.progress.clamp(0, 1),
