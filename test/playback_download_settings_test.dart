@@ -35,6 +35,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.playbackQuality, AudioQuality.lossless);
 
+    await tester.ensureVisible(find.byKey(const ValueKey('download-quality')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('download-quality')));
     await tester.pumpAndSettle();
     await tester.tap(find.text(AudioQuality.standard.label).last);

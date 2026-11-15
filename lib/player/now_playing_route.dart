@@ -268,15 +268,21 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
         physical,
         navigator!.userGestureInProgressNotifier,
       ]),
-      child: MotionSnapshot(animation: physical, child: child),
+      child: MotionSnapshot(
+        animation: physical,
+        snapshotForward: false,
+        child: child,
+      ),
       builder: (BuildContext context, Widget? child) {
         final systemBack = mobile && popGestureInProgress && !_dragging;
         final double travelled = systemBack ? 1 : physical.value;
         // The page is still mounted for the reverse transition. Pause its
         // ambient and lyric tickers so the compositor can move one stable
         // layer offscreen without also repainting the full player each frame.
+        // The entrance must stay live: freezing it made a slow spring slide a
+        // still image up and only start the player once the motion ended.
         final bool tickersEnabled =
-            !_dragging && physical.status == AnimationStatus.completed;
+            !_dragging && physical.status != AnimationStatus.reverse;
         final page = Stack(
           fit: StackFit.expand,
           children: [

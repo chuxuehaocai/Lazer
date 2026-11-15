@@ -11,9 +11,25 @@ class MotionSnapshot extends StatefulWidget {
     super.key,
     required this.animation,
     required this.child,
+    this.snapshotForward = true,
+    this.snapshotReverse = true,
   });
   final Animation<double> animation;
   final Widget child;
+
+  /// Whether a forward run may replace the page with a cached raster.
+  ///
+  /// An incoming page must stay live: its first frame often holds a loading
+  /// placeholder, and freezing that frame leaves the page apparently empty
+  /// until the spring ends — at slow animation speeds for over a second.
+  /// Outgoing pages still opt in because nobody needs to watch them repaint
+  /// while they slide away.
+  final bool snapshotForward;
+
+  /// Whether a reverse run may replace the page with a cached raster. A page
+  /// revealed by a closing motion (the shell under the player) must stay live
+  /// for the same reason.
+  final bool snapshotReverse;
 
   /// Refresh frozen transition pixels when asynchronous visible content arrives.
   static void invalidate(BuildContext context) {
@@ -39,9 +55,21 @@ class _MotionSnapshotState extends State<MotionSnapshot> {
   bool _scrolling = false;
 
   void _status(AnimationStatus status) {
-    final moving =
-        status == AnimationStatus.forward || status == AnimationStatus.reverse;
-    if (!moving) _scrolling = false;
+    final forward = status == AnimationStatus.forward && widget.snapshotForward;
+    final reverse = status == AnimationStatus.reverse && widget.snapshotReverse;
+    final moving = forward || reverse;
+    if (!moving) {
+      _scrolling = false;
+      // Release the raster as soon as the motion ends. A parked page never
+      // paints, so a kept raster would be reused verbatim when it comes back.
+      _snapshot.clear();
+    } else if (!_snapshot.allowSnapshotting) {
+      // A page parked before this move may still hold its previous raster.
+      // Offstage pages never repaint, so that image would otherwise be shown
+      // for one frame when the page comes back — the returning home shelf
+      // appeared twice, offset and dimmed, before this clear.
+      _snapshot.clear();
+    }
     _snapshot.allowSnapshotting = moving && !_scrolling;
   }
 

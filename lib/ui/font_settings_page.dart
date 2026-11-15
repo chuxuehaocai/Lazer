@@ -38,6 +38,7 @@ class FontSettingsView extends StatelessWidget {
       child: Builder(
         builder: (context) => SettingsDetailScaffold(
           title: '字体自定义',
+          headerTitle: true,
           actions: [
             SpringTextButton(
               key: const ValueKey('reset-all-fonts'),

@@ -207,4 +207,32 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('secondary settings surfaces are transparent over the backdrop', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final state = AppState();
+    addTearDown(state.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(brightness: Brightness.dark),
+        home: Scaffold(body: AppSettingsPage(state: state)),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('open-font-settings')));
+    await tester.pumpAndSettle();
+    final material = tester.widget<Material>(
+      find.byKey(const ValueKey('settings-detail-material')),
+    );
+    expect(material.type, MaterialType.transparency);
+    expect(
+      material.color,
+      isNull,
+      reason: 'an opaque material would paint a black sheet over the backdrop',
+    );
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../animation/view_transitions.dart';
 import 'package:flutter/services.dart';
 import '../animation/apple_spring.dart';
+import '../l10n/app_localizations.dart';
 import '../navigation/system_back_gesture.dart';
 import '../theme/apple_design.dart';
 import 'apple_ui.dart';
@@ -256,10 +257,16 @@ class SettingsDetailScaffold extends StatelessWidget {
     required this.title,
     required this.child,
     this.actions = const [],
+    this.headerTitle = false,
   });
   final String title;
   final Widget child;
   final List<Widget> actions;
+
+  /// Paints [title] in the header row instead of only naming the page on the
+  /// overview. Off by default: category pages already show a large page title
+  /// inside their scroll view.
+  final bool headerTitle;
 
   @override
   Widget build(BuildContext context) {
@@ -271,18 +278,9 @@ class SettingsDetailScaffold extends StatelessWidget {
         : Wrap(spacing: 8, children: actions);
     if (close == null) {
       final bool canPop = Navigator.of(context).canPop();
-      final bool hasTopBar = canPop || trailing != null;
-      return Scaffold(
-        // Detail pages own an opaque surface during their route transition.
-        // A transparent scaffold lets the previous settings page show through
-        // while the incoming controls are fading in, which is especially
-        // visible when opening a third-level page such as the plugin market.
-        backgroundColor: AppleSemanticColors.of(context).background,
-        // The route already receives the system inset from SafeArea. The
-        // previous minimum top inset was added on top of the back-row's own
-        // 8 px margin, leaving every mobile secondary page with a visible
-        // blank band below the status bar.
-        body: SafeArea(
+      final bool hasTopBar = canPop || trailing != null || headerTitle;
+      return _DetailRouteSurface(
+        child: SafeArea(
           child: Stack(
             children: <Widget>[
               if (hasTopBar)
@@ -299,7 +297,26 @@ class SettingsDetailScaffold extends StatelessWidget {
                           onPressed: () => Navigator.of(context).maybePop(),
                           icon: const Icon(Icons.chevron_left_rounded),
                         ),
-                      const Spacer(),
+                      if (headerTitle)
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            child: Text(
+                              context.tr(title),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(
+                                    color: AppleSemanticColors.of(
+                                      context,
+                                    ).label,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ),
+                        )
+                      else
+                        const Spacer(),
                       ?trailing,
                     ],
                   ),
@@ -319,7 +336,12 @@ class SettingsDetailScaffold extends StatelessWidget {
       );
     }
     return Material(
-      color: AppleSemanticColors.of(context).background,
+      key: const ValueKey('settings-detail-material'),
+      // The shared browse canvas lives below the navigator. An opaque material
+      // here painted the theme background over it, so every secondary settings
+      // page turned into a flat black sheet in the dark theme even while the
+      // configured backdrop was running.
+      type: MaterialType.transparency,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final inset = constraints.maxWidth < 600 ? 20.0 : 32.0;
@@ -352,6 +374,43 @@ class SettingsDetailScaffold extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// A pushed settings page shares the browse canvas, but keeps an opaque veil
+/// only while the route is still moving. Without it the outgoing page shows
+/// through the incoming one during the push; if it stayed after the spring
+/// settles, the configured backdrop would never be visible.
+class _DetailRouteSurface extends StatelessWidget {
+  const _DetailRouteSurface({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final Animation<double>? animation = ModalRoute.of(context)?.animation;
+    final Color canvas = AppleSemanticColors.of(context).background;
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        if (animation != null)
+          AnimatedBuilder(
+            animation: animation,
+            builder: (BuildContext context, Widget? _) => IgnorePointer(
+              child: ColoredBox(
+                color: canvas.withValues(
+                  alpha: (1 - animation.value).clamp(0.0, 1.0),
+                ),
+              ),
+            ),
+          ),
+        Scaffold(
+          key: const ValueKey('settings-detail-route-scaffold'),
+          backgroundColor: Colors.transparent,
+          body: child,
+        ),
+      ],
     );
   }
 }

@@ -340,7 +340,11 @@ class _SpringPageSurface extends StatelessWidget {
             end: Offset.zero,
           ).animate(animation),
           textDirection: Directionality.of(context),
-          child: MotionSnapshot(animation: animation, child: child),
+          child: MotionSnapshot(
+            animation: animation,
+            snapshotForward: false,
+            child: child,
+          ),
         ),
       ),
     ),
@@ -456,7 +460,11 @@ class _RouteTransitionState extends State<_RouteTransition> {
         position: _motion.drive(
           Tween<Offset>(begin: const Offset(.035, 0), end: Offset.zero),
         ),
-        child: MotionSnapshot(animation: widget.animation, child: widget.child),
+        child: MotionSnapshot(
+          animation: widget.animation,
+          snapshotForward: false,
+          child: widget.child,
+        ),
       ),
     ),
   );

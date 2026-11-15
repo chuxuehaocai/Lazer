@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lazer_nextgen/animation/apple_spring.dart';
 import 'package:lazer_nextgen/widgets/retained_content_switcher.dart';
 
 void main() {
@@ -287,6 +288,64 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pump();
     expect(tester.element(find.text('root/light/1000.0')), same(rootElement));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('incoming page stays live and tickers keep running', (
+    tester,
+  ) async {
+    MotionTiming.speed = MotionTiming.minSpeed;
+    addTearDown(() => MotionTiming.speed = MotionTiming.defaultSpeed);
+    Widget app(String key) => MaterialApp(
+      home: RetainedContentSwitcher(
+        currentKey: key,
+        retainKeys: const {'root'},
+        page: SizedBox.expand(child: Text(key)),
+      ),
+    );
+    await tester.pumpWidget(app('root'));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(app('detail'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final incomingTicker = tester.widget<TickerMode>(
+      find
+          .ancestor(of: find.text('detail'), matching: find.byType(TickerMode))
+          .first,
+    );
+    expect(
+      incomingTicker.enabled,
+      isTrue,
+      reason: 'a visible incoming page must not freeze its own animations',
+    );
+    final incomingSnapshot = tester.widget<SnapshotWidget>(
+      find
+          .ancestor(
+            of: find.text('detail'),
+            matching: find.byType(SnapshotWidget),
+          )
+          .first,
+    );
+    expect(
+      incomingSnapshot.controller.allowSnapshotting,
+      isFalse,
+      reason: 'the incoming page must paint live, not reuse a cached raster',
+    );
+    final outgoingSnapshot = tester.widget<SnapshotWidget>(
+      find
+          .ancestor(
+            of: find.text('root'),
+            matching: find.byType(SnapshotWidget),
+          )
+          .first,
+    );
+    expect(
+      outgoingSnapshot.controller.allowSnapshotting,
+      isTrue,
+      reason: 'the outgoing page is the one worth rasterizing',
+    );
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 

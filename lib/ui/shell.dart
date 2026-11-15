@@ -535,6 +535,7 @@ class _AppShellState extends State<AppShell>
           excluding: !settled,
           child: MotionSnapshot(
             animation: _nowPlayingMotion,
+            snapshotForward: false,
             // Focus starts on the first control of the player so a remote can
             // operate it at once.
             child: TvFocusRegion(focusToken: settled, child: page!),
@@ -1245,6 +1246,7 @@ class _AppShellState extends State<AppShell>
                             blurSigma: state.backgroundBlurEnabled
                                 ? state.backgroundBlur
                                 : 0,
+                            darkEdge: state.backgroundDarkEdgeEnabled,
                             quality: state.dynamicBackgroundQuality,
                             frameRate: state.browseBackgroundFps,
                             solidColor: state.browseBackgroundColor,
@@ -1346,6 +1348,10 @@ class _AppShellState extends State<AppShell>
                             enabled: !_nowPlayingOpen,
                             child: MotionSnapshot(
                               animation: _nowPlayingMotion,
+                              // Opening the player freezes the shell it covers;
+                              // closing reveals the shell again, so it has to
+                              // paint live instead of showing the old raster.
+                              snapshotReverse: false,
                               child: shell,
                             ),
                           ),

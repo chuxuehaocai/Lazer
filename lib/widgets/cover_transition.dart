@@ -624,6 +624,13 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget>
         setState(() => _flying = false);
         _setTargetTextHidden(widget.identity, false);
         _hideSource(origin.sourceKey, false);
+        // The aborted flight owned the blend state. Leaving it at 0 made a
+        // later return fly the source snapshot at full detail size, which
+        // looked like a second copy of the tapped card over the page.
+        _forgetOrigin();
+        _flightBlend = 1;
+        _flightPresentation = null;
+        _textPresentations.clear();
         return;
       }
       final start = Rect.fromPoints(

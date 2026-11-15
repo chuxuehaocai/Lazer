@@ -1016,6 +1016,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double backgroundBlur = 0;
   bool backgroundBlurEnabled = false;
 
+  /// Whether the flowing canvas paints its radial dark edge (vignette).
+  /// The vertical scrim stays: it is what keeps the page's text readable.
+  bool backgroundDarkEdgeEnabled = true;
+
   /// `内容不透明度` of the app shell — how much of the backdrop the content
   /// veil hides.
   double uiAlpha = 0.7;
@@ -1192,6 +1196,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       player
           ? 'lazer_player_background_blur_enabled'
           : 'lazer_background_blur_enabled',
+      value,
+    );
+  }
+
+  Future<void> setBackgroundDarkEdgeEnabled(bool value) async {
+    if (backgroundDarkEdgeEnabled == value) return;
+    backgroundDarkEdgeEnabled = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      'lazer_background_dark_edge',
       value,
     );
   }
@@ -2133,6 +2147,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       backgroundBlurEnabled =
           prefs.getBool('lazer_background_blur_enabled') ?? false;
+      backgroundDarkEdgeEnabled =
+          prefs.getBool('lazer_background_dark_edge') ?? true;
       playerBackgroundImageAlignmentX =
           (prefs.getDouble('lazer_player_background_image_alignment_x') ?? 0)
               .clamp(

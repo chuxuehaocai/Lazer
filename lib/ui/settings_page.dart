@@ -312,7 +312,16 @@ class _SettingsOverview extends StatelessWidget {
   final Future<String?> Function()? backgroundImagePicker;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedBuilder(
+    // Category pages can be pushed as their own route on compact layouts.
+    // That route is not inside the shell's rebuild, so without listening here
+    // a slider, button or dropdown updated the state but the visible row kept
+    // the value it was built with.
+    animation: state,
+    builder: (BuildContext context, Widget? _) => _buildBody(context),
+  );
+
+  Widget _buildBody(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final double minScale = UiMetrics.minScaleOf(context);
@@ -527,6 +536,48 @@ class _SettingsOverview extends StatelessWidget {
                             key: const ValueKey('animation-speed-reset'),
                             onPressed: () =>
                                 unawaited(state.resetAnimationSpeed()),
+                            child: const TrText('恢复默认'),
+                          ),
+                        ),
+                        const _AppSectionLabel('顶边栏'),
+                        _AppSliderRow(
+                          key: const ValueKey('header-blur-slider'),
+                          label: '顶边栏模糊',
+                          valueText: '${state.headerBlur.round()} px',
+                          subtitle: '0 为不模糊；数值越大，标题栏后方的背景越柔和',
+                          value: state.headerBlur,
+                          min: kHeaderBlurMin,
+                          max: kHeaderBlurMax,
+                          divisions: ((kHeaderBlurMax - kHeaderBlurMin) / 2)
+                              .round(),
+                          onChanged: (double value) =>
+                              unawaited(state.setHeaderBlur(value)),
+                          action: SpringTextButton(
+                            key: const ValueKey('header-blur-reset'),
+                            onPressed: () => unawaited(
+                              state.setHeaderBlur(kHeaderBlurDefault),
+                            ),
+                            child: const TrText('恢复默认'),
+                          ),
+                        ),
+                        _AppSliderRow(
+                          key: const ValueKey('header-opacity-slider'),
+                          label: '顶边栏不透明度',
+                          valueText: '${(state.headerOpacity * 100).round()}%',
+                          subtitle: '数值越低背景越明显；100% 时顶边栏不再模糊背景',
+                          value: state.headerOpacity,
+                          min: kHeaderOpacityMin,
+                          max: kHeaderOpacityMax,
+                          divisions:
+                              ((kHeaderOpacityMax - kHeaderOpacityMin) / .05)
+                                  .round(),
+                          onChanged: (double value) =>
+                              unawaited(state.setHeaderOpacity(value)),
+                          action: SpringTextButton(
+                            key: const ValueKey('header-opacity-reset'),
+                            onPressed: () => unawaited(
+                              state.setHeaderOpacity(kHeaderOpacityDefault),
+                            ),
                             child: const TrText('恢复默认'),
                           ),
                         ),
@@ -1729,7 +1780,7 @@ class _VersionSecretTileState extends State<_VersionSecretTile> {
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(7),
         child: Image.asset(
-          'assets/zako.png',
+          'assets/app_icon.png',
           width: 30,
           height: 30,
           fit: BoxFit.cover,
@@ -2251,6 +2302,17 @@ class _BackgroundPreferences extends StatelessWidget {
                 }
               },
             ),
+          ),
+        if (!player)
+          _AppSwitchRow(
+            key: const ValueKey('background-dark-edge'),
+            label: '背景暗边',
+            subtitle: '在背景四周叠加一层暗角，让上层文字更清晰；关闭后背景色彩更均匀',
+            value: state.backgroundDarkEdgeEnabled,
+            onChanged: mode == AppBackgroundMode.off
+                ? null
+                : (bool value) =>
+                      unawaited(state.setBackgroundDarkEdgeEnabled(value)),
           ),
         if (player && mode == AppBackgroundMode.customImage)
           _AppSettingRow(

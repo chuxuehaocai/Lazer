@@ -811,6 +811,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                     blurSigma: widget.state.playerBackgroundBlurEnabled
                         ? widget.state.playerBackgroundBlur
                         : 0,
+                    darkEdge: widget.state.backgroundDarkEdgeEnabled,
                     pageColor: Colors.black,
                     animationsEnabled: widget.state.playing,
                     // Reads the live preference: the shell rebuilds this page on

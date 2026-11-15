@@ -30,6 +30,7 @@ class AlbumBlurFlowCanvas extends StatefulWidget {
     this.imageAlignmentY = 0,
     this.imageScale = 1,
     this.blurSigma = 0,
+    this.darkEdge = true,
     this.paletteLoader = albumPaletteForCover,
   });
 
@@ -43,6 +44,9 @@ class AlbumBlurFlowCanvas extends StatefulWidget {
   final double imageAlignmentY;
   final double imageScale;
   final double blurSigma;
+
+  /// Draws the radial vignette that darkens the canvas edges.
+  final bool darkEdge;
   final AppBackgroundMode mode;
   final Color pageColor;
   final bool animationsEnabled;
@@ -64,7 +68,6 @@ class AlbumBlurFlowCanvas extends StatefulWidget {
   @override
   State<AlbumBlurFlowCanvas> createState() => _AlbumBlurFlowCanvasState();
 }
-
 
 /// Public player background surface. Browse uses [AlbumBlurFlowCanvas] directly
 /// so a shell can keep one player surface and one browse surface without
@@ -88,6 +91,7 @@ class AlbumBlurFlow extends StatelessWidget {
     this.imageAlignmentY = 0,
     this.imageScale = 1,
     this.blurSigma = 0,
+    this.darkEdge = true,
     this.paletteLoader = albumPaletteForCover,
   });
 
@@ -107,6 +111,7 @@ class AlbumBlurFlow extends StatelessWidget {
   final double imageAlignmentY;
   final double imageScale;
   final double blurSigma;
+  final bool darkEdge;
   final AlbumPaletteLoader paletteLoader;
 
   @override
@@ -118,9 +123,7 @@ class AlbumBlurFlow extends StatelessWidget {
     quality: quality,
     preview: preview,
     boundaryKey: boundaryKey,
-    onSeed: onSeed == null
-        ? null
-        : (Color color) => onSeed!(color),
+    onSeed: onSeed == null ? null : (Color color) => onSeed!(color),
     frameRate: frameRate,
     solidColor: solidColor,
     imagePath: imagePath,
@@ -129,6 +132,7 @@ class AlbumBlurFlow extends StatelessWidget {
     imageAlignmentY: imageAlignmentY,
     imageScale: imageScale,
     blurSigma: blurSigma,
+    darkEdge: darkEdge,
     paletteLoader: paletteLoader,
   );
 }
@@ -162,7 +166,8 @@ class _AlbumBlurFlowCanvasState extends State<AlbumBlurFlowCanvas>
         ? cachedAlbumPaletteForCover(coverUrl)
         : null;
     final List<Color> fallback =
-        cached?.mesh ?? albumFlowColors(albumFallbackSeedForTrack(widget.track));
+        cached?.mesh ??
+        albumFlowColors(albumFallbackSeedForTrack(widget.track));
     if (mounted) {
       setState(() => _colors = fallback);
     } else {
@@ -236,18 +241,19 @@ class _AlbumBlurFlowCanvasState extends State<AlbumBlurFlowCanvas>
                 ),
               ),
             ),
-            const IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment(-.35, -.25),
-                    radius: 1.08,
-                    colors: <Color>[Color(0x00000000), Color(0x75000000)],
-                    stops: <double>[.42, 1],
+            if (widget.darkEdge)
+              const IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: Alignment(-.35, -.25),
+                      radius: 1.08,
+                      colors: <Color>[Color(0x00000000), Color(0x75000000)],
+                      stops: <double>[.42, 1],
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),

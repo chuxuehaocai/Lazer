@@ -1,4 +1,5 @@
 import 'build_safe_state.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/physics.dart';
@@ -63,6 +64,12 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     vsync: this,
   )..addStatusListener(_status);
 
+  /// Upper bound on one page switch. A spring that stalls (a dropped frame, a
+  /// platform lifecycle pause, or a retarget that never produced a tick) would
+  /// otherwise leave the outgoing page painted over the incoming one forever:
+  /// the reported home-page ghost was the 每日推荐 page stuck half faded.
+  Timer? _settleWatchdog;
+
   /// Every transition report goes through here so [dispose] knows whether a
   /// `false` is still owed.
   void _report(bool moving) {
@@ -88,6 +95,8 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
 
   void _status(AnimationStatus status) {
     if (status != AnimationStatus.completed || !mounted) return;
+    _settleWatchdog?.cancel();
+    _settleWatchdog = null;
     setState(() {
       _pages.removeWhere(
         (key, _) =>
@@ -113,6 +122,33 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     }
   }
 
+  /// Settles a switch even if its spring never reports completion.
+  void _armSettleWatchdog() {
+    _settleWatchdog?.cancel();
+    if (widget.duration <= Duration.zero) return;
+    _settleWatchdog = Timer(
+      widget.duration * 4 + const Duration(milliseconds: 250),
+      () {
+        if (!mounted) return;
+        _settleWatchdog = null;
+        setState(() {
+          _pages.removeWhere(
+            (key, _) =>
+                key != widget.currentKey && !widget.retainKeys.contains(key),
+          );
+          for (final entry in _pages.values) {
+            entry
+              ..from = entry.to
+              ..spring = null
+              ..parkedView = null;
+          }
+        });
+        _motion.stop();
+        _report(false);
+      },
+    );
+  }
+
   @override
   void didUpdateWidget(covariant RetainedContentSwitcher oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -129,6 +165,8 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     if (oldWidget.backTargetKey == widget.currentKey && widget.backCommitted) {
       // The interactive preview already painted the complete return. Keep
       // those exact retained elements and finish without a second transition.
+      _settleWatchdog?.cancel();
+      _settleWatchdog = null;
       _transitionGeneration++;
       _motion.stop();
       _pages[widget.currentKey]!.page = widget.page;
@@ -178,6 +216,8 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     final generation = ++_transitionGeneration;
     if (widget.duration == Duration.zero ||
         MediaQuery.disableAnimationsOf(context)) {
+      _settleWatchdog?.cancel();
+      _settleWatchdog = null;
       _motion.stop();
       _pages.removeWhere(
         (key, _) =>
@@ -212,11 +252,14 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
         }
       });
       _report(true);
+      _armSettleWatchdog();
     }
   }
 
   @override
   void dispose() {
+    _settleWatchdog?.cancel();
+    _settleWatchdog = null;
     // The shell replaces this element outright when a layout-mode change or a
     // resize across the breakpoint puts the content at a different place in the
     // tree. The completion that would have reported the end of the switch never
@@ -294,7 +337,11 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
       key: ValueKey<String>(key),
       offstage: parked,
       child: TickerMode(
-        enabled: current && !entry.transitioning && !preview,
+        // Only parked pages stay muted. The incoming page is fully visible
+        // while the spring runs, and muting its tickers froze spinners and
+        // entrance animations for the whole switch — very visible at slow
+        // animation speeds. The outgoing page is raster-snapshotted instead.
+        enabled: current || preview,
         child: IgnorePointer(
           ignoring: !current,
           child: ExcludeFocus(
@@ -350,6 +397,7 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
                           animation: entry.transitioning
                               ? _motion
                               : kAlwaysCompleteAnimation,
+                          snapshotForward: !current,
                           child: RepaintBoundary(child: entry.page),
                         ),
                       ),

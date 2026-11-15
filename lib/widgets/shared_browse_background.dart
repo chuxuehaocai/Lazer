@@ -48,6 +48,7 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
       state.backgroundImageAlignmentY,
       state.backgroundImageScale,
       state.backgroundBlurEnabled ? state.backgroundBlur : 0,
+      state.backgroundDarkEdgeEnabled,
       state.uiAlpha,
       state.dynamicBackgroundQuality,
       state.browseBackgroundFps,
@@ -138,6 +139,7 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
                   blurSigma: state.backgroundBlurEnabled
                       ? state.backgroundBlur
                       : 0,
+                  darkEdge: state.backgroundDarkEdgeEnabled,
                   quality: state.dynamicBackgroundQuality,
                   frameRate: state.browseBackgroundFps,
                   solidColor: state.browseBackgroundColor,

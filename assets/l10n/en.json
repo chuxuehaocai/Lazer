@@ -1254,5 +1254,12 @@
   "手动配置代理": "Manual Proxy",
   "通过指定的 HTTP 或 SOCKS 代理路由外部流量": "Route external traffic through a specified HTTP or SOCKS proxy",
   "代理服务器地址": "Proxy Server Address",
-  "输入代理地址，例如 http://127.0.0.1:7890": "Enter proxy address, e.g. http://127.0.0.1:7890"
+  "输入代理地址，例如 http://127.0.0.1:7890": "Enter proxy address, e.g. http://127.0.0.1:7890",
+  "顶边栏": "Top bar",
+  "顶边栏模糊": "Top bar blur",
+  "0 为不模糊；数值越大，标题栏后方的背景越柔和": "0 disables blur; higher values soften the background behind the title bar",
+  "顶边栏不透明度": "Top bar opacity",
+  "数值越低背景越明显；100% 时顶边栏不再模糊背景": "Lower values reveal more background; at 100% the top bar stops blurring it",
+  "背景暗边": "Background dark edge",
+  "在背景四周叠加一层暗角，让上层文字更清晰；关闭后背景色彩更均匀": "Adds a dark vignette around the backdrop for clearer text; turn it off for more even colour"
 }
