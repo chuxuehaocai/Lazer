@@ -421,6 +421,12 @@ class Catalog {
 
   Future<void> invalidateLyrics(String trackId) => _expire('lyrics:$trackId');
 
+  /// Deletes every durable lyric file and returns how many were removed.
+  ///
+  /// A stored lyric has no version marker, so a plugin that starts answering
+  /// better would otherwise keep showing the older reply forever.
+  Future<int> clearLyricsCache() => lyricsCache.clear();
+
   /// Drops every discovery-chart snapshot, in memory and on disk.
   Future<void> invalidateDiscoveryCharts() async {
     await Future.wait(<Future<void>>[

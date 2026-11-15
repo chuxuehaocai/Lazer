@@ -1291,5 +1291,8 @@
   "直连、系统代理与自定义端点": "Direct connections, system proxy, and custom endpoints",
   "版本、更新、日志和开源信息": "Version, updates, logs, and open-source information",
   "外观、界面和账户。": "Appearance, interface, and accounts.",
-  "已登录": "Signed in"
+  "已登录": "Signed in",
+  "清除歌词缓存": "Clear lyrics cache",
+  "下次播放时重新获取歌词": "Lyrics are fetched again on the next play",
+  "已清除 {count} 首歌词": "Cleared lyrics for {count} songs"
 }
