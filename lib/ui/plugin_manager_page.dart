@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../animation/apple_modal.dart';
 import '../l10n/app_localizations.dart';
 import '../gateway/gateway.dart';
 import '../plugins/plugin_manager.dart';
@@ -191,10 +193,29 @@ class _PluginRow extends StatelessWidget {
   final PluginManager manager;
   final bool active;
   final Future<void> Function() onUse;
+
+  String _permissionSummary(BuildContext context) {
+    final parts = <String>[];
+    if (plugin.manifest.domains.isNotEmpty) {
+      final count = plugin.manifest.domains.length;
+      final unit = context.tr('个授权域名');
+      parts.add('$count $unit');
+    }
+    if (plugin.manifest.websocketDomains.isNotEmpty) {
+      parts.add(context.tr('WebSocket 需授权'));
+    }
+    if (plugin.manifest.storage) {
+      parts.add(context.tr('本地存储'));
+    }
+    if (parts.isEmpty) {
+      return context.tr('无需特殊权限');
+    }
+    return parts.join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final apple = AppleSemanticColors.of(context);
-    final String hosts = plugin.manifest.domains.join('、');
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
       child: Row(
@@ -215,33 +236,33 @@ class _PluginRow extends StatelessWidget {
               children: [
                 Text(
                   plugin.manifest.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 Text(
                   '${plugin.manifest.provider} · v${plugin.manifest.version}${plugin.error == null ? '' : ' · ${plugin.error}'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: plugin.error == null
                         ? apple.secondaryLabel
                         : Theme.of(context).colorScheme.error,
                   ),
                 ),
-                if (plugin.manifest.domains.isNotEmpty ||
-                    plugin.manifest.websocketDomains.isNotEmpty ||
-                    plugin.manifest.storage)
-                  Text(
-                    context.tr(
-                      plugin.manifest.websocketDomains.isNotEmpty
-                          ? '网络：$hosts · WebSocket 需授权${plugin.manifest.storage ? ' · 本地存储' : ''}'
-                          : plugin.manifest.storage
-                          ? '网络：$hosts · 本地存储'
-                          : '网络：$hosts',
-                    ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    _permissionSummary(context),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: apple.secondaryLabel,
                     ),
                   ),
+                ),
               ],
             ),
           ),
@@ -257,27 +278,307 @@ class _PluginRow extends StatelessWidget {
                 : (value) =>
                       unawaited(manager.setEnabled(plugin.manifest.id, value)),
           ),
-          if (plugin.manifest.websocketDomains.isNotEmpty)
-            Switch(
-              value: plugin.websocketGranted,
-              onChanged: manager.busy
-                  ? null
-                  : (value) => unawaited(
-                      manager.setWebsocketPermission(plugin.manifest.id, value),
-                    ),
-            ),
           PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert_rounded, color: apple.secondaryLabel),
             onSelected: (value) async {
-              if (value == 'remove') {
+              if (value == 'info') {
+                await _showPluginDetails(context, plugin, manager);
+              } else if (value == 'remove') {
                 await manager.uninstall(plugin.manifest.id);
               }
             },
             itemBuilder: (_) => [
-              PopupMenuItem(value: 'remove', child: Text(context.tr('卸载'))),
+              PopupMenuItem(
+                value: 'info',
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded, size: 18),
+                    const SizedBox(width: 8),
+                    Text(context.tr('详细信息')),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'remove',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.delete_outline_rounded,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      context.tr('卸载'),
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+Future<void> _showPluginDetails(
+  BuildContext context,
+  InstalledPlugin plugin,
+  PluginManager manager,
+) {
+  final bool wide = MediaQuery.sizeOf(context).width >= 700;
+  if (wide) {
+    return showAppleDialog<void>(
+      context: context,
+      builder: (BuildContext context) => Dialog(
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: SizedBox(
+          width: 480,
+          child: _PluginDetailsSheet(plugin: plugin, manager: manager),
+        ),
+      ),
+    );
+  }
+  return showAppleModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useRootNavigator: true,
+    showDragHandle: true,
+    builder: (BuildContext context) => SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.75,
+      child: _PluginDetailsSheet(plugin: plugin, manager: manager),
+    ),
+  );
+}
+
+class _PluginDetailsSheet extends StatefulWidget {
+  const _PluginDetailsSheet({required this.plugin, required this.manager});
+
+  final InstalledPlugin plugin;
+  final PluginManager manager;
+
+  @override
+  State<_PluginDetailsSheet> createState() => _PluginDetailsSheetState();
+}
+
+class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final apple = AppleSemanticColors.of(context);
+    final manifest = widget.plugin.manifest;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: apple.accent.withValues(alpha: .13),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.extension_rounded, color: apple.accent, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      manifest.name,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${manifest.id} · v${manifest.version} · ${manifest.provider}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: apple.secondaryLabel,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Divider(height: 1, color: apple.separator),
+          const SizedBox(height: 16),
+          Expanded(
+            child: ListView(
+              children: [
+                _sectionHeader(context, Icons.language_rounded, '网络访问权限', apple),
+                const SizedBox(height: 8),
+                if (manifest.domains.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 12),
+                    child: Text(
+                      context.tr('无需访问外网'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: apple.secondaryLabel,
+                      ),
+                    ),
+                  )
+                else ...[
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 8),
+                    child: Text(
+                      context.tr('该插件仅限访问以下白名单网络域名：'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: apple.secondaryLabel,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: apple.tertiaryFill,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: apple.separator, width: .5),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final domain in manifest.domains)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Row(
+                              children: [
+                                Icon(Icons.circle, size: 5, color: apple.accent),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: SelectableText(
+                                    domain,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: apple.label,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: SpringTextButton(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: manifest.domains.join('\n')));
+                        ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            SnackBar(
+                              content: Text(context.tr('已复制域名列表')),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.copy_rounded, size: 14, color: apple.accent),
+                          const SizedBox(width: 4),
+                          const TrText('复制全部域名'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                if (manifest.websocketDomains.isNotEmpty) ...[
+                  _sectionHeader(context, Icons.swap_calls_rounded, 'WebSocket 实时通信', apple),
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: apple.tertiaryFill,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: apple.separator, width: .5),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final ws in manifest.websocketDomains)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Text(
+                              ws,
+                              style: theme.textTheme.bodyMedium?.copyWith(color: apple.label),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              context.tr('允许 WebSocket 连接'),
+                              style: theme.textTheme.bodySmall?.copyWith(color: apple.label),
+                            ),
+                            Switch(
+                              value: widget.plugin.websocketGranted,
+                              onChanged: widget.manager.busy
+                                  ? null
+                                  : (value) async {
+                                      await widget.manager.setWebsocketPermission(manifest.id, value);
+                                      if (mounted) setState(() {});
+                                    },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                _sectionHeader(context, Icons.folder_outlined, '本地数据存储', apple),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Text(
+                    manifest.storage
+                        ? context.tr('拥有独立的本地数据存储沙箱（存储于 lua_plugin_data 目录）。')
+                        : context.tr('不使用本地存储'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: apple.secondaryLabel,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          SpringFilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const TrText('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(BuildContext context, IconData icon, String title, AppleSemanticColors apple) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: apple.accent),
+        const SizedBox(width: 6),
+        Text(
+          context.tr(title),
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }

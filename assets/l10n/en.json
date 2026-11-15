@@ -1002,8 +1002,6 @@
   "无法识别这个 ZIP。{error}": "Could not read this ZIP. {error}",
   "缺少插件入口。": "The plugin entry point is missing.",
   "独占或 DSD 输出时音量由 DAC 控制，软件音量保持 100%。": "Volume is controlled by the DAC in exclusive or DSD output; software volume stays at 100%.",
-  "网络：{hosts}": "Network: {hosts}",
-  "网络：{hosts} · 本地存储": "Network: {hosts} · Local storage",
   "没有已初始化的输出会话": "No output session is initialized",
   "输出不是独占": "Output is not exclusive",
   "DSP 在信号路径中": "DSP is in the signal path",
@@ -1270,5 +1268,17 @@
   "在浏览器中打开授权页": "Open authorization page in browser",
   "复制验证码": "Copy verification code",
   "验证码已复制到剪贴板。": "Verification code copied to clipboard.",
-  "验证码：": "Verification code: "
+  "验证码：": "Verification code: ",
+  "WebSocket 需授权": "WebSocket requires authorization",
+  "不使用本地存储": "No local storage",
+  "个授权域名": "authorized domains",
+  "允许 WebSocket 连接": "Allow WebSocket connections",
+  "复制全部域名": "Copy all domains",
+  "已复制域名列表": "Domain list copied",
+  "拥有独立的本地数据存储沙箱（存储于 lua_plugin_data 目录）。": "Isolated local storage sandbox (stored in lua_plugin_data directory).",
+  "无需特殊权限": "No special permissions",
+  "无需访问外网": "No external network access",
+  "本地存储": "Local storage",
+  "该插件仅限访问以下白名单网络域名：": "This plugin is restricted to the following allowlisted domains:",
+  "详细信息": "Details"
 }
