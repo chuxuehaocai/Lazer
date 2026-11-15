@@ -315,7 +315,7 @@ void main() {
 }
 
 class _RichQrGateway extends _QrGateway {
-  _RichQrGateway({super.codes = const <int>[801]});
+  _RichQrGateway() : super(codes: const <int>[801]);
 
   final QrSessionInfo sessionInfo = const QrSessionInfo(
     url: _scanUrl,
