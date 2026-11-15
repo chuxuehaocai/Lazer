@@ -957,6 +957,7 @@ class _SettingsOverview extends StatelessWidget {
                   const _AppSectionLabel('歌词'),
                   LyricsCacheSettings(
                     onClear: state.catalog.clearLyricsCache,
+                    onCount: state.catalog.countLyricsCache,
                   ),
                   const _AppSectionLabel('下载'),
                   PlaybackCacheSettings(controller: state.playbackCache),

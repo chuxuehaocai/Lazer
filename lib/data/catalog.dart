@@ -421,6 +421,9 @@ class Catalog {
 
   Future<void> invalidateLyrics(String trackId) => _expire('lyrics:$trackId');
 
+  /// Reports how many lyric files are currently cached on disk.
+  Future<int> countLyricsCache() => lyricsCache.count();
+
   /// Deletes every durable lyric file and returns how many were removed.
   ///
   /// A stored lyric has no version marker, so a plugin that starts answering

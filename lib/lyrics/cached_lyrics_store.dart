@@ -120,6 +120,25 @@ class CachedLyricsStore {
     );
   }
 
+  /// Reports how many lyric files are currently cached on disk.
+  Future<int> count() async {
+    try {
+      final directory = Directory(
+        '${(await _support()).path}${Platform.pathSeparator}cached_lyrics',
+      );
+      if (!await directory.exists()) return 0;
+      var total = 0;
+      await for (final entity in directory.list()) {
+        if (entity is File && entity.path.endsWith('.json')) {
+          total++;
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   /// Deletes every cached lyric file and reports how many were removed.
   ///
   /// The list is per song and has no version marker, so a plugin that starts

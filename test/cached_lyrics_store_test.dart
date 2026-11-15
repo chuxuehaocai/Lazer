@@ -111,7 +111,9 @@ void main() {
       );
     }
 
+    expect(await store.count(), 3);
     expect(await store.clear(), 3);
+    expect(await store.count(), 0);
     expect(
       Directory('${support.path}/cached_lyrics')
           .listSync()
@@ -122,7 +124,8 @@ void main() {
     expect(await store.read(_track('song:clear0')), isNull);
   });
 
-  test('clear on a missing directory reports zero instead of throwing', () async {
+  test('count and clear on a missing directory report zero instead of throwing', () async {
+    expect(await store.count(), 0);
     expect(await store.clear(), 0);
   });
 }

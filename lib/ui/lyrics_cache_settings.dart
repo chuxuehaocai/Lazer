@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../animation/apple_modal.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/settings_row.dart';
+import '../widgets/spring_buttons.dart';
 
 /// Settings group for the durable lyric file store.
 ///
@@ -12,10 +14,17 @@ import '../widgets/settings_row.dart';
 /// better still shows its older reply until the row expires. This is the only
 /// way to make the next play ask again.
 class LyricsCacheSettings extends StatefulWidget {
-  const LyricsCacheSettings({super.key, required this.onClear});
+  const LyricsCacheSettings({
+    super.key,
+    required this.onClear,
+    this.onCount,
+  });
 
   /// Deletes every cached lyric file and reports how many were removed.
   final Future<int> Function() onClear;
+
+  /// Reports how many lyric files are currently cached.
+  final Future<int> Function()? onCount;
 
   @override
   State<LyricsCacheSettings> createState() => _LyricsCacheSettingsState();
@@ -24,6 +33,65 @@ class LyricsCacheSettings extends StatefulWidget {
 class _LyricsCacheSettingsState extends State<LyricsCacheSettings> {
   bool _clearing = false;
   int? _removed;
+
+  Future<void> _handleTap() async {
+    if (_clearing) return;
+    int count = 0;
+    if (widget.onCount != null) {
+      setState(() => _clearing = true);
+      try {
+        count = await widget.onCount!();
+      } catch (_) {
+        count = 0;
+      } finally {
+        if (mounted) setState(() => _clearing = false);
+      }
+    }
+    if (!mounted) return;
+
+    if (count <= 0) {
+      await showAppleDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const TrText('清除歌词缓存'),
+          content: const TrText('当前暂无已缓存的歌词。'),
+          actions: [
+            SpringFilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const TrText('关闭'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showAppleDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const TrText('清除歌词缓存？'),
+        content: Text(
+          dialogContext
+              .tr('确定要清空本地缓存的 {count} 首歌词吗？清除后下次播放将重新从网络获取。')
+              .replaceAll('{count}', '$count'),
+        ),
+        actions: [
+          SpringTextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const TrText('取消'),
+          ),
+          SpringFilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const TrText('清除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await _clear();
+    }
+  }
 
   Future<void> _clear() async {
     if (_clearing) return;
@@ -68,7 +136,7 @@ class _LyricsCacheSettingsState extends State<LyricsCacheSettings> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.delete_outline_rounded),
-        onTap: _clearing ? null : () => unawaited(_clear()),
+        onTap: _clearing ? null : () => unawaited(_handleTap()),
       ),
     );
   }
