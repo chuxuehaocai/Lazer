@@ -99,6 +99,43 @@ void main() {
     semanticsHandle.dispose();
   });
 
+  testWidgets('bottom navigation closes a player opened from settings', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(520, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final state = AppState(catalog: _Catalog())..uiMode = AppUiMode.mobile;
+    addTearDown(state.dispose);
+    await state.setAppBackground(AppBackgroundMode.off);
+    state.playQueue(<Track>[_track]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(),
+        home: AppShell(state: state, autoCheckUpdates: false),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('配色'), findsOneWidget);
+
+    for (final destination in <String>['主页', '搜索', '音乐库', '我喜欢', '设置']) {
+      await tapNowPlayingControl(tester, title: _track.title);
+      await tester.pump();
+      final playerSlide = playerSlideAnimation(tester);
+      await tester.tap(find.byTooltip(destination));
+      await pumpPlayerTransition(
+        tester,
+        playerSlide,
+        AnimationStatus.dismissed,
+      );
+      expect(find.byType(NowPlayingPage), findsNothing, reason: destination);
+      await tester.pumpAndSettle();
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the player header opens the listen-together entry', (
     tester,
   ) async {

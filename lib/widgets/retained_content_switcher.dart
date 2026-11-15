@@ -187,14 +187,25 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     final focus = FocusManager.instance.primaryFocus;
     final focusedContext = focus?.context;
     var insideOldPage = false;
-    focusedContext?.visitAncestorElements((element) {
-      if (element.widget is Offstage &&
-          element.widget.key == ValueKey<String>(oldWidget.currentKey)) {
-        insideOldPage = true;
-        return false;
+    // The player can dismiss while its focused subtree is being removed. In
+    // that frame the FocusNode still exposes its old context, but walking its
+    // ancestors would query a deactivated element and throw during a route
+    // switch. Only restore focus when the context is still mounted.
+    if (focusedContext?.mounted == true) {
+      try {
+        focusedContext!.visitAncestorElements((element) {
+          if (element.widget is Offstage &&
+              element.widget.key == ValueKey<String>(oldWidget.currentKey)) {
+            insideOldPage = true;
+            return false;
+          }
+          return true;
+        });
+      } on FlutterError {
+        // A focus node can retain a deactivated context for this frame while
+        // an overlay is being removed. It cannot be used to restore focus.
       }
-      return true;
-    });
+    }
     if (insideOldPage) _pages[oldWidget.currentKey]?.lastFocus = focus;
     final velocities = <_RetainedPage, double>{};
     for (final entry in _pages.values) {

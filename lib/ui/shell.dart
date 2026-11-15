@@ -602,6 +602,11 @@ class _AppShellState extends State<AppShell>
   void _select(_AppSection section) {
     _browseHistory.clear();
     cancelCoverTransitions();
+    // Navigation chrome can remain tappable while the player is entering or
+    // while a desktop player panel is sliding away. Selecting a destination
+    // must close that overlay first, otherwise the new home page is built
+    // underneath it and the next tap appears to return to playback.
+    if (_nowPlayingOpen) _closeNowPlaying();
     setState(() {
       _section = section;
       _playlist = null;
