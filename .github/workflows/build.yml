@@ -688,13 +688,30 @@ jobs:
           done
       - name: Verify release archives exclude FFmpeg source and notices
         run: python3 ci/verify-package-contents.py release-assets
+      - name: Stage versioned release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$GITHUB_REF_NAME"
+          mkdir -p staged-release-assets
+          find release-assets -type f ! -name "*.sha256" | sort | while read -r file; do
+            filename="$(basename "$file")"
+            if [[ "$filename" == Lazer-* ]]; then
+              new_name="Lazer-${version}-${filename#Lazer-}"
+            else
+              new_name="Lazer-${version}-${filename}"
+            fi
+            echo "Staging $filename -> $new_name"
+            cp -v "$file" "staged-release-assets/$new_name"
+            (cd staged-release-assets && sha256sum "$new_name" > "${new_name}.sha256")
+          done
       - name: Publish tag as a GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mapfile -t assets < <(find release-assets -type f -print | sort)
+          mapfile -t assets < <(find staged-release-assets -type f -print | sort)
           test "${#assets[@]}" -gt 0
           release_args=(--verify-tag --title "$GITHUB_REF_NAME")
           notes="docs/releases/$GITHUB_REF_NAME.md"
