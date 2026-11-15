@@ -233,16 +233,34 @@ class LuaMusicGateway extends MusicAccountGateway {
   }
 
   @override
-  Future<String> qrUrl(String key) async {
-    final url = (await _call('qrUrl', {
+  Future<String> qrUrl(String key) async => (await qrDetails(key)).url;
+
+  @override
+  Future<QrSessionInfo> qrDetails(String key) async {
+    final raw = await _call('qrUrl', {
       'key': key,
       'web': kIsWeb,
-    }))?.toString() ?? '';
+    });
+    if (raw is Map) {
+      final url = raw['url']?.toString() ?? '';
+      if (url.isNotEmpty) {
+        _qrKeys.clear();
+        _qrKeys[url] = key;
+      }
+      return QrSessionInfo(
+        url: url,
+        code: raw['code']?.toString() ?? raw['userCode']?.toString(),
+        hint: raw['hint']?.toString() ?? raw['instructions']?.toString(),
+        actionUrl:
+            raw['actionUrl']?.toString() ?? raw['browserUrl']?.toString(),
+      );
+    }
+    final url = raw?.toString() ?? '';
     if (url.isNotEmpty) {
       _qrKeys.clear();
       _qrKeys[url] = key;
     }
-    return url;
+    return QrSessionInfo(url: url);
   }
 
   @override

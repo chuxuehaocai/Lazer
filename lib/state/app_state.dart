@@ -2716,13 +2716,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _qrConfirmed = false;
     qrPollError = null;
     qrStartError = null;
+    qrSession = null;
     try {
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
         final key = await active.qrKey();
         if (key == null || key.isEmpty) return null;
-        final url = await active.qrUrl(key);
-        return url.isEmpty ? null : url;
+        final details = await active.qrDetails(key);
+        if (details.isEmpty) return null;
+        qrSession = details;
+        return details.url;
       }
       qrStartError = '请先安装并启用支持扫码登录的插件。';
       return null;
@@ -2731,6 +2734,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return null;
     }
   }
+
+  /// Session metadata of the current active QR handshake (user code, hints, etc.).
+  QrSessionInfo? qrSession;
 
   /// Set once a poll answered 803. The account endpoint can trail the key
   /// confirmation by a moment, so later polls re-check the account before

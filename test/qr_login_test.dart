@@ -271,4 +271,61 @@ void main() {
     expect(find.text('使用 Cookie 登录'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('the QR panel displays custom user code, hint, and action link', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final gateway = _RichQrGateway();
+    final state = _state(gateway);
+    addTearDown(() async {
+      await _flush();
+      state.dispose();
+    });
+
+    await tester.pumpWidget(
+      AnimatedBuilder(
+        animation: state,
+        builder: (BuildContext context, _) => MaterialApp(
+          theme: buildAppleTheme(),
+          home: Builder(
+            builder: (BuildContext context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => showAppLoginDialog(context, state),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('AAA-BBB-CCC'), findsOneWidget);
+    expect(find.text('请使用手机相机扫码或浏览器访问'), findsOneWidget);
+    expect(find.text('在浏览器中打开授权页'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+class _RichQrGateway extends _QrGateway {
+  _RichQrGateway({
+    this.sessionInfo = const QrSessionInfo(
+      url: _scanUrl,
+      code: 'AAA-BBB-CCC',
+      hint: '请使用手机相机扫码或浏览器访问',
+      actionUrl: 'https://youtube.com/activate?user_code=AAA-BBB-CCC',
+    ),
+  });
+
+  final QrSessionInfo sessionInfo;
+
+  @override
+  Future<QrSessionInfo> qrDetails(String key) async => sessionInfo;
 }

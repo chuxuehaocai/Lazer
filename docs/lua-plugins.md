@@ -70,7 +70,9 @@ end
 登录操作包括 `session`、`loginCookie({cookie})`、`loginPassword({account,password})`、
 `loginCaptcha({phone,captcha})`、`sendCaptcha({phone})`、`qrKey`、`qrUrl({key})`、
 `qrCheck({key})` 和 `logout`。认证成功返回 `{id,name,avatarUrl}`，未登录返回 nil；
-失败的登录尝试应保留之前有效的凭据。客户端不解析二维码 URL 中的服务特定参数。
+失败的登录尝试应保留之前有效的凭据。`qrUrl` 可直接返回二维码 URL 字符串，亦可返回包含
+`{url, code, hint, actionUrl}` 的 table（适用于 OAuth 设备授权码流，可在 UI 展示验证码、
+自定义扫码引导文案与浏览器直达链接）。客户端不解析二维码 URL 中的服务特定参数。
 
 登录会话与当前浏览音源相互独立。选择本地音乐不会调用 `logout`，切换平台也不会清空
 其他平台的会话或正在播放的队列。`logout` 只清除当前 `args.platform` 的凭据；
