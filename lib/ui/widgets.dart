@@ -656,15 +656,28 @@ class AppNotice extends StatelessWidget {
     required this.message,
     this.action,
     this.icon = Icons.music_note_rounded,
+    this.topInset = 0,
   });
 
   final String message;
   final Widget? action;
   final IconData icon;
+  final double topInset;
 
   @override
   Widget build(BuildContext context) {
-    return AppleEmptyState(message: message, icon: icon, action: action);
+    final notice = AppleEmptyState(
+      message: message,
+      icon: icon,
+      action: action,
+    );
+    if (topInset == 0) return notice;
+    return CustomScrollView(
+      slivers: <Widget>[
+        SliverToBoxAdapter(child: SizedBox(height: topInset)),
+        SliverFillRemaining(hasScrollBody: false, child: notice),
+      ],
+    );
   }
 }
 

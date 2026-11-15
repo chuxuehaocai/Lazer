@@ -8,9 +8,9 @@ import 'imported_lyrics_store.dart';
 
 const XTypeGroup _lyricsTypes = XTypeGroup(
   label: '歌词',
-  extensions: <String>['lrc', 'txt'],
+  extensions: <String>['lrc', 'ttml', 'txt'],
   // iOS needs a UTI; without one `openFile` throws before showing a picker.
-  uniformTypeIdentifiers: <String>['public.plain-text'],
+  uniformTypeIdentifiers: <String>['public.plain-text', 'public.xml'],
 );
 
 /// Lets the user pick a `.lrc`, validates it and stores it for [track].

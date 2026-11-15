@@ -164,7 +164,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('desktop detail has a page heading without an AppBar', (
+  testWidgets('desktop detail keeps controls without an extra page heading', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -176,17 +176,14 @@ void main() {
 
     expect(find.byType(AppBar), findsNothing);
     expect(find.byType(Scaffold), findsOneWidget);
-    final title = find.byType(ApplePageTitle);
-    expect(tester.widget<ApplePageTitle>(title).title, 'Detail');
+    expect(find.byType(ApplePageTitle), findsNothing);
+    expect(find.text('Detail'), findsNothing);
     expect(
-      tester
-          .getBottomLeft(find.byKey(const ValueKey('settings-detail-back')))
-          .dy,
-      lessThanOrEqualTo(tester.getTopLeft(title).dy),
-    );
-    expect(
-      tester.getTopLeft(find.byKey(_detailKey)).dy,
-      greaterThan(tester.getBottomLeft(title).dy),
+      tester.getTopLeft(find.byKey(_detailKey)).dy -
+          tester
+              .getBottomLeft(find.byKey(const ValueKey('settings-detail-back')))
+              .dy,
+      inInclusiveRange(0, 16),
     );
     expect(find.text('Reset'), findsOneWidget);
     expect(tester.takeException(), isNull);

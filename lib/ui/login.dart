@@ -344,10 +344,10 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       elevation: 0,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 370),
+        constraints: const BoxConstraints(maxWidth: 400),
         decoration: BoxDecoration(
           color: apple.tertiaryBackground,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(28),
           border: Border.all(color: apple.separator, width: .5),
           boxShadow: <BoxShadow>[
             BoxShadow(
@@ -357,7 +357,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
             ),
           ],
         ),
-        padding: const EdgeInsets.fromLTRB(22, 16, 22, 20),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -365,6 +365,19 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
             children: <Widget>[
               Row(
                 children: <Widget>[
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: apple.accentSoft,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.person_outline_rounded,
+                      color: apple.accent,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: TrText(
                       '登录',
@@ -376,6 +389,11 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                   ),
                   IconButton(
                     tooltip: context.tr('取消'),
+                    style: IconButton.styleFrom(
+                      backgroundColor: apple.secondaryFill,
+                      foregroundColor: apple.secondaryLabel,
+                      minimumSize: const Size(40, 40),
+                    ),
                     onPressed: _navBusy || _submitting
                         ? null
                         : () => Navigator.of(context).maybePop(),
@@ -383,25 +401,86 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                   ),
                 ],
               ),
+              const SizedBox(height: 24),
+              TrText(
+                '音乐平台',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: apple.secondaryLabel,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 key: ValueKey('login-platform-${state.activeConnectionKey}'),
                 initialValue: state.activeConnectionKey,
                 isExpanded: true,
-                decoration: InputDecoration(labelText: context.tr('音乐平台')),
+                borderRadius: BorderRadius.circular(16),
+                dropdownColor: apple.tertiaryBackground,
+                icon: Icon(
+                  Icons.unfold_more_rounded,
+                  color: apple.secondaryLabel,
+                  size: 20,
+                ),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: apple.secondaryFill,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: apple.separator, width: .5),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: apple.accent, width: 1.5),
+                  ),
+                ),
                 items: [
                   for (final gateway in state.availableMusicPlatforms)
                     DropdownMenuItem(
                       value: GatewayRegistry.keyOf(gateway),
-                      child: Text(
-                        '${gateway.provider.name}${state.musicAccounts.containsKey(GatewayRegistry.keyOf(gateway)) ? ' · 已登录' : ''}',
-                        overflow: TextOverflow.ellipsis,
+                      child: Row(
+                        children: [
+                          Icon(
+                            gateway.provider.id == 'local'
+                                ? Icons.library_music_outlined
+                                : Icons.headphones_rounded,
+                            size: 20,
+                            color: apple.accent,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              gateway.provider.id == 'local'
+                                  ? context.tr('本地音乐')
+                                  : gateway.provider.name,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (state.musicAccounts.containsKey(
+                            GatewayRegistry.keyOf(gateway),
+                          ))
+                            Tooltip(
+                              message: context.tr('已登录'),
+                              child: Icon(
+                                Icons.check_circle_rounded,
+                                size: 18,
+                                color: apple.accent,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                 ],
                 onChanged: _submitting || _navBusy ? null : _selectConnection,
               ),
-              const SizedBox(height: 12),
-              if (_methods.isNotEmpty)
+              if (_methods.isNotEmpty) ...[
+                const SizedBox(height: 12),
                 Text(
                   context.tr(
                     state.musicLoginHint ??
@@ -416,17 +495,36 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                     color: apple.secondaryLabel,
                   ),
                 ),
-              const SizedBox(height: 18),
+              ],
+              const SizedBox(height: 20),
               if (_methods.isEmpty)
                 Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TrText(
-                      state.musicProvider.id == 'local'
-                          ? '本地音乐无需登录，其他平台的账号会继续保留。'
-                          : '安装并启用音乐平台插件后即可登录。',
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: apple.secondaryFill.withValues(alpha: .45),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: TrText(
+                        state.musicProvider.id == 'local'
+                            ? '本地音乐无需登录，其他平台的账号会继续保留。'
+                            : '安装并启用音乐平台插件后即可登录。',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: apple.secondaryLabel,
+                          height: 1.5,
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    SpringFilledButton(
+                    const SizedBox(height: 20),
+                    SpringFilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
                       onPressed: () {
                         final navigator = Navigator.of(context);
                         navigator.pop();
@@ -436,7 +534,8 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                           ),
                         );
                       },
-                      child: const TrText('插件管理'),
+                      icon: const Icon(Icons.extension_outlined, size: 20),
+                      label: const TrText('插件管理'),
                     ),
                   ],
                 )

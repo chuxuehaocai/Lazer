@@ -24,6 +24,7 @@ Future<void> showLyricImageDialog(
   BuildContext context, {
   required Track track,
   required List<LyricLine> lines,
+  bool showRomanization = true,
   ui.Image? background,
 }) {
   final themes = InheritedTheme.capture(
@@ -43,6 +44,7 @@ Future<void> showLyricImageDialog(
         child: LyricImageDialog(
           track: track,
           lines: List.unmodifiable(lines),
+          showRomanization: showRomanization,
           background: background,
         ),
       ),
@@ -112,10 +114,12 @@ class LyricImageDialog extends StatefulWidget {
     super.key,
     required this.track,
     required this.lines,
+    this.showRomanization = true,
     this.background,
   });
   final Track track;
   final List<LyricLine> lines;
+  final bool showRomanization;
 
   /// A frame of the live player backdrop, used behind the exported lyrics.
   final ui.Image? background;
@@ -151,7 +155,7 @@ class _LyricImageDialogState extends State<LyricImageDialog>
   Future<void> _loadArtwork() async {
     final url = enlargedArtworkUrl(widget.track.coverUrl);
     if (url != null && url.isNotEmpty) {
-      _artwork = ArtworkImage(url);
+      _artwork = ArtworkImage(url, targetSize: 2048);
       await precacheImage(
         _artwork!,
         context,
@@ -253,6 +257,7 @@ class _LyricImageDialogState extends State<LyricImageDialog>
                     child: LyricImageCard(
                       track: widget.track,
                       lines: widget.lines,
+                      showRomanization: widget.showRomanization,
                       artwork: _artwork,
                       background: widget.background,
                     ),
@@ -610,11 +615,13 @@ class LyricImageCard extends StatelessWidget {
     super.key,
     required this.track,
     required this.lines,
+    this.showRomanization = true,
     this.artwork,
     this.background,
   });
   final Track track;
   final List<LyricLine> lines;
+  final bool showRomanization;
   final ImageProvider? artwork;
 
   /// A painted frame of the player's flowing backdrop.
@@ -718,10 +725,16 @@ class LyricImageCard extends StatelessWidget {
                         color: primaryText,
                       ),
                     ),
-                    if (lines[i].translation?.trim().isNotEmpty ?? false) ...[
+                    for (final secondary
+                        in <String?>[
+                          if (showRomanization) lines[i].romanization,
+                          lines[i].translation,
+                        ].whereType<String>().where(
+                          (text) => text.trim().isNotEmpty,
+                        )) ...[
                       const SizedBox(height: 4),
                       Text(
-                        lines[i].translation!.trim(),
+                        secondary.trim(),
                         style: context.type.bodySm.copyWith(
                           fontSize: 14,
                           height: 1.5,

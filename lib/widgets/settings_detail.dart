@@ -6,7 +6,6 @@ import '../animation/apple_spring.dart';
 import '../l10n/app_localizations.dart';
 import '../navigation/system_back_gesture.dart';
 import '../theme/apple_design.dart';
-import 'apple_ui.dart';
 
 import 'accessible_controls.dart';
 
@@ -359,15 +358,30 @@ class SettingsDetailScaffold extends StatelessWidget {
                       onPressed: close,
                       icon: const Icon(Icons.chevron_left_rounded),
                     ),
-                    const Spacer(),
+                    if (headerTitle)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Text(
+                            context.tr(title),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(
+                                  color: AppleSemanticColors.of(context).label,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                      )
+                    else
+                      const Spacer(),
                     ?trailing,
                   ],
                 ),
               ),
-              ApplePageTitle(
-                title: title,
-                padding: EdgeInsets.fromLTRB(inset, 4, inset, 20),
-              ),
+              // Page content owns its heading; the shared chrome only keeps
+              // navigation and actions above it.
               const SizedBox(height: 8),
               Expanded(child: child),
             ],

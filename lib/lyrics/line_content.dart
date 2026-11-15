@@ -25,8 +25,11 @@ TextStyle lyricTextStyle(
   );
 }
 
-String lyricSemanticLabel(LyricLine line) =>
-    [line.text, if (line.translation != null) line.translation!].join('\n');
+String lyricSemanticLabel(LyricLine line, {bool showRomanization = true}) => [
+  line.text,
+  if (showRomanization && line.romanization != null) line.romanization!,
+  if (line.translation != null) line.translation!,
+].join('\n');
 
 class LyricLineContent extends StatelessWidget {
   const LyricLineContent({

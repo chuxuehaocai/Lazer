@@ -85,6 +85,8 @@ class AppShell extends StatefulWidget {
 
 enum _AppSection { home, search, library, likes, settings }
 
+const double _desktopToolbarHeight = 50;
+
 class _BrowseLocation {
   const _BrowseLocation({
     required this.key,
@@ -1353,6 +1355,7 @@ class _AppShellState extends State<AppShell>
                             enabled: !_nowPlayingOpen,
                             child: MotionSnapshot(
                               animation: _nowPlayingMotion,
+                              snapshotForward: _nowPlayingOpen,
                               // Opening the player freezes the shell it covers;
                               // closing reveals the shell again, so it has to
                               // paint live instead of showing the old raster.
@@ -1414,7 +1417,13 @@ class _AppShellState extends State<AppShell>
                 child: Column(
                   children: <Widget>[
                     if (_hasOpenDetail) _desktopToolbar(apple),
-                    Expanded(child: RepaintBoundary(child: _content())),
+                    Expanded(
+                      child: RepaintBoundary(
+                        child: _content(
+                          topInset: _hasOpenDetail ? 0 : _desktopToolbarHeight,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1439,31 +1448,20 @@ class _AppShellState extends State<AppShell>
   /// network pane never leaves keyboard and mouse users without a way back.
   Widget _desktopToolbar(AppleSemanticColors apple) {
     return SizedBox(
-      height: 50,
-      child: AppleGlass(
-        color: apple.glass.withValues(alpha: state.headerOpacity),
-        blurSigma: state.headerBlur,
-        border: Border(
-          bottom: BorderSide(
-            color: apple.separator.withValues(
-              alpha: (state.headerOpacity * .35).clamp(0.0, .35),
+      height: _desktopToolbarHeight,
+      // Share the page canvas without adding a separate header tint.
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        child: Row(
+          children: <Widget>[
+            _ToolbarButton(
+              tooltip: '返回',
+              icon: Icons.chevron_left_rounded,
+              onPressed: _backToRoot,
             ),
-            width: .5,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          child: Row(
-            children: <Widget>[
-              _ToolbarButton(
-                tooltip: '返回',
-                icon: Icons.chevron_left_rounded,
-                onPressed: _backToRoot,
-              ),
-              const Spacer(),
-              _accountButton(apple, radius: 16),
-            ],
-          ),
+            const Spacer(),
+            _accountButton(apple, radius: 16),
+          ],
         ),
       ),
     );
@@ -1518,52 +1516,26 @@ class _AppShellState extends State<AppShell>
     );
   }
 
-  /// Keeps the TV header flush to the top while a quiet gradient lets it
-  /// dissolve into the page instead of ending as a hard horizontal edge.
+  /// Keeps the TV header flush to the top over the shared page canvas.
   Widget _largeScreenHeader(AppleSemanticColors apple) {
     return SizedBox(
       height: LargeScreenMetrics.navBarHeight + 10,
-      child: Stack(
-        fit: StackFit.expand,
-        children: <Widget>[
-          IgnorePointer(
-            child: AnimatedContainer(
-              duration: MediaQuery.disableAnimationsOf(context)
-                  ? Duration.zero
-                  : const Duration(milliseconds: 260),
-              curve: const AppleSpringCurve(),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: <Color>[
-                    apple.background.withValues(alpha: .98),
-                    apple.background.withValues(alpha: .82),
-                    apple.background.withValues(alpha: 0),
-                  ],
-                  stops: const <double>[0, .56, 1],
-                ),
-              ),
-            ),
-          ),
-          LargeScreenNavBar(
-            showLikes: !state.isLocalPlayback,
-            selected: _largeScreenTab,
-            searchActive: _section == _AppSection.search && !_hasOpenDetail,
-            canGoBack: _hasOpenDetail,
-            onBack: _backToRoot,
-            onTab: (LargeScreenTab tab) => _select(switch (tab) {
-              LargeScreenTab.home => _AppSection.home,
-              LargeScreenTab.library => _AppSection.library,
-              LargeScreenTab.likes => _AppSection.likes,
-              LargeScreenTab.settings => _AppSection.settings,
-            }),
-            onSearch: () => _select(_AppSection.search),
-            onNowPlaying: _openNowPlaying,
-            account: _accountButton(apple, radius: 22),
-            playing: state.playing,
-          ),
-        ],
+      child: LargeScreenNavBar(
+        showLikes: !state.isLocalPlayback,
+        selected: _largeScreenTab,
+        searchActive: _section == _AppSection.search && !_hasOpenDetail,
+        canGoBack: _hasOpenDetail,
+        onBack: _backToRoot,
+        onTab: (LargeScreenTab tab) => _select(switch (tab) {
+          LargeScreenTab.home => _AppSection.home,
+          LargeScreenTab.library => _AppSection.library,
+          LargeScreenTab.likes => _AppSection.likes,
+          LargeScreenTab.settings => _AppSection.settings,
+        }),
+        onSearch: () => _select(_AppSection.search),
+        onNowPlaying: _openNowPlaying,
+        account: _accountButton(apple, radius: 22),
+        playing: state.playing,
       ),
     );
   }
@@ -1960,36 +1932,22 @@ class _AppShellState extends State<AppShell>
     final double topInset = MediaQuery.paddingOf(context).top;
     return SizedBox(
       height: 50 + topInset,
-      child: AppleGlass(
-        // Use the semantic glass colour instead of the pure page background.
-        // In dark mode a black tint composites into an opaque-looking strip
-        // even at low alpha; the glass surface keeps the backdrop visible.
-        color: apple.glass.withValues(alpha: state.headerOpacity),
-        blurSigma: state.headerBlur,
-        border: Border(
-          bottom: BorderSide(
-            color: apple.separator.withValues(
-              alpha: (state.headerOpacity * .35).clamp(0.0, .35),
-            ),
-            width: .5,
-          ),
-        ),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(8, topInset, 8, 0),
-          child: Row(
-            children: <Widget>[
-              if (canGoBack) ...<Widget>[
-                _ToolbarButton(
-                  tooltip: '返回',
-                  icon: Icons.chevron_left_rounded,
-                  onPressed: _backToRoot,
-                ),
-                const SizedBox(width: 10),
-              ],
-              const Spacer(),
-              _accountButton(apple, radius: 15),
+      // The status-bar inset and toolbar reveal the same backdrop as content.
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(8, topInset, 8, 0),
+        child: Row(
+          children: <Widget>[
+            if (canGoBack) ...<Widget>[
+              _ToolbarButton(
+                tooltip: '返回',
+                icon: Icons.chevron_left_rounded,
+                onPressed: _backToRoot,
+              ),
+              const SizedBox(width: 10),
             ],
-          ),
+            const Spacer(),
+            _accountButton(apple, radius: 15),
+          ],
         ),
       ),
     );
@@ -2162,7 +2120,7 @@ class _AppShellState extends State<AppShell>
 
   // -- content --------------------------------------------------------------
 
-  Widget _content() {
+  Widget _content({double topInset = 0}) {
     final bool motion = !MediaQuery.disableAnimationsOf(context);
     final bool largeScreen = _isLargeScreen(context);
     return RetainedContentSwitcher(
@@ -2177,7 +2135,10 @@ class _AppShellState extends State<AppShell>
       duration: motion ? const Duration(milliseconds: 420) : Duration.zero,
       onTransitionChanged: _onContentTransitionChanged,
       slideFraction: largeScreen ? .012 : .04,
-      page: TvFocusRegion(focusToken: _nowPlayingOpen, child: _contentPage()),
+      page: TvFocusRegion(
+        focusToken: _nowPlayingOpen,
+        child: _contentPage(topInset: topInset),
+      ),
     );
   }
 
@@ -2210,7 +2171,7 @@ class _AppShellState extends State<AppShell>
     return 'section:${_section.name}';
   }
 
-  Widget _contentPage() {
+  Widget _contentPage({double topInset = 0}) {
     // A television gets the ten-foot composition: same state, same catalogue,
     // same playback — a different page tree.
     if (_isLargeScreen(context)) return _largeScreenPage();
@@ -2300,6 +2261,7 @@ class _AppShellState extends State<AppShell>
     return switch (_section) {
       _AppSection.home => AppHomePage(
         state: state,
+        topInset: topInset,
         onOpenPlaylist: _openPlaylist,
         onOpenChart: _openChart,
         onPlayTrack: (List<Track> tracks, int index) =>
@@ -2307,6 +2269,7 @@ class _AppShellState extends State<AppShell>
       ),
       _AppSection.search => AppSearchPage(
         state: state,
+        topInset: topInset,
         onOpenPlaylist: _openPlaylist,
       ),
       _AppSection.library => SettingsDetailHost(
@@ -2317,6 +2280,7 @@ class _AppShellState extends State<AppShell>
         child: Builder(
           builder: (detailContext) => AppLibraryPage(
             state: state,
+            topInset: topInset,
             onOpenPlaylist: _openPlaylist,
             onOpenLocalMusic: _openLocalMusic,
             onOpenSavedAlbums: _openSavedAlbums,
@@ -2333,9 +2297,10 @@ class _AppShellState extends State<AppShell>
           ),
         ),
       ),
-      _AppSection.likes => AppLikesPage(state: state),
+      _AppSection.likes => AppLikesPage(state: state, topInset: topInset),
       _AppSection.settings => AppSettingsPage(
         state: state,
+        topInset: topInset,
         categorized: widget.categorizedSettings,
         onOpenLocalMusic: _openLocalMusic,
       ),
@@ -2509,7 +2474,11 @@ class _Avatar extends StatelessWidget {
       child: url == null
           ? fallback
           : Image(
-              image: ArtworkImage(url),
+              image: ArtworkImage.forSize(
+                url,
+                logicalEdge: radius * 2,
+                devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+              ),
               fit: BoxFit.cover,
               width: radius * 2,
               height: radius * 2,

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lazer</string>
+    <string name="widget_recent_playback">Recently Played</string>
+    <string name="widget_recent_empty">No recently played music</string>
+    <string name="widget_recent_description">Your latest music and what is playing now.</string>
+    <color name="widget_background">#F3F3F5</color>
+    <color name="widget_cover">#DFDFE3</color>
+    <color name="widget_primary">#1C1C1E</color>
+    <color name="widget_secondary">#626269</color>
+</resources>

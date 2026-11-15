@@ -39,12 +39,14 @@ class AppLibraryPage extends StatelessWidget {
     required this.onOpenPlaylist,
     required this.onOpenLocalMusic,
     required this.onOpenSavedAlbums,
+    this.topInset = 0,
     this.onOpenListeningStatistics,
     this.onOpenNetworkSources,
     this.localImporter = const LocalMusicImporter(),
   });
 
   final AppState state;
+  final double topInset;
   final ValueChanged<Playlist> onOpenPlaylist;
   final VoidCallback onOpenLocalMusic;
 
@@ -104,7 +106,7 @@ class AppLibraryPage extends StatelessWidget {
             return CustomScrollView(
               slivers: <Widget>[
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(inset, 8, inset, 0),
+                  padding: EdgeInsets.fromLTRB(inset, 8 + topInset, inset, 0),
                   sliver: SliverList.list(
                     children: <Widget>[
                       ApplePageTitle(

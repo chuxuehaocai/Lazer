@@ -209,6 +209,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   bool? _desktopLayout;
   DesktopNowPlayingPane _desktopPane = DesktopNowPlayingPane.lyrics;
   final GlobalKey _backdropKey = GlobalKey();
+  final FocusNode _playPauseFocus = FocusNode(debugLabel: 'player-play-pause');
   late SongCommentsController _commentsController;
   Timer? _hideTimer;
   final Set<int> _activeControlPointers = {};
@@ -257,6 +258,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   bool get _canAutoHide =>
+      !TvScope.isActive(context) &&
       _activeControlPointers.isEmpty &&
       !_selectionOpen &&
       !_commentsOpen &&
@@ -343,6 +345,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   @override
   void dispose() {
+    _playPauseFocus.dispose();
     widget.state.playerPresentationChanged(false);
     _hideTimer?.cancel();
     widget.state.removeListener(_preferencesChanged);
@@ -775,150 +778,159 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   @override
-  Widget build(BuildContext context) => Focus(
-    autofocus: true,
-    onKeyEvent: _onShortcutKey,
-    child: Theme(
-      data: _playerTheme(context),
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: AnimatedBuilder(
-          animation: widget.state,
-          builder: (context, _) {
-            final Track? track = widget.state.current;
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                _EntranceGatedBackdrop(
-                  settled: widget.entranceSettled,
-                  builder: (bool settled) => AlbumBlurFlow(
-                    boundaryKey: _backdropKey,
-                    track: track,
-                    // The immersive player owns its canvas: browse-page backdrop
-                    // settings (including "不使用" or a custom picture) must not
-                    // strip the song's album-colour flow from here.
-                    mode: widget.state.playerBackground,
-                    frameRate: widget.state.playerBackgroundFps == 0
-                        ? null
-                        : widget.state.playerBackgroundFps,
-                    solidColor: widget.state.playerBackgroundColor,
-                    imagePath: widget.state.playerBackgroundImagePath,
-                    imageAlignmentX:
-                        widget.state.playerBackgroundImageAlignmentX,
-                    imageAlignmentY:
-                        widget.state.playerBackgroundImageAlignmentY,
-                    imageScale: widget.state.playerBackgroundImageScale,
-                    blurSigma: widget.state.playerBackgroundBlurEnabled
-                        ? widget.state.playerBackgroundBlur
-                        : 0,
-                    darkEdge: widget.state.backgroundDarkEdgeEnabled,
-                    pageColor: Colors.black,
-                    animationsEnabled: widget.state.playing,
-                    // Reads the live preference: the shell rebuilds this page on
-                    // every state report, so dragging the slider is reflected on
-                    // the next frame instead of on the next opening.
-                    quality: widget.state.playerBackgroundQuality,
-                    // The background belongs to the visible player at every
-                    // point in its spring. Replacing it with the entrance-only
-                    // placeholder made the selected canvas disappear whenever
-                    // the outer status was interrupted or not delivered.
-                    preview: false,
-                  ),
-                ),
-                if (track == null)
-                  _EmptyNowPlaying(onBack: _closePage)
-                else
-                  LayoutBuilder(
-                    builder: (context, box) {
-                      final bool compact = useCompactLayout(
-                        widget.state.uiMode,
-                        box.maxWidth,
-                      );
-                      if (_desktopLayout != !compact) {
-                        _desktopLayout = !compact;
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) {
-                            _wakeControls();
-                            _armHide();
+  Widget build(BuildContext context) => TvTraversalScope(
+    child: TvFocusRegion(
+      initialFocus: _playPauseFocus,
+      child: Focus(
+        autofocus: !TvScope.isActive(context),
+        canRequestFocus: !TvScope.isActive(context),
+        onKeyEvent: _onShortcutKey,
+        child: Theme(
+          data: _playerTheme(context),
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            body: AnimatedBuilder(
+              animation: widget.state,
+              builder: (context, _) {
+                final Track? track = widget.state.current;
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _EntranceGatedBackdrop(
+                      settled: widget.entranceSettled,
+                      builder: (bool settled) => AlbumBlurFlow(
+                        boundaryKey: _backdropKey,
+                        track: track,
+                        // The immersive player owns its canvas: browse-page backdrop
+                        // settings (including "不使用" or a custom picture) must not
+                        // strip the song's album-colour flow from here.
+                        mode: widget.state.playerBackground,
+                        frameRate: widget.state.playerBackgroundFps == 0
+                            ? null
+                            : widget.state.playerBackgroundFps,
+                        solidColor: widget.state.playerBackgroundColor,
+                        imagePath: widget.state.playerBackgroundImagePath,
+                        imageAlignmentX:
+                            widget.state.playerBackgroundImageAlignmentX,
+                        imageAlignmentY:
+                            widget.state.playerBackgroundImageAlignmentY,
+                        imageScale: widget.state.playerBackgroundImageScale,
+                        blurSigma: widget.state.playerBackgroundBlurEnabled
+                            ? widget.state.playerBackgroundBlur
+                            : 0,
+                        darkEdge: widget.state.backgroundDarkEdgeEnabled,
+                        pageColor: Colors.black,
+                        animationsEnabled: widget.state.playing,
+                        // Reads the live preference: the shell rebuilds this page on
+                        // every state report, so dragging the slider is reflected on
+                        // the next frame instead of on the next opening.
+                        quality: widget.state.playerBackgroundQuality,
+                        // The background belongs to the visible player at every
+                        // point in its spring. Replacing it with the entrance-only
+                        // placeholder made the selected canvas disappear whenever
+                        // the outer status was interrupted or not delivered.
+                        preview: false,
+                      ),
+                    ),
+                    if (track == null)
+                      _EmptyNowPlaying(onBack: _closePage)
+                    else
+                      LayoutBuilder(
+                        builder: (context, box) {
+                          final bool compact =
+                              !TvScope.isActive(context) &&
+                              useCompactLayout(
+                                widget.state.uiMode,
+                                box.maxWidth,
+                              );
+                          if (_desktopLayout != !compact) {
+                            _desktopLayout = !compact;
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted) {
+                                _wakeControls();
+                                _armHide();
+                              }
+                            });
                           }
-                        });
-                      }
-                      if (!compact) {
-                        return Stack(
-                          fit: StackFit.expand,
-                          children: <Widget>[
-                            SafeArea(
-                              child: DesktopNowPlaying(
-                                key: const ValueKey('desktop-now-playing'),
-                                state: widget.state,
-                                track: track,
-                                artwork: _cover(track),
-                                lyrics: _settledGate(
-                                  LyricViewport(
-                                    key: ValueKey<String>(
-                                      'desktop-lyrics-${track.id}',
-                                    ),
+                          if (!compact) {
+                            return Stack(
+                              fit: StackFit.expand,
+                              children: <Widget>[
+                                SafeArea(
+                                  child: DesktopNowPlaying(
+                                    key: const ValueKey('desktop-now-playing'),
                                     state: widget.state,
-                                    backdropKey: _backdropKey,
-                                    onSelectionChanged: _selectionChanged,
+                                    track: track,
+                                    artwork: _cover(track),
+                                    lyrics: _settledGate(
+                                      LyricViewport(
+                                        key: ValueKey<String>(
+                                          'desktop-lyrics-${track.id}',
+                                        ),
+                                        state: widget.state,
+                                        backdropKey: _backdropKey,
+                                        onSelectionChanged: _selectionChanged,
+                                      ),
+                                    ),
+                                    comments: SongCommentsView(
+                                      state: widget.state,
+                                      track: track,
+                                      controller: _commentsController,
+                                    ),
+                                    queue: PlaybackQueueView(
+                                      state: widget.state,
+                                      showHeader: false,
+                                    ),
+                                    pane: _desktopPane,
+                                    onPaneChanged: _selectDesktopPane,
+                                    onBack: _closePage,
+                                    onSaveArtwork: () =>
+                                        unawaited(_saveArtwork(track)),
+                                    onFullscreen: () =>
+                                        unawaited(_toggleFullscreen()),
+                                    controlsVisible: _controlsVisible,
+                                    playPauseFocus: _playPauseFocus,
+                                    onActivity: _controlsActivity,
+                                    onPointerStart: _beginControlPointer,
+                                    onPointerEnd: _endControlPointer,
                                   ),
                                 ),
-                                comments: SongCommentsView(
-                                  state: widget.state,
-                                  track: track,
-                                  controller: _commentsController,
+                                ?_pullDownLayer(box),
+                              ],
+                            );
+                          }
+                          return Listener(
+                            behavior: HitTestBehavior.translucent,
+                            onPointerDown: (event) {
+                              _onTouchDown();
+                              _beginControlPointer(event.pointer);
+                            },
+                            onPointerUp: (event) =>
+                                _endControlPointer(event.pointer),
+                            onPointerCancel: (event) =>
+                                _endControlPointer(event.pointer),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: <Widget>[
+                                GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  excludeFromSemantics: true,
+                                  onTap: compact && _lyricsMode
+                                      ? _stepBackFromLyrics
+                                      : null,
+                                  child: SafeArea(child: _mobile(track)),
                                 ),
-                                queue: PlaybackQueueView(
-                                  state: widget.state,
-                                  showHeader: false,
-                                ),
-                                pane: _desktopPane,
-                                onPaneChanged: _selectDesktopPane,
-                                onBack: _closePage,
-                                onSaveArtwork: () =>
-                                    unawaited(_saveArtwork(track)),
-                                onFullscreen: () =>
-                                    unawaited(_toggleFullscreen()),
-                                controlsVisible: _controlsVisible,
-                                onActivity: _controlsActivity,
-                                onPointerStart: _beginControlPointer,
-                                onPointerEnd: _endControlPointer,
-                              ),
+                                ?_pullDownLayer(box),
+                              ],
                             ),
-                            ?_pullDownLayer(box),
-                          ],
-                        );
-                      }
-                      return Listener(
-                        behavior: HitTestBehavior.translucent,
-                        onPointerDown: (event) {
-                          _onTouchDown();
-                          _beginControlPointer(event.pointer);
+                          );
                         },
-                        onPointerUp: (event) =>
-                            _endControlPointer(event.pointer),
-                        onPointerCancel: (event) =>
-                            _endControlPointer(event.pointer),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: <Widget>[
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              excludeFromSemantics: true,
-                              onTap: compact && _lyricsMode
-                                  ? _stepBackFromLyrics
-                                  : null,
-                              child: SafeArea(child: _mobile(track)),
-                            ),
-                            ?_pullDownLayer(box),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-              ],
-            );
-          },
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
         ),
       ),
     ),

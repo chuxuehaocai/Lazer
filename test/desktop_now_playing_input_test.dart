@@ -13,6 +13,19 @@ import 'package:lazer_nextgen/tv/tv_mode.dart';
 import 'package:lazer_nextgen/widgets/media_shortcut_listener.dart';
 
 class _State extends AppState {
+  int playToggles = 0;
+  int nextPresses = 0;
+  int previousPresses = 0;
+
+  @override
+  void togglePlay() => playToggles++;
+
+  @override
+  void next() => nextPresses++;
+
+  @override
+  void previous() => previousPresses++;
+
   _State() {
     lyricControlsSeconds = 1;
     lyrics = parseLrc('[00:00.00]First line\n[00:04.00]Second line');
@@ -144,7 +157,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('television remotes can still wake their transport', (
+  testWidgets('TV opens on play and keeps remote controls available', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -154,11 +167,31 @@ void main() {
     addTearDown(state.dispose);
     await tester.pumpWidget(_host(state, tv: true));
     await tester.pump();
-    Focus.of(tester.element(find.byIcon(Icons.search_rounded))).requestFocus();
-    await tester.pump(const Duration(milliseconds: 1100));
-    expect(_visible(tester), isFalse);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    final play = find
+        .descendant(
+          of: find.byKey(const ValueKey('desktop-play-pause')),
+          matching: find.byType(Icon),
+        )
+        .first;
+    expect(Focus.of(tester.element(play)).hasPrimaryFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
     await tester.pump();
+    expect(state.playToggles, 1);
+    await tester.pump(const Duration(seconds: 10));
+    expect(_visible(tester), isTrue);
+    expect(Focus.of(tester.element(play)).hasPrimaryFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    expect(state.nextPresses, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    expect(state.previousPresses, 1);
     expect(_visible(tester), isTrue);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());

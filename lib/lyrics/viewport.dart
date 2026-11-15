@@ -82,6 +82,7 @@ class _LyricViewportState extends State<LyricViewport>
   TextScaler? _textScaler;
   double? _fontSize;
   int? _fontWeight;
+  bool? _showRomanization;
   (TextStyle, TextStyle)? _typography;
   int _active = -1;
   bool _playing = false;
@@ -225,7 +226,8 @@ class _LyricViewportState extends State<LyricViewport>
         _timelineDuration != widget.state.current?.duration;
     final typographyChanged =
         _fontSize != widget.state.lyricFontSize ||
-        _fontWeight != widget.state.lyricFontWeight;
+        _fontWeight != widget.state.lyricFontWeight ||
+        _showRomanization != widget.state.showLyricRomanization;
     if (_trackId != widget.state.current?.id) {
       _trackId = widget.state.current?.id;
       if (_selection.active) {
@@ -601,6 +603,15 @@ class _LyricViewportState extends State<LyricViewport>
           line.text.trim().isEmpty
               ? 72
               : measure(line.text, originalStyle, originalHeights) +
+                    (widget.state.showLyricRomanization &&
+                            line.romanization != null
+                        ? _theme.lyricTranslationGap +
+                              measure(
+                                line.romanization!,
+                                translationStyle,
+                                translationHeights,
+                              )
+                        : 0) +
                     (line.translation == null
                         ? 0
                         : _theme.lyricTranslationGap +
@@ -625,7 +636,8 @@ class _LyricViewportState extends State<LyricViewport>
     final typographyChanged =
         _fontSize != widget.state.lyricFontSize ||
         _fontWeight != widget.state.lyricFontWeight ||
-        _typography != typography;
+        _typography != typography ||
+        _showRomanization != widget.state.showLyricRomanization;
     if (!replaced &&
         !typographyChanged &&
         size == _size &&
@@ -642,6 +654,7 @@ class _LyricViewportState extends State<LyricViewport>
     _fontSize = widget.state.lyricFontSize;
     _fontWeight = widget.state.lyricFontWeight;
     _typography = typography;
+    _showRomanization = widget.state.showLyricRomanization;
     if (replaced) {
       _sourceLines = widget.state.lyrics;
       _timelineDuration = widget.state.current?.duration;
@@ -831,7 +844,14 @@ class _LyricViewportState extends State<LyricViewport>
 
   Future<void> _copyLyrics() async {
     final revision = _selectionRevision;
-    await Clipboard.setData(ClipboardData(text: _selection.text(_lines)));
+    await Clipboard.setData(
+      ClipboardData(
+        text: _selection.text(
+          _lines,
+          showRomanization: widget.state.showLyricRomanization,
+        ),
+      ),
+    );
     if (!mounted || revision != _selectionRevision) return;
     setState(() => _copied = true);
     _copiedTimer?.cancel();
@@ -857,6 +877,7 @@ class _LyricViewportState extends State<LyricViewport>
       context,
       track: track,
       lines: selected,
+      showRomanization: widget.state.showLyricRomanization,
       background: backdrop,
     );
   }
@@ -893,7 +914,10 @@ class _LyricViewportState extends State<LyricViewport>
     excludeSemantics: true,
     label: _lines[index].text.trim().isEmpty
         ? context.tr('间奏')
-        : lyricSemanticLabel(_lines[index]),
+        : lyricSemanticLabel(
+            _lines[index],
+            showRomanization: widget.state.showLyricRomanization,
+          ),
     onTap: _lines[index].text.trim().isEmpty
         ? null
         : () => _selection.active
@@ -983,7 +1007,10 @@ class _LyricViewportState extends State<LyricViewport>
               ),
             ),
           ),
-          if (_lines[index].translation != null) ...[
+          for (final secondary in <String?>[
+            if (widget.state.showLyricRomanization) _lines[index].romanization,
+            _lines[index].translation,
+          ].whereType<String>()) ...[
             SizedBox(height: _theme.lyricTranslationGap),
             AnimatedBuilder(
               animation: _emphasisFrames,
@@ -998,10 +1025,10 @@ class _LyricViewportState extends State<LyricViewport>
               ),
               child: _interactiveText(
                 index,
-                _lines[index].translation!,
+                secondary,
                 _translationStyle,
                 Text(
-                  _lines[index].translation!,
+                  secondary,
                   textAlign: TextAlign.left,
                   textDirection: TextDirection.ltr,
                   style: _translationStyle,

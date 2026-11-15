@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_recent_playback">最近播放</string>
+    <string name="widget_recent_empty">无最近播放的音乐</string>
+    <string name="widget_recent_description">查看最近播放的音乐和当前播放内容。</string>
+</resources>

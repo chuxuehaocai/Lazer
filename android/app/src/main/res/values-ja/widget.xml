@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_recent_playback">最近再生した項目</string>
+    <string name="widget_recent_empty">最近再生した音楽はありません</string>
+    <string name="widget_recent_description">最近再生した音楽と現在再生中の曲を表示します。</string>
+</resources>

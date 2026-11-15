@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
@@ -197,68 +198,88 @@ class _PluginRow extends StatelessWidget {
     final String hosts = plugin.manifest.domains.join('、');
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: apple.accent.withValues(alpha: .13),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(Icons.extension_rounded, color: apple.accent),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  plugin.manifest.name,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: apple.accent.withValues(alpha: .13),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                Text(
-                  '${plugin.manifest.provider} · v${plugin.manifest.version}${plugin.error == null ? '' : ' · ${plugin.error}'}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: plugin.error == null
-                        ? apple.secondaryLabel
-                        : Theme.of(context).colorScheme.error,
-                  ),
+                child: Icon(Icons.extension_rounded, color: apple.accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      plugin.manifest.name,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      '${plugin.manifest.provider} · v${plugin.manifest.version}${plugin.error == null ? '' : ' · ${plugin.error}'}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: plugin.error == null
+                            ? apple.secondaryLabel
+                            : Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                    if (plugin.manifest.domains.isNotEmpty ||
+                        plugin.manifest.websocketDomains.isNotEmpty ||
+                        plugin.manifest.websocketServerBindings.isNotEmpty ||
+                        plugin.manifest.storage)
+                      Text(
+                        context.tr(
+                          plugin.manifest.websocketDomains.isNotEmpty
+                              ? '网络：$hosts · WebSocket 需授权${plugin.manifest.storage ? ' · 本地存储' : ''}'
+                              : plugin.manifest.storage
+                              ? '网络：$hosts · 本地存储'
+                              : '网络：$hosts',
+                        ),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: apple.secondaryLabel,
+                        ),
+                      ),
+                  ],
                 ),
-                if (plugin.manifest.domains.isNotEmpty ||
-                    plugin.manifest.websocketDomains.isNotEmpty ||
-                    plugin.manifest.storage)
-                  Text(
-                    context.tr(
-                      plugin.manifest.websocketDomains.isNotEmpty
-                          ? '网络：$hosts · WebSocket 需授权${plugin.manifest.storage ? ' · 本地存储' : ''}'
-                          : plugin.manifest.storage
-                          ? '网络：$hosts · 本地存储'
-                          : '网络：$hosts',
-                    ),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: apple.secondaryLabel,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          if (plugin.enabled && !active && plugin.error == null)
-            SpringTextButton(
-              onPressed: manager.busy ? null : () => unawaited(onUse()),
-              child: const TrText('使用'),
-            ),
-          Switch(
-            value: plugin.enabled,
-            onChanged: manager.busy
-                ? null
-                : (value) =>
-                      unawaited(manager.setEnabled(plugin.manifest.id, value)),
+              ),
+              if (plugin.enabled && !active && plugin.error == null)
+                SpringTextButton(
+                  onPressed: manager.busy ? null : () => unawaited(onUse()),
+                  child: const TrText('使用'),
+                ),
+              Switch(
+                value: plugin.enabled,
+                onChanged: manager.busy
+                    ? null
+                    : (value) => unawaited(
+                        manager.setEnabled(plugin.manifest.id, value),
+                      ),
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) async {
+                  if (value == 'remove') {
+                    await manager.uninstall(plugin.manifest.id);
+                  }
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'remove', child: Text(context.tr('卸载'))),
+                ],
+              ),
+            ],
           ),
           if (plugin.manifest.websocketDomains.isNotEmpty)
-            Switch(
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(context.tr('允许 WebSocket 连接')),
+              subtitle: Text(plugin.manifest.websocketDomains.join(', ')),
               value: plugin.websocketGranted,
               onChanged: manager.busy
                   ? null
@@ -266,16 +287,29 @@ class _PluginRow extends StatelessWidget {
                       manager.setWebsocketPermission(plugin.manifest.id, value),
                     ),
             ),
-          PopupMenuButton<String>(
-            onSelected: (value) async {
-              if (value == 'remove') {
-                await manager.uninstall(plugin.manifest.id);
-              }
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(value: 'remove', child: Text(context.tr('卸载'))),
-            ],
-          ),
+          if (plugin.manifest.websocketServerBindings.isNotEmpty)
+            SwitchListTile.adaptive(
+              key: ValueKey(
+                'websocket-server-permission-${plugin.manifest.id}',
+              ),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(context.tr('允许 WebSocket 服务端')),
+              subtitle: Text(
+                kIsWeb
+                    ? context.tr('浏览器不支持 WebSocket 服务端。')
+                    : plugin.manifest.websocketServerBindings.join(', '),
+              ),
+              value: plugin.websocketServerGranted,
+              onChanged: manager.busy || kIsWeb
+                  ? null
+                  : (value) => unawaited(
+                      manager.setWebsocketServerPermission(
+                        plugin.manifest.id,
+                        value,
+                      ),
+                    ),
+            ),
         ],
       ),
     );

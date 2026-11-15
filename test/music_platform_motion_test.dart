@@ -48,17 +48,42 @@ void main() {
             )
             .first,
       );
+      final slide = tester.widget<SlideTransition>(
+        find
+            .ancestor(
+              of: find.text('Second view'),
+              matching: find.byType(SlideTransition),
+            )
+            .first,
+      );
       expect(
-        fade.opacity.value,
+        slide.position.value.dy,
         closeTo(
-          const AppleSpring(
-            duration: ViewMotion.duration,
-          ).simulation(0, 1).x(.08),
+          .025 *
+              (1 -
+                  const AppleSpring(
+                    duration: ViewMotion.duration,
+                  ).simulation(0, 1).x(.08)),
           .00001,
         ),
         reason: 'The view uses the same spring response as other transitions.',
       );
-      expect(fade.opacity.value, lessThan(1));
+      expect(
+        fade.opacity.value,
+        0,
+        reason: 'The new view waits for the old text to fade away.',
+      );
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(fade.opacity.value, greaterThan(0));
+      final outgoingFade = tester.widget<FadeTransition>(
+        find
+            .ancestor(
+              of: find.text('First view'),
+              matching: find.byType(FadeTransition),
+            )
+            .first,
+      );
+      expect(outgoingFade.opacity.value, 0);
       final departing = find.ancestor(
         of: find.text('First view'),
         matching: find.byType(IgnorePointer),

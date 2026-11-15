@@ -115,9 +115,7 @@ void main() {
       throwsFormatException,
     );
     expect(
-      PluginManifest.fromJson(
-        withNetwork(<String>['*.example.com']),
-      ).domains,
+      PluginManifest.fromJson(withNetwork(<String>['*.example.com'])).domains,
       <String>['*.example.com'],
     );
   });
@@ -133,9 +131,15 @@ void main() {
         'websocket': ['socket.example.com'],
       },
     });
-    expect(manifest.permitsWebSocket(Uri.parse('wss://socket.example.com')), isTrue);
+    expect(
+      manifest.permitsWebSocket(Uri.parse('wss://socket.example.com')),
+      isTrue,
+    );
     expect(manifest.permits(Uri.parse('https://socket.example.com')), isFalse);
-    expect(manifest.permitsWebSocket(Uri.parse('wss://other.example.com')), isFalse);
+    expect(
+      manifest.permitsWebSocket(Uri.parse('wss://other.example.com')),
+      isFalse,
+    );
   });
 
   test('Lua entrypoint and module calls remain data-only', () async {
@@ -228,21 +232,23 @@ void main() {
     expect(package.sources.containsKey('main.lua'), isTrue);
   });
 
-  test('a VM that times out is replaced, and the next call still works', () async {
-    final directory = await Directory.systemTemp.createTemp('lazer-restart-');
-    addTearDown(() => directory.delete(recursive: true));
-    final runtime = LuaPluginRuntime(
-      manifest: PluginManifest.fromJson(const {
-        'id': 'demo.restart',
-        'name': 'Restart',
-        'version': '1.0.0',
-        'provider': 'restart',
-        'apiVersion': 1,
-        'entry': 'main.lua',
-        'permissions': {'storage': true},
-      }),
-      sources: const {
-        'main.lua': '''
+  test(
+    'a VM that times out is replaced, and the next call still works',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('lazer-restart-');
+      addTearDown(() => directory.delete(recursive: true));
+      final runtime = LuaPluginRuntime(
+        manifest: PluginManifest.fromJson(const {
+          'id': 'demo.restart',
+          'name': 'Restart',
+          'version': '1.0.0',
+          'provider': 'restart',
+          'apiVersion': 1,
+          'entry': 'main.lua',
+          'permissions': {'storage': true},
+        }),
+        sources: const {
+          'main.lua': '''
           host.storage_set("boots", (host.storage_get("boots") or 0) + 1)
           return {call = function(op, args)
             if op == "hang" then while true do end end
@@ -250,28 +256,31 @@ void main() {
             return {ok = true}
           end}
         ''',
-      },
-      dataDirectory: directory.path,
-      timeout: const Duration(milliseconds: 600),
-    );
-    addTearDown(runtime.close);
-    expect(await runtime.invoke('ping'), {'ok': true});
-    // A plugin that never returns must not cost the session its plugin: the
-    // call reports a retryable timeout and the next call gets a fresh VM.
-    await expectLater(
-      runtime.invoke('hang'),
-      throwsA(
-        isA<PluginException>().having(
-          (error) => error.code,
-          'code',
-          PluginException.timeoutCode,
+        },
+        dataDirectory: directory.path,
+        // VM startup shares the host with the rest of the suite. Keep the short
+        // deadline on the hung call itself, rather than on isolate startup.
+        timeout: const Duration(seconds: 5),
+      );
+      addTearDown(runtime.close);
+      expect(await runtime.invoke('ping'), {'ok': true});
+      // A plugin that never returns must not cost the session its plugin: the
+      // call reports a retryable timeout and the next call gets a fresh VM.
+      await expectLater(
+        runtime.invoke('hang', const {}, const Duration(milliseconds: 600)),
+        throwsA(
+          isA<PluginException>().having(
+            (error) => error.code,
+            'code',
+            PluginException.timeoutCode,
+          ),
         ),
-      ),
-    );
-    expect(await runtime.invoke('ping'), {'ok': true});
-    final boots = await runtime.invoke('boots') as Map;
-    expect(boots['count'], 2);
-  });
+      );
+      expect(await runtime.invoke('ping'), {'ok': true});
+      final boots = await runtime.invoke('boots') as Map;
+      expect(boots['count'], 2);
+    },
+  );
 
   test('close is permanent while a timeout is not', () async {
     final directory = await Directory.systemTemp.createTemp('lazer-close-');

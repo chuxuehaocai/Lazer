@@ -118,10 +118,9 @@ void main() {
     for (var frame = 0; frame < 6; frame++) {
       await tester.pump(const Duration(milliseconds: 30));
     }
-    expect(incoming.opacity.value, greaterThan(.5));
+    expect(incoming.opacity.value, greaterThan(0));
     expect(incoming.opacity.value, lessThan(1));
-    expect(outgoing.opacity.value, greaterThan(0));
-    expect(outgoing.opacity.value, lessThan(.5));
+    expect(outgoing.opacity.value, 0);
     expect(
       parkedFrameBuilds,
       0,
@@ -248,6 +247,44 @@ void main() {
     await tester.pumpWidget(app('detail', {}));
     await tester.pump();
     expect(find.text('root', skipOffstage: false), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('transparent pages never overlap during switches or retargets', (
+    tester,
+  ) async {
+    Widget host(String name) => MaterialApp(
+      home: RetainedContentSwitcher(
+        currentKey: name,
+        page: SizedBox.expand(child: Text(name)),
+        retainKeys: const {'root', 'manager', 'market'},
+      ),
+    );
+    await tester.pumpWidget(host('root'));
+    for (final (name, frames) in [
+      ('manager', 8),
+      ('market', 4),
+      ('root', 40),
+      ('market', 40),
+    ]) {
+      await tester.pumpWidget(host(name));
+      for (var frame = 0; frame < frames; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        final visible = <String>[];
+        for (final page in ['root', 'manager', 'market']) {
+          final text = find.text(page);
+          if (text.evaluate().isEmpty) continue;
+          final opacity = tester
+              .widgetList<FadeTransition>(
+                find.ancestor(of: text, matching: find.byType(FadeTransition)),
+              )
+              .fold(1.0, (value, fade) => value * fade.opacity.value);
+          if (opacity > .00001) visible.add(page);
+        }
+        expect(visible.length, lessThanOrEqualTo(1), reason: '$visible');
+      }
+    }
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 

@@ -10,6 +10,7 @@ import '../data/audio_quality.dart';
 import '../data/models.dart';
 import '../state/build_safe_notifier.dart';
 import 'coalescing_writer.dart';
+import 'local_audio_probe.dart';
 
 /// Where a file in the local library came from.
 enum LocalTrackSource { download, scan, cache }
@@ -259,6 +260,7 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
     if (_disposed) return;
     notifyListeners();
     bool changed = false;
+    bool artworkChanged = false;
     try {
       final List<LocalTrack> snapshot = List<LocalTrack>.of(_tracks);
       int indexedRevision = _tracksRevision;
@@ -283,13 +285,56 @@ class LocalLibrary extends ChangeNotifier with BuildSafeNotifier {
           entry.missing = !exists;
           changed = true;
         }
+        if (exists) {
+          final String? artwork = await _restoreArtwork(entry);
+          if (_disposed) break;
+          if (artwork == null || !isLive(entry)) continue;
+          final index = _indexesByPath()[_normalize(_absolute(entry.path))];
+          if (index == null || !identical(_tracks[index], entry)) continue;
+          _tracks[index] = LocalTrack(
+            track: entry.track.copyWith(coverUrl: artwork),
+            path: entry.path,
+            source: entry.source,
+            quality: entry.quality,
+            bytes: entry.bytes,
+            modifiedAt: entry.modifiedAt,
+            addedAt: entry.addedAt,
+          );
+          changed = artworkChanged = true;
+        }
       }
     } finally {
       _verifying = false;
       if (changed && !_disposed) {
         _tracksRevision++;
         notifyListeners();
+        if (artworkChanged) await _persist();
       }
+    }
+  }
+
+  /// Repair library entries saved before embedded covers were read, and file
+  /// URIs lost after an iOS container move. Existing network or sidecar covers
+  /// are left alone. This runs in the background verification lane.
+  Future<String?> _restoreArtwork(LocalTrack entry) async {
+    try {
+      final cover = entry.track.coverUrl;
+      if (cover != null && cover.isNotEmpty) {
+        final uri = Uri.tryParse(cover);
+        if (uri?.scheme != 'file' || await File.fromUri(uri!).exists()) {
+          return null;
+        }
+      }
+      final manifest = await _manifestFile();
+      if (manifest == null) return null;
+      return await LocalAudioProbe.artworkUriFor(
+        entry.path,
+        cacheDirectory: Directory(
+          '${manifest.parent.path}/embedded-artwork-v1',
+        ),
+      );
+    } catch (_) {
+      return null;
     }
   }
 

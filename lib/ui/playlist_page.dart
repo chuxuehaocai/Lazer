@@ -23,14 +23,16 @@ import 'widgets.dart';
 
 /// The liked-songs library entry.
 class AppLikesPage extends StatelessWidget {
-  const AppLikesPage({super.key, required this.state});
+  const AppLikesPage({super.key, required this.state, this.topInset = 0});
 
   final AppState state;
+  final double topInset;
 
   @override
   Widget build(BuildContext context) {
     if (!state.hasNetworkProvider) {
       return AppNotice(
+        topInset: topInset,
         message: '切换到音乐平台后查看喜欢的音乐。',
         icon: Icons.favorite_border_rounded,
         action: SpringFilledButton(
@@ -41,6 +43,7 @@ class AppLikesPage extends StatelessWidget {
     }
     if (state.isGuest) {
       return AppNotice(
+        topInset: topInset,
         message: '登录后查看喜欢的音乐。',
         icon: Icons.favorite_border_rounded,
         action: SpringFilledButton(
@@ -54,6 +57,7 @@ class AppLikesPage extends StatelessWidget {
       final String? error = state.collectionsError;
       if (error != null) {
         return AppNotice(
+          topInset: topInset,
           message: error,
           icon: Icons.wifi_off_rounded,
           action: SpringFilledButton(
@@ -64,7 +68,12 @@ class AppLikesPage extends StatelessWidget {
       }
       return const Center(child: CircularProgressIndicator());
     }
-    return AppPlaylistPage(state: state, playlist: liked, embedded: true);
+    return AppPlaylistPage(
+      state: state,
+      playlist: liked,
+      embedded: true,
+      topInset: topInset,
+    );
   }
 }
 
@@ -75,12 +84,14 @@ class AppPlaylistPage extends StatefulWidget {
     required this.state,
     required this.playlist,
     this.embedded = false,
+    this.topInset = 0,
     this.album,
   });
 
   final AppState state;
   final Playlist playlist;
   final bool embedded;
+  final double topInset;
 
   /// When set, the page loads album tracks instead of playlist tracks. The
   /// album still travels through [playlist] for the header and title, so both
@@ -342,7 +353,7 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
     final List<double>? heights = _rowHeights;
     final double? header = _headerKey.currentContext?.size?.height;
     if (tops == null || heights == null || header == null) return false;
-    final double top = 12 + header + tops[index];
+    final double top = widget.topInset + 12 + header + tops[index];
     final double bottom = top + heights[index];
     final double viewTop = _scroll.offset;
     final double viewBottom =
@@ -367,7 +378,7 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
     final List<double>? heights = _rowHeights;
     if (tops == null || heights == null) return;
     final double header = _headerKey.currentContext?.size?.height ?? 0;
-    final double top = 12 + header + tops[index];
+    final double top = widget.topInset + 12 + header + tops[index];
     final double extent = heights[index];
     final double viewport =
         _scroll.position.viewportDimension -
@@ -422,7 +433,12 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
               controller: _scroll,
               slivers: <Widget>[
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(inset, 12, inset, 0),
+                  padding: EdgeInsets.fromLTRB(
+                    inset,
+                    12 + widget.topInset,
+                    inset,
+                    0,
+                  ),
                   sliver: SliverToBoxAdapter(
                     child: Column(
                       key: _headerKey,

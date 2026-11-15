@@ -3,7 +3,6 @@ import '../widgets/spring_buttons.dart';
 import '../storage/app_storage.dart';
 import '../storage/storage_settings.dart';
 import 'dart:async';
-import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/system_http.dart';
 
@@ -53,6 +52,7 @@ import 'scheduled_pause_settings.dart';
 import '../widgets/music_provider_badge.dart';
 import 'plugin_manager_page.dart';
 import 'developer_console_page.dart';
+import 'custom_image_backdrop.dart';
 
 /// A single-column, inset-grouped Settings page, following the iOS Settings
 /// information architecture rather than a desktop form grid.
@@ -63,9 +63,11 @@ class AppSettingsPage extends StatelessWidget {
     this.onOpenLocalMusic,
     this.backgroundImagePicker,
     this.categorized = false,
+    this.topInset = 0,
   });
 
   final AppState state;
+  final double topInset;
 
   /// Jumps to the local-music page from the download settings group.
   final VoidCallback? onOpenLocalMusic;
@@ -93,11 +95,13 @@ class AppSettingsPage extends StatelessWidget {
     child: categorized
         ? _SettingsCategoryHome(
             state: state,
+            topInset: topInset,
             onOpenLocalMusic: onOpenLocalMusic,
             backgroundImagePicker: backgroundImagePicker,
           )
         : _SettingsOverview(
             state: state,
+            topInset: topInset,
             onOpenLocalMusic: onOpenLocalMusic,
             backgroundImagePicker: backgroundImagePicker,
           ),
@@ -118,30 +122,32 @@ enum _SettingsCategory {
 }
 
 extension _SettingsCategoryLabels on _SettingsCategory {
+  // Call sites translate these source labels. Keep the declarations visible
+  // to the coverage checker even though the text sinks receive variables.
   String get label => switch (this) {
-    _SettingsCategory.interface => '界面与布局',
-    _SettingsCategory.appearance => '外观与背景',
-    _SettingsCategory.playback => '播放与滚动',
-    _SettingsCategory.lyrics => '歌词',
-    _SettingsCategory.storage => '存储与下载',
-    _SettingsCategory.interaction => '交互与快捷键',
-    _SettingsCategory.performance => '性能与调试',
-    _SettingsCategory.account => '账户与扩展',
-    _SettingsCategory.network => '网络代理',
-    _SettingsCategory.about => '关于 Lazer',
+    _SettingsCategory.interface => '界面与布局', // i18n:key
+    _SettingsCategory.appearance => '外观与背景', // i18n:key
+    _SettingsCategory.playback => '播放与滚动', // i18n:key
+    _SettingsCategory.lyrics => '歌词', // i18n:key
+    _SettingsCategory.storage => '存储与下载', // i18n:key
+    _SettingsCategory.interaction => '交互与快捷键', // i18n:key
+    _SettingsCategory.performance => '性能与调试', // i18n:key
+    _SettingsCategory.account => '账户与扩展', // i18n:key
+    _SettingsCategory.network => '网络代理', // i18n:key
+    _SettingsCategory.about => '关于 Lazer', // i18n:key
   };
 
   String get detail => switch (this) {
-    _SettingsCategory.interface => '布局、字体和缩放',
-    _SettingsCategory.appearance => '主题、配色和动态背景',
-    _SettingsCategory.playback => '音质、切歌衔接和滚动手感',
-    _SettingsCategory.lyrics => '歌词显示、间距和歌词窗口',
-    _SettingsCategory.storage => '本地音乐、缓存和下载任务',
-    _SettingsCategory.interaction => '震动、返回行为和快捷键',
-    _SettingsCategory.performance => '动画、开发者控制台和诊断',
-    _SettingsCategory.account => '登录、平台连接和插件',
-    _SettingsCategory.network => '直连、系统代理与自定义端点',
-    _SettingsCategory.about => '版本、更新、日志和开源信息',
+    _SettingsCategory.interface => '布局、字体和缩放', // i18n:key
+    _SettingsCategory.appearance => '主题、配色和动态背景', // i18n:key
+    _SettingsCategory.playback => '音质、切歌衔接和滚动手感', // i18n:key
+    _SettingsCategory.lyrics => '歌词显示、间距和歌词窗口', // i18n:key
+    _SettingsCategory.storage => '本地音乐、缓存和下载任务', // i18n:key
+    _SettingsCategory.interaction => '震动、返回行为和快捷键', // i18n:key
+    _SettingsCategory.performance => '动画、开发者控制台和诊断', // i18n:key
+    _SettingsCategory.account => '登录、平台连接和插件', // i18n:key
+    _SettingsCategory.network => '直连、系统代理与自定义端点', // i18n:key
+    _SettingsCategory.about => '版本、更新、日志和开源信息', // i18n:key
   };
 
   IconData get icon => switch (this) {
@@ -161,11 +167,13 @@ extension _SettingsCategoryLabels on _SettingsCategory {
 class _SettingsCategoryHome extends StatelessWidget {
   const _SettingsCategoryHome({
     required this.state,
+    this.topInset = 0,
     this.onOpenLocalMusic,
     this.backgroundImagePicker,
   });
 
   final AppState state;
+  final double topInset;
   final VoidCallback? onOpenLocalMusic;
   final Future<String?> Function()? backgroundImagePicker;
 
@@ -197,7 +205,7 @@ class _SettingsCategoryHome extends StatelessWidget {
         child: ListView(
           padding: EdgeInsets.fromLTRB(
             inset,
-            8,
+            8 + topInset,
             inset,
             36 + MediaQuery.paddingOf(context).bottom,
           ),
@@ -303,11 +311,13 @@ class _SettingsOverview extends StatelessWidget {
   const _SettingsOverview({
     this.category,
     required this.state,
+    this.topInset = 0,
     this.onOpenLocalMusic,
     this.backgroundImagePicker,
   });
   final _SettingsCategory? category;
   final AppState state;
+  final double topInset;
   final VoidCallback? onOpenLocalMusic;
   final Future<String?> Function()? backgroundImagePicker;
 
@@ -337,7 +347,7 @@ class _SettingsOverview extends StatelessWidget {
     final double inset = pageInset(context);
     bool show(_SettingsCategory value) => category == null || category == value;
     final String pageTitle = category?.label ?? '设置';
-    final String pageSubtitle = category?.detail ?? '外观、界面和账户。';
+    final String pageSubtitle = category?.detail ?? '外观、界面和账户。'; // i18n:key
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760),
@@ -345,7 +355,7 @@ class _SettingsOverview extends StatelessWidget {
           key: const PageStorageKey('settings-overview-scroll'),
           padding: EdgeInsets.fromLTRB(
             inset,
-            8,
+            8 + topInset,
             inset,
             36 + MediaQuery.paddingOf(context).bottom,
           ),
@@ -1229,6 +1239,14 @@ class _SettingsOverview extends StatelessWidget {
                             ),
                           ),
                         ],
+                        _AppSwitchRow(
+                          key: const ValueKey('lyric-romanization-switch'),
+                          label: '显示罗马音',
+                          subtitle: '仅在歌词文件或插件提供罗马音时显示',
+                          value: state.showLyricRomanization,
+                          onChanged: (value) =>
+                              unawaited(state.setShowLyricRomanization(value)),
+                        ),
                         _AppSwitchRow(
                           label: '歌词模糊',
                           subtitle: '距离当前歌词越远，模糊越强；手动浏览时渐隐',
@@ -2230,8 +2248,8 @@ class _BackgroundImageCropDialogState
                         child: Transform.scale(
                           scale: _scale,
                           alignment: Alignment(_x, _y),
-                          child: Image.file(
-                            File(widget.path),
+                          child: Image(
+                            image: backgroundImageProvider(widget.path),
                             width: width,
                             height: height,
                             fit: BoxFit.cover,

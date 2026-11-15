@@ -1,5 +1,6 @@
 import '../gateway/music_models.dart';
 import '../animation/apple_spring.dart';
+import '../animation/view_transitions.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import '../widgets/catalog_links.dart';
@@ -48,6 +49,7 @@ class DesktopNowPlaying extends StatelessWidget {
     required this.onActivity,
     this.onPointerStart,
     this.onPointerEnd,
+    this.playPauseFocus,
   });
   final AppState state;
   final Track track;
@@ -58,6 +60,7 @@ class DesktopNowPlaying extends StatelessWidget {
   final bool controlsVisible;
   final VoidCallback onActivity;
   final ValueChanged<int>? onPointerStart, onPointerEnd;
+  final FocusNode? playPauseFocus;
 
   @override
   Widget build(BuildContext context) {
@@ -156,42 +159,10 @@ class DesktopNowPlaying extends StatelessWidget {
                                   SizedBox(width: paneGap),
                                   Expanded(
                                     child: RepaintBoundary(
-                                      child: AnimatedSwitcher(
-                                        duration:
-                                            MediaQuery.disableAnimationsOf(
-                                              context,
-                                            )
-                                            ? Duration.zero
-                                            : const Duration(milliseconds: 240),
-                                        switchInCurve: const AppleSpringCurve(),
-                                        switchOutCurve:
-                                            const AppleSpringCurve(),
-                                        transitionBuilder: (child, animation) =>
-                                            FadeTransition(
-                                              opacity: animation,
-                                              child: SlideTransition(
-                                                position: Tween(
-                                                  begin: const Offset(.025, 0),
-                                                  end: Offset.zero,
-                                                ).animate(animation),
-                                                child: RepaintBoundary(
-                                                  child: child,
-                                                ),
-                                              ),
-                                            ),
-                                        layoutBuilder: (current, previous) =>
-                                            Stack(
-                                              fit: StackFit.expand,
-                                              children: [
-                                                for (final old in previous)
-                                                  ExcludeSemantics(
-                                                    child: IgnorePointer(
-                                                      child: old,
-                                                    ),
-                                                  ),
-                                                ?current,
-                                              ],
-                                            ),
+                                      // Share page transitions so transparent
+                                      // panes never overlap and outgoing TV
+                                      // controls leave traversal immediately.
+                                      child: ViewTransitionSwitcher(
                                         child: KeyedSubtree(
                                           key: ValueKey(pane),
                                           child: switch (pane) {
@@ -218,6 +189,7 @@ class DesktopNowPlaying extends StatelessWidget {
               ),
               _DesktopDock(
                 state: state,
+                playPauseFocus: playPauseFocus,
                 visible: controlsVisible,
                 pane: pane,
                 onPaneChanged: onPaneChanged,
@@ -716,12 +688,14 @@ class _DesktopDock extends StatelessWidget {
     required this.pane,
     required this.onPaneChanged,
     required this.onFullscreen,
+    this.playPauseFocus,
   });
   final AppState state;
   final bool visible;
   final DesktopNowPlayingPane pane;
   final ValueChanged<DesktopNowPlayingPane> onPaneChanged;
   final VoidCallback onFullscreen;
+  final FocusNode? playPauseFocus;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
@@ -874,6 +848,8 @@ class _DesktopDock extends StatelessWidget {
                               const SizedBox(width: 8),
                               AccessibleIconButton(
                                 key: const ValueKey('desktop-play-pause'),
+                                autofocus: TvScope.isActive(context),
+                                focusNode: playPauseFocus,
                                 tooltip: state.playing ? '暂停' : '播放',
                                 color: context.colors.onPlayer,
                                 onPressed: state.togglePlay,

@@ -65,9 +65,10 @@
         <receiver
             android:name=".PlayCountWidgetProvider"
             android:exported="true"
-            android:label="播放次数">
+            android:label="@string/widget_recent_playback">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

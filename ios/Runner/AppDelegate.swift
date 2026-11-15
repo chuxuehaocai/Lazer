@@ -7,6 +7,7 @@ import WidgetKit
   private var hapticsChannel: FlutterMethodChannel?
   private var updatesChannel: FlutterMethodChannel?
   private var systemWidgetsChannel: FlutterMethodChannel?
+  private let widgetStorageQueue = DispatchQueue(label: "dev.naominet.lazer.widget-storage", qos: .utility)
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -72,16 +73,88 @@ import WidgetKit
       binaryMessenger: widgetsRegistrar.messenger()
     )
     systemWidgetsChannel = widgets
-    widgets.setMethodCallHandler { call, result in
-      guard call.method == "updatePlayCount" else {
+    widgets.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "updateRecentPlayback" else {
         result(FlutterMethodNotImplemented)
         return
       }
       let args = call.arguments as? [String: Any] ?? [:]
-      let count = max(0, (args["count"] as? NSNumber)?.intValue ?? 0)
-      UserDefaults(suiteName: "group.dev.naominet.lazer")?.set(count, forKey: "play_count")
-      WidgetCenter.shared.reloadAllTimelines()
-      result(nil)
+      guard let self = self else { result(nil); return }
+      self.widgetStorageQueue.async {
+        do {
+          let changed = try Self.storeRecentPlayback(args)
+          DispatchQueue.main.async {
+            if changed { WidgetCenter.shared.reloadTimelines(ofKind: "LazerPlayCountWidget") }
+            result(nil)
+          }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "widget_update_failed", message: "Unable to update the recent playback widget.", details: nil))
+          }
+        }
+      }
     }
+  }
+
+  private nonisolated static func storeRecentPlayback(_ args: [String: Any]) throws -> Bool {
+    let files = FileManager.default
+    guard let container = files.containerURL(forSecurityApplicationGroupIdentifier: "group.dev.naominet.lazer") else {
+      throw NSError(domain: "LazerWidget", code: 1)
+    }
+    let snapshotURL = container.appendingPathComponent("recent-playback.json")
+    let previousData = try? Data(contentsOf: snapshotURL)
+    let previous: [String: Any]? = previousData.flatMap { data in
+      (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+    let previousArtwork = previous?["artworkFile"] as? String ?? ""
+    let hasTrack = args["hasTrack"] as? Bool ?? false
+    var artworkFile = ""
+    if hasTrack, let typed = args["artwork"] as? FlutterStandardTypedData {
+      let data = typed.data
+      // Flutter already downsamples to 256 px; keep the extension bounded too.
+      if !data.isEmpty, data.count <= 1_048_576,
+         let image = UIImage(data: data), let pixels = image.cgImage,
+         pixels.width <= 256, pixels.height <= 256, let png = image.pngData() {
+        let oldURL = container.appendingPathComponent(previousArtwork)
+        if previousArtwork.hasPrefix("recent-playback-artwork-"),
+           previousArtwork.hasSuffix(".png"),
+           !previousArtwork.contains("/"), !previousArtwork.contains("\\"),
+           (try? Data(contentsOf: oldURL)) == png {
+          artworkFile = previousArtwork
+        } else {
+          artworkFile = "recent-playback-artwork-\(UUID().uuidString).png"
+          try png.write(to: container.appendingPathComponent(artworkFile), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+      }
+    }
+    func text(_ name: String) -> String { String((args[name] as? String ?? "").prefix(512)) }
+    let requestedLanguage = text("language")
+    let language = ["en", "ja", "zh-Hans", "zh-Hant", "system"].contains(requestedLanguage) ? requestedLanguage : "system"
+    let snapshot: [String: Any] = [
+      "title": hasTrack ? text("title") : "",
+      "artist": hasTrack ? text("artist") : "",
+      "album": hasTrack ? text("album") : "",
+      "trackId": hasTrack ? text("trackId") : "",
+      "playing": hasTrack && (args["playing"] as? Bool ?? false),
+      "hasTrack": hasTrack,
+      "language": language,
+      "artworkFile": artworkFile,
+    ]
+    let data = try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys])
+    // Publish metadata last so a new track cannot show the previous cover.
+    let changed = previousData != data
+    if changed {
+      try data.write(to: snapshotURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+    // Keep the prior cover for an extension reader using the previous snapshot.
+    // The next update removes it; at most two small covers remain.
+    let keep = hasTrack ? Set([artworkFile, previousArtwork]) : Set<String>()
+    for url in (try? files.contentsOfDirectory(at: container, includingPropertiesForKeys: nil)) ?? [] {
+      let name = url.lastPathComponent
+      if name.hasPrefix("recent-playback-artwork-"), name.hasSuffix(".png"), !keep.contains(name) {
+        try? files.removeItem(at: url)
+      }
+    }
+    return changed
   }
 }

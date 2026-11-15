@@ -801,11 +801,14 @@ void main() {
       final chooser = tester.widget<DropdownButton<String>>(
         find.byType(DropdownButton<String>),
       );
-      expect(chooser.items!.map((entry) => (entry.child as Text).data), [
-        '本地音乐',
-        'Alpha Music',
-        'Beta Radio',
-      ]);
+      expect(chooser.items, hasLength(3));
+      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.pumpAndSettle();
+      for (final label in ['本地音乐', 'Alpha Music', 'Beta Radio']) {
+        expect(find.text(label), findsWidgets);
+      }
+      await tester.tap(find.text(app.musicProvider.name).last);
+      await tester.pumpAndSettle();
       expect(find.text('扫码登录'), findsNothing);
       expect(find.text('短信验证码登录'), findsNothing);
       expect(find.text('密码登录'), findsNothing);

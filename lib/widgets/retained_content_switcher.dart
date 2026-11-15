@@ -449,5 +449,7 @@ class _PageSpringValue extends Animatable<double> {
 
 class _ClampedPageOpacity extends Animatable<double> {
   @override
-  double transform(double t) => t.clamp(0.0, 1.0);
+  // Both pages share a transparent canvas. Their complementary springs must
+  // fade through it instead of painting two sets of text at the same time.
+  double transform(double t) => ((t - .5) * 2).clamp(0.0, 1.0);
 }

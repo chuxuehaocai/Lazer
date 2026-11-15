@@ -74,6 +74,7 @@ class DesktopLyricsController {
       animationSpeed: _state.animationSpeed,
       lineSpacing: _state.lyricLineSpacing,
       locked: _state.floatingLyricsLocked,
+      showRomanization: _state.showLyricRomanization,
       theme: _state.pluginTheme?.toJson(),
     );
   }

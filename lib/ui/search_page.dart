@@ -31,10 +31,12 @@ class AppSearchPage extends StatefulWidget {
     super.key,
     required this.state,
     required this.onOpenPlaylist,
+    this.topInset = 0,
   });
 
   final AppState state;
   final ValueChanged<Playlist> onOpenPlaylist;
+  final double topInset;
 
   @override
   State<AppSearchPage> createState() => _AppSearchPageState();
@@ -147,26 +149,37 @@ class _AppSearchPageState extends State<AppSearchPage>
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1180),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Padding(
-              padding: EdgeInsets.fromLTRB(inset, 14, inset, 12),
-              child: AppleSearchField(
-                hintText: widget.state.isLocalPlayback ? '搜索本地音乐' : null,
-                controller: _search,
-                autofocus: _autoFocusField,
-                onChanged: _onChanged,
-                onSubmitted: _submit,
-                onClear: _clear,
+        child: widget.topInset == 0
+            ? _pageContent(inset)
+            : NestedScrollView(
+                // Collapse only the empty toolbar space; keep the search
+                // controls available while the result list keeps scrolling.
+                headerSliverBuilder: (context, innerBoxIsScrolled) => <Widget>[
+                  SliverToBoxAdapter(child: SizedBox(height: widget.topInset)),
+                ],
+                body: _pageContent(inset),
               ),
-            ),
-            Expanded(child: _body(inset)),
-          ],
-        ),
       ),
     );
   }
+
+  Widget _pageContent(double inset) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      Padding(
+        padding: EdgeInsets.fromLTRB(inset, 14, inset, 12),
+        child: AppleSearchField(
+          hintText: widget.state.isLocalPlayback ? '搜索本地音乐' : null,
+          controller: _search,
+          autofocus: _autoFocusField,
+          onChanged: _onChanged,
+          onSubmitted: _submit,
+          onClear: _clear,
+        ),
+      ),
+      Expanded(child: _body(inset)),
+    ],
+  );
 
   Widget _body(double inset) {
     final double bottomInset = MediaQuery.paddingOf(context).bottom;
@@ -233,6 +246,7 @@ class _AppSearchPageState extends State<AppSearchPage>
               key: ValueKey(_tab),
               child: switch (_tab) {
                 _SearchTab.songs => ListView.builder(
+                  primary: widget.topInset > 0 ? true : null,
                   padding: EdgeInsets.fromLTRB(
                     inset,
                     0,
@@ -259,6 +273,7 @@ class _AppSearchPageState extends State<AppSearchPage>
                   },
                 ),
                 _SearchTab.albums => ListView.builder(
+                  primary: widget.topInset > 0 ? true : null,
                   padding: EdgeInsets.fromLTRB(
                     inset,
                     0,
@@ -285,6 +300,7 @@ class _AppSearchPageState extends State<AppSearchPage>
                   },
                 ),
                 _SearchTab.artists => ListView.builder(
+                  primary: widget.topInset > 0 ? true : null,
                   padding: EdgeInsets.fromLTRB(
                     inset,
                     0,
@@ -316,6 +332,7 @@ class _AppSearchPageState extends State<AppSearchPage>
                       (box.maxWidth - inset * 2).clamp(0, double.infinity),
                     );
                     return CustomScrollView(
+                      primary: widget.topInset > 0 ? true : null,
                       slivers: <Widget>[
                         SliverPadding(
                           padding: EdgeInsets.fromLTRB(

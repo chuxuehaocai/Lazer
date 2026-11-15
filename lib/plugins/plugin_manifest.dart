@@ -21,6 +21,9 @@ class PluginManifest {
       websocketDomains = List<String>.from(
         (json['permissions'] as Map?)?['websocket'] as List? ?? [],
       ),
+      websocketServerBindings = List<String>.from(
+        (json['permissions'] as Map?)?['websocketServer'] as List? ?? [],
+      ),
       storage = (json['permissions'] as Map?)?['storage'] == true {
     if (!RegExp(r'^[a-z][a-z0-9_.-]{2,79}$').hasMatch(id) ||
         !RegExp(r'^[a-z][a-z0-9_-]{1,39}$').hasMatch(provider) ||
@@ -33,6 +36,10 @@ class PluginManifest {
         !entry.endsWith('.lua') ||
         domains.length > 32 ||
         websocketDomains.length > 32 ||
+        websocketServerBindings.length > 16 ||
+        websocketServerBindings.any(
+          (binding) => _serverBinding(binding) == null,
+        ) ||
         domains.any(invalidNetworkRule) ||
         websocketDomains.any(invalidNetworkRule)) {
       throw const FormatException('插件清单无效，或不支持该插件 API 版本。');
@@ -92,6 +99,7 @@ class PluginManifest {
   final String id, name, version, description, author, entry, provider;
   final int apiVersion;
   final List<String> capabilities, auth, domains, websocketDomains;
+  final List<String> websocketServerBindings;
   final bool storage;
 
   static bool safePath(String path) =>
@@ -134,6 +142,42 @@ class PluginManifest {
             : uri.host == rule.host;
       });
 
+  static ({String host, int port})? _serverBinding(String binding) {
+    // Parse the declared port ourselves: Uri normalizes explicit :0 away for
+    // ws, and a port of zero deliberately requests an ephemeral listener.
+    final match = RegExp(
+      r'^(\[[0-9a-fA-F:]+\]|localhost|\d+(?:\.\d+){3}):(\d{1,5})$',
+      caseSensitive: false,
+    ).firstMatch(binding);
+    if (match == null) return null;
+    final port = int.parse(match.group(2)!);
+    if (port > 65535) return null;
+    try {
+      final host = Uri.parse('http://${match.group(1)}').host;
+      final parts = host.split('.');
+      if (!host.contains(':') &&
+          host != 'localhost' &&
+          (parts.length != 4 || parts.any((part) => int.parse(part) > 255))) {
+        return null;
+      }
+      return (host: host, port: port);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  bool permitsWebSocketServer(String host, int port) {
+    if (port < 0 || port > 65535) return false;
+    final binding = _serverBinding(
+      '${host.contains(':') ? '[$host]' : host}:$port',
+    );
+    if (binding == null) return false;
+    return websocketServerBindings.any((rule) {
+      final allowed = _serverBinding(rule)!;
+      return allowed.host == binding.host && allowed.port == port;
+    });
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
@@ -148,6 +192,7 @@ class PluginManifest {
     'permissions': {
       'network': domains,
       'websocket': websocketDomains,
+      'websocketServer': websocketServerBindings,
       'storage': storage,
     },
   };

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>播放次数</string>
+  <string>最近播放</string>
   <key>CFBundleExecutable</key>
   <string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIdentifier</key>
@@ -16,6 +16,11 @@
   <string>$(FLUTTER_BUILD_NAME)</string>
   <key>CFBundleVersion</key>
   <string>$(FLUTTER_BUILD_NUMBER)</string>
+  <key>UIAppFonts</key>
+  <array>
+    <string>MiSans-Regular.ttf</string>
+    <string>MiSans-Semibold.ttf</string>
+  </array>
   <key>NSExtension</key>
   <dict>
     <key>NSExtensionPointIdentifier</key>

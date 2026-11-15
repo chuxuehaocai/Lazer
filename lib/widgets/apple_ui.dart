@@ -2,6 +2,7 @@ import 'build_safe_state.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
 import '../state/ui_preferences.dart';
@@ -484,7 +485,7 @@ class AppleEmptyState extends StatelessWidget {
 /// elevation, focus overlay and text field straight from the Material theme,
 /// so it matches any `searchBarTheme` the app installs. The toolbar and the
 /// mobile search row only decide how wide and tall it is.
-class AppleSearchField extends StatelessWidget {
+class AppleSearchField extends StatefulWidget {
   const AppleSearchField({
     super.key,
     required this.controller,
@@ -511,52 +512,102 @@ class AppleSearchField extends StatelessWidget {
   final TextInputAction textInputAction;
 
   @override
+  State<AppleSearchField> createState() => _AppleSearchFieldState();
+}
+
+class _AppleSearchFieldState extends State<AppleSearchField> {
+  late final FocusNode _focusNode = FocusNode(
+    debugLabel: 'search-input',
+    onKeyEvent: _onKeyEvent,
+  );
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (!TvScope.isActive(context) || event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final bool keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final LogicalKeyboardKey key = event.logicalKey;
+    if (key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.gameButtonA ||
+        (!keyboardVisible &&
+            (key == LogicalKeyboardKey.enter ||
+                key == LogicalKeyboardKey.numpadEnter))) {
+      // Directional focus does not open the Android TV IME. Request it even
+      // when the input already has focus (including after dismissing it).
+      node.context
+          ?.findAncestorStateOfType<EditableTextState>()
+          ?.requestKeyboard();
+      return KeyEventResult.handled;
+    }
+    if (!keyboardVisible &&
+        (key == LogicalKeyboardKey.arrowUp ||
+            key == LogicalKeyboardKey.arrowDown)) {
+      node.focusInDirection(
+        key == LogicalKeyboardKey.arrowUp
+            ? TraversalDirection.up
+            : TraversalDirection.down,
+      );
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: height,
-      child: SearchBar(
-        controller: controller,
-        onChanged: onChanged,
-        onSubmitted: onSubmitted,
-        hintText: context.tr(hintText ?? '搜索歌曲、歌手或歌单'),
-        autoFocus: autofocus,
-        // A search field, not a button: no elevation, no shadow and no hover
-        // wash. Users who want it will click it.
-        elevation: const WidgetStatePropertyAll<double>(0),
-        shadowColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
-        surfaceTintColor: const WidgetStatePropertyAll<Color>(
-          Colors.transparent,
-        ),
-        overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
-        textInputAction: textInputAction,
-        leading: const Icon(Icons.search),
-        // A rounded rectangle rather than Material's default stadium: the bar
-        // spans the page width, so a pill would read as a button.
-        shape: const WidgetStatePropertyAll<OutlinedBorder>(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
+    return TvFocusHighlight(
+      child: SizedBox(
+        height: widget.height,
+        child: SearchBar(
+          focusNode: _focusNode,
+          controller: widget.controller,
+          onChanged: widget.onChanged,
+          onSubmitted: widget.onSubmitted,
+          hintText: context.tr(widget.hintText ?? '搜索歌曲、歌手或歌单'),
+          autoFocus: widget.autofocus,
+          // A search field, not a button: no elevation, no shadow and no hover
+          // wash. Users who want it will click it.
+          elevation: const WidgetStatePropertyAll<double>(0),
+          shadowColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+          surfaceTintColor: const WidgetStatePropertyAll<Color>(
+            Colors.transparent,
           ),
-        ),
-        trailing: <Widget>[
-          ValueListenableBuilder<TextEditingValue>(
-            valueListenable: controller,
-            builder: (BuildContext context, TextEditingValue value, _) =>
-                value.text.isEmpty
-                ? const SizedBox.shrink()
-                : IconButton(
-                    tooltip: context.tr('清除'),
-                    onPressed: onClear,
-                    icon: const Icon(Icons.close),
-                  ),
+          overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+          textInputAction: widget.textInputAction,
+          leading: const Icon(Icons.search),
+          // A rounded rectangle rather than Material's default stadium: the bar
+          // spans the page width, so a pill would read as a button.
+          shape: const WidgetStatePropertyAll<OutlinedBorder>(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
           ),
-        ],
-        // Stock Material reserves 360 px of width; here the toolbar and the
-        // mobile row own the width, and the bar fills whatever they give it.
-        constraints: BoxConstraints(
-          minWidth: 0,
-          maxWidth: double.infinity,
-          minHeight: height,
-          maxHeight: height,
+          trailing: <Widget>[
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: widget.controller,
+              builder: (BuildContext context, TextEditingValue value, _) =>
+                  value.text.isEmpty
+                  ? const SizedBox.shrink()
+                  : IconButton(
+                      tooltip: context.tr('清除'),
+                      onPressed: widget.onClear,
+                      icon: const Icon(Icons.close),
+                    ),
+            ),
+          ],
+          // Stock Material reserves 360 px of width; here the toolbar and the
+          // mobile row own the width, and the bar fills whatever they give it.
+          constraints: BoxConstraints(
+            minWidth: 0,
+            maxWidth: double.infinity,
+            minHeight: widget.height,
+            maxHeight: widget.height,
+          ),
         ),
       ),
     );

@@ -33,7 +33,9 @@ class PluginMarketView extends StatefulWidget {
 
 class _PluginMarketViewState extends State<PluginMarketView>
     with BuildSafeState<PluginMarketView> {
-  late final market = widget.market ?? PluginMarket(widget.state.pluginManager);
+  // Downloads and the source catalogue belong to the app, not to one visit.
+  // Creating a client per visit also left every old client's pool open.
+  late final market = widget.market ?? widget.state.pluginMarket;
   String _query = '';
   @override
   void initState() {

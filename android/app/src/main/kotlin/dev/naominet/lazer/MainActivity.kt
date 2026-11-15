@@ -147,17 +147,17 @@ class MainActivity : AudioServiceActivity() {
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SYSTEM_WIDGETS_CHANNEL)
             .setMethodCallHandler { call, result ->
-                if (call.method != "updatePlayCount") {
+                if (call.method != "updateRecentPlayback") {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
-                val count = (call.argument<Number>("count") ?: 0).toInt().coerceAtLeast(0)
-                getSharedPreferences(PlayCountWidgetProvider.PREFS, MODE_PRIVATE)
-                    .edit()
-                    .putInt(PlayCountWidgetProvider.PLAY_COUNT, count)
-                    .apply()
-                PlayCountWidgetProvider.refresh(this)
-                result.success(null)
+                val data = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                PlayCountWidgetProvider.publish(applicationContext, data) { error ->
+                    runOnUiThread {
+                        if (error == null) result.success(null)
+                        else result.error("widget_update_failed", error.message, null)
+                    }
+                }
             }
     }
 

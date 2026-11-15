@@ -118,12 +118,14 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(find.text('使用 Cookie 登录'));
     await tester.tap(find.text('使用 Cookie 登录'));
     await tester.pump();
     expect(
       tester.widget<TextField>(find.byType(TextField)).style!.fontFamily,
       state.fontPreferences.family.resolvedFamily,
     );
+    await tester.ensureVisible(find.byTooltip('取消'));
     await tester.tap(find.byTooltip('取消'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

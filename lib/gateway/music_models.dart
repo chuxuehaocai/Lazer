@@ -310,9 +310,15 @@ class MusicStream {
 }
 
 class MusicLyricLine {
-  const MusicLyricLine({required this.text, this.start});
+  const MusicLyricLine({
+    required this.text,
+    this.start,
+    this.translation,
+    this.romanization,
+  });
   final String text;
   final Duration? start;
+  final String? translation, romanization;
 }
 
 class MusicLyrics {
@@ -325,6 +331,9 @@ class MusicLyrics {
     this.wordByWord,
     this.translation,
     this.wordTranslation,
+    this.romanization,
+    this.wordRomanization,
+    this.ttml,
   }) : lines = List.unmodifiable(lines);
 
   final List<MusicLyricLine> lines;
@@ -335,6 +344,7 @@ class MusicLyrics {
   final String? wordByWord;
   final String? translation;
   final String? wordTranslation;
+  final String? romanization, wordRomanization, ttml;
 }
 
 class MusicPlayRecord {
@@ -350,6 +360,9 @@ class GatewayLyrics {
     this.yrc,
     this.tlyric,
     this.ytlrc,
+    this.rlyric,
+    this.yromalrc,
+    this.ttml,
     this.pureMusic = false,
   });
 
@@ -357,9 +370,13 @@ class GatewayLyrics {
   final String? yrc;
   final String? tlyric;
   final String? ytlrc;
+  final String? rlyric, yromalrc, ttml;
   final bool pureMusic;
 
   bool get hasTimedLyric {
+    if (ttml?.contains(RegExp(r'<(?:\w+:)?p\s[^>]*begin\s*=')) ?? false) {
+      return true;
+    }
     final String? yrcLyric = yrc;
     final String? lrcLyric = lrc;
     if (yrcLyric != null && _yrcTimedLine.hasMatch(yrcLyric)) return true;

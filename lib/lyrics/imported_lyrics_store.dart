@@ -87,7 +87,7 @@ class ImportedLyricsStore {
     try {
       if (!await file.exists()) return null;
       final String text = decodeLyricsBytes(await file.readAsBytes());
-      return parseLrc(text).isEmpty ? null : text;
+      return parseLyricFile(text).isEmpty ? null : text;
     } catch (_) {
       return null;
     }
@@ -95,7 +95,7 @@ class ImportedLyricsStore {
 
   /// Saves [content] only when it contains at least one timed line.
   Future<bool> save(Track track, String content) async {
-    if (parseLrc(content).isEmpty) return false;
+    if (parseLyricFile(content).isEmpty) return false;
     final File? file = await fileFor(track);
     if (file == null) return false;
     try {
@@ -122,13 +122,19 @@ class ImportedLyricsStore {
     if (audioPath == null || audioPath.isEmpty) return null;
     final int dot = audioPath.lastIndexOf('.');
     final String stem = dot > 0 ? audioPath.substring(0, dot) : audioPath;
-    for (final String extension in <String>['.lrc', '.LRC', '.Lrc']) {
+    for (final String extension in <String>[
+      '.ttml',
+      '.TTML',
+      '.lrc',
+      '.LRC',
+      '.Lrc',
+    ]) {
       try {
         final File file = File('$stem$extension');
         if (!await file.exists()) continue;
         final Uint8List bytes = await file.readAsBytes();
         final String text = decodeLyricsBytes(bytes);
-        return parseLrc(text).isEmpty ? null : text;
+        if (parseLyricFile(text).isNotEmpty) return text;
       } catch (_) {}
     }
     return null;

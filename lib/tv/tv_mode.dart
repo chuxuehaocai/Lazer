@@ -551,12 +551,20 @@ class _TvFocusHighlightState extends State<TvFocusHighlight>
 /// not a [FocusScope], so traversal can still leave the content for the rail
 /// and the transport bar.
 class TvFocusRegion extends StatefulWidget {
-  const TvFocusRegion({super.key, required this.child, this.focusToken});
+  const TvFocusRegion({
+    super.key,
+    required this.child,
+    this.focusToken,
+    this.initialFocus,
+  });
 
   final Widget child;
 
   /// Changing this value re-acquires focus for the region's first control.
   final Object? focusToken;
+
+  /// Optional opening anchor, such as the player's primary transport button.
+  final FocusNode? initialFocus;
 
   @override
   State<TvFocusRegion> createState() => _TvFocusRegionState();
@@ -635,9 +643,18 @@ class _TvFocusRegionState extends State<TvFocusRegion> {
     });
   }
 
-  FocusNode? _firstControl() => _region.traversalDescendants
-      .where((FocusNode node) => node.context != null && node.canRequestFocus)
-      .firstOrNull;
+  FocusNode? _firstControl() {
+    final preferred = widget.initialFocus;
+    if (preferred != null &&
+        preferred.context != null &&
+        preferred.canRequestFocus &&
+        _isInside(preferred)) {
+      return preferred;
+    }
+    return _region.traversalDescendants
+        .where((FocusNode node) => node.context != null && node.canRequestFocus)
+        .firstOrNull;
+  }
 
   bool _isInside(FocusNode node) {
     for (FocusNode? current = node; current != null; current = current.parent) {

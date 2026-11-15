@@ -367,10 +367,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     }
     final int count = _settings.lineCount.clamp(1, 5);
     final int leading = count ~/ 2;
-    final double slot = lyricsOverlaySlotHeightWithSpacing(
-      _settings.fontSize,
-      lineSpacing: _settings.lineSpacing,
-    );
+    final double slot = _slotHeight;
     final int focus = _focus.clamp(0, _lines.length - 1);
     final bool atEdge = focus == 0 || focus == _lines.length - 1;
     final bool interlude =
@@ -527,10 +524,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   Future<void> _resizeOverlay() async {
     if (!_windowConfigured) return;
     final double width = _desiredOverlayWidth();
-    final double slot = lyricsOverlaySlotHeightWithSpacing(
-      _settings.fontSize,
-      lineSpacing: _settings.lineSpacing,
-    );
+    final double slot = _slotHeight;
     final Size size = Size(
       width,
       slot * _settings.lineCount + _verticalPadding * 2,
@@ -560,6 +554,31 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     }
   }
 
+  double get _slotHeight {
+    final theme = LazerThemeTokens.of(context);
+    final secondaryLines = _lines.fold<int>(
+      0,
+      (maximum, line) => math.max(
+        maximum,
+        (line.translation == null ? 0 : 1) +
+            (_settings.showRomanization && line.romanization != null ? 1 : 0),
+      ),
+    );
+    final originalHeight =
+        _settings.fontSize * theme.lyricFontScale * theme.lyricLineHeight;
+    final secondaryHeight =
+        (_settings.fontSize * theme.lyricTranslationScale).clamp(12, 30) *
+            theme.lyricTranslationLineHeight +
+        theme.lyricTranslationGap;
+    return math.max(
+      lyricsOverlaySlotHeightWithSpacing(
+        _settings.fontSize,
+        lineSpacing: _settings.lineSpacing,
+      ),
+      originalHeight + secondaryLines * secondaryHeight + _settings.lineSpacing,
+    );
+  }
+
   double _desiredOverlayWidth() {
     double widest = 0;
     final TextPainter painter = TextPainter(
@@ -571,6 +590,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         for (final String text in <String?>[
           line.text,
           line.translation,
+          if (_settings.showRomanization) line.romanization,
         ].whereType<String>()) {
           painter.text = TextSpan(text: text, style: _lyricStyle);
           painter.layout();
@@ -646,10 +666,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   @override
   Widget build(BuildContext context) {
     final bool desktop = _mode == LyricsOverlayMode.desktop;
-    final double slot = lyricsOverlaySlotHeightWithSpacing(
-      _settings.fontSize,
-      lineSpacing: _settings.lineSpacing,
-    );
+    final double slot = _slotHeight;
     final int count = _settings.lineCount.clamp(1, 5);
     final Size window = MediaQuery.sizeOf(context);
     final double inset = _horizontalPadding;
@@ -708,7 +725,10 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     final Widget text = Semantics(
       container: true,
       excludeSemantics: true,
-      label: lyricSemanticLabel(line),
+      label: lyricSemanticLabel(
+        line,
+        showRomanization: _settings.showRomanization,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -723,10 +743,13 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             emphasis: emphasis,
             maxLines: 1,
           ),
-          if (line.translation != null) ...[
+          for (final secondary in <String?>[
+            if (_settings.showRomanization) line.romanization,
+            line.translation,
+          ].whereType<String>()) ...[
             SizedBox(height: theme.lyricTranslationGap),
             Text(
-              line.translation!,
+              secondary,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: _lyricStyle.copyWith(

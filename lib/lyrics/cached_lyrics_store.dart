@@ -49,6 +49,9 @@ class CachedLyricsStore {
           yrc: data['yrc'] as String?,
           tlyric: data['tlyric'] as String?,
           ytlrc: data['ytlrc'] as String?,
+          rlyric: data['rlyric'] as String?,
+          yromalrc: data['yromalrc'] as String?,
+          ttml: data['ttml'] as String?,
           pureMusic: data['pureMusic'] == true,
         );
         if (payload.hasTimedLyric || payload.pureMusic) return payload;
@@ -71,6 +74,9 @@ class CachedLyricsStore {
       'yrc': payload.yrc,
       'tlyric': payload.tlyric,
       'ytlrc': payload.ytlrc,
+      'rlyric': payload.rlyric,
+      'yromalrc': payload.yromalrc,
+      'ttml': payload.ttml,
       'pureMusic': payload.pureMusic,
     });
     await Future.wait(

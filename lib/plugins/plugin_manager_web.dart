@@ -28,6 +28,7 @@ class InstalledPlugin {
   final PluginManifest manifest;
   bool enabled;
   bool websocketGranted = false;
+  bool websocketServerGranted = false;
   LuaPluginRuntime? runtime;
   final List<LuaMusicGateway> gateways = <LuaMusicGateway>[];
   LazerThemeTokens? theme;
@@ -95,6 +96,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             enabled: value['enabled'] != false,
           );
           plugin.websocketGranted = value['websocketGranted'] == true;
+          plugin.websocketServerGranted =
+              value['websocketServerGranted'] == true;
           _plugins.add(plugin);
           if (plugin.enabled) await _start(plugin, value['sources']);
         } catch (_) {
@@ -118,6 +121,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         sources: sources,
         dataDirectory: plugin.manifest.id,
         websocketGranted: plugin.websocketGranted,
+        websocketServerGranted: plugin.websocketServerGranted,
       );
       plugin.runtime = runtime;
       await runtime.start();
@@ -178,7 +182,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.error = null;
     } catch (_) {
       MediaRequestRules.remove(plugin.manifest.id);
-      plugin.runtime?.close();
+      await plugin.runtime?.shutdown();
       plugin.runtime = null;
       plugin.gateways.clear();
       plugin.theme = null;
@@ -199,6 +203,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         'sources': sources,
         'enabled': plugin.enabled,
         'websocketGranted': plugin.websocketGranted,
+        'websocketServerGranted': plugin.websocketServerGranted,
       }),
     );
   }
@@ -227,14 +232,14 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       try {
         await probe.start();
       } finally {
-        probe.close();
+        await probe.shutdown();
       }
       final previous = _plugins
           .where((v) => v.manifest.id == manifest.id)
           .firstOrNull;
       final enabled = previous?.enabled ?? true;
       await beforeChange?.call(manifest.id);
-      previous?.runtime?.close();
+      await previous?.runtime?.shutdown();
       final plugin = InstalledPlugin(manifest, enabled: enabled);
       if (previous != null) _plugins.remove(previous);
       _plugins.add(plugin);
@@ -265,7 +270,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _notify();
     try {
       await beforeChange?.call(id);
-      plugin.runtime?.close();
+      await plugin.runtime?.shutdown();
       plugin.runtime = null;
       plugin.gateways.clear();
       MediaRequestRules.remove(id);
@@ -294,17 +299,24 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _notify();
     try {
       await beforeChange?.call(id);
-      plugin.runtime?.close();
+      await plugin.runtime?.shutdown();
       plugin.runtime = null;
       plugin.gateways.clear();
       plugin.websocketGranted = granted;
-      if (plugin.enabled) await _start(plugin);
+      final prefs = await SharedPreferences.getInstance();
+      final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
+      saved['websocketGranted'] = granted;
+      await prefs.setString(_key(id), jsonEncode(saved));
+      if (plugin.enabled) await _start(plugin, saved['sources']);
       await afterChange?.call();
     } finally {
       busy = false;
       _notify();
     }
   }
+
+  Future<void> setWebsocketServerPermission(String id, bool granted) =>
+      Future.error(const PluginException('浏览器不支持 WebSocket 服务端。'));
 
   Future<void> uninstall(String id) async {
     if (busy) throw const PluginException('正在处理插件，请稍候。');
@@ -313,7 +325,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _notify();
     try {
       await beforeChange?.call(id);
-      plugin.runtime?.close();
+      await plugin.runtime?.shutdown();
       plugin.gateways.clear();
       MediaRequestRules.remove(id);
       _plugins.remove(plugin);

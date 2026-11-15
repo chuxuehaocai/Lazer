@@ -26,6 +26,7 @@ README.md
   "permissions": {
     "network": ["api.example.com"],
     "websocket": ["socket.example.com"],
+    "websocketServer": ["127.0.0.1:11444"],
     "storage": true
   }
 }
@@ -88,7 +89,8 @@ end
 | 接口 | 用途 |
 | --- | --- |
 | `host.http({url, method, headers, body})` | 访问清单声明的 HTTPS 域名；禁止重定向，响应最多 8 MB |
-| `host.websocket({operation, id, url, data})` | 打开、发送、接收或关闭 WebSocket；需要用户授予 WebSocket 权限 |
+| `host.websocket({operation, id, url, data, timeoutMs})` | 打开、发送、接收或关闭 WebSocket；需要用户授予 WebSocket 连接权限 |
+| `host.websocket_server({operation, id, host, port, path, clientId, data, timeoutMs})` | 原生客户端监听 WebSocket 服务；需要声明监听地址并由用户独立授予服务端权限 |
 | `host.crypto({operation=..., ...})` | `md5`、`sha256`、`base64`、`base64_decode`、`aes`、`rsa_modpow` |
 | `host.json_encode(value)` / `host.json_decode(text)` | JSON 编解码 |
 | `host.url_encode(text)` | URL 百分号编码 |
@@ -240,3 +242,66 @@ JSON 地址。索引格式为 `{schemaVersion:1,plugins:[...]}`；每项至少�
 `name`、`summary` 和 HTTPS `download`，可以附带 `author`、`platforms`、
 `minAppVersion`、`sha256`。`name/summary` 可以是字符串或语言标签到文本的映射。
 索引中的 ID、版本必须与 ZIP 内清单严格一致；预发布客户端遵循 SemVer 的兼容性比较。
+
+
+### WebSocket 服务端与权限
+
+`permissions.websocketServer` 是独立于连接权限的监听地址列表。插件管理会列出所申请的
+地址和端口，用户必须打开“允许 WebSocket 服务端”后脚本才能监听。默认未授权；仅授予
+`websocket` 不会允许创建服务端。撤销权限、停用、升级或卸载插件时关闭其监听端口和连接。
+浏览器不能监听 TCP 端口，因此 Web 版的 `host.websocket_server` 返回不支持错误。
+
+地址必须是明确的 IP 地址或 `localhost`，端口为 0–65535；不支持通配域名。
+`127.0.0.1:11444` 只授权该回环地址和端口；`0.0.0.0:11444` 才允许监听全部 IPv4
+接口。若需要系统分配临时端口，清单声明 `127.0.0.1:0`，调用时也传 `port=0`，
+返回值包含实际端口。推荐本地集成使用回环地址。
+
+```lua
+-- manifest.json: "permissions": {"websocketServer": ["127.0.0.1:11444"]}
+local listener = host.websocket_server({
+  operation="listen", id="lyrics", host="127.0.0.1", port=11444, path="/lyrics"
+})
+-- accept 和 receive 超时返回 nil；timeoutMs=0 只检查已到达的数据。
+local client = host.websocket_server({operation="accept", id="lyrics", timeoutMs=0})
+if client then
+  host.websocket_server({operation="send", id="lyrics",
+    clientId=client.clientId, data=host.json_encode({type="hello"})})
+end
+```
+
+服务端操作：`listen` 返回 `{id, host, port}`；`accept` 返回 `{clientId, address}`；
+`clients` 返回客户端 ID 列表；`send` / `receive` 用 `clientId` 选择连接；`broadcast`
+返回接收本次发送的在线客户端数量；`close_client` 关闭指定客户端；`close` 关闭服务端
+及全部连接。`path` 可限定允许握手的路径。接收到断开的连接后可用 `close_client` 释放
+其剩余消息；已断开且消息读取完的连接会自动清理。
+
+客户端仍使用 `host.websocket` 的 `open`、`send`、`receive`、`close`。客户端和服务端
+均使用持续订阅，支持多次接收和暂存调用之间到达的消息；超时不会关闭连接。
+`timeoutMs` 默认 30000，上限 30000。Lua 调用串行执行，建议后台集成使用短超时或
+`timeoutMs=0`，避免长时间阻塞同一插件的播放请求。
+每个插件最多 4 个服务端、每个服务端 32 个客户端，以及 16 个主动连接；每条消息最多
+1 MB，单个接收队列最多 128 条、4 MB，超限将关闭该连接。文本以字符串表示，二进制
+以 0–255 整数数组表示。
+
+### 罗马音 / 音译歌词
+
+歌词返回值可提供 `romanization`（时间轴 LRC）和 `wordRomanization`（LRC 或 YRC）作为
+独立音译轨道；兼容别名分别为 `rlyric` / `romanLyric` / `romaji` 和 `yromalrc`。
+逐行 `lines` 也可直接返回 `romanization`（或 AMLL 的 `romanLyric`）、`translation`
+（或 `translatedLyric`）及 `startMs`。原文、翻译和罗马音会分别匹配并保存到离线缓存。
+
+```lua
+return {{synced=true,
+  lrc="[00:01.00]君へ",
+  translation="[00:01.00]给你",
+  romanization="[00:01.00]kimi e"
+}}
+```
+
+也可返回 `ttml`，使用 [AMLL TTML 约定](https://github.com/amll-dev/applemusic-like-lyrics/blob/main/packages/docs/src/content/docs/en/guides/lyric/ttml.md)
+的 `ttm:role="x-roman"` 和 `ttm:role="x-translation"`，或 Apple metadata
+`transliterations` / `translations` sidecar 与 `itunes:key` / `for` 关联。用户导入或音频旁的
+`.ttml` 文件使用相同解析器。普通 LRC 无明确音译标记时不会凭语言或重复时间戳猜测音译。
+
+设置 → 歌词 → 显示罗马音默认开启，关闭后正在播放、桌面/悬浮歌词及歌词导出均隐藏
+音译，保留原文与翻译。没有提供音译的行不占用额外空间，也不会自动生成罗马音。

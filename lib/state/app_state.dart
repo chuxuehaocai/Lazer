@@ -165,6 +165,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.startupByteTarget = startupBytes,
     PluginManager? pluginManager,
     PluginMarket? pluginMarket,
+    SystemWidgetsBridge? systemWidgets,
     this.scheduledPauseClock = DateTime.now,
     math.Random? shuffleRandom,
   }) : catalog = catalog ?? Catalog(),
@@ -176,8 +177,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        updateChecker = updateChecker ?? UpdateChecker(),
        pluginManager = pluginManager ?? PluginManager(),
        _injectedPluginMarket = pluginMarket,
+       _systemWidgets = systemWidgets ?? SystemWidgetsBridge(),
        _shuffleOrder = ShuffleOrder(random: shuffleRandom) {
-    this.listeningStatistics.addListener(_updateSystemWidgetPlayCount);
+    addListener(_updateSystemWidget);
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
     this.pluginManager.afterChange = _musicPlatforms.synchronizePlugins;
     this.pluginManager.addListener(_onPluginManagerChanged);
@@ -1390,6 +1392,19 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   double lyricControlsSeconds = 1.5;
   bool lyricBlurEnabled = true;
+  bool showLyricRomanization = true;
+  static const String lyricRomanizationKey = 'lazer_lyric_romanization';
+
+  Future<void> setShowLyricRomanization(bool value) async {
+    if (showLyricRomanization == value) return;
+    showLyricRomanization = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      lyricRomanizationKey,
+      value,
+    );
+  }
+
   double lyricBlurIntensity = 1;
   bool showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
   bool _developerConsoleEnabled = false;
@@ -2339,6 +2354,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           // Preference storage is unavailable; the in-memory fallback stands.
         }
       }
+      showLyricRomanization = prefs.getBool(lyricRomanizationKey) ?? true;
       floatingLyricsEnabled = prefs.getBool(floatingLyricsKey) ?? false;
       floatingLyricsLocked =
           prefs.getBool('lazer_floating_lyrics_locked') ?? false;
@@ -2399,7 +2415,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _restorePlaybackSnapshot(initialQueueActivity),
       _restoreCatalogSession(),
     ]);
-    _updateSystemWidgetPlayCount();
+    _systemWidgetsReady = true;
+    _updateSystemWidget();
     unawaited(_refreshMissingArtwork());
     AppLog.shared.event('app', 'bootstrap_completed', {
       'elapsed_ms': bootClock.elapsedMilliseconds,
@@ -2910,10 +2927,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   int? _pendingListeningSeek;
   int _queueActivity = 0;
 
-  void _updateSystemWidgetPlayCount() {
+  final SystemWidgetsBridge _systemWidgets;
+  bool _systemWidgetsReady = false;
+
+  void _updateSystemWidget() {
+    if (!_systemWidgetsReady || _presentationDisposed) return;
     unawaited(
-      SystemWidgetsBridge.updatePlayCount(
-        listeningStatistics.snapshot(ListeningRange.allTime).playCount,
+      _systemWidgets.update(
+        track: current ?? _recentTracks.firstOrNull,
+        playing: current != null && playing,
+        language: language.code,
       ),
     );
   }
@@ -5072,7 +5095,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           lyrics.isEmpty &&
           !lyricsImported &&
           !lyricsPureMusic) {
-        lyrics = List<LyricLine>.unmodifiable(parseLrc(sidecar));
+        lyrics = List<LyricLine>.unmodifiable(parseLyricFile(sidecar));
         cacheable = true;
       }
     }
@@ -5097,7 +5120,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           .read(track)
           .then((String? imported) {
             if (imported == null || generation != _lyricGeneration) return;
-            lyrics = List<LyricLine>.unmodifiable(parseLrc(imported));
+            lyrics = List<LyricLine>.unmodifiable(parseLyricFile(imported));
             lyricsImported = true;
             lyricsPureMusic = false;
             lyricsError = null;
@@ -5799,7 +5822,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _playFlushTimer?.cancel();
     _developerConsole?.dispose();
     _sampleListening();
-    listeningStatistics.removeListener(_updateSystemWidgetPlayCount);
+    removeListener(_updateSystemWidget);
+    _systemWidgets.dispose();
     listeningStatistics.dispose();
     _pauseSchedule.dispose();
     _musicPlatforms.cancelPending();

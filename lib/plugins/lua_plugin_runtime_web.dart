@@ -14,6 +14,7 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 import 'plugin_manifest.dart';
+import 'plugin_socket_inbox.dart';
 import 'lua_console_evaluator.dart';
 import '../diagnostics/app_log.dart';
 import '../utils/system_http.dart';
@@ -32,6 +33,7 @@ class LuaPluginRuntime {
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
     this.websocketGranted = false,
+    this.websocketServerGranted = false,
   });
 
   final PluginManifest manifest;
@@ -41,6 +43,7 @@ class LuaPluginRuntime {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
   final bool websocketGranted;
+  final bool websocketServerGranted;
 
   final Random _random = Random.secure();
   final http.Client _client = http.Client();
@@ -65,6 +68,7 @@ class LuaPluginRuntime {
       client: _client,
       externalHttp: httpHandler,
       websocketGranted: websocketGranted,
+      websocketServerGranted: websocketServerGranted,
     );
     await host.initialize();
     _host = host;
@@ -118,6 +122,10 @@ class LuaPluginRuntime {
     return result.future.timeout(budget ?? timeout);
   }
 
+  Future<void> shutdown() async {
+    close();
+  }
+
   void close() {
     if (_closed) return;
     _closed = true;
@@ -137,6 +145,7 @@ class _WebPluginHost {
     required this.client,
     this.externalHttp,
     this.websocketGranted = false,
+    this.websocketServerGranted = false,
   });
 
   final PluginManifest manifest;
@@ -147,15 +156,29 @@ class _WebPluginHost {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   externalHttp;
   final bool websocketGranted;
+  final bool websocketServerGranted;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   Map<String, dynamic> storage = <String, dynamic>{};
   final Map<String, html.WebSocket> _websockets = <String, html.WebSocket>{};
 
-  void closeSockets() {
-    for (final socket in _websockets.values) {
-      socket.close();
+  final Map<String, PluginSocketInbox> _websocketInboxes = {};
+  final Map<String, List<StreamSubscription<dynamic>>> _websocketSubscriptions =
+      {};
+
+  void _closeSocket(String id) {
+    _websockets.remove(id)?.close();
+    _websocketInboxes.remove(id)?.close(discard: true);
+    for (final subscription
+        in _websocketSubscriptions.remove(id) ??
+            <StreamSubscription<dynamic>>[]) {
+      unawaited(subscription.cancel());
     }
-    _websockets.clear();
+  }
+
+  void closeSockets() {
+    for (final id in _websockets.keys.toList()) {
+      _closeSocket(id);
+    }
   }
 
   String get _cookieName =>
@@ -261,34 +284,80 @@ class _WebPluginHost {
         if (!manifest.permitsWebSocket(uri)) {
           throw const FormatException('WebSocket permission denied');
         }
-        _websockets[id]?.close();
-        final socket = html.WebSocket(uri.toString());
-        await socket.onOpen.first;
+        if (!_websockets.containsKey(id) && _websockets.length >= 16) {
+          throw const FormatException('Too many WebSocket connections');
+        }
+        _closeSocket(id);
+        final socket = html.WebSocket(uri.toString())
+          ..binaryType = 'arraybuffer';
+        final inbox = PluginSocketInbox();
         _websockets[id] = socket;
+        _websocketInboxes[id] = inbox;
+        final opened = Completer<void>();
+        _websocketSubscriptions[id] = [
+          socket.onOpen.listen((_) {
+            if (!opened.isCompleted) opened.complete();
+          }),
+          socket.onMessage.listen((event) {
+            final data = event.data;
+            final value = data is ByteBuffer ? data.asUint8List() : data;
+            if (value != null && !inbox.add(value)) {
+              socket.close(1009);
+              inbox.close(discard: true);
+            }
+          }),
+          socket.onError.listen((_) {
+            inbox.close();
+            if (!opened.isCompleted) {
+              opened.completeError(
+                const FormatException('WebSocket connection failed'),
+              );
+            }
+          }),
+          socket.onClose.listen((_) {
+            inbox.close();
+            if (!opened.isCompleted) {
+              opened.completeError(
+                const FormatException('WebSocket connection closed'),
+              );
+            }
+          }),
+        ];
+        try {
+          await opened.future.timeout(const Duration(seconds: 20));
+        } catch (_) {
+          _closeSocket(id);
+          rethrow;
+        }
         _push(state, true);
         return 1;
       }
       final socket = _websockets[id];
       if (socket == null) throw const FormatException('WebSocket is not open');
       if (operation == 'send') {
-        socket.send(spec['data'] ?? '');
+        final data = pluginSocketData(spec['data']);
+        socket.send(data is List<int> ? Uint8List.fromList(data) : data);
         _push(state, true);
         return 1;
       }
       if (operation == 'receive') {
-        final event = await socket.onMessage.first.timeout(
-          const Duration(seconds: 30),
+        _push(
+          state,
+          await _websocketInboxes[id]!.receive(pluginSocketTimeout(spec)),
         );
-        _push(state, event.data);
         return 1;
       }
       if (operation == 'close') {
-        socket.close();
-        _websockets.remove(id);
+        _closeSocket(id);
         _push(state, true);
         return 1;
       }
       throw const FormatException('Unsupported WebSocket operation');
+    });
+    lua.register('_websocket_server', (state) {
+      throw const FormatException(
+        'WebSocket servers are unavailable in a browser',
+      );
     });
     lua.registerAsync('pcall', (state) async {
       final status = await state.pCallAsync(state.getTop() - 1, luaMultret, 0);
@@ -315,7 +384,7 @@ class _WebPluginHost {
         now = _now, url_encode = _url_encode, random_hex = _random_hex,
         cookie_compact = _cookie_compact, cookie_field = _cookie_field,
         cookie_merge = _cookie_merge, crypto = _crypto, http = _http,
-        websocket = _websocket,
+        websocket = _websocket, websocket_server = _websocket_server,
         storage_get = _storage_get, storage_set = _storage_set }
       $moduleBuffers
       local modules = {}
@@ -495,13 +564,17 @@ class _WebPluginHost {
         return crypto.sha1.convert(utf8.encode(input)).toString();
       case 'hmac':
         final key = utf8.encode(spec['key'] as String? ?? '');
-        final algorithm = (spec['algorithm'] as String? ?? 'sha256').toLowerCase();
+        final algorithm = (spec['algorithm'] as String? ?? 'sha256')
+            .toLowerCase();
         final hashAlgorithm = switch (algorithm) {
           'sha1' => crypto.sha1,
           'md5' => crypto.md5,
           _ => crypto.sha256,
         };
-        return crypto.Hmac(hashAlgorithm, key).convert(utf8.encode(input)).toString();
+        return crypto.Hmac(
+          hashAlgorithm,
+          key,
+        ).convert(utf8.encode(input)).toString();
       case 'xor':
         final raw = spec['encoding'] == 'hex'
             ? Uint8List.fromList([
@@ -520,12 +593,15 @@ class _WebPluginHost {
         return spec['outputEncoding'] == 'hex'
             ? output.map((b) => b.toRadixString(16).padLeft(2, '0')).join()
             : (spec['outputEncoding'] == 'utf8'
-                ? utf8.decode(output, allowMalformed: true)
-                : base64Encode(output));
+                  ? utf8.decode(output, allowMalformed: true)
+                  : base64Encode(output));
       case 'zlib_inflate':
         try {
           final raw = base64Decode(input);
-          return utf8.decode(ZLibDecoder().decodeBytes(raw), allowMalformed: true);
+          return utf8.decode(
+            ZLibDecoder().decodeBytes(raw),
+            allowMalformed: true,
+          );
         } catch (_) {
           return '';
         }
@@ -539,12 +615,32 @@ class _WebPluginHost {
         try {
           final raw = base64Decode(input);
           if (raw.length <= 4) return '';
-          const enKey = [64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105];
+          const enKey = [
+            64,
+            71,
+            97,
+            119,
+            94,
+            50,
+            116,
+            71,
+            81,
+            54,
+            49,
+            45,
+            206,
+            210,
+            110,
+            105,
+          ];
           final payload = Uint8List(raw.length - 4);
           for (var i = 0; i < payload.length; i++) {
             payload[i] = raw[i + 4] ^ enKey[i % enKey.length];
           }
-          return utf8.decode(ZLibDecoder().decodeBytes(payload), allowMalformed: true);
+          return utf8.decode(
+            ZLibDecoder().decodeBytes(payload),
+            allowMalformed: true,
+          );
         } catch (_) {
           return '';
         }

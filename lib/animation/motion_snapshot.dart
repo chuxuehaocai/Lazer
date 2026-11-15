@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart';
@@ -53,8 +55,15 @@ class MotionSnapshot extends StatefulWidget {
 class _MotionSnapshotState extends State<MotionSnapshot> {
   late final SnapshotController _snapshot = SnapshotController();
   bool _scrolling = false;
+  bool _geometryChanged = false;
+  (Size, double, EdgeInsets, EdgeInsets, EdgeInsets)? _metrics;
 
   void _status(AnimationStatus status) {
+    _geometryChanged = false;
+    _sync(status);
+  }
+
+  void _sync(AnimationStatus status) {
     final forward = status == AnimationStatus.forward && widget.snapshotForward;
     final reverse = status == AnimationStatus.reverse && widget.snapshotReverse;
     final moving = forward || reverse;
@@ -70,7 +79,7 @@ class _MotionSnapshotState extends State<MotionSnapshot> {
       // appeared twice, offset and dimmed, before this clear.
       _snapshot.clear();
     }
-    _snapshot.allowSnapshotting = moving && !_scrolling;
+    _snapshot.allowSnapshotting = moving && !_scrolling && !_geometryChanged;
   }
 
   bool _onScroll(ScrollNotification notification) {
@@ -97,12 +106,38 @@ class _MotionSnapshotState extends State<MotionSnapshot> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final media = MediaQuery.of(context);
+    final next = (
+      media.size,
+      media.devicePixelRatio,
+      media.padding,
+      media.viewPadding,
+      media.viewInsets,
+    );
+    if (_metrics != null && _metrics != next) {
+      // The shell keeps its full height while the keyboard resizes its body.
+      // SnapshotWidget.autoresize cannot notice this internal layout change.
+      // Paint live for the rest of this motion instead of stretching/reusing
+      // the keyboard-sized contents after it has closed.
+      _geometryChanged = true;
+      _snapshot.allowSnapshotting = false;
+      _snapshot.clear();
+    }
+    _metrics = next;
+  }
+
+  @override
   void didUpdateWidget(covariant MotionSnapshot oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.animation != widget.animation) {
       oldWidget.animation.removeStatusListener(_status);
       widget.animation.addStatusListener(_status);
       _status(widget.animation.status);
+    } else if (oldWidget.snapshotForward != widget.snapshotForward ||
+        oldWidget.snapshotReverse != widget.snapshotReverse) {
+      _sync(widget.animation.status);
     }
   }
 
@@ -114,14 +149,35 @@ class _MotionSnapshotState extends State<MotionSnapshot> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      NotificationListener<ScrollNotification>(
-        onNotification: _onScroll,
-        child: SnapshotWidget(
-          controller: _snapshot,
-          mode: SnapshotMode.permissive,
-          autoresize: true,
-          child: RepaintBoundary(child: widget.child),
-        ),
-      );
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    return NotificationListener<ScrollNotification>(
+      onNotification: _onScroll,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = constraints.biggest;
+          // A moving page needs at most a 2 MP raster (8 MB RGBA). Full-DPR
+          // phone/4K snapshots otherwise allocate tens of MB per nested page.
+          final area = size.width * size.height;
+          final ratio = area.isFinite && area > 0
+              ? math.min(media.devicePixelRatio, math.sqrt(2000000 / area))
+              : media.devicePixelRatio;
+          return MediaQuery(
+            data: media.copyWith(devicePixelRatio: ratio),
+            child: SnapshotWidget(
+              controller: _snapshot,
+              mode: SnapshotMode.permissive,
+              autoresize: true,
+              // The raster budget must not change image decoding, text or
+              // layout metrics inside the real page.
+              child: MediaQuery(
+                data: media,
+                child: RepaintBoundary(child: widget.child),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }

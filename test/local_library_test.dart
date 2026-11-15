@@ -616,6 +616,68 @@ void main() {
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
+
+  test(
+    'restores embedded artwork without replacing an existing cover',
+    () async {
+      final File audio = await writeFile('embedded.mp3', _mp3WithPicture());
+      final File kept = await writeFile('kept.mp3', <int>[0x49, 0x44, 0x33]);
+      final library = create();
+      await library.addTracks(<LocalTrack>[
+        LocalTrack(
+          track: _track('local:embedded', '内嵌'),
+          path: audio.path,
+          source: LocalTrackSource.download,
+          bytes: await audio.length(),
+          addedAt: DateTime(2020),
+          modifiedAt: DateTime(2020),
+        ),
+        LocalTrack(
+          track: _track(
+            'local:kept',
+            '已有封面',
+          ).copyWith(coverUrl: 'https://example.com/cover.jpg'),
+          path: kept.path,
+          source: LocalTrackSource.scan,
+          bytes: await kept.length(),
+          addedAt: DateTime(2020),
+          modifiedAt: DateTime(2020),
+        ),
+      ]);
+      await library.refreshMissing();
+      final String? cover = library.tracks
+          .singleWhere((LocalTrack entry) => entry.track.title == '内嵌')
+          .track
+          .coverUrl;
+      expect(cover, isNotNull);
+      expect(
+        await File.fromUri(Uri.parse(cover!)).readAsBytes(),
+        _picturePng(),
+      );
+      expect(
+        library.tracks
+            .singleWhere((LocalTrack entry) => entry.track.title == '已有封面')
+            .track
+            .coverUrl,
+        'https://example.com/cover.jpg',
+      );
+      library.dispose();
+
+      final LocalLibrary restored = create();
+      await restored.load();
+      expect(
+        restored.tracks
+            .singleWhere((LocalTrack entry) => entry.track.title == '内嵌')
+            .track
+            .coverUrl,
+        cover,
+      );
+      while (restored.verifying) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      restored.dispose();
+    },
+  );
 }
 
 /// Starts an index check from `initState`, the way the local music page does.
@@ -637,4 +699,114 @@ class _ScanOnMountState extends State<_ScanOnMount> {
 
   @override
   Widget build(BuildContext context) => const SizedBox.expand();
+}
+
+List<int> _picturePng() => const <int>[
+  0x89,
+  0x50,
+  0x4E,
+  0x47,
+  0x0D,
+  0x0A,
+  0x1A,
+  0x0A,
+  0x00,
+  0x00,
+  0x00,
+  0x0D,
+  0x49,
+  0x48,
+  0x44,
+  0x52,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x01,
+  0x08,
+  0x02,
+  0x00,
+  0x00,
+  0x00,
+  0x90,
+  0x77,
+  0x53,
+  0xDE,
+  0x00,
+  0x00,
+  0x00,
+  0x0C,
+  0x49,
+  0x44,
+  0x41,
+  0x54,
+  0x08,
+  0xD7,
+  0x63,
+  0xF8,
+  0xCF,
+  0xC0,
+  0x00,
+  0x00,
+  0x00,
+  0x03,
+  0x00,
+  0x01,
+  0x00,
+  0x05,
+  0xFE,
+  0x02,
+  0xFE,
+  0xDC,
+  0xCC,
+  0x59,
+  0xE7,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x49,
+  0x45,
+  0x4E,
+  0x44,
+  0xAE,
+  0x42,
+  0x60,
+  0x82,
+];
+
+List<int> _mp3WithPicture() {
+  final List<int> png = _picturePng();
+  final List<int> payload = <int>[
+    0,
+    ...utf8.encode('image/png'),
+    0,
+    3,
+    0,
+    ...png,
+  ];
+  final List<int> frame = <int>[
+    ...utf8.encode('APIC'),
+    (payload.length >> 24) & 0xFF,
+    (payload.length >> 16) & 0xFF,
+    (payload.length >> 8) & 0xFF,
+    payload.length & 0xFF,
+    0,
+    0,
+    ...payload,
+  ];
+  return <int>[
+    ...utf8.encode('ID3'),
+    3,
+    0,
+    0,
+    (frame.length >> 21) & 0x7F,
+    (frame.length >> 14) & 0x7F,
+    (frame.length >> 7) & 0x7F,
+    frame.length & 0x7F,
+    ...frame,
+  ];
 }

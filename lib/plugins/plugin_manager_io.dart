@@ -28,6 +28,7 @@ class InstalledPlugin {
   final PluginManifest manifest;
   bool enabled;
   bool websocketGranted = false;
+  bool websocketServerGranted = false;
   LuaPluginRuntime? runtime;
   final List<LuaMusicGateway> gateways = [];
   LazerThemeTokens? theme;
@@ -96,6 +97,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           plugin.websocketGranted = await File(
             p.join(item.path, '.websocket-enabled'),
           ).exists();
+          plugin.websocketServerGranted = await File(
+            p.join(item.path, '.websocket-server-enabled'),
+          ).exists();
           _plugins.add(plugin);
           if (!disabled) await _start(plugin);
         } catch (_) {
@@ -136,6 +140,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           plugin.manifest.id,
         ),
         websocketGranted: plugin.websocketGranted,
+        websocketServerGranted: plugin.websocketServerGranted,
       );
       plugin.runtime = runtime;
       await runtime.start();
@@ -200,7 +205,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.error = null;
     } catch (_) {
       MediaRequestRules.remove(plugin.manifest.id);
-      plugin.runtime?.close();
+      await plugin.runtime?.shutdown();
       plugin.runtime = null;
       plugin.gateways.clear();
       plugin.theme = null;
@@ -250,14 +255,14 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       try {
         await probe.start();
       } finally {
-        probe.close();
+        await probe.shutdown();
       }
       final previous = _plugins
           .where((v) => v.manifest.id == manifest.id)
           .firstOrNull;
       final enabled = previous?.enabled ?? true;
       await beforeChange?.call(manifest.id);
-      previous?.runtime?.close();
+      await previous?.runtime?.shutdown();
       final installed = Directory(p.join(base.path, manifest.id));
       final backup = Directory(p.join(base.path, '.backup-${manifest.id}'));
       if (await backup.exists()) await backup.delete(recursive: true);
@@ -281,11 +286,11 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         if (await backup.exists()) await backup.delete(recursive: true);
         return plugin;
       } catch (_) {
-        _plugins
+        await _plugins
             .where((v) => v.manifest.id == manifest.id)
             .firstOrNull
             ?.runtime
-            ?.close();
+            ?.shutdown();
         _plugins.removeWhere((v) => v.manifest.id == manifest.id);
         if (await installed.exists()) await installed.delete(recursive: true);
         if (await backup.exists()) await backup.rename(installed.path);
@@ -314,7 +319,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     try {
       await beforeChange?.call(id);
       MediaRequestRules.remove(plugin.manifest.id);
-      plugin.runtime?.close();
+      await plugin.runtime?.shutdown();
       plugin.runtime = null;
       plugin.gateways.clear();
       plugin.enabled = enabled;
@@ -341,11 +346,39 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _notify();
     try {
       await beforeChange?.call(id);
-      plugin.runtime?.close();
+      await plugin.runtime?.shutdown();
       plugin.runtime = null;
       plugin.gateways.clear();
       plugin.websocketGranted = granted;
       final marker = File(p.join((await root).path, id, '.websocket-enabled'));
+      if (granted) {
+        await marker.writeAsString('');
+      } else if (await marker.exists()) {
+        await marker.delete();
+      }
+      if (plugin.enabled) await _start(plugin);
+      await afterChange?.call();
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> setWebsocketServerPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    final plugin = _plugins.firstWhere((v) => v.manifest.id == id);
+    if (plugin.websocketServerGranted == granted) return;
+    busy = true;
+    _notify();
+    try {
+      await beforeChange?.call(id);
+      await plugin.runtime?.shutdown();
+      plugin.runtime = null;
+      plugin.gateways.clear();
+      plugin.websocketServerGranted = granted;
+      final marker = File(
+        p.join((await root).path, id, '.websocket-server-enabled'),
+      );
       if (granted) {
         await marker.writeAsString('');
       } else if (await marker.exists()) {
@@ -367,7 +400,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     try {
       await beforeChange?.call(id);
       MediaRequestRules.remove(plugin.manifest.id);
-      plugin.runtime?.close();
+      await plugin.runtime?.shutdown();
       plugin.gateways.clear();
       final base = (await root).absolute.path;
       final directory = Directory(p.join(base, plugin.manifest.id));

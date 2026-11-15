@@ -53,12 +53,14 @@ class AppHomePage extends StatefulWidget {
     required this.onOpenPlaylist,
     required this.onPlayTrack,
     required this.onOpenChart,
+    this.topInset = 0,
   });
 
   final AppState state;
   final ValueChanged<Playlist> onOpenPlaylist;
   final void Function(List<Track> tracks, int index) onPlayTrack;
   final ValueChanged<MusicChart> onOpenChart;
+  final double topInset;
 
   @override
   State<AppHomePage> createState() => _AppHomePageState();
@@ -120,11 +122,13 @@ class _AppHomePageState extends State<AppHomePage>
       return LocalRecentHome(
         state: widget.state,
         onPlayTrack: widget.onPlayTrack,
+        topInset: widget.topInset,
       );
     }
     final HomeFeed? feed = widget.state.home;
     if (feed == null) {
       return AppNotice(
+        topInset: widget.topInset,
         message: widget.state.homeError ?? '正在加载曲库…',
         action:
             widget.state.hasNetworkProvider && !widget.state.activeMusicSignedIn
@@ -190,7 +194,7 @@ class _AppHomePageState extends State<AppHomePage>
               // frozen behind the navigation capsule.
               padding: EdgeInsets.fromLTRB(
                 inset,
-                8,
+                8 + widget.topInset,
                 inset,
                 MediaQuery.sizeOf(context).height * .45,
               ),
@@ -813,9 +817,11 @@ class LocalRecentHome extends StatelessWidget {
     super.key,
     required this.state,
     required this.onPlayTrack,
+    this.topInset = 0,
   });
   final AppState state;
   final void Function(List<Track>, int) onPlayTrack;
+  final double topInset;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: Listenable.merge([state, state.localLibrary]),
@@ -831,7 +837,7 @@ class LocalRecentHome extends StatelessWidget {
             key: const PageStorageKey('local-recent-scroll'),
             padding: EdgeInsets.fromLTRB(
               inset,
-              20,
+              20 + topInset,
               inset,
               28 + MediaQuery.paddingOf(context).bottom,
             ),

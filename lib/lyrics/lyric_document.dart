@@ -1,4 +1,5 @@
 import '../gateway/gateway.dart';
+import 'ttml_parser.dart';
 
 class LyricWord {
   const LyricWord(this.start, this.duration, this.text);
@@ -12,12 +13,14 @@ class LyricLine {
     this.time,
     this.text, {
     this.translation,
+    this.romanization,
     this.words = const [],
     this.end,
   });
   final Duration time;
   final String text;
   final String? translation;
+  final String? romanization;
   final List<LyricWord> words;
   final Duration? end;
 }
@@ -90,7 +93,11 @@ List<LyricLine> parseYrc(String? source) {
         if (word.group(4)!.isNotEmpty)
           LyricWord(
             Duration(milliseconds: int.parse(word.group(1)!)),
-            Duration(milliseconds: int.parse(word.group(2)!).clamp(1, 0x1FFFFFFFFFFFFF)),
+            Duration(
+              milliseconds: int.parse(
+                word.group(2)!,
+              ).clamp(1, 0x1FFFFFFFFFFFFF),
+            ),
             word.group(4)!,
           ),
     ];
@@ -114,17 +121,41 @@ const Duration _translationAlignmentWindow = Duration(milliseconds: 1000);
 const double _translationAlignmentRatio = .7;
 
 List<LyricLine> parseLyrics(GatewayLyrics payload) {
+  final ttml = parseTtml(payload.ttml);
   final words = parseYrc(payload.yrc);
-  final original = words.isNotEmpty ? words : parseLrc(payload.lrc);
+  final original = ttml.isNotEmpty
+      ? ttml
+      : words.isNotEmpty
+      ? words
+      : parseLyricFile(payload.lrc);
+  final translated = _attachSecondary(original, [
+    payload.tlyric,
+    payload.ytlrc,
+  ]);
+  return _attachSecondary(translated, [
+    payload.rlyric,
+    payload.yromalrc,
+  ], romanization: true);
+}
+
+/// TTML carries explicit translation/romanization roles; plain LRC is never
+/// guessed to be romanized text merely because it shares a timestamp.
+List<LyricLine> parseLyricFile(String? source) =>
+    source?.trimLeft().startsWith('<') == true
+    ? parseTtml(source)
+    : parseLrc(source);
+
+List<LyricLine> _attachSecondary(
+  List<LyricLine> original,
+  List<String?> sources, {
+  bool romanization = false,
+}) {
   // Some platform responses put the translated lines that have no word
   // timing in `tlyric`, while the remaining lines only exist in `ytlrc`.
   // Treating tlyric as an exclusive fallback drops those lines (notably in
   // long soundtrack lyrics). Parse both formats and merge duplicate rows.
   final allTranslations = _mergeTranslations(<LyricLine>[
-    ...parseLrc(payload.tlyric),
-    ...parseYrc(payload.tlyric),
-    ...parseLrc(payload.ytlrc),
-    ...parseYrc(payload.ytlrc),
+    for (final source in sources) ...[...parseLrc(source), ...parseYrc(source)],
   ]);
   final translations = allTranslations
       .where((line) => line.text.trim().isNotEmpty)
@@ -155,7 +186,7 @@ List<LyricLine> parseLyrics(GatewayLyrics payload) {
   }
   return <LyricLine>[
     for (var i = 0; i < original.length; i++)
-      _withTranslation(original[i], matched[i]),
+      _withTranslation(original[i], matched[i], romanization: romanization),
   ];
 }
 
@@ -237,13 +268,22 @@ List<String?>? _pairByLine(
   return <String?>[for (final LyricLine line in translations) line.text.trim()];
 }
 
-LyricLine _withTranslation(LyricLine line, String? translation) {
+LyricLine _withTranslation(
+  LyricLine line,
+  String? translation, {
+  bool romanization = false,
+}) {
   final String text = translation?.trim() ?? '';
   return LyricLine(
     line.time,
     line.text,
     words: line.words,
     end: line.end,
-    translation: text.isEmpty || text == line.text.trim() ? null : text,
+    translation: romanization
+        ? line.translation
+        : (text.isEmpty || text == line.text.trim() ? line.translation : text),
+    romanization: romanization && text.isNotEmpty && text != line.text.trim()
+        ? text
+        : line.romanization,
   );
 }

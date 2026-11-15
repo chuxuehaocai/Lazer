@@ -4,6 +4,9 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import '../storage/app_storage.dart';
+import 'embedded_artwork.dart';
+
 /// Tags read from a local file. Missing fields are filled from the file name,
 /// so every track has a title the library can show.
 class LocalAudioMetadata {
@@ -24,8 +27,8 @@ class LocalAudioMetadata {
 ///
 /// MP3 (ID3v2.2/2.3/2.4), FLAC (STREAMINFO + VORBIS_COMMENT), M4A/MP4
 /// (`mvhd` + `ilst`) and WAV (`fmt `/`data`) are parsed; anything else falls
-/// back to the file name. Embedded artwork is deliberately ignored — the
-/// library keeps the existing generative covers.
+/// back to the file name. Artwork is read separately by [artworkUriFor], so
+/// metadata-only probes never allocate large picture frames.
 class LocalAudioProbe {
   const LocalAudioProbe();
 
@@ -91,10 +94,35 @@ class LocalAudioProbe {
     );
   }
 
-  /// Finds the common sidecar artwork names used by music folders. The
-  /// returned URI is consumed by the shared artwork cache without copying the
-  /// user's image into memory or the app cache.
-  static Future<String?> artworkUriFor(String audioPath) async {
+  /// Extracts bounded embedded artwork, falling back to common sidecar names.
+  /// Cached images use file URIs shared by the player, library and widgets.
+  static Future<String?> artworkUriFor(
+    String audioPath, {
+    Directory? cacheDirectory,
+  }) async {
+    try {
+      Directory cache;
+      if (cacheDirectory != null) {
+        cache = cacheDirectory;
+      } else {
+        try {
+          cache = Directory(
+            '${(await appSupportDirectory()).path}/embedded-artwork-v1',
+          );
+        } catch (_) {
+          cache = Directory(
+            '${Directory.systemTemp.path}/lazer-embedded-artwork-v1',
+          );
+        }
+      }
+      final String? embedded = await EmbeddedArtwork.cacheUri(
+        File(audioPath),
+        cache,
+      );
+      if (embedded != null) return embedded;
+    } catch (_) {
+      // Inaccessible tags/cache must not hide an available sidecar cover.
+    }
     final String normalized = audioPath.replaceAll('\\', '/');
     final int slash = normalized.lastIndexOf('/');
     final String directory = slash < 0 ? '' : normalized.substring(0, slash);
@@ -420,7 +448,9 @@ class LocalAudioProbe {
                 );
                 if (data != null) {
                   final int payloadStart = data.contentStart + 8;
-                  if (payloadStart < data.end) {
+                  if (const {'©nam', '©ART', 'aART', '©alb'}.contains(name) &&
+                      payloadStart < data.end &&
+                      data.end - payloadStart <= _maxTextFrameBytes) {
                     final Uint8List payload = await _read(
                       raf,
                       payloadStart,

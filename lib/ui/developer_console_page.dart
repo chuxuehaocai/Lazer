@@ -121,6 +121,7 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
     final entries = _console.entries;
     return SettingsDetailScaffold(
       title: 'Lua 开发者控制台',
+      headerTitle: true,
       child: !enabled
           ? Center(child: Text(context.tr('开发者控制台已关闭。请在设置中启用。')))
           : SafeArea(

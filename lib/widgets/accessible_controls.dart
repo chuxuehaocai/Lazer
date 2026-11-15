@@ -3,14 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../interaction/app_haptics.dart';
 import '../l10n/app_localizations.dart';
+import '../tv/tv_mode.dart';
 import 'interaction_feedback.dart';
 
 /// Keep a control and its semantics in the same island.
 ///
-/// Putting every slider and dropdown inside a nested [Overlay] can make the
-/// overlay's render layer win hit testing on touch surfaces: sliders remain
-/// visible but cannot be dragged. A semantics container is sufficient here;
-/// controls keep their own native popup and gesture handling.
+/// Material sliders use an OverlayPortal for their value indicator. When the
+/// control animates out, a page-level overlay can serialize its semantics
+/// separately from the disappearing anchor and leave orphan AX nodes. A local
+/// overlay keeps both updates in the same subtree. Size it to the control so
+/// it cannot cover adjacent hit targets; Overlay does not add a FocusScope, so
+/// remote traversal can still enter and leave the control.
 class SemanticsPortal extends StatelessWidget {
   const SemanticsPortal({super.key, required this.child});
   final Widget child;
@@ -257,23 +260,25 @@ class AccessibleIconButton extends IconButton {
   Widget build(BuildContext context) {
     return Semantics(
       container: true,
-      child: SpringPress(
-        builder: (context, states) => IconButton(
-          statesController: states,
-          icon: icon,
-          onPressed: feedbackAction(context, onPressed),
-          tooltip: tooltip == null ? null : context.tr(tooltip!),
-          isSelected: isSelected,
-          iconSize: iconSize,
-          padding: padding,
-          style: style,
-          color: color,
-          constraints: constraints,
-          visualDensity: visualDensity,
-          alignment: alignment,
-          focusNode: focusNode,
-          autofocus: autofocus,
-          enableFeedback: false,
+      child: TvFocusHighlight(
+        child: SpringPress(
+          builder: (context, states) => IconButton(
+            statesController: states,
+            icon: icon,
+            onPressed: feedbackAction(context, onPressed),
+            tooltip: tooltip == null ? null : context.tr(tooltip!),
+            isSelected: isSelected,
+            iconSize: iconSize,
+            padding: padding,
+            style: style,
+            color: color,
+            constraints: constraints,
+            visualDensity: visualDensity,
+            alignment: alignment,
+            focusNode: focusNode,
+            autofocus: autofocus,
+            enableFeedback: false,
+          ),
         ),
       ),
     );

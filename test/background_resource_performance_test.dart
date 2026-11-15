@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/ui/background.dart';
+import 'package:lazer_nextgen/ui/custom_image_backdrop.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/widgets/artwork_image.dart';
@@ -84,6 +85,23 @@ Color _vividReference(Color color) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('custom backgrounds share a bounded aspect-preserving decode', () async {
+    final directory = await Directory.systemTemp.createTemp('lazer-wallpaper-');
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}/photo.png');
+    await _cover(file, 4096, 2048);
+    final provider = backgroundImageProvider(file.path);
+    final image = await _displayDecode(provider);
+    try {
+      expect((image.width, image.height), (2048, 1024));
+      expect(provider, backgroundImageProvider(file.path));
+      debugPrint('Background RGBA: 33554432 -> 8388608 bytes');
+    } finally {
+      image.dispose();
+      await provider.evict();
+    }
+  });
 
   test(
     'palette pixels are bounded and do not retain full display images',
@@ -311,13 +329,17 @@ void main() {
       state.report();
       await tester.pump();
       expect(
-        tester.widget<AlbumBlurFlowCanvas>(find.byType(AlbumBlurFlowCanvas)).track,
+        tester
+            .widget<AlbumBlurFlowCanvas>(find.byType(AlbumBlurFlowCanvas))
+            .track,
         same(_second),
       );
       await state.setDynamicBackgroundQuality(.3);
       await tester.pump();
       expect(
-        tester.widget<AlbumBlurFlowCanvas>(find.byType(AlbumBlurFlowCanvas)).quality,
+        tester
+            .widget<AlbumBlurFlowCanvas>(find.byType(AlbumBlurFlowCanvas))
+            .quality,
         .3,
       );
       state.playerPresented.value = true;

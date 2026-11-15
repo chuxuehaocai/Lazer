@@ -120,8 +120,13 @@ class LuaMusicGateway extends MusicAccountGateway {
     if (value is Map) return Map<String, dynamic>.from(value);
     // A nil or list where an object was promised is a plugin bug. Mapping it to
     // an empty object made it look like a successful empty result.
-    throw MusicGatewayException(provider.id, 'response', reason: 'invalid payload');
+    throw MusicGatewayException(
+      provider.id,
+      'response',
+      reason: 'invalid payload',
+    );
   }
+
   String _string(Object? value) => value?.toString() ?? '';
   MusicId _id(MusicEntityKind kind, Object? value) => id(kind, _string(value));
   MusicArtist _artist(Map value) => MusicArtist(
@@ -234,10 +239,8 @@ class LuaMusicGateway extends MusicAccountGateway {
 
   @override
   Future<String> qrUrl(String key) async {
-    final url = (await _call('qrUrl', {
-      'key': key,
-      'web': kIsWeb,
-    }))?.toString() ?? '';
+    final url =
+        (await _call('qrUrl', {'key': key, 'web': kIsWeb}))?.toString() ?? '';
     if (url.isNotEmpty) {
       _qrKeys.clear();
       _qrKeys[url] = key;
@@ -307,7 +310,9 @@ class LuaMusicGateway extends MusicAccountGateway {
   );
   @override
   Future<MusicAlbum> album(MusicId id) async => _album(
-    _mapResult(await _call('album', {'id': remoteId(id, MusicEntityKind.album)})),
+    _mapResult(
+      await _call('album', {'id': remoteId(id, MusicEntityKind.album)}),
+    ),
   );
   @override
   Future<MusicPage<MusicAlbum>> albums({
@@ -485,6 +490,13 @@ class LuaMusicGateway extends MusicAccountGateway {
                   for (final line in _list(item['lines']).whereType<Map>())
                     MusicLyricLine(
                       text: _string(line['text']),
+                      translation:
+                          line['translation'] as String? ??
+                          line['translatedLyric'] as String?,
+                      romanization:
+                          line['romanization'] as String? ??
+                          line['romanLyric'] as String? ??
+                          line['romaji'] as String?,
                       start: (line['startMs'] as num?) == null
                           ? null
                           : Duration(
@@ -498,7 +510,17 @@ class LuaMusicGateway extends MusicAccountGateway {
                 wordTranslation:
                     item['wordTranslation'] as String? ??
                     item['ytlrc'] as String?,
-                wordByWord: item['wordByWord'] as String?,
+                romanization:
+                    item['romanization'] as String? ??
+                    item['romanLyric'] as String? ??
+                    item['romaji'] as String? ??
+                    item['rlyric'] as String?,
+                wordRomanization:
+                    item['wordRomanization'] as String? ??
+                    item['yromalrc'] as String?,
+                ttml: item['ttml'] as String?,
+                wordByWord:
+                    item['wordByWord'] as String? ?? item['yrc'] as String?,
                 lrc: item['lrc'] as String?,
                 offset: Duration(
                   milliseconds: (item['offsetMs'] as num?)?.toInt() ?? 0,

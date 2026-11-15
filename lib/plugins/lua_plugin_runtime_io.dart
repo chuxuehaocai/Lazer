@@ -13,6 +13,7 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:path/path.dart' as p;
 
 import 'plugin_manifest.dart';
+import 'plugin_websockets_io.dart';
 import 'lua_console_evaluator.dart';
 import '../diagnostics/app_log.dart';
 import '../utils/system_http.dart';
@@ -27,6 +28,7 @@ class LuaPluginRuntime {
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
     this.websocketGranted = false,
+    this.websocketServerGranted = false,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -38,6 +40,7 @@ class LuaPluginRuntime {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
   final bool websocketGranted;
+  final bool websocketServerGranted;
   Isolate? _isolate;
   ReceivePort? _port;
   SendPort? _commands;
@@ -116,6 +119,7 @@ class LuaPluginRuntime {
           'data': dataDirectory,
           'externalHttp': httpHandler != null,
           'websocketGranted': websocketGranted,
+          'websocketServerGranted': websocketServerGranted,
           'proxyMode': SystemHttpProxy.currentMode.name,
           'proxyEndpoint': SystemHttpProxy.customEndpoint,
           'cachedSystemRules': SystemHttpProxy.cachedSystemRules,
@@ -199,7 +203,7 @@ class LuaPluginRuntime {
       // start a fresh one. The answer to this call is gone, so it reports the
       // timeout and the caller may repeat it once against the new VM.
       _pending.remove(id);
-      _reset();
+      await _reset();
       AppLog.shared.event('lua', 'timeout', {
         'plugin': manifest.id,
         'operation': operation,
@@ -214,7 +218,7 @@ class LuaPluginRuntime {
         // Instruction-budget failures leave the Lua stack in the same state as
         // a wall-clock timeout. Recreate the isolate before the next stream
         // resolve instead of reusing a poisoned VM.
-        _reset();
+        await _reset();
         AppLog.shared.event('lua', 'timeout', {
           'plugin': manifest.id,
           'operation': operation,
@@ -261,26 +265,32 @@ class LuaPluginRuntime {
     return result.future;
   }
 
+  Future<void>? _closing;
+
   void close() {
-    if (_disposed) return;
-    _disposed = true;
-    _teardown();
+    unawaited(shutdown());
   }
 
-  /// Discards the current VM but keeps the plugin usable: the next call starts a
-  /// fresh isolate. Loaded state (login cookies, storage) lives in the plugin's
-  /// own files, so a restart does not log the user out.
-  void _reset() {
-    _teardown();
+  /// Wait for the worker to release listener ports before a permission change
+  /// or replacement VM can finish. Calls are rejected immediately.
+  Future<void> shutdown() {
+    if (_disposed) return _closing ?? Future<void>.value();
+    _disposed = true;
+    return _closing = _teardown();
+  }
+
+  Future<void> _reset() async {
+    await _teardown();
     _closed = false;
   }
 
-  void _teardown() {
+  Future<void> _teardown() async {
     _closed = true;
     AppLog.shared.event('lua', 'closed', {'plugin': manifest.id});
-    _isolate?.kill(priority: Isolate.immediate);
+    final isolate = _isolate;
+    final commands = _commands;
+    final port = _port;
     _isolate = null;
-    _port?.close();
     _port = null;
     _commands = null;
     _starting = null;
@@ -288,6 +298,19 @@ class LuaPluginRuntime {
       pending.completeError(const PluginException('插件已停止。'));
     }
     _pending.clear();
+    port?.close();
+    if (commands != null) {
+      final released = ReceivePort();
+      commands.send({'action': 'close', 'reply': released.sendPort});
+      try {
+        await released.first.timeout(const Duration(seconds: 2));
+      } catch (_) {
+        /* A stuck interpreter still has a bounded shutdown. */
+      } finally {
+        released.close();
+      }
+    }
+    isolate?.kill(priority: Isolate.immediate);
   }
 }
 
@@ -325,11 +348,14 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
           }
         : null,
     websocketGranted: config['websocketGranted'] == true,
+    websocketServerGranted: config['websocketServerGranted'] == true,
   );
   try {
     await host.initialize();
     output.send(commands.sendPort);
   } catch (error) {
+    await host.closeSockets();
+    host.client.close(force: true);
     output.send({'startupError': '$error'});
     commands.close();
     return;
@@ -337,15 +363,21 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
   Future<void> tail = Future.value();
   commands.listen((dynamic request) {
     if (request is! Map) return;
+    if (request['action'] == 'close') {
+      unawaited(() async {
+        await host.closeSockets();
+        host.client.close(force: true);
+        (request['reply'] as SendPort).send(true);
+        commands.close();
+      }());
+      return;
+    }
     if (request['action'] == 'setProxy') {
       final mode = ProxyMode.values.firstWhere(
         (m) => m.name == request['mode'],
         orElse: () => ProxyMode.system,
       );
-      SystemHttpProxy.setMode(
-        mode,
-        endpoint: request['endpoint'] as String?,
-      );
+      SystemHttpProxy.setMode(mode, endpoint: request['endpoint'] as String?);
       return;
     }
     tail = tail.then((_) async {
@@ -393,6 +425,7 @@ class _PluginHost {
     this.dataPath, {
     this.externalHttp,
     this.websocketGranted = false,
+    this.websocketServerGranted = false,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -400,20 +433,19 @@ class _PluginHost {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   externalHttp;
   final bool websocketGranted;
+  final bool websocketServerGranted;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   final HttpClient client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 20)
     ..findProxy = SystemHttpProxy.currentFindProxyRule;
   final Random random = Random.secure();
   Map<String, dynamic> storage = {};
-  final Map<String, WebSocket> _websockets = <String, WebSocket>{};
-
-  void closeSockets() {
-    for (final socket in _websockets.values) {
-      socket.close();
-    }
-    _websockets.clear();
-  }
+  late final PluginWebSockets _sockets = PluginWebSockets(
+    manifest,
+    clientGranted: websocketGranted,
+    serverGranted: websocketServerGranted,
+  );
+  Future<void> closeSockets() => _sockets.close();
 
   Future<void> initialize() async {
     if (manifest.storage) {
@@ -518,40 +550,18 @@ class _PluginHost {
       return 1;
     });
     lua.registerAsync('_websocket', (l) async {
-      final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
-      if (!websocketGranted) {
-        throw const FormatException('WebSocket permission required');
-      }
-      final String operation = spec['operation'] as String? ?? 'open';
-      final String id = spec['id'] as String? ?? 'default';
-      if (operation == 'open') {
-        final uri = Uri.parse(spec['url'] as String);
-        if (!manifest.permitsWebSocket(uri)) {
-          throw const FormatException('WebSocket permission denied');
-        }
-        await _websockets[id]?.close();
-        _websockets[id] = await WebSocket.connect(uri.toString());
-        _push(l, true);
-        return 1;
-      }
-      final socket = _websockets[id];
-      if (socket == null) throw const FormatException('WebSocket is not open');
-      if (operation == 'send') {
-        socket.add(spec['data'] ?? '');
-        _push(l, true);
-        return 1;
-      }
-      if (operation == 'receive') {
-        _push(l, await socket.first.timeout(const Duration(seconds: 30)));
-        return 1;
-      }
-      if (operation == 'close') {
-        await socket.close();
-        _websockets.remove(id);
-        _push(l, true);
-        return 1;
-      }
-      throw const FormatException('Unsupported WebSocket operation');
+      _push(
+        l,
+        await _sockets.client(Map<String, dynamic>.from(_read(l, 1) as Map)),
+      );
+      return 1;
+    });
+    lua.registerAsync('_websocket_server', (l) async {
+      _push(
+        l,
+        await _sockets.server(Map<String, dynamic>.from(_read(l, 1) as Map)),
+      );
+      return 1;
     });
     lua.registerAsync('pcall', (l) async {
       final status = await l.pCallAsync(l.getTop() - 1, luaMultret, 0);
@@ -579,7 +589,7 @@ host = { json_encode = _json_encode, json_decode = _json_decode,
   now = _now, url_encode = _url_encode, random_hex = _random_hex,
   cookie_compact = _cookie_compact, cookie_field = _cookie_field,
   cookie_merge = _cookie_merge,
-  crypto = _crypto, http = _http, websocket = _websocket,
+  crypto = _crypto, http = _http, websocket = _websocket, websocket_server = _websocket_server,
   storage_get = _storage_get, storage_set = _storage_set }
 $moduleBuffers
 local modules = {}
@@ -693,13 +703,17 @@ end
         return crypto.sha1.convert(utf8.encode(input)).toString();
       case 'hmac':
         final key = utf8.encode(spec['key'] as String? ?? '');
-        final algorithm = (spec['algorithm'] as String? ?? 'sha256').toLowerCase();
+        final algorithm = (spec['algorithm'] as String? ?? 'sha256')
+            .toLowerCase();
         final hashAlgorithm = switch (algorithm) {
           'sha1' => crypto.sha1,
           'md5' => crypto.md5,
           _ => crypto.sha256,
         };
-        return crypto.Hmac(hashAlgorithm, key).convert(utf8.encode(input)).toString();
+        return crypto.Hmac(
+          hashAlgorithm,
+          key,
+        ).convert(utf8.encode(input)).toString();
       case 'xor':
         final raw = spec['encoding'] == 'hex'
             ? Uint8List.fromList([
@@ -718,8 +732,8 @@ end
         return spec['outputEncoding'] == 'hex'
             ? output.map((b) => b.toRadixString(16).padLeft(2, '0')).join()
             : (spec['outputEncoding'] == 'utf8'
-                ? utf8.decode(output, allowMalformed: true)
-                : base64Encode(output));
+                  ? utf8.decode(output, allowMalformed: true)
+                  : base64Encode(output));
       case 'zlib_inflate':
         try {
           final raw = base64Decode(input);
@@ -737,7 +751,24 @@ end
         try {
           final raw = base64Decode(input);
           if (raw.length <= 4) return '';
-          const enKey = [64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105];
+          const enKey = [
+            64,
+            71,
+            97,
+            119,
+            94,
+            50,
+            116,
+            71,
+            81,
+            54,
+            49,
+            45,
+            206,
+            210,
+            110,
+            105,
+          ];
           final payload = Uint8List(raw.length - 4);
           for (var i = 0; i < payload.length; i++) {
             payload[i] = raw[i + 4] ^ enKey[i % enKey.length];

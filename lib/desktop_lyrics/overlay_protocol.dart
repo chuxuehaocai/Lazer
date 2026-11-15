@@ -55,6 +55,7 @@ class LyricsOverlaySettings {
     required this.animationSpeed,
     required this.lineSpacing,
     this.locked = false,
+    this.showRomanization = true,
     this.theme,
   });
 
@@ -68,6 +69,7 @@ class LyricsOverlaySettings {
   final double animationSpeed;
   final double lineSpacing;
   final bool locked;
+  final bool showRomanization;
   final Map<String, Object?>? theme;
 
   Map<String, Object?> toMap() => <String, Object?>{
@@ -81,6 +83,7 @@ class LyricsOverlaySettings {
     'animationSpeed': animationSpeed,
     'lineSpacing': lineSpacing,
     'locked': locked,
+    'showRomanization': showRomanization,
     if (theme != null) 'theme': theme,
   };
 
@@ -117,6 +120,7 @@ class LyricsOverlaySettings {
         kLyricsLineSpacingMax,
       ),
       locked: map['locked'] is bool ? map['locked'] as bool : false,
+      showRomanization: map['showRomanization'] != false,
       theme: map['theme'] is Map
           ? LazerThemeTokens.fromJson(<String, Object?>{
               for (final entry in (map['theme'] as Map).entries)
@@ -139,6 +143,7 @@ class LyricsOverlaySettings {
       animationSpeed == other.animationSpeed &&
       lineSpacing == other.lineSpacing &&
       locked == other.locked &&
+      showRomanization == other.showRomanization &&
       theme?.toString() == other.theme?.toString();
 
   @override
@@ -153,6 +158,7 @@ class LyricsOverlaySettings {
     animationSpeed,
     lineSpacing,
     locked,
+    showRomanization,
     theme?.toString(),
   );
 }
@@ -189,6 +195,7 @@ class LyricsOverlayPayload {
           'end': line.end?.inMilliseconds,
           'text': line.text,
           'translation': line.translation,
+          'romanization': line.romanization,
           'words': [
             for (final word in line.words)
               {
@@ -221,6 +228,7 @@ class LyricsOverlayPayload {
             text,
             end: end is num ? Duration(milliseconds: end.toInt()) : null,
             translation: raw['translation'] as String?,
+            romanization: raw['romanization'] as String?,
             words: [
               if (raw['words'] is List)
                 for (final word in raw['words'] as List)

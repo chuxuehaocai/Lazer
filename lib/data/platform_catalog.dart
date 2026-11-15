@@ -80,8 +80,7 @@ class _PlatformCatalog {
       final pageSize = page.items.length;
       final nextOffset = page.nextOffset;
       final pending = <Future<MusicPage<T>>>[
-        for (var i = 0; i < concurrency; i++)
-          load(nextOffset + i * pageSize),
+        for (var i = 0; i < concurrency; i++) load(nextOffset + i * pageSize),
       ];
       final pages = await Future.wait(pending);
       var finished = false;
@@ -410,20 +409,31 @@ class _PlatformCatalog {
     final value =
         values.where((lyrics) => lyrics.synced).firstOrNull ?? values.first;
     final buffer = StringBuffer();
+    final translations = StringBuffer();
+    final romanization = StringBuffer();
     for (final line in value.lines) {
+      var stamp = '';
       if (line.start case final start?) {
         final ms = math.max(0, (start + value.offset).inMilliseconds);
-        buffer.write(
-          '[${(ms ~/ 60000).toString().padLeft(2, '0')}:${(ms ~/ 1000 % 60).toString().padLeft(2, '0')}.${(ms % 1000).toString().padLeft(3, '0')}]',
-        );
+        stamp =
+            '[${(ms ~/ 60000).toString().padLeft(2, '0')}:${(ms ~/ 1000 % 60).toString().padLeft(2, '0')}.${(ms % 1000).toString().padLeft(3, '0')}]';
       }
-      buffer.writeln(line.text);
+      buffer.writeln('$stamp${line.text}');
+      if (stamp.isNotEmpty && line.translation != null) {
+        translations.writeln('$stamp${line.translation}');
+      }
+      if (stamp.isNotEmpty && line.romanization != null) {
+        romanization.writeln('$stamp${line.romanization}');
+      }
     }
     return GatewayLyrics(
       lrc: value.lrc ?? buffer.toString(),
       yrc: value.wordByWord,
-      tlyric: value.translation,
+      tlyric: value.translation ?? translations.toString(),
       ytlrc: value.wordTranslation,
+      rlyric: value.romanization ?? romanization.toString(),
+      yromalrc: value.wordRomanization,
+      ttml: value.ttml,
     );
   }
 }

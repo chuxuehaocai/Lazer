@@ -54,10 +54,12 @@ class LyricSelection {
         : LyricSelection(anchor: anchor ?? available.first, keys: available);
   }
 
-  String text(List<LyricLine> lines) => [
+  String text(List<LyricLine> lines, {bool showRomanization = true}) => [
     for (final line in lines)
       if (keys.contains(lyricSelectionKey(line))) ...[
         line.text.trim(),
+        if (showRomanization && (line.romanization?.trim().isNotEmpty ?? false))
+          line.romanization!.trim(),
         if (line.translation?.trim().isNotEmpty ?? false)
           line.translation!.trim(),
       ],

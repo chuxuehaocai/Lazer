@@ -240,3 +240,13 @@ focused suites include `test/player_pull_down_test.dart`,
 `test/accessible_player_transitions_test.dart` and
 `test/player_open_cost_test.dart`. These checks do not substitute for frame-time
 and input testing on each physical platform.
+
+
+Romanization is an optional secondary lyric row, independent from translation,
+following [AMLL's `romanLyric` model](https://github.com/amll-dev/applemusic-like-lyrics/blob/main/packages/lyric/README.md).
+Settings → Lyrics → Show romanization controls it in the player, desktop/floating
+lyrics, copied selections and image exports. It is on by default and appears only
+when a plugin or imported/sidecar TTML supplies it. The cache retains the source
+romanization, so hiding it does not discard it. TTML accepts inline `x-roman` and
+Apple metadata transliteration sidecars; LRC providers can supply a separate
+`romanization`/`rlyric` track. No automatic transliteration is performed.

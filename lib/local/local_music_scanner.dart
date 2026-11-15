@@ -29,10 +29,13 @@ class LocalScanResult {
 /// Files whose size and modification time are unchanged reuse the previous
 /// metadata, so rescanning a large library only probes new or edited files.
 class LocalMusicScanner {
-  LocalMusicScanner({LocalAudioProbe? probe})
+  LocalMusicScanner({LocalAudioProbe? probe, this.artworkCache})
     : probe = probe ?? const LocalAudioProbe();
 
   final LocalAudioProbe probe;
+
+  /// Tests pass a temporary directory. Production uses application support.
+  final Directory? artworkCache;
 
   static const Set<String> extensions = <String>{
     'mp3',
@@ -126,7 +129,26 @@ class LocalMusicScanner {
                 previous.bytes == stat.size &&
                 previous.modifiedAt.millisecondsSinceEpoch ==
                     stat.modified.millisecondsSinceEpoch) {
-              entry = previous;
+              final String? cover = previous.track.coverUrl;
+              if (cover != null && cover.isNotEmpty) {
+                entry = previous;
+              } else {
+                final String? artwork = await LocalAudioProbe.artworkUriFor(
+                  path,
+                  cacheDirectory: artworkCache,
+                );
+                entry = artwork == null
+                    ? previous
+                    : LocalTrack(
+                        track: previous.track.copyWith(coverUrl: artwork),
+                        path: previous.path,
+                        source: previous.source,
+                        quality: previous.quality,
+                        bytes: previous.bytes,
+                        modifiedAt: previous.modifiedAt,
+                        addedAt: previous.addedAt,
+                      );
+              }
             } else {
               final LocalAudioMetadata metadata = await probe.probe(entity);
               final String title = metadata.title.trim().isEmpty
@@ -134,7 +156,10 @@ class LocalMusicScanner {
                   : metadata.title.trim();
               final String artist = metadata.artist.trim();
               final String album = metadata.album.trim();
-              final String? artwork = await LocalAudioProbe.artworkUriFor(path);
+              final String? artwork = await LocalAudioProbe.artworkUriFor(
+                path,
+                cacheDirectory: artworkCache,
+              );
               entry = LocalTrack(
                 track: Track(
                   id: localTrackIdForPath(path),

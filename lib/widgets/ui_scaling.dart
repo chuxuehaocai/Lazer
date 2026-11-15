@@ -253,7 +253,14 @@ class _ScaledInterface extends StatelessWidget {
           bounds.height / scale,
         );
         return MediaQuery(
-          data: media.copyWith(size: workspace),
+          data: media.copyWith(
+            size: workspace,
+            devicePixelRatio: media.devicePixelRatio * scale,
+            padding: media.padding / scale,
+            viewPadding: media.viewPadding / scale,
+            viewInsets: media.viewInsets / scale,
+            systemGestureInsets: media.systemGestureInsets / scale,
+          ),
           // Below 1x the workspace is *larger* than the window: loose window
           // constraints would clamp it, the interface would keep the window's
           // layout size, and the scaled copy would cover only a corner of the

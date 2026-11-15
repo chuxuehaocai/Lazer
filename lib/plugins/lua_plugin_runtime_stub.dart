@@ -14,6 +14,7 @@ class LuaPluginRuntime {
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
     this.websocketGranted = false,
+    this.websocketServerGranted = false,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -22,6 +23,7 @@ class LuaPluginRuntime {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
   final bool websocketGranted;
+  final bool websocketServerGranted;
   Future<void> start() =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<Object?> invoke(
@@ -29,6 +31,10 @@ class LuaPluginRuntime {
     Map<String, dynamic> args = const {},
     Duration? budget,
   ]) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> shutdown() async {
+    close();
+  }
+
   void close() {}
   void updateProxy({required ProxyMode mode, String? endpoint}) {}
   Future<List<String>> evaluate(String source) =>
