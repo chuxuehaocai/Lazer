@@ -201,7 +201,8 @@ class _PluginRow extends StatelessWidget {
       final unit = context.tr('个授权域名');
       parts.add('$count $unit');
     }
-    if (plugin.manifest.websocketDomains.isNotEmpty) {
+    if (plugin.manifest.websocketDomains.isNotEmpty ||
+        plugin.manifest.websocketServerBindings.isNotEmpty) {
       parts.add(context.tr('WebSocket 需授权'));
     }
     if (plugin.manifest.storage) {
@@ -416,7 +417,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
           Expanded(
             child: ListView(
               children: [
-                _sectionHeader(context, Icons.language_rounded, '网络访问权限', apple),
+                _sectionHeader(context, Icons.language_rounded, context.tr('网络访问权限'), apple),
                 const SizedBox(height: 8),
                 if (manifest.domains.isEmpty)
                   Padding(
@@ -497,7 +498,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                 ],
                 const SizedBox(height: 12),
                 if (manifest.websocketDomains.isNotEmpty) ...[
-                  _sectionHeader(context, Icons.swap_calls_rounded, 'WebSocket 实时通信', apple),
+                  _sectionHeader(context, Icons.swap_calls_rounded, context.tr('WebSocket 实时通信'), apple),
                   const SizedBox(height: 8),
                   Container(
                     decoration: BoxDecoration(
@@ -541,7 +542,61 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                   ),
                   const SizedBox(height: 16),
                 ],
-                _sectionHeader(context, Icons.folder_outlined, '本地数据存储', apple),
+                if (manifest.websocketServerBindings.isNotEmpty) ...[
+                  _sectionHeader(context, Icons.dns_outlined, context.tr('WebSocket 服务端'), apple),
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: apple.tertiaryFill,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: apple.separator, width: .5),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final binding in manifest.websocketServerBindings)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Text(
+                              binding,
+                              style: theme.textTheme.bodyMedium?.copyWith(color: apple.label),
+                            ),
+                          ),
+                        if (kIsWeb)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              context.tr('浏览器不支持 WebSocket 服务端。'),
+                              style: theme.textTheme.bodySmall?.copyWith(color: apple.secondaryLabel),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              context.tr('允许 WebSocket 服务端'),
+                              style: theme.textTheme.bodySmall?.copyWith(color: apple.label),
+                            ),
+                            Switch(
+                              key: ValueKey('websocket-server-permission-${manifest.id}'),
+                              value: widget.plugin.websocketServerGranted,
+                              onChanged: widget.manager.busy || kIsWeb
+                                  ? null
+                                  : (value) async {
+                                      await widget.manager.setWebsocketServerPermission(manifest.id, value);
+                                      if (mounted) setState(() {});
+                                    },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                _sectionHeader(context, Icons.folder_outlined, context.tr('本地数据存储'), apple),
                 const SizedBox(height: 8),
                 Padding(
                   padding: const EdgeInsets.only(left: 4),
@@ -573,7 +628,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
         Icon(icon, size: 16, color: apple.accent),
         const SizedBox(width: 6),
         Text(
-          context.tr(title),
+          title,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
             fontWeight: FontWeight.w600,
           ),

@@ -1280,5 +1280,11 @@
   "无需访问外网": "No external network access",
   "本地存储": "Local storage",
   "该插件仅限访问以下白名单网络域名：": "This plugin is restricted to the following allowlisted domains:",
-  "详细信息": "Details"
+  "详细信息": "Details",
+  "WebSocket 实时通信": "WebSocket Real-time Communication",
+  "WebSocket 服务端": "WebSocket Server",
+  "本地数据存储": "Local Data Storage",
+  "网络访问权限": "Network Access Permissions",
+  "允许 WebSocket 服务端": "Allow WebSocket Server",
+  "浏览器不支持 WebSocket 服务端。": "The browser does not support WebSocket servers."
 }
