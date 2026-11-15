@@ -1027,6 +1027,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Opacity and backdrop blur used by the compact/tablet page header.
   double headerOpacity = kHeaderOpacityDefault;
   double headerBlur = kHeaderBlurDefault;
+
+  /// Whether the compact/tablet floating capsule navigation filters the page.
+  bool bottomBarBlurEnabled = true;
+  double bottomBarBlur = kBottomBarBlurDefault;
   double browseBackgroundFps = 30;
   double playerBackgroundFps = 30;
   AppBackgroundMode playerBackground = AppBackgroundMode.nowPlayingDynamic;
@@ -1237,6 +1241,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await (await SharedPreferences.getInstance()).setDouble(
       'lazer_header_blur',
       headerBlur,
+    );
+  }
+
+  Future<void> setBottomBarBlurEnabled(bool value) async {
+    if (bottomBarBlurEnabled == value) return;
+    bottomBarBlurEnabled = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      'lazer_bottom_bar_blur_enabled',
+      value,
+    );
+  }
+
+  Future<void> setBottomBarBlur(double value) async {
+    if (!value.isFinite) return;
+    bottomBarBlur = value.clamp(kBottomBarBlurMin, kBottomBarBlurMax);
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_bottom_bar_blur',
+      bottomBarBlur,
     );
   }
 
@@ -2194,6 +2218,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
               .clamp(kHeaderOpacityMin, kHeaderOpacityMax);
       headerBlur = (prefs.getDouble('lazer_header_blur') ?? kHeaderBlurDefault)
           .clamp(kHeaderBlurMin, kHeaderBlurMax);
+      bottomBarBlurEnabled =
+          prefs.getBool('lazer_bottom_bar_blur_enabled') ?? true;
+      bottomBarBlur =
+          (prefs.getDouble('lazer_bottom_bar_blur') ?? kBottomBarBlurDefault)
+              .clamp(kBottomBarBlurMin, kBottomBarBlurMax);
       dynamicBackgroundQuality = normalizeDynamicBackgroundQuality(
         prefs.getDouble('lazer_dynamic_background_quality') ??
             kDynamicBackgroundQualityDefault,

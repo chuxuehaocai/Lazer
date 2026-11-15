@@ -581,6 +581,42 @@ class _SettingsOverview extends StatelessWidget {
                             child: const TrText('恢复默认'),
                           ),
                         ),
+                        const _AppSectionLabel('底部胶囊栏'),
+                        _AppSwitchRow(
+                          key: const ValueKey('bottom-bar-blur-switch'),
+                          label: '底部胶囊栏模糊',
+                          subtitle: '让底部胶囊导航与后方背景融合',
+                          value: state.bottomBarBlurEnabled,
+                          onChanged: (bool value) =>
+                              unawaited(state.setBottomBarBlurEnabled(value)),
+                        ),
+                        _AppSliderRow(
+                          key: const ValueKey('bottom-bar-blur-slider'),
+                          label: '底部胶囊栏模糊强度',
+                          valueText: '${state.bottomBarBlur.round()} px',
+                          subtitle: '数值越大，胶囊后方的背景越柔和',
+                          value: state.bottomBarBlur,
+                          min: kBottomBarBlurMin,
+                          max: kBottomBarBlurMax,
+                          divisions:
+                              ((kBottomBarBlurMax - kBottomBarBlurMin) / 2)
+                                  .round(),
+                          onChanged: state.bottomBarBlurEnabled
+                              ? (double value) =>
+                                    unawaited(state.setBottomBarBlur(value))
+                              : null,
+                          action: SpringTextButton(
+                            key: const ValueKey('bottom-bar-blur-reset'),
+                            onPressed: state.bottomBarBlurEnabled
+                                ? () => unawaited(
+                                    state.setBottomBarBlur(
+                                      kBottomBarBlurDefault,
+                                    ),
+                                  )
+                                : null,
+                            child: const TrText('恢复默认'),
+                          ),
+                        ),
                         const _AppSectionLabel('动态背景'),
                         _AppSettingRow(
                           label: '背景',

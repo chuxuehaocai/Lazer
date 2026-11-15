@@ -1724,6 +1724,8 @@ class _AppShellState extends State<AppShell>
                       selectedIndex: sections
                           .indexOf(_section)
                           .clamp(0, sections.length - 1),
+                      blurEnabled: state.bottomBarBlurEnabled,
+                      blurSigma: state.bottomBarBlur,
                       onDestinationSelected: (int index) =>
                           _select(sections[index]),
                       destinations: <NavigationDestination>[
@@ -1912,8 +1914,7 @@ class _AppShellState extends State<AppShell>
                 children: <Widget>[Expanded(child: _accountRow(apple))],
               ),
             ),
-            // A direct way into settings, right under the account block; the
-            // account menu keeps its own entry for touch-sized screens.
+            // A direct way into settings, right under the account block.
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 8, 10),
               child: AppRailItem(
@@ -2040,8 +2041,6 @@ class _AppShellState extends State<AppShell>
       unawaited(showAppLoginDialog(context, state));
     } else if (value == 'logout') {
       state.signOut();
-    } else if (value == 'settings') {
-      _select(_AppSection.settings);
     }
   }
 
@@ -2065,7 +2064,6 @@ class _AppShellState extends State<AppShell>
       PopupMenuItem<String>(value: 'login', child: TrText('登录'))
     else
       PopupMenuItem<String>(value: 'logout', child: TrText('退出登录')),
-    PopupMenuItem<String>(value: 'settings', child: TrText('设置')),
     PopupMenuItem<String>(
       value: 'platform',
       child: Row(

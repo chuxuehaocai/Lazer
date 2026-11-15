@@ -480,10 +480,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('推荐歌单'), findsOneWidget);
 
-    // 设置 opens the preferences page.
-    await tester.tap(find.byKey(const ValueKey('rail-account')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('设置').last);
+    // 设置 opens from the dedicated rail entry below the account row.
+    await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
     expect(find.text('配色'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -625,9 +623,7 @@ void main() {
     addTearDown(state.dispose);
     await tester.pumpWidget(_legacyApp(state));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('rail-account')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('设置').last);
+    await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
 
     for (final String label in <String>[

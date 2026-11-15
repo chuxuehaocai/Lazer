@@ -29,6 +29,9 @@ const double kHeaderOpacityDefault = 0.72;
 const double kHeaderBlurMin = 0;
 const double kHeaderBlurMax = 32;
 const double kHeaderBlurDefault = 14;
+const double kBottomBarBlurMin = 0;
+const double kBottomBarBlurMax = 32;
+const double kBottomBarBlurDefault = 14;
 
 /// How many cards the library lays its playlists out in per row.
 ///

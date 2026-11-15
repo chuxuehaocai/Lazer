@@ -119,6 +119,51 @@ void main() {
     expect(state.headerOpacity, closeTo(kHeaderOpacityMin, .001));
   });
 
+  testWidgets('bottom capsule blur can be toggled and adjusted', (
+    tester,
+  ) async {
+    final state = await pumpSettings(tester);
+    final switchRow = find.byKey(const ValueKey('bottom-bar-blur-switch'));
+    expect(
+      tester
+          .widget<Switch>(
+            find.descendant(of: switchRow, matching: find.byType(Switch)),
+          )
+          .value,
+      isTrue,
+    );
+    final sliderRow = find.byKey(const ValueKey('bottom-bar-blur-slider'));
+    await tester.drag(
+      find.descendant(of: sliderRow, matching: find.byType(Slider)),
+      const Offset(400, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(state.bottomBarBlur, kBottomBarBlurMax);
+    expect(
+      find.descendant(
+        of: sliderRow,
+        matching: find.text('${kBottomBarBlurMax.round()} px'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.descendant(of: switchRow, matching: find.byType(Switch)),
+    );
+    await tester.pumpAndSettle();
+    expect(state.bottomBarBlurEnabled, isFalse);
+    expect(
+      tester
+          .widget<Slider>(
+            find.descendant(of: sliderRow, matching: find.byType(Slider)),
+          )
+          .onChanged,
+      isNull,
+    );
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('lazer_bottom_bar_blur_enabled'), isFalse);
+    expect(prefs.getDouble('lazer_bottom_bar_blur'), kBottomBarBlurMax);
+  });
+
   testWidgets('the background dark edge is a persisted switch', (tester) async {
     final state = await pumpSettings(tester);
     await state.setAppBackground(AppBackgroundMode.nowPlayingDynamic);

@@ -85,4 +85,44 @@ void main() {
       debugOnRebuildDirtyWidget = null;
     }
   });
+
+  testWidgets('capsule blur can be enabled or disabled', (tester) async {
+    const destinations = [
+      NavigationDestination(icon: Icon(Icons.home), label: '主页'),
+      NavigationDestination(icon: Icon(Icons.search), label: '搜索'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CapsuleNavigationBar(
+            selectedIndex: 0,
+            onDestinationSelected: _noop,
+            destinations: destinations,
+            blurEnabled: true,
+            blurSigma: 22,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byType(BackdropFilter), findsOneWidget);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CapsuleNavigationBar(
+            selectedIndex: 0,
+            onDestinationSelected: _noop,
+            destinations: destinations,
+            blurEnabled: false,
+            blurSigma: 22,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.byType(BackdropFilter), findsNothing);
+  });
 }
+
+void _noop(int _) {}

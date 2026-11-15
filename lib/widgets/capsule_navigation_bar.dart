@@ -17,6 +17,8 @@ class CapsuleNavigationBar extends StatefulWidget {
     required this.onDestinationSelected,
     required this.destinations,
     this.iconOnly = false,
+    this.blurEnabled = true,
+    this.blurSigma = 14,
   }) : assert(destinations.length >= 2),
        assert(selectedIndex >= 0 && selectedIndex < destinations.length);
 
@@ -27,6 +29,10 @@ class CapsuleNavigationBar extends StatefulWidget {
   /// When the available width is tight, keep every tab equal and show only
   /// the selected icon with a circular highlight.
   final bool iconOnly;
+
+  /// Filters the page behind the capsule when enabled.
+  final bool blurEnabled;
+  final double blurSigma;
 
   @override
   State<CapsuleNavigationBar> createState() => _CapsuleNavigationBarState();
@@ -116,7 +122,8 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
         return RepaintBoundary(
           child: AppleGlass(
             borderRadius: BorderRadius.circular(999),
-            color: apple.glassStrong,
+            color: widget.blurEnabled ? apple.glass : apple.glassStrong,
+            blurSigma: widget.blurSigma,
             child: Padding(
               padding: const EdgeInsets.all(6),
               child: SizedBox(

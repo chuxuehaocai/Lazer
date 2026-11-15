@@ -69,7 +69,7 @@ void main() {
     {'host':'*.images.test','artworkResize':{'parameter':'param','value':'{size}y{size}'}},
     {'host':'127.0.0.1','headers':{'Referer':'https://provider.test/'}}
   ]));
-  tearDown(()=>MediaRequestRules.remove('fixture'));
+  tearDown(() => MediaRequestRules.remove('fixture'));
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   test('the flow palette is a five-step ramp on the seed hue', () {
@@ -372,9 +372,7 @@ void main() {
     addTearDown(state.dispose);
     await tester.pumpWidget(_app(_reducedMotion(AppShell(state: state))));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('rail-account')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('设置').last);
+    await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
 
     expect(find.text('背景'), findsOneWidget);
