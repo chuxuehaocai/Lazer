@@ -315,16 +315,12 @@ void main() {
 }
 
 class _RichQrGateway extends _QrGateway {
-  _RichQrGateway({
-    this.sessionInfo = const QrSessionInfo(
-      url: _scanUrl,
-      code: 'AAA-BBB-CCC',
-      hint: '请使用手机相机扫码或浏览器访问',
-      actionUrl: 'https://youtube.com/activate?user_code=AAA-BBB-CCC',
-    ),
-  });
-
-  final QrSessionInfo sessionInfo;
+  final QrSessionInfo sessionInfo = const QrSessionInfo(
+    url: _scanUrl,
+    code: 'AAA-BBB-CCC',
+    hint: '请使用手机相机扫码或浏览器访问',
+    actionUrl: 'https://youtube.com/activate?user_code=AAA-BBB-CCC',
+  );
 
   @override
   Future<QrSessionInfo> qrDetails(String key) async => sessionInfo;

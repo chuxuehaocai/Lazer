@@ -545,7 +545,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: apple.tertiarySystemFill,
+              color: apple.tertiaryFill,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: apple.separator, width: .5),
             ),
