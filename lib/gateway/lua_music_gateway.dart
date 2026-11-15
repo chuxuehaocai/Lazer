@@ -522,6 +522,7 @@ class LuaMusicGateway extends MusicAccountGateway {
                 wordByWord:
                     item['wordByWord'] as String? ?? item['yrc'] as String?,
                 lrc: item['lrc'] as String?,
+                pureMusic: item['pureMusic'] == true,
                 offset: Duration(
                   milliseconds: (item['offsetMs'] as num?)?.toInt() ?? 0,
                 ),

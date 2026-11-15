@@ -1112,24 +1112,27 @@ class _LyricViewportState extends State<LyricViewport>
                   (widget.state.lyricsPureMusic ? '纯音乐' : '这首歌暂未提供歌词'),
               style: context.type.captionMuted,
             ),
-            if (!widget.state.lyricsPureMusic)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  SpringTextButton(
-                    onPressed: () => unawaited(
-                      widget.state.ensureCurrentLyrics(force: true),
-                    ),
-                    child: const TrText('重新加载歌词'),
+            // Both actions stay available whatever the reason the sheet is
+            // empty: a wrongly cached verdict, an expired credential and a
+            // genuinely instrumental track all look the same from here, and
+            // hiding the retry left the listener with no way out.
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                SpringTextButton(
+                  onPressed: () => unawaited(
+                    widget.state.ensureCurrentLyrics(force: true),
                   ),
-                  SpringTextButton(
-                    key: const ValueKey<String>('import-lyrics'),
-                    onPressed: () =>
-                        unawaited(pickAndImportLyrics(context, widget.state)),
-                    child: const TrText('导入歌词'),
-                  ),
-                ],
-              ),
+                  child: const TrText('重新加载歌词'),
+                ),
+                SpringTextButton(
+                  key: const ValueKey<String>('import-lyrics'),
+                  onPressed: () =>
+                      unawaited(pickAndImportLyrics(context, widget.state)),
+                  child: const TrText('导入歌词'),
+                ),
+              ],
+            ),
           ],
         ),
       );
