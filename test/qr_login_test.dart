@@ -315,6 +315,8 @@ void main() {
 }
 
 class _RichQrGateway extends _QrGateway {
+  _RichQrGateway({super.codes = const <int>[801]});
+
   final QrSessionInfo sessionInfo = const QrSessionInfo(
     url: _scanUrl,
     code: 'AAA-BBB-CCC',
@@ -323,5 +325,8 @@ class _RichQrGateway extends _QrGateway {
   );
 
   @override
-  Future<QrSessionInfo> qrDetails(String key) async => sessionInfo;
+  Future<QrSessionInfo> qrDetails(String key) async {
+    await qrUrl(key);
+    return sessionInfo;
+  }
 }

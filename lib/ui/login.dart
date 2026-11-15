@@ -558,7 +558,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                     color: apple.secondaryLabel,
                   ),
                 ),
-                SelectableText(
+                Text(
                   _qrInfo!.code!,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontFamily: 'monospace',
