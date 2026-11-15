@@ -41,6 +41,8 @@ class IosWidgetVersionTest(unittest.TestCase):
     def test_widget_plist_reads_flutter_version_settings(self):
         plist = (REPO / "ios/Widget/Info.plist").read_text(encoding="utf-8")
         self.assertIn("<string>$(FLUTTER_BUILD_NAME)</string>", plist)
+        self.assertIn("<key>CFBundleName</key>", plist)
+        self.assertIn("<string>PlayCount</string>", plist)
         self.assertIn("<string>$(FLUTTER_BUILD_NUMBER)</string>", plist)
         self.assertNotIn("$(MARKETING_VERSION)", plist)
         self.assertNotIn("$(CURRENT_PROJECT_VERSION)", plist)

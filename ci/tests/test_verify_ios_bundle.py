@@ -23,6 +23,7 @@ def bundle_info(
     executable: str | None,
     short_version: str = "2.0.200",
     build_version: str = "200",
+    name: str | None = "Lazer",
 ) -> dict:
     info = {
         "CFBundleIdentifier": identifier,
@@ -30,6 +31,8 @@ def bundle_info(
         "CFBundleShortVersionString": short_version,
         "CFBundleVersion": build_version,
     }
+    if name is not None:
+        info["CFBundleName"] = name
     if executable is not None:
         info["CFBundleExecutable"] = executable
     return info
@@ -66,6 +69,16 @@ class IosBundleMetadataTest(unittest.TestCase):
     def test_valid_app_and_extension_pass(self):
         with tempfile.TemporaryDirectory() as directory:
             VERIFY.verify_app(self.make_app(Path(directory)))
+
+    def test_blank_extension_name_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(Path(directory))
+            info_path = app / "PlugIns/PlayCount.appex/Info.plist"
+            info = plistlib.loads(info_path.read_bytes())
+            info["CFBundleName"] = " "
+            info_path.write_bytes(plistlib.dumps(info))
+            with self.assertRaisesRegex(ValueError, "CFBundleName"):
+                VERIFY.verify_app(app)
 
     def test_missing_extension_executable_key_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

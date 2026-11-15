@@ -36,6 +36,7 @@ def _validate_bundle(info: object, label: str, package_type: str) -> tuple[str, 
             f"{label} has package type {info.get('CFBundlePackageType')!r}, "
             f"expected {package_type!r}"
         )
+    _required_string(info, "CFBundleName", label)
     short_version = _required_string(info, "CFBundleShortVersionString", label)
     if not SHORT_VERSION_PATTERN.fullmatch(short_version):
         raise ValueError(f"{label} has an invalid CFBundleShortVersionString")
