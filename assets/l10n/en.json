@@ -1266,5 +1266,9 @@
   "底部胶囊栏模糊": "Bottom capsule bar blur",
   "让底部胶囊导航与后方背景融合": "Blend the bottom capsule navigation with the backdrop",
   "底部胶囊栏模糊强度": "Bottom capsule bar blur strength",
-  "数值越大，胶囊后方的背景越柔和": "Higher values soften the background behind the capsule"
+  "数值越大，胶囊后方的背景越柔和": "Higher values soften the background behind the capsule",
+  "在浏览器中打开授权页": "Open authorization page in browser",
+  "复制验证码": "Copy verification code",
+  "验证码已复制到剪贴板。": "Verification code copied to clipboard.",
+  "验证码：": "Verification code: "
 }
