@@ -561,7 +561,6 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                 Text(
                   _qrInfo!.code!,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontFamily: 'monospace',
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.2,
                     color: apple.label,

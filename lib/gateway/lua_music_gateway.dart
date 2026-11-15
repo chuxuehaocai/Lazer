@@ -260,7 +260,23 @@ class LuaMusicGateway extends MusicAccountGateway {
       _qrKeys.clear();
       _qrKeys[url] = key;
     }
-    return QrSessionInfo(url: url);
+    String? code;
+    String? actionUrl;
+    final uri = Uri.tryParse(url);
+    if (uri != null) {
+      final queryCode = uri.queryParameters['user_code'] ??
+          uri.queryParameters['userCode'] ??
+          uri.queryParameters['code'];
+      if (queryCode != null && queryCode.isNotEmpty) {
+        code = queryCode;
+        actionUrl = url;
+      }
+    }
+    return QrSessionInfo(
+      url: url,
+      code: code,
+      actionUrl: actionUrl,
+    );
   }
 
   @override
