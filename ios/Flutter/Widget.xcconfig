@@ -1,0 +1,3 @@
+// Version settings only. The app xcconfig also force-loads the audio engine,
+// which an app extension must not link.
+#include "Generated.xcconfig"
