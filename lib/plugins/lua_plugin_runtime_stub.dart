@@ -19,6 +19,8 @@ class LuaPluginRuntime {
     this.websocketGranted = false,
     this.websocketServerGranted = false,
     this.permissionRequester,
+    this.onSettingAdded,
+    this.onPlayerMenuItemAdded,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -32,6 +34,9 @@ class LuaPluginRuntime {
   final bool websocketGranted;
   final bool websocketServerGranted;
   final Future<bool> Function(String permission)? permissionRequester;
+  final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
+  final Future<Object?> Function(Map<String, dynamic> spec)?
+  onPlayerMenuItemAdded;
   Future<void> start() =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<Object?> invoke(

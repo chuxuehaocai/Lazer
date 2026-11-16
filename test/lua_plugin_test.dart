@@ -7,6 +7,7 @@ import 'package:lazer_nextgen/plugins/lua_plugin_runtime.dart';
 import 'package:lazer_nextgen/plugins/plugin_manifest.dart';
 import 'package:lazer_nextgen/plugins/plugin_manager.dart';
 import 'package:lazer_nextgen/plugins/plugin_package.dart';
+import 'package:lazer_nextgen/plugins/plugin_extensions.dart';
 
 void main() {
   test(
@@ -186,6 +187,112 @@ void main() {
     expect(PluginManifest.safePath('../api.lua'), isFalse);
   });
 
+  test(
+    'Lua plugins can register settings and now-playing menu items',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('lazer-lua-ui-');
+      addTearDown(() => directory.delete(recursive: true));
+      final registeredSettings = <Map<String, dynamic>>[];
+      final registeredMenus = <Map<String, dynamic>>[];
+      final runtime = LuaPluginRuntime(
+        manifest: PluginManifest.fromJson(const {
+          'id': 'demo.ui',
+          'name': 'UI Demo',
+          'version': '1.0.0',
+          'provider': 'ui',
+          'apiVersion': 1,
+          'entry': 'main.lua',
+        }),
+        sources: const {
+          'main.lua': '''
+          local quality = host.add_setting({
+            id="quality", type="select", title="音质",
+            default="standard", options={
+              {value="standard", label="标准"},
+              {value="high", label="高"},
+            }
+          })
+          host.add_player_menu_item({
+            id="copy_id", label="复制歌曲 ID", icon="content_copy"
+          })
+          return {call=function(operation, args)
+            if operation == "describe" then return {} end
+            if operation == "setting_changed" then
+              return {id=args.id, value=args.value}
+            end
+            if operation == "player_menu" then
+              return {id=args.id, track=args.track}
+            end
+            return quality
+          end}
+        ''',
+        },
+        dataDirectory: directory.path,
+        onSettingAdded: (spec) async {
+          registeredSettings.add(spec);
+          return spec['default'];
+        },
+        onPlayerMenuItemAdded: (spec) async {
+          registeredMenus.add(spec);
+          return true;
+        },
+      );
+      addTearDown(runtime.close);
+      expect(await runtime.invoke('describe'), isEmpty);
+      expect(registeredSettings.single['id'], 'quality');
+      expect(registeredMenus.single['id'], 'copy_id');
+      expect(
+        await runtime.invoke('setting_changed', {
+          'id': 'quality',
+          'value': 'high',
+        }),
+        {'id': 'quality', 'value': 'high'},
+      );
+      expect(
+        await runtime.invoke('player_menu', {
+          'id': 'copy_id',
+          'track': {'id': 'song-1', 'title': '示例'},
+        }),
+        {
+          'id': 'copy_id',
+          'track': {'id': 'song-1', 'title': '示例'},
+        },
+      );
+    },
+  );
+
+  test('Lua plugin UI extension specs validate before reaching Flutter', () {
+    expect(
+      () => LuaPluginSetting.fromSpec(
+        pluginId: 'demo.ui',
+        pluginName: 'UI Demo',
+        spec: const {'id': 'bad id', 'type': 'toggle', 'title': '无效'},
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => LuaPluginSetting.fromSpec(
+        pluginId: 'demo.ui',
+        pluginName: 'UI Demo',
+        spec: const {
+          'id': 'quality',
+          'type': 'select',
+          'title': '音质',
+          'options': <Object?>[],
+        },
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => LuaPlayerMenuItem.fromSpec(
+        pluginId: 'demo.ui',
+        pluginName: 'UI Demo',
+        spec: const {'id': 'copy_id', 'label': ''},
+      ),
+      throwsFormatException,
+    );
+  });
+
   test('manifest rejects a wildcard over a public suffix', () {
     Map<String, Object> withNetwork(List<String> domains) => <String, Object>{
       'id': 'demo.network',
@@ -291,6 +398,57 @@ void main() {
     await manager.setEnabled('demo.manager', false);
     expect(manager.plugins.single.enabled, isFalse);
   });
+
+  test(
+    'plugin manager exposes registered UI extensions and routes actions',
+    () async {
+      final root = await Directory.systemTemp.createTemp('lazer-plugin-ui-');
+      addTearDown(() => root.delete(recursive: true));
+      final pluginId =
+          'demo.ui-manager-${DateTime.now().microsecondsSinceEpoch}';
+      final manifestBytes = utf8.encode(
+        jsonEncode({
+          'id': pluginId,
+          'name': 'UI Manager',
+          'version': '1.0.0',
+          'provider': 'demo',
+          'apiVersion': 1,
+          'entry': 'main.lua',
+        }),
+      );
+      final sourceBytes = utf8.encode('''
+      host.add_setting({id="enabled", type="toggle", title="启用", default=true})
+      host.add_player_menu_item({id="copy", label="复制", icon="content_copy"})
+      return {call=function(operation, args)
+        if operation == "describe" then return {} end
+        return {operation=operation, id=args.id, value=args.value, track=args.track}
+      end}
+    ''');
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile('manifest.json', manifestBytes.length, manifestBytes),
+        )
+        ..addFile(ArchiveFile('main.lua', sourceBytes.length, sourceBytes));
+      final manager = PluginManager(rootDirectory: root);
+      addTearDown(manager.dispose);
+      final plugin = await manager.importZip(
+        Uint8List.fromList(ZipEncoder().encode(archive)),
+      );
+      expect(plugin.settings.single.id, 'enabled');
+      expect(plugin.playerMenuItems.single.id, 'copy');
+      expect(manager.pluginSettings.single.value, isTrue);
+      expect(manager.playerMenuItems.single.label, '复制');
+      await manager.setPluginSetting(pluginId, 'enabled', false);
+      expect(manager.pluginSettings.single.value, isFalse);
+      await manager.invokePlayerMenu(manager.playerMenuItems.single, const {
+        'id': 'song-1',
+      });
+      final persisted = File(
+        '${root.parent.path}${Platform.pathSeparator}lua_plugin_data${Platform.pathSeparator}$pluginId${Platform.pathSeparator}ui-settings.json',
+      );
+      expect(await persisted.exists(), isTrue);
+    },
+  );
 
   test('a folder zip and Windows paths still resolve the plugin root', () {
     final manifestBytes = utf8.encode(

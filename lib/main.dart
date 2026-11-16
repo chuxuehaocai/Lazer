@@ -470,42 +470,56 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
       case 'network':
         return (
           context.tr('允许插件访问网络？'),
-          context.tr(
-            '插件「${manifest.name}」请求访问以下 HTTPS 域名：\n${manifest.domains.join('\n')}',
-          ),
+          context
+              .tr('插件「{name}」请求访问以下 HTTPS 域名：\n{values}')
+              .replaceAll('{name}', manifest.name)
+              .replaceAll('{values}', manifest.domains.join('\n')),
         );
       case 'socket':
         return (
           context.tr('允许插件建立 Socket 连接？'),
-          context.tr(
-            '插件「${manifest.name}」请求连接以下主机：\n${(manifest.socketDomains.isEmpty ? manifest.domains : manifest.socketDomains).join('\n')}',
-          ),
+          context
+              .tr('插件「{name}」请求连接以下主机：\n{values}')
+              .replaceAll('{name}', manifest.name)
+              .replaceAll(
+                '{values}',
+                (manifest.socketDomains.isEmpty
+                        ? manifest.domains
+                        : manifest.socketDomains)
+                    .join('\n'),
+              ),
         );
       case 'socketServer':
         return (
           context.tr('允许插件监听 Socket 服务？'),
-          context.tr(
-            '插件「${manifest.name}」请求监听以下地址：\n${manifest.socketServerBindings.join('\n')}',
-          ),
+          context
+              .tr('插件「{name}」请求监听以下地址：\n{values}')
+              .replaceAll('{name}', manifest.name)
+              .replaceAll('{values}', manifest.socketServerBindings.join('\n')),
         );
       case 'websocket':
         return (
           context.tr('允许插件连接 WebSocket？'),
-          context.tr(
-            '插件「${manifest.name}」请求连接以下 WebSocket 域名：\n${manifest.websocketDomains.join('\n')}',
-          ),
+          context
+              .tr('插件「{name}」请求连接以下 WebSocket 域名：\n{values}')
+              .replaceAll('{name}', manifest.name)
+              .replaceAll('{values}', manifest.websocketDomains.join('\n')),
         );
       case 'websocketServer':
         return (
           context.tr('允许插件作为 WebSocket 服务端？'),
-          context.tr(
-            '插件「${manifest.name}」请求监听以下地址：\n${manifest.websocketServerBindings.join('\n')}',
-          ),
+          context
+              .tr('插件「{name}」请求监听以下地址：\n{values}')
+              .replaceAll('{name}', manifest.name)
+              .replaceAll(
+                '{values}',
+                manifest.websocketServerBindings.join('\n'),
+              ),
         );
       default:
         return (
           context.tr('允许插件使用额外权限？'),
-          context.tr('插件「${manifest.name}」请求使用额外权限。'),
+          context.tr('插件「{name}」请求使用额外权限。').replaceAll('{name}', manifest.name),
         );
     }
   }

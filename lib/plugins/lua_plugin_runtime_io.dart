@@ -34,6 +34,8 @@ class LuaPluginRuntime {
     this.websocketGranted = false,
     this.websocketServerGranted = false,
     this.permissionRequester,
+    this.onSettingAdded,
+    this.onPlayerMenuItemAdded,
   }) : networkGranted = networkGranted ?? httpHandler != null;
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -50,6 +52,9 @@ class LuaPluginRuntime {
   bool websocketGranted;
   bool websocketServerGranted;
   final Future<bool> Function(String permission)? permissionRequester;
+  final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
+  final Future<Object?> Function(Map<String, dynamic> spec)?
+  onPlayerMenuItemAdded;
   Isolate? _isolate;
   ReceivePort? _port;
   SendPort? _commands;
@@ -105,6 +110,31 @@ class LuaPluginRuntime {
         } catch (_) {
           reply.send({'error': true});
         }
+      } else if (message is Map && message['hostExtension'] is String) {
+        final reply = message['reply'] as SendPort;
+        try {
+          final spec = Map<String, dynamic>.from(
+            message['spec'] as Map? ?? const <String, dynamic>{},
+          );
+          final value = switch (message['hostExtension']) {
+            'setting' =>
+              onSettingAdded == null
+                  ? throw const FormatException(
+                      'Plugin settings are unavailable',
+                    )
+                  : await onSettingAdded!(spec),
+            'playerMenu' =>
+              onPlayerMenuItemAdded == null
+                  ? throw const FormatException(
+                      'Plugin player menu is unavailable',
+                    )
+                  : await onPlayerMenuItemAdded!(spec),
+            _ => throw const FormatException('Unknown plugin extension'),
+          };
+          reply.send({'value': value});
+        } catch (_) {
+          reply.send({'error': true});
+        }
       } else if (message is Map && message['startupError'] != null) {
         if (!ready.isCompleted) {
           ready.completeError(const PluginException('插件启动失败，请检查 Lua 源码。'));
@@ -144,6 +174,8 @@ class LuaPluginRuntime {
           'websocketGranted': websocketGranted,
           'websocketServerGranted': websocketServerGranted,
           'permissionRequester': permissionRequester != null,
+          'uiExtensions':
+              onSettingAdded != null || onPlayerMenuItemAdded != null,
           'proxyMode': SystemHttpProxy.currentMode.name,
           'proxyEndpoint': SystemHttpProxy.customEndpoint,
           'cachedSystemRules': SystemHttpProxy.cachedSystemRules,
@@ -406,6 +438,25 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
             }
           }
         : null,
+    uiExtensions: config['uiExtensions'] == true
+        ? (kind, spec) async {
+            final reply = ReceivePort();
+            try {
+              output.send({
+                'hostExtension': kind,
+                'spec': spec,
+                'reply': reply.sendPort,
+              });
+              final response = await reply.first as Map;
+              if (response['error'] == true) {
+                throw const PluginException('插件扩展注册失败。');
+              }
+              return response['value'];
+            } finally {
+              reply.close();
+            }
+          }
+        : null,
   );
   try {
     await host.initialize();
@@ -487,6 +538,7 @@ class _PluginHost {
     this.websocketGranted = false,
     this.websocketServerGranted = false,
     this.permissionRequester,
+    this.uiExtensions,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -497,6 +549,8 @@ class _PluginHost {
   bool socketGranted, socketServerGranted;
   bool websocketGranted, websocketServerGranted;
   final Future<bool> Function(String permission)? permissionRequester;
+  final Future<Object?> Function(String kind, Map<String, dynamic> spec)?
+  uiExtensions;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   final HttpClient client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 20)
@@ -616,6 +670,24 @@ class _PluginHost {
       storage = next;
       return null;
     });
+    lua.registerAsync('_add_setting', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Plugin settings are unavailable');
+      }
+      final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
+      final value = await uiExtensions!('setting', spec);
+      _push(l, value);
+      return 1;
+    });
+    lua.registerAsync('_add_player_menu_item', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Plugin player menu is unavailable');
+      }
+      final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
+      final value = await uiExtensions!('playerMenu', spec);
+      _push(l, value ?? true);
+      return 1;
+    });
     lua.registerAsync('_http', (l) async {
       final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
       final result = await _http(spec).timeout(const Duration(seconds: 30));
@@ -678,7 +750,8 @@ host = { json_encode = _json_encode, json_decode = _json_decode,
   cookie_merge = _cookie_merge,
   crypto = _crypto, http = _http, websocket = _websocket, websocket_server = _websocket_server,
   socket = _socket, socket_server = _socket_server,
-  storage_get = _storage_get, storage_set = _storage_set }
+  storage_get = _storage_get, storage_set = _storage_set,
+  add_setting = _add_setting, add_player_menu_item = _add_player_menu_item }
 $moduleBuffers
 local modules = {}
 function require(name)

@@ -102,6 +102,52 @@ end
 | `host.cookie_merge(previous, setCookieHeaders)` | 合并响应 Cookie，保留没有被覆盖的凭据字段 |
 | `host.random_hex(count)` / `host.now()` | 随机数和 Unix 毫秒时间 |
 | `host.storage_get(key)` / `host.storage_set(key, value)` | 清单申请存储权限时使用；总量最多 1 MB |
+| `host.add_setting(spec)` | 向设置页注册一个受宿主约束的设置项；返回当前值 |
+| `host.add_player_menu_item(spec)` | 向正在播放页右上角的“三个点”菜单注册一个项目；返回 `true` |
+
+插件可以在入口文件执行时注册设置和正在播放菜单项目。注册是幂等的，同一个插件内重复使用
+相同的 `id` 会更新项目。设置值由宿主持久化，插件通过 `setting_changed` 操作接收变化；
+菜单项目点击后通过 `player_menu` 操作接收当前歌曲的通用 `track` 对象。
+
+```lua
+local quality = host.add_setting({
+  id = "quality",
+  type = "select", -- toggle / select / text / number / action
+  title = "音质",
+  subtitle = "选择播放音质",
+  default = "standard",
+  options = {
+    {value = "standard", label = "标准"},
+    {value = "high", label = "高"},
+  },
+})
+
+host.add_player_menu_item({
+  id = "copy_id",
+  label = "复制歌曲 ID",
+  icon = "content_copy",
+})
+
+return {
+  call = function(operation, args)
+    if operation == "setting_changed" then
+      -- args.id 和 args.value 是宿主保存后的值；action 的 value 为 nil
+      return true
+    end
+    if operation == "player_menu" then
+      -- args.id 是项目 ID，args.track 是当前播放歌曲的通用模型
+      return true
+    end
+    -- 其余平台操作……
+  end
+}
+```
+
+设置规格必须包含 `id` 和 `title`（也可用 `label`）。`select` 需要非空 `options`，
+每项包含字符串 `value` 和 `label`；`number` 可提供 `min`、`max`、`step`；`text` 最多
+保存 2048 个字符；`action` 是一个按钮，不保存值。设置和菜单项目均有数量、长度和类型
+限制，越界或无效规格会被拒绝。`icon` 使用有限的 Material 图标名称，未知名称显示扩展
+图标。插件菜单项目只会在插件启用且运行成功时出现。
 
 `host.http` 是异步函数，插件调用时可以直接使用返回值；嵌套函数、循环和 `pcall` 均支持等待 HTTP。
 返回 `{status,headers,body}`，其中 body 是字符串，多个 Set-Cookie 用换行分隔。

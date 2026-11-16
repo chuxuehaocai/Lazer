@@ -51,6 +51,7 @@ import 'shortcut_settings_page.dart';
 import 'scheduled_pause_settings.dart';
 import '../widgets/music_provider_badge.dart';
 import 'plugin_manager_page.dart';
+import 'plugin_settings.dart';
 import 'developer_console_page.dart';
 import 'custom_image_backdrop.dart';
 
@@ -1567,6 +1568,8 @@ class _SettingsOverview extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (state.pluginManager.pluginSettings.isNotEmpty)
+                    LuaPluginSettingsSection(state: state),
                 ],
                 if (show(_SettingsCategory.network)) ...[
                   const _AppSectionLabel('网络代理'),

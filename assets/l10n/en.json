@@ -1304,5 +1304,21 @@
   "直连、系统代理与自定义端点": "Direct connections, system proxy, and custom endpoints",
   "版本、更新、日志和开源信息": "Version, updates, logs, and open-source information",
   "外观、界面和账户。": "Appearance, interface, and accounts.",
-  "已登录": "Signed in"
+  "已登录": "Signed in",
+  "从插件源安装新的音乐平台": "Install a new music platform from the plugin source",
+  "导入一个插件开始使用": "Import a plugin to get started",
+  "当前平台不支持原生 Socket。": "This platform does not support native Socket.",
+  "插件「{name}」请求使用额外权限。": "Plugin \"{name}\" requests an additional permission.",
+  "插件「{name}」请求监听以下地址：\n{values}": "Plugin \"{name}\" requests listening on these addresses:\n{values}",
+  "插件「{name}」请求访问以下 HTTPS 域名：\n{values}": "Plugin \"{name}\" requests access to these HTTPS domains:\n{values}",
+  "插件「{name}」请求连接以下 WebSocket 域名：\n{values}": "Plugin \"{name}\" requests connections to these WebSocket domains:\n{values}",
+  "插件「{name}」请求连接以下主机：\n{values}": "Plugin \"{name}\" requests connections to these hosts:\n{values}",
+  "插件不存在。": "Plugin not found.",
+  "插件扩展注册失败。": "Plugin extension registration failed.",
+  "插件设置": "Plugin settings",
+  "插件设置不存在。": "Plugin setting not found.",
+  "插件设置值无效。": "Invalid plugin setting value.",
+  "浏览器不支持 Socket 服务端。": "Socket servers are not supported in browsers.",
+  "请选择": "Please choose",
+  "输入内容": "Enter content"
 }
