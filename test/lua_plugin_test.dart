@@ -551,4 +551,67 @@ void main() {
     runtime.close();
     await expectLater(runtime.invoke('ping'), throwsA(isA<PluginException>()));
   });
+
+  test('Lua plugins can invoke host.player_control and receive player_event', () async {
+    final directory = await Directory.systemTemp.createTemp('lazer-control-');
+    addTearDown(() => directory.delete(recursive: true));
+    final controlCalls = <Map<String, dynamic>>[];
+    final runtime = LuaPluginRuntime(
+      manifest: PluginManifest.fromJson(const {
+        'id': 'demo.control',
+        'name': 'Control',
+        'version': '1.0.0',
+        'provider': 'control',
+        'apiVersion': 1,
+        'entry': 'main.lua',
+      }),
+      sources: const {
+        'main.lua': '''
+        local last_event = nil
+        return {
+          call = function(op, args)
+            if op == "do_play" then
+              return host.player_control({ command = "play" })
+            end
+            if op == "do_seek" then
+              return host.player_control({ command = "seek", positionMs = 12000 })
+            end
+            if op == "player_event" then
+              last_event = args
+              return true
+            end
+            if op == "get_last_event" then
+              return last_event
+            end
+          end
+        }
+        ''',
+      },
+      dataDirectory: directory.path,
+      onPlayerControl: (spec) async {
+        controlCalls.add(spec);
+        return {'handled': spec['command']};
+      },
+    );
+    addTearDown(runtime.close);
+
+    final playResult = await runtime.invoke('do_play') as Map;
+    expect(playResult['handled'], 'play');
+    expect(controlCalls.length, 1);
+    expect(controlCalls.first['command'], 'play');
+
+    final seekResult = await runtime.invoke('do_seek') as Map;
+    expect(seekResult['handled'], 'seek');
+    expect(controlCalls.length, 2);
+    expect(controlCalls.last['positionMs'], 12000);
+
+    // Test receiving player_event
+    await runtime.invoke('player_event', {
+      'type': 'track',
+      'data': {'title': 'Test Song', 'duration': 180000},
+    });
+    final eventReceived = await runtime.invoke('get_last_event') as Map;
+    expect(eventReceived['type'], 'track');
+    expect((eventReceived['data'] as Map)['title'], 'Test Song');
+  });
 }

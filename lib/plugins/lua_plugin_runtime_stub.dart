@@ -21,6 +21,7 @@ class LuaPluginRuntime {
     this.permissionRequester,
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
+    this.onPlayerControl,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -37,6 +38,7 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)?
   onPlayerMenuItemAdded;
+  final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
   Future<void> start() =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<Object?> invoke(

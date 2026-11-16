@@ -46,6 +46,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   LazerLayoutDefinition? get activeLayout => null;
   int get skinRevision => 0;
   bool busy = false;
+  Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+  void broadcastPlayerEvent(String type, Map<String, dynamic> data) {}
 
   void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {}
   Future<void> Function(String pluginId)? beforeChange;

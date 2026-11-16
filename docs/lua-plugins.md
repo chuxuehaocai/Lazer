@@ -106,10 +106,21 @@ end
 | `host.storage_get(key)` / `host.storage_set(key, value)` | 清单申请存储权限时使用；总量最多 1 MB |
 | `host.add_setting(spec)` | 向设置页注册一个受宿主约束的设置项；返回当前值 |
 | `host.add_player_menu_item(spec)` | 向正在播放页右上角的“三个点”菜单注册一个项目；返回 `true` |
+| `host.player_control(spec)` | 控制播放器播放、暂停、上下首、进度跳转或调节音量；返回执行结果 |
 
 插件可以在入口文件执行时注册设置和正在播放菜单项目。注册是幂等的，同一个插件内重复使用
 相同的 `id` 会更新项目。设置值由宿主持久化，插件通过 `setting_changed` 操作接收变化；
 菜单项目点击后通过 `player_menu` 操作接收当前歌曲的通用 `track` 对象。
+宿主还会在切歌、歌词更新与播放状态变化时向所有激活插件派发 `player_event` 操作（支持外部推流与挂件联动）。
+
+```lua
+-- 播放控制示例：
+host.player_control({ command = "play" })
+host.player_control({ command = "seek", positionMs = 30000 })
+host.player_control({ command = "volume", volume = 0.8 })
+
+-- 接收宿主广播的播放事件：
+-- operation == "player_event", args.type 为 "track" | "lyric" | "status"
 
 ```lua
 local quality = host.add_setting({

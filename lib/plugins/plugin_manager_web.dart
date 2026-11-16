@@ -83,6 +83,22 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     activeLayout?.toJson().toString(),
   );
   bool busy = false;
+  Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+
+  void broadcastPlayerEvent(String type, Map<String, dynamic> data) {
+    for (final plugin in _plugins) {
+      if (!plugin.enabled || plugin.runtime == null) continue;
+      unawaited(
+        plugin.runtime!
+            .invoke('player_event', {
+              'type': type,
+              'data': data,
+              ...data,
+            })
+            .catchError((Object _) => null),
+      );
+    }
+  }
   bool _disposed = false;
 
   void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {}
@@ -260,6 +276,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             _requestPermission(plugin, permission),
         onSettingAdded: (spec) => _registerSetting(plugin, spec),
         onPlayerMenuItemAdded: (spec) => _registerPlayerMenuItem(plugin, spec),
+        onPlayerControl: (spec) => onPlayerControl?.call(spec),
       );
       plugin.runtime = runtime;
       await runtime.start();

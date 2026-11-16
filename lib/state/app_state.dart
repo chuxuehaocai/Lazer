@@ -180,6 +180,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        _systemWidgets = systemWidgets ?? SystemWidgetsBridge(),
        _shuffleOrder = ShuffleOrder(random: shuffleRandom) {
     addListener(_updateSystemWidget);
+    this.pluginManager.onPlayerControl = _handlePluginPlayerControl;
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
     this.pluginManager.afterChange = _musicPlatforms.synchronizePlugins;
     this.pluginManager.addListener(_onPluginManagerChanged);
@@ -2935,8 +2936,134 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   final SystemWidgetsBridge _systemWidgets;
   bool _systemWidgetsReady = false;
+  String? _lastBroadcastTrackId;
+  DateTime _lastBroadcastStatusAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool? _lastBroadcastPlaying;
+
+  Future<Object?> _handlePluginPlayerControl(Map<String, dynamic> spec) async {
+    final command =
+        (spec['command'] ?? spec['op'] ?? spec['action'])
+            ?.toString()
+            .toLowerCase()
+            .trim();
+    switch (command) {
+      case 'play':
+        play();
+        return true;
+      case 'pause':
+        pause();
+        return true;
+      case 'stop':
+        stop();
+        return true;
+      case 'toggle':
+      case 'toggleplay':
+        togglePlay();
+        return true;
+      case 'next':
+        next();
+        return true;
+      case 'prev':
+      case 'previous':
+        previous();
+        return true;
+      case 'seek':
+        final total = current?.duration;
+        if (total != null && total.inMilliseconds > 0) {
+          final ms =
+              (spec['positionMs'] ?? spec['position'] ?? spec['ms'] as num?)
+                  ?.toDouble();
+          final frac = (spec['fraction'] as num?)?.toDouble();
+          if (ms != null) {
+            seek((ms / total.inMilliseconds).clamp(0.0, 1.0));
+            return true;
+          } else if (frac != null) {
+            seek(frac.clamp(0.0, 1.0));
+            return true;
+          }
+        }
+        return false;
+      case 'volume':
+      case 'setvolume':
+        final vol = (spec['volume'] ?? spec['value'] as num?)?.toDouble();
+        if (vol != null) {
+          await setVolume(vol.clamp(0.0, 1.0));
+          return true;
+        }
+        return false;
+      case 'status':
+      case 'getstatus':
+        return {
+          'state': playing ? 'playing' : 'paused',
+          'position': position.inMilliseconds,
+          'duration':
+              (duration ?? current?.duration ?? Duration.zero).inMilliseconds,
+          'volume': volume,
+        };
+      default:
+        throw FormatException('Unsupported player control command: $command');
+    }
+  }
+
+  void _broadcastPluginPlayerState() {
+    if (_presentationDisposed) return;
+    final track = current;
+    if (track?.id != _lastBroadcastTrackId) {
+      _lastBroadcastTrackId = track?.id;
+      if (track != null) {
+        pluginManager.broadcastPlayerEvent('track', {
+          'id': track.id,
+          'name': track.title,
+          'title': track.title,
+          'artist': track.artists.map((a) => a.name).join(', '),
+          'artists': [
+            for (final a in track.artists) {'id': a.id, 'name': a.name}
+          ],
+          'album': track.albumName ?? '',
+          'albumName': track.albumName ?? '',
+          'coverUrl': track.artworkUrl ?? '',
+          'picUrl': track.artworkUrl ?? '',
+          'duration': track.duration.inMilliseconds,
+          'durationMs': track.duration.inMilliseconds,
+        });
+      }
+    }
+    final now = DateTime.now();
+    final isPlaying = current != null && playing;
+    final stateChanged = _lastBroadcastPlaying != isPlaying;
+    if (stateChanged ||
+        now.difference(_lastBroadcastStatusAt) >=
+            const Duration(milliseconds: 500)) {
+      _lastBroadcastStatusAt = now;
+      _lastBroadcastPlaying = isPlaying;
+      pluginManager.broadcastPlayerEvent('status', {
+        'state': isPlaying ? 'playing' : 'paused',
+        'position': position.inMilliseconds,
+        'duration':
+            (duration ?? current?.duration ?? Duration.zero).inMilliseconds,
+        'volume': volume,
+      });
+    }
+  }
+
+  void _broadcastPluginLyrics() {
+    if (_presentationDisposed) return;
+    pluginManager.broadcastPlayerEvent('lyric', {
+      'lyric': [
+        for (final line in lyrics)
+          {
+            'time': line.time.inMilliseconds,
+            'text': line.text,
+            if (line.translation != null) 'tlyric': line.translation,
+            if (line.romanization != null) 'rlyric': line.romanization,
+          }
+      ],
+      'pureMusic': lyricsPureMusic,
+    });
+  }
 
   void _updateSystemWidget() {
+    _broadcastPluginPlayerState();
     if (!_systemWidgetsReady || _presentationDisposed) return;
     unawaited(
       _systemWidgets.update(
@@ -5012,6 +5139,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricsError = null;
       lyricsLoading = false;
       _rememberLyrics(key);
+      _broadcastPluginLyrics();
       notifyListeners();
     }
 
@@ -5132,6 +5260,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             lyricsError = null;
             lyricsLoading = false;
             _rememberLyrics(key);
+            _broadcastPluginLyrics();
             notifyListeners();
           })
           .catchError((Object _) {}),

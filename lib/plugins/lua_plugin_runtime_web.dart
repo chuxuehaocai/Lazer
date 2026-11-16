@@ -40,6 +40,7 @@ class LuaPluginRuntime {
     this.permissionRequester,
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
+    this.onPlayerControl,
   }) : networkGranted = networkGranted ?? httpHandler != null;
 
   final PluginManifest manifest;
@@ -57,6 +58,7 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)?
   onPlayerMenuItemAdded;
+  final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
 
   final Random _random = Random.secure();
   final http.Client _client = http.Client();
@@ -86,7 +88,9 @@ class LuaPluginRuntime {
       websocketGranted: websocketGranted,
       websocketServerGranted: websocketServerGranted,
       permissionRequester: permissionRequester,
-      uiExtensions: onSettingAdded == null && onPlayerMenuItemAdded == null
+      uiExtensions: onSettingAdded == null &&
+              onPlayerMenuItemAdded == null &&
+              onPlayerControl == null
           ? null
           : (kind, spec) async => switch (kind) {
               'setting' =>
@@ -101,6 +105,12 @@ class LuaPluginRuntime {
                         'Plugin player menu is unavailable',
                       )
                     : onPlayerMenuItemAdded!(spec),
+              'playerControl' =>
+                onPlayerControl == null
+                    ? throw const FormatException(
+                        'Player control is unavailable',
+                      )
+                    : onPlayerControl!(spec),
               _ => throw const FormatException('Unknown plugin extension'),
             },
     );
@@ -325,6 +335,14 @@ class _WebPluginHost {
       _push(state, await uiExtensions!('playerMenu', spec) ?? true);
       return 1;
     });
+    lua.registerAsync('_player_control', (state) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
+      _push(state, await uiExtensions!('playerControl', spec) ?? true);
+      return 1;
+    });
     lua.registerAsync('_http', (state) async {
       final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
       final result = await _http(spec).timeout(const Duration(seconds: 30));
@@ -450,7 +468,8 @@ class _WebPluginHost {
         cookie_merge = _cookie_merge, crypto = _crypto, http = _http,
         websocket = _websocket, websocket_server = _websocket_server,
         storage_get = _storage_get, storage_set = _storage_set,
-        add_setting = _add_setting, add_player_menu_item = _add_player_menu_item }
+        add_setting = _add_setting, add_player_menu_item = _add_player_menu_item,
+        player_control = _player_control }
       $moduleBuffers
       local modules = {}
       function require(name)
