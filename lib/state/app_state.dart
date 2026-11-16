@@ -180,6 +180,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        _systemWidgets = systemWidgets ?? SystemWidgetsBridge(),
        _shuffleOrder = ShuffleOrder(random: shuffleRandom) {
     addListener(_updateSystemWidget);
+    _tickNotifier.addListener(_broadcastPluginPlayerState);
     this.pluginManager.onPlayerControl = _handlePluginPlayerControl;
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
     this.pluginManager.afterChange = _musicPlatforms.synchronizePlugins;
@@ -3004,7 +3005,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  void _broadcastPluginPlayerState() {
+  void _broadcastPluginPlayerState({bool force = false}) {
     if (_presentationDisposed) return;
     final track = current;
     if (track?.id != _lastBroadcastTrackId) {
@@ -3032,7 +3033,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final now = DateTime.now();
     final isPlaying = current != null && playing;
     final stateChanged = _lastBroadcastPlaying != isPlaying;
-    if (stateChanged ||
+    if (force ||
+        stateChanged ||
         now.difference(_lastBroadcastStatusAt) >=
             const Duration(milliseconds: 500)) {
       _lastBroadcastStatusAt = now;
@@ -3887,6 +3889,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     // Position-only change: tick lane, not a structural rebuild.
     _tickNotifier.pulse();
+    _broadcastPluginPlayerState(force: true);
   }
 
   /// Applies a system or remote seek even when a new source is still opening.
@@ -5990,6 +5993,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _failureSubscription?.cancel();
     _bufferPulseTimer?.cancel();
     _ticker?.cancel();
+    _tickNotifier.removeListener(_broadcastPluginPlayerState);
     _tickNotifier.dispose();
     if (_ownsDownloadManager) downloadManager.dispose();
     playbackCache.dispose();
