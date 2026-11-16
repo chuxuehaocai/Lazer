@@ -238,14 +238,51 @@ class LuaMusicGateway extends MusicAccountGateway {
   }
 
   @override
-  Future<String> qrUrl(String key) async {
-    final url =
-        (await _call('qrUrl', {'key': key, 'web': kIsWeb}))?.toString() ?? '';
+  Future<String> qrUrl(String key) async => (await qrDetails(key)).url;
+
+  @override
+  Future<QrSessionInfo> qrDetails(String key) async {
+    final raw = await _call('qrUrl', {
+      'key': key,
+      'web': kIsWeb,
+      'rich': true,
+    });
+    if (raw is Map) {
+      final url = raw['url']?.toString() ?? '';
+      if (url.isNotEmpty) {
+        _qrKeys.clear();
+        _qrKeys[url] = key;
+      }
+      return QrSessionInfo(
+        url: url,
+        code: raw['code']?.toString() ?? raw['userCode']?.toString(),
+        hint: raw['hint']?.toString() ?? raw['instructions']?.toString(),
+        actionUrl:
+            raw['actionUrl']?.toString() ?? raw['browserUrl']?.toString(),
+      );
+    }
+    final url = raw?.toString() ?? '';
     if (url.isNotEmpty) {
       _qrKeys.clear();
       _qrKeys[url] = key;
     }
-    return url;
+    String? code;
+    String? actionUrl;
+    final uri = Uri.tryParse(url);
+    if (uri != null) {
+      final queryCode = uri.queryParameters['user_code'] ??
+          uri.queryParameters['userCode'] ??
+          uri.queryParameters['code'];
+      if (queryCode != null && queryCode.isNotEmpty) {
+        code = queryCode;
+        actionUrl = url;
+      }
+    }
+    return QrSessionInfo(
+      url: url,
+      code: code,
+      actionUrl: actionUrl,
+    );
   }
 
   @override
