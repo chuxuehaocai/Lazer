@@ -46,6 +46,12 @@ class LuaPluginRuntime {
     Map<String, dynamic> args = const {},
     Duration? budget,
   ]) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  /// Completes once the runtime holds no worker or listener.
+  ///
+  /// The native implementation waits for its isolate to release the listen
+  /// ports; the browser build has nothing to release, so this is immediate.
+  Future<void> get settled => Future<void>.value();
+
   Future<void> shutdown() async {
     close();
   }

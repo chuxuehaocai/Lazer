@@ -663,8 +663,6 @@ void main() {
         hifiSettings: hifi.settings,
         artworkSeedLoader: (_) async => null,
       );
-      addTearDown(app.dispose);
-      addTearDown(hifi.dispose);
       final packageFile = File('${directory.path}/test-plugin.zip');
       await tester.runAsync(() async {
         await packageFile.writeAsBytes(_package());
@@ -743,6 +741,17 @@ void main() {
         same(retainedHifi),
       );
       await tester.pumpWidget(const SizedBox.shrink());
+      // Dispose inside the body, not in addTearDown: the framework checks for
+      // pending timers as soon as the body returns, and before tearDowns run. A
+      // plugin call still in flight holds its 40 s guard until the runtime shuts
+      // down, so leaving that to addTearDown made this test fail on whichever run
+      // the import happened to still be settling.
+      app.dispose();
+      hifi.dispose();
+      // Awaiting the real teardown instead of pumping a guessed delay: the worker
+      // closes its listeners on a live isolate, which needs real async time.
+      await tester.runAsync(() => plugins.shutdownSettled);
+      await tester.pump();
     },
   );
 

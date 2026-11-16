@@ -49,6 +49,18 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
   void broadcastPlayerEvent(String type, Map<String, dynamic> data) {}
 
+  /// Completes once every installed plugin has released its worker.
+  ///
+  /// Paired with [dispose], which cannot await. This variant has no worker to
+  /// wait for, so it completes immediately.
+  Future<void> get shutdownSettled => Future.wait<void>(
+    <Future<void>>[
+      for (final plugin in _plugins)
+        plugin.runtime?.settled ?? Future<void>.value(),
+    ],
+  );
+
+
   void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {}
   Future<void> Function(String pluginId)? beforeChange;
   Future<void> Function()? afterChange;

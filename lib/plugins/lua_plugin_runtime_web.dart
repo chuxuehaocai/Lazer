@@ -166,6 +166,12 @@ class LuaPluginRuntime {
     return result.future.timeout(budget ?? timeout);
   }
 
+  /// Completes once the runtime holds no worker or listener.
+  ///
+  /// The native implementation waits for its isolate to release the listen
+  /// ports; the browser build has nothing to release, so this is immediate.
+  Future<void> get settled => Future<void>.value();
+
   Future<void> shutdown() async {
     close();
   }

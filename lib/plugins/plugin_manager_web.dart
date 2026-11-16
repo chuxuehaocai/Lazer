@@ -611,6 +611,17 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  /// Completes once every installed plugin has released its worker.
+  ///
+  /// Paired with [dispose], which cannot await. This variant has no worker to
+  /// wait for, so it completes immediately.
+  Future<void> get shutdownSettled => Future.wait<void>(
+    <Future<void>>[
+      for (final plugin in _plugins)
+        plugin.runtime?.settled ?? Future<void>.value(),
+    ],
+  );
+
   @override
   void dispose() {
     _disposed = true;

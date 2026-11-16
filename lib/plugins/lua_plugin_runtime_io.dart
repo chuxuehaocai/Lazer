@@ -63,6 +63,18 @@ class LuaPluginRuntime {
   Future<void>? _starting;
   Future<void> _calls = Future.value();
   final Map<int, Completer<Object?>> _pending = {};
+  /// The wall-clock guard for each in-flight call.
+  ///
+  /// `Future.timeout` cannot be used: it owns a timer of its own that only dies
+  /// when the future settles, and `close()` cannot await its teardown. A call
+  /// still in flight when the plugin is disabled therefore left a 40 s timer
+  /// running past disposal, which is both a leak and - in widget tests - an
+  /// "A Timer is still pending even after the widget tree was disposed" failure.
+  /// Holding the timer here lets teardown cancel it synchronously.
+  final Map<int, Timer> _guards = {};
+  /// The startup handshake, so teardown can settle a VM that never signalled
+  /// ready instead of leaving its guard to expire on its own.
+  Completer<void>? _ready;
   int _serial = 0;
 
   /// Whether the current VM is unusable. Cleared by [_reset], which is how a
@@ -75,6 +87,41 @@ class LuaPluginRuntime {
   /// from sources that cannot start). A reset never sets this.
   bool _disposed = false;
 
+  /// Starts the clock for one call; the caller must [Timer.cancel] it.
+  Timer _armGuard(int id, Completer<Object?> result, Duration budget) {
+    final guard = Timer(budget, () {
+      _guards.remove(id);
+      if (result.isCompleted) return;
+      result.completeError(
+        TimeoutException('the plugin did not answer in time', budget),
+      );
+    });
+    _guards[id] = guard;
+    return guard;
+  }
+
+  void _disarmGuard(int id) {
+    _guards.remove(id)?.cancel();
+  }
+
+  /// Fails every in-flight call and cancels its guard, synchronously.
+  ///
+  /// Synchronous on purpose: [close] cannot await, and anything still pending
+  /// when this returns is a timer the object no longer owns.
+  void _releasePending(Object error) {
+    for (final guard in _guards.values) {
+      guard.cancel();
+    }
+    _guards.clear();
+    for (final pending in _pending.values) {
+      if (!pending.isCompleted) pending.completeError(error);
+    }
+    _pending.clear();
+    final ready = _ready;
+    _ready = null;
+    if (ready != null && !ready.isCompleted) ready.completeError(error);
+  }
+
   Future<void> start() {
     if (_disposed) {
       return Future<void>.error(const PluginException('插件已停止，请重新启用。'));
@@ -85,7 +132,7 @@ class LuaPluginRuntime {
   Future<void> _start() async {
     if (_disposed || _closed) throw const PluginException('插件已停止。');
     AppLog.shared.event('lua', 'starting', {'plugin': manifest.id});
-    final ready = Completer<void>();
+    final ready = _ready = Completer<void>();
     final port = _port = ReceivePort();
     port.listen((dynamic message) async {
       if (message is SendPort) {
@@ -199,7 +246,21 @@ class LuaPluginRuntime {
         return;
       }
       _isolate = isolate;
-      await ready.future.timeout(timeout);
+      // Cancellable, not `Future.timeout`: teardown settles this completer, and a
+      // timer this object does not own would outlive the plugin.
+      final guard = Timer(timeout, () {
+        if (!ready.isCompleted) {
+          ready.completeError(
+            TimeoutException('the plugin VM did not start in time', timeout),
+          );
+        }
+      });
+      try {
+        await ready.future;
+      } finally {
+        guard.cancel();
+        if (identical(_ready, ready)) _ready = null;
+      }
       AppLog.shared.event('lua', 'started', {'plugin': manifest.id});
     } catch (_) {
       AppLog.shared.event('lua', 'startup_failed', {'plugin': manifest.id});
@@ -269,9 +330,11 @@ class LuaPluginRuntime {
     });
     final result = Completer<Object?>();
     _pending[id] = result;
+    _armGuard(id, result, budget ?? timeout);
     _commands!.send({'id': id, 'operation': operation, 'args': args});
     try {
-      final value = await result.future.timeout(budget ?? timeout);
+      final value = await result.future;
+      _disarmGuard(id);
       AppLog.shared.event('lua', 'completed', {
         'plugin': manifest.id,
         'operation': operation,
@@ -283,6 +346,7 @@ class LuaPluginRuntime {
       // The VM is unresponsive, not gone: drop the isolate and let the next call
       // start a fresh one. The answer to this call is gone, so it reports the
       // timeout and the caller may repeat it once against the new VM.
+      _disarmGuard(id);
       _pending.remove(id);
       await _reset();
       AppLog.shared.event('lua', 'timeout', {
@@ -295,6 +359,7 @@ class LuaPluginRuntime {
         code: PluginException.timeoutCode,
       );
     } on PluginException catch (error) {
+      _disarmGuard(id);
       if (error.code == PluginException.timeoutCode) {
         // Instruction-budget failures leave the Lua stack in the same state as
         // a wall-clock timeout. Recreate the isolate before the next stream
@@ -315,6 +380,7 @@ class LuaPluginRuntime {
       }
       rethrow;
     } catch (_) {
+      _disarmGuard(id);
       AppLog.shared.event('lua', 'failed', {
         'plugin': manifest.id,
         'operation': operation,
@@ -335,9 +401,14 @@ class LuaPluginRuntime {
         final id = ++_serial;
         final pending = Completer<Object?>();
         _pending[id] = pending;
-        _commands!.send({'id': id, 'source': source});
-        final value = await pending.future.timeout(timeout);
-        result.complete(List<String>.from(value as List));
+        _armGuard(id, pending, timeout);
+        try {
+          _commands!.send({'id': id, 'source': source});
+          final value = await pending.future;
+          result.complete(List<String>.from(value as List));
+        } finally {
+          _disarmGuard(id);
+        }
       } catch (error, stack) {
         if (error is TimeoutException) close();
         result.completeError(error, stack);
@@ -348,6 +419,14 @@ class LuaPluginRuntime {
 
   Future<void>? _closing;
 
+  /// Completes once the worker has released its listeners, or immediately when
+  /// the runtime was never started.
+  ///
+  /// [close] cannot be awaited by its callers, so this is how a test - or a
+  /// restart that has to rebind the same port - waits for the teardown to
+  /// actually finish instead of guessing a delay.
+  Future<void> get settled => _closing ?? Future<void>.value();
+
   void close() {
     unawaited(shutdown());
   }
@@ -357,6 +436,11 @@ class LuaPluginRuntime {
   Future<void> shutdown() {
     if (_disposed) return _closing ?? Future<void>.value();
     _disposed = true;
+    _closed = true;
+    // Release callers before the first await. `close()` is synchronous and
+    // unawaited by every caller, so anything still waiting here would keep its
+    // guard timer alive after the object is gone.
+    _releasePending(const PluginException('插件已停止。'));
     return _closing = _teardown();
   }
 
@@ -374,12 +458,16 @@ class LuaPluginRuntime {
     _isolate = null;
     _port = null;
     _commands = null;
+    // `_releasePending` now rejects a startup handshake that used to hang, and a
+    // caller that gave up on `start()` would otherwise leave that rejection
+    // unhandled. Own it here instead of letting it reach the zone.
+    final starting = _starting;
     _starting = null;
-    for (final pending in _pending.values) {
-      pending.completeError(const PluginException('插件已停止。'));
-    }
-    _pending.clear();
+    if (starting != null) unawaited(starting.catchError((Object _) {}));
+    _releasePending(const PluginException('插件已停止。'));
     port?.close();
+    // The worker closes its own listeners before it exits. Killing it first left
+    // the websocket server bound, so a restart on the same port failed to bind.
     if (commands != null) {
       final released = ReceivePort();
       commands.send({'action': 'close', 'reply': released.sendPort});
