@@ -240,6 +240,7 @@ class LuaMusicGateway extends MusicAccountGateway {
     final raw = await _call('qrUrl', {
       'key': key,
       'web': kIsWeb,
+      'rich': true,
     });
     if (raw is Map) {
       final url = raw['url']?.toString() ?? '';
