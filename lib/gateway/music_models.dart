@@ -334,6 +334,7 @@ class MusicLyrics {
     this.romanization,
     this.wordRomanization,
     this.ttml,
+    this.pureMusic = false,
   }) : lines = List.unmodifiable(lines);
 
   final List<MusicLyricLine> lines;
@@ -345,6 +346,13 @@ class MusicLyrics {
   final String? translation;
   final String? wordTranslation;
   final String? romanization, wordRomanization, ttml;
+
+  /// The provider states this track has no lyrics by design.
+  ///
+  /// Only an explicit claim may cache a track as instrumental. An empty reply
+  /// means the provider could not answer — a missing capability, an expired
+  /// credential, a transient service gap — and must stay retryable.
+  final bool pureMusic;
 }
 
 class MusicPlayRecord {

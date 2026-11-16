@@ -1337,5 +1337,11 @@
   "WebSocket 实时通信": "WebSocket Real-time Communication",
   "WebSocket 服务端": "WebSocket Server",
   "本地数据存储": "Local Data Storage",
-  "网络访问权限": "Network Access Permissions"
+  "网络访问权限": "Network Access Permissions",
+  "清除歌词缓存": "Clear lyrics cache",
+  "下次播放时重新获取歌词": "Lyrics are fetched again on the next play",
+  "已清除 {count} 首歌词": "Cleared lyrics for {count} songs",
+  "清除歌词缓存？": "Clear Lyrics Cache?",
+  "确定要清空本地缓存的 {count} 首歌词吗？清除后下次播放将重新从网络获取。": "Are you sure you want to clear {count} cached lyrics? They will be fetched again on next playback.",
+  "当前暂无已缓存的歌词。": "No cached lyrics found."
 }

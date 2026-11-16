@@ -15,8 +15,7 @@ import '../animation/apple_spring.dart';
 
 import '../audio/audio_device_report.dart';
 import '../cache/playback_cache_settings.dart';
-import '../data/audio_quality.dart';
-import '../data/track_transition.dart';
+import '../data/audio_quality.dart';import '../data/track_transition.dart';
 import '../diagnostics/build_info.dart';
 import '../diagnostics/console_window.dart';
 import '../diagnostics/app_log.dart';
@@ -46,6 +45,7 @@ import '../utils/byte_format.dart';
 import '../widgets/ui_scaling.dart';
 import 'login.dart';
 import 'widgets.dart';
+import 'lyrics_cache_settings.dart';
 import 'font_settings_page.dart';
 import 'shortcut_settings_page.dart';
 import 'scheduled_pause_settings.dart';
@@ -955,6 +955,11 @@ class _SettingsOverview extends StatelessWidget {
                     const _AppSectionLabel('数据存储'),
                     const StorageSettings(),
                   ],
+                  const _AppSectionLabel('歌词'),
+                  LyricsCacheSettings(
+                    onClear: state.catalog.clearLyricsCache,
+                    onCount: state.catalog.countLyricsCache,
+                  ),
                   const _AppSectionLabel('下载'),
                   PlaybackCacheSettings(controller: state.playbackCache),
                   const SizedBox(height: SettingsSpacing.groupGap),
