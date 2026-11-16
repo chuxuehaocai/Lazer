@@ -3052,12 +3052,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (_presentationDisposed) return;
     pluginManager.broadcastPlayerEvent('lyric', {
       'lyric': [
-        for (final line in lyrics)
+        for (var i = 0; i < lyrics.length; i++)
           {
-            'time': line.time.inMilliseconds,
-            'text': line.text,
-            if (line.translation != null) 'tlyric': line.translation,
-            if (line.romanization != null) 'rlyric': line.romanization,
+            'time': lyrics[i].time.inMilliseconds,
+            'startTime': lyrics[i].time.inMilliseconds,
+            'endTime': (i + 1 < lyrics.length)
+                ? lyrics[i + 1].time.inMilliseconds
+                : (lyrics[i].time + const Duration(seconds: 4)).inMilliseconds,
+            'text': lyrics[i].text,
+            if (lyrics[i].translation != null) ...{
+              'tlyric': lyrics[i].translation,
+              'translatedLyric': lyrics[i].translation,
+            },
+            if (lyrics[i].romanization != null) ...{
+              'rlyric': lyrics[i].romanization,
+              'romanLyric': lyrics[i].romanization,
+            },
           }
       ],
       'pureMusic': lyricsPureMusic,
