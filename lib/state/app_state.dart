@@ -3020,6 +3020,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           ],
           'album': track.album,
           'albumName': track.album,
+          'cover': track.coverUrl ?? '',
+          'coverOriginal': track.coverUrl ?? '',
           'coverUrl': track.coverUrl ?? '',
           'picUrl': track.coverUrl ?? '',
           'duration': track.duration.inMilliseconds,
