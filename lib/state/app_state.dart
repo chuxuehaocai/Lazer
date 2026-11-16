@@ -5117,6 +5117,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // and of whether the player page has ever been mounted.
     currentArtwork.update(track);
     notifyListeners();
+    _broadcastPluginLyrics();
     if (track == null || key == null) return Future<void>.value();
     if (cached != null) {
       _lyricSnapshots[key] = cached;
@@ -5250,7 +5251,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricsError = '歌词暂时无法加载。';
     }
     lyricsLoading = false;
-    if (cacheable || lyricsImported || localOnly) _rememberLyrics(key);
+    if (cacheable || lyricsImported || localOnly) {
+      _rememberLyrics(key);
+      _broadcastPluginLyrics();
+    }
     notifyListeners();
   }
 
