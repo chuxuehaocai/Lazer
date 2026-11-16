@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000071 /* MiSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000073 /* MiSans-Regular.ttf */; };
 		A10000000000000000000072 /* MiSans-Semibold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000074 /* MiSans-Semibold.ttf */; };
+		A10000000000000000000082 /* LazerAppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000081 /* LazerAppGroup.swift */; };
+		A10000000000000000000083 /* LazerAppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000081 /* LazerAppGroup.swift */; };
 		A10000000000000000000001 /* PlayCountWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* PlayCountWidget.swift */; };
 		A10000000000000000000002 /* LazerPlayCountWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* LazerPlayCountWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
 		A10000000000000000000041 /* WidgetAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000042 /* WidgetAssets.xcassets */; };
@@ -69,6 +71,7 @@
 /* Begin PBXFileReference section */
 		A10000000000000000000073 /* MiSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../assets/fonts/MiSans-Regular.ttf"; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000074 /* MiSans-Semibold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../assets/fonts/MiSans-Semibold.ttf"; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000081 /* LazerAppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LazerAppGroup.swift; sourceTree = "<group>"; };
 		A10000000000000000000011 /* PlayCountWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayCountWidget.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* LazerPlayCountWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = LazerPlayCountWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000013 /* Widget Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -122,6 +125,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A10000000000000000000091 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000081 /* LazerAppGroup.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		A10000000000000000000005 /* Widget */ = {
 			isa = PBXGroup;
 			children = (
@@ -163,6 +174,7 @@
 			children = (
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,
+				A10000000000000000000091 /* Shared */,
 				A10000000000000000000005 /* Widget */,
 				97C146EF1CF9000F007C117D /* Products */,
 				331C8082294A63A400263BE5 /* RunnerTests */,
@@ -399,6 +411,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000001 /* PlayCountWidget.swift in Sources */,
+				A10000000000000000000083 /* LazerAppGroup.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -415,6 +428,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
+				A10000000000000000000082 /* LazerAppGroup.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 			);

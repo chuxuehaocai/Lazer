@@ -4,7 +4,11 @@
 <dict>
   <key>com.apple.security.application-groups</key>
   <array>
-    <string>group.dev.naominet.lazer</string>
+    <!-- Must match `LAZER_APP_GROUP_IDENTIFIER` in ios/Flutter/LazerAppGroup.xcconfig
+         and the same key in Widget.entitlements. ci/verify-ios-bundle.py fails the
+         build when the two sides disagree, because a mismatch empties the widget
+         while every other check still passes. -->
+    <string>$(LAZER_APP_GROUP_IDENTIFIER)</string>
   </array>
 </dict>
 </plist>

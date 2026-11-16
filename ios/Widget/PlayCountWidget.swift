@@ -3,7 +3,9 @@ import SwiftUI
 import UIKit
 import WidgetKit
 
-private let widgetSuite = "group.dev.naominet.lazer"
+/// The App Group shared with the app, resolved from this bundle's Info.plist so a
+/// re-signed install can use a group its own team owns.
+private let widgetSuite = LazerAppGroup.identifier
 
 fileprivate struct RecentPlayback: Decodable {
   let title: String

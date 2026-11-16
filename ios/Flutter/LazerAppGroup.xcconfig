@@ -1,0 +1,8 @@
+// The App Group the widget extension and the app share.
+//
+// It is a build setting, not a literal in Swift: a re-signed install has to use a
+// group registered to *its own* team, and rewriting a plist is something a
+// sideload tool or a shell script can do without an Xcode build. The resolved
+// value lands in both Info.plists as `LazerAppGroupIdentifier`, which is what the
+// Swift code reads at runtime.
+LAZER_APP_GROUP_IDENTIFIER = group.dev.naominet.lazer

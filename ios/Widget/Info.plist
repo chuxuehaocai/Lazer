@@ -16,6 +16,9 @@
   <string>$(FLUTTER_BUILD_NAME)</string>
   <key>CFBundleVersion</key>
   <string>$(FLUTTER_BUILD_NUMBER)</string>
+  <!-- The App Group shared with the app; see Runner/Info.plist. -->
+  <key>LazerAppGroupIdentifier</key>
+  <string>$(LAZER_APP_GROUP_IDENTIFIER)</string>
   <key>UIAppFonts</key>
   <array>
     <string>MiSans-Regular.ttf</string>

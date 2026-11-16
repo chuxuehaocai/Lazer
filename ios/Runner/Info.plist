@@ -74,6 +74,11 @@
 			</array>
 		</dict>
 	</dict>
+	<!-- The App Group shared with the widget extension. Resolved from
+	     LAZER_APP_GROUP_IDENTIFIER so a re-signed install can point the app at
+	     a group registered to its own team without recompiling Swift. -->
+	<key>LazerAppGroupIdentifier</key>
+	<string>$(LAZER_APP_GROUP_IDENTIFIER)</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

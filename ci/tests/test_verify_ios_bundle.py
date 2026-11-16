@@ -50,10 +50,17 @@ class SharedContainerContractTest(unittest.TestCase):
         group = VERIFY.verify_shared_container_contract(REPO)
         self.assertTrue(group.startswith("group."))
 
-    def _project_with(self, runner_groups, widget_groups) -> Path:
+    def _project_with(
+        self,
+        runner_groups,
+        widget_groups,
+        *,
+        configured: str | None = "group.dev.naominet.lazer",
+    ) -> Path:
         root = Path(tempfile.mkdtemp())
         (root / "ios/Runner").mkdir(parents=True)
         (root / "ios/Widget").mkdir(parents=True)
+        (root / "ios/Flutter").mkdir(parents=True)
         (root / "ios/Runner/Runner.entitlements").write_bytes(
             plistlib.dumps(
                 {"com.apple.security.application-groups": runner_groups}
@@ -64,6 +71,12 @@ class SharedContainerContractTest(unittest.TestCase):
                 {"com.apple.security.application-groups": widget_groups}
             )
         )
+        if configured is not None:
+            (root / VERIFY.APP_GROUP_XCCONFIG).write_text(
+                "# fixture\n"
+                f"{VERIFY.XCCONFIG_SETTING} = {configured}\n",
+                encoding="utf-8",
+            )
         return root
 
     def test_a_widget_with_no_group_is_rejected(self):
@@ -81,7 +94,7 @@ class SharedContainerContractTest(unittest.TestCase):
         root = self._project_with(
             ["group.dev.naominet.lazer"], ["group.dev.naominet.other"]
         )
-        with self.assertRaisesRegex(ValueError, "share no application group"):
+        with self.assertRaisesRegex(ValueError, "different application groups?"):
             VERIFY.verify_shared_container_contract(root)
 
     def test_a_group_without_the_group_prefix_is_rejected(self):
@@ -89,6 +102,52 @@ class SharedContainerContractTest(unittest.TestCase):
             ["dev.naominet.lazer"], ["dev.naominet.lazer"]
         )
         with self.assertRaisesRegex(ValueError, "invalid application group"):
+            VERIFY.verify_shared_container_contract(root)
+
+    def test_a_build_setting_resolves_to_the_configured_group(self):
+        root = self._project_with(
+            ["$(LAZER_APP_GROUP_IDENTIFIER)"],
+            ["$(LAZER_APP_GROUP_IDENTIFIER)"],
+            configured="group.com.example.resigned",
+        )
+        self.assertEqual(
+            VERIFY.verify_shared_container_contract(root),
+            "group.com.example.resigned",
+        )
+
+    def test_a_variable_with_no_definition_is_rejected(self):
+        root = self._project_with(
+            ["$(LAZER_APP_GROUP_IDENTIFIER)"],
+            ["$(LAZER_APP_GROUP_IDENTIFIER)"],
+            configured=None,
+        )
+        with self.assertRaisesRegex(ValueError, "does not define"):
+            VERIFY.verify_shared_container_contract(root)
+
+    def test_a_variable_the_project_never_defines_is_rejected(self):
+        root = self._project_with(
+            ["$(SOME_OTHER_GROUP)"], ["$(SOME_OTHER_GROUP)"]
+        )
+        with self.assertRaisesRegex(ValueError, "not a build setting"):
+            VERIFY.verify_shared_container_contract(root)
+
+    def test_a_literal_on_one_side_and_a_variable_on_the_other_is_rejected(self):
+        # Xcode substitutes one build setting into both files; a split means one
+        # bundle joins a group the other never looks at.
+        root = self._project_with(
+            ["group.dev.naominet.lazer"], ["$(LAZER_APP_GROUP_IDENTIFIER)"]
+        )
+        with self.assertRaisesRegex(ValueError, "different application"):
+            VERIFY.verify_shared_container_contract(root)
+
+    def test_more_than_one_group_is_rejected(self):
+        # The runtime reads exactly one identifier from Info.plist, so a second
+        # entry would silently be ignored instead of shared.
+        root = self._project_with(
+            ["$(LAZER_APP_GROUP_IDENTIFIER)", "group.example.other"],
+            ["$(LAZER_APP_GROUP_IDENTIFIER)", "group.example.other"],
+        )
+        with self.assertRaisesRegex(ValueError, "exactly one group"):
             VERIFY.verify_shared_container_contract(root)
 
 

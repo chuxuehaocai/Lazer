@@ -27,7 +27,10 @@ enum WidgetWriteStatus: String {
 /// widget that actually exists.
 let widgetKind = "LazerPlayCountWidget"
 /// The one container the app writes and the extension reads.
-let widgetSuite = "group.dev.naominet.lazer"
+///
+/// Resolved from `Info.plist` so a re-signed install can point both bundles at a
+/// group its own team owns; see `ios/Shared/LazerAppGroup.swift`.
+let widgetSuite = LazerAppGroup.identifier
 /// The snapshot the extension decodes.
 let widgetSnapshot = "recent-playback.json"
 /// Prefix of the cover files the extension reads beside the snapshot.

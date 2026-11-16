@@ -80,3 +80,10 @@ toolchains; they cannot be compiled or exercised by the Windows build host.
 References: [audio_service](https://pub.dev/packages/audio_service),
 [MPRIS adapter](https://pub.dev/packages/audio_service_mpris),
 [Microsoft SMTC timeline](https://learn.microsoft.com/en-us/uwp/api/windows.media.systemmediatransportcontrols.updatetimelineproperties).
+
+## iOS widget and re-signing
+
+The home-screen widget reads an App Group container, which is registered per
+developer team. A re-signed install therefore has to point both bundles at a
+group its own team owns; see `docs/ios-widget-and-resigning.md` and
+`ci/resign-ios-ipa.sh`.

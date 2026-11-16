@@ -81,6 +81,44 @@ def _entitlements(path: Path, label: str) -> dict:
     return value
 
 
+XCCONFIG_SETTING = "LAZER_APP_GROUP_IDENTIFIER"
+APP_GROUP_XCCONFIG = Path("ios/Flutter/LazerAppGroup.xcconfig")
+
+
+def _xcconfig_setting(path: Path, name: str) -> str | None:
+    """The last assignment of ``name`` in an xcconfig, which is the one that wins."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        # A missing settings file means the setting is simply not defined; the
+        # caller reports that as the actionable problem.
+        return None
+    value = None
+    for raw in text.splitlines():
+        line = raw.split("//", 1)[0].strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, assigned = line.partition("=")
+        if key.strip() == name:
+            value = assigned.strip()
+    return value
+
+
+def _group_entry(entitlements: dict) -> str:
+    """The single application-group entry, which may still hold an xcconfig variable."""
+    groups = entitlements.get(APP_GROUP_KEY)
+    if not isinstance(groups, list) or not groups:
+        return ""
+    if len(groups) != 1:
+        raise ValueError(
+            f"{APP_GROUP_KEY} must name exactly one group, found {groups!r}"
+        )
+    entry = groups[0]
+    if not isinstance(entry, str) or not entry:
+        raise ValueError(f"{APP_GROUP_KEY} has an invalid entry: {entry!r}")
+    return entry
+
+
 def verify_shared_container_contract(repo: Path) -> str:
     """The widget can only read what the app writes into one shared App Group.
 
@@ -99,32 +137,50 @@ def verify_shared_container_contract(repo: Path) -> str:
         repo / "ios" / "Widget" / "Widget.entitlements",
         "Widget.entitlements",
     )
-    app_groups = runner.get(APP_GROUP_KEY)
-    widget_groups = widget.get(APP_GROUP_KEY)
-    if not isinstance(app_groups, list) or not app_groups:
+    runner_entry = _group_entry(runner)
+    widget_entry = _group_entry(widget)
+    if not runner_entry:
         raise ValueError(
             "Runner.entitlements declares no application groups, so the widget "
             "extension cannot read the app's playback snapshot"
         )
-    if not isinstance(widget_groups, list) or not widget_groups:
+    if not widget_entry:
         raise ValueError(
             "Widget.entitlements declares no application groups, so the "
             "extension cannot read the app's playback snapshot"
         )
-    for name, groups in (
-        ("Runner.entitlements", app_groups),
-        ("Widget.entitlements", widget_groups),
-    ):
-        for group in groups:
-            if not isinstance(group, str) or not group.startswith("group."):
-                raise ValueError(f"{name} has an invalid application group: {group!r}")
-    shared = sorted(set(app_groups) & set(widget_groups))
-    if not shared:
+    # Both sides must name the same thing, whether that is one literal or one
+    # variable: Xcode substitutes the same build setting into both files, so a
+    # shared variable is as safe as a shared literal and a split is not.
+    if runner_entry != widget_entry:
         raise ValueError(
-            "the app and the widget extension share no application group: "
-            f"{sorted(set(app_groups))} vs {sorted(set(widget_groups))}"
+            "the app and the widget extension name different application "
+            f"groups: {runner_entry!r} vs {widget_entry!r}; they cannot share a "
+            "container, so the widget stays empty"
         )
-    return shared[0]
+
+    if "$(" in runner_entry:
+        configured = _xcconfig_setting(repo / APP_GROUP_XCCONFIG, XCCONFIG_SETTING)
+        if configured is None:
+            raise ValueError(
+                f"{APP_GROUP_XCCONFIG} does not define {XCCONFIG_SETTING}"
+            )
+        if runner_entry != f"$({XCCONFIG_SETTING})":
+            raise ValueError(
+                f"the entitlements name {runner_entry!r}, which is not a build "
+                f"setting this project defines; only $({XCCONFIG_SETTING}) is"
+            )
+        resolved = configured
+    else:
+        resolved = runner_entry
+
+    if not resolved.startswith("group."):
+        raise ValueError(
+            f"invalid application group: {resolved!r}; it must start with 'group.'"
+        )
+    if " " in resolved or resolved.endswith("group."):
+        raise ValueError(f"invalid application group: {resolved!r}")
+    return resolved
 
 
 def verify_widget_extension_point(info: object, label: str) -> None:
