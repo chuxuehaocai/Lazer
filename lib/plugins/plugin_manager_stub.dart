@@ -9,6 +9,7 @@ import '../utils/system_http.dart';
 import '../theme/lazer_theme.dart';
 import '../ui/layout_system.dart';
 import 'lua_plugin_runtime.dart';
+import 'plugin_extensions.dart';
 
 class InstalledPlugin {
   InstalledPlugin(
@@ -24,6 +25,9 @@ class InstalledPlugin {
   bool socketServerGranted = false;
   bool websocketGranted = false;
   bool websocketServerGranted = false;
+  final Map<String, Object?> settingValues = <String, Object?>{};
+  final List<LuaPluginSetting> settings = <LuaPluginSetting>[];
+  final List<LuaPlayerMenuItem> playerMenuItems = <LuaPlayerMenuItem>[];
   LuaPluginRuntime? runtime;
   LazerThemeTokens? theme;
   LazerLayoutDefinition? layout;
@@ -36,6 +40,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   final List<InstalledPlugin> _plugins = [];
   List<InstalledPlugin> get plugins => List.unmodifiable(_plugins);
   List<MusicGateway> get gateways => const [];
+  List<LuaPluginSetting> get pluginSettings => const [];
+  List<LuaPlayerMenuItem> get playerMenuItems => const [];
   LazerThemeTokens? get activeTheme => null;
   LazerLayoutDefinition? get activeLayout => null;
   int get skinRevision => 0;
@@ -64,6 +70,17 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> setWebsocketServerPermission(String id, bool granted) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> setPluginSetting(
+    String pluginId,
+    String settingId,
+    Object? value,
+  ) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> invokePluginSetting(String pluginId, String settingId) =>
+      Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> invokePlayerMenu(
+    LuaPlayerMenuItem item,
+    Map<String, dynamic> track,
+  ) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> uninstall(String id) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
 }

@@ -173,6 +173,10 @@ abstract class MusicAccountGateway extends MusicGateway {
       Future.error(MusicUnsupportedException(provider.id, 'qrKey'));
   Future<String> qrUrl(String key) =>
       Future.error(MusicUnsupportedException(provider.id, 'qrUrl'));
+  Future<QrSessionInfo> qrDetails(String key) async {
+    final url = await qrUrl(key);
+    return QrSessionInfo(url: url);
+  }
   Future<int> qrCheck(String key) =>
       Future.error(MusicUnsupportedException(provider.id, 'qrCheck'));
   Future<void> logout() async {
@@ -180,6 +184,29 @@ abstract class MusicAccountGateway extends MusicGateway {
   }
 
   Future<String?> exportCookie() => Future.value(null);
+}
+
+/// Session metadata returned when initiating QR / device-code logins
+/// (such as RFC 8628 OAuth 2.0 Device Authorization Grant).
+class QrSessionInfo {
+  final String url;
+  final String? code;
+  final String? hint;
+  final String? actionUrl;
+
+  const QrSessionInfo({
+    required this.url,
+    this.code,
+    this.hint,
+    this.actionUrl,
+  });
+
+  bool get isEmpty => url.isEmpty;
+  bool get isNotEmpty => url.isNotEmpty;
+
+  @override
+  String toString() =>
+      'QrSessionInfo(url: $url, code: $code, hint: $hint, actionUrl: $actionUrl)';
 }
 
 class MusicUnsupportedException implements Exception {

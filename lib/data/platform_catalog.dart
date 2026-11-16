@@ -405,9 +405,13 @@ class _PlatformCatalog {
   Future<GatewayLyrics> lyrics(String key) async {
     final id = reference(key, MusicEntityKind.song);
     final values = await owner(id).lyrics(id);
-    if (values.isEmpty) return const GatewayLyrics(pureMusic: true);
+    // An empty reply is "the provider could not answer", not "this track has
+    // no lyrics". Treating the two as the same cached the inference as a fact
+    // and left the song stuck on 纯音乐 even after the provider recovered.
+    if (values.isEmpty) return const GatewayLyrics();
     final value =
         values.where((lyrics) => lyrics.synced).firstOrNull ?? values.first;
+    if (value.pureMusic) return const GatewayLyrics(pureMusic: true);
     final buffer = StringBuffer();
     final translations = StringBuffer();
     final romanization = StringBuffer();

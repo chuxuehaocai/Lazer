@@ -84,6 +84,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
   Timer? _resend;
   String? _error;
   String? _notice;
+  QrSessionInfo? _qrInfo;
 
   AppState get state => widget.state;
 
@@ -101,6 +102,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     setState(() {
       _phase = _Phase.creating;
       _url = null;
+      _qrInfo = null;
       _error = null;
     });
     final owner = state.activeConnectionKey;
@@ -113,6 +115,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     }
     setState(() {
       _url = url;
+      _qrInfo = state.qrSession;
       _phase = url == null ? _Phase.error : _Phase.waiting;
       _error = url == null ? state.qrStartError ?? '连接失败，请检查网络后重试。' : null;
     });
@@ -164,6 +167,8 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       _mode = mode;
       _error = null;
       _notice = null;
+      _url = null;
+      _qrInfo = null;
     });
     if (mode == _Mode.qr) unawaited(_start());
   }
@@ -175,6 +180,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     setState(() {
       _navBusy = true;
       _url = null;
+      _qrInfo = null;
       _error = null;
     });
     try {
@@ -617,7 +623,9 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
         child: TrText(
           switch (_phase) {
             _Phase.creating => '正在生成二维码…',
-            _Phase.waiting => '打开 App 扫描二维码',
+            _Phase.waiting => _qrInfo?.hint?.isNotEmpty == true
+                ? _qrInfo!.hint!
+                : '打开 App 扫描二维码',
             _Phase.scanned => '已扫描，请在手机上确认',
             _Phase.expired => '二维码已过期',
             _Phase.error => '二维码获取失败，请检查网络后重试。',
@@ -630,6 +638,75 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
           ),
         ),
       ),
+      if (_phase == _Phase.waiting && _qrInfo?.code?.isNotEmpty == true) ...[
+        const SizedBox(height: 12),
+        Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: apple.tertiaryFill,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: apple.separator, width: .5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TrText(
+                  '验证码：',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: apple.secondaryLabel,
+                  ),
+                ),
+                Text(
+                  _qrInfo!.code!,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                    color: apple.label,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.copy_rounded, size: 16),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: context.tr('复制验证码'),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: _qrInfo!.code!));
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            context.tr('验证码已复制到剪贴板。'),
+                          ),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      if (_phase == _Phase.waiting && _qrInfo?.actionUrl?.isNotEmpty == true) ...[
+        const SizedBox(height: 8),
+        Center(
+          child: SpringTextButton(
+            onPressed: () => unawaited(openExternalUrl(_qrInfo!.actionUrl!)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.open_in_browser_rounded, size: 16, color: apple.accent),
+                const SizedBox(width: 6),
+                const TrText('在浏览器中打开授权页'),
+              ],
+            ),
+          ),
+        ),
+      ],
       if (_phase == _Phase.expired || _phase == _Phase.error) ...<Widget>[
         const SizedBox(height: 12),
         Center(

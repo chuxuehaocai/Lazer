@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../data/models.dart';
 import '../downloads/download_dialog.dart';
+import '../plugins/plugin_extensions.dart';
 import 'player_backdrop.dart';
 import '../l10n/app_localizations.dart';
 import '../navigation/pull_down_to_close.dart';
@@ -683,6 +684,17 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     ),
   );
 
+  Future<void> _invokePlayerMenu(LuaPlayerMenuItem item, Track track) async {
+    try {
+      await widget.state.pluginManager.invokePlayerMenu(item, track.toJson());
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
+
   /// Opens the song sheet: what the player knows about the track, and every
   /// action the header used to spell out with its own icon.
   Future<void> _showMore() async {
@@ -722,6 +734,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
           return _NowPlayingMoreSheet(
             state: widget.state,
             track: track,
+            pluginMenuItems: widget.state.pluginManager.playerMenuItems,
             lyricsOpen: _lyricsMode,
             onLyrics: () {
               Navigator.of(sheetContext).pop();
@@ -766,6 +779,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             onSleepTimer: () {
               Navigator.of(sheetContext).pop();
               unawaited(_showSleepTimer());
+            },
+            onPluginMenu: (item) {
+              Navigator.of(sheetContext).pop();
+              unawaited(_invokePlayerMenu(item, track));
             },
           );
         },
@@ -1303,6 +1320,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
   const _NowPlayingMoreSheet({
     required this.state,
     required this.track,
+    required this.pluginMenuItems,
     required this.lyricsOpen,
     required this.onLyrics,
     required this.onTogether,
@@ -1313,10 +1331,12 @@ class _NowPlayingMoreSheet extends StatelessWidget {
     required this.onComments,
     required this.onQueue,
     required this.onSleepTimer,
+    required this.onPluginMenu,
   });
 
   final AppState state;
   final Track track;
+  final List<LuaPlayerMenuItem> pluginMenuItems;
   final bool lyricsOpen;
   final VoidCallback onLyrics;
   final VoidCallback onTogether;
@@ -1327,6 +1347,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
   final VoidCallback onComments;
   final VoidCallback onQueue;
   final VoidCallback onSleepTimer;
+  final ValueChanged<LuaPlayerMenuItem> onPluginMenu;
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -1476,6 +1497,18 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 selected: state.sleepTimerActive,
                 onTap: onSleepTimer,
               ),
+              if (pluginMenuItems.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                Divider(height: 1, color: context.colors.stone),
+                for (final item in pluginMenuItems)
+                  _MoreAction(
+                    icon: luaPluginIcon(item.icon),
+                    label: item.pluginName.isEmpty
+                        ? item.label
+                        : '${item.label}（${item.pluginName}）',
+                    onTap: item.enabled ? () => onPluginMenu(item) : null,
+                  ),
+              ],
             ],
           ),
         ),

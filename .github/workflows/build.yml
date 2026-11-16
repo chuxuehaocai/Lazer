@@ -76,6 +76,11 @@ jobs:
       - name: Configure FFmpeg install prefix
         shell: pwsh
         run: Add-Content -Path $env:GITHUB_ENV -Value "LAZER_FFMPEG_ROOT=$env:RUNNER_TEMP\lazer-ffmpeg"
+      - name: Restore the Windows FFmpeg SDK
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/lazer-ffmpeg
+          key: windows-x86_64-ffmpeg-${{ hashFiles('native/lazer-audio/tools/build_dsd_ffmpeg.sh') }}
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
       - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
@@ -102,7 +107,14 @@ jobs:
           set -euo pipefail
           command -v cl.exe
           prefix="$(cygpath -u "$LAZER_FFMPEG_ROOT")"
-          bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
+          if [[ -f "$prefix/include/libavformat/avformat.h" ]] &&
+             compgen -G "$prefix/bin/avcodec-*.dll" > /dev/null &&
+             [[ -f "$prefix/share/lazer-ffmpeg/BUILDINFO.txt" ]]; then
+            echo 'Using the restored Windows FFmpeg SDK cache.'
+          else
+            rm -rf -- "$prefix"
+            bash ./native/lazer-audio/tools/build_dsd_ffmpeg.sh "$prefix"
+          fi
       - name: Run the engine's device-free probe suite
         shell: pwsh
         run: |
@@ -119,15 +131,10 @@ jobs:
           ctest --test-dir build/native-probes -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw 'The native probe suite failed' }
       - run: flutter build windows --release --no-pub --dart-define=LAZER_COMMIT=${{ github.sha }} --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
-      - name: Stage native audio and FFmpeg into the Windows bundle
+      - name: Verify native audio and FFmpeg in the Windows bundle
         shell: pwsh
         run: |
-          dart run tool/build_native_audio.dart --ffmpeg-root "$env:LAZER_FFMPEG_ROOT"
-          if ($LASTEXITCODE -ne 0) { throw 'Could not stage the native audio engine' }
           $release = 'build/windows/x64/runner/Release'
-          Get-ChildItem -LiteralPath 'build/native-audio' -Filter '*.dll' -File |
-            Copy-Item -Destination $release -Force
-          # Staging that copies nothing must not look like success.
           foreach ($pair in @(
             @('lazer-audio.dll', 'liblazer-audio.dll'),
             @('lazer-audio-bridge.dll', 'liblazer-audio-bridge.dll')

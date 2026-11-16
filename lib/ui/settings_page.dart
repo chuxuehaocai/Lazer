@@ -15,8 +15,7 @@ import '../animation/apple_spring.dart';
 
 import '../audio/audio_device_report.dart';
 import '../cache/playback_cache_settings.dart';
-import '../data/audio_quality.dart';
-import '../data/track_transition.dart';
+import '../data/audio_quality.dart';import '../data/track_transition.dart';
 import '../diagnostics/build_info.dart';
 import '../diagnostics/console_window.dart';
 import '../diagnostics/app_log.dart';
@@ -46,11 +45,13 @@ import '../utils/byte_format.dart';
 import '../widgets/ui_scaling.dart';
 import 'login.dart';
 import 'widgets.dart';
+import 'lyrics_cache_settings.dart';
 import 'font_settings_page.dart';
 import 'shortcut_settings_page.dart';
 import 'scheduled_pause_settings.dart';
 import '../widgets/music_provider_badge.dart';
 import 'plugin_manager_page.dart';
+import 'plugin_settings.dart';
 import 'developer_console_page.dart';
 import 'custom_image_backdrop.dart';
 
@@ -954,6 +955,11 @@ class _SettingsOverview extends StatelessWidget {
                     const _AppSectionLabel('数据存储'),
                     const StorageSettings(),
                   ],
+                  const _AppSectionLabel('歌词'),
+                  LyricsCacheSettings(
+                    onClear: state.catalog.clearLyricsCache,
+                    onCount: state.catalog.countLyricsCache,
+                  ),
                   const _AppSectionLabel('下载'),
                   PlaybackCacheSettings(controller: state.playbackCache),
                   const SizedBox(height: SettingsSpacing.groupGap),
@@ -1567,6 +1573,8 @@ class _SettingsOverview extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (state.pluginManager.pluginSettings.isNotEmpty)
+                    LuaPluginSettingsSection(state: state),
                 ],
                 if (show(_SettingsCategory.network)) ...[
                   const _AppSectionLabel('网络代理'),

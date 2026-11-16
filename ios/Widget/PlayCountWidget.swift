@@ -183,8 +183,8 @@ private struct RecentPlaybackView: View {
               Image("LazerWidgetIcon")
                 .resizable()
                 .scaledToFit()
-                .frame(width: coverSize * .52, height: coverSize * .52)
-                .opacity(entry.playback.hasTrack ? .35 : .8)
+                .frame(width: coverSize * 0.52, height: coverSize * 0.52)
+                .opacity(entry.playback.hasTrack ? 0.35 : 0.8)
             }
           }
           .frame(width: coverSize, height: coverSize)
