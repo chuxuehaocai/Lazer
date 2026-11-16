@@ -47,9 +47,10 @@ class ShortcutSettingsView extends StatelessWidget {
                 SettingsDetailHost.isEmbedded(context) ? 32 : 20,
               ),
               children: [
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 16),
-                  child: TrText('在应用内用键盘控制播放；在文本框中输入时快捷键不会触发'),
+                const ApplePageTitle(
+                  title: '快捷键设置',
+                  subtitle: '在应用内用键盘控制播放；在文本框中输入时快捷键不会触发',
+                  padding: EdgeInsets.fromLTRB(0, 0, 0, 20),
                 ),
                 AppleGroupedCard(
                   child: Column(

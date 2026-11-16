@@ -18,6 +18,12 @@ class PluginManifest {
       domains = List<String>.from(
         (json['permissions'] as Map?)?['network'] as List? ?? [],
       ),
+      socketDomains = List<String>.from(
+        (json['permissions'] as Map?)?['socket'] as List? ?? [],
+      ),
+      socketServerBindings = List<String>.from(
+        (json['permissions'] as Map?)?['socketServer'] as List? ?? [],
+      ),
       websocketDomains = List<String>.from(
         (json['permissions'] as Map?)?['websocket'] as List? ?? [],
       ),
@@ -35,12 +41,18 @@ class PluginManifest {
         !safePath(entry) ||
         !entry.endsWith('.lua') ||
         domains.length > 32 ||
+        socketDomains.length > 32 ||
         websocketDomains.length > 32 ||
+        socketServerBindings.length > 16 ||
+        socketServerBindings.any(
+          (binding) => _serverBinding(binding) == null,
+        ) ||
         websocketServerBindings.length > 16 ||
         websocketServerBindings.any(
           (binding) => _serverBinding(binding) == null,
         ) ||
         domains.any(invalidNetworkRule) ||
+        socketDomains.any(invalidNetworkRule) ||
         websocketDomains.any(invalidNetworkRule)) {
       throw const FormatException('插件清单无效，或不支持该插件 API 版本。');
     }
@@ -57,6 +69,8 @@ class PluginManifest {
     ).hasMatch(domain)) {
       return true;
     }
+    final port = RegExp(r':(\d+)$').firstMatch(domain);
+    if (port != null && int.parse(port.group(1)!) > 65535) return true;
     if (!domain.startsWith('*.')) return false;
     final host = domain.substring(2).split(':').first.toLowerCase();
     final labels = host.split('.').where((label) => label.isNotEmpty).toList();
@@ -98,8 +112,12 @@ class PluginManifest {
 
   final String id, name, version, description, author, entry, provider;
   final int apiVersion;
-  final List<String> capabilities, auth, domains, websocketDomains;
-  final List<String> websocketServerBindings;
+  final List<String> capabilities,
+      auth,
+      domains,
+      socketDomains,
+      websocketDomains;
+  final List<String> socketServerBindings, websocketServerBindings;
   final bool storage;
 
   static bool safePath(String path) =>
@@ -142,6 +160,18 @@ class PluginManifest {
             : uri.host == rule.host;
       });
 
+  bool permitsSocket(String host, int port) {
+    if (port < 0 || port > 65535) return false;
+    final checkDomains = socketDomains.isNotEmpty ? socketDomains : domains;
+    return checkDomains.any((domain) {
+      final rule = Uri.parse('https://${domain.replaceFirst('*.', '')}');
+      if (rule.hasPort && port != rule.port) return false;
+      return domain.startsWith('*.')
+          ? host == rule.host || host.endsWith('.${rule.host}')
+          : host == rule.host;
+    });
+  }
+
   static ({String host, int port})? _serverBinding(String binding) {
     // Parse the declared port ourselves: Uri normalizes explicit :0 away for
     // ws, and a port of zero deliberately requests an ephemeral listener.
@@ -164,6 +194,22 @@ class PluginManifest {
     } on FormatException {
       return null;
     }
+  }
+
+  bool permitsSocketServer(String host, int port) {
+    if (port < 0 || port > 65535) return false;
+    final binding = _serverBinding(
+      '${host.contains(':') ? '[$host]' : host}:$port',
+    );
+    if (binding == null) return false;
+    final checkBindings = socketServerBindings.isNotEmpty
+        ? socketServerBindings
+        : websocketServerBindings;
+    return checkBindings.any((rule) {
+      final allowed = _serverBinding(rule)!;
+      return allowed.host == binding.host &&
+          (allowed.port == 0 || allowed.port == port);
+    });
   }
 
   bool permitsWebSocketServer(String host, int port) {
@@ -191,6 +237,8 @@ class PluginManifest {
     'auth': auth,
     'permissions': {
       'network': domains,
+      'socket': socketDomains,
+      'socketServer': socketServerBindings,
       'websocket': websocketDomains,
       'websocketServer': websocketServerBindings,
       'storage': storage,

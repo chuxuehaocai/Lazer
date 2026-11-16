@@ -13,8 +13,12 @@ class LuaPluginRuntime {
     required this.dataDirectory,
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
+    this.networkGranted = false,
+    this.socketGranted = false,
+    this.socketServerGranted = false,
     this.websocketGranted = false,
     this.websocketServerGranted = false,
+    this.permissionRequester,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -22,8 +26,12 @@ class LuaPluginRuntime {
   final Duration timeout;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
+  final bool networkGranted;
+  final bool socketGranted;
+  final bool socketServerGranted;
   final bool websocketGranted;
   final bool websocketServerGranted;
+  final Future<bool> Function(String permission)? permissionRequester;
   Future<void> start() =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<Object?> invoke(

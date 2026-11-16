@@ -110,6 +110,13 @@ class _PluginMarketViewState extends State<PluginMarketView>
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
+            ApplePageTitle(
+              title: '插件市场',
+              subtitle: market.plugins.isEmpty
+                  ? '从插件源安装新的音乐平台'
+                  : '${market.plugins.length} 个可用插件',
+              padding: const EdgeInsets.fromLTRB(0, 4, 0, 16),
+            ),
             TextField(
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search_rounded),

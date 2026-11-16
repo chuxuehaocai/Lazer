@@ -17,6 +17,10 @@ fileprivate struct RecentPlayback: Decodable {
 
   static let empty = RecentPlayback(title: "", artist: "", album: "", trackId: "", playing: false, hasTrack: false, language: "system", artworkFile: "")
 
+  /// Stands in for a real song in the gallery preview and in the placeholder
+  /// frame, so an empty collection never resolves to a blank card.
+  static let sample = RecentPlayback(title: "Lazer", artist: "最近播放", album: "", trackId: "", playing: true, hasTrack: true, language: "system", artworkFile: "")
+
   private var resolvedLanguage: String {
     language == "system" ? (Locale.preferredLanguages.first ?? "en") : language
   }
@@ -40,6 +44,56 @@ fileprivate struct RecentPlayback: Decodable {
     if !artist.isEmpty { return artist }
     return album.isEmpty ? localized("未知艺术家", "未知藝人", "不明なアーティスト", "Unknown artist") : album
   }
+
+  /// The second line of the empty state: what the listener has to do first.
+  var displayHint: String {
+    localized(
+      "在 Lazer 播放音乐后显示",
+      "在 Lazer 播放音樂後顯示",
+      "Lazer で再生するとここに表示されます",
+      "Play something in Lazer to see it here"
+    )
+  }
+}
+
+/// Reads the snapshot written by the app. Every field is optional: a snapshot
+/// from an older or newer build must still render the fields it does carry,
+/// instead of failing to decode and leaving the widget permanently empty.
+private struct PlaybackKey: CodingKey {
+  let stringValue: String
+  var intValue: Int? { nil }
+
+  init(_ stringValue: String) { self.stringValue = stringValue }
+  init?(stringValue: String) { self.stringValue = stringValue }
+  init?(intValue: Int) { return nil }
+}
+
+extension RecentPlayback {
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: PlaybackKey.self)
+    func text(_ key: String) -> String {
+      let value = (try? container.decode(String.self, forKey: PlaybackKey(key))) ?? ""
+      return String(value.prefix(512))
+    }
+    func flag(_ key: String) -> Bool {
+      (try? container.decode(Bool.self, forKey: PlaybackKey(key))) ?? false
+    }
+
+    let storedTitle = text("title")
+    let storedLanguage = text("language")
+    self.init(
+      title: storedTitle,
+      artist: text("artist"),
+      album: text("album"),
+      trackId: text("trackId"),
+      playing: flag("playing"),
+      // A snapshot without an explicit flag still carries a track when it has
+      // a title, which is what an older writer produced.
+      hasTrack: flag("hasTrack") || !storedTitle.isEmpty,
+      language: storedLanguage.isEmpty ? "system" : storedLanguage,
+      artworkFile: text("artworkFile")
+    )
+  }
 }
 
 struct PlayCountEntry: TimelineEntry {
@@ -50,7 +104,10 @@ struct PlayCountEntry: TimelineEntry {
 
 struct PlayCountProvider: TimelineProvider {
   func placeholder(in context: Context) -> PlayCountEntry {
-    PlayCountEntry(date: Date(), playback: .empty, artwork: nil)
+    // WidgetKit redraws this entry as a skeleton, but the gallery and every
+    // pre-timeline frame keep the real composition: cover, icon and two lines
+    // of type, never a single grey block.
+    PlayCountEntry(date: Date(), playback: .sample, artwork: nil)
   }
 
   func getSnapshot(in context: Context, completion: @escaping (PlayCountEntry) -> Void) {
@@ -58,15 +115,30 @@ struct PlayCountProvider: TimelineProvider {
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<PlayCountEntry>) -> Void) {
-    // The app reloads this timeline when playback changes. No periodic network
-    // fetch or fifteen-minute wakeup is needed for a persisted recent track.
-    completion(Timeline(entries: [loadEntry()], policy: .never))
+    // The app reloads this timeline when playback changes, so no periodic
+    // network fetch is needed. The half-hour retry is only a safety net: a
+    // reload that never reached the widget (the app was terminated before it
+    // could ask) would otherwise leave a stale or empty card until the next
+    // launch, because `.never` never asks again.
+    completion(
+      Timeline(
+        entries: [loadEntry()],
+        policy: .after(Date().addingTimeInterval(1800))
+      )
+    )
   }
 
   private func loadEntry() -> PlayCountEntry {
-    guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetSuite),
-          let data = try? Data(contentsOf: container.appendingPathComponent("recent-playback.json")),
-          let playback = try? JSONDecoder().decode(RecentPlayback.self, from: data) else {
+    guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetSuite) else {
+      NSLog("[LazerWidget] app group %@ unavailable; showing the empty state", widgetSuite)
+      return PlayCountEntry(date: Date(), playback: .empty, artwork: nil)
+    }
+    guard let data = try? Data(contentsOf: container.appendingPathComponent("recent-playback.json")) else {
+      NSLog("[LazerWidget] no snapshot in the shared container yet")
+      return PlayCountEntry(date: Date(), playback: .empty, artwork: nil)
+    }
+    guard let playback = try? JSONDecoder().decode(RecentPlayback.self, from: data) else {
+      NSLog("[LazerWidget] snapshot (%d bytes) could not be decoded", data.count)
       return PlayCountEntry(date: Date(), playback: .empty, artwork: nil)
     }
     var artwork: UIImage?
@@ -105,6 +177,14 @@ private struct RecentPlaybackView: View {
               Image(uiImage: artwork)
                 .resizable()
                 .scaledToFill()
+            } else {
+              // Nothing to show yet: the app mark reads as "waiting for music"
+              // instead of leaving an unexplained empty tile.
+              Image("LazerWidgetIcon")
+                .resizable()
+                .scaledToFit()
+                .frame(width: coverSize * .52, height: coverSize * .52)
+                .opacity(entry.playback.hasTrack ? .35 : .8)
             }
           }
           .frame(width: coverSize, height: coverSize)
@@ -134,6 +214,13 @@ private struct RecentPlaybackView: View {
               .font(.custom("MiSans-Regular", size: 12, relativeTo: .caption))
               .foregroundStyle(.secondary)
               .lineLimit(1)
+          } else {
+            // An empty widget must explain itself: the title alone read as a
+            // broken card on the home screen.
+            Text(entry.playback.displayHint)
+              .font(.custom("MiSans-Regular", size: 12, relativeTo: .caption))
+              .foregroundStyle(.secondary)
+              .lineLimit(2)
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

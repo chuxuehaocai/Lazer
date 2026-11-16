@@ -99,6 +99,10 @@ import WidgetKit
   private nonisolated static func storeRecentPlayback(_ args: [String: Any]) throws -> Bool {
     let files = FileManager.default
     guard let container = files.containerURL(forSecurityApplicationGroupIdentifier: "group.dev.naominet.lazer") else {
+      // The widget can only read this container. Without the App Groups entitlement
+      // (an unsigned or re-signed sideload build) every update lands nowhere and the
+      // widget stays empty, so say so instead of failing silently.
+      NSLog("[LazerWidget] app group %@ unavailable; snapshot not written", "group.dev.naominet.lazer")
       throw NSError(domain: "LazerWidget", code: 1)
     }
     let snapshotURL = container.appendingPathComponent("recent-playback.json")
@@ -145,6 +149,7 @@ import WidgetKit
     let changed = previousData != data
     if changed {
       try data.write(to: snapshotURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+      NSLog("[LazerWidget] stored snapshot (%d bytes, track=%@)", data.count, snapshot["trackId"] as? String ?? "")
     }
     // Keep the prior cover for an extension reader using the previous snapshot.
     // The next update removes it; at most two small covers remain.

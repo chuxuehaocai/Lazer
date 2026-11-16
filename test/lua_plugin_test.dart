@@ -80,6 +80,96 @@ void main() {
     },
   );
 
+  test(
+    'network requests ask for permission once and reuse the grant',
+    () async {
+      final prompts = <String>[];
+      final runtime = LuaPluginRuntime(
+        manifest: PluginManifest.fromJson(const {
+          'id': 'demo.permission',
+          'name': 'Permission',
+          'version': '1.0.0',
+          'provider': 'permission',
+          'apiVersion': 1,
+          'permissions': {
+            'network': ['fixture.test'],
+          },
+        }),
+        sources: const {
+          'main.lua': '''
+          return {call=function(op)
+            return host.http({url="https://fixture.test/"})
+          end}
+        ''',
+        },
+        dataDirectory: '',
+        networkGranted: false,
+        permissionRequester: (permission) async {
+          prompts.add(permission);
+          return true;
+        },
+        httpHandler: (_) async => {
+          'status': 200,
+          'headers': <String, dynamic>{},
+          'body': 'ok',
+        },
+      );
+      addTearDown(runtime.close);
+      expect(await runtime.invoke('request'), {
+        'status': 200,
+        'headers': <String, dynamic>{},
+        'body': 'ok',
+      });
+      expect(await runtime.invoke('request'), {
+        'status': 200,
+        'headers': <String, dynamic>{},
+        'body': 'ok',
+      });
+      expect(prompts, ['network']);
+    },
+  );
+
+  test(
+    'network permission denial prevents the transport from running',
+    () async {
+      var requests = 0;
+      final runtime = LuaPluginRuntime(
+        manifest: PluginManifest.fromJson(const {
+          'id': 'demo.denied',
+          'name': 'Denied',
+          'version': '1.0.0',
+          'provider': 'denied',
+          'apiVersion': 1,
+          'permissions': {
+            'network': ['fixture.test'],
+          },
+        }),
+        sources: const {
+          'main.lua': '''
+          return {call=function() return host.http({url="https://fixture.test/"}) end}
+        ''',
+        },
+        dataDirectory: '',
+        networkGranted: false,
+        permissionRequester: (_) async => false,
+        httpHandler: (_) async {
+          requests++;
+          return <String, dynamic>{
+            'status': 200,
+            'headers': <String, dynamic>{},
+            'body': 'unexpected',
+          };
+        },
+      );
+      addTearDown(runtime.close);
+      await expectLater(
+        runtime.invoke('request'),
+        throwsA(isA<PluginException>()),
+      );
+      expect(requests, 0);
+    },
+  );
+
   test('manifest rejects traversal and non-HTTPS wildcard permissions', () {
     expect(
       () => PluginManifest.fromJson(const {

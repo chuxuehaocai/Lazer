@@ -38,7 +38,6 @@ class FontSettingsView extends StatelessWidget {
       child: Builder(
         builder: (context) => SettingsDetailScaffold(
           title: '字体自定义',
-          headerTitle: true,
           actions: [
             SpringTextButton(
               key: const ValueKey('reset-all-fonts'),
@@ -132,12 +131,13 @@ class FontSettingsView extends StatelessWidget {
                       child: ListView(
                         padding: EdgeInsets.fromLTRB(inset, 12, inset, 36),
                         children: [
+                          const ApplePageTitle(
+                            title: '字体自定义',
+                            subtitle: '按文字用途调节大小和粗细，修改即时生效。',
+                            padding: EdgeInsets.fromLTRB(0, 0, 0, 20),
+                          ),
                           _FontFamilyCard(state: state),
                           const SizedBox(height: 16),
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 16),
-                            child: TrText('按文字用途调节大小和粗细，修改即时生效。'),
-                          ),
                           if (twoColumns)
                             Wrap(
                               spacing: 16,

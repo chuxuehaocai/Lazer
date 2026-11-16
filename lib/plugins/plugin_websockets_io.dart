@@ -9,19 +9,26 @@ class PluginWebSockets {
     this.manifest, {
     required this.clientGranted,
     required this.serverGranted,
+    this.permissionRequester,
   });
   final PluginManifest manifest;
-  final bool clientGranted, serverGranted;
+  bool clientGranted, serverGranted;
+  final Future<bool> Function(String permission)? permissionRequester;
   final Map<String, _Socket> _clients = {};
   final Map<String, _Server> _servers = {};
 
   Future<Object?> client(Map<String, dynamic> spec) async {
-    if (!clientGranted) {
-      throw const FormatException('WebSocket permission required');
-    }
     final operation = spec['operation'] as String? ?? 'open';
     final id = _id(spec);
     if (operation == 'open') {
+      if (!clientGranted) {
+        if (permissionRequester != null &&
+            await permissionRequester!('websocket')) {
+          clientGranted = true;
+        } else {
+          throw const FormatException('WebSocket permission required');
+        }
+      }
       final uri = Uri.parse(spec['url'] as String);
       if (!manifest.permitsWebSocket(uri)) {
         throw const FormatException('WebSocket permission denied');
@@ -54,12 +61,17 @@ class PluginWebSockets {
   }
 
   Future<Object?> server(Map<String, dynamic> spec) async {
-    if (!serverGranted) {
-      throw const FormatException('WebSocket server permission required');
-    }
     final operation = spec['operation'] as String? ?? 'listen';
     final id = _id(spec);
     if (operation == 'listen') {
+      if (!serverGranted) {
+        if (permissionRequester != null &&
+            await permissionRequester!('websocketServer')) {
+          serverGranted = true;
+        } else {
+          throw const FormatException('WebSocket server permission required');
+        }
+      }
       final host = spec['host'] as String? ?? '127.0.0.1';
       final port = (spec['port'] as num?)?.toInt() ?? 0;
       final path = spec['path'] as String?;

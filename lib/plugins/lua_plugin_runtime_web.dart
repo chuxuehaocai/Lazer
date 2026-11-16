@@ -32,9 +32,13 @@ class LuaPluginRuntime {
     required this.dataDirectory,
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
+    bool? networkGranted,
+    this.socketGranted = false,
+    this.socketServerGranted = false,
     this.websocketGranted = false,
     this.websocketServerGranted = false,
-  });
+    this.permissionRequester,
+  }) : networkGranted = networkGranted ?? httpHandler != null;
 
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -42,8 +46,12 @@ class LuaPluginRuntime {
   final Duration timeout;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
+  final bool networkGranted;
+  final bool socketGranted;
+  final bool socketServerGranted;
   final bool websocketGranted;
   final bool websocketServerGranted;
+  final Future<bool> Function(String permission)? permissionRequester;
 
   final Random _random = Random.secure();
   final http.Client _client = http.Client();
@@ -67,8 +75,12 @@ class LuaPluginRuntime {
       random: _random,
       client: _client,
       externalHttp: httpHandler,
+      networkGranted: networkGranted,
+      socketGranted: socketGranted,
+      socketServerGranted: socketServerGranted,
       websocketGranted: websocketGranted,
       websocketServerGranted: websocketServerGranted,
+      permissionRequester: permissionRequester,
     );
     await host.initialize();
     _host = host;
@@ -144,8 +156,12 @@ class _WebPluginHost {
     required this.random,
     required this.client,
     this.externalHttp,
+    this.networkGranted = false,
+    this.socketGranted = false,
+    this.socketServerGranted = false,
     this.websocketGranted = false,
     this.websocketServerGranted = false,
+    this.permissionRequester,
   });
 
   final PluginManifest manifest;
@@ -155,8 +171,10 @@ class _WebPluginHost {
   final http.Client client;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   externalHttp;
-  final bool websocketGranted;
-  final bool websocketServerGranted;
+  bool networkGranted;
+  bool socketGranted, socketServerGranted;
+  bool websocketGranted, websocketServerGranted;
+  final Future<bool> Function(String permission)? permissionRequester;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   Map<String, dynamic> storage = <String, dynamic>{};
   final Map<String, html.WebSocket> _websockets = <String, html.WebSocket>{};
@@ -273,13 +291,18 @@ class _WebPluginHost {
       return 1;
     });
     lua.registerAsync('_websocket', (state) async {
-      if (!websocketGranted) {
-        throw const FormatException('WebSocket permission required');
-      }
       final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
       final operation = spec['operation'] as String? ?? 'open';
       final id = spec['id'] as String? ?? 'default';
       if (operation == 'open') {
+        if (!websocketGranted) {
+          if (permissionRequester != null &&
+              await permissionRequester!('websocket')) {
+            websocketGranted = true;
+          } else {
+            throw const FormatException('WebSocket permission required');
+          }
+        }
         final uri = Uri.parse(spec['url'] as String);
         if (!manifest.permitsWebSocket(uri)) {
           throw const FormatException('WebSocket permission denied');
@@ -436,6 +459,14 @@ class _WebPluginHost {
     final uri = Uri.parse(spec['url'] as String);
     if (!manifest.permits(uri)) {
       throw const FormatException('Network permission denied');
+    }
+    if (!networkGranted) {
+      if (permissionRequester != null &&
+          await permissionRequester!('network')) {
+        networkGranted = true;
+      } else {
+        throw const FormatException('Network permission required');
+      }
     }
     if (externalHttp != null) return externalHttp!(spec);
 

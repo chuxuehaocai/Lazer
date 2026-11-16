@@ -241,6 +241,163 @@ void main() {
     }
   });
 
+  testWidgets(
+    'a subview opened from another subview animates and returns one level',
+    (tester) async {
+      const managerKey = ValueKey('test-settings-manager');
+      const nestedKey = ValueKey('test-settings-nested');
+
+      Widget shell(BuildContext context) => ListView(
+        key: _overviewKey,
+        children: [
+          TextButton(
+            key: _openKey,
+            onPressed: () => SettingsDetailHost.open(
+              context,
+              page: (_) => throw StateError('Desktop must not push a page'),
+              view: (viewContext) => SettingsDetailScaffold(
+                title: 'Manager',
+                child: Builder(
+                  builder: (inner) => Align(
+                    alignment: Alignment.topLeft,
+                    child: TextButton(
+                      key: managerKey,
+                      onPressed: () => SettingsDetailHost.open(
+                        inner,
+                        page: (_) =>
+                            throw StateError('Desktop must not push a page'),
+                        view: (_) => SettingsDetailScaffold(
+                          title: 'Market',
+                          child: const SizedBox.expand(key: nestedKey),
+                        ),
+                      ),
+                      child: const Text('Market'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            child: const Text('Open'),
+          ),
+          const SizedBox(height: 1400),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppleTheme(),
+          home: Scaffold(
+            body: SettingsDetailHost(
+              compact: false,
+              child: Builder(builder: shell),
+            ),
+          ),
+        ),
+      );
+
+      // Level one: the manager, reached straight from the overview.
+      await tester.tap(find.byKey(_openKey));
+      await tester.pumpAndSettle();
+      final Element manager = tester.element(find.byKey(managerKey));
+
+      // Level two: the market is pushed on top and must travel in, not appear.
+      double opacityOf(Finder finder) => tester
+          .widget<Opacity>(
+            // Outermost of its kind: the nested stack wrapper, not the
+            // FadeTransition inside the page being animated.
+            find.ancestor(of: finder, matching: find.byType(Opacity)).last,
+          )
+          .opacity;
+
+      /// Every fractional offset applied above [finder]; the stack wrapper is
+      /// one of them, and a `SlideTransition` inside the page is another.
+      List<double> slidesOf(Finder finder) => find
+          .ancestor(of: finder, matching: find.byType(FractionalTranslation))
+          .evaluate()
+          .map(
+            (Element e) => (e.widget as FractionalTranslation).translation.dx,
+          )
+          .toList();
+
+      await tester.tap(find.byKey(managerKey));
+      await tester.pump();
+      expect(find.byKey(nestedKey), findsOneWidget);
+      expect(
+        identical(tester.element(find.byKey(managerKey)), manager),
+        isTrue,
+        reason: 'the subview underneath stays mounted while the new one enters',
+      );
+      // The subview underneath leaves first and the new one fades in behind
+      // it: at no point do both sets of controls paint at full strength.
+      final List<double> leaving = <double>[];
+      final List<double> arriving = <double>[];
+      bool slidIn = false;
+      bool slidOut = false;
+      for (var frame = 0; frame < 18; frame++) {
+        if (find.byKey(managerKey).evaluate().isNotEmpty) {
+          leaving.add(opacityOf(find.byKey(managerKey)));
+          slidOut =
+              slidOut ||
+              slidesOf(find.byKey(managerKey)).any((double dx) => dx < -.001);
+        }
+        if (find.byKey(nestedKey).evaluate().isNotEmpty) {
+          arriving.add(opacityOf(find.byKey(nestedKey)));
+          slidIn =
+              slidIn ||
+              slidesOf(find.byKey(nestedKey)).any((double dx) => dx > .001);
+        }
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(
+        leaving.any((double value) => value > 0 && value < 1),
+        isTrue,
+        reason: 'the subview underneath fades out instead of vanishing',
+      );
+      expect(
+        arriving.any((double value) => value > 0 && value < 1),
+        isTrue,
+        reason: 'the new subview fades in',
+      );
+      expect(
+        slidIn,
+        isTrue,
+        reason: 'the new subview slides in from the right',
+      );
+      expect(slidOut, isTrue, reason: 'the old subview slides out to the left');
+
+      await tester.pumpAndSettle();
+      expect(find.byKey(nestedKey), findsOneWidget);
+      // The page underneath is retained (its scroll and fields survive), but it
+      // no longer takes taps while the new one covers it.
+      expect(find.byKey(managerKey).hitTestable(), findsNothing);
+
+      // Back inside the stack: the market leaves the way it came, and the
+      // manager returns without remounting.
+      await tester.tap(
+        find.byKey(const ValueKey('settings-detail-back')).hitTestable(),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(find.byKey(nestedKey), findsOneWidget);
+      expect(find.byKey(managerKey), findsOneWidget);
+      expect(
+        identical(tester.element(find.byKey(managerKey)), manager),
+        isTrue,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(nestedKey), findsNothing);
+      expect(find.byKey(managerKey), findsOneWidget);
+
+      // The last level still closes the whole subview back to the overview.
+      await tester.tap(
+        find.byKey(const ValueKey('settings-detail-back')).hitTestable(),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(managerKey), findsNothing);
+      expect(find.byKey(_overviewKey), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets('reduced motion removes the detail immediately on return', (
     tester,
   ) async {

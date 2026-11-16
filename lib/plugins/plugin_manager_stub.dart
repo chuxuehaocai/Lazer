@@ -19,6 +19,9 @@ class InstalledPlugin {
   });
   final PluginManifest manifest;
   bool enabled;
+  bool networkGranted = false;
+  bool socketGranted = false;
+  bool socketServerGranted = false;
   bool websocketGranted = false;
   bool websocketServerGranted = false;
   LuaPluginRuntime? runtime;
@@ -41,6 +44,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {}
   Future<void> Function(String pluginId)? beforeChange;
   Future<void> Function()? afterChange;
+  Future<bool> Function(InstalledPlugin plugin, String permission)?
+  onPermissionRequest;
   Future<void> restore() async {}
   Future<InstalledPlugin> importZip(
     Uint8List bytes, {
@@ -48,6 +53,12 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     String? expectedVersion,
   }) => Future.error(const PluginException('当前平台不支持 ZIP 插件安装。'));
   Future<void> setEnabled(String id, bool enabled) =>
+      Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> setNetworkPermission(String id, bool granted) =>
+      Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> setSocketPermission(String id, bool granted) =>
+      Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> setSocketServerPermission(String id, bool granted) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> setWebsocketPermission(String id, bool granted) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));

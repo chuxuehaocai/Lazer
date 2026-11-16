@@ -30,6 +30,7 @@ import 'theme/apple_design.dart';
 import 'theme/lazer_theme.dart';
 import 'state/app_state.dart';
 import 'state/ui_preferences.dart';
+import 'plugins/plugin_manager.dart';
 import 'theme/font_preferences.dart';
 import 'accessibility/lazer_binding.dart';
 import 'state/hifi_settings.dart';
@@ -322,6 +323,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>(
     debugLabel: 'lazer-root-navigator',
   );
+  Future<void> _pluginPermissionQueue = Future<void>.value();
 
   _RootUiSignature get _rootUiSignature => (
     _state.accentSeed,
@@ -342,6 +344,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   void initState() {
     super.initState();
     _rootUi = _rootUiSignature;
+    _state.pluginManager.onPermissionRequest = _requestPluginPermission;
     _state.addListener(_onRootUiChanged);
     _playbackLifecycle = AppLifecycleListener(
       onResume: _state.synchronizePlaybackAfterResume,
@@ -393,12 +396,118 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _remote.dispose();
     _browseNavigation.dispose();
     _state.removeListener(_onRootUiChanged);
+    _state.pluginManager.onPermissionRequest = null;
     widget.media.close();
     widget.discord?.dispose();
     widget.session?.close();
     _state.dispose();
     widget.audio.dispose();
     super.dispose();
+  }
+
+  Future<bool> _requestPluginPermission(
+    InstalledPlugin plugin,
+    String permission,
+  ) {
+    final result = Completer<bool>();
+    _pluginPermissionQueue = _pluginPermissionQueue.then((_) async {
+      try {
+        if (!mounted) {
+          result.complete(false);
+          return;
+        }
+        final context = _navigatorKey.currentContext;
+        if (context == null) {
+          result.complete(false);
+          return;
+        }
+        if (!mounted || !context.mounted) {
+          result.complete(false);
+          return;
+        }
+        final (title, description) = _pluginPermissionCopy(
+          context,
+          plugin,
+          permission,
+        );
+        if (!mounted || !context.mounted) {
+          result.complete(false);
+          return;
+        }
+        final granted = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(title),
+            content: SingleChildScrollView(child: Text(description)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text(dialogContext.tr('拒绝')),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text(dialogContext.tr('允许')),
+              ),
+            ],
+          ),
+        );
+        result.complete(granted == true);
+      } catch (_) {
+        result.complete(false);
+      }
+    });
+    return result.future;
+  }
+
+  (String, String) _pluginPermissionCopy(
+    BuildContext context,
+    InstalledPlugin plugin,
+    String permission,
+  ) {
+    final manifest = plugin.manifest;
+    switch (permission) {
+      case 'network':
+        return (
+          context.tr('允许插件访问网络？'),
+          context.tr(
+            '插件「${manifest.name}」请求访问以下 HTTPS 域名：\n${manifest.domains.join('\n')}',
+          ),
+        );
+      case 'socket':
+        return (
+          context.tr('允许插件建立 Socket 连接？'),
+          context.tr(
+            '插件「${manifest.name}」请求连接以下主机：\n${(manifest.socketDomains.isEmpty ? manifest.domains : manifest.socketDomains).join('\n')}',
+          ),
+        );
+      case 'socketServer':
+        return (
+          context.tr('允许插件监听 Socket 服务？'),
+          context.tr(
+            '插件「${manifest.name}」请求监听以下地址：\n${manifest.socketServerBindings.join('\n')}',
+          ),
+        );
+      case 'websocket':
+        return (
+          context.tr('允许插件连接 WebSocket？'),
+          context.tr(
+            '插件「${manifest.name}」请求连接以下 WebSocket 域名：\n${manifest.websocketDomains.join('\n')}',
+          ),
+        );
+      case 'websocketServer':
+        return (
+          context.tr('允许插件作为 WebSocket 服务端？'),
+          context.tr(
+            '插件「${manifest.name}」请求监听以下地址：\n${manifest.websocketServerBindings.join('\n')}',
+          ),
+        );
+      default:
+        return (
+          context.tr('允许插件使用额外权限？'),
+          context.tr('插件「${manifest.name}」请求使用额外权限。'),
+        );
+    }
   }
 
   @override

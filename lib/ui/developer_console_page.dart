@@ -11,6 +11,7 @@ import '../theme/apple_design.dart';
 import '../diagnostics/export_logs.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
+import '../widgets/apple_ui.dart';
 import '../widgets/build_safe_state.dart';
 import '../widgets/settings_detail.dart';
 
@@ -119,20 +120,38 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
               .toList()
         : const <String>[];
     final entries = _console.entries;
+    final double inset = SettingsDetailHost.isEmbedded(context) ? 32 : 20;
+    // The page owns its heading, like every other page: the shared chrome keeps
+    // navigation and actions only, without a title of its own.
+    const Widget heading = ApplePageTitle(
+      title: 'Lua 开发者控制台',
+      subtitle: '输入 Lua 或 /help；Enter 执行，Shift+Enter 换行，↑↓ 浏览历史。',
+      padding: EdgeInsets.fromLTRB(0, 0, 0, 16),
+    );
     return SettingsDetailScaffold(
       title: 'Lua 开发者控制台',
-      headerTitle: true,
       child: !enabled
-          ? Center(child: Text(context.tr('开发者控制台已关闭。请在设置中启用。')))
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(padding: EdgeInsets.all(inset), child: heading),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      context.tr('开发者控制台已关闭。请在设置中启用。'),
+                    ),
+                  ),
+                ),
+              ],
+            )
           : SafeArea(
               top: false,
               child: Padding(
-                padding: EdgeInsets.all(
-                  SettingsDetailHost.isEmbedded(context) ? 32 : 20,
-                ),
+                padding: EdgeInsets.all(inset),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    heading,
                     Wrap(
                       spacing: 8,
                       runSpacing: 4,

@@ -27,6 +27,9 @@ class InstalledPlugin {
 
   final PluginManifest manifest;
   bool enabled;
+  bool networkGranted = false;
+  bool socketGranted = false;
+  bool socketServerGranted = false;
   bool websocketGranted = false;
   bool websocketServerGranted = false;
   LuaPluginRuntime? runtime;
@@ -75,6 +78,60 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> Function(String pluginId)? beforeChange;
   Future<void> Function()? afterChange;
+  Future<bool> Function(InstalledPlugin plugin, String permission)?
+  onPermissionRequest;
+
+  Future<bool> _requestPermission(
+    InstalledPlugin plugin,
+    String permission,
+  ) async {
+    if (permission == 'network' && plugin.networkGranted) return true;
+    if (permission == 'socket' && plugin.socketGranted) return true;
+    if (permission == 'socketServer' && plugin.socketServerGranted) return true;
+    if (permission == 'websocket' && plugin.websocketGranted) return true;
+    if (permission == 'websocketServer' && plugin.websocketServerGranted) {
+      return true;
+    }
+    if (onPermissionRequest == null) return false;
+    bool granted;
+    try {
+      granted = await onPermissionRequest!(plugin, permission);
+    } catch (_) {
+      return false;
+    }
+    if (granted) await _rememberPermission(plugin, permission);
+    return granted;
+  }
+
+  Future<void> _rememberPermission(
+    InstalledPlugin plugin,
+    String permission,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved =
+        jsonDecode(prefs.getString(_key(plugin.manifest.id)) ?? '{}') as Map;
+    switch (permission) {
+      case 'network':
+        plugin.networkGranted = true;
+        saved['networkGranted'] = true;
+      case 'socket':
+        plugin.socketGranted = true;
+        saved['socketGranted'] = true;
+      case 'socketServer':
+        plugin.socketServerGranted = true;
+        saved['socketServerGranted'] = true;
+      case 'websocket':
+        plugin.websocketGranted = true;
+        saved['websocketGranted'] = true;
+      case 'websocketServer':
+        plugin.websocketServerGranted = true;
+        saved['websocketServerGranted'] = true;
+      default:
+        return;
+    }
+    await prefs.setString(_key(plugin.manifest.id), jsonEncode(saved));
+    _notify();
+  }
 
   String _key(String id) => 'lazer.web.plugin.$id';
 
@@ -95,6 +152,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             manifest,
             enabled: value['enabled'] != false,
           );
+          plugin.networkGranted = value['networkGranted'] == true;
+          plugin.socketGranted = value['socketGranted'] == true;
+          plugin.socketServerGranted = value['socketServerGranted'] == true;
           plugin.websocketGranted = value['websocketGranted'] == true;
           plugin.websocketServerGranted =
               value['websocketServerGranted'] == true;
@@ -120,8 +180,13 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         manifest: plugin.manifest,
         sources: sources,
         dataDirectory: plugin.manifest.id,
+        networkGranted: plugin.networkGranted,
+        socketGranted: plugin.socketGranted,
+        socketServerGranted: plugin.socketServerGranted,
         websocketGranted: plugin.websocketGranted,
         websocketServerGranted: plugin.websocketServerGranted,
+        permissionRequester: (permission) =>
+            _requestPermission(plugin, permission),
       );
       plugin.runtime = runtime;
       await runtime.start();
@@ -202,6 +267,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         'manifest': plugin.manifest.toJson(),
         'sources': sources,
         'enabled': plugin.enabled,
+        'networkGranted': plugin.networkGranted,
+        'socketGranted': plugin.socketGranted,
+        'socketServerGranted': plugin.socketServerGranted,
         'websocketGranted': plugin.websocketGranted,
         'websocketServerGranted': plugin.websocketServerGranted,
       }),
@@ -314,6 +382,38 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       _notify();
     }
   }
+
+  Future<void> setNetworkPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    final plugin = _plugins.firstWhere((value) => value.manifest.id == id);
+    if (plugin.networkGranted == granted) return;
+    busy = true;
+    _notify();
+    try {
+      await beforeChange?.call(id);
+      await plugin.runtime?.shutdown();
+      plugin.runtime = null;
+      plugin.gateways.clear();
+      plugin.networkGranted = granted;
+      final prefs = await SharedPreferences.getInstance();
+      final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
+      saved['networkGranted'] = granted;
+      await prefs.setString(_key(id), jsonEncode(saved));
+      if (plugin.enabled) await _start(plugin, saved['sources']);
+      await afterChange?.call();
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> setSocketPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    throw const PluginException('当前平台不支持原生 Socket。');
+  }
+
+  Future<void> setSocketServerPermission(String id, bool granted) =>
+      Future.error(const PluginException('浏览器不支持 Socket 服务端。'));
 
   Future<void> setWebsocketServerPermission(String id, bool granted) =>
       Future.error(const PluginException('浏览器不支持 WebSocket 服务端。'));

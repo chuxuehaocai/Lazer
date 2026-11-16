@@ -104,6 +104,13 @@ class _PluginManagerViewState extends State<PluginManagerView>
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
+            ApplePageTitle(
+              title: '插件管理',
+              subtitle: manager.plugins.isEmpty
+                  ? '导入一个插件开始使用'
+                  : '${manager.plugins.length} 个插件已安装',
+              padding: const EdgeInsets.fromLTRB(0, 4, 0, 18),
+            ),
             AppleGroupedCard(
               margin: EdgeInsets.zero,
               child: Padding(
@@ -231,6 +238,8 @@ class _PluginRow extends StatelessWidget {
                       ),
                     ),
                     if (plugin.manifest.domains.isNotEmpty ||
+                        plugin.manifest.socketDomains.isNotEmpty ||
+                        plugin.manifest.socketServerBindings.isNotEmpty ||
                         plugin.manifest.websocketDomains.isNotEmpty ||
                         plugin.manifest.websocketServerBindings.isNotEmpty ||
                         plugin.manifest.storage)
@@ -274,6 +283,51 @@ class _PluginRow extends StatelessWidget {
               ),
             ],
           ),
+          if (plugin.manifest.domains.isNotEmpty)
+            SwitchListTile.adaptive(
+              key: ValueKey('network-permission-${plugin.manifest.id}'),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(context.tr('允许网络访问')),
+              subtitle: Text(plugin.manifest.domains.join(', ')),
+              value: plugin.networkGranted,
+              onChanged: manager.busy
+                  ? null
+                  : (value) => unawaited(
+                      manager.setNetworkPermission(plugin.manifest.id, value),
+                    ),
+            ),
+          if (plugin.manifest.socketDomains.isNotEmpty)
+            SwitchListTile.adaptive(
+              key: ValueKey('socket-permission-${plugin.manifest.id}'),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(context.tr('允许 Socket 连接')),
+              subtitle: Text(plugin.manifest.socketDomains.join(', ')),
+              value: plugin.socketGranted,
+              onChanged: manager.busy
+                  ? null
+                  : (value) => unawaited(
+                      manager.setSocketPermission(plugin.manifest.id, value),
+                    ),
+            ),
+          if (plugin.manifest.socketServerBindings.isNotEmpty)
+            SwitchListTile.adaptive(
+              key: ValueKey('socket-server-permission-${plugin.manifest.id}'),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(context.tr('允许 Socket 服务端')),
+              subtitle: Text(plugin.manifest.socketServerBindings.join(', ')),
+              value: plugin.socketServerGranted,
+              onChanged: manager.busy || kIsWeb
+                  ? null
+                  : (value) => unawaited(
+                      manager.setSocketServerPermission(
+                        plugin.manifest.id,
+                        value,
+                      ),
+                    ),
+            ),
           if (plugin.manifest.websocketDomains.isNotEmpty)
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,

@@ -44,10 +44,40 @@ class SettingsDetailHost extends StatefulWidget {
   State<SettingsDetailHost> createState() => _SettingsDetailHostState();
 }
 
+/// One subview opened inside the settings host.
+///
+/// The host keeps a stack rather than a single slot: 插件管理 opens 插件市场 on
+/// top of itself and Back returns one level at a time, so both moves need the
+/// same spring the first push already had.
+class _DetailPage {
+  _DetailPage(this.builder) : id = _nextId++;
+  static int _nextId = 0;
+  final int id;
+  final WidgetBuilder builder;
+}
+
 class _SettingsDetailHostState extends State<SettingsDetailHost>
-    with SingleTickerProviderStateMixin, BuildSafeState<SettingsDetailHost> {
+    with TickerProviderStateMixin, BuildSafeState<SettingsDetailHost> {
   final _storage = PageStorageBucket();
   final _backProgress = ValueNotifier<double?>(null);
+
+  /// Open subviews; the last entry is the page on screen.
+  final List<_DetailPage> _details = <_DetailPage>[];
+
+  /// The subview that is leaving while a nested push or pop runs.
+  _DetailPage? _leaving;
+
+  /// One local-history entry for the whole detail session; Back inside the
+  /// stack pops a level, and only the last level gives the entry back.
+  LocalHistoryEntry? _history;
+
+  /// Set while the host is torn down, so callbacks stop touching state.
+  bool _disposing = false;
+
+  /// Direction of the running nested motion: a push presents the new page, a
+  /// pop hands the screen back to the one underneath.
+  bool _pushing = true;
+
   @override
   void initState() {
     super.initState();
@@ -82,28 +112,107 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
     begin: const Offset(.035, 0),
     end: Offset.zero,
   ).animate(_transition);
-  WidgetBuilder? _detail;
-  LocalHistoryEntry? _history;
-  bool _disposing = false;
-  int _generation = 0;
+
+  /// Nested push/pop between two open subviews.
+  ///
+  /// 1 means "the newer page is presented"; the first push leaves it at rest
+  /// there, so a page opened straight from the overview never carries a stack
+  /// offset of its own.
+  late final _swap = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+    value: 1,
+  )..addStatusListener(_swapChanged);
+
+  /// How far the nested motion has travelled, in either direction.
+  double get _swapProgress => _pushing ? _swap.value : 1 - _swap.value;
+
+  /// The page handing over the screen leaves the way the first push sent the
+  /// overview away: to the left when it is replaced, back to the right (where
+  /// it came from) when it is dismissed.
+  Offset get _leavingOffset => _pushing
+      ? Offset(-.025 * _swapProgress, 0)
+      : Offset(.035 * _swapProgress, 0);
+
+  /// The page taking over arrives from the opposite side.
+  Offset get _enteringOffset => _pushing
+      ? Offset(.035 * (1 - _swapProgress), 0)
+      : Offset(-.025 * (1 - _swapProgress), 0);
+
+  double get _leavingOpacity => ((.4 - _swapProgress) / .4).clamp(0.0, 1.0);
+
+  double get _enteringOpacity => ((_swapProgress - .55) / .45).clamp(0.0, 1.0);
+
+  bool get _reduceMotion => MediaQuery.disableAnimationsOf(context);
+
+  void _swapChanged(AnimationStatus status) {
+    if (!mounted || _disposing || _leaving == null) return;
+    if (status != AnimationStatus.completed &&
+        status != AnimationStatus.dismissed) {
+      return;
+    }
+    setState(() => _leaving = null);
+  }
 
   void _open(WidgetBuilder builder) {
-    if (_history == null) {
-      _history = LocalHistoryEntry(onRemove: _closed);
-      ModalRoute.of(context)?.addLocalHistoryEntry(_history!);
+    if (_details.isEmpty) {
+      if (_history == null) {
+        _history = LocalHistoryEntry(onRemove: _closed);
+        ModalRoute.of(context)?.addLocalHistoryEntry(_history!);
+      }
+      setState(() {
+        _leaving = null;
+        _pushing = true;
+        _swap.value = 1;
+        _details.add(_DetailPage(builder));
+      });
+      if (_reduceMotion) {
+        _transition.value = 1;
+      } else {
+        _transition.springTo(1, spring: AppleSpring.responsive);
+      }
+      return;
     }
+    // A subview is already open: put the new one on top of it with the same
+    // motion instead of swapping the slot on a single frame.
+    _swap.stop();
+    final bool reduce = _reduceMotion;
     setState(() {
-      _detail = builder;
-      _generation++;
+      _pushing = true;
+      _swap.value = 0;
+      // The open subview stays in the stack: it is the page underneath, and
+      // keeping it mounted is what preserves its scroll and its fields.
+      _leaving = _details.last;
+      _details.add(_DetailPage(builder));
     });
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _transition.value = 1;
+    if (reduce) {
+      _swap.value = 1;
+      setState(() => _leaving = null);
     } else {
-      _transition.springTo(1, spring: AppleSpring.responsive);
+      _swap.springTo(1, spring: AppleSpring.responsive);
     }
   }
 
-  void _close() => _history?.remove();
+  void _close() {
+    if (_details.length > 1) {
+      // Back inside the stack: hand the screen to the page underneath.
+      _swap.stop();
+      final bool reduce = _reduceMotion;
+      setState(() {
+        _pushing = false;
+        _swap.value = 1;
+        _leaving = _details.removeLast();
+      });
+      if (reduce) {
+        _swap.value = 0;
+        setState(() => _leaving = null);
+      } else {
+        _swap.springTo(0, spring: AppleSpring.responsive);
+      }
+      return;
+    }
+    _history?.remove();
+  }
 
   void _closed() {
     _history = null;
@@ -112,7 +221,10 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
         MediaQuery.disableAnimationsOf(context) ||
         (_backProgress.value ?? 0) >= 1;
     setState(() {
-      if (immediate || _transition.isDismissed) _detail = null;
+      _swap.stop();
+      _swap.value = 0;
+      _leaving = null;
+      if (immediate || _transition.isDismissed) _details.clear();
     });
     if (immediate) {
       _transition.value = 0;
@@ -124,10 +236,10 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
   void _transitionChanged(AnimationStatus status) {
     if (status == AnimationStatus.dismissed &&
         _history == null &&
-        _detail != null &&
+        _details.isNotEmpty &&
         mounted &&
         !_disposing) {
-      setState(() => _detail = null);
+      setState(() => _details.clear());
     }
   }
 
@@ -136,19 +248,126 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
     _disposing = true;
     _history?.remove();
     _backProgress.dispose();
+    _swap.dispose();
     _transition.dispose();
     super.dispose();
   }
 
+  /// Keeps the overview mounted so its scroll and controls do not have to
+  /// restore themselves on the first return frame.
+  Widget _overviewLayer({required bool active}) => AnimatedBuilder(
+    animation: _transition,
+    builder: (context, child) => Offstage(
+      offstage: _overviewOpacity.value == 0,
+      child: TickerMode(enabled: _overviewOpacity.value != 0, child: child!),
+    ),
+    child: ExcludeFocus(
+      excluding: active,
+      child: ExcludeSemantics(
+        excluding: active,
+        child: IgnorePointer(
+          ignoring: active,
+          child: FadeTransition(
+            opacity: _overviewOpacity,
+            child: SlideTransition(
+              position: _overviewPosition,
+              child: RepaintBoundary(child: widget.child),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  /// One subview: the visible page follows the overview↔detail spring, and a
+  /// nested push or pop adds the stack motion on top of it.
+  ///
+  /// Keyed by page identity so the Stack moves this subtree between the
+  /// "leaving" and "current" slots instead of rebuilding it: a nested push
+  /// must not reset the scroll position or the fields of the page underneath.
+  Widget _detailLayer(
+    _DetailPage page, {
+    required _DetailPage? detail,
+    required bool active,
+    required bool leaving,
+  }) => KeyedSubtree(
+    key: ValueKey<int>(page.id),
+    child: AnimatedBuilder(
+      animation: _swap,
+      builder: (BuildContext context, Widget? child) {
+        final bool isLeaving = leaving;
+        final bool isDetail = page == detail;
+        final bool moving = _leaving != null;
+
+        final double nested;
+        final Offset offset;
+
+        if (isLeaving) {
+          nested = _leavingOpacity;
+          offset = _leavingOffset;
+        } else if (isDetail) {
+          nested = moving ? _enteringOpacity : 1.0;
+          offset = moving ? _enteringOffset : Offset.zero;
+        } else {
+          nested = 0.0;
+          offset = Offset.zero;
+        }
+
+        final bool buried = !isLeaving && !isDetail;
+
+        return Offstage(
+          offstage: buried,
+          child: TickerMode(
+            enabled: !buried,
+            child: Opacity(
+              opacity: nested,
+              child: FractionalTranslation(translation: offset, child: child),
+            ),
+          ),
+        );
+      },
+      child: ExcludeFocus(
+        excluding: !active,
+        child: ExcludeSemantics(
+          excluding: !active,
+          child: IgnorePointer(
+            ignoring: !active,
+            child: FadeTransition(
+              opacity: _detailOpacity,
+              child: SlideTransition(
+                position: _detailPosition,
+                child: RepaintBoundary(
+                  // Retain the embedded scope until the exit has finished, never
+                  // replacing it with a Scaffold.
+                  child: _SettingsDetailScope(
+                    key: ValueKey<int>(page.id),
+                    open: _open,
+                    close: _close,
+                    child: Focus(
+                      autofocus: active,
+                      child: Builder(builder: page.builder),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
-    final detail = _detail;
-    final active = _history != null;
+    final _DetailPage? detail = _details.isEmpty ? null : _details.last;
+    final _DetailPage? leaving = _leaving;
+    final bool active = _history != null;
     return SystemBackGesture(
       canStart: () =>
           mounted &&
           _history != null &&
           _transition.isCompleted &&
+          !_swap.isAnimating &&
           (ModalRoute.of(context)?.isCurrent ?? false),
       progress: _backProgress,
       onStart: _transition.stop,
@@ -167,62 +386,23 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Keep the overview mounted so its scroll and controls do not
-                  // have to restore themselves on the first return frame.
-                  AnimatedBuilder(
-                    animation: _transition,
-                    builder: (context, child) => Offstage(
-                      offstage: _overviewOpacity.value == 0,
-                      child: TickerMode(
-                        enabled: _overviewOpacity.value != 0,
-                        child: child!,
-                      ),
+                  _overviewLayer(active: active),
+                  // The whole stack stays mounted, so coming back to a subview
+                  // restores it exactly where the listener left it.
+                  for (final _DetailPage page in _details)
+                    _detailLayer(
+                      page,
+                      detail: detail,
+                      active: active && page == detail,
+                      leaving: page == leaving,
                     ),
-                    child: ExcludeFocus(
-                      excluding: active,
-                      child: ExcludeSemantics(
-                        excluding: active,
-                        child: IgnorePointer(
-                          ignoring: active,
-                          child: FadeTransition(
-                            opacity: _overviewOpacity,
-                            child: SlideTransition(
-                              position: _overviewPosition,
-                              child: RepaintBoundary(child: widget.child),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (detail != null)
-                    ExcludeFocus(
-                      excluding: !active,
-                      child: ExcludeSemantics(
-                        excluding: !active,
-                        child: IgnorePointer(
-                          ignoring: !active,
-                          child: FadeTransition(
-                            opacity: _detailOpacity,
-                            child: SlideTransition(
-                              position: _detailPosition,
-                              child: RepaintBoundary(
-                                // Retain the embedded scope until the exit has
-                                // finished, never replacing it with a Scaffold.
-                                child: _SettingsDetailScope(
-                                  key: ValueKey(_generation),
-                                  open: _open,
-                                  close: _close,
-                                  child: Focus(
-                                    autofocus: true,
-                                    child: Builder(builder: detail),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                  // A popped page paints on top of the one it hands back to.
+                  if (leaving != null && !_details.contains(leaving))
+                    _detailLayer(
+                      leaving,
+                      detail: detail,
+                      active: false,
+                      leaving: true,
                     ),
                 ],
               ),

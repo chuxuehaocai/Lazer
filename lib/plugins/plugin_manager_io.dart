@@ -27,6 +27,9 @@ class InstalledPlugin {
   });
   final PluginManifest manifest;
   bool enabled;
+  bool networkGranted = false;
+  bool socketGranted = false;
+  bool socketServerGranted = false;
   bool websocketGranted = false;
   bool websocketServerGranted = false;
   LuaPluginRuntime? runtime;
@@ -74,6 +77,68 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   /// Stop owned playback and detach gateways before shutting down a VM.
   Future<void> Function(String pluginId)? beforeChange;
   Future<void> Function()? afterChange;
+  Future<bool> Function(InstalledPlugin plugin, String permission)?
+  onPermissionRequest;
+
+  Future<bool> _requestPermission(
+    InstalledPlugin plugin,
+    String permission,
+  ) async {
+    if (permission == 'network' && plugin.networkGranted) return true;
+    if (permission == 'socket' && plugin.socketGranted) return true;
+    if (permission == 'socketServer' && plugin.socketServerGranted) return true;
+    if (permission == 'websocket' && plugin.websocketGranted) return true;
+    if (permission == 'websocketServer' && plugin.websocketServerGranted) {
+      return true;
+    }
+    if (onPermissionRequest == null) return false;
+    bool granted;
+    try {
+      granted = await onPermissionRequest!(plugin, permission);
+    } catch (_) {
+      return false;
+    }
+    if (granted) {
+      // The request originates inside this plugin's isolate. Restarting the
+      // runtime here would wait for that isolate to finish the request while
+      // it is waiting for this answer, so persist the grant in place. The
+      // runtime updates its own capability after the reply; explicit toggles
+      // still use the lifecycle-aware setters below.
+      await _rememberPermission(plugin, permission);
+    }
+    return granted;
+  }
+
+  Future<void> _rememberPermission(
+    InstalledPlugin plugin,
+    String permission,
+  ) async {
+    final String? markerName = switch (permission) {
+      'network' => '.network-enabled',
+      'socket' => '.socket-enabled',
+      'socketServer' => '.socket-server-enabled',
+      'websocket' => '.websocket-enabled',
+      'websocketServer' => '.websocket-server-enabled',
+      _ => null,
+    };
+    if (markerName == null) return;
+    switch (permission) {
+      case 'network':
+        plugin.networkGranted = true;
+      case 'socket':
+        plugin.socketGranted = true;
+      case 'socketServer':
+        plugin.socketServerGranted = true;
+      case 'websocket':
+        plugin.websocketGranted = true;
+      case 'websocketServer':
+        plugin.websocketServerGranted = true;
+    }
+    await File(
+      p.join((await root).path, plugin.manifest.id, markerName),
+    ).writeAsString('');
+    _notify();
+  }
 
   Future<Directory> get root async => rootDirectory ??= Directory(
     p.join((await AppStorage.shared.supportDirectory()).path, 'lua_plugins'),
@@ -94,6 +159,15 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           if (p.basename(item.path) != manifest.id) continue;
           final disabled = await File(p.join(item.path, '.disabled')).exists();
           final plugin = InstalledPlugin(manifest, enabled: !disabled);
+          plugin.networkGranted = await File(
+            p.join(item.path, '.network-enabled'),
+          ).exists();
+          plugin.socketGranted = await File(
+            p.join(item.path, '.socket-enabled'),
+          ).exists();
+          plugin.socketServerGranted = await File(
+            p.join(item.path, '.socket-server-enabled'),
+          ).exists();
           plugin.websocketGranted = await File(
             p.join(item.path, '.websocket-enabled'),
           ).exists();
@@ -139,8 +213,13 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           'lua_plugin_data',
           plugin.manifest.id,
         ),
+        networkGranted: plugin.networkGranted,
+        socketGranted: plugin.socketGranted,
+        socketServerGranted: plugin.socketServerGranted,
         websocketGranted: plugin.websocketGranted,
         websocketServerGranted: plugin.websocketServerGranted,
+        permissionRequester: (permission) =>
+            _requestPermission(plugin, permission),
       );
       plugin.runtime = runtime;
       await runtime.start();
@@ -378,6 +457,86 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.websocketServerGranted = granted;
       final marker = File(
         p.join((await root).path, id, '.websocket-server-enabled'),
+      );
+      if (granted) {
+        await marker.writeAsString('');
+      } else if (await marker.exists()) {
+        await marker.delete();
+      }
+      if (plugin.enabled) await _start(plugin);
+      await afterChange?.call();
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> setNetworkPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    final plugin = _plugins.firstWhere((v) => v.manifest.id == id);
+    if (plugin.networkGranted == granted) return;
+    busy = true;
+    _notify();
+    try {
+      await beforeChange?.call(id);
+      await plugin.runtime?.shutdown();
+      plugin.runtime = null;
+      plugin.gateways.clear();
+      plugin.networkGranted = granted;
+      final marker = File(p.join((await root).path, id, '.network-enabled'));
+      if (granted) {
+        await marker.writeAsString('');
+      } else if (await marker.exists()) {
+        await marker.delete();
+      }
+      if (plugin.enabled) await _start(plugin);
+      await afterChange?.call();
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> setSocketPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    final plugin = _plugins.firstWhere((v) => v.manifest.id == id);
+    if (plugin.socketGranted == granted) return;
+    busy = true;
+    _notify();
+    try {
+      await beforeChange?.call(id);
+      await plugin.runtime?.shutdown();
+      plugin.runtime = null;
+      plugin.gateways.clear();
+      plugin.socketGranted = granted;
+      final marker = File(p.join((await root).path, id, '.socket-enabled'));
+      if (granted) {
+        await marker.writeAsString('');
+      } else if (await marker.exists()) {
+        await marker.delete();
+      }
+      if (plugin.enabled) await _start(plugin);
+      await afterChange?.call();
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> setSocketServerPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    final plugin = _plugins.firstWhere((v) => v.manifest.id == id);
+    if (plugin.socketServerGranted == granted) return;
+    busy = true;
+    _notify();
+    try {
+      await beforeChange?.call(id);
+      await plugin.runtime?.shutdown();
+      plugin.runtime = null;
+      plugin.gateways.clear();
+      plugin.socketServerGranted = granted;
+      final marker = File(
+        p.join((await root).path, id, '.socket-server-enabled'),
       );
       if (granted) {
         await marker.writeAsString('');
