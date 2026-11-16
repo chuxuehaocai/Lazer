@@ -62,6 +62,86 @@ def _validate_extension(
     return executable
 
 
+WIDGET_EXTENSION_POINT = "com.apple.widgetkit-extension"
+APP_GROUP_KEY = "com.apple.security.application-groups"
+
+
+def _entitlements(path: Path, label: str) -> dict:
+    """Reads a signing entitlement file, or an empty dict when it is absent.
+
+    An absent ``CODE_SIGN_ENTITLEMENTS`` silently changes what the bundle can do,
+    so the caller is expected to pass a path it already required to exist.
+    """
+    try:
+        value = plistlib.loads(path.read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError) as error:
+        raise ValueError(f"could not read {label}: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} is not a dictionary")
+    return value
+
+
+def verify_shared_container_contract(repo: Path) -> str:
+    """The widget can only read what the app writes into one shared App Group.
+
+    Both targets must declare the *same* group. When they differ - or when either
+    side loses the entitlement, which is what a re-signed sideload produces - the
+    extension's ``containerURL`` returns nil, every snapshot the app writes lands
+    somewhere the widget cannot see, and the home-screen card stays empty with no
+    error anywhere. That is exactly the "widget shows nothing" failure, so it is
+    checked here rather than discovered on a device.
+    """
+    runner = _entitlements(
+        repo / "ios" / "Runner" / "Runner.entitlements",
+        "Runner.entitlements",
+    )
+    widget = _entitlements(
+        repo / "ios" / "Widget" / "Widget.entitlements",
+        "Widget.entitlements",
+    )
+    app_groups = runner.get(APP_GROUP_KEY)
+    widget_groups = widget.get(APP_GROUP_KEY)
+    if not isinstance(app_groups, list) or not app_groups:
+        raise ValueError(
+            "Runner.entitlements declares no application groups, so the widget "
+            "extension cannot read the app's playback snapshot"
+        )
+    if not isinstance(widget_groups, list) or not widget_groups:
+        raise ValueError(
+            "Widget.entitlements declares no application groups, so the "
+            "extension cannot read the app's playback snapshot"
+        )
+    for name, groups in (
+        ("Runner.entitlements", app_groups),
+        ("Widget.entitlements", widget_groups),
+    ):
+        for group in groups:
+            if not isinstance(group, str) or not group.startswith("group."):
+                raise ValueError(f"{name} has an invalid application group: {group!r}")
+    shared = sorted(set(app_groups) & set(widget_groups))
+    if not shared:
+        raise ValueError(
+            "the app and the widget extension share no application group: "
+            f"{sorted(set(app_groups))} vs {sorted(set(widget_groups))}"
+        )
+    return shared[0]
+
+
+def verify_widget_extension_point(info: object, label: str) -> None:
+    """Every extension must be a WidgetKit extension for this app to be useful."""
+    if not isinstance(info, dict):
+        raise ValueError(f"{label} has an invalid Info.plist")
+    extension = info.get("NSExtension")
+    if not isinstance(extension, dict):
+        raise ValueError(f"{label} declares no NSExtension")
+    point = extension.get("NSExtensionPointIdentifier")
+    if point != WIDGET_EXTENSION_POINT:
+        raise ValueError(
+            f"{label} declares extension point {point!r}, "
+            f"expected {WIDGET_EXTENSION_POINT!r}"
+        )
+
+
 def _load_plist(path: Path) -> object:
     try:
         return plistlib.loads(path.read_bytes())
@@ -88,6 +168,7 @@ def verify_app(path: Path) -> None:
         executable = _validate_extension(
             info, str(extension), (short_version, build_version)
         )
+        verify_widget_extension_point(info, str(extension))
         binary = extension / executable
         if not binary.is_file() or binary.stat().st_size == 0:
             raise ValueError(
@@ -127,6 +208,7 @@ def verify_ipa(path: Path) -> None:
                     info_name,
                     (short_version, build_version),
                 )
+                verify_widget_extension_point(info, info_name)
                 extension_binary = package.getinfo(extension_root + executable)
                 if extension_binary.file_size == 0:
                     raise ValueError(f"{info_name} has an empty extension executable")
@@ -144,6 +226,8 @@ def main() -> None:
     target.add_argument("--ipa", type=Path, help="finished unsigned IPA")
     args = parser.parse_args()
     try:
+        group = verify_shared_container_contract(Path(__file__).resolve().parents[1])
+        print(f"shared application group: {group}")
         if args.app is not None:
             verify_app(args.app)
         else:

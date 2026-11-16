@@ -54,6 +54,28 @@ fileprivate struct RecentPlayback: Decodable {
       "Play something in Lazer to see it here"
     )
   }
+
+  /// The headline of the unentitled state: short enough for a small widget, and
+  /// not the "no recently played music" wording, which would be wrong.
+  var sharingTitle: String {
+    localized("小组件未启用", "小部件未啟用", "ウィジェット未設定", "Widget not enabled")
+  }
+
+  /// Shown instead of [displayHint] when the extension cannot reach the app's
+  /// shared container at all.
+  ///
+  /// Saying "play something in Lazer" there would be a lie: no amount of playing
+  /// makes the card fill, because the App Group entitlement is missing from the
+  /// installed package. The one thing the listener can actually do is reinstall
+  /// with a profile that carries it.
+  var sharingHint: String {
+    localized(
+      "小组件无法读取共享容器，请确认安装包包含 App Groups 权限后重新安装",
+      "小部件無法讀取共享容器，請確認安裝檔包含 App Groups 權限後重新安裝",
+      "ウィジェットが共有コンテナを読めません。App Groups 権限を含むパッケージで再インストールしてください",
+      "The widget cannot reach the app's shared container. Reinstall with App Groups enabled."
+    )
+  }
 }
 
 /// Reads the snapshot written by the app. Every field is optional: a snapshot
@@ -100,6 +122,12 @@ struct PlayCountEntry: TimelineEntry {
   let date: Date
   fileprivate let playback: RecentPlayback
   let artwork: UIImage?
+  /// False when the extension has no App Group container to read.
+  ///
+  /// The card then says so instead of claiming nothing has been played: an
+  /// unentitled install looks exactly like an empty one from inside the
+  /// extension, and only this flag tells them apart.
+  var sharingAvailable: Bool = true
 }
 
 struct PlayCountProvider: TimelineProvider {
@@ -130,8 +158,16 @@ struct PlayCountProvider: TimelineProvider {
 
   private func loadEntry() -> PlayCountEntry {
     guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: widgetSuite) else {
-      NSLog("[LazerWidget] app group %@ unavailable; showing the empty state", widgetSuite)
-      return PlayCountEntry(date: Date(), playback: .empty, artwork: nil)
+      NSLog(
+        "[LazerWidget] app group %@ unavailable; the extension has no shared container",
+        widgetSuite
+      )
+      return PlayCountEntry(
+        date: Date(),
+        playback: .empty,
+        artwork: nil,
+        sharingAvailable: false
+      )
     }
     guard let data = try? Data(contentsOf: container.appendingPathComponent("recent-playback.json")) else {
       NSLog("[LazerWidget] no snapshot in the shared container yet")
@@ -204,7 +240,7 @@ private struct RecentPlaybackView: View {
         Spacer(minLength: 0)
 
         VStack(alignment: .leading, spacing: 3) {
-          Text(entry.playback.displayTitle)
+          Text(entry.sharingAvailable ? entry.playback.displayTitle : entry.playback.sharingTitle)
             .font(.custom("MiSans-Semibold", size: 15, relativeTo: .subheadline))
             .foregroundStyle(.primary)
             .lineLimit(entry.playback.hasTrack ? 1 : 2)
@@ -216,11 +252,16 @@ private struct RecentPlaybackView: View {
               .lineLimit(1)
           } else {
             // An empty widget must explain itself: the title alone read as a
-            // broken card on the home screen.
-            Text(entry.playback.displayHint)
+            // broken card on the home screen. When the cause is a missing shared
+            // container, "play something" would send the listener looking in the
+            // wrong place.
+            Text(entry.sharingAvailable ? entry.playback.displayHint : entry.playback.sharingHint)
               .font(.custom("MiSans-Regular", size: 12, relativeTo: .caption))
               .foregroundStyle(.secondary)
-              .lineLimit(2)
+              // The reinstall hint is a sentence, not a phrase: two lines clipped
+              // it into a fragment that named no action.
+              .lineLimit(entry.sharingAvailable ? 2 : 4)
+              .minimumScaleFactor(0.9)
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

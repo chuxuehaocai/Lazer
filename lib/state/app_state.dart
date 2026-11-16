@@ -3066,13 +3066,31 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _broadcastPluginPlayerState();
     if (!_systemWidgetsReady || _presentationDisposed) return;
     unawaited(
-      _systemWidgets.update(
-        track: current ?? _recentTracks.firstOrNull,
-        playing: current != null && playing,
-        language: language.code,
-      ),
+      _systemWidgets
+          .update(
+            track: current ?? _recentTracks.firstOrNull,
+            playing: current != null && playing,
+            language: language.code,
+          )
+          .then<void>((_) => _reportSystemWidgetStatus()),
     );
   }
+
+  /// Records the widget's storage outcome once per distinct reason.
+  ///
+  /// A widget that cannot be written at all - no App Groups entitlement on a
+  /// re-signed install - otherwise looks exactly like a widget with nothing to
+  /// show, and the home screen stays empty with no trace anywhere the user or a
+  /// bug report can find it.
+  void _reportSystemWidgetStatus() {
+    final String? reason = _systemWidgets.lastReason;
+    if (reason == _widgetFailure) return;
+    _widgetFailure = reason;
+    if (reason == null) return;
+    AppLog.shared.event('widget', 'publish_failed', {'reason': reason});
+  }
+
+  String? _widgetFailure;
 
   List<Track> _recentTracks = <Track>[];
   int _queueIndex = 0;

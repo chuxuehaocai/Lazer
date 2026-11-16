@@ -35,7 +35,80 @@ def bundle_info(
         info["CFBundleName"] = name
     if executable is not None:
         info["CFBundleExecutable"] = executable
+    if package_type == "XPC!":
+        # A real appex carries its extension point; the bundle check now requires
+        # it, because an extension without the WidgetKit point installs but never
+        # appears in the widget gallery.
+        info["NSExtension"] = {
+            "NSExtensionPointIdentifier": "com.apple.widgetkit-extension"
+        }
     return info
+
+
+class SharedContainerContractTest(unittest.TestCase):
+    def test_the_shipped_project_shares_one_application_group(self):
+        group = VERIFY.verify_shared_container_contract(REPO)
+        self.assertTrue(group.startswith("group."))
+
+    def _project_with(self, runner_groups, widget_groups) -> Path:
+        root = Path(tempfile.mkdtemp())
+        (root / "ios/Runner").mkdir(parents=True)
+        (root / "ios/Widget").mkdir(parents=True)
+        (root / "ios/Runner/Runner.entitlements").write_bytes(
+            plistlib.dumps(
+                {"com.apple.security.application-groups": runner_groups}
+            )
+        )
+        (root / "ios/Widget/Widget.entitlements").write_bytes(
+            plistlib.dumps(
+                {"com.apple.security.application-groups": widget_groups}
+            )
+        )
+        return root
+
+    def test_a_widget_with_no_group_is_rejected(self):
+        root = self._project_with(["group.dev.naominet.lazer"], [])
+        with self.assertRaisesRegex(ValueError, "Widget.entitlements"):
+            VERIFY.verify_shared_container_contract(root)
+
+    def test_an_app_with_no_group_is_rejected(self):
+        root = self._project_with([], ["group.dev.naominet.lazer"])
+        with self.assertRaisesRegex(ValueError, "Runner.entitlements"):
+            VERIFY.verify_shared_container_contract(root)
+
+    def test_disjoint_groups_are_rejected(self):
+        # The failure that empties a widget while every build check passes.
+        root = self._project_with(
+            ["group.dev.naominet.lazer"], ["group.dev.naominet.other"]
+        )
+        with self.assertRaisesRegex(ValueError, "share no application group"):
+            VERIFY.verify_shared_container_contract(root)
+
+    def test_a_group_without_the_group_prefix_is_rejected(self):
+        root = self._project_with(
+            ["dev.naominet.lazer"], ["dev.naominet.lazer"]
+        )
+        with self.assertRaisesRegex(ValueError, "invalid application group"):
+            VERIFY.verify_shared_container_contract(root)
+
+
+class WidgetExtensionPointTest(unittest.TestCase):
+    def test_the_shipped_widget_is_a_widgetkit_extension(self):
+        info = plistlib.loads((REPO / "ios/Widget/Info.plist").read_bytes())
+        VERIFY.verify_widget_extension_point(info, "ios/Widget/Info.plist")
+
+    def test_a_plain_extension_is_rejected(self):
+        # An extension without this point installs but never appears in the
+        # widget gallery, which reads as "the widget is missing".
+        info = {
+            "NSExtension": {"NSExtensionPointIdentifier": "com.apple.share-services"}
+        }
+        with self.assertRaisesRegex(ValueError, "expected"):
+            VERIFY.verify_widget_extension_point(info, "fixture")
+
+    def test_a_missing_extension_dict_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "NSExtension"):
+            VERIFY.verify_widget_extension_point({}, "fixture")
 
 
 class IosBundleMetadataTest(unittest.TestCase):
