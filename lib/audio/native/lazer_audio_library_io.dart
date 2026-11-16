@@ -637,6 +637,36 @@ class LazerAudioBridgeApi {
       );
 }
 
+/// The ABI entry points a load must find before the engine is offered at all.
+///
+/// Kept in step with `ci/verify-ios-audio.py` (`ABI_SYMBOLS`) and
+/// `ci/build-ios-audio.sh`, which fail the build when one is absent from the
+/// archive. `lazer_audio_set_automix`, `lazer_audio_read_log` and the device
+/// catalogs are additive: an engine without them still plays, so they are looked
+/// up optionally instead of gating the path.
+const List<String> requiredEngineSymbols = <String>[
+  // Called before the list is checked, because the version it returns decides
+  // whether any other struct may be read at all.
+  'lazer_audio_abi_version',
+  'lazer_audio_create',
+  'lazer_audio_destroy',
+  'lazer_audio_open_file_utf8',
+  'lazer_audio_open_reader',
+  'lazer_audio_queue_reader',
+  'lazer_audio_clear_queued_reader',
+  'lazer_audio_play',
+  'lazer_audio_pause',
+  'lazer_audio_stop',
+  'lazer_audio_seek',
+  'lazer_audio_set_volume',
+  'lazer_audio_set_dsp',
+  'lazer_audio_set_device',
+  'lazer_audio_snapshot',
+  'lazer_audio_stream_info',
+  'lazer_audio_last_error',
+  'lazer_audio_build_information',
+];
+
 /// Resolves and loads `lazer-audio` plus its reader bridge, once per process.
 abstract final class LazerAudioLoader {
   /// Overrides the engine path; also honoured from the environment so a build
@@ -786,30 +816,22 @@ abstract final class LazerAudioLoader {
         '(dart run tool/build_native_audio.dart) or import a matching engine.',
       );
     }
-    for (final symbol in const [
-      'lazer_audio_create',
-      'lazer_audio_destroy',
-      'lazer_audio_open_file_utf8',
-      'lazer_audio_open_reader',
-      'lazer_audio_queue_reader',
-      'lazer_audio_clear_queued_reader',
-      'lazer_audio_play',
-      'lazer_audio_pause',
-      'lazer_audio_stop',
-      'lazer_audio_seek',
-      'lazer_audio_set_volume',
-      'lazer_audio_set_dsp',
-      'lazer_audio_set_device',
-      'lazer_audio_snapshot',
-      'lazer_audio_stream_info',
-      'lazer_audio_last_error',
-      'lazer_audio_build_information',
-    ]) {
-      if (!api._library.providesSymbol(symbol)) {
-        return LazerAudioAvailability.unavailable(
-          '$engineFileName is missing $symbol',
-        );
-      }
+    // Every symbol at once, not the first one that is absent: on iOS the engine
+    // is force-loaded into the executable, so a missing entry point means the
+    // linker dropped the export trie (`-export_dynamic`) or an archive member was
+    // not pulled in. Reporting one name at a time turned that into a sequence of
+    // rebuilds, so the whole missing set travels in the reason the settings page
+    // and the log show.
+    final List<String> missingSymbols = <String>[
+      for (final String symbol in requiredEngineSymbols)
+        if (!api._library.providesSymbol(symbol)) symbol,
+    ];
+    if (missingSymbols.isNotEmpty) {
+      return LazerAudioAvailability.unavailable(
+        '$engineFileName is missing ${missingSymbols.length} of '
+        '${requiredEngineSymbols.length} ABI symbols: '
+        '${missingSymbols.join(', ')}',
+      );
     }
     // The bridge is optional: without it the engine still plays local files,
     // it just cannot stream. A load failure is reported through
@@ -819,7 +841,15 @@ abstract final class LazerAudioLoader {
       try {
         bridge = LazerAudioBridgeApi(library);
       } catch (error) {
-        developer.log('bridge load failed: $error', name: 'lazer-audio');
+        // In-process there is no path to report: the bridge is linked into the
+        // same image, so a failure here is a build problem that also removes
+        // network playback. Say so instead of leaving the user with a silently
+        // local-only engine.
+        developer.log(
+          'the linked reader bridge is not usable, network sources will not '
+          'play: $error',
+          name: 'lazer-audio',
+        );
       }
     } else {
       final Uri? bridgePath = _resolve(

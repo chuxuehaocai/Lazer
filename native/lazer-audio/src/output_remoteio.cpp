@@ -106,6 +106,7 @@ public:
         }
         opened_ = true;
         bufferMillis_ = std::clamp(request.bufferMillis, 20, 1000);
+        ioPeriodFrames_.store(ioFrames, std::memory_order_release);
         // Activation and preference changes may emit their own notifications.
         // Consume that epoch once, after setup, rather than rebuilding forever.
         sessionRevision_ = iosSessionState().revision;
@@ -116,8 +117,13 @@ public:
         session.formatSelection = LazerAudioFormatSelectionSharedMix;
         session.exclusive = false;
         session.periodFrames = ioFrames;
-        session.bufferFrames = static_cast<int32_t>(
-            std::min<int64_t>(queueFrames, std::numeric_limits<int32_t>::max()));
+        // The device holds one IO buffer; everything above that in `queue_` is this
+        // backend's own cushion for a source that stalls mid-track. The engine sizes
+        // its ring and its render block from `bufferFrames`, so publishing the
+        // cushion there would triple seconds of software queue into that ring and
+        // hide the latency the listener actually hears. The cushion stays a detail
+        // of this backend; the published depth is what the AudioUnit asked for.
+        session.bufferFrames = ioFrames;
         session.writeMode = OutputWriteMode::Variable;
         session.queueDepthAvailable = true;
         // The render loop primes one period itself; pre-filling here would
@@ -140,6 +146,7 @@ public:
         disposeUnit();
         queue_.reset();
         frameBytes_.store(0, std::memory_order_release);
+        ioPeriodFrames_.store(0, std::memory_order_release);
         // Deactivating between tracks relinquishes the background playback
         // session; iOS can then refuse the next activation while locked. Keep
         // it through replacements and release it only on stop or teardown.
@@ -210,13 +217,15 @@ public:
         // wait behind a full queue. The callback drains it in the background.
         if (writableFrames(error) > 0) return OutputWaitResult::Ready;
         if (!error.empty()) return OutputWaitResult::Error;
-        const int32_t slice = std::clamp(timeoutMillis, 0, 20);
-        for (int32_t waited = 0; waited < slice; waited += 1) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            if (writableFrames(error) > 0) return OutputWaitResult::Ready;
-            if (!error.empty()) return OutputWaitResult::Error;
-        }
-        return OutputWaitResult::Timeout;
+        // Frames only become writable when the AudioUnit renders its next period,
+        // so nothing can free before one IO period has elapsed. Sleeping once for a
+        // slice derived from that period keeps the producer off both the device lock
+        // and the session snapshot, instead of re-entering writableFrames() up to
+        // twenty times per call and finding the same queue every time.
+        const int32_t slice = std::clamp(timeoutMillis, 0, ioPeriodMillis());
+        if (slice > 0) std::this_thread::sleep_for(std::chrono::milliseconds(slice));
+        if (writableFrames(error) > 0) return OutputWaitResult::Ready;
+        return error.empty() ? OutputWaitResult::Timeout : OutputWaitResult::Error;
     }
 
     int32_t writableFrames(std::string &error) override {
@@ -272,6 +281,16 @@ public:
     }
 
 private:
+    /// How long the device needs to render one period, bounded so a pathological
+    /// route cannot park the producer for longer than a frame budget.
+    [[nodiscard]] int32_t ioPeriodMillis() const noexcept {
+        const int32_t frames = ioPeriodFrames_.load(std::memory_order_acquire);
+        const int32_t rate = target_.sampleRate;
+        if (frames <= 0 || rate <= 0) return 20;
+        const int64_t millis = static_cast<int64_t>(frames) * 1000 / rate;
+        return static_cast<int32_t>(std::clamp<int64_t>(millis, 1, 20));
+    }
+
     // Only control / render-producer callers enter these helpers. Stopping
     // and disposing the unit synchronizes its callback before queue reset or
     // destruction. A route rebuild deliberately leaves the SPSC PCM untouched.
@@ -457,26 +476,41 @@ private:
     OSStatus render(AudioUnitRenderActionFlags *, const AudioTimeStamp *, UInt32, UInt32 frames,
         AudioBufferList *data) {
         if (data == nullptr || data->mNumberBuffers == 0) return noErr;
-        AudioBuffer &buffer = data->mBuffers[0];
         const int32_t frameBytes = frameBytes_.load(std::memory_order_acquire);
-        if (frameBytes <= 0 || buffer.mData == nullptr) return noErr;
-        const size_t capacityFrames = buffer.mDataByteSize / static_cast<size_t>(frameBytes);
-        const int32_t wanted = static_cast<int32_t>(
-            std::min<size_t>(frames, capacityFrames));
-        if (wanted <= 0) return noErr;
-        const int32_t dequeued = queue_.readInterleavedBytes(
-            static_cast<uint8_t *>(buffer.mData), buffer.mDataByteSize,
-            static_cast<size_t>(wanted));
-        const int32_t received = dequeued > 0 ? std::min(dequeued, wanted) : 0;
-        if (received < wanted) {
-            const size_t offset = static_cast<size_t>(received) * static_cast<size_t>(frameBytes);
-            const size_t missing = buffer.mDataByteSize > offset
-                ? static_cast<size_t>(wanted - received) * static_cast<size_t>(frameBytes) : 0;
-            if (missing > 0) {
-                std::memset(static_cast<uint8_t *>(buffer.mData) + offset, 0, missing);
+        if (frameBytes <= 0) return noErr;
+
+        // The client format is interleaved, so a well-behaved unit hands exactly one
+        // buffer. Anything else is still answered rather than left alone: whatever a
+        // buffer keeps from the previous callback is device memory the listener would
+        // hear as noise, and this callback must never be the reason a route plays
+        // garbage back.
+        AudioBuffer &buffer = data->mBuffers[0];
+        int32_t received = 0;
+        int32_t wanted = 0;
+        if (buffer.mData != nullptr) {
+            const size_t capacityFrames = buffer.mDataByteSize / static_cast<size_t>(frameBytes);
+            wanted = static_cast<int32_t>(std::min<size_t>(frames, capacityFrames));
+            if (wanted > 0) {
+                const int32_t dequeued = queue_.readInterleavedBytes(
+                    static_cast<uint8_t *>(buffer.mData), buffer.mDataByteSize,
+                    static_cast<size_t>(wanted));
+                received = dequeued > 0 ? std::min(dequeued, wanted) : 0;
             }
+            const size_t filled = static_cast<size_t>(received) * static_cast<size_t>(frameBytes);
+            if (buffer.mDataByteSize > filled) {
+                std::memset(static_cast<uint8_t *>(buffer.mData) + filled, 0,
+                    buffer.mDataByteSize - filled);
+            }
+        }
+        if (received < wanted) {
             underrunFrames_.fetch_add(static_cast<uint64_t>(wanted - received),
                 std::memory_order_relaxed);
+        }
+        for (UInt32 index = 1; index < data->mNumberBuffers; ++index) {
+            AudioBuffer &extra = data->mBuffers[index];
+            if (extra.mData != nullptr && extra.mDataByteSize > 0) {
+                std::memset(extra.mData, 0, extra.mDataByteSize);
+            }
         }
         return noErr;
     }
@@ -495,6 +529,8 @@ private:
     std::chrono::steady_clock::time_point nextRecoveryAttempt_{};
     TargetFormat target_{};
     std::atomic<int32_t> frameBytes_{0};
+    /// The IO period the route granted, in frames; 0 before the first open.
+    std::atomic<int32_t> ioPeriodFrames_{0};
     std::atomic<uint64_t> underrunFrames_{0};
 };
 

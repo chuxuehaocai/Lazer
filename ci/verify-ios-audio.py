@@ -219,6 +219,52 @@ def verify_ipa(path: Path) -> int:
     return result
 
 
+def verify_required_abi_matches_dart() -> None:
+    """The loader's required list and this file must name the same entry points.
+
+    `lib/audio/native/lazer_audio_library_io.dart` refuses the engine when one of
+    its `requiredEngineSymbols` is absent, and this script refuses the build when
+    one of `ABI_SYMBOLS` is absent. When those two lists drift apart the build
+    passes and the app then quietly falls back to just_audio on every launch,
+    which is the failure this check exists to make impossible.
+    """
+    source = (Path(__file__).resolve().parents[1] /
+              "lib" / "audio" / "native" / "lazer_audio_library_io.dart")
+    if not source.is_file():
+        raise SystemExit(f"missing Dart loader: {source}")
+    text = source.read_text(encoding="utf-8")
+    start = text.find("requiredEngineSymbols")
+    if start < 0:
+        raise SystemExit("the Dart loader no longer defines requiredEngineSymbols")
+    end = text.find("];", start)
+    if end < 0:
+        raise SystemExit("could not read the Dart loader's required symbol list")
+    required = {
+        name for name in re.findall(r"'([a-z0-9_]+)'", text[start:end])
+    }
+    # Verified in the archive as well, but optional for the loader: an engine
+    # without the overlap mixer still plays, so `LazerAudioApi.setAutoMix` is a
+    # nullable lookup and must not gate the native path.
+    verified_beyond_loader = {"lazer_audio_set_automix"}
+    declared = set(ABI_SYMBOLS)
+    only_dart = sorted(required - declared)
+    only_script = sorted(declared - required - verified_beyond_loader)
+    if only_dart or only_script:
+        if only_dart:
+            print(
+                "the Dart loader requires symbols this check does not verify: "
+                + ", ".join(only_dart),
+                file=sys.stderr,
+            )
+        if only_script:
+            print(
+                "this check verifies symbols the Dart loader does not require: "
+                + ", ".join(only_script),
+                file=sys.stderr,
+            )
+        raise SystemExit(1)
+
+
 def verify_archive(directory: Path) -> int:
     if not directory.is_dir():
         raise SystemExit(f"missing directory: {directory}")
@@ -263,6 +309,7 @@ def main() -> int:
     target.add_argument("--archive", type=Path, help="staged iOS archive directory")
     parser.add_argument("--expect-native", action="store_true", help="fail when the engine is absent")
     args = parser.parse_args()
+    verify_required_abi_matches_dart()
     if args.ipa is not None:
         return verify_ipa(args.ipa)
     if args.app is not None:

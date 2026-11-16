@@ -90,6 +90,44 @@ std::vector<float> pullAudio(int32_t frames, int32_t channels) {
     return samples;
 }
 
+/* A two-buffer list: the AudioUnit may hand more than the one interleaved buffer
+ * the client format asks for, and it must still come back filled with audio or
+ * silence rather than with whatever the previous callback left there. */
+struct MultiBufferPull {
+    std::vector<float> first;
+    std::vector<float> second;
+    OSStatus status = -1;
+};
+
+/* The real `AudioBufferList` ends in a variable-length array; the fake declares
+ * one element, so a two-buffer list is built beside it and viewed through the
+ * same head layout the callback sees. */
+struct TwoBufferList {
+    UInt32 mNumberBuffers;
+    AudioBuffer mBuffers[2];
+};
+
+MultiBufferPull pullAudioTwoBuffers(int32_t frames, int32_t channels) {
+    MultiBufferPull pulled;
+    pulled.first.assign(static_cast<size_t>(frames) * static_cast<size_t>(channels), -1.0f);
+    pulled.second.assign(static_cast<size_t>(frames) * static_cast<size_t>(channels), -1.0f);
+    TwoBufferList list{};
+    list.mNumberBuffers = 2;
+    list.mBuffers[0].mNumberChannels = static_cast<UInt32>(channels);
+    list.mBuffers[0].mDataByteSize = static_cast<UInt32>(pulled.first.size() * sizeof(float));
+    list.mBuffers[0].mData = pulled.first.data();
+    list.mBuffers[1].mNumberChannels = static_cast<UInt32>(channels);
+    list.mBuffers[1].mDataByteSize = static_cast<UInt32>(pulled.second.size() * sizeof(float));
+    list.mBuffers[1].mData = pulled.second.data();
+    AudioUnitRenderActionFlags flags = 0;
+    g_inRenderCallback = true;
+    pulled.status = g_unit.callback.inputProc(g_unit.callback.inputProcRefCon, &flags,
+        nullptr, 0, static_cast<UInt32>(frames),
+        reinterpret_cast<AudioBufferList *>(&list));
+    g_inRenderCallback = false;
+    return pulled;
+}
+
 }  // namespace
 
 /* Fake AudioToolbox implementation. */
@@ -428,6 +466,54 @@ void testQueuesAndDeliversFrames() {
     output->close();
 }
 
+/* The callback is the only thing standing between the queue and the speaker. A
+ * layout it does not expect must still surface as audio or silence, never as the
+ * bytes the device happened to hold before. */
+void testRenderFillsEveryBufferItIsGiven() {
+    g_session = FakeSession{};
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    output->start(error);
+
+    const float frames[] = {0.5f, -0.5f, 0.25f, -0.25f};
+    checkEqual(output->write(reinterpret_cast<const uint8_t *>(frames), 2, error), 2,
+        "queues two frames for the callback");
+
+    const MultiBufferPull pulled = pullAudioTwoBuffers(4, 2);
+    checkEqual(pulled.status, noErr, "a two-buffer layout is answered with noErr");
+    checkNear(pulled.first[0], 0.5, 1e-6, "the first buffer carries the queued sample");
+    checkNear(pulled.first[3], -0.25, 1e-6, "the first buffer carries the last queued channel");
+    checkNear(pulled.first[4], 0.0, 1e-6, "the first buffer pads its underrun with silence");
+    for (size_t index = 0; index < pulled.second.size(); ++index) {
+        if (pulled.second[index] != 0.0f) {
+            check(false, "an extra buffer is zeroed instead of keeping stale audio");
+            break;
+        }
+    }
+    checkEqual(output->queuedFrames(error), 0, "the callback consumed exactly what it was given");
+    output->close();
+}
+
+/* The depth the engine buffers against is the latency the listener hears, not the
+ * software cushion the backend holds for a stalling network source. Reporting the
+ * whole cushion made the engine triple it into its ring. */
+void testBufferDepthIsTheDeviceLatencyNotTheSoftwareQueue() {
+    g_session = FakeSession{};
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    const int32_t queueFrames = output->queuedFrames(error) + output->writableFrames(error);
+    check(session.bufferFrames > 0, "reports a positive buffer depth");
+    checkEqual(session.bufferFrames, session.periodFrames,
+        "reports the IO buffer the device holds as the depth");
+    check(session.bufferFrames < queueFrames,
+        "reports less than the software queue it is backed by");
+    output->close();
+}
+
 void testWaitForReadySeesTheDeviceDrain() {
     g_session = FakeSession{};
     auto output = createPlatformAudioOutput();
@@ -721,6 +807,8 @@ int main() {
     testRefusesFormatsIOSCannotDeliver();
     testReportsGrantedFacts();
     testQueuesAndDeliversFrames();
+    testRenderFillsEveryBufferItIsGiven();
+    testBufferDepthIsTheDeviceLatencyNotTheSoftwareQueue();
     testWaitForReadySeesTheDeviceDrain();
     testMissingUnitAndSessionFailureAreReported();
     testRejectsChangedCallbackLayout();
