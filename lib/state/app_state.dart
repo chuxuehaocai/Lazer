@@ -2996,8 +2996,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         return {
           'state': playing ? 'playing' : 'paused',
           'position': position.inMilliseconds,
-          'duration':
-              (duration ?? current?.duration ?? Duration.zero).inMilliseconds,
+          'duration': (current?.duration ?? Duration.zero).inMilliseconds,
           'volume': volume,
         };
       default:
@@ -3015,14 +3014,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           'id': track.id,
           'name': track.title,
           'title': track.title,
-          'artist': track.artists.map((a) => a.name).join(', '),
+          'artist': track.artist,
           'artists': [
             for (final a in track.artists) {'id': a.id, 'name': a.name}
           ],
-          'album': track.albumName ?? '',
-          'albumName': track.albumName ?? '',
-          'coverUrl': track.artworkUrl ?? '',
-          'picUrl': track.artworkUrl ?? '',
+          'album': track.album,
+          'albumName': track.album,
+          'coverUrl': track.coverUrl ?? '',
+          'picUrl': track.coverUrl ?? '',
           'duration': track.duration.inMilliseconds,
           'durationMs': track.duration.inMilliseconds,
         });
@@ -3039,8 +3038,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       pluginManager.broadcastPlayerEvent('status', {
         'state': isPlaying ? 'playing' : 'paused',
         'position': position.inMilliseconds,
-        'duration':
-            (duration ?? current?.duration ?? Duration.zero).inMilliseconds,
+        'duration': (current?.duration ?? Duration.zero).inMilliseconds,
         'volume': volume,
       });
     }

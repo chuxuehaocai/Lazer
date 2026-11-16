@@ -1,6 +1,7 @@
 // i18n:data — manager status and validation messages are interface keys shown
 // by the plugin manager through `context.tr`.
 import '../state/build_safe_notifier.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -382,7 +383,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             _requestPermission(plugin, permission),
         onSettingAdded: (spec) => _registerSetting(plugin, spec),
         onPlayerMenuItemAdded: (spec) => _registerPlayerMenuItem(plugin, spec),
-        onPlayerControl: (spec) => onPlayerControl?.call(spec),
+        onPlayerControl: (spec) =>
+            onPlayerControl?.call(spec) ?? Future.value(null),
       );
       plugin.runtime = runtime;
       await runtime.start();
