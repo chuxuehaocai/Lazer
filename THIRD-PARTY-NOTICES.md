@@ -174,9 +174,9 @@ licenses remain separate from the Lazer license above.
 
 ## LuaDardo Plus
 
-`third_party/lua_dardo_plus` vendors the published LuaDardo Plus 0.3.1 pure Dart
-Lua VM under Apache-2.0. The full upstream license is retained at
-`third_party/lua_dardo_plus/LICENSE`; local changes are listed in
-`third_party/lua_dardo_plus/LAZER_PATCHES.md`.
+The application depends on the published LuaDardo Plus 0.3.1 pure Dart Lua VM
+from pub.dev. It is licensed under Apache-2.0 and is downloaded during Dart
+dependency resolution rather than vendored in this repository.
 
 Upstream: <https://gitlab.com/aa22396584/LuaDardo>.
+Package: <https://pub.dev/packages/lua_dardo_plus>.

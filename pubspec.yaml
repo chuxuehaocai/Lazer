@@ -64,9 +64,8 @@ dependencies:
   # registrant also references it, so it must be on the release classpath.
   integration_test:
     sdk: flutter
-  # Includes the nested async CALL fix required by Lua Gateway HTTP.
-  lua_dardo_plus:
-    path: third_party/lua_dardo_plus
+  # Published LuaDardo fork with async Dart calls and web support.
+  lua_dardo_plus: ^0.3.1
   archive: ^4.6.0
   path: ^1.9.1
 
