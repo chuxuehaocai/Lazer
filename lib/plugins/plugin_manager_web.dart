@@ -38,6 +38,7 @@ class InstalledPlugin {
   final Map<String, Object?> settingValues = <String, Object?>{};
   final List<LuaPluginSetting> settings = <LuaPluginSetting>[];
   final List<LuaPlayerMenuItem> playerMenuItems = <LuaPlayerMenuItem>[];
+  final List<LuaPluginPage> pages = <LuaPluginPage>[];
   LuaPluginRuntime? runtime;
   final List<LuaMusicGateway> gateways = <LuaMusicGateway>[];
   LazerThemeTokens? theme;
@@ -69,6 +70,10 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   List<LuaPlayerMenuItem> get playerMenuItems => <LuaPlayerMenuItem>[
     for (final plugin in _plugins)
       if (plugin.enabled && plugin.runtime != null) ...plugin.playerMenuItems,
+  ];
+  List<LuaPluginPage> get pluginPages => <LuaPluginPage>[
+    for (final plugin in _plugins)
+      if (plugin.enabled && plugin.runtime != null) ...plugin.pages,
   ];
   LazerThemeTokens? get activeTheme => _plugins
       .where((plugin) => plugin.enabled && plugin.runtime != null)
@@ -207,6 +212,25 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     return true;
   }
 
+  Future<Object?> _registerPage(
+    InstalledPlugin plugin,
+    Map<String, dynamic> spec,
+  ) async {
+    final page = LuaPluginPage.fromSpec(
+      pluginId: plugin.manifest.id,
+      pluginName: plugin.manifest.name,
+      spec: spec,
+    );
+    if (!plugin.pages.any((value) => value.id == page.id) &&
+        plugin.pages.length >= 16) {
+      throw const FormatException('Too many plugin pages');
+    }
+    plugin.pages.removeWhere((value) => value.id == page.id);
+    plugin.pages.add(page);
+    _notify();
+    return true;
+  }
+
   Future<void> _persistSettingValues(InstalledPlugin plugin) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -269,6 +293,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     try {
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
+      plugin.pages.clear();
       final sources = rawSources is Map
           ? Map<String, String>.from(rawSources)
           : <String, String>{};
@@ -291,6 +316,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             _requestPermission(plugin, permission),
         onSettingAdded: (spec) => _registerSetting(plugin, spec),
         onPlayerMenuItemAdded: (spec) => _registerPlayerMenuItem(plugin, spec),
+        onPageAdded: (spec) => _registerPage(plugin, spec),
         onPlayerControl: (spec) =>
             onPlayerControl?.call(spec) ?? Future.value(null),
       );
@@ -360,6 +386,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.layout = null;
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
+      plugin.pages.clear();
       plugin.error = '插件启动失败，请检查插件版本或重新导入。';
     }
   }
@@ -421,6 +448,14 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           );
           return true;
         },
+        onPageAdded: (spec) async {
+          LuaPluginPage.fromSpec(
+            pluginId: manifest.id,
+            pluginName: manifest.name,
+            spec: spec,
+          );
+          return true;
+        },
       );
       try {
         await probe.start();
@@ -471,6 +506,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.gateways.clear();
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
+      plugin.pages.clear();
       MediaRequestRules.remove(id);
       plugin.enabled = enabled;
       if (enabled) {
@@ -502,6 +538,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.gateways.clear();
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
+      plugin.pages.clear();
       plugin.websocketGranted = granted;
       final prefs = await SharedPreferences.getInstance();
       final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
@@ -530,6 +567,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.gateways.clear();
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
+      plugin.pages.clear();
       plugin.networkGranted = granted;
       final prefs = await SharedPreferences.getInstance();
       final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
@@ -558,6 +596,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.gateways.clear();
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
+      plugin.pages.clear();
       plugin.filesystemGranted = granted;
       final prefs = await SharedPreferences.getInstance();
       final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
@@ -634,6 +673,38 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     });
   }
 
+  Future<void> invokePluginPageEvent(
+    String pluginId,
+    String pageId,
+    String elementId,
+    Object? value,
+  ) async {
+    final plugin = _plugins.firstWhere(
+      (item) => item.manifest.id == pluginId,
+      orElse: () => throw const PluginException('插件不存在。'),
+    );
+    final pageIndex = plugin.pages.indexWhere((item) => item.id == pageId);
+    if (pageIndex < 0) throw const PluginException('插件页面不存在。');
+    final page = plugin.pages[pageIndex];
+    final elementIndex = page.elements.indexWhere(
+      (item) => item.id == elementId,
+    );
+    if (elementIndex < 0) throw const PluginException('插件页面控件不存在。');
+    final element = page.elements[elementIndex];
+    if (!element.accepts(value)) {
+      throw const PluginException('插件页面控件值无效。');
+    }
+    final elements = [...page.elements];
+    elements[elementIndex] = element.copyWithValue(value);
+    plugin.pages[pageIndex] = page.copyWithElements(elements);
+    _notify();
+    await plugin.runtime?.invoke('page_event', {
+      'page': pageId,
+      'id': elementId,
+      'value': value,
+    });
+  }
+
   Future<void> uninstall(String id) async {
     if (busy) throw const PluginException('正在处理插件，请稍候。');
     final plugin = _plugins.firstWhere((value) => value.manifest.id == id);
@@ -645,6 +716,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.gateways.clear();
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
+      plugin.pages.clear();
       MediaRequestRules.remove(id);
       _plugins.remove(plugin);
       final prefs = await SharedPreferences.getInstance();

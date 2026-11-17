@@ -482,7 +482,7 @@ class _TvFocusHighlightState extends State<TvFocusHighlight>
   @override
   void initState() {
     super.initState();
-    // Focus changes in a DropdownButton/Switch can be delivered to the
+    // Focus changes in a selector or Switch can be delivered to the
     // descendant after the wrapper's own Focus callback. Listening to the
     // manager keeps the ring deterministic for every Material control.
     FocusManager.instance.addListener(_syncFocus);

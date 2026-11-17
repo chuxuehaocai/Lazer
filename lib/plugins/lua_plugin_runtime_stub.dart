@@ -23,6 +23,7 @@ class LuaPluginRuntime {
     this.permissionRequester,
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
+    this.onPageAdded,
     this.onPlayerControl,
     this.onLog,
   });
@@ -43,6 +44,7 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)?
   onPlayerMenuItemAdded;
+  final Future<Object?> Function(Map<String, dynamic> spec)? onPageAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
   final void Function(Map<String, dynamic> record)? onLog;
   Future<void> start() =>

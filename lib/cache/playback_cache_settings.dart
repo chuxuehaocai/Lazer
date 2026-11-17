@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../widgets/apple_ui.dart';
+import '../widgets/settings_choice.dart';
 import '../widgets/settings_row.dart';
 import 'playback_cache.dart';
 
@@ -25,24 +26,22 @@ class PlaybackCacheSettings extends StatelessWidget {
             SettingsRow(
               label: '边听边缓存',
               subtitle: '完整缓存可在本地音乐中离线播放',
-              trailing: DropdownButtonHideUnderline(
-                child: DropdownButton<PlaybackCacheMode>(
-                  key: const ValueKey<String>('playback-cache-mode'),
-                  value: controller.mode,
-                  items: <DropdownMenuItem<PlaybackCacheMode>>[
-                    DropdownMenuItem(
-                      value: PlaybackCacheMode.recent,
-                      child: Text(context.tr('最近缓存')),
-                    ),
-                    DropdownMenuItem(
-                      value: PlaybackCacheMode.intelligent,
-                      child: Text(context.tr('智能缓存')),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) unawaited(controller.setMode(value));
-                  },
-                ),
+              trailing: SettingsChoice<PlaybackCacheMode>(
+                key: const ValueKey<String>('playback-cache-mode'),
+                value: controller.mode,
+                items: <DropdownMenuItem<PlaybackCacheMode>>[
+                  DropdownMenuItem(
+                    value: PlaybackCacheMode.recent,
+                    child: Text(context.tr('最近缓存')),
+                  ),
+                  DropdownMenuItem(
+                    value: PlaybackCacheMode.intelligent,
+                    child: Text(context.tr('智能缓存')),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) unawaited(controller.setMode(value));
+                },
               ),
             ),
             Padding(
@@ -59,31 +58,29 @@ class PlaybackCacheSettings extends StatelessWidget {
             SettingsRow(
               label: '缓存歌曲上限',
               subtitle: '当前已缓存 ${controller.cachedCount} 首',
-              trailing: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  key: const ValueKey<String>('playback-cache-limit'),
-                  value: controller.maximumTracks,
-                  items: <DropdownMenuItem<int>>[
-                    for (final int count in <int>{
-                      10,
-                      25,
-                      50,
-                      100,
-                      200,
-                      500,
-                      controller.maximumTracks,
-                    }.toList()..sort())
-                      DropdownMenuItem(
-                        value: count,
-                        child: Text(context.tr('$count 首')),
-                      ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      unawaited(controller.setMaximumTracks(value));
-                    }
-                  },
-                ),
+              trailing: SettingsChoice<int>(
+                key: const ValueKey<String>('playback-cache-limit'),
+                value: controller.maximumTracks,
+                items: <DropdownMenuItem<int>>[
+                  for (final int count in <int>{
+                    10,
+                    25,
+                    50,
+                    100,
+                    200,
+                    500,
+                    controller.maximumTracks,
+                  }.toList()..sort())
+                    DropdownMenuItem(
+                      value: count,
+                      child: Text(context.tr('$count 首')),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    unawaited(controller.setMaximumTracks(value));
+                  }
+                },
               ),
             ),
             AppleListTile(

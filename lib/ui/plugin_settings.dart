@@ -11,6 +11,7 @@ import '../widgets/settings_choice.dart';
 import '../widgets/settings_row.dart';
 import '../widgets/spring_buttons.dart';
 import '../widgets/apple_ui.dart';
+import '../widgets/settings_detail.dart';
 
 /// Renders the bounded settings controls registered by enabled Lua plugins.
 ///
@@ -25,7 +26,8 @@ class LuaPluginSettingsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settings = state.pluginManager.pluginSettings;
-    if (settings.isEmpty) return const SizedBox.shrink();
+    final pages = state.pluginManager.pluginPages;
+    if (settings.isEmpty && pages.isEmpty) return const SizedBox.shrink();
     final grouped = <String, List<LuaPluginSetting>>{};
     for (final setting in settings) {
       grouped
@@ -36,47 +38,353 @@ class LuaPluginSettingsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 22, 12, 7),
-          child: Text(
-            context.tr('插件设置'),
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: apple.secondaryLabel,
-              fontWeight: FontWeight.w500,
+        if (settings.isNotEmpty) ...<Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 22, 12, 7),
+            child: Text(
+              context.tr('插件设置'),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: apple.secondaryLabel,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
-        ),
-        for (final group in grouped.values) ...<Widget>[
+          for (final group in grouped.values) ...<Widget>[
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(Icons.extension_rounded, color: apple.accent),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            group.first.pluginName,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  for (final setting in group)
+                    _LuaPluginSettingRow(state: state, setting: setting),
+                ],
+              ),
+            ),
+            if (grouped.values.last != group) const SizedBox(height: 12),
+          ],
+        ],
+        if (pages.isNotEmpty) ...<Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 22, 12, 7),
+            child: Text(
+              context.tr('插件页面'),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: apple.secondaryLabel,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
           AppleGroupedCard(
             margin: EdgeInsets.zero,
             child: Column(
               children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-                  child: Row(
-                    children: <Widget>[
-                      Icon(Icons.extension_rounded, color: apple.accent),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          group.first.pluginName,
-                          style: Theme.of(context).textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                for (final setting in group)
-                  _LuaPluginSettingRow(state: state, setting: setting),
+                for (var i = 0; i < pages.length; i++) ...<Widget>[
+                  if (i > 0) Divider(height: 1, color: apple.separator),
+                  _LuaPluginPageTile(state: state, page: pages[i]),
+                ],
               ],
             ),
           ),
-          if (grouped.values.last != group) const SizedBox(height: 12),
         ],
       ],
     );
   }
+}
+
+class _LuaPluginPageTile extends StatelessWidget {
+  const _LuaPluginPageTile({required this.state, required this.page});
+
+  final AppState state;
+  final LuaPluginPage page;
+
+  @override
+  Widget build(BuildContext context) => AppleListTile(
+    key: ValueKey('lua-plugin-page-${page.pluginId}-${page.id}'),
+    padding: SettingsSpacing.rowPadding,
+    minHeight: SettingsSpacing.rowMinHeight,
+    leading: AppleIconTile(
+      icon: luaPluginIcon(page.icon),
+      color: AppleSemanticColors.of(context).accent,
+    ),
+    title: context.tr(page.title),
+    subtitle: page.subtitle.isEmpty
+        ? context.tr(page.pluginName)
+        : '${context.tr(page.pluginName)} · ${context.tr(page.subtitle)}',
+    trailing: const Icon(Icons.chevron_right_rounded),
+    onTap: () => SettingsDetailHost.open(
+      context,
+      page: (_) => LuaPluginPageView(
+        state: state,
+        pluginId: page.pluginId,
+        pageId: page.id,
+      ),
+      view: (_) => LuaPluginPageView(
+        state: state,
+        pluginId: page.pluginId,
+        pageId: page.id,
+      ),
+    ),
+  );
+}
+
+/// Flutter-owned rendering for a Lua page description.
+class LuaPluginPageView extends StatelessWidget {
+  const LuaPluginPageView({
+    super.key,
+    required this.state,
+    required this.pluginId,
+    required this.pageId,
+  });
+
+  final AppState state;
+  final String pluginId;
+  final String pageId;
+
+  LuaPluginPage? _page() => state.pluginManager.pluginPages
+      .where((page) => page.pluginId == pluginId && page.id == pageId)
+      .firstOrNull;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: state.pluginManager,
+    builder: (context, _) {
+      final page = _page();
+      if (page == null) {
+        return SettingsDetailScaffold(
+          title: context.tr('插件页面'),
+          child: const Center(child: CircularProgressIndicator()),
+        );
+      }
+      return SettingsDetailScaffold(
+        title: context.tr(page.title),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          children: <Widget>[
+            if (page.subtitle.isNotEmpty)
+              ApplePageTitle(
+                title: page.title,
+                subtitle: page.subtitle,
+                padding: const EdgeInsets.fromLTRB(0, 4, 0, 18),
+              ),
+            AppleGroupedCard(
+              margin: EdgeInsets.zero,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final element in page.elements)
+                    _LuaPluginPageElementView(state: state, element: element),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class _LuaPluginPageElementView extends StatelessWidget {
+  const _LuaPluginPageElementView({required this.state, required this.element});
+
+  final AppState state;
+  final LuaPluginPageElement element;
+
+  Future<void> _event(BuildContext context, Object? value) async {
+    try {
+      await state.pluginManager.invokePluginPageEvent(
+        element.pluginId,
+        element.pageId,
+        element.id!,
+        value,
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(context.tr('$error'))));
+    }
+  }
+
+  Future<void> _editText(BuildContext context) async {
+    final controller = TextEditingController(
+      text: element.value is String ? element.value as String : '',
+    );
+    final value = await showAppleDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.tr(element.title)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: element.maxLines,
+          maxLength: 2048,
+          decoration: InputDecoration(
+            hintText: element.placeholder.isEmpty
+                ? context.tr('输入内容')
+                : context.tr(element.placeholder),
+          ),
+          onSubmitted: element.maxLines == 1
+              ? (text) => Navigator.of(dialogContext).pop(text)
+              : null,
+        ),
+        actions: <Widget>[
+          SpringTextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const TrText('取消'),
+          ),
+          SpringFilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const TrText('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!context.mounted || value == null) return;
+    await _event(context, value);
+  }
+
+  Widget _control(BuildContext context) {
+    switch (element.type) {
+      case LuaPluginPageElementType.text:
+        return Padding(
+          padding: SettingsSpacing.rowPadding,
+          child: Text(
+            context.tr(element.text),
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        );
+      case LuaPluginPageElementType.section:
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+          child: Text(
+            context.tr(element.title),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        );
+      case LuaPluginPageElementType.divider:
+        return Divider(
+          height: 1,
+          color: AppleSemanticColors.of(context).separator,
+        );
+      case LuaPluginPageElementType.spacer:
+        return const SizedBox(height: 12);
+      case LuaPluginPageElementType.button:
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: SpringFilledButton.icon(
+            onPressed: element.enabled
+                ? () => unawaited(_event(context, null))
+                : null,
+            icon: Icon(luaPluginIcon(element.icon)),
+            label: Text(context.tr(element.title)),
+          ),
+        );
+      case LuaPluginPageElementType.toggle:
+        return SettingsRow(
+          label: element.title,
+          subtitle: element.subtitle,
+          trailing: Switch(
+            value: element.value == true,
+            onChanged: element.enabled
+                ? (value) => unawaited(_event(context, value))
+                : null,
+          ),
+        );
+      case LuaPluginPageElementType.select:
+        final selected =
+            element.value is String &&
+                element.options.any((option) => option.value == element.value)
+            ? element.value as String
+            : element.options.first.value;
+        return SettingsRow(
+          label: element.title,
+          subtitle: element.subtitle,
+          expandControl: true,
+          trailing: SettingsChoice<String>(
+            value: selected,
+            items: [
+              for (final option in element.options)
+                DropdownMenuItem<String>(
+                  value: option.value,
+                  child: Text(context.tr(option.label)),
+                ),
+            ],
+            onChanged: element.enabled
+                ? (value) {
+                    if (value != null) unawaited(_event(context, value));
+                  }
+                : null,
+          ),
+        );
+      case LuaPluginPageElementType.slider:
+        final value = element.value is num
+            ? (element.value as num)
+                  .toDouble()
+                  .clamp(element.min, element.max)
+                  .toDouble()
+            : element.min;
+        final divisions = ((element.max - element.min) / element.step)
+            .round()
+            .clamp(1, 2000);
+        return SettingsRow(
+          label: element.title,
+          subtitle: element.subtitle,
+          trailing: SizedBox(
+            width: 250,
+            child: Slider(
+              value: value,
+              min: element.min,
+              max: element.max,
+              divisions: divisions,
+              label: _formatNumber(value),
+              onChanged: element.enabled
+                  ? (next) => unawaited(_event(context, next))
+                  : null,
+            ),
+          ),
+        );
+      case LuaPluginPageElementType.textField:
+        final value = element.value is String ? element.value as String : '';
+        return SettingsRow(
+          label: element.title,
+          subtitle: element.subtitle,
+          trailing: SpringOutlinedButton(
+            onPressed: element.enabled
+                ? () => unawaited(_editText(context))
+                : null,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 210),
+              child: Text(
+                value.isEmpty ? context.tr('未设置') : value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _control(context);
 }
 
 class _LuaPluginSettingRow extends StatelessWidget {

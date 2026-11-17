@@ -898,7 +898,7 @@ class _EqBandEditor extends StatelessWidget {
 
 double _tenthDb(double value) => (value * 10).roundToDouble() / 10;
 
-/// The dropdown's value: the encoded order, because `DropdownButton` compares with
+/// The dropdown's value: the encoded order, because the selector compares with
 /// `==` and two equal `List<int>`s are not equal.
 String _dspOrderChoice(HifiSettings settings) =>
     encodeDspStageOrder(settings.dspStageOrder);

@@ -14,6 +14,7 @@ import '../animation/view_transitions.dart';
 import '../updates/open_external.dart';
 import '../gateway/gateway.dart';
 import 'plugin_manager_page.dart';
+import '../widgets/settings_choice.dart';
 
 /// Present the sign-in card in the Apple sheet language.
 Future<void> showAppLoginDialog(BuildContext context, AppState state) {
@@ -416,74 +417,53 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                 ),
               ),
               const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                key: ValueKey('login-platform-${state.activeConnectionKey}'),
-                initialValue: state.activeConnectionKey,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(16),
-                dropdownColor: apple.tertiaryBackground,
-                icon: Icon(
-                  Icons.unfold_more_rounded,
-                  color: apple.secondaryLabel,
-                  size: 20,
-                ),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: apple.secondaryFill,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 14,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(color: apple.separator, width: .5),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(color: apple.accent, width: 1.5),
-                  ),
-                ),
-                items: [
-                  for (final gateway in state.availableMusicPlatforms)
-                    DropdownMenuItem(
-                      value: GatewayRegistry.keyOf(gateway),
-                      child: Row(
-                        children: [
-                          Icon(
-                            gateway.provider.id == 'local'
-                                ? Icons.library_music_outlined
-                                : Icons.headphones_rounded,
-                            size: 20,
-                            color: apple.accent,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
+              SizedBox(
+                width: double.infinity,
+                child: SettingsChoice<String>(
+                  key: ValueKey('login-platform-${state.activeConnectionKey}'),
+                  value: state.activeConnectionKey,
+                  items: [
+                    for (final gateway in state.availableMusicPlatforms)
+                      DropdownMenuItem(
+                        value: GatewayRegistry.keyOf(gateway),
+                        child: Row(
+                          children: [
+                            Icon(
                               gateway.provider.id == 'local'
-                                  ? context.tr('本地音乐')
-                                  : gateway.provider.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
+                                  ? Icons.library_music_outlined
+                                  : Icons.headphones_rounded,
+                              size: 20,
+                              color: apple.accent,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                gateway.provider.id == 'local'
+                                    ? context.tr('本地音乐')
+                                    : gateway.provider.name,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
-                          ),
-                          if (state.musicAccounts.containsKey(
-                            GatewayRegistry.keyOf(gateway),
-                          ))
-                            Tooltip(
-                              message: context.tr('已登录'),
-                              child: Icon(
-                                Icons.check_circle_rounded,
-                                size: 18,
-                                color: apple.accent,
+                            if (state.musicAccounts.containsKey(
+                              GatewayRegistry.keyOf(gateway),
+                            ))
+                              Tooltip(
+                                message: context.tr('已登录'),
+                                child: Icon(
+                                  Icons.check_circle_rounded,
+                                  size: 18,
+                                  color: apple.accent,
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                ],
-                onChanged: _submitting || _navBusy ? null : _selectConnection,
+                  ],
+                  onChanged: _submitting || _navBusy ? null : _selectConnection,
+                ),
               ),
               if (_methods.isNotEmpty) ...[
                 const SizedBox(height: 12),
@@ -623,9 +603,10 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
         child: TrText(
           switch (_phase) {
             _Phase.creating => '正在生成二维码…',
-            _Phase.waiting => _qrInfo?.hint?.isNotEmpty == true
-                ? _qrInfo!.hint!
-                : '打开 App 扫描二维码',
+            _Phase.waiting =>
+              _qrInfo?.hint?.isNotEmpty == true
+                  ? _qrInfo!.hint!
+                  : '打开 App 扫描二维码',
             _Phase.scanned => '已扫描，请在手机上确认',
             _Phase.expired => '二维码已过期',
             _Phase.error => '二维码获取失败，请检查网络后重试。',
@@ -678,9 +659,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                       ..hideCurrentSnackBar()
                       ..showSnackBar(
                         SnackBar(
-                          content: Text(
-                            context.tr('验证码已复制到剪贴板。'),
-                          ),
+                          content: Text(context.tr('验证码已复制到剪贴板。')),
                           duration: const Duration(seconds: 2),
                         ),
                       );
@@ -691,7 +670,8 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
           ),
         ),
       ],
-      if (_phase == _Phase.waiting && _qrInfo?.actionUrl?.isNotEmpty == true) ...[
+      if (_phase == _Phase.waiting &&
+          _qrInfo?.actionUrl?.isNotEmpty == true) ...[
         const SizedBox(height: 8),
         Center(
           child: SpringTextButton(
@@ -699,7 +679,11 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.open_in_browser_rounded, size: 16, color: apple.accent),
+                Icon(
+                  Icons.open_in_browser_rounded,
+                  size: 16,
+                  color: apple.accent,
+                ),
                 const SizedBox(width: 6),
                 const TrText('在浏览器中打开授权页'),
               ],

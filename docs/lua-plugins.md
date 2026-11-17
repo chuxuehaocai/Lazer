@@ -112,14 +112,17 @@ end
 | `host.log(level, message, data)` | 写入经过脱敏和长度限制的宿主诊断日志 |
 | `host.sleep(milliseconds)` | 在 Lua 异步挂起一小段时间，最长 60 秒；适合轮询和限流 |
 | `host.add_setting(spec)` | 向设置页注册一个受宿主约束的设置项；返回当前值 |
+| `host.add_page(spec)` | 向设置页注册一个由 Flutter 宿主渲染的插件页面；返回 `true` |
 | `host.add_player_menu_item(spec)` | 向正在播放页右上角的“三个点”菜单注册一个项目；返回 `true` |
 | `host.player_control(spec)` | 控制播放器播放、暂停、上下首、进度跳转或调节音量；返回执行结果 |
 | `host.player_state()` / `host.player_status()` / `host.player_queue()` / `host.player_track()` | 查询当前歌曲、进度、音量、缓冲、队列索引和播放模式 |
 | `host.player_lyrics()` / `host.player_recent()` | 查询当前歌词和最近播放歌曲，适合自定义播放界面 |
 
-插件可以在入口文件执行时注册设置和正在播放菜单项目。注册是幂等的，同一个插件内重复使用
+插件可以在入口文件执行时注册设置、插件页面和正在播放菜单项目。注册是幂等的，同一个插件内重复使用
 相同的 `id` 会更新项目。设置值由宿主持久化，插件通过 `setting_changed` 操作接收变化；
-菜单项目点击后通过 `player_menu` 操作接收当前歌曲的通用 `track` 对象。
+页面控件变化通过 `page_event` 操作接收，菜单项目点击后通过 `player_menu` 操作接收当前歌曲的通用
+`track` 对象。页面布局和控件始终由 Flutter 宿主创建，Lua 只提供数据描述，不能传入 Widget 或执行
+Flutter 代码。
 宿主还会在切歌、队列变化、歌词更新与播放状态变化时向所有激活插件派发 `player_event` 操作（支持外部推流与挂件联动）。
 
 ```lua
@@ -159,6 +162,23 @@ host.add_player_menu_item({
   icon = "content_copy",
 })
 
+host.add_page({
+  id = "tools",
+  title = "工具",
+  subtitle = "插件工具页",
+  icon = "settings",
+  elements = {
+    {type = "section", title = "常用操作"},
+    {type = "text", text = "这是由宿主渲染的说明文字。"},
+    {type = "toggle", id = "enabled", title = "启用功能", value = true},
+    {type = "select", id = "mode", title = "模式", value = "a",
+      options = {{value = "a", label = "模式 A"}, {value = "b", label = "模式 B"}}},
+    {type = "slider", id = "volume", title = "强度", min = 0, max = 100, step = 5, value = 50},
+    {type = "text_field", id = "query", title = "关键词", placeholder = "输入关键词"},
+    {type = "button", id = "refresh", title = "刷新", icon = "refresh"},
+  },
+})
+
 return {
   call = function(operation, args)
     if operation == "setting_changed" then
@@ -167,6 +187,10 @@ return {
     end
     if operation == "player_menu" then
       -- args.id 是项目 ID，args.track 是当前播放歌曲的通用模型
+      return true
+    end
+    if operation == "page_event" then
+      -- args.page、args.id 和 args.value 是宿主发回的控件事件
       return true
     end
     -- 其余平台操作……
@@ -198,8 +222,10 @@ end
 设置规格必须包含 `id` 和 `title`（也可用 `label`）。`select` 需要非空 `options`，
 每项包含字符串 `value` 和 `label`；`number` 可提供 `min`、`max`、`step`；`text` 最多
 保存 2048 个字符；`action` 是一个按钮，不保存值。设置和菜单项目均有数量、长度和类型
-限制，越界或无效规格会被拒绝。`icon` 使用有限的 Material 图标名称，未知名称显示扩展
-图标。插件菜单项目只会在插件启用且运行成功时出现。
+限制，越界或无效规格会被拒绝。页面最多 16 个，每页最多 128 个元素；元素类型包括
+`text`、`section`、`divider`、`spacer`、`button`、`toggle`、`select`、`slider` 和
+`text_field`，交互元素必须提供唯一 `id`。`icon` 使用有限的 Material 图标名称，未知名称
+显示扩展图标。插件页面和菜单项目只会在插件启用且运行成功时出现。
 
 `host.http` 是异步函数，插件调用时可以直接使用返回值；嵌套函数、循环和 `pcall` 均支持等待 HTTP。
 返回 `{status,headers,body}`，其中 body 是字符串，多个 Set-Cookie 用换行分隔。

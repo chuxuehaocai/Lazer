@@ -43,6 +43,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   List<MusicGateway> get gateways => const [];
   List<LuaPluginSetting> get pluginSettings => const [];
   List<LuaPlayerMenuItem> get playerMenuItems => const [];
+  List<LuaPluginPage> get pluginPages => const [];
   LazerThemeTokens? get activeTheme => null;
   LazerLayoutDefinition? get activeLayout => null;
   int get skinRevision => 0;
@@ -54,13 +55,10 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   ///
   /// Paired with [dispose], which cannot await. This variant has no worker to
   /// wait for, so it completes immediately.
-  Future<void> get shutdownSettled => Future.wait<void>(
-    <Future<void>>[
-      for (final plugin in _plugins)
-        plugin.runtime?.settled ?? Future<void>.value(),
-    ],
-  );
-
+  Future<void> get shutdownSettled => Future.wait<void>(<Future<void>>[
+    for (final plugin in _plugins)
+      plugin.runtime?.settled ?? Future<void>.value(),
+  ]);
 
   void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {}
   Future<void> Function(String pluginId)? beforeChange;
@@ -97,6 +95,12 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   Future<void> invokePlayerMenu(
     LuaPlayerMenuItem item,
     Map<String, dynamic> track,
+  ) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> invokePluginPageEvent(
+    String pluginId,
+    String pageId,
+    String elementId,
+    Object? value,
   ) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> uninstall(String id) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));

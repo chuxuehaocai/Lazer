@@ -12,6 +12,7 @@ import '../theme/font_preferences.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/settings_detail.dart';
+import '../widgets/settings_choice.dart';
 
 class FontSettingsPage extends StatelessWidget {
   const FontSettingsPage({super.key, required this.state});
@@ -123,13 +124,13 @@ class FontSettingsView extends StatelessWidget {
                     desktop ? 1000.0 : 760.0,
                   );
                   final twoColumns = desktop && width >= 700;
-                  final inset = desktop ? 32.0 : 20.0;
+                  final inset = desktop ? 32.0 : 16.0;
                   final cardWidth = (width - inset * 2 - 16) / 2;
                   return Center(
                     child: SizedBox(
                       width: width,
                       child: ListView(
-                        padding: EdgeInsets.fromLTRB(inset, 12, inset, 36),
+                        padding: EdgeInsets.fromLTRB(inset, 8, inset, 28),
                         children: [
                           const ApplePageTitle(
                             title: '字体自定义',
@@ -151,7 +152,7 @@ class FontSettingsView extends StatelessWidget {
                             for (final card in cards)
                               Padding(
                                 padding: EdgeInsets.only(
-                                  bottom: desktop ? 16 : 0,
+                                  bottom: desktop ? 16 : 10,
                                 ),
                                 child: card,
                               ),
@@ -252,17 +253,16 @@ class _FontFamilyCardState extends State<_FontFamilyCard>
       key: const ValueKey('font-family-card'),
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             TrText('字体', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             const TrText('选择自带字体、系统字体，或导入自己的字体文件。'),
-            const SizedBox(height: 8),
-            DropdownButton<FontSource>(
+            const SizedBox(height: 10),
+            SettingsChoice<FontSource>(
               key: const ValueKey('font-family-selector'),
-              isExpanded: true,
               value: family.source,
               items: [
                 const DropdownMenuItem(
@@ -333,11 +333,9 @@ class _FontCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AppleGroupedCard(
-    margin: desktop
-        ? EdgeInsets.zero
-        : const EdgeInsets.symmetric(horizontal: 24),
+    margin: EdgeInsets.zero,
     child: Padding(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(desktop ? 16 : 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -354,7 +352,7 @@ class _FontCard extends StatelessWidget {
           ),
           TrText(detail, style: Theme.of(context).textTheme.bodySmall),
           Padding(
-            padding: EdgeInsets.symmetric(vertical: desktop ? 12 : 20),
+            padding: EdgeInsets.symmetric(vertical: desktop ? 12 : 12),
             child: Text(
               context.tr(sample),
               style: style,
@@ -382,9 +380,8 @@ class _FontCard extends StatelessWidget {
           Row(
             children: [
               const Expanded(child: TrText('字体粗细')),
-              DropdownButton<int>(
+              SettingsChoice<int>(
                 value: weight ?? 0,
-                underline: const SizedBox.shrink(),
                 items: [
                   const DropdownMenuItem(value: 0, child: TrText('默认')),
                   for (final entry in const {

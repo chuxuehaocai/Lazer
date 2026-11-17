@@ -15,7 +15,8 @@ import '../animation/apple_spring.dart';
 
 import '../audio/audio_device_report.dart';
 import '../cache/playback_cache_settings.dart';
-import '../data/audio_quality.dart';import '../data/track_transition.dart';
+import '../data/audio_quality.dart';
+import '../data/track_transition.dart';
 import '../diagnostics/build_info.dart';
 import '../diagnostics/console_window.dart';
 import '../diagnostics/app_log.dart';
@@ -392,11 +393,9 @@ class _SettingsOverview extends StatelessWidget {
                         _AppSettingRow(
                           label: '配色',
                           subtitle: state.paletteMode.detail,
-                          trailing: DropdownButton<AppPaletteMode>(
+                          trailing: SettingsChoice<AppPaletteMode>(
                             key: ValueKey<AppPaletteMode>(state.paletteMode),
                             value: state.paletteMode,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
                             items: <DropdownMenuItem<AppPaletteMode>>[
                               for (final AppPaletteMode mode
                                   in AppPaletteMode.values)
@@ -448,11 +447,9 @@ class _SettingsOverview extends StatelessWidget {
                           key: const ValueKey('layout-style-setting'),
                           label: '布局样式',
                           subtitle: state.layoutStyle.detail,
-                          trailing: DropdownButton<AppLayoutStyle>(
+                          trailing: SettingsChoice<AppLayoutStyle>(
                             key: ValueKey<AppLayoutStyle>(state.layoutStyle),
                             value: state.layoutStyle,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
                             items: <DropdownMenuItem<AppLayoutStyle>>[
                               for (final AppLayoutStyle style
                                   in AppLayoutStyle.values)
@@ -475,13 +472,11 @@ class _SettingsOverview extends StatelessWidget {
                             key: const ValueKey('tablet-rail-position-setting'),
                             label: '平板胶囊栏位置',
                             subtitle: '选择左侧或右侧显示导航与迷你播放器',
-                            trailing: DropdownButton<AppTabletRailPosition>(
+                            trailing: SettingsChoice<AppTabletRailPosition>(
                               key: ValueKey<AppTabletRailPosition>(
                                 state.tabletRailPosition,
                               ),
                               value: state.tabletRailPosition,
-                              underline: const SizedBox.shrink(),
-                              borderRadius: BorderRadius.circular(12),
                               items: <DropdownMenuItem<AppTabletRailPosition>>[
                                 for (final AppTabletRailPosition position
                                     in AppTabletRailPosition.values)
@@ -794,11 +789,9 @@ class _SettingsOverview extends StatelessWidget {
                             ThemeMode.light => '浅色',
                             ThemeMode.dark => '深色',
                           },
-                          trailing: DropdownButton<ThemeMode>(
+                          trailing: SettingsChoice<ThemeMode>(
                             key: ValueKey<ThemeMode>(state.themeMode),
                             value: state.themeMode,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
                             items: const <DropdownMenuItem<ThemeMode>>[
                               DropdownMenuItem<ThemeMode>(
                                 value: ThemeMode.system,
@@ -823,11 +816,9 @@ class _SettingsOverview extends StatelessWidget {
                         _AppSettingRow(
                           label: '语言',
                           subtitle: state.language.name,
-                          trailing: DropdownButton<AppLanguage>(
+                          trailing: SettingsChoice<AppLanguage>(
                             key: ValueKey<AppLanguage>(state.language),
                             value: state.language,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
                             items: <DropdownMenuItem<AppLanguage>>[
                               for (final AppLanguage language
                                   in AppLanguage.values)
@@ -869,11 +860,9 @@ class _SettingsOverview extends StatelessWidget {
                           subtitle: state.audioQualityDetail(
                             state.playbackQuality,
                           ),
-                          trailing: DropdownButton<AudioQuality>(
+                          trailing: SettingsChoice<AudioQuality>(
                             key: const ValueKey('playback-quality'),
                             value: state.playbackQuality,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
                             items: <DropdownMenuItem<AudioQuality>>[
                               for (final AudioQuality quality
                                   in AudioQuality.values)
@@ -910,11 +899,9 @@ class _SettingsOverview extends StatelessWidget {
                           key: const ValueKey('track-transition'),
                           label: '切歌衔接',
                           subtitle: state.trackTransitionDetail,
-                          trailing: DropdownButton<TrackTransition>(
+                          trailing: SettingsChoice<TrackTransition>(
                             key: const ValueKey('track-transition-mode'),
                             value: state.trackTransition,
-                            underline: const SizedBox.shrink(),
-                            borderRadius: BorderRadius.circular(12),
                             items: <DropdownMenuItem<TrackTransition>>[
                               for (final TrackTransition mode
                                   in TrackTransition.values)
@@ -974,11 +961,9 @@ class _SettingsOverview extends StatelessWidget {
                           ),
                           trailing: KeyedSubtree(
                             key: ValueKey<AudioQuality>(state.downloadQuality),
-                            child: DropdownButton<AudioQuality>(
+                            child: SettingsChoice<AudioQuality>(
                               key: const ValueKey('download-quality'),
                               value: state.downloadQuality,
-                              underline: const SizedBox.shrink(),
-                              borderRadius: BorderRadius.circular(12),
                               items: <DropdownMenuItem<AudioQuality>>[
                                 for (final AudioQuality quality
                                     in AudioQuality.values)
@@ -1573,7 +1558,8 @@ class _SettingsOverview extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (state.pluginManager.pluginSettings.isNotEmpty)
+                  if (state.pluginManager.pluginSettings.isNotEmpty ||
+                      state.pluginManager.pluginPages.isNotEmpty)
                     LuaPluginSettingsSection(state: state),
                 ],
                 if (show(_SettingsCategory.network)) ...[

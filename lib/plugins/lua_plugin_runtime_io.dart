@@ -42,6 +42,7 @@ class LuaPluginRuntime {
     this.permissionRequester,
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
+    this.onPageAdded,
     this.onPlayerControl,
     this.onLog,
   }) : networkGranted = networkGranted ?? false;
@@ -68,6 +69,7 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)?
   onPlayerMenuItemAdded;
+  final Future<Object?> Function(Map<String, dynamic> spec)? onPageAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
   final void Function(Map<String, dynamic> record)? onLog;
   Isolate? _isolate;
@@ -193,6 +195,10 @@ class LuaPluginRuntime {
                       'Plugin player menu is unavailable',
                     )
                   : await onPlayerMenuItemAdded!(spec),
+            'page' =>
+              onPageAdded == null
+                  ? throw const FormatException('Plugin pages are unavailable')
+                  : await onPageAdded!(spec),
             'playerControl' =>
               onPlayerControl == null
                   ? throw const FormatException('Player control is unavailable')
@@ -249,6 +255,7 @@ class LuaPluginRuntime {
           'uiExtensions':
               onSettingAdded != null ||
               onPlayerMenuItemAdded != null ||
+              onPageAdded != null ||
               onPlayerControl != null,
           'logging': onLog != null,
           'proxyMode': SystemHttpProxy.currentMode.name,
@@ -850,6 +857,15 @@ class _PluginHost {
       _push(l, value ?? true);
       return 1;
     });
+    lua.registerAsync('_add_page', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Plugin pages are unavailable');
+      }
+      final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
+      final value = await uiExtensions!('page', spec);
+      _push(l, value ?? true);
+      return 1;
+    });
     lua.registerAsync('_player_control', (l) async {
       if (uiExtensions == null) {
         throw const FormatException('Player control is unavailable');
@@ -992,6 +1008,7 @@ host = { json_encode = _json_encode, json_decode = _json_decode,
   storage_get = _storage_get, storage_set = _storage_set,
   storage_keys = _storage_keys, storage_clear = _storage_clear,
   add_setting = _add_setting, add_player_menu_item = _add_player_menu_item,
+  add_page = _add_page,
   player_control = _player_control, player_state = _player_state,
   player_status = _player_state, player_queue = _player_queue,
   player_track = _player_track, now_playing = _player_track,
