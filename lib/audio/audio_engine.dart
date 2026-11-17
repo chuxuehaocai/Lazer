@@ -150,7 +150,7 @@ abstract interface class SerialQueueAudioEngine implements QueueAudioEngine {}
 /// Mixes a prepared successor into the current source before it finishes.
 /// This changes the decoding/mixing policy without changing the output engine.
 abstract interface class AutoMixConfigurableAudioEngine {
-  Future<void> setAutoMixEnabled(bool enabled);
+  Future<void> setAutoMixEnabled(bool enabled, {Duration? duration});
 }
 
 /// Why a source failed after it was loaded.

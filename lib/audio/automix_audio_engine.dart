@@ -83,7 +83,7 @@ class AutoMixAudioEngine
     androidApplyAudioAttributes: false,
   );
 
-  late final AutoMixTransitionPlanner _planner;
+  late AutoMixTransitionPlanner _planner;
   final String? fallbackNotice;
   late final AudioPlayer _primary;
   late final AudioPlayer _secondary;
@@ -128,8 +128,11 @@ class AutoMixAudioEngine
   Future<void> setEnabled(bool value) => setAutoMixEnabled(value);
 
   @override
-  Future<void> setAutoMixEnabled(bool value) {
+  Future<void> setAutoMixEnabled(bool value, {Duration? duration}) {
     _enabled = value;
+    if (duration != null) {
+      _planner = AutoMixTransitionPlanner(maximum: duration);
+    }
     return _serialize(() async {
       if (_disposed) return;
       // Keep the prepared successor: AppState still owns its queue index.

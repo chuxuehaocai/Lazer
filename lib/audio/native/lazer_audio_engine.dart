@@ -714,13 +714,13 @@ class NativeAudioEngine
   /// An existing source needs reopening to renegotiate its PCM format.
   /// The overlap the transition uses, in milliseconds.
   ///
-  /// The reference player's natural mode picks six seconds (its candidate set is
-  /// 4-8 s), which is long enough to be a real blend and short enough that two
+  /// The reference player's natural mode picks five seconds (its candidate set is
+  /// 1-13 s), which is long enough to be a real blend and short enough that two
   /// songs never fight for the floor.
-  static const int autoMixOverlapMillis = 6000;
+  static const int autoMixOverlapMillis = 5000;
 
   @override
-  Future<void> setAutoMixEnabled(bool enabled) async {
+  Future<void> setAutoMixEnabled(bool enabled, {Duration? duration}) async {
     if (!supportsAutoMix) {
       if (enabled) {
         throw UnsupportedError('This audio engine has no overlap mixer.');
@@ -729,10 +729,12 @@ class NativeAudioEngine
     }
     final int? address = _engineAddressOrNull;
     if (address == null) return;
+    final int overlapMs =
+        duration != null ? duration.inMilliseconds : autoMixOverlapMillis;
     final int status = _status(
       await _worker.call(LazerWorkerOp.setAutoMix, <Object?>[
         address,
-        enabled ? autoMixOverlapMillis : 0,
+        enabled ? overlapMs : 0,
       ]),
     );
     if (status != lazerAudioOk) {

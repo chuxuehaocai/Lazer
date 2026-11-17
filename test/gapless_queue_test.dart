@@ -633,4 +633,37 @@ void main() {
 
     state.dispose();
   });
+
+  testWidgets(
+    'track transition supports off, albumGapless and autoMix with custom duration',
+    (tester) async {
+      final engine = _QueueEngine();
+      final state = AppState(catalog: _Catalog(), audioEngine: engine);
+      addTearDown(state.dispose);
+
+      expect(state.trackTransition, TrackTransition.albumGapless);
+      expect(state.autoMixDurationSeconds, 5);
+
+      // Clamps to min (1) and max (13)
+      await state.setAutoMixDurationSeconds(0);
+      expect(state.autoMixDurationSeconds, 1);
+      await state.setAutoMixDurationSeconds(20);
+      expect(state.autoMixDurationSeconds, 13);
+      await state.setAutoMixDurationSeconds(8);
+      expect(state.autoMixDurationSeconds, 8);
+
+      // TrackTransition.off skips prefetching
+      await state.setTrackTransition(TrackTransition.off);
+      expect(state.trackTransition, TrackTransition.off);
+      state.playQueue(<Track>[_track('1'), _track('2')]);
+      await tester.pump();
+      expect(engine.appends, isEmpty);
+      expect(state.successorPrepared, isFalse);
+
+      // TrackTransition.autoMix enables mixing
+      await state.setTrackTransition(TrackTransition.autoMix);
+      expect(state.trackTransition, TrackTransition.autoMix);
+      expect(state.autoMixEnabled, isTrue);
+    },
+  );
 }

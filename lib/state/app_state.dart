@@ -569,6 +569,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   TrackTransition _trackTransition = TrackTransition.albumGapless;
   TrackTransition get trackTransition => _trackTransition;
 
+  /// Default, minimum and maximum duration in seconds for AutoMix overlap.
+  static const int defaultAutoMixDurationSeconds = 5;
+  static const int minAutoMixDurationSeconds = 1;
+  static const int maxAutoMixDurationSeconds = 13;
+
+  int _autoMixDurationSeconds = defaultAutoMixDurationSeconds;
+  int get autoMixDurationSeconds => _autoMixDurationSeconds;
+  Duration get autoMixDuration => Duration(seconds: _autoMixDurationSeconds);
+
   /// Whether AutoMix replaces album gapless playback.
   bool get autoMixEnabled => _trackTransition.mixes;
 
@@ -582,6 +591,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Future<void> setAutoMixEnabled(bool value) =>
       setTrackTransition(TrackTransition.fromAutoMix(value));
 
+  Future<void> setAutoMixDurationSeconds(int value) async {
+    final int clamped = value.clamp(
+      minAutoMixDurationSeconds,
+      maxAutoMixDurationSeconds,
+    );
+    if (_autoMixDurationSeconds == clamped) return;
+    _autoMixDurationSeconds = clamped;
+    final engine = audioEngine;
+    if (engine is AutoMixConfigurableAudioEngine && _trackTransition.mixes) {
+      try {
+        await (engine as AutoMixConfigurableAudioEngine).setAutoMixEnabled(
+          true,
+          duration: autoMixDuration,
+        );
+      } catch (_) {}
+    }
+    await (await SharedPreferences.getInstance()).setInt(
+      'lazer_automix_duration_seconds',
+      clamped,
+    );
+    if (!_presentationDisposed) notifyListeners();
+  }
+
   Future<void> setTrackTransition(TrackTransition value) {
     final result = _autoMixOperations.then((_) async {
       if (_trackTransition == value && autoMixError == null) return;
@@ -591,6 +623,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         if (engine is AutoMixConfigurableAudioEngine) {
           await (engine as AutoMixConfigurableAudioEngine).setAutoMixEnabled(
             value.mixes,
+            duration: autoMixDuration,
           );
         }
         _trackTransition = value;
@@ -614,10 +647,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             unawaited(_prefetchNext());
           }
         }
-        await (await SharedPreferences.getInstance()).setBool(
-          'lazer_automix_enabled',
-          value.mixes,
-        );
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('lazer_track_transition', value.name);
+        await prefs.setBool('lazer_automix_enabled', value.mixes);
       } catch (_) {
         autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
       }
@@ -2106,13 +2138,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       discordClientId = prefs.getString('lazer_discord_client_id') ?? '';
       skipUnavailableSongs =
           prefs.getBool('lazer_skip_unavailable_songs') ?? skipUnavailableSongs;
-      _trackTransition = TrackTransition.fromAutoMix(
-        prefs.getBool('lazer_automix_enabled') ?? autoMixEnabled,
+      _autoMixDurationSeconds =
+          (prefs.getInt('lazer_automix_duration_seconds') ??
+                  defaultAutoMixDurationSeconds)
+              .clamp(minAutoMixDurationSeconds, maxAutoMixDurationSeconds);
+      _trackTransition = TrackTransition.fromStored(
+        prefs.getString('lazer_track_transition'),
+        legacyAutoMix: prefs.getBool('lazer_automix_enabled'),
       );
       if (audioEngine is AutoMixConfigurableAudioEngine) {
         try {
           await (audioEngine as AutoMixConfigurableAudioEngine)
-              .setAutoMixEnabled(autoMixEnabled);
+              .setAutoMixEnabled(autoMixEnabled, duration: autoMixDuration);
         } catch (_) {
           _trackTransition = TrackTransition.albumGapless;
           autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
@@ -3336,6 +3373,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// This is what album gapless playback crosses without a reload; a different
   /// album is a normal track change.
   bool get nextTrackContinuesAlbum {
+    if (_trackTransition == TrackTransition.off) return false;
     final int? next = _autoAdvanceIndex();
     return next != null && _continuesAlbum(next);
   }
@@ -4888,7 +4926,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     final int generation = ++_prefetchGeneration;
     final int? next = _autoAdvanceIndex();
-    if (next == null) {
+    if (next == null || _trackTransition == TrackTransition.off) {
       _clearQueuedNext();
       return;
     }

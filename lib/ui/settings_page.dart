@@ -917,6 +917,21 @@ class _SettingsOverview extends StatelessWidget {
                             },
                           ),
                         ),
+                        if (state.trackTransition == TrackTransition.autoMix)
+                          _AppSliderRow(
+                            key: const ValueKey('automix-duration-slider'),
+                            label: '混音重叠时长',
+                            valueText: '${state.autoMixDurationSeconds} 秒',
+                            subtitle: '上一首与下一首在切歌时共同播放交叠的时长',
+                            value: state.autoMixDurationSeconds.toDouble(),
+                            min: AppState.minAutoMixDurationSeconds.toDouble(),
+                            max: AppState.maxAutoMixDurationSeconds.toDouble(),
+                            divisions: AppState.maxAutoMixDurationSeconds -
+                                AppState.minAutoMixDurationSeconds,
+                            onChanged: (double value) => unawaited(
+                              state.setAutoMixDurationSeconds(value.round()),
+                            ),
+                          ),
                         AppleListTile(
                           padding: SettingsSpacing.rowPadding,
                           minHeight: SettingsSpacing.rowMinHeight,
