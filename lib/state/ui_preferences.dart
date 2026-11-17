@@ -44,7 +44,7 @@ const int kPlaylistColumnsMax = 6;
 
 /// How the shell picks its accent palette.
 ///
-/// [fixed] is the Apple Music red accent. [nowPlaying] derives the accent and
+/// [fixed] is Lazer's blue accent. [nowPlaying] derives the accent and
 /// ambient tint from the current cover, matching the app's album-led chrome.
 /// [custom] uses the colour the listener picked in Settings.
 enum AppPaletteMode { fixed, nowPlaying, custom }
@@ -58,7 +58,7 @@ extension AppPaletteModeLabels on AppPaletteMode {
   };
 
   String get detail => switch (this) {
-    AppPaletteMode.fixed => 'Apple Music 红色强调色',
+    AppPaletteMode.fixed => 'Lazer 蓝色强调色',
     AppPaletteMode.nowPlaying => '由当前封面主色生成强调色与浏览背景',
     AppPaletteMode.custom => '使用你挑选的强调色',
   };

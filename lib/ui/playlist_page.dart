@@ -293,8 +293,12 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
     // sampling them once turns the per-track work into one addition.
     final double title = _lineHeight(theme.textTheme.bodyMedium, scaler);
     final double detail = _lineHeight(theme.textTheme.bodySmall, scaler);
-    final double plain = math.max(44.0, title + detail) + 16.0;
-    final double translated = math.max(44.0, title + detail * 2) + 16.0;
+    final bool wide = MediaQuery.sizeOf(context).width >= 940;
+    final double cover = wide ? 52 : 44;
+    // Includes padding, the focus border and the vertical row margins.
+    final double chrome = wide ? 22 : 18;
+    final double plain = math.max(cover, title + detail) + chrome;
+    final double translated = math.max(cover, title + detail * 2) + chrome;
     final List<double> tops = <double>[];
     final List<double> heights = <double>[];
     var offset = 0.0;

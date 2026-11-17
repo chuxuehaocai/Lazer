@@ -211,7 +211,7 @@ class _SettingsCategoryHome extends StatelessWidget {
     final double inset = pageInset(context);
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
+        constraints: const BoxConstraints(maxWidth: 980),
         child: ListView(
           padding: EdgeInsets.fromLTRB(
             inset,
@@ -222,7 +222,6 @@ class _SettingsCategoryHome extends StatelessWidget {
           children: <Widget>[
             const ApplePageTitle(
               title: '设置',
-              subtitle: '按分类整理常用选项，减少滚动和查找。',
               padding: EdgeInsets.fromLTRB(0, 12, 0, 20),
             ),
             LayoutBuilder(
@@ -244,7 +243,7 @@ class _SettingsCategoryHome extends StatelessWidget {
                           child: TvFocusHighlight(
                             borderRadius: BorderRadius.circular(12),
                             child: AppleListTile(
-                              minHeight: twoColumns ? 88 : 76,
+                              minHeight: twoColumns ? 96 : 80,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
                                 vertical: 12,

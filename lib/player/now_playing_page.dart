@@ -273,6 +273,8 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   bool get _canAutoHide =>
       !TvScope.isActive(context) &&
+      widget.state.playing &&
+      widget.state.playbackError == null &&
       _activeControlPointers.isEmpty &&
       !_selectionOpen &&
       !_commentsOpen &&

@@ -336,10 +336,21 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
                 bottom: 0,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(widget.inline ? 20 : 0),
-                  child: ColoredBox(
-                    color: widget.inline
-                        ? scheme.surfaceContainerHighest.withValues(alpha: .66)
-                        : Colors.transparent,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: widget.inline
+                          ? scheme.onSurface.withValues(alpha: .045)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(
+                        widget.inline ? 20 : 0,
+                      ),
+                      border: widget.inline
+                          ? Border.all(
+                              color: scheme.onSurface.withValues(alpha: .08),
+                              width: .5,
+                            )
+                          : null,
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[

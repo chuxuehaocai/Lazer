@@ -1712,7 +1712,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   AppPaletteMode paletteMode = AppPaletteMode.fixed;
 
   /// The accent picked in [AppPaletteMode.custom]; null until the listener
-  /// chooses one, in which case the shipped red remains in effect.
+  /// chooses one, in which case the shipped blue remains in effect.
   Color? accentColor;
 
   /// The last artwork seed the compatibility backdrop extracted; only used while
@@ -1720,7 +1720,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Color? artworkSeed;
 
   /// The accent seed handed to the Apple theme builders. Null keeps the
-  /// shipped Apple Music red.
+  /// shipped Lazer blue.
   Color? get accentSeed => switch (paletteMode) {
     AppPaletteMode.fixed => null,
     AppPaletteMode.nowPlaying => artworkSeed,

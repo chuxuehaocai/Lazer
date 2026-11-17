@@ -20,6 +20,7 @@ import '../state/song_comments_controller.dart';
 import '../state/detail_requests.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
+import '../theme/lazer_theme.dart';
 import '../animation/motion_snapshot.dart';
 import '../animation/apple_spring.dart';
 import '../gateway/music_models.dart';
@@ -1144,13 +1145,17 @@ class _AppShellState extends State<AppShell>
   Widget build(BuildContext context) {
     final bool sharedBackground = BrowseBackgroundScope.contains(context);
     final Brightness brightness = Theme.of(context).brightness;
-    final Color accent = state.accentSeed ?? AppleColors.musicRed;
+    final Color? accent = state.accentSeed;
     return Theme(
       data:
           buildAppleTheme(
             brightness: brightness,
             seedAccent: accent,
             fonts: state.fontPreferences,
+            ui:
+                state.pluginTheme ??
+                Theme.of(context).extension<LazerThemeTokens>() ??
+                LazerThemeTokens.apple,
           ).copyWith(
             scaffoldBackgroundColor: sharedBackground
                 ? Colors.transparent
@@ -1810,21 +1815,22 @@ class _AppShellState extends State<AppShell>
       blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica ? 0 : 16,
       color: apple.glass.withValues(
         alpha: state.backgroundMode == AppBackgroundMode.windowsMica
-            ? .60
-            : .92,
+            ? .42
+            : .80,
       ),
       child: SizedBox(
-        width: 236,
+        width: (MediaQuery.sizeOf(context).width * .166).clamp(216.0, 264.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 18, 14, 14),
+              padding: const EdgeInsets.fromLTRB(22, 22, 18, 22),
               child: Text(
                 'Lazer',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: apple.label,
                   fontWeight: FontWeight.w700,
+                  fontSize: 24,
                   letterSpacing: -.5,
                 ),
               ),
@@ -2644,52 +2650,59 @@ class _RailPlaylistState extends State<_RailPlaylist>
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       cursor: SystemMouseCursors.click,
-      child: TvTapTarget(
-        onTap: feedbackAction(context, widget.onTap),
-        onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: BorderRadius.circular(7),
-        focusScale: 1.01,
-        child: GestureDetector(
-          onTap: feedbackAction(context, widget.onTap),
-          behavior: HitTestBehavior.opaque,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            height: 34,
-            margin: const EdgeInsets.only(bottom: 1),
-            padding: const EdgeInsets.symmetric(horizontal: 7),
-            decoration: BoxDecoration(
-              color: widget.selected
-                  ? apple.fill
-                  : _hovering || _focused
-                  ? apple.tertiaryFill
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(7),
-            ),
-            child: Row(
-              children: <Widget>[
-                AppCover(
-                  url: widget.playlist.coverUrl,
-                  size: 24,
-                  radius: 5,
-                  iconSize: 12,
+      child: Semantics(
+        button: true,
+        selected: widget.selected,
+        child: TvFocusHighlight(
+          borderRadius: BorderRadius.circular(9),
+          child: InkWell(
+            onTap: feedbackAction(context, widget.onTap),
+            onFocusChange: (value) => setState(() => _focused = value),
+            borderRadius: BorderRadius.circular(9),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              height: 40,
+              margin: const EdgeInsets.only(bottom: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 7),
+              decoration: BoxDecoration(
+                color: widget.selected
+                    ? apple.accentSoft
+                    : _hovering || _focused
+                    ? apple.tertiaryFill
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(
+                  color: _focused
+                      ? apple.accent.withValues(alpha: .65)
+                      : Colors.transparent,
                 ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    widget.playlist.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: widget.selected || _focused
-                          ? apple.label
-                          : apple.secondaryLabel,
-                      fontWeight: widget.selected
-                          ? FontWeight.w600
-                          : FontWeight.w400,
+              ),
+              child: Row(
+                children: <Widget>[
+                  AppCover(
+                    url: widget.playlist.coverUrl,
+                    size: 28,
+                    radius: 5,
+                    iconSize: 12,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      widget.playlist.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: widget.selected || _focused
+                            ? apple.label
+                            : apple.secondaryLabel,
+                        fontWeight: widget.selected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

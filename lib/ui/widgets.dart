@@ -330,164 +330,176 @@ class _AppTrackRowState extends State<AppTrackRow>
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       cursor: SystemMouseCursors.click,
-      child: TvTapTarget(
-        onTap: feedbackAction(context, widget.onTap),
-        onFocusChange: (bool value) => setState(() => _focused = value),
-        focusScale: 1.006,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: feedbackAction(context, widget.onTap),
-          onSecondaryTapDown: widget.onMenuRequested == null
-              ? null
-              : (TapDownDetails details) =>
-                    widget.onMenuRequested!(details.globalPosition),
-          onLongPress:
-              widget.onLongPress ??
-              (widget.onMenuRequested == null
-                  ? null
-                  : () {
-                      final RenderBox? box =
-                          context.findRenderObject() as RenderBox?;
-                      widget.onMenuRequested!(
-                        box?.localToGlobal(box.size.center(Offset.zero)) ??
-                            Offset.zero,
-                      );
-                    }),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-            decoration: BoxDecoration(
-              color: widget.selected
-                  ? apple.accentSoft
-                  : widget.current
-                  ? apple.accentSoft
-                  : highlighted
-                  ? apple.fill
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: <Widget>[
-                SizedBox(
-                  width: 28,
-                  child: widget.selectionMode
-                      ? Icon(
-                          widget.selected
-                              ? Icons.check_circle_rounded
-                              : Icons.radio_button_unchecked_rounded,
-                          size: 21,
-                          color: widget.selected
-                              ? apple.accent
-                              : apple.tertiaryLabel,
-                          semanticLabel: context.tr(
-                            widget.selected ? '已选择' : '未选择',
-                          ),
-                        )
-                      : widget.current
-                      ? Icon(
-                          widget.playing
-                              ? Icons.graphic_eq_rounded
-                              : Icons.pause_rounded,
-                          size: 16,
-                          color: apple.accent,
-                        )
-                      : Text(
-                          '${widget.index + 1}',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: highlighted
-                                ? apple.secondaryLabel
+      child: Semantics(
+        button: !widget.selectionMode,
+        selected: widget.selectionMode ? widget.selected : null,
+        child: TvFocusHighlight(
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: feedbackAction(context, widget.onTap),
+            onFocusChange: (value) => setState(() => _focused = value),
+            borderRadius: BorderRadius.circular(10),
+            onSecondaryTapDown: widget.onMenuRequested == null
+                ? null
+                : (TapDownDetails details) =>
+                      widget.onMenuRequested!(details.globalPosition),
+            onLongPress:
+                widget.onLongPress ??
+                (widget.onMenuRequested == null
+                    ? null
+                    : () {
+                        final RenderBox? box =
+                            context.findRenderObject() as RenderBox?;
+                        widget.onMenuRequested!(
+                          box?.localToGlobal(box.size.center(Offset.zero)) ??
+                              Offset.zero,
+                        );
+                      }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+              padding: EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: wide ? 9 : 7,
+              ),
+              decoration: BoxDecoration(
+                color: widget.selected
+                    ? apple.accentSoft
+                    : widget.current
+                    ? apple.accentSoft
+                    : highlighted
+                    ? apple.fill
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _focused
+                      ? apple.accent.withValues(alpha: .65)
+                      : Colors.transparent,
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                children: <Widget>[
+                  SizedBox(
+                    width: 28,
+                    child: widget.selectionMode
+                        ? Icon(
+                            widget.selected
+                                ? Icons.check_circle_rounded
+                                : Icons.radio_button_unchecked_rounded,
+                            size: 21,
+                            color: widget.selected
+                                ? apple.accent
                                 : apple.tertiaryLabel,
-                            fontFeatures: const <FontFeature>[
-                              FontFeature.tabularFigures(),
-                            ],
+                            semanticLabel: context.tr(
+                              widget.selected ? '已选择' : '未选择',
+                            ),
+                          )
+                        : widget.current
+                        ? Icon(
+                            widget.playing
+                                ? Icons.graphic_eq_rounded
+                                : Icons.pause_rounded,
+                            size: 16,
+                            color: apple.accent,
+                          )
+                        : Text(
+                            '${widget.index + 1}',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: highlighted
+                                  ? apple.secondaryLabel
+                                  : apple.tertiaryLabel,
+                              fontFeatures: const <FontFeature>[
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
                           ),
-                        ),
-                ),
-                const SizedBox(width: 8),
-                AppCover(
-                  url: widget.track.coverUrl,
-                  size: 44,
-                  radius: 6,
-                  iconSize: 16,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 12,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      _trackTitle(
-                        Text(
-                          widget.track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: titleColor,
-                            fontWeight: context.fonts.weightFor(
-                              FontCategory.title,
-                              widget.current
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
+                  ),
+                  const SizedBox(width: 8),
+                  AppCover(
+                    url: widget.track.coverUrl,
+                    size: wide ? 52 : 44,
+                    radius: 8,
+                    iconSize: 16,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 12,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        _trackTitle(
+                          Text(
+                            widget.track.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: titleColor,
+                              fontWeight: context.fonts.weightFor(
+                                FontCategory.title,
+                                widget.current
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      if (translated != null && translated.isNotEmpty)
+                        if (translated != null && translated.isNotEmpty)
+                          Text(
+                            translated,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: apple.secondaryLabel,
+                            ),
+                          ),
                         Text(
-                          translated,
+                          widget.track.artist,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: apple.secondaryLabel,
                           ),
                         ),
-                      Text(
-                        widget.track.artist,
+                      ],
+                    ),
+                  ),
+                  if (wide)
+                    Expanded(
+                      flex: 7,
+                      child: Text(
+                        widget.track.album,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: apple.secondaryLabel,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                if (wide)
-                  Expanded(
-                    flex: 7,
-                    child: Text(
-                      widget.track.album,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: apple.secondaryLabel,
+                    ),
+                  if (widget.trailing != null)
+                    widget.trailing!
+                  else if (wide || highlighted)
+                    SizedBox(
+                      width: 46,
+                      child: Text(
+                        // A remote file has no duration until a decoder opens it;
+                        // showing 0:00 there would claim the song is empty.
+                        widget.track.duration > Duration.zero
+                            ? formatDuration(widget.track.duration)
+                            : '--:--',
+                        textAlign: TextAlign.end,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: apple.secondaryLabel,
+                          fontFeatures: const <FontFeature>[
+                            FontFeature.tabularFigures(),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                if (widget.trailing != null)
-                  widget.trailing!
-                else if (wide || highlighted)
-                  SizedBox(
-                    width: 46,
-                    child: Text(
-                      // A remote file has no duration until a decoder opens it;
-                      // showing 0:00 there would claim the song is empty.
-                      widget.track.duration > Duration.zero
-                          ? formatDuration(widget.track.duration)
-                          : '--:--',
-                      textAlign: TextAlign.end,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: apple.secondaryLabel,
-                        fontFeatures: const <FontFeature>[
-                          FontFeature.tabularFigures(),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -598,49 +610,57 @@ class _AppRailItemState extends State<AppRailItem>
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       cursor: SystemMouseCursors.click,
-      child: TvTapTarget(
-        onTap: feedbackAction(context, widget.onTap),
-        onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: BorderRadius.circular(7),
-        focusScale: 1.02,
-        child: GestureDetector(
-          onTap: feedbackAction(context, widget.onTap),
-          behavior: HitTestBehavior.opaque,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            height: 30,
-            padding: const EdgeInsets.symmetric(horizontal: 9),
-            decoration: BoxDecoration(
-              color: widget.selected
-                  ? apple.fill
-                  : highlighted
-                  ? apple.tertiaryFill
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(7),
-            ),
-            child: Row(
-              children: <Widget>[
-                Icon(
-                  widget.icon,
-                  size: 18,
-                  color: widget.selected ? apple.accent : labelColor,
+      child: Semantics(
+        button: true,
+        selected: widget.selected,
+        child: TvFocusHighlight(
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: feedbackAction(context, widget.onTap),
+            onFocusChange: (value) => setState(() => _focused = value),
+            borderRadius: BorderRadius.circular(10),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              height: 38,
+              padding: const EdgeInsets.symmetric(horizontal: 11),
+              decoration: BoxDecoration(
+                color: widget.selected
+                    ? apple.accent.withValues(alpha: .20)
+                    : highlighted
+                    ? apple.tertiaryFill
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _focused
+                      ? apple.accent.withValues(alpha: .65)
+                      : Colors.transparent,
+                  width: 1,
                 ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    context.tr(widget.label),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: labelColor,
-                      fontWeight: context.fonts.weightFor(
-                        FontCategory.controls,
-                        widget.selected ? FontWeight.w600 : FontWeight.w400,
+              ),
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    widget.icon,
+                    size: 20,
+                    color: widget.selected ? apple.accent : labelColor,
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Text(
+                      context.tr(widget.label),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: labelColor,
+                        fontWeight: context.fonts.weightFor(
+                          FontCategory.controls,
+                          widget.selected ? FontWeight.w600 : FontWeight.w400,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -687,10 +707,12 @@ class AppArtistTrackCard extends StatefulWidget {
     required this.track,
     required this.current,
     required this.onTap,
+    this.onMenuRequested,
   });
   final Track track;
   final bool current;
   final VoidCallback onTap;
+  final ValueChanged<Offset>? onMenuRequested;
 
   @override
   State<AppArtistTrackCard> createState() => _AppArtistTrackCardState();
@@ -699,6 +721,7 @@ class AppArtistTrackCard extends StatefulWidget {
 class _AppArtistTrackCardState extends State<AppArtistTrackCard>
     with BuildSafeState<AppArtistTrackCard> {
   bool _hover = false;
+  bool _focused = false;
   @override
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
@@ -709,24 +732,31 @@ class _AppArtistTrackCardState extends State<AppArtistTrackCard>
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           onTap: feedbackAction(context, widget.onTap),
+          onFocusChange: (value) => setState(() => _focused = value),
+          onSecondaryTapDown: widget.onMenuRequested == null
+              ? null
+              : (details) => widget.onMenuRequested!(details.globalPosition),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            height: 66,
-            padding: const EdgeInsets.all(7),
+            height: 72,
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: widget.current
                   ? apple.accentSoft
-                  : _hover
+                  : _hover || _focused
                   ? apple.fill
-                  : apple.secondaryGroupedBackground,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: apple.separator, width: .5),
+                  : apple.secondaryGroupedBackground.withValues(alpha: .70),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _focused ? apple.accent : apple.separator,
+                width: _focused ? 1 : .7,
+              ),
             ),
             child: Row(
               children: <Widget>[
-                AppCover(url: widget.track.coverUrl, size: 52, radius: 6),
+                AppCover(url: widget.track.coverUrl, size: 56, radius: 8),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -760,7 +790,27 @@ class _AppArtistTrackCardState extends State<AppArtistTrackCard>
                     ],
                   ),
                 ),
-                Icon(Icons.more_horiz_rounded, color: apple.tertiaryLabel),
+                if (widget.onMenuRequested != null)
+                  Builder(
+                    builder: (menuContext) => IconButton(
+                      key: ValueKey('recent-track-menu-${widget.track.id}'),
+                      tooltip: context.tr('更多'),
+                      icon: const Icon(Icons.more_horiz_rounded, size: 20),
+                      color: apple.tertiaryLabel,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 30,
+                        height: 34,
+                      ),
+                      onPressed: () {
+                        final box =
+                            menuContext.findRenderObject()! as RenderBox;
+                        widget.onMenuRequested!(
+                          box.localToGlobal(box.size.bottomRight(Offset.zero)),
+                        );
+                      },
+                    ),
+                  ),
               ],
             ),
           ),

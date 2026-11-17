@@ -1,5 +1,4 @@
 import '../gateway/music_models.dart';
-import '../state/build_safe_notifier.dart';
 import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
@@ -11,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../data/catalog.dart';
 import '../data/models.dart';
+import '../downloads/download_dialog.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
@@ -44,8 +44,7 @@ Playlist dailyRecommendationsPlaylist(
   );
 }
 
-/// Apple-style browse page: a large title, one featured card, a horizontal
-/// recommendation shelf and the quick-pick track list.
+/// Artwork shortcuts, recent listening and discovery shelves.
 class AppHomePage extends StatefulWidget {
   const AppHomePage({
     super.key,
@@ -196,7 +195,7 @@ class _AppHomePageState extends State<AppHomePage>
                 inset,
                 8 + widget.topInset,
                 inset,
-                MediaQuery.sizeOf(context).height * .45,
+                compact ? MediaQuery.sizeOf(context).height * .45 : 32,
               ),
               sliver: SliverList(
                 delegate: SliverChildListDelegate(<Widget>[
@@ -244,20 +243,26 @@ class _AppHomePageState extends State<AppHomePage>
                           ? null
                           : () => widget.state.playQueue(recent),
                     ),
-                    const SizedBox(height: 34),
+                    SizedBox(height: compact ? 28 : 30),
                   ],
                   AppSectionHeader(title: '最近播放'),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   if (recent.isNotEmpty)
-                    _HomeTrackGrid(
-                      state: widget.state,
+                    HomeRecentTrackShelf(
+                      currentTrackId: widget.state.current?.id,
                       tracks: recent,
                       onPlay: widget.onPlayTrack,
+                      onMenuRequested: (track, position) => showTrackActions(
+                        context,
+                        widget.state,
+                        track,
+                        position,
+                      ),
                     )
                   else
                     const AppNotice(message: '还没有最近播放记录'),
                   if (feed.albums.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 36),
+                    const SizedBox(height: 30),
                     const AppSectionHeader(title: '为你推荐的新发行'),
                     const SizedBox(height: 14),
                     _HomeReleaseShelf(
@@ -420,20 +425,24 @@ class HomeActionShelf extends StatelessWidget {
             tap: onReplay,
           ),
         ].where((item) => item.tap != null).toList();
+    if (items.isEmpty) return const SizedBox.shrink();
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        // The four shortcuts share the browse width on a television instead of
-        // huddling at the left. The large-screen home asks for bigger tiles so
-        // the artwork reads from the sofa.
         final double gap = large ? 18 : 14;
-        final double cardWidth =
-            TvScope.isActive(context) && constraints.maxWidth.isFinite
-            ? ((constraints.maxWidth - 3 * gap) / 4).clamp(
-                large ? 300.0 : 228.0,
-                large ? 480.0 : 372.0,
-              )
-            : 228.0;
-        final double tileHeight = large ? 216 : 154;
+        // Four cards fill a desktop row, including at 1280px window width.
+        // Phone widths retain a swipeable shelf instead of tiny captions.
+        final bool fitRow = constraints.maxWidth >= (large ? 960 : 740);
+        final double cardWidth = fitRow
+            ? (constraints.maxWidth - (items.length - 1) * gap) /
+                  math.max(1, items.length)
+            : large
+            ? 300
+            : 228;
+        final double tileHeight = large
+            ? 216
+            : fitRow
+            ? (cardWidth * .66).clamp(148.0, 184.0)
+            : 154;
         return _PagedHorizontalShelf(
           key: const ValueKey<String>('home-actions'),
           height: tileHeight,
@@ -442,14 +451,15 @@ class HomeActionShelf extends StatelessWidget {
           itemCount: items.length,
           itemBuilder: (context, index) {
             final item = items[index];
+            final bool daily = item.icon == Icons.calendar_today_rounded;
             return StableCoverKey(
               key: ValueKey<String>('home-action:${item.title}'),
               builder: (GlobalKey coverKey) => CoverTransitionSource(
                 key: coverKey,
-                identity: index == 0 && dailyOpensPlaylist
+                identity: daily && dailyOpensPlaylist
                     ? 'playlist:$dailyRecommendationsPlaylistId'
                     : null,
-                morphArtwork: index == 0,
+                morphArtwork: daily,
                 radius: large ? 18 : 16,
                 child: FilledCoverCard(
                   width: cardWidth,
@@ -467,7 +477,7 @@ class HomeActionShelf extends StatelessWidget {
                   onTap: busy || item.tap == null
                       ? null
                       : () {
-                          if (index == 0 && dailyOpensPlaylist) {
+                          if (daily && dailyOpensPlaylist) {
                             rememberCoverTransition(
                               'playlist:$dailyRecommendationsPlaylistId',
                               coverKey,
@@ -493,6 +503,7 @@ class _PagedHorizontalShelf extends StatefulWidget {
     required this.itemBuilder,
     this.gap = 14,
     this.showArrows = true,
+    this.pageByViewport = false,
   });
 
   final double height;
@@ -502,6 +513,7 @@ class _PagedHorizontalShelf extends StatefulWidget {
 
   /// Hides the paging chevrons where the remote already pages by focus.
   final bool showArrows;
+  final bool pageByViewport;
 
   @override
   State<_PagedHorizontalShelf> createState() => _PagedHorizontalShelfState();
@@ -544,11 +556,13 @@ class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf>
     if (!_controller.hasClients) return;
     final position = _controller.position;
     if (!position.hasContentDimensions) return;
-    final target =
-        (position.pixels + position.viewportDimension * .86 * direction).clamp(
-          position.minScrollExtent,
-          position.maxScrollExtent,
-        );
+    final double distance = widget.pageByViewport
+        ? position.viewportDimension + widget.gap
+        : position.viewportDimension * .86;
+    final target = (position.pixels + distance * direction).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
     _controller.animateTo(
       target,
       duration: MediaQuery.disableAnimationsOf(context)
@@ -568,14 +582,22 @@ class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf>
         children: <Widget>[
           ScrollConfiguration(
             behavior: shelfScrollBehavior(context),
-            child: ListView.separated(
-              controller: _controller,
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              physics: const BouncingScrollPhysics(),
-              itemCount: widget.itemCount,
-              separatorBuilder: (_, _) => SizedBox(width: widget.gap),
-              itemBuilder: widget.itemBuilder,
+            child: NotificationListener<ScrollMetricsNotification>(
+              onNotification: (_) {
+                _refreshAfterLayout();
+                return false;
+              },
+              child: ListView.separated(
+                controller: _controller,
+                scrollDirection: Axis.horizontal,
+                // Off-page artwork must stay inside the content lane rather
+                // than painting through the sidebar or the next shelf.
+                clipBehavior: Clip.hardEdge,
+                physics: const BouncingScrollPhysics(),
+                itemCount: widget.itemCount,
+                separatorBuilder: (_, _) => SizedBox(width: widget.gap),
+                itemBuilder: widget.itemBuilder,
+              ),
             ),
           ),
           if (desktop && widget.showArrows)
@@ -630,182 +652,77 @@ class _ShelfArrow extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => AnimatedOpacity(
-    curve: const AppleSpringCurve(),
-    opacity: visible ? 1 : 0,
-    duration: MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : AppleSpring.responsive.duration,
-    child: Material(
-      color: AppleSemanticColors.of(
-        context,
-      ).tertiaryBackground.withValues(alpha: .94),
-      elevation: 8,
-      shadowColor: Colors.black26,
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: visible ? onTap : null,
-        child: SizedBox.square(dimension: 38, child: Icon(icon, size: 24)),
+  Widget build(BuildContext context) => IgnorePointer(
+    ignoring: !visible,
+    child: ExcludeFocus(
+      excluding: !visible,
+      child: AnimatedOpacity(
+        curve: const AppleSpringCurve(),
+        opacity: visible ? 1 : 0,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : AppleSpring.responsive.duration,
+        child: Material(
+          color: AppleSemanticColors.of(
+            context,
+          ).tertiaryBackground.withValues(alpha: .94),
+          elevation: 8,
+          shadowColor: Colors.black26,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: visible ? onTap : null,
+            child: SizedBox.square(dimension: 38, child: Icon(icon, size: 24)),
+          ),
+        ),
       ),
     ),
   );
 }
 
-class _MovingCoverMosaic extends StatefulWidget {
-  const _MovingCoverMosaic({
-    required this.covers,
-    this.angle = 0,
-    this.reverse = false,
-    this.rows = 2,
-    this.tile = 76,
-    this.diagonal = 0,
-  });
+/// A stable six-cover collage. Artwork only changes with the feed, so the
+/// landing page never runs a timer just to slide repeated covers under labels.
+class _CoverMosaic extends StatelessWidget {
+  const _CoverMosaic({required this.covers, this.rows = 2});
   final List<String?> covers;
-  final double angle;
-  final bool reverse;
   final int rows;
-  final double tile;
-  final double diagonal;
-
-  @override
-  State<_MovingCoverMosaic> createState() => _MovingCoverMosaicState();
-}
-
-class _MovingCoverMosaicState extends State<_MovingCoverMosaic>
-    with WidgetsBindingObserver {
-  static const Duration _driftDuration = Duration(seconds: 18);
-  static const Duration _frameInterval = Duration(milliseconds: 33);
-
-  // This is intentionally a 30 fps timer, not an AnimationController. A
-  // controller still wakes the UI isolate on every display vsync (165+ times
-  // a second on high-refresh screens) even if its listener only publishes a
-  // value every 33 ms.
-  final ValueNotifier<double> _phase = BuildSafeValueNotifier<double>(0);
-  final Stopwatch _clock = Stopwatch();
-  Timer? _timer;
-  Duration _lastAdvance = Duration.zero;
-  double _phaseValue = 0;
-  bool _reduceMotion = false;
-  bool _tickerAllowed = true;
-  bool _appActive = true;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _syncPlayback();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    final bool active = state == AppLifecycleState.resumed;
-    if (active == _appActive) return;
-    _appActive = active;
-    _syncPlayback();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final bool reduce = MediaQuery.disableAnimationsOf(context);
-    final bool allowed = TickerMode.valuesOf(context).enabled;
-    if (reduce != _reduceMotion || allowed != _tickerAllowed) {
-      _reduceMotion = reduce;
-      _tickerAllowed = allowed;
-      _syncPlayback();
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _MovingCoverMosaic oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncPlayback();
-  }
-
-  bool get _hasCovers => widget.covers.any((url) => url?.isNotEmpty ?? false);
-
-  bool get _runs =>
-      _hasCovers && !_reduceMotion && _tickerAllowed && _appActive;
-
-  void _syncPlayback() {
-    if (_runs) {
-      if (_timer != null) return;
-      _clock
-        ..reset()
-        ..start();
-      _lastAdvance = Duration.zero;
-      _timer = Timer.periodic(_frameInterval, (_) => _advance());
-    } else {
-      _timer?.cancel();
-      _timer = null;
-      _clock.stop();
-      _lastAdvance = Duration.zero;
-    }
-  }
-
-  void _advance() {
-    if (!mounted) return;
-    final Duration elapsed = _clock.elapsed;
-    final double delta =
-        (elapsed - _lastAdvance).inMicroseconds / _driftDuration.inMicroseconds;
-    _lastAdvance = elapsed;
-    if (delta <= 0) return;
-    _phaseValue = (_phaseValue + delta) % 1;
-    _phase.value = _phaseValue;
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
-    _clock.stop();
-    _phase.dispose();
-    super.dispose();
-  }
+  static const int columns = 3;
 
   @override
   Widget build(BuildContext context) {
-    final covers = widget.covers
-        .where((url) => url?.isNotEmpty ?? false)
-        .take(8)
-        .toList();
-    if (covers.isEmpty) return const SizedBox.expand();
-    final repeated = List<String?>.generate(
-      math.max(24, widget.rows * 12),
-      (index) => covers[index % covers.length],
-    );
-    final travel = widget.tile * covers.length;
-    return AnimatedBuilder(
-      animation: _phase,
-      builder: (context, child) => Transform.rotate(
-        angle: widget.angle,
-        child: Transform.translate(
-          offset: Offset(
-            widget.reverse
-                ? -travel + _phase.value * travel
-                : -_phase.value * travel,
-            (_phase.value - .5) * widget.tile * widget.diagonal,
-          ),
-          child: child,
-        ),
-      ),
-      child: RepaintBoundary(
-        child: OverflowBox(
-          alignment: Alignment.topLeft,
-          minWidth: 0,
-          maxWidth: double.infinity,
-          child: SizedBox(
-            width: repeated.length * widget.tile / widget.rows,
-            height: widget.tile * widget.rows,
-            child: Wrap(
-              direction: Axis.vertical,
-              children: <Widget>[
-                for (final url in repeated)
-                  AppCover(url: url, size: widget.tile, radius: 0),
-              ],
-            ),
-          ),
+    final artwork = covers
+        .whereType<String>()
+        .where((url) => url.isNotEmpty)
+        .toSet()
+        .take(rows * columns)
+        .toList(growable: false);
+    if (artwork.isEmpty) return const SizedBox.expand();
+    return RepaintBoundary(
+      child: LayoutBuilder(
+        builder: (context, box) => Column(
+          children: [
+            for (var row = 0; row < rows; row++)
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var column = 0; column < columns; column++)
+                      Expanded(
+                        child: AppCover(
+                          url:
+                              artwork[(row * columns + column) %
+                                  artwork.length],
+                          size: math.max(
+                            box.maxWidth / columns,
+                            box.maxHeight / rows,
+                          ),
+                          radius: 0,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -847,10 +764,12 @@ class LocalRecentHome extends StatelessWidget {
               if (recent.isEmpty)
                 const AppNotice(message: '还没有最近播放记录')
               else
-                _HomeTrackGrid(
-                  state: state,
+                HomeRecentTrackShelf(
+                  currentTrackId: state.current?.id,
                   tracks: recent,
                   onPlay: onPlayTrack,
+                  onMenuRequested: (track, position) =>
+                      showTrackActions(context, state, track, position),
                 ),
             ],
           ),
@@ -860,52 +779,79 @@ class LocalRecentHome extends StatelessWidget {
   );
 }
 
-class _HomeTrackGrid extends StatelessWidget {
-  const _HomeTrackGrid({
-    required this.state,
+/// Recent listening is laid out in reading order. Sparse history takes only
+/// the rows it needs; a full desktop page holds three rows of three tracks.
+class HomeRecentTrackShelf extends StatelessWidget {
+  const HomeRecentTrackShelf({
+    super.key,
     required this.tracks,
     required this.onPlay,
+    this.currentTrackId,
+    this.onMenuRequested,
   });
-  final AppState state;
+  final String? currentTrackId;
   final List<Track> tracks;
   final void Function(List<Track>, int) onPlay;
+  final void Function(Track, Offset)? onMenuRequested;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
-      const int rows = 3;
-      final int visibleColumns = box.maxWidth >= 920
-          ? 3
-          : box.maxWidth >= 560
-          ? 2
-          : 1;
-      final List<Track> shown = tracks;
-      final int columns = (shown.length / rows).ceil();
-      final double width =
-          (box.maxWidth - (visibleColumns - 1) * 10) / visibleColumns;
+      if (tracks.isEmpty) return const SizedBox.shrink();
+      const double gap = 10;
+      const double rowHeight = 72;
+      final int columns = ((box.maxWidth + gap) / 270).floor().clamp(1, 3);
+      final int pageSize = columns * 3;
+      final int rows = (math.min(tracks.length, pageSize) / columns).ceil();
+      final int pages = (tracks.length / pageSize).ceil();
+      final double width = (box.maxWidth - (columns - 1) * gap) / columns;
       return _PagedHorizontalShelf(
         key: const ValueKey<String>('recent-tracks'),
-        height: rows * 66 + (rows - 1) * 8,
-        gap: 10,
-        itemCount: columns,
-        itemBuilder: (context, column) => SizedBox(
-          width: width,
+        height: rows * rowHeight + (rows - 1) * gap,
+        gap: gap,
+        pageByViewport: true,
+        itemCount: pages,
+        itemBuilder: (context, page) => SizedBox(
+          width: box.maxWidth,
           child: Column(
-            children: <Widget>[
-              for (var row = 0; row < rows; row++) ...<Widget>[
-                if (row > 0) const SizedBox(height: 8),
-                if (column * rows + row < shown.length)
-                  AppArtistTrackCard(
-                    track: shown[column * rows + row],
-                    current: state.current?.id == shown[column * rows + row].id,
-                    onTap: () => onPlay(shown, column * rows + row),
-                  ),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var row = 0; row < rows; row++) ...[
+                if (row > 0) const SizedBox(height: gap),
+                Row(
+                  children: [
+                    for (var column = 0; column < columns; column++) ...[
+                      if (column > 0) const SizedBox(width: gap),
+                      if (page * pageSize + row * columns + column <
+                          tracks.length)
+                        SizedBox(
+                          width: width,
+                          height: rowHeight,
+                          child: _track(
+                            page * pageSize + row * columns + column,
+                          ),
+                        )
+                      else
+                        SizedBox(width: width),
+                    ],
+                  ],
+                ),
               ],
             ],
           ),
         ),
       );
     },
+  );
+
+  Widget _track(int index) => AppArtistTrackCard(
+    key: ValueKey('recent-track:${tracks[index].id}'),
+    track: tracks[index],
+    current: currentTrackId == tracks[index].id,
+    onTap: () => onPlay(tracks, index),
+    onMenuRequested: onMenuRequested == null
+        ? null
+        : (position) => onMenuRequested!(tracks[index], position),
   );
 }
 
@@ -1118,15 +1064,11 @@ class ChartShelf extends StatelessWidget {
                       children: <Widget>[
                         Transform.scale(
                           scale: 1.32,
-                          child: _MovingCoverMosaic(
+                          child: _CoverMosaic(
                             covers: chart.entries
                                 .map(chartEntryCover)
                                 .toList(growable: false),
-                            angle: -.11,
-                            reverse: true,
-                            rows: 4,
-                            tile: 82,
-                            diagonal: -.55,
+                            rows: 3,
                           ),
                         ),
                         ColoredBox(color: Colors.black.withValues(alpha: .68)),
@@ -1420,7 +1362,7 @@ class _StationStrip extends StatelessWidget {
 /// A card filled edge to edge with artwork.
 ///
 /// This is the 电台 strip's card, and the same renderer now draws 为你打造 on
-/// every platform: a moving cover mosaic under a dark gradient, the category
+/// every platform: a stable cover mosaic under a dark gradient, the category
 /// glyph and a play mark on the top row, and the title/detail pair on two
 /// caption lines. A television gets the usual focus ring through
 /// [TvTapTarget]; a pointer gets the same tap target without a second widget.
@@ -1466,82 +1408,97 @@ class FilledCoverCard extends StatelessWidget {
           onTap: tap,
           borderRadius: radius,
           focusScale: 1.02,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: tap,
-            child: ClipRRect(
-              borderRadius: radius,
-              child: Stack(
-                fit: StackFit.expand,
-                children: <Widget>[
-                  ColoredBox(
-                    color: AppleSemanticColors.of(
-                      context,
-                    ).secondaryGroupedBackground,
-                    child: Opacity(
-                      opacity: tap == null ? .18 : .58,
-                      child: _MovingCoverMosaic(
-                        covers: covers,
-                        tile: large ? 104 : 76,
-                      ),
-                    ),
+          child: ClipRRect(
+            borderRadius: radius,
+            child: Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                ColoredBox(
+                  color: AppleSemanticColors.of(
+                    context,
+                  ).secondaryGroupedBackground,
+                  child: Opacity(
+                    opacity: tap == null ? .2 : .82,
+                    child: _CoverMosaic(covers: covers),
                   ),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: <Color>[Color(0x22000000), Color(0xE0000000)],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.all(large ? 20 : 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: <Widget>[
-                            Icon(
-                              icon,
-                              color: Colors.white,
-                              size: large ? 27 : 22,
-                            ),
-                            Icon(
-                              Icons.play_circle_fill_rounded,
-                              color: Colors.white,
-                              size: large ? 35 : 29,
-                            ),
-                          ],
-                        ),
-                        const Spacer(),
-                        Text(
-                          context.tr(title),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                fontSize: large ? 21 : null,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800,
-                              ),
-                        ),
-                        Text(
-                          context.tr(detail),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                fontSize: large ? 15.5 : null,
-                                color: Colors.white70,
-                              ),
-                        ),
+                ),
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: <Color>[
+                        Color(0x22000000),
+                        Color(0x44000000),
+                        Color(0xE8000000),
                       ],
+                      stops: <double>[0, .4, 1],
                     ),
                   ),
-                ],
-              ),
+                ),
+                Padding(
+                  padding: EdgeInsets.all(large ? 20 : 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: <Widget>[
+                          Icon(
+                            icon,
+                            color: Colors.white,
+                            size: large ? 27 : 22,
+                          ),
+                          Icon(
+                            Icons.play_circle_fill_rounded,
+                            color: Colors.white,
+                            size: large ? 35 : 30,
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text(
+                        context.tr(title),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              fontSize: large ? 21 : 18,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      Text(
+                        context.tr(detail),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontSize: large ? 15.5 : 13,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: tap,
+                    canRequestFocus: !TvScope.isActive(context),
+                    borderRadius: radius,
+                    hoverColor: Colors.white.withValues(alpha: .08),
+                    focusColor: Colors.white.withValues(alpha: .15),
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        borderRadius: radius,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: .12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
