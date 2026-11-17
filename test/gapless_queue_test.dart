@@ -63,6 +63,11 @@ class _QueueEngine implements AudioEngine, QueueAudioEngine {
   }
 
   @override
+  Future<void> clearQueued() async {
+    _hasQueuedNext = false;
+  }
+
+  @override
   Future<bool> playQueuedNext() async {
     jumps++;
     if (!_hasQueuedNext || !queueJumpSucceeds) return false;
@@ -356,6 +361,44 @@ void main() {
       state.next();
       await tester.pump();
       expect('url-${state.current!.id}', sequential);
+      state.pause();
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'changing play mode does not reload or interrupt currently playing track',
+    (tester) async {
+      final engine = _QueueEngine();
+      final state = AppState(
+        catalog: _Catalog(),
+        audioEngine: engine,
+        shuffleRandom: Random(7),
+      );
+      addTearDown(state.dispose);
+      state.playQueue([for (var i = 0; i < 5; i++) _track('$i')]);
+      await tester.pump();
+      expect(engine.loads.length, 1);
+      expect(engine.loads.first, 'url-0');
+      expect(engine.appends.last, 'url-1');
+
+      // Toggling shuffle does not reload the active track
+      state.toggleShuffle();
+      await tester.pump();
+      expect(engine.loads.length, 1);
+
+      // Switching to repeat-one drops the queued successor and does not reload
+      state.setPlayMode(LoopMode.one);
+      await tester.pump();
+      expect(engine.loads.length, 1);
+      expect(state.successorPrepared, isFalse);
+
+      // Switching back to repeat-all refreshes the successor without reloading
+      state.setPlayMode(LoopMode.all);
+      await tester.pump();
+      expect(engine.loads.length, 1);
+      expect(state.successorPrepared, isTrue);
+
       state.pause();
       await tester.pump();
     },

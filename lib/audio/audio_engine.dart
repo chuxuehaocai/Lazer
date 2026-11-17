@@ -110,6 +110,9 @@ abstract interface class QueueAudioEngine {
   /// knows the append did not happen and must not expect the hand-off.
   Future<bool> appendToQueue(int queueId, String url);
 
+  /// Drops any prepared successor from the queue.
+  Future<void> clearQueued();
+
   /// Moves to the next item of the loaded queue without reloading it.
   ///
   /// Returns `false` when the platform queue no longer has a next item. The
@@ -633,6 +636,22 @@ class JustAudioEngine
         _currentUrl = _queueUrls[currentIndex];
       }
       return true;
+    });
+  }
+
+  @override
+  Future<void> clearQueued() {
+    return _serialize(() async {
+      final ConcatenatingAudioSource? queue = _queue;
+      if (queue == null) return;
+      final int? currentIndex = _player.currentIndex;
+      if (currentIndex == null) return;
+      while (queue.children.length > currentIndex + 1) {
+        await queue.removeAt(queue.children.length - 1);
+      }
+      while (_queueUrls.length > currentIndex + 1) {
+        _queueUrls.removeLast();
+      }
     });
   }
 

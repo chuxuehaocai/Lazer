@@ -563,6 +563,9 @@ class NativeAudioEngine
     return true;
   }
 
+  @override
+  Future<void> clearQueued() => _clearQueued();
+
   /// The URL this engine has prepared as its successor, or null when it holds
   /// none.
   ///

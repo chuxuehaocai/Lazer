@@ -297,8 +297,15 @@ class AutoMixAudioEngine
       if (_presentedIncoming) return false;
       if (_incoming != null) {
         // Already prepared for exactly this successor.
-        return _currentIndex + 1 < _queueUrls.length &&
-            _queueUrls[_currentIndex + 1] == url;
+        if (_currentIndex + 1 < _queueUrls.length &&
+            _queueUrls[_currentIndex + 1] == url) {
+          return true;
+        }
+        await _incoming!.stop();
+        _incoming = null;
+        while (_queueUrls.length > _currentIndex + 1) {
+          _queueUrls.removeLast();
+        }
       }
       _queueUrls.add(url);
       if (await _prepareNext(generation)) return true;
@@ -306,6 +313,20 @@ class AutoMixAudioEngine
         _queueUrls.removeLast();
       }
       return false;
+    });
+  }
+
+  @override
+  Future<void> clearQueued() {
+    return _serialize(() async {
+      if (_disposed || _presentedIncoming) return;
+      if (_incoming != null) {
+        await _incoming!.stop();
+        _incoming = null;
+      }
+      while (_queueUrls.length > _currentIndex + 1) {
+        _queueUrls.removeLast();
+      }
     });
   }
 

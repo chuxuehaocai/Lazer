@@ -4256,11 +4256,23 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _refreshQueueSuccessor() {
-    // A prepared decoder belongs to the old play mode. Rebuild from the current
-    // playhead so repeat/shuffle changes cannot mix the wrong successor.
-    if (_realActive && current != null && _queueEngine != null) {
-      unawaited(_startAudio(resumeAt: precisePosition));
-    }
+    // A prepared decoder belongs to the old play mode. Clear any queued
+    // successor and schedule a prefetch for the updated play mode without
+    // disrupting or reloading the currently playing audio stream.
+    if (!_realActive || current == null || _queueEngine == null) return;
+    _clearQueuedNext();
+    final int generation = ++_prefetchGeneration;
+    final QueueAudioEngine engine = _queueEngine!;
+    final int? queueId = _queueId;
+    unawaited(() async {
+      await engine.clearQueued();
+      if (generation != _prefetchGeneration ||
+          queueId != _queueId ||
+          !_realActive) {
+        return;
+      }
+      unawaited(_prefetchNext());
+    }());
   }
 
   void playTrackAt(int index) {
@@ -4888,7 +4900,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     final int generation = ++_prefetchGeneration;
     final int? next = _autoAdvanceIndex();
-    if (next == null) {
+    if (next == null || _repeat == LoopMode.one) {
       _clearQueuedNext();
       return;
     }
