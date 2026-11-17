@@ -622,7 +622,7 @@ jobs:
         with:
           name: ios-audio-runtime-smoke
           path: |
-            build/ios-audio-smoke/console.log
+            build/ios-audio-smoke/*.log
             build/ios-audio-smoke/result.txt
             build/ios-audio-smoke/devices.json
           if-no-files-found: warn

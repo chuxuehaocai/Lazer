@@ -28,6 +28,11 @@ void lazer_bridge_reader_cancel(void *);
 
 namespace {
 
+void stage(const char *message) {
+    std::fprintf(stderr, "stage=%s\n", message);
+    std::fflush(stderr);
+}
+
 void require(bool condition, const std::string &message) {
     if (!condition) throw std::runtime_error(message);
 }
@@ -72,6 +77,7 @@ std::vector<uint8_t> wavFixture() {
 struct EngineOwner {
     LazerAudioEngine engine = nullptr;
     EngineOwner() {
+        stage("engine create");
         LazerAudioEngineConfig config{};
         config.abi_version = LAZER_AUDIO_ABI_VERSION;
         config.struct_size = sizeof(config);
@@ -79,8 +85,13 @@ struct EngineOwner {
         config.log.on_log = &logNative;
         engine = lazer_audio_create(&config);
         require(engine != nullptr, "engine creation failed");
+        stage("engine created");
     }
-    ~EngineOwner() { lazer_audio_destroy(engine); }
+    ~EngineOwner() {
+        stage("engine destroy");
+        lazer_audio_destroy(engine);
+        stage("engine destroyed");
+    }
 };
 
 std::string failure(LazerAudioEngine engine, const char *stage, int32_t result) {
@@ -96,8 +107,10 @@ int64_t provePlayback(LazerAudioEngine engine) {
         "FFmpeg did not decode the fixture format");
     require(info.output_format_initialized && info.output_sample_rate > 0,
         "RemoteIO did not initialize an output format");
+    stage("play");
     const int32_t played = lazer_audio_play(engine);
     require(played == LazerAudioOk, failure(engine, "play", played));
+    stage("playing; waiting for RemoteIO clock");
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     while (std::chrono::steady_clock::now() < deadline) {
         LazerAudioSnapshot snapshot{};
@@ -121,18 +134,22 @@ int64_t provePlayback(LazerAudioEngine engine) {
 }
 
 int64_t testFile(NSString *directory, const std::vector<uint8_t> &wav) {
+    stage("file fixture");
     NSString *path = [directory stringByAppendingPathComponent:@"file.wav"];
     require([[NSData dataWithBytes:wav.data() length:wav.size()] writeToFile:path atomically:YES],
         "could not write file fixture");
     EngineOwner owner;
     LazerAudioOpenParams params{};
     params.struct_size = sizeof(params);
+    stage("file open");
     const int32_t opened = lazer_audio_open_file_utf8(owner.engine, path.UTF8String, &params);
     require(opened == LazerAudioOk, failure(owner.engine, "file open", opened));
+    stage("file opened");
     return provePlayback(owner.engine);
 }
 
 int64_t testGrowingReader(NSString *directory, const std::vector<uint8_t> &wav) {
+    stage("reader fixture");
     NSString *path = [directory stringByAppendingPathComponent:@"reader.wav"];
     FILE *sink = std::fopen(path.UTF8String, "wb");
     require(sink != nullptr, "could not create growing fixture");
@@ -169,8 +186,10 @@ int64_t testGrowingReader(NSString *directory, const std::vector<uint8_t> &wav) 
             &lazer_bridge_reader_cancel};
         LazerAudioOpenParams params{};
         params.struct_size = sizeof(params);
+        stage("reader open");
         const int32_t opened = lazer_audio_open_reader(owner.engine, &reader, &params);
         require(opened == LazerAudioOk, failure(owner.engine, "growing reader open", opened));
+        stage("reader opened");
         position = provePlayback(owner.engine);
     } catch (...) {
         feeder.join();
@@ -184,6 +203,7 @@ int64_t testGrowingReader(NSString *directory, const std::vector<uint8_t> &wav) 
 
 void runSmoke() {
     @autoreleasepool {
+        stage("runSmoke");
         NSString *directory = NSSearchPathForDirectoriesInDomains(
             NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
         [[NSFileManager defaultManager] createDirectoryAtPath:directory
@@ -215,12 +235,14 @@ void runSmoke() {
 @implementation AudioSmokeDelegate
 - (BOOL)application:(UIApplication *)application
     didFinishLaunchingWithOptions:(NSDictionary *)options {
+    stage("application didFinishLaunching");
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [UIViewController new];
     [self.window makeKeyAndVisible];
     return YES;
 }
 - (void)applicationDidBecomeActive:(UIApplication *)application {
+    stage("application active");
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ runSmoke(); });
@@ -230,6 +252,16 @@ void runSmoke() {
 
 int main(int argc, char **argv) {
     @autoreleasepool {
+        // simctl launch runs synchronously without --console attachment. Persist
+        // diagnostics even if UIKit activation or native open never returns.
+        NSString *directory = NSSearchPathForDirectoriesInDomains(
+            NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        [[NSFileManager defaultManager] createDirectoryAtPath:directory
+            withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *log = [directory stringByAppendingPathComponent:@"smoke-console.log"];
+        if (std::freopen(log.UTF8String, "w", stderr) == nullptr) return 2;
+        std::setvbuf(stderr, nullptr, _IONBF, 0);
+        stage("main");
         return UIApplicationMain(argc, argv, nil, NSStringFromClass([AudioSmokeDelegate class]));
     }
 }

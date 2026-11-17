@@ -40,48 +40,6 @@ cat > "$app/Info.plist" <<'PLIST'
 PLIST
 codesign --force --sign - "$app"
 
-# Choose an installed iOS runtime and create our own device, leaving any runner
-# devices alone. Device type comes from that runtime's existing compatible list.
-xcrun simctl list --json > "$out/devices.json"
-selection="$(python3 - "$out/devices.json" <<'PY'
-import json, sys
-catalog = json.load(open(sys.argv[1]))
-devices = catalog['devices']
-types = {entry['name']: entry['identifier'] for entry in catalog['devicetypes']}
-for runtime, entries in reversed(list(devices.items())):
-    if '.iOS-' not in runtime:
-        continue
-    for entry in entries:
-        device_type = entry.get('deviceTypeIdentifier') or types.get(entry['name'], '')
-        if '.iPhone-' in device_type and entry.get('isAvailable', False):
-            print(device_type, runtime)
-            raise SystemExit(0)
-raise SystemExit('No available iPhone Simulator runtime found')
-PY
-)"
-read -r device_type runtime <<< "$selection"
-device="$(xcrun simctl create 'Lazer Native Audio Smoke' "$device_type" "$runtime")"
-cleanup() {
-    xcrun simctl terminate "$device" "$bundle" >/dev/null 2>&1 || true
-    xcrun simctl shutdown "$device" >/dev/null 2>&1 || true
-    xcrun simctl delete "$device" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-xcrun simctl boot "$device"
-xcrun simctl bootstatus "$device" -b
-xcrun simctl install "$device" "$app"
-xcrun simctl launch --console "$device" "$bundle" > "$out/console.log" 2>&1 &
-container="$(xcrun simctl get_app_container "$device" "$bundle" data)"
-for ((attempt = 0; attempt < 90; ++attempt)); do
-    if [[ -f "$container/Documents/smoke-result.txt" ]]; then
-        cp "$container/Documents/smoke-result.txt" "$out/result.txt"
-        cat "$out/console.log"
-        cat "$out/result.txt"
-        grep -q '^PASS ' "$out/result.txt"
-        exit $?
-    fi
-    sleep 1
-done
-cat "$out/console.log"
-echo '::error::iOS native smoke timed out before a playback result.' >&2
-exit 1
+# Launch synchronously before starting the playback deadline. The runner owns
+# only its newly created simulator and bounds both setup and cleanup commands.
+python3 "$repo/ci/run-ios-audio-smoke.py" --app "$app" --out "$out" --bundle "$bundle"
