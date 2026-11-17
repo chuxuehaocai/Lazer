@@ -24,48 +24,11 @@ if(ANDROID AND NOT LAZER_ANDROID_BUILD_ENGINE)
     find_package(Threads REQUIRED)
 
     if(LAZER_ANDROID_BUILD_UAC2)
-        # Pin the upstream release commit and archive hash. The source set below follows libusb's
-        # own android/jni/libusb.mk, keeping its Linux usbfs backend and Android feature config in
-        # sync without building the unrelated DSD/FFmpeg SDK.
-        include(FetchContent)
-        if(POLICY CMP0169)
-            cmake_policy(SET CMP0169 OLD)
-        endif()
-        FetchContent_Declare(libusb
-            URL "https://codeload.github.com/libusb/libusb/tar.gz/87a55632db62c9bdc58cd31d3ccfa673f1bb017f"
-            URL_HASH SHA256=26733c3eee2475c062e14f80a62ece4b33ee3b33fc0c88b2758964412a42b7e0
-            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-        FetchContent_GetProperties(libusb)
-        if(NOT libusb_POPULATED)
-            FetchContent_Populate(libusb)
-        endif()
-
-        set(_lazer_libusb_root "${libusb_SOURCE_DIR}")
-        add_library(usb-1.0 SHARED
-            "${_lazer_libusb_root}/libusb/core.c"
-            "${_lazer_libusb_root}/libusb/descriptor.c"
-            "${_lazer_libusb_root}/libusb/hotplug.c"
-            "${_lazer_libusb_root}/libusb/io.c"
-            "${_lazer_libusb_root}/libusb/sync.c"
-            "${_lazer_libusb_root}/libusb/strerror.c"
-            "${_lazer_libusb_root}/libusb/os/linux_usbfs.c"
-            "${_lazer_libusb_root}/libusb/os/events_posix.c"
-            "${_lazer_libusb_root}/libusb/os/threads_posix.c"
-            "${_lazer_libusb_root}/libusb/os/linux_netlink.c")
-        target_include_directories(usb-1.0 PRIVATE
-            "${_lazer_libusb_root}/android"
-            "${_lazer_libusb_root}/libusb"
-            "${_lazer_libusb_root}/libusb/os")
-        target_compile_features(usb-1.0 PRIVATE c_std_11)
-        target_compile_options(usb-1.0 PRIVATE -fvisibility=hidden -pthread)
-        target_link_libraries(usb-1.0 PRIVATE Threads::Threads log)
-        set_target_properties(usb-1.0 PROPERTIES
-            OUTPUT_NAME "usb-1.0"
-            C_EXTENSIONS ON
-            POSITION_INDEPENDENT_CODE ON)
+        include(cmake/AndroidUac2.cmake)
 
         add_library(lazer-uac2 SHARED
             src/android_uac2_jni.cpp
+            src/android_uac2_control.cpp
             src/android_uac2_iso_transport.cpp
             src/android_uac2_packetizer.cpp
             src/dop_packer.cpp)
@@ -190,8 +153,14 @@ if(WIN32)
         src/pcm_format_probe_wasapi.cpp)
     list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES ole32 mmdevapi user32 advapi32)
 elseif(ANDROID)
-    list(APPEND LAZER_AUDIO_PLATFORM_SOURCES src/output_aaudio.cpp)
-    list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES aaudio android log)
+    include(cmake/AndroidUac2.cmake)
+    list(APPEND LAZER_AUDIO_PLATFORM_SOURCES
+        src/output_aaudio.cpp
+        src/android_uac2_output.cpp
+        src/android_uac2_control.cpp
+        src/android_uac2_iso_transport.cpp
+        src/android_uac2_packetizer.cpp)
+    list(APPEND LAZER_AUDIO_PLATFORM_LIBRARIES aaudio android log usb-1.0 Threads::Threads)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(ALSA REQUIRED IMPORTED_TARGET alsa)
@@ -268,6 +237,8 @@ target_link_libraries(lazer-audio PRIVATE ${LAZER_FFMPEG_LIBRARIES}
 target_compile_features(lazer-audio PRIVATE cxx_std_20)
 target_compile_definitions(lazer-audio PRIVATE LAZER_AUDIO_EXPORTS)
 if(ANDROID)
+    target_compile_definitions(lazer-audio PRIVATE LAZER_ANDROID_UAC2=1)
+    target_include_directories(lazer-audio PRIVATE "${_lazer_libusb_root}/libusb")
     # FFmpeg's static SIMD objects refer directly to internal tables. Keep them
     # local to this DSO, both for PIC linkage and to avoid interposing other
     # plugins' FFmpeg/libc++ symbols. Only the app's stable C ABI is exported.

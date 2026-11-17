@@ -33,6 +33,7 @@ import '../../storage/app_storage.dart';
 import '../../diagnostics/app_log.dart';
 
 import '../audio_engine.dart';
+import '../android_usb_audio.dart';
 import 'audio_path_log.dart';
 import 'audio_stream_cache.dart';
 import 'engine_metrics.dart';
@@ -194,6 +195,9 @@ class NativeAudioEngine
   Pointer<Uint8>? _logBuffer;
   final AudioStreamCache _cache;
   LazerDeviceSettings _deviceSettings;
+  StreamSubscription<String>? _usbDetachSubscription;
+  bool _usbConnectionsOpened = false;
+  bool _nativeDestroyed = false;
   int _engineAddress = 0;
 
   final StreamController<void> _completed = StreamController<void>.broadcast();
@@ -752,11 +756,64 @@ class NativeAudioEngine
     _deviceSettings = settings;
     final int? address = _engineAddressOrNull;
     if (address == null) return;
-    await _worker.call(LazerWorkerOp.setDevice, <Object?>[
-      address,
-      ...settings.toDeviceMessage(),
-      settings.deviceToken,
-    ]);
+    final String? token = await _resolveDeviceToken(settings);
+    if (_disposed || !identical(settings, _deviceSettings)) return;
+    final int status = _status(
+      await _worker.call(LazerWorkerOp.setDevice, <Object?>[
+        address,
+        ...settings.toDeviceMessage(),
+        token,
+      ]),
+    );
+    // A running source applies the selection on its next open. Every other USB
+    // refusal must reach the settings UI instead of retaining a system route.
+    if (AndroidUsbAudio.isUsbDeviceId(settings.deviceToken) &&
+        status != lazerAudioOk &&
+        status != lazerAudioErrorState) {
+      throw StateError(
+        'USB output settings were refused ($status): ${lastError()}',
+      );
+    }
+  }
+
+  Future<String?> _resolveDeviceToken(LazerDeviceSettings settings) async {
+    final String? token = settings.deviceToken;
+    if (defaultTargetPlatform != TargetPlatform.android ||
+        token == null ||
+        !token.startsWith('android-usb')) {
+      return token;
+    }
+    if (!_api.supportsAndroidUsb) {
+      throw UnsupportedError(
+        'This audio engine has no Android USB output backend.',
+      );
+    }
+    final usb = AndroidUsbAudio.instance;
+    final int generation = _generation;
+    final String resolved = await usb.resolveDeviceId(token);
+    _usbConnectionsOpened = true;
+    if (_disposed || settings.deviceToken != _deviceSettings.deviceToken) {
+      // Android caches one connection per device. A superseded request can
+      // resolve to the FD still used by the current native output, so retain it
+      // until native destruction. A permission result arriving after destruction
+      // is too late for shutdown's closeAll and must release its connection here.
+      if (_nativeDestroyed) await usb.releaseDevice(token);
+      throw StateError('The USB output request was cancelled.');
+    }
+    if (generation != _generation) {
+      // A newer source may be using this same connection. Retain its ownership
+      // until shutdown, but never apply the old source's request to it.
+      throw StateError('The USB output request was superseded.');
+    }
+    _usbDetachSubscription ??= usb.detachedDevices.listen((deviceId) {
+      if (!_disposed && deviceId == _deviceSettings.deviceToken) {
+        _reportFailure(
+          'The USB audio device was disconnected.',
+          AudioFailureKind.device,
+        );
+      }
+    });
+    return resolved;
   }
 
   /// Applies the EQ/limiter chain.
@@ -850,8 +907,20 @@ class NativeAudioEngine
         await _worker.call(LazerWorkerOp.stop, <Object?>[address]);
         await _worker.call(LazerWorkerOp.destroy, <Object?>[address]);
       }
+      _nativeDestroyed = true;
     } catch (error) {
       debugPrint('lazer-audio: shutdown failed: $error');
+    }
+    await _usbDetachSubscription?.cancel();
+    _usbDetachSubscription = null;
+    if (_usbConnectionsOpened && _nativeDestroyed) {
+      // Java's connection owns the FD: close it only after native output stops.
+      try {
+        await AndroidUsbAudio.instance.closeConnections();
+      } catch (error) {
+        debugPrint('lazer-audio: closing USB connections failed: $error');
+      }
+      _usbConnectionsOpened = false;
     }
     // Readers are only freed once the engine has joined its threads.
     _releaseActive();
@@ -1088,13 +1157,16 @@ class NativeAudioEngine
   /// Applies the output policy; [dsdOverride] replaces the DSD field for one
   /// attempt of the auto chain.
   Future<void> _applyOutputSettings(int address, {int? dsdOverride}) async {
-    final List<Object?> message = _deviceSettings.toDeviceMessage();
+    final LazerDeviceSettings settings = _deviceSettings;
+    final String? token = await _resolveDeviceToken(settings);
+    if (_disposed) return;
+    final List<Object?> message = settings.toDeviceMessage();
     if (dsdOverride != null) message[5] = dsdOverride;
     Future<int> apply() async => _status(
       await _worker.call(LazerWorkerOp.setDevice, <Object?>[
         address,
         ...message,
-        _deviceSettings.deviceToken,
+        token,
       ]),
     );
     int status = await apply();
@@ -1107,6 +1179,11 @@ class NativeAudioEngine
       status = await apply();
     }
     if (status != lazerAudioOk) {
+      if (AndroidUsbAudio.isUsbDeviceId(settings.deviceToken)) {
+        throw StateError(
+          'USB output settings were refused ($status): ${lastError()}',
+        );
+      }
       // Playback can still proceed with the previous output config, but the
       // mismatch must be visible in the path log rather than implied.
       debugPrint(

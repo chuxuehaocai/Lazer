@@ -36,11 +36,11 @@ if (requireReleaseSigning && !hasReleaseSigning) {
 // `android/app/src/main/jniLibs/<abi>/`.
 val requireNativeAudio =
     (findProperty("lazerRequireNativeAudio") as String?)?.toBoolean() ?: false
+val nativeAudioAbis = listOf("arm64-v8a", "armeabi-v7a")
 
 if (requireNativeAudio) {
-    val abis = listOf("arm64-v8a", "armeabi-v7a")
     val missing = mutableListOf<String>()
-    for (abi in abis) {
+    for (abi in nativeAudioAbis) {
         for (library in listOf("liblazer-audio.so", "liblazer-audio-bridge.so")) {
             if (!file("src/main/jniLibs/$abi/$library").isFile) {
                 missing.add("$abi/$library")
@@ -101,6 +101,25 @@ android {
             // Real release key when key.properties exists; the debug key otherwise so
             // `flutter run --release` keeps working on a fresh checkout.
             signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "release" else "debug")
+        }
+    }
+}
+
+if (requireNativeAudio) {
+    // Flutter can replace defaultConfig's ABI filters while configuring its
+    // plugin. Finalize the publication policy after all ordinary DSL writers:
+    // plugin-only x86_64 libraries must not advertise an incomplete app ABI.
+    // Without this explicit publication flag, emulator/debug behavior stays
+    // under Flutter's normal target-platform and split configuration.
+    androidComponents.finalizeDsl { extension ->
+        extension.defaultConfig.ndk.abiFilters.clear()
+        if (extension.splits.abi.isEnable) {
+            // AGP rejects simultaneous ndk filters and ABI splits. Restrict the
+            // split include list instead, preserving the universal-APK choice.
+            extension.splits.abi.reset()
+            extension.splits.abi.include(*nativeAudioAbis.toTypedArray())
+        } else {
+            extension.defaultConfig.ndk.abiFilters.addAll(nativeAudioAbis)
         }
     }
 }

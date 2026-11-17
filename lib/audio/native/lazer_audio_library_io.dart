@@ -141,6 +141,18 @@ class LazerAudioApi {
         int Function(Pointer<Void>, int)
       >('lazer_audio_clear_queued_reader');
 
+  late final int Function()? _androidUsbBackendVersion = () {
+    try {
+      return _library.lookupFunction<Uint32 Function(), int Function()>(
+        'lazer_audio_android_usb_backend_version',
+      );
+    } catch (_) {
+      return null;
+    }
+  }();
+
+  bool get supportsAndroidUsb => _androidUsbBackendVersion?.call() == 1;
+
   late final int Function(Pointer<Void>) play = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>),

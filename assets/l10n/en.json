@@ -1,4 +1,7 @@
 {
+  "系统音频输出；选择 USB DAC 可绕过系统混音与重采样": "System audio output; select a USB DAC to bypass system mixing and resampling",
+  "USB DAC 未连接；直通播放将停止，不会回退到系统输出": "USB DAC disconnected; direct playback stops without falling back to system audio",
+  "USB DAC 直通；首次使用需要 USB 授权，实际格式以播放信息为准": "Direct USB DAC output; USB permission is required on first use. Playback information shows the negotiated format.",
   "动画速率": "Animation speed",
   "数值越大动画越快，作用于页面、播放页和其他弹簧过渡": "Higher values animate faster across pages, the player and other spring transitions.",
   "数据目录不可用，暂用应用默认目录。请检查权限和可用空间。": "The data directory is unavailable. Using the default app directory temporarily. Check permissions and free space.",

@@ -151,10 +151,21 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                     settings: settings,
                     onChanged: (String? token, String? name) => _update(
                       token == null
-                          ? settings.copyWith(clearOutput: true)
+                          ? settings.copyWith(
+                              clearOutput: true,
+                              exclusiveMode: hifi.usesAndroidUsbDevices
+                                  ? false
+                                  : settings.exclusiveMode,
+                              bitPerfect: hifi.usesAndroidUsbDevices
+                                  ? false
+                                  : settings.bitPerfect,
+                            )
                           : settings.copyWith(
                               outputToken: token,
                               outputName: name,
+                              exclusiveMode: hifi.usesAndroidUsbDevices
+                                  ? true
+                                  : settings.exclusiveMode,
                             ),
                     ),
                   ),
@@ -437,6 +448,14 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
   }
 
   String _deviceSubtitle(HifiController hifi, HifiSettings settings) {
+    if (hifi.usesAndroidUsbDevices) {
+      if (settings.outputToken == null) {
+        return '系统音频输出；选择 USB DAC 可绕过系统混音与重采样';
+      }
+      return hifi.selectedDevice == null
+          ? 'USB DAC 未连接；直通播放将停止，不会回退到系统输出'
+          : 'USB DAC 直通；首次使用需要 USB 授权，实际格式以播放信息为准';
+    }
     if (settings.outputToken == null) return '系统默认输出设备';
     final LazerOutputDevice? device = hifi.selectedDevice;
     if (device == null) {
@@ -590,8 +609,13 @@ class _DevicePicker extends StatelessWidget {
         Flexible(
           child: SettingsChoice<String?>(
             key: const ValueKey('hifi-device'),
-            value: selectionKnown ? selected : null,
+            value: selected,
             items: <DropdownMenuItem<String?>>[
+              if (!selectionKnown)
+                DropdownMenuItem<String?>(
+                  value: selected,
+                  child: Text(settings.outputName ?? selected),
+                ),
               const DropdownMenuItem<String?>(
                 value: null,
                 child: TrText('系统默认'),

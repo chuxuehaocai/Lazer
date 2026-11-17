@@ -35,6 +35,9 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        if (!flutterEngine.plugins.has(AndroidUsbAudioPlugin::class.java)) {
+            flutterEngine.plugins.add(AndroidUsbAudioPlugin())
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_SERVICE_CHANNEL)
             .setMethodCallHandler { call, result ->
                 if (call.method != "start") {
