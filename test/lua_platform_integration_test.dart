@@ -24,6 +24,7 @@ import 'package:lazer_nextgen/state/playback_queue_store.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/ui/login.dart';
 import 'package:lazer_nextgen/ui/settings_page.dart';
+import 'package:lazer_nextgen/widgets/settings_choice.dart';
 import 'package:lazer_nextgen/widgets/hifi_settings_section.dart';
 
 const _source = '''
@@ -582,7 +583,9 @@ void main() {
       );
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButton<String>));
+      // The platform picker is the app's own select control now; opening it
+      // drops the declared platforms down as a menu.
+      await tester.tap(find.byType(SettingsChoice<String>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('本地音乐').last);
       await tester.pumpAndSettle();
@@ -807,11 +810,9 @@ void main() {
       );
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
-      final chooser = tester.widget<DropdownButton<String>>(
-        find.byType(DropdownButton<String>),
-      );
-      expect(chooser.items, hasLength(3));
-      await tester.tap(find.byType(DropdownButton<String>));
+      // Three platforms are offered — the local source plus the two the plugin
+      // declares — and they come from the select control's menu.
+      await tester.tap(find.byType(SettingsChoice<String>));
       await tester.pumpAndSettle();
       for (final label in ['本地音乐', 'Alpha Music', 'Beta Radio']) {
         expect(find.text(label), findsWidgets);

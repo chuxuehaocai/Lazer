@@ -570,15 +570,39 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
               child: ValueListenableBuilder<bool>(
                 valueListenable: _showLocate,
                 builder: (BuildContext context, bool show, Widget? _) {
-                  if (!show || _selecting) return const SizedBox.shrink();
-                  return FloatingActionButton.small(
-                    key: const ValueKey<String>('playlist-locate'),
-                    heroTag: null,
-                    tooltip: context.tr('定位正在播放'),
-                    backgroundColor: AppleSemanticColors.of(context).accent,
-                    foregroundColor: Colors.white,
-                    onPressed: () => unawaited(_locateCurrent()),
-                    child: const Icon(Icons.my_location_rounded, size: 20),
+                  // The button arrives and leaves with a fade instead of
+                  // popping in and out: the page keeps its scroll under the
+                  // finger, and a control that appears when the playing row
+                  // scrolls away is less of an interruption when it grows in.
+                  final bool visible = show && !_selecting;
+                  return IgnorePointer(
+                    ignoring: !visible,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(end: visible ? 1 : 0),
+                      duration: const Duration(milliseconds: 280),
+                      // Non-linear both ways: the change is legible at once and
+                      // then settles, so a fast scroll does not stack fades.
+                      curve: Curves.easeOutCubic,
+                      builder: (BuildContext context, double value, Widget? child) {
+                        if (value <= 0.001) return const SizedBox.shrink();
+                        return Opacity(
+                          opacity: value,
+                          child: Transform.scale(
+                            scale: .9 + .1 * value,
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: FloatingActionButton.small(
+                        key: const ValueKey<String>('playlist-locate'),
+                        heroTag: null,
+                        tooltip: context.tr('定位正在播放'),
+                        backgroundColor: AppleSemanticColors.of(context).accent,
+                        foregroundColor: Colors.white,
+                        onPressed: () => unawaited(_locateCurrent()),
+                        child: const Icon(Icons.my_location_rounded, size: 20),
+                      ),
+                    ),
                   );
                 },
               ),

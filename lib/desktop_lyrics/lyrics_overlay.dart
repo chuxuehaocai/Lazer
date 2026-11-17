@@ -786,10 +786,16 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
                     .clamp(0.0, 1.0);
             final double opacity =
                 theme.lyricDimAlpha + (1 - theme.lyricDimAlpha) * emphasis;
-            final double distance = ((motion.y.value - activeY).abs() / slot)
-                .clamp(0.0, 6.0);
+            // The overlay only ever shows a handful of rows, so a blur that
+            // starts at the neighbouring line leaves every line above and
+            // below the current one unreadable. Keeping the first row of
+            // slack sharp — and capping the far end — keeps the depth cue
+            // without turning the panel into a smudge.
+            final double distance = (((motion.y.value - activeY).abs() / slot) -
+                    0.8)
+                .clamp(0.0, 4.0);
             final double sigma = _settings.blurEnabled
-                ? (distance * 1.25 * _settings.blurIntensity).clamp(0.0, 6.0)
+                ? (distance * 1.25 * _settings.blurIntensity).clamp(0.0, 3.5)
                 : 0.0;
             return Transform.translate(
               offset: Offset(0, motion.y.value),

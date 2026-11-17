@@ -1407,7 +1407,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     );
   }
 
-  double lyricBlurIntensity = 1;
+  double lyricBlurIntensity = defaultLyricBlurIntensity;
   bool showFrameStats = const bool.fromEnvironment('LAZER_FRAME_STATS');
   bool _developerConsoleEnabled = false;
   bool get developerConsoleEnabled => _developerConsoleEnabled;
@@ -1764,6 +1764,24 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   double lyricResumeSeconds = 2;
 
+  /// How strongly lines outside the focus band are blurred.
+  ///
+  /// The field shipped at full strength, which put every line more than a row
+  /// away behind a five-pixel blur: a lyric sheet read as a smudge instead of
+  /// text, and the line being sung was the only sharp thing on screen. The
+  /// milder default keeps the depth cue without costing legibility.
+  static const double defaultLyricBlurIntensity = .35;
+
+  /// Preference key for [lyricBlurIntensity].
+  ///
+  /// This is a second key on purpose: the first one carried the old shipped
+  /// default, so every install that never opened the slider stored a full
+  /// strength value that was never a decision. Ignoring that key lets the new
+  /// default reach existing installs while a listener who drags the slider to
+  /// any value — full strength included — keeps exactly what they chose.
+  static const String lyricBlurIntensityKey =
+      'lazer_lyric_blur_intensity_v2';
+
   Future<void> setLyricBlurEnabled(bool value) async {
     lyricBlurEnabled = value;
     notifyListeners();
@@ -1779,7 +1797,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     lyricBlurIntensity = next;
     notifyListeners();
     await (await SharedPreferences.getInstance()).setDouble(
-      'lazer_lyric_blur_intensity',
+      lyricBlurIntensityKey,
       next,
     );
   }
@@ -2323,8 +2341,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricControlsSeconds =
           (prefs.getDouble('lazer_lyric_controls_seconds') ?? 1.5).clamp(1, 10);
       lyricBlurEnabled = prefs.getBool('lazer_lyric_blur') ?? true;
-      lyricBlurIntensity = (prefs.getDouble('lazer_lyric_blur_intensity') ?? 1)
-          .clamp(0.0, 1.0);
+      lyricBlurIntensity =
+          (prefs.getDouble(lyricBlurIntensityKey) ?? defaultLyricBlurIntensity)
+              .clamp(0.0, 1.0);
       showFrameStats =
           prefs.getBool('lazer_show_frame_stats') ?? showFrameStats;
       _developerConsoleEnabled =
@@ -3155,10 +3174,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final now = DateTime.now();
     final isPlaying = current != null && playing;
     final stateChanged = _lastBroadcastPlaying != isPlaying;
+    // A status event costs one Lua invocation per enabled plugin. Plugins read
+    // it for progress display, so a one second cadence is indistinguishable on
+    // screen and halves the host work a gateway plugin pays while it plays.
     if (force ||
         stateChanged ||
         now.difference(_lastBroadcastStatusAt) >=
-            const Duration(milliseconds: 500)) {
+            const Duration(seconds: 1)) {
       _lastBroadcastStatusAt = now;
       _lastBroadcastPlaying = isPlaying;
       final buffered = audioEngine is BufferedAudioEngine

@@ -392,14 +392,22 @@ end
 | `join` | `roomId`、`inviterId` | 接受邀请 |
 | `status` | `roomId` | 查询房间状态与成员；不带 `roomId` 时取当前账号仍在的房间 |
 | `leave` | `roomId` | 结束或退出房间 |
-| `heartbeat` | `roomId`、`songId`、`playStatus`、`progress` | 每 5 秒一次；`playStatus` 为 `PLAY`/`PAUSE`，`progress` 为毫秒 |
+| `heartbeat` | `roomId`、`songId`、`playStatus`、`progress`、`playlistVersion` | 每 5 秒一次；`playStatus` 为 `PLAY`/`PAUSE`，`progress` 为毫秒，`playlistVersion` 是上次上报的队列版本 |
 | `command` | `roomId`、`command` | 播放指令：`{clientSeq,commandType,formerSongId,playStatus,progress,targetSongId,triggerType}` |
 | `syncPlaylist` | `roomId` | 可选，读取房间队列 |
-| `syncList` | `roomId`、`playlistParam` | 可选，上报房间队列变化 |
+| `syncList` | `roomId`、`playlistVersion`、`playlist` | 可选，上报房间队列与版本 |
+| `commands` | `roomId`、`since` | 可选，取两次心跳之间的最新播放指令 |
 
 返回值使用 `{roomId,inviterId,members}`，成员为 `{userId,name,avatarUrl}`；也可以返回
 `users` 或 `participants`，字段名可用 `uid`、`nickname`、`avatar`。返回 `code` 时非 200
 表示失败。`command` 里的账号标识由插件补全，客户端只给出通用字段。
+
+房间视图还可以携带 `songId`、`playStatus`、`progress`、`playlistVersion`、`playlist`
+（`[{id,name,artist,album,coverUrl,durationMs}]`）与 `command`
+（`{clientSeq,serverSeq,commandType,formerSongId,targetSongId,playStatus,progress,triggerType,userId}`）。
+客户端据此做三件事：心跳带回的曲目变化就是「别人切歌」，版本变化才触发 `syncPlaylist`，
+`command` 的 `serverSeq` 单调递增，重复返回的同一条指令不会被执行两次。自己发出去的指令
+按 `userId` 忽略，避免两端互相同步。
 
 兼容性：旧插件可以只实现 `create/join/status/leave/heartbeat/command`，返回值也可以不带
 `code`；客户端把缺失的 `code` 当作成功，成员列表为空时保留上一次结果。反过来，新插件

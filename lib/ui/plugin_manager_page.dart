@@ -125,7 +125,7 @@ class _PluginManagerViewState extends State<PluginManagerView>
                     Expanded(
                       child: Text(
                         context.tr(
-                          '插件以 ZIP 导入。每个插件运行在独立的 Lua 沙箱中，只能访问清单声明的网络域名和存储。',
+                          '插件以 ZIP 导入。每个插件运行在独立的 Lua 沙箱中，只能访问清单声明的网络域名、存储和文件沙箱。',
                         ),
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),

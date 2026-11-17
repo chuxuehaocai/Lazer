@@ -312,11 +312,22 @@ class _LyricViewportState extends State<LyricViewport>
   /// Blur tracks how far a row sits from the focus band instead of its index
   /// gap, so it ramps in and out as rows travel rather than snapping to zero
   /// the instant a line becomes active.
+  ///
+  /// The band itself stays crisp: a row is only blurred once it is outside the
+  /// focus strip, and the row being sung is never blurred at all. Measuring
+  /// from the band edge rather than its centre is what keeps the neighbouring
+  /// lines — the ones a listener reads ahead on — sharp.
   double _sigma(int i) {
     if (_rowUnit <= 0 || _blur.value <= 0) return 0;
+    if (i == _active) return 0;
     final centre = _ys[i].value + _heights[i] * 0.5;
-    final distance = (centre - _size.height * 0.35).abs() / _rowUnit;
-    return math.min(5.0, distance * 1.55) * _blur.value * _blurIntensity;
+    final band = _rowUnit * 0.95;
+    final distance =
+        ((centre - _size.height * 0.35).abs() - band) / _rowUnit;
+    if (distance <= 0) return 0;
+    // Capped below the old five-pixel ceiling: past this the shape of a glyph
+    // is gone, and the row reads as a stain rather than a lyric.
+    return math.min(3.0, distance * 1.35) * _blur.value * _blurIntensity;
   }
 
   /// Dissolves rows into the viewport edges so the clip never slices a blurred

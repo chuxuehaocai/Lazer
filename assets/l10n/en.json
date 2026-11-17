@@ -505,6 +505,9 @@
   "房间号：{roomId}": "Room: {roomId}",
   "邀请人：{inviterId}": "Inviter: {inviterId}",
   "一起听的人": "In the room",
+  "房间歌单": "Room playlist",
+  "同步到本机": "Sync to this device",
+  "还有 {count} 首": "{count} more songs",
   "复制邀请": "Copy invite",
   "结束一起听": "End session",
   "创建一起听": "Create a room",
@@ -1348,5 +1351,9 @@
   "已清除 {count} 首歌词": "Cleared lyrics for {count} songs",
   "清除歌词缓存？": "Clear Lyrics Cache?",
   "确定要清空本地缓存的 {count} 首歌词吗？清除后下次播放将重新从网络获取。": "Are you sure you want to clear {count} cached lyrics? They will be fetched again on next playback.",
-  "当前暂无已缓存的歌词。": "No cached lyrics found."
+  "当前暂无已缓存的歌词。": "No cached lyrics found.",
+  "插件页面": "Plugin page",
+  "插件页面不存在。": "This plugin page does not exist.",
+  "插件页面控件不存在。": "The control on this plugin page does not exist.",
+  "插件页面控件值无效。": "The control value on this plugin page is invalid."
 }

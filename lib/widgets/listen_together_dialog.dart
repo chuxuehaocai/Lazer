@@ -166,6 +166,51 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
           ),
         ),
     ],
+    if (room.roomQueue.isNotEmpty) ...<Widget>[
+      const SizedBox(height: 16),
+      Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              context.tr('房间歌单'),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+          // The room queue is data until the listener adopts it: another
+          // member reordering the room must not silence what is playing here.
+          if (!room.queueInSync)
+            SpringOutlinedButton(
+              onPressed: () => unawaited(room.adoptRoomQueue()),
+              child: Text(context.tr('同步到本机')),
+            ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      for (final track in room.roomQueue.take(5))
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.music_note_rounded, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  track.title.isEmpty ? track.artist : track.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      if (room.roomQueue.length > 5)
+        Text(
+          context.tr('还有 ${room.roomQueue.length - 5} 首'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+    ],
     const SizedBox(height: 18),
     Wrap(
       spacing: 10,
@@ -175,6 +220,13 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
           onPressed: room.loading ? null : () => unawaited(_copyInvite(room)),
           icon: const Icon(Icons.copy_rounded),
           label: Text(context.tr('复制邀请')),
+        ),
+        SpringOutlinedButton.icon(
+          onPressed: room.loading
+              ? null
+              : () => unawaited(room.refresh()),
+          icon: const Icon(Icons.refresh_rounded),
+          label: Text(context.tr('刷新')),
         ),
         SpringOutlinedButton(
           onPressed: room.loading

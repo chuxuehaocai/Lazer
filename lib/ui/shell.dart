@@ -1897,7 +1897,20 @@ class _AppShellState extends State<AppShell>
               child: AppRailItem(
                 icon: Icons.settings_rounded,
                 label: '设置',
-                selected: _section == _AppSection.settings,
+                // The same detail guards the destinations above keep: opening a
+                // playlist, album or chart from this rail leaves the section
+                // alone, so a bare section check kept 设置 lit while the
+                // content pane showed something else entirely.
+                selected:
+                    _section == _AppSection.settings &&
+                    _playlist == null &&
+                    _album == null &&
+                    _artist == null &&
+                    _chart == null &&
+                    !_comments &&
+                    !_localMusic &&
+                    !_savedAlbums &&
+                    !_networkSources,
                 onTap: () => _select(_AppSection.settings),
               ),
             ),
