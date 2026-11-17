@@ -14,6 +14,7 @@ import '../gateway/lua_music_gateway.dart';
 import '../gateway/music_gateway.dart';
 import '../utils/media_requests.dart';
 import '../utils/system_http.dart';
+import '../diagnostics/app_log.dart';
 import '../theme/lazer_theme.dart';
 import '../ui/layout_system.dart';
 import 'lua_plugin_runtime.dart';
@@ -86,15 +87,12 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       if (!plugin.enabled || plugin.runtime == null) continue;
       unawaited(
         plugin.runtime!
-            .invoke('player_event', {
-              'type': type,
-              'data': data,
-              ...data,
-            })
+            .invoke('player_event', {'type': type, 'data': data, ...data})
             .catchError((Object _) => null),
       );
     }
   }
+
   bool _disposed = false;
   Future<void>? _restoring;
 
@@ -350,6 +348,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
       final sources = <String, String>{};
+      final resources = <String, String>{};
       final directory = Directory(
         p.join((await root).path, plugin.manifest.id),
       );
@@ -358,17 +357,30 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         recursive: true,
         followLinks: false,
       )) {
-        if (file is! File || !file.path.endsWith('.lua')) continue;
+        if (file is! File) continue;
+        final name = p
+            .relative(file.path, from: directory.path)
+            .replaceAll('\\', '/');
+        final isLua = name.endsWith('.lua');
+        final isResource =
+            name != 'manifest.json' &&
+            (name.endsWith('.json') ||
+                name.endsWith('.md') ||
+                name.endsWith('.txt'));
+        if (!isLua && !isResource) continue;
         total += await file.length();
         if (total > 8 * 1024 * 1024) throw const FormatException();
-        sources[p
-            .relative(file.path, from: directory.path)
-            .replaceAll('\\', '/')] = await file
-            .readAsString();
+        final text = await file.readAsString();
+        if (isLua) {
+          sources[name] = text;
+        } else {
+          resources[name] = text;
+        }
       }
       final runtime = LuaPluginRuntime(
         manifest: plugin.manifest,
         sources: sources,
+        resources: resources,
         dataDirectory: p.join(
           (await root).parent.path,
           'lua_plugin_data',
@@ -385,6 +397,15 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         onPlayerMenuItemAdded: (spec) => _registerPlayerMenuItem(plugin, spec),
         onPlayerControl: (spec) =>
             onPlayerControl?.call(spec) ?? Future.value(null),
+        onLog: (record) {
+          final level = record['level']?.toString() ?? 'info';
+          final fields = <String, Object?>{
+            'plugin': plugin.manifest.id,
+            if (record['message'] != null) 'message': record['message'],
+            if (record['data'] is Map) 'data': record['data'],
+          };
+          AppLog.shared.event('lua.plugin', level, fields);
+        },
       );
       plugin.runtime = runtime;
       await runtime.start();
@@ -496,6 +517,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       final probe = LuaPluginRuntime(
         manifest: manifest,
         sources: package.sources,
+        resources: package.resources,
         dataDirectory: p.join(staging.path, '.probe-data'),
         onSettingAdded: (spec) async => LuaPluginSetting.fromSpec(
           pluginId: manifest.id,
@@ -782,12 +804,10 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   /// Paired with [dispose], which cannot await: a caller that needs the plugins
   /// fully stopped - a test, or a rebind of the same listen port - awaits this
   /// instead of sleeping.
-  Future<void> get shutdownSettled => Future.wait<void>(
-    <Future<void>>[
-      for (final plugin in _plugins)
-        plugin.runtime?.settled ?? Future<void>.value(),
-    ],
-  );
+  Future<void> get shutdownSettled => Future.wait<void>(<Future<void>>[
+    for (final plugin in _plugins)
+      plugin.runtime?.settled ?? Future<void>.value(),
+  ]);
 
   @override
   void dispose() {

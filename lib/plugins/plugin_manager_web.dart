@@ -91,15 +91,12 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       if (!plugin.enabled || plugin.runtime == null) continue;
       unawaited(
         plugin.runtime!
-            .invoke('player_event', {
-              'type': type,
-              'data': data,
-              ...data,
-            })
+            .invoke('player_event', {'type': type, 'data': data, ...data})
             .catchError((Object _) => null),
       );
     }
   }
+
   bool _disposed = false;
 
   void notifyProxyUpdated({required ProxyMode mode, String? endpoint}) {}
@@ -245,7 +242,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             plugin.settingValues.addAll(Map<String, Object?>.from(rawSettings));
           }
           _plugins.add(plugin);
-          if (plugin.enabled) await _start(plugin, value['sources']);
+          if (plugin.enabled) {
+            await _start(plugin, value['sources'], value['resources']);
+          }
         } catch (_) {
           // Ignore a partially written or obsolete browser record.
         }
@@ -256,17 +255,25 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _notify();
   }
 
-  Future<void> _start(InstalledPlugin plugin, [Object? rawSources]) async {
+  Future<void> _start(
+    InstalledPlugin plugin, [
+    Object? rawSources,
+    Object? rawResources,
+  ]) async {
     try {
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
       final sources = rawSources is Map
           ? Map<String, String>.from(rawSources)
           : <String, String>{};
+      final resources = rawResources is Map
+          ? Map<String, String>.from(rawResources)
+          : <String, String>{};
       if (sources.isEmpty) throw const FormatException('Plugin source missing');
       final runtime = LuaPluginRuntime(
         manifest: plugin.manifest,
         sources: sources,
+        resources: resources,
         dataDirectory: plugin.manifest.id,
         networkGranted: plugin.networkGranted,
         socketGranted: plugin.socketGranted,
@@ -353,6 +360,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   Future<void> _save(
     InstalledPlugin plugin,
     Map<String, String> sources,
+    Map<String, String> resources,
   ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
@@ -360,6 +368,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       jsonEncode(<String, dynamic>{
         'manifest': plugin.manifest.toJson(),
         'sources': sources,
+        'resources': resources,
         'enabled': plugin.enabled,
         'networkGranted': plugin.networkGranted,
         'socketGranted': plugin.socketGranted,
@@ -390,6 +399,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       final probe = LuaPluginRuntime(
         manifest: manifest,
         sources: package.sources,
+        resources: package.resources,
         dataDirectory: '${manifest.id}.probe',
         onSettingAdded: (spec) async => LuaPluginSetting.fromSpec(
           pluginId: manifest.id,
@@ -423,7 +433,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       if (previous != null) _plugins.remove(previous);
       _plugins.add(plugin);
       if (enabled) {
-        await _start(plugin, package.sources);
+        await _start(plugin, package.sources, package.resources);
         if (plugin.error != null) {
           _plugins.remove(plugin);
           if (previous != null) {
@@ -433,7 +443,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           throw const PluginException('新插件无法启动，已保留旧版本。');
         }
       }
-      await _save(plugin, package.sources);
+      await _save(plugin, package.sources, package.resources);
       await afterChange?.call();
       return plugin;
     } finally {
@@ -459,7 +469,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       if (enabled) {
         final prefs = await SharedPreferences.getInstance();
         final value = jsonDecode(prefs.getString(_key(id)) ?? '') as Map;
-        await _start(plugin, value['sources']);
+        await _start(plugin, value['sources'], value['resources']);
       }
       final prefs = await SharedPreferences.getInstance();
       final value = jsonDecode(prefs.getString(_key(id)) ?? '') as Map;
@@ -490,7 +500,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
       saved['websocketGranted'] = granted;
       await prefs.setString(_key(id), jsonEncode(saved));
-      if (plugin.enabled) await _start(plugin, saved['sources']);
+      if (plugin.enabled) {
+        await _start(plugin, saved['sources'], saved['resources']);
+      }
       await afterChange?.call();
     } finally {
       busy = false;
@@ -516,7 +528,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
       saved['networkGranted'] = granted;
       await prefs.setString(_key(id), jsonEncode(saved));
-      if (plugin.enabled) await _start(plugin, saved['sources']);
+      if (plugin.enabled) {
+        await _start(plugin, saved['sources'], saved['resources']);
+      }
       await afterChange?.call();
     } finally {
       busy = false;
@@ -615,12 +629,10 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   ///
   /// Paired with [dispose], which cannot await. This variant has no worker to
   /// wait for, so it completes immediately.
-  Future<void> get shutdownSettled => Future.wait<void>(
-    <Future<void>>[
-      for (final plugin in _plugins)
-        plugin.runtime?.settled ?? Future<void>.value(),
-    ],
-  );
+  Future<void> get shutdownSettled => Future.wait<void>(<Future<void>>[
+    for (final plugin in _plugins)
+      plugin.runtime?.settled ?? Future<void>.value(),
+  ]);
 
   @override
   void dispose() {

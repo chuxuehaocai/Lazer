@@ -92,35 +92,48 @@ end
 
 | 接口 | 用途 |
 | --- | --- |
-| `host.http({url, method, headers, body})` | 访问清单声明的 HTTPS 域名；禁止重定向，响应最多 8 MB |
+| `host.http({url, method, headers, body})` / `host.http_json(spec)` | 访问清单声明的 HTTPS 域名；后者直接解析 JSON 响应 |
 | `host.socket({operation, id, host, port, data, timeoutMs})` | 原生客户端建立 TCP 连接；需要声明主机并由用户授予连接权限 |
 | `host.socket_server({operation, id, host, port, clientId, data, timeoutMs})` | 原生客户端监听 TCP 端口；需要声明地址并由用户授予服务端权限 |
 | `host.websocket({operation, id, url, data, timeoutMs})` | 打开、发送、接收或关闭 WebSocket；需要用户授予 WebSocket 连接权限 |
 | `host.websocket_server({operation, id, host, port, path, clientId, data, timeoutMs})` | 原生客户端监听 WebSocket 服务；需要声明监听地址并由用户独立授予服务端权限 |
-| `host.crypto({operation=..., ...})` | `md5`、`sha256`、`base64`、`base64_decode`、`aes`、`rsa_modpow` |
+| `host.crypto({operation=..., ...})` | `md5`、`sha1`、`sha256`、`hmac`、`base64`、`base64_decode`、`xor`、`zlib_inflate`、`zlib_deflate`、`krc_decode`、`aes`、`rsa_modpow` |
 | `host.json_encode(value)` / `host.json_decode(text)` | JSON 编解码 |
-| `host.url_encode(text)` | URL 百分号编码 |
+| `host.url_encode(text)` / `host.url_decode(text)` | URL 百分号编码与解码 |
 | `host.cookie_compact(text)` / `host.cookie_field(text, name)` | 规范化通用 Cookie Header、读取字段 |
 | `host.cookie_merge(previous, setCookieHeaders)` | 合并响应 Cookie，保留没有被覆盖的凭据字段 |
 | `host.random_hex(count)` / `host.now()` | 随机数和 Unix 毫秒时间 |
 | `host.storage_get(key)` / `host.storage_set(key, value)` | 清单申请存储权限时使用；总量最多 1 MB |
+| `host.storage_keys()` / `host.storage_clear()` | 枚举或清空插件自己的持久化空间 |
+| `host.info()` / `host.plugin_info()` | 读取插件清单、宿主运行端和可用 host 特性 |
+| `host.resource(path)` / `host.read_resource(path)` / `host.resource_keys()` | 读取或枚举 ZIP 中的 JSON、TXT、Markdown 文本资源；不能访问宿主文件系统 |
+| `host.log(level, message, data)` | 写入经过脱敏和长度限制的宿主诊断日志 |
+| `host.sleep(milliseconds)` | 在 Lua 异步挂起一小段时间，最长 60 秒；适合轮询和限流 |
 | `host.add_setting(spec)` | 向设置页注册一个受宿主约束的设置项；返回当前值 |
 | `host.add_player_menu_item(spec)` | 向正在播放页右上角的“三个点”菜单注册一个项目；返回 `true` |
 | `host.player_control(spec)` | 控制播放器播放、暂停、上下首、进度跳转或调节音量；返回执行结果 |
+| `host.player_state()` / `host.player_status()` / `host.player_queue()` / `host.player_track()` | 查询当前歌曲、进度、音量、缓冲、队列索引和播放模式 |
 
 插件可以在入口文件执行时注册设置和正在播放菜单项目。注册是幂等的，同一个插件内重复使用
 相同的 `id` 会更新项目。设置值由宿主持久化，插件通过 `setting_changed` 操作接收变化；
 菜单项目点击后通过 `player_menu` 操作接收当前歌曲的通用 `track` 对象。
-宿主还会在切歌、歌词更新与播放状态变化时向所有激活插件派发 `player_event` 操作（支持外部推流与挂件联动）。
+宿主还会在切歌、队列变化、歌词更新与播放状态变化时向所有激活插件派发 `player_event` 操作（支持外部推流与挂件联动）。
 
 ```lua
 -- 播放控制示例：
 host.player_control({ command = "play" })
 host.player_control({ command = "seek", positionMs = 30000 })
 host.player_control({ command = "volume", volume = 0.8 })
+local state = host.player_state()
+local queue = host.player_control({ command = "queue" })
+if queue.length > 0 and queue.currentIndex < queue.length - 1 then
+  host.player_control({ command = "play_index", index = queue.currentIndex + 1 })
+end
+host.player_control({ command = "repeat", mode = "all" })
+host.player_control({ command = "shuffle", enabled = true })
 
 -- 接收宿主广播的播放事件：
--- operation == "player_event", args.type 为 "track" | "lyric" | "status"
+-- operation == "player_event", args.type 为 "track" | "queue" | "lyric" | "status"
 
 ```lua
 local quality = host.add_setting({
@@ -167,6 +180,8 @@ return {
 `host.crypto` 的 RSA 运算支持 `inputEncoding="utf8"` 和 `reverse=true`，用于原始 RSA
 模幂输入；默认输入为十六进制字符串。AES 支持 CBC/ECB 和 PKCS7 填充。
 所有插件调用在自己的 Lua VM 中串行执行，并有时间上限；异常、超时和重启不会让插件访问 Dart 对象、Flutter Widget、文件路径、进程、动态库或其他插件。
+
+`host.info()` 返回的数据只描述当前插件和宿主能力，不包含账号 Cookie、令牌、签名 URL 或其他插件的数据。资源路径必须是安全的相对路径；资源在安装时从 ZIP 读入内存，插件不能通过它访问宿主目录。`host.log` 的消息会经过宿主脱敏，插件不应把凭据放进日志。
 
 音乐平台插件应返回客户端模型需要的字段：歌曲使用 `id`、`title`、`artists`、`albumId`、`albumName`、`coverUrl`、`durationMs`；音频流使用 `url`、`contentType`、`suffix`、`bitRate`、`size`；歌词使用 `lines`（每行包含 `text` 和可选 `startMs`）、`lrc`、`translation`、`wordByWord` 和 `offsetMs`。`id` 只在插件内部使用，客户端会将 provider、连接和实体类型编码进 `MusicId`。
 

@@ -48,6 +48,21 @@ void _patchLuaState(String path) {
   final file = File(path);
   var source = file.readAsStringSync();
 
+  // The async closure bridge calls the VM's instruction helpers directly.
+  // Hosted lua_dardo_plus exposes them from a separate library, so keep the
+  // import in the patch itself and make it idempotent for already-patched
+  // caches.
+  if (!source.contains("import '../vm/instructions.dart';")) {
+    const anchor = "import '../vm/opcodes.dart';";
+    source = _replaceOnce(
+      source,
+      anchor,
+      "$anchor\nimport '../vm/instructions.dart';",
+      path,
+    );
+    file.writeAsStringSync(source);
+  }
+
   if (!source.contains('Future<void> _callLuaClosureAsync(')) {
     const callSite = '''      if (c.proto != null) {
         _callLuaClosure(nArgs, nResults, c);

@@ -29,6 +29,7 @@ class LuaPluginRuntime {
   LuaPluginRuntime({
     required this.manifest,
     required this.sources,
+    this.resources = const <String, String>{},
     required this.dataDirectory,
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
@@ -41,10 +42,14 @@ class LuaPluginRuntime {
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
     this.onPlayerControl,
+    this.onLog,
   }) : networkGranted = networkGranted ?? httpHandler != null;
 
   final PluginManifest manifest;
   final Map<String, String> sources;
+
+  /// Read-only text files shipped in the plugin package.
+  final Map<String, String> resources;
   final String dataDirectory;
   final Duration timeout;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
@@ -59,6 +64,7 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)?
   onPlayerMenuItemAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+  final void Function(Map<String, dynamic> record)? onLog;
 
   final Random _random = Random.secure();
   final http.Client _client = http.Client();
@@ -78,6 +84,7 @@ class LuaPluginRuntime {
     final host = _WebPluginHost(
       manifest,
       sources,
+      resources,
       dataDirectory,
       random: _random,
       client: _client,
@@ -88,7 +95,9 @@ class LuaPluginRuntime {
       websocketGranted: websocketGranted,
       websocketServerGranted: websocketServerGranted,
       permissionRequester: permissionRequester,
-      uiExtensions: onSettingAdded == null &&
+      onLog: onLog,
+      uiExtensions:
+          onSettingAdded == null &&
               onPlayerMenuItemAdded == null &&
               onPlayerControl == null
           ? null
@@ -190,6 +199,7 @@ class _WebPluginHost {
   _WebPluginHost(
     this.manifest,
     this.sources,
+    this.resources,
     this.dataKey, {
     required this.random,
     required this.client,
@@ -200,11 +210,13 @@ class _WebPluginHost {
     this.websocketGranted = false,
     this.websocketServerGranted = false,
     this.permissionRequester,
+    this.onLog,
     this.uiExtensions,
   });
 
   final PluginManifest manifest;
   final Map<String, String> sources;
+  final Map<String, String> resources;
   final String dataKey;
   final Random random;
   final http.Client client;
@@ -214,6 +226,7 @@ class _WebPluginHost {
   bool socketGranted, socketServerGranted;
   bool websocketGranted, websocketServerGranted;
   final Future<bool> Function(String permission)? permissionRequester;
+  final void Function(Map<String, dynamic> record)? onLog;
   final Future<Object?> Function(String kind, Map<String, dynamic> spec)?
   uiExtensions;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
@@ -275,6 +288,16 @@ class _WebPluginHost {
     sync('_json_decode', (state) => jsonDecode(state.checkString(1)!));
     sync('_now', (_) => DateTime.now().millisecondsSinceEpoch);
     sync('_url_encode', (state) => Uri.encodeComponent(state.checkString(1)!));
+    sync('_url_decode', (state) => Uri.decodeComponent(state.checkString(1)!));
+    sync('_host_info', (_) => _hostInfo());
+    sync('_resource', (state) {
+      final path = state.checkString(1)!;
+      if (!PluginManifest.safePath(path)) {
+        throw const FormatException('Invalid resource path');
+      }
+      return resources[path];
+    });
+    sync('_resource_keys', (_) => resources.keys.toList()..sort());
     sync('_cookie_compact', (state) => _compactCookie(state.checkString(1)!));
     sync(
       '_cookie_field',
@@ -309,6 +332,11 @@ class _WebPluginHost {
       '_storage_get',
       (state) => manifest.storage ? storage[state.checkString(1)] : null,
     );
+    sync(
+      '_storage_keys',
+      (_) =>
+          manifest.storage ? (storage.keys.toList()..sort()) : const <String>[],
+    );
     sync('_storage_set', (state) {
       if (!manifest.storage) {
         throw const FormatException('Storage permission required');
@@ -317,12 +345,35 @@ class _WebPluginHost {
       final value = _read(state, 2);
       final next = <String, dynamic>{...storage};
       value == null ? next.remove(key) : next[key] = value;
-      final encoded = jsonEncode(next);
-      if (utf8.encode(encoded).length > 1024 * 1024) {
-        throw const FormatException('Storage full');
+      _saveStorage(next);
+      return null;
+    });
+    sync('_storage_clear', (_) {
+      if (!manifest.storage) {
+        throw const FormatException('Storage permission required');
       }
-      storage = next;
-      _saveStorage();
+      _saveStorage(<String, dynamic>{});
+      return null;
+    });
+    sync('_log', (state) {
+      final level = (state.isNoneOrNil(1) ? 'info' : state.checkString(1)!)
+          .toLowerCase();
+      final message = state.isNoneOrNil(2) ? '' : '${_read(state, 2)}';
+      final fields = <String, Object?>{
+        'plugin': manifest.id,
+        'message': message.length > 2048 ? message.substring(0, 2048) : message,
+      };
+      final data = state.isNoneOrNil(3) ? null : _read(state, 3);
+      if (data is Map) fields['data'] = Map<String, dynamic>.from(data);
+      if (onLog != null) {
+        onLog!({
+          'level': level,
+          'message': fields['message'],
+          if (fields['data'] != null) 'data': fields['data'],
+        });
+      } else {
+        AppLog.shared.event('lua.plugin', level, fields);
+      }
       return null;
     });
     lua.registerAsync('_add_setting', (state) async {
@@ -349,10 +400,53 @@ class _WebPluginHost {
       _push(state, await uiExtensions!('playerControl', spec) ?? true);
       return 1;
     });
+    lua.registerAsync('_player_state', (state) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      _push(
+        state,
+        await uiExtensions!('playerControl', {'command': 'status'}) ??
+            const <String, dynamic>{},
+      );
+      return 1;
+    });
+    lua.registerAsync('_player_queue', (state) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      _push(
+        state,
+        await uiExtensions!('playerControl', {'command': 'queue'}) ??
+            const <String, dynamic>{},
+      );
+      return 1;
+    });
+    lua.registerAsync('_player_track', (state) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      _push(state, await uiExtensions!('playerControl', {'command': 'track'}));
+      return 1;
+    });
+    lua.registerAsync('_sleep', (state) async {
+      final requested = state.checkInteger(1) ?? 0;
+      final milliseconds = requested.clamp(0, 60000);
+      await Future<void>.delayed(Duration(milliseconds: milliseconds));
+      _push(state, true);
+      return 1;
+    });
     lua.registerAsync('_http', (state) async {
       final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
       final result = await _http(spec).timeout(const Duration(seconds: 30));
       _push(state, result);
+      return 1;
+    });
+    lua.registerAsync('_http_json', (state) async {
+      final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
+      final result = await _http(spec).timeout(const Duration(seconds: 30));
+      final body = result['body'];
+      _push(state, body is String && body.isNotEmpty ? jsonDecode(body) : null);
       return 1;
     });
     lua.registerAsync('_websocket', (state) async {
@@ -469,13 +563,20 @@ class _WebPluginHost {
     final bootstrap =
         '''
       host = { json_encode = _json_encode, json_decode = _json_decode,
-        now = _now, url_encode = _url_encode, random_hex = _random_hex,
+        now = _now, url_encode = _url_encode, url_decode = _url_decode,
+        info = _host_info, plugin_info = _host_info, resource = _resource,
+        resource_keys = _resource_keys,
+        read_resource = _resource, log = _log, random_hex = _random_hex,
         cookie_compact = _cookie_compact, cookie_field = _cookie_field,
         cookie_merge = _cookie_merge, crypto = _crypto, http = _http,
+        http_json = _http_json,
         websocket = _websocket, websocket_server = _websocket_server,
         storage_get = _storage_get, storage_set = _storage_set,
+        storage_keys = _storage_keys, storage_clear = _storage_clear,
         add_setting = _add_setting, add_player_menu_item = _add_player_menu_item,
-        player_control = _player_control }
+        player_control = _player_control, player_state = _player_state,
+        player_status = _player_state, player_queue = _player_queue,
+        player_track = _player_track, now_playing = _player_track, sleep = _sleep }
       $moduleBuffers
       local modules = {}
       function require(name)
@@ -521,6 +622,34 @@ class _WebPluginHost {
       }
     });
   }
+
+  Map<String, dynamic> _hostInfo() => {
+    'runtime': 'web',
+    'plugin': manifest.id,
+    'name': manifest.name,
+    'version': manifest.version,
+    'apiVersion': manifest.apiVersion,
+    'provider': manifest.provider,
+    'capabilities': List<String>.of(manifest.capabilities),
+    'auth': List<String>.of(manifest.auth),
+    'permissions': {
+      'network': List<String>.of(manifest.domains),
+      'socket': List<String>.of(manifest.socketDomains),
+      'socketServer': List<String>.of(manifest.socketServerBindings),
+      'websocket': List<String>.of(manifest.websocketDomains),
+      'websocketServer': List<String>.of(manifest.websocketServerBindings),
+      'storage': manifest.storage,
+    },
+    'features': [
+      'http',
+      'crypto',
+      'storage',
+      'resources',
+      'player',
+      'websocket',
+      'sleep',
+    ],
+  };
 
   Future<Map<String, dynamic>> _http(Map<String, dynamic> spec) async {
     final uri = Uri.parse(spec['url'] as String);
@@ -572,8 +701,9 @@ class _WebPluginHost {
     }
   }
 
-  void _saveStorage() {
+  void _saveStorage([Map<String, dynamic>? next]) {
     if (!manifest.storage) return;
+    if (next != null) storage = next;
     final value = base64Url.encode(utf8.encode(jsonEncode(storage)));
     // A browser cookie is the durable primary store for normal credentials.
     // Keep a localStorage fallback when a plugin's optional state exceeds the

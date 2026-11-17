@@ -368,6 +368,65 @@ void main() {
     });
   });
 
+  test(
+    'Lua host exposes metadata, bundled resources, storage keys and sleep',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'lazer-lua-host-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final logs = <String>[];
+      final runtime = LuaPluginRuntime(
+        manifest: PluginManifest.fromJson(const {
+          'id': 'demo.host',
+          'name': 'Host API',
+          'version': '1.0.0',
+          'provider': 'host',
+          'apiVersion': 1,
+          'permissions': {'storage': true},
+        }),
+        sources: const {
+          'main.lua': '''
+          host.storage_set("boot", (host.storage_get("boot") or 0) + 1)
+          return {call=function(op)
+            if op == "inspect" then
+              host.log("debug", "host is alive", {value=42})
+              local info = host.plugin_info()
+              return {
+                runtime = info.runtime,
+                id = info.plugin,
+                resource = host.read_resource("config.json"),
+                decoded = host.json_decode(host.read_resource("config.json")).value,
+                keys = host.storage_keys(),
+                decodedUrl = host.url_decode(host.url_encode("a b/中")),
+                slept = host.sleep(1),
+              }
+            end
+            if op == "clear" then
+              host.storage_clear()
+              return host.storage_keys()
+            end
+          end}
+        ''',
+        },
+        resources: const {'config.json': '{"value":42}'},
+        dataDirectory: directory.path,
+        onLog: (record) => logs.add('${record['level']}:${record['message']}'),
+      );
+      addTearDown(runtime.close);
+      final inspected = await runtime.invoke('inspect') as Map;
+      expect(inspected['runtime'], 'native');
+      expect(inspected['id'], 'demo.host');
+      expect(inspected['resource'], '{"value":42}');
+      expect(inspected['decoded'], 42);
+      expect(inspected['keys'], ['boot']);
+      expect(inspected['decodedUrl'], 'a b/中');
+      expect(inspected['slept'], isTrue);
+      expect(logs, ['debug:host is alive']);
+      expect(await runtime.invoke('clear'), isEmpty);
+    },
+  );
+
   test('ZIP import validates, probes, installs and toggles a plugin', () async {
     final root = await Directory.systemTemp.createTemp('lazer-plugin-test');
     addTearDown(() => root.delete(recursive: true));
@@ -462,6 +521,7 @@ void main() {
       }),
     );
     final sourceBytes = utf8.encode('return {call=function() return {} end}');
+    final resourceBytes = utf8.encode('{"value":42}');
     final archive = Archive()
       ..addFile(
         ArchiveFile(
@@ -472,12 +532,20 @@ void main() {
       )
       ..addFile(
         ArchiveFile('netease-cloud\\main.lua', sourceBytes.length, sourceBytes),
+      )
+      ..addFile(
+        ArchiveFile(
+          'netease-cloud\\config.json',
+          resourceBytes.length,
+          resourceBytes,
+        ),
       );
     final package = decodePluginPackage(
       Uint8List.fromList(ZipEncoder().encode(archive)),
     );
     expect(package.manifest.id, 'demo.wrapped');
     expect(package.sources.containsKey('main.lua'), isTrue);
+    expect(package.resources['config.json'], '{"value":42}');
   });
 
   test(
@@ -552,21 +620,23 @@ void main() {
     await expectLater(runtime.invoke('ping'), throwsA(isA<PluginException>()));
   });
 
-  test('Lua plugins can invoke host.player_control and receive player_event', () async {
-    final directory = await Directory.systemTemp.createTemp('lazer-control-');
-    addTearDown(() => directory.delete(recursive: true));
-    final controlCalls = <Map<String, dynamic>>[];
-    final runtime = LuaPluginRuntime(
-      manifest: PluginManifest.fromJson(const {
-        'id': 'demo.control',
-        'name': 'Control',
-        'version': '1.0.0',
-        'provider': 'control',
-        'apiVersion': 1,
-        'entry': 'main.lua',
-      }),
-      sources: const {
-        'main.lua': '''
+  test(
+    'Lua plugins can invoke host.player_control and receive player_event',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('lazer-control-');
+      addTearDown(() => directory.delete(recursive: true));
+      final controlCalls = <Map<String, dynamic>>[];
+      final runtime = LuaPluginRuntime(
+        manifest: PluginManifest.fromJson(const {
+          'id': 'demo.control',
+          'name': 'Control',
+          'version': '1.0.0',
+          'provider': 'control',
+          'apiVersion': 1,
+          'entry': 'main.lua',
+        }),
+        sources: const {
+          'main.lua': '''
         local last_event = nil
         return {
           call = function(op, args)
@@ -575,6 +645,12 @@ void main() {
             end
             if op == "do_seek" then
               return host.player_control({ command = "seek", positionMs = 12000 })
+            end
+            if op == "state" then
+              return host.player_state()
+            end
+            if op == "queue" then
+              return host.player_queue()
             end
             if op == "player_event" then
               last_event = args
@@ -586,32 +662,37 @@ void main() {
           end
         }
         ''',
-      },
-      dataDirectory: directory.path,
-      onPlayerControl: (spec) async {
-        controlCalls.add(spec);
-        return {'handled': spec['command']};
-      },
-    );
-    addTearDown(runtime.close);
+        },
+        dataDirectory: directory.path,
+        onPlayerControl: (spec) async {
+          controlCalls.add(spec);
+          return {'handled': spec['command']};
+        },
+      );
+      addTearDown(runtime.close);
 
-    final playResult = await runtime.invoke('do_play') as Map;
-    expect(playResult['handled'], 'play');
-    expect(controlCalls.length, 1);
-    expect(controlCalls.first['command'], 'play');
+      final playResult = await runtime.invoke('do_play') as Map;
+      expect(playResult['handled'], 'play');
+      expect(controlCalls.length, 1);
+      expect(controlCalls.first['command'], 'play');
 
-    final seekResult = await runtime.invoke('do_seek') as Map;
-    expect(seekResult['handled'], 'seek');
-    expect(controlCalls.length, 2);
-    expect(controlCalls.last['positionMs'], 12000);
+      final seekResult = await runtime.invoke('do_seek') as Map;
+      expect(seekResult['handled'], 'seek');
+      expect(controlCalls.length, 2);
+      expect(controlCalls.last['positionMs'], 12000);
 
-    // Test receiving player_event
-    await runtime.invoke('player_event', {
-      'type': 'track',
-      'data': {'title': 'Test Song', 'duration': 180000},
-    });
-    final eventReceived = await runtime.invoke('get_last_event') as Map;
-    expect(eventReceived['type'], 'track');
-    expect((eventReceived['data'] as Map)['title'], 'Test Song');
-  });
+      expect(await runtime.invoke('state'), {'handled': 'status'});
+      expect(await runtime.invoke('queue'), {'handled': 'queue'});
+      expect(controlCalls.length, 4);
+
+      // Test receiving player_event
+      await runtime.invoke('player_event', {
+        'type': 'track',
+        'data': {'title': 'Test Song', 'duration': 180000},
+      });
+      final eventReceived = await runtime.invoke('get_last_event') as Map;
+      expect(eventReceived['type'], 'track');
+      expect((eventReceived['data'] as Map)['title'], 'Test Song');
+    },
+  );
 }

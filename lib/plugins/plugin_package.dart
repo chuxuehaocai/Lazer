@@ -10,10 +10,22 @@ import 'plugin_manifest.dart';
 const maxPluginArchiveBytes = 16 * 1024 * 1024;
 
 class PluginPackage {
-  const PluginPackage(this.manifest, this.files, this.sources);
+  const PluginPackage(
+    this.manifest,
+    this.files,
+    this.sources, {
+    this.resources = const <String, String>{},
+  });
   final PluginManifest manifest;
   final Map<String, Uint8List> files;
   final Map<String, String> sources;
+
+  /// Text resources bundled with a plugin. Lua source files are kept in
+  /// [sources] and the manifest is exposed through `host.info()`; the
+  /// remaining small text files are available to the plugin as read-only
+  /// resources so a provider can ship JSON tables, signatures, or examples
+  /// without asking for filesystem access.
+  final Map<String, String> resources;
 }
 
 /// Decode, verify and validate away from the UI isolate before any installation.
@@ -60,10 +72,23 @@ PluginPackage decodePluginPackage(Uint8List bytes) {
   if (!files.containsKey(manifest.entry)) {
     throw const FormatException('缺少插件入口。');
   }
-  return PluginPackage(manifest, files, {
-    for (final entry in files.entries)
-      if (entry.key.endsWith('.lua')) entry.key: utf8.decode(entry.value),
-  });
+  return PluginPackage(
+    manifest,
+    files,
+    {
+      for (final entry in files.entries)
+        if (entry.key.endsWith('.lua')) entry.key: utf8.decode(entry.value),
+    },
+    resources: {
+      for (final entry in files.entries)
+        if (entry.key != 'manifest.json' &&
+            !entry.key.endsWith('.lua') &&
+            (entry.key.endsWith('.json') ||
+                entry.key.endsWith('.md') ||
+                entry.key.endsWith('.txt')))
+          entry.key: utf8.decode(entry.value),
+    },
+  );
 }
 
 Archive _openPluginZip(Uint8List bytes) {

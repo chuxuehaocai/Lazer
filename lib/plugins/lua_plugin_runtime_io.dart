@@ -25,6 +25,7 @@ class LuaPluginRuntime {
   LuaPluginRuntime({
     required this.manifest,
     required this.sources,
+    this.resources = const <String, String>{},
     required this.dataDirectory,
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
@@ -37,9 +38,13 @@ class LuaPluginRuntime {
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
     this.onPlayerControl,
+    this.onLog,
   }) : networkGranted = networkGranted ?? httpHandler != null;
   final PluginManifest manifest;
   final Map<String, String> sources;
+
+  /// Read-only text files shipped in the plugin package.
+  final Map<String, String> resources;
   final String dataDirectory;
   final Duration timeout;
 
@@ -57,12 +62,14 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)?
   onPlayerMenuItemAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+  final void Function(Map<String, dynamic> record)? onLog;
   Isolate? _isolate;
   ReceivePort? _port;
   SendPort? _commands;
   Future<void>? _starting;
   Future<void> _calls = Future.value();
   final Map<int, Completer<Object?>> _pending = {};
+
   /// The wall-clock guard for each in-flight call.
   ///
   /// `Future.timeout` cannot be used: it owns a timer of its own that only dies
@@ -72,6 +79,7 @@ class LuaPluginRuntime {
   /// "A Timer is still pending even after the widget tree was disposed" failure.
   /// Holding the timer here lets teardown cancel it synchronously.
   final Map<int, Timer> _guards = {};
+
   /// The startup handshake, so teardown can settle a VM that never signalled
   /// ready instead of leaving its guard to expire on its own.
   Completer<void>? _ready;
@@ -180,9 +188,7 @@ class LuaPluginRuntime {
                   : await onPlayerMenuItemAdded!(spec),
             'playerControl' =>
               onPlayerControl == null
-                  ? throw const FormatException(
-                      'Player control is unavailable',
-                    )
+                  ? throw const FormatException('Player control is unavailable')
                   : await onPlayerControl!(spec),
             _ => throw const FormatException('Unknown plugin extension'),
           };
@@ -190,6 +196,8 @@ class LuaPluginRuntime {
         } catch (_) {
           reply.send({'error': true});
         }
+      } else if (message is Map && message['hostLog'] is Map) {
+        onLog?.call(Map<String, dynamic>.from(message['hostLog'] as Map));
       } else if (message is Map && message['startupError'] != null) {
         if (!ready.isCompleted) {
           ready.completeError(const PluginException('插件启动失败，请检查 Lua 源码。'));
@@ -221,6 +229,7 @@ class LuaPluginRuntime {
           'port': port.sendPort,
           'manifest': manifest.toJson(),
           'sources': sources,
+          'resources': resources,
           'data': dataDirectory,
           'externalHttp': httpHandler != null,
           'networkGranted': networkGranted,
@@ -233,6 +242,7 @@ class LuaPluginRuntime {
               onSettingAdded != null ||
               onPlayerMenuItemAdded != null ||
               onPlayerControl != null,
+          'logging': onLog != null,
           'proxyMode': SystemHttpProxy.currentMode.name,
           'proxyEndpoint': SystemHttpProxy.customEndpoint,
           'cachedSystemRules': SystemHttpProxy.cachedSystemRules,
@@ -500,6 +510,7 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
   final host = _PluginHost(
     PluginManifest.fromJson(config['manifest'] as Map<String, dynamic>),
     Map<String, String>.from(config['sources'] as Map),
+    Map<String, String>.from(config['resources'] as Map? ?? const {}),
     config['data'] as String,
     externalHttp: config['externalHttp'] == true
         ? (spec) async {
@@ -554,6 +565,9 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
               reply.close();
             }
           }
+        : null,
+    onLog: config['logging'] == true
+        ? (record) => output.send({'hostLog': record})
         : null,
   );
   try {
@@ -628,6 +642,7 @@ class _PluginHost {
   _PluginHost(
     this.manifest,
     this.sources,
+    this.resources,
     this.dataPath, {
     this.externalHttp,
     this.networkGranted = false,
@@ -637,9 +652,11 @@ class _PluginHost {
     this.websocketServerGranted = false,
     this.permissionRequester,
     this.uiExtensions,
+    this.onLog,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
+  final Map<String, String> resources;
   final String dataPath;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   externalHttp;
@@ -649,6 +666,7 @@ class _PluginHost {
   final Future<bool> Function(String permission)? permissionRequester;
   final Future<Object?> Function(String kind, Map<String, dynamic> spec)?
   uiExtensions;
+  final void Function(Map<String, dynamic> record)? onLog;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   final HttpClient client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 20)
@@ -709,6 +727,16 @@ class _PluginHost {
     sync('_json_decode', (l) => jsonDecode(l.checkString(1)!));
     sync('_now', (_) => DateTime.now().millisecondsSinceEpoch);
     sync('_url_encode', (l) => Uri.encodeComponent(l.checkString(1)!));
+    sync('_url_decode', (l) => Uri.decodeComponent(l.checkString(1)!));
+    sync('_host_info', (_) => _hostInfo());
+    sync('_resource', (l) {
+      final path = l.checkString(1)!;
+      if (!PluginManifest.safePath(path)) {
+        throw const FormatException('Invalid resource path');
+      }
+      return resources[path];
+    });
+    sync('_resource_keys', (_) => resources.keys.toList()..sort());
     sync('_cookie_compact', (l) => _compactCookie(l.checkString(1)!));
     sync(
       '_cookie_field',
@@ -747,6 +775,11 @@ class _PluginHost {
       '_storage_get',
       (l) => manifest.storage ? storage[l.checkString(1)] : null,
     );
+    sync(
+      '_storage_keys',
+      (_) =>
+          manifest.storage ? (storage.keys.toList()..sort()) : const <String>[],
+    );
     sync('_storage_set', (l) {
       if (!manifest.storage) {
         throw const FormatException('Storage permission required');
@@ -755,17 +788,35 @@ class _PluginHost {
       final value = _read(l, 2);
       final next = {...storage};
       value == null ? next.remove(key) : next[key] = value;
-      final encoded = jsonEncode(next);
-      if (utf8.encode(encoded).length > 1024 * 1024) {
-        throw const FormatException('Storage full');
+      _saveStorage(next);
+      return null;
+    });
+    sync('_storage_clear', (_) {
+      if (!manifest.storage) {
+        throw const FormatException('Storage permission required');
       }
-      final directory = Directory(dataPath)..createSync(recursive: true);
-      final temp = File(p.join(directory.path, 'storage.tmp'));
-      temp.writeAsStringSync(encoded, flush: true);
-      final target = File(p.join(directory.path, 'storage.json'));
-      if (target.existsSync()) target.deleteSync();
-      temp.renameSync(target.path);
-      storage = next;
+      _saveStorage(<String, dynamic>{});
+      return null;
+    });
+    sync('_log', (l) {
+      final level = (l.isNoneOrNil(1) ? 'info' : l.checkString(1)!)
+          .toLowerCase();
+      final message = l.isNoneOrNil(2) ? '' : '${_read(l, 2)}';
+      final fields = <String, Object?>{
+        'plugin': manifest.id,
+        'message': message.length > 2048 ? message.substring(0, 2048) : message,
+      };
+      final data = l.isNoneOrNil(3) ? null : _read(l, 3);
+      if (data is Map) fields['data'] = Map<String, dynamic>.from(data);
+      if (onLog != null) {
+        onLog!({
+          'level': level,
+          'message': fields['message'],
+          if (fields['data'] != null) 'data': fields['data'],
+        });
+      } else {
+        AppLog.shared.event('lua.plugin', level, fields);
+      }
       return null;
     });
     lua.registerAsync('_add_setting', (l) async {
@@ -795,10 +846,47 @@ class _PluginHost {
       _push(l, value ?? true);
       return 1;
     });
+    lua.registerAsync('_player_state', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      final value = await uiExtensions!('playerControl', {'command': 'status'});
+      _push(l, value ?? const <String, dynamic>{});
+      return 1;
+    });
+    lua.registerAsync('_player_queue', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      final value = await uiExtensions!('playerControl', {'command': 'queue'});
+      _push(l, value ?? const <String, dynamic>{});
+      return 1;
+    });
+    lua.registerAsync('_player_track', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      _push(l, await uiExtensions!('playerControl', {'command': 'track'}));
+      return 1;
+    });
+    lua.registerAsync('_sleep', (l) async {
+      final requested = l.checkInteger(1) ?? 0;
+      final milliseconds = requested.clamp(0, 60000);
+      await Future<void>.delayed(Duration(milliseconds: milliseconds));
+      _push(l, true);
+      return 1;
+    });
     lua.registerAsync('_http', (l) async {
       final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
       final result = await _http(spec).timeout(const Duration(seconds: 30));
       _push(l, result);
+      return 1;
+    });
+    lua.registerAsync('_http_json', (l) async {
+      final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
+      final result = await _http(spec).timeout(const Duration(seconds: 30));
+      final body = result['body'];
+      _push(l, body is String && body.isNotEmpty ? jsonDecode(body) : null);
       return 1;
     });
     lua.registerAsync('_websocket', (l) async {
@@ -852,14 +940,21 @@ class _PluginHost {
     final bootstrap =
         '''
 host = { json_encode = _json_encode, json_decode = _json_decode,
-  now = _now, url_encode = _url_encode, random_hex = _random_hex,
+  now = _now, url_encode = _url_encode, url_decode = _url_decode,
+  info = _host_info, plugin_info = _host_info, resource = _resource,
+  resource_keys = _resource_keys,
+  read_resource = _resource, log = _log, random_hex = _random_hex,
   cookie_compact = _cookie_compact, cookie_field = _cookie_field,
   cookie_merge = _cookie_merge,
-  crypto = _crypto, http = _http, websocket = _websocket, websocket_server = _websocket_server,
+  crypto = _crypto, http = _http, http_json = _http_json,
+  websocket = _websocket, websocket_server = _websocket_server,
   socket = _socket, socket_server = _socket_server,
   storage_get = _storage_get, storage_set = _storage_set,
+  storage_keys = _storage_keys, storage_clear = _storage_clear,
   add_setting = _add_setting, add_player_menu_item = _add_player_menu_item,
-  player_control = _player_control }
+  player_control = _player_control, player_state = _player_state,
+  player_status = _player_state, player_queue = _player_queue,
+  player_track = _player_track, now_playing = _player_track, sleep = _sleep }
 $moduleBuffers
 local modules = {}
 function require(name)
@@ -904,6 +999,49 @@ end
         lua.setTop(0);
       }
     });
+  }
+
+  Map<String, dynamic> _hostInfo() => {
+    'runtime': 'native',
+    'plugin': manifest.id,
+    'name': manifest.name,
+    'version': manifest.version,
+    'apiVersion': manifest.apiVersion,
+    'provider': manifest.provider,
+    'capabilities': List<String>.of(manifest.capabilities),
+    'auth': List<String>.of(manifest.auth),
+    'permissions': {
+      'network': List<String>.of(manifest.domains),
+      'socket': List<String>.of(manifest.socketDomains),
+      'socketServer': List<String>.of(manifest.socketServerBindings),
+      'websocket': List<String>.of(manifest.websocketDomains),
+      'websocketServer': List<String>.of(manifest.websocketServerBindings),
+      'storage': manifest.storage,
+    },
+    'features': [
+      'http',
+      'crypto',
+      'storage',
+      'resources',
+      'player',
+      'websocket',
+      'socket',
+      'sleep',
+    ],
+  };
+
+  void _saveStorage(Map<String, dynamic> next) {
+    final encoded = jsonEncode(next);
+    if (utf8.encode(encoded).length > 1024 * 1024) {
+      throw const FormatException('Storage full');
+    }
+    final directory = Directory(dataPath)..createSync(recursive: true);
+    final temp = File(p.join(directory.path, 'storage.tmp'));
+    temp.writeAsStringSync(encoded, flush: true);
+    final target = File(p.join(directory.path, 'storage.json'));
+    if (target.existsSync()) target.deleteSync();
+    temp.renameSync(target.path);
+    storage = next;
   }
 
   Future<Map<String, dynamic>> _http(Map<String, dynamic> spec) async {

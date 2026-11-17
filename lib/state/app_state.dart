@@ -2940,13 +2940,50 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   String? _lastBroadcastTrackId;
   DateTime _lastBroadcastStatusAt = DateTime.fromMillisecondsSinceEpoch(0);
   bool? _lastBroadcastPlaying;
+  int _lastBroadcastQueueRevision = -1;
+
+  Map<String, dynamic> _pluginTrack(Track track) => {
+    'id': track.id,
+    'name': track.title,
+    'title': track.title,
+    'artist': track.artist,
+    'artists': [
+      for (final artist in track.artists)
+        {
+          'id': artist.id,
+          'name': artist.name,
+          if (artist.coverUrl != null) 'coverUrl': artist.coverUrl,
+          if (artist.platformKey != null) 'platformKey': artist.platformKey,
+        },
+    ],
+    'album': track.album,
+    'albumName': track.album,
+    'albumId': track.albumId,
+    if (track.albumKey != null) 'albumKey': track.albumKey,
+    'cover': track.coverUrl ?? '',
+    'coverOriginal': track.coverUrl ?? '',
+    'coverUrl': track.coverUrl ?? '',
+    'picUrl': track.coverUrl ?? '',
+    'duration': track.duration.inMilliseconds,
+    'durationMs': track.duration.inMilliseconds,
+    if (track.translatedTitle != null) 'translatedTitle': track.translatedTitle,
+  };
+
+  Map<String, dynamic> _pluginQueue() => {
+    'index': queueIndex,
+    'currentIndex': queueIndex,
+    'length': queueLength,
+    'revision': queueRevision,
+    'shuffle': shuffle,
+    'repeat': repeat.name,
+    'tracks': [for (final track in queue) _pluginTrack(track)],
+  };
 
   Future<Object?> _handlePluginPlayerControl(Map<String, dynamic> spec) async {
-    final command =
-        (spec['command'] ?? spec['op'] ?? spec['action'])
-            ?.toString()
-            .toLowerCase()
-            .trim();
+    final command = (spec['command'] ?? spec['op'] ?? spec['action'])
+        ?.toString()
+        .toLowerCase()
+        .trim();
     switch (command) {
       case 'play':
         play();
@@ -2994,12 +3031,77 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         return false;
       case 'status':
       case 'getstatus':
+        final buffered = audioEngine is BufferedAudioEngine
+            ? (audioEngine as BufferedAudioEngine).bufferedPosition
+            : precisePosition;
         return {
           'state': playing ? 'playing' : 'paused',
-          'position': position.inMilliseconds,
+          'position': precisePosition.inMilliseconds,
+          'positionMs': precisePosition.inMilliseconds,
           'duration': (current?.duration ?? Duration.zero).inMilliseconds,
+          'durationMs': (current?.duration ?? Duration.zero).inMilliseconds,
           'volume': volume,
+          'bufferedPosition': buffered.inMilliseconds,
+          'bufferedPositionMs': buffered.inMilliseconds,
+          'progress': progress,
+          'audioReady': audioReady,
+          'seekInFlight': seekInFlight,
+          'queueIndex': queueIndex,
+          'queueLength': queueLength,
+          'shuffle': shuffle,
+          'repeat': repeat.name,
+          'track': current == null ? null : _pluginTrack(current!),
         };
+      case 'queue':
+      case 'getqueue':
+      case 'get_queue':
+      case 'queue_status':
+        return _pluginQueue();
+      case 'track':
+      case 'gettrack':
+      case 'get_track':
+      case 'current':
+      case 'nowplaying':
+      case 'now_playing':
+        return current == null ? null : _pluginTrack(current!);
+      case 'play_index':
+      case 'playat':
+      case 'play_at':
+        final rawIndex = spec['index'] ?? spec['queueIndex'];
+        final index = rawIndex is num ? rawIndex.toInt() : -1;
+        if (index < 0 || index >= queueLength) return false;
+        playTrackAt(index);
+        return true;
+      case 'shuffle':
+      case 'set_shuffle':
+        final requested = spec['enabled'] ?? spec['value'];
+        if (requested is bool) {
+          if (requested != shuffle) toggleShuffle();
+        } else {
+          toggleShuffle();
+        }
+        return {'shuffle': shuffle, 'repeat': repeat.name};
+      case 'repeat':
+      case 'set_repeat':
+        final requested = (spec['mode'] ?? spec['value'])
+            ?.toString()
+            .toLowerCase();
+        if (requested == null || requested.isEmpty) {
+          return {'repeat': repeat.name, 'shuffle': shuffle};
+        }
+        final next = switch (requested) {
+          'off' || 'none' || 'sequential' => LoopMode.off,
+          'all' || 'list' || 'loop' => LoopMode.all,
+          'one' || 'single' || 'track' => LoopMode.one,
+          _ => throw FormatException('Unsupported repeat mode: $requested'),
+        };
+        if (next != repeat) {
+          _repeat = next;
+          _savePlayMode();
+          _refreshQueueSuccessor();
+          notifyListeners();
+        }
+        return {'repeat': repeat.name, 'shuffle': shuffle};
       default:
         throw FormatException('Unsupported player control command: $command');
     }
@@ -3010,25 +3112,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final track = current;
     if (track?.id != _lastBroadcastTrackId) {
       _lastBroadcastTrackId = track?.id;
-      if (track != null) {
-        pluginManager.broadcastPlayerEvent('track', {
-          'id': track.id,
-          'name': track.title,
-          'title': track.title,
-          'artist': track.artist,
-          'artists': [
-            for (final a in track.artists) {'id': a.id, 'name': a.name}
-          ],
-          'album': track.album,
-          'albumName': track.album,
-          'cover': track.coverUrl ?? '',
-          'coverOriginal': track.coverUrl ?? '',
-          'coverUrl': track.coverUrl ?? '',
-          'picUrl': track.coverUrl ?? '',
-          'duration': track.duration.inMilliseconds,
-          'durationMs': track.duration.inMilliseconds,
-        });
-      }
+      pluginManager.broadcastPlayerEvent('track', {
+        'track': track == null ? null : _pluginTrack(track),
+        if (track != null) ..._pluginTrack(track),
+      });
+    }
+    if (_lastBroadcastQueueRevision != queueRevision) {
+      _lastBroadcastQueueRevision = queueRevision;
+      pluginManager.broadcastPlayerEvent('queue', _pluginQueue());
     }
     final now = DateTime.now();
     final isPlaying = current != null && playing;
@@ -3039,11 +3130,26 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             const Duration(milliseconds: 500)) {
       _lastBroadcastStatusAt = now;
       _lastBroadcastPlaying = isPlaying;
+      final buffered = audioEngine is BufferedAudioEngine
+          ? (audioEngine as BufferedAudioEngine).bufferedPosition
+          : precisePosition;
       pluginManager.broadcastPlayerEvent('status', {
         'state': isPlaying ? 'playing' : 'paused',
         'position': position.inMilliseconds,
+        'positionMs': precisePosition.inMilliseconds,
         'duration': (current?.duration ?? Duration.zero).inMilliseconds,
+        'durationMs': (current?.duration ?? Duration.zero).inMilliseconds,
         'volume': volume,
+        'bufferedPosition': buffered.inMilliseconds,
+        'bufferedPositionMs': buffered.inMilliseconds,
+        'progress': progress,
+        'audioReady': audioReady,
+        'seekInFlight': seekInFlight,
+        'queueIndex': queueIndex,
+        'queueLength': queueLength,
+        'shuffle': shuffle,
+        'repeat': repeat.name,
+        'track': current == null ? null : _pluginTrack(current!),
       });
     }
   }
@@ -3068,7 +3174,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
               'rlyric': lyrics[i].romanization,
               'romanLyric': lyrics[i].romanization,
             },
-          }
+          },
       ],
       'pureMusic': lyricsPureMusic,
     });

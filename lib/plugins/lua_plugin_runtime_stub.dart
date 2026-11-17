@@ -10,6 +10,7 @@ class LuaPluginRuntime {
   LuaPluginRuntime({
     required this.manifest,
     required this.sources,
+    this.resources = const <String, String>{},
     required this.dataDirectory,
     this.timeout = const Duration(seconds: 40),
     this.httpHandler,
@@ -22,9 +23,11 @@ class LuaPluginRuntime {
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
     this.onPlayerControl,
+    this.onLog,
   });
   final PluginManifest manifest;
   final Map<String, String> sources;
+  final Map<String, String> resources;
   final String dataDirectory;
   final Duration timeout;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
@@ -39,6 +42,7 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)?
   onPlayerMenuItemAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+  final void Function(Map<String, dynamic> record)? onLog;
   Future<void> start() =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<Object?> invoke(
@@ -46,6 +50,7 @@ class LuaPluginRuntime {
     Map<String, dynamic> args = const {},
     Duration? budget,
   ]) => Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+
   /// Completes once the runtime holds no worker or listener.
   ///
   /// The native implementation waits for its isolate to release the listen
