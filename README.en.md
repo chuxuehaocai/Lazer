@@ -97,8 +97,11 @@ Playback caching keeps up to 50 completed songs by default, with a configurable 
 
 Use **Flutter 3.47.0 stable**.
 
+`lua_dardo_plus` is fetched from pub.dev. Run the patch script after resolving dependencies to keep Lua plugin async calls working:
+
 ```sh
 flutter pub get
+dart tool/patch_lua_dardo_plus.dart
 flutter analyze
 flutter test
 flutter run
@@ -113,6 +116,7 @@ The web build is compiled from this repository's `lib/main.dart` and shares the 
 ```sh
 # 1. Build the static site in this repository
 flutter pub get
+dart tool/patch_lua_dardo_plus.dart
 flutter build web --release --no-web-resources-cdn
 
 # 2. Pack the Vercel Build Output with the lazer_demo wrapper

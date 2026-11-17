@@ -70,8 +70,11 @@
 
 需要 **Flutter 3.47.0 stable**。
 
+`lua_dardo_plus` 从 pub.dev 获取。依赖解析后运行补丁脚本，保持 Lua 插件的异步调用行为：
+
 ```sh
 flutter pub get
+dart tool/patch_lua_dardo_plus.dart
 flutter analyze
 flutter test
 flutter run
@@ -94,6 +97,7 @@ Vercel 的构建机没有 Flutter，Windows 上的 `vercel build` 也会在拉�
 ```sh
 # 1. 构建静态站点
 flutter pub get
+dart tool/patch_lua_dardo_plus.dart
 flutter build web --release --no-web-resources-cdn
 
 # 2. 打包成 Build Output API 目录（写入本仓库 .vercel/output）
