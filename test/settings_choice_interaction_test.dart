@@ -41,6 +41,24 @@ Widget _host({
 );
 
 void main() {
+  testWidgets('disabling an open selector closes its stale menu', (
+    tester,
+  ) async {
+    final changes = <String?>[];
+    await tester.pumpWidget(_host(onChanged: changes.add));
+    await tester.tap(find.byType(SettingsChoice<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('Automatic'), findsOneWidget);
+
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+    expect(find.text('Automatic'), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(changes, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('TV Select opens the selected item and skips disabled choices', (
     tester,
   ) async {

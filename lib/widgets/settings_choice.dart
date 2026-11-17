@@ -41,6 +41,18 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
       widget.onChanged != null && widget.items.any((item) => item.enabled);
 
   @override
+  void didUpdateWidget(covariant SettingsChoice<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_enabled && _menu.isOpen) {
+      // Closing the overlay while its anchor is rebuilding would dirty an
+      // ancestor. Recheck after the frame in case the control is re-enabled.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_enabled && _menu.isOpen) _menu.close();
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _buttonFocus.dispose();
     super.dispose();

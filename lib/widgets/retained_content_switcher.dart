@@ -16,6 +16,7 @@ class RetainedContentSwitcher extends StatefulWidget {
     required this.currentKey,
     required this.page,
     required this.retainKeys,
+    this.maxRetainedPages = 9,
     this.duration = const Duration(milliseconds: 420),
     this.slideFraction = .04,
     this.expand = true,
@@ -23,11 +24,15 @@ class RetainedContentSwitcher extends StatefulWidget {
     this.backProgress,
     this.backTargetKey,
     this.backCommitted = false,
-  });
+  }) : assert(maxRetainedPages >= 2);
 
   final String currentKey;
   final Widget page;
   final Set<String> retainKeys;
+
+  /// Includes the current page and its retained navigation ancestors. At most
+  /// one additional, outgoing page may exist while a switch is running.
+  final int maxRetainedPages;
   final Duration duration;
   final double slideFraction;
   final bool expand;
@@ -93,19 +98,41 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
       ) ??
       entry.to;
 
+  /// Keep the root and nearest ancestors under a hard budget. Intermediate
+  /// outgoing pages from interrupted switches are no longer visible history;
+  /// retaining all their springs lets rapid navigation accumulate full pages.
+  void _prunePages({String? outgoingKey}) {
+    final keep = <String>{widget.currentKey};
+    final target = widget.backTargetKey;
+    if (target != null && _pages.containsKey(target)) keep.add(target);
+    final requested = widget.retainKeys.where(_pages.containsKey).toList();
+    if (requested.isNotEmpty && keep.length < widget.maxRetainedPages) {
+      keep.add(requested.first);
+    }
+    for (final key in requested.reversed) {
+      if (keep.length >= widget.maxRetainedPages) break;
+      keep.add(key);
+    }
+    if (outgoingKey != null) keep.add(outgoingKey);
+    _pages.removeWhere((key, _) => !keep.contains(key));
+  }
+
+  void _settlePages() {
+    _prunePages();
+    for (final entry in _pages.values) {
+      entry
+        ..from = entry.to
+        ..spring = null
+        ..parkedView = null;
+    }
+  }
+
   void _status(AnimationStatus status) {
     if (status != AnimationStatus.completed || !mounted) return;
     _settleWatchdog?.cancel();
     _settleWatchdog = null;
     setState(() {
-      _pages.removeWhere(
-        (key, _) =>
-            key != widget.currentKey && !widget.retainKeys.contains(key),
-      );
-      for (final entry in _pages.values) {
-        entry.from = entry.to;
-        entry.spring = null;
-      }
+      _settlePages();
     });
     _report(false);
     final completedKey = widget.currentKey;
@@ -132,16 +159,7 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
         if (!mounted) return;
         _settleWatchdog = null;
         setState(() {
-          _pages.removeWhere(
-            (key, _) =>
-                key != widget.currentKey && !widget.retainKeys.contains(key),
-          );
-          for (final entry in _pages.values) {
-            entry
-              ..from = entry.to
-              ..spring = null
-              ..parkedView = null;
-          }
+          _settlePages();
         });
         _motion.stop();
         _report(false);
@@ -154,12 +172,12 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentKey == widget.currentKey) {
       _pages[widget.currentKey]!.page = widget.page;
-      _pages.removeWhere(
-        (key, entry) =>
-            key != widget.currentKey &&
-            !entry.transitioning &&
-            !widget.retainKeys.contains(key),
-      );
+      final outgoing = _pages.entries
+          .where(
+            (item) => item.key != widget.currentKey && item.value.transitioning,
+          )
+          .lastOrNull;
+      _prunePages(outgoingKey: outgoing?.key);
       return;
     }
     if (oldWidget.backTargetKey == widget.currentKey && widget.backCommitted) {
@@ -169,11 +187,12 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
       _settleWatchdog = null;
       _transitionGeneration++;
       _motion.stop();
-      _pages[widget.currentKey]!.page = widget.page;
-      _pages.removeWhere(
-        (key, _) =>
-            key != widget.currentKey && !widget.retainKeys.contains(key),
-      );
+      // A destination can have been evicted by the retention budget.
+      _pages
+              .putIfAbsent(widget.currentKey, () => _RetainedPage(widget.page))
+              .page =
+          widget.page;
+      _prunePages();
       for (final item in _pages.entries) {
         item.value
           ..from = item.key == widget.currentKey ? 1 : 0
@@ -208,7 +227,15 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     }
     if (insideOldPage) _pages[oldWidget.currentKey]?.lastFocus = focus;
     final velocities = <_RetainedPage, double>{};
-    for (final entry in _pages.values) {
+    for (final item in _pages.entries) {
+      final entry = item.value;
+      if (item.key != oldWidget.currentKey && item.key != widget.currentKey) {
+        entry
+          ..from = 0
+          ..to = 0
+          ..spring = null
+          ..parkedView = null;
+      }
       velocities[entry] =
           entry.spring?.dx(
             (_motion.value - entry.epoch).clamp(0.0, double.infinity),
@@ -224,20 +251,14 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     );
     incoming.to = 1;
     incoming.page = widget.page;
+    _prunePages(outgoingKey: oldWidget.currentKey);
     final generation = ++_transitionGeneration;
-    if (widget.duration == Duration.zero ||
+    if (widget.duration <= Duration.zero ||
         MediaQuery.disableAnimationsOf(context)) {
       _settleWatchdog?.cancel();
       _settleWatchdog = null;
       _motion.stop();
-      _pages.removeWhere(
-        (key, _) =>
-            key != widget.currentKey && !widget.retainKeys.contains(key),
-      );
-      for (final entry in _pages.values) {
-        entry.from = entry.to;
-        entry.spring = null;
-      }
+      _settlePages();
       _report(false);
     } else {
       final response = AppleSpring(duration: widget.duration);

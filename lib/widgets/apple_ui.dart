@@ -558,11 +558,23 @@ class _AppleSearchFieldState extends State<AppleSearchField> {
     super.dispose();
   }
 
+  void _clear() {
+    widget.controller.clear();
+    if (widget.onClear case final clear?) {
+      clear();
+    } else {
+      widget.onChanged('');
+    }
+    _focusNode.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final height = (MediaQuery.textScalerOf(context).scale(16) * 1.4 + 20)
+        .clamp(widget.height, double.infinity);
     return TvFocusHighlight(
       child: SizedBox(
-        height: widget.height,
+        height: height,
         child: SearchBar(
           focusNode: _focusNode,
           controller: widget.controller,
@@ -595,7 +607,7 @@ class _AppleSearchFieldState extends State<AppleSearchField> {
                   ? const SizedBox.shrink()
                   : IconButton(
                       tooltip: context.tr('清除'),
-                      onPressed: widget.onClear,
+                      onPressed: _clear,
                       icon: const Icon(Icons.close),
                     ),
             ),
@@ -605,8 +617,8 @@ class _AppleSearchFieldState extends State<AppleSearchField> {
           constraints: BoxConstraints(
             minWidth: 0,
             maxWidth: double.infinity,
-            minHeight: widget.height,
-            maxHeight: widget.height,
+            minHeight: height,
+            maxHeight: height,
           ),
         ),
       ),

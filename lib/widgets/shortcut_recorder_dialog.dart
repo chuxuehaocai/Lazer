@@ -86,7 +86,7 @@ class _ShortcutRecorderDialogState extends State<_ShortcutRecorderDialog>
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent || !_listening) {
+    if (event is! KeyDownEvent || event.synthesized || !_listening) {
       return KeyEventResult.ignored;
     }
     final LogicalKeyboardKey key = event.logicalKey;
@@ -123,6 +123,7 @@ class _ShortcutRecorderDialogState extends State<_ShortcutRecorderDialog>
       autofocus: true,
       onKeyEvent: _onKey,
       child: AlertDialog(
+        scrollable: true,
         title: const TrText('设置快捷键'),
         content: SizedBox(
           width: 380,

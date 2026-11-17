@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
+import '../state/build_safe_notifier.dart';
 import '../theme/apple_design.dart';
 import '../theme/tokens.dart';
 import '../tv/tv_mode.dart';
 import 'accessible_controls.dart';
+import 'apple_ui.dart';
 import 'copyable_song_title.dart';
 import 'interaction_feedback.dart';
 import 'plate_art.dart';
@@ -35,6 +37,8 @@ class PlaybackQueueView extends StatefulWidget {
 
 class _PlaybackQueueViewState extends State<PlaybackQueueView> {
   ScrollController? _scroll;
+  final _showLocate = BuildSafeValueNotifier(false);
+  bool _locateScheduled = false;
 
   double get _rowExtent =>
       (MediaQuery.textScalerOf(context).scale(16) * 1.4 +
@@ -49,12 +53,57 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
       initialScrollOffset:
           (widget.state.queueIndex - 2).clamp(0, widget.state.queueLength) *
           _rowExtent,
-    );
+    )..addListener(_updateLocate);
+    _scheduleLocate();
+  }
+
+  void _scheduleLocate() {
+    if (_locateScheduled) return;
+    _locateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _locateScheduled = false;
+      if (mounted) _updateLocate();
+    });
+  }
+
+  void _updateLocate() {
+    final scroll = _scroll;
+    final index = widget.state.queueIndex;
+    if (scroll == null ||
+        scroll.positions.length != 1 ||
+        index < 0 ||
+        index >= widget.state.queueLength) {
+      _showLocate.value = false;
+      return;
+    }
+    final top = index * _rowExtent;
+    _showLocate.value =
+        top < scroll.offset ||
+        top + _rowExtent > scroll.offset + scroll.position.viewportDimension;
+  }
+
+  Future<void> _locateCurrent() async {
+    final scroll = _scroll;
+    if (scroll == null || scroll.positions.length != 1) return;
+    final target =
+        (widget.state.queueIndex * _rowExtent -
+                (scroll.position.viewportDimension - _rowExtent) / 2)
+            .clamp(0.0, scroll.position.maxScrollExtent);
+    if (MediaQuery.disableAnimationsOf(context)) {
+      scroll.jumpTo(target);
+    } else {
+      await scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 320),
+        curve: const AppleSpringCurve(),
+      );
+    }
   }
 
   @override
   void dispose() {
     _scroll?.dispose();
+    _showLocate.dispose();
     super.dispose();
   }
 
@@ -70,6 +119,7 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
         // rather than copying the entire queue for every visible row.
         final List<Track> queue = state.queue;
         final int currentIndex = state.queueIndex;
+        _scheduleLocate();
         return SafeArea(
           top: false,
           child: Column(
@@ -109,23 +159,62 @@ class _PlaybackQueueViewState extends State<PlaybackQueueView> {
                   ),
                 ),
               Expanded(
-                child: ListView.builder(
-                  key: const PageStorageKey<String>('playback-queue'),
-                  controller: _scroll,
-                  itemExtent: _rowExtent,
-                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
-                  itemCount: queue.length,
-                  itemBuilder: (BuildContext context, int i) => _QueueRow(
-                    track: queue[i],
-                    index: i,
-                    state: state,
-                    // The queue may contain the same song twice; only the slot
-                    // the transport is actually at is the current one.
-                    isCurrent: i == currentIndex,
-                    playing: state.playing && i == currentIndex,
-                    onTap: () => state.playTrackAt(i),
-                  ),
-                ),
+                child: queue.isEmpty
+                    ? LayoutBuilder(
+                        builder: (context, box) => SingleChildScrollView(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minHeight: box.maxHeight,
+                            ),
+                            child: const AppleEmptyState(
+                              message: '播放队列为空。',
+                              icon: Icons.queue_music_rounded,
+                            ),
+                          ),
+                        ),
+                      )
+                    : Stack(
+                        children: [
+                          ListView.builder(
+                            key: const PageStorageKey<String>('playback-queue'),
+                            controller: _scroll,
+                            itemExtent: _rowExtent,
+                            padding: const EdgeInsets.fromLTRB(10, 0, 10, 72),
+                            itemCount: queue.length,
+                            itemBuilder: (BuildContext context, int i) => _QueueRow(
+                              track: queue[i],
+                              index: i,
+                              state: state,
+                              // The queue may contain the same song twice; only the slot
+                              // the transport is actually at is the current one.
+                              isCurrent: i == currentIndex,
+                              playing: state.playing && i == currentIndex,
+                              onTap: () => state.playTrackAt(i),
+                            ),
+                          ),
+                          Positioned(
+                            right: 16,
+                            bottom: 16,
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: _showLocate,
+                              builder: (context, show, _) => show
+                                  ? FloatingActionButton.small(
+                                      key: const ValueKey(
+                                        'queue-locate-current',
+                                      ),
+                                      heroTag: null,
+                                      tooltip: context.tr('定位正在播放'),
+                                      onPressed: _locateCurrent,
+                                      child: const Icon(
+                                        Icons.my_location_rounded,
+                                        size: 20,
+                                      ),
+                                    )
+                                  : const SizedBox.shrink(),
+                            ),
+                          ),
+                        ],
+                      ),
               ),
             ],
           ),
@@ -166,119 +255,133 @@ class _QueueRowState extends State<_QueueRow> with BuildSafeState<_QueueRow> {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final bool current = widget.isCurrent;
     final bool highlighted = _hovering || _focused;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 1),
-        child: Material(
-          color: current
-              ? apple.accentSoft
-              : highlighted
-              ? apple.fill
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: feedbackAction(context, widget.onTap),
-            onFocusChange: (bool value) => setState(() => _focused = value),
-            child: Stack(
-              children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 8,
-                    horizontal: 10,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      SizedBox(
-                        width: 24,
-                        child: current && widget.playing
-                            ? _PlayingBars(state: widget.state)
-                            : Text(
-                                '${widget.index + 1}'.padLeft(2, '0'),
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: current
-                                      ? apple.accent
-                                      : apple.secondaryLabel,
-                                  fontFeatures: const <FontFeature>[
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Preserve room for the title when a side panel is narrow or text grows.
+        final showDuration =
+            constraints.maxWidth >=
+            200 + MediaQuery.textScalerOf(context).scale(12) * 5;
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hovering = true),
+          onExit: (_) => setState(() => _hovering = false),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: Material(
+              color: current
+                  ? apple.accentSoft
+                  : highlighted
+                  ? apple.fill
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: feedbackAction(context, widget.onTap),
+                onFocusChange: (bool value) => setState(() => _focused = value),
+                child: Stack(
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 8,
+                        horizontal: 10,
                       ),
-                      const SizedBox(width: 8),
-                      ClipRRect(
-                        borderRadius: AppShape.smRadius,
-                        child: SizedBox.square(
-                          dimension: 44,
-                          child: PlateArt(
-                            seed: widget.track.coverSeed,
-                            coverUrl: widget.track.coverUrl,
-                            size: 44,
+                      child: Row(
+                        children: <Widget>[
+                          SizedBox(
+                            width: 24,
+                            child: current && widget.playing
+                                ? _PlayingBars(state: widget.state)
+                                : Text(
+                                    '${widget.index + 1}'.padLeft(2, '0'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: current
+                                          ? apple.accent
+                                          : apple.secondaryLabel,
+                                      fontFeatures: const <FontFeature>[
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                  ),
+                          ),
+                          const SizedBox(width: 8),
+                          ClipRRect(
+                            borderRadius: AppShape.smRadius,
+                            child: SizedBox.square(
+                              dimension: 44,
+                              child: PlateArt(
+                                seed: widget.track.coverSeed,
+                                coverUrl: widget.track.coverUrl,
+                                size: 44,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: <Widget>[
+                                CopyableSongTitle(
+                                  title: widget.track.title,
+                                  child: Text(
+                                    widget.track.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: current
+                                          ? apple.accent
+                                          : apple.label,
+                                      fontWeight: current
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  widget.track.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: apple.secondaryLabel,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (showDuration) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              fmt(widget.track.duration),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: apple.secondaryLabel,
+                                fontFeatures: const <FontFeature>[
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (_focused && TvScope.isActive(context))
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: TvFocusOutline(
+                            borderRadius: BorderRadius.circular(8),
+                            width: 2,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: <Widget>[
-                            CopyableSongTitle(
-                              title: widget.track.title,
-                              child: Text(
-                                widget.track.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: current ? apple.accent : apple.label,
-                                  fontWeight: current
-                                      ? FontWeight.w600
-                                      : FontWeight.w400,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              widget.track.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: apple.secondaryLabel,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        fmt(widget.track.duration),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: apple.secondaryLabel,
-                          fontFeatures: const <FontFeature>[
-                            FontFeature.tabularFigures(),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
-                if (_focused && TvScope.isActive(context))
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: TvFocusOutline(
-                        borderRadius: BorderRadius.circular(8),
-                        width: 2,
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -301,17 +404,27 @@ class _PlayingBars extends StatefulWidget {
 class _PlayingBarsState extends State<_PlayingBars>
     with BuildSafeState<_PlayingBars> {
   int _step = 0;
+  bool _listening = false;
 
   @override
-  void initState() {
-    super.initState();
-    widget.state.ticks.addListener(_advance);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final enabled =
+        TickerMode.valuesOf(context).enabled &&
+        !MediaQuery.disableAnimationsOf(context);
+    if (enabled == _listening) return;
+    _listening = enabled;
+    if (enabled) {
+      widget.state.ticks.addListener(_advance);
+    } else {
+      widget.state.ticks.removeListener(_advance);
+    }
   }
 
   @override
   void didUpdateWidget(covariant _PlayingBars oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.state != widget.state) {
+    if (_listening && oldWidget.state != widget.state) {
       oldWidget.state.ticks.removeListener(_advance);
       widget.state.ticks.addListener(_advance);
     }
@@ -323,7 +436,7 @@ class _PlayingBarsState extends State<_PlayingBars>
 
   @override
   void dispose() {
-    widget.state.ticks.removeListener(_advance);
+    if (_listening) widget.state.ticks.removeListener(_advance);
     super.dispose();
   }
 

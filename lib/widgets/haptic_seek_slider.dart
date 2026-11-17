@@ -20,7 +20,14 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
 
   bool _focused = false;
   bool _dragging = false;
-  String? _dragTrackId;
+  Object? _dragSource;
+
+  Object get _source =>
+      (widget.state, widget.state.current?.id, widget.state.queueIndex);
+  bool get _seekable =>
+      widget.state.current != null &&
+      widget.state.current!.duration > Duration.zero &&
+      widget.state.seekLimitFraction > 0;
   double? _preview;
 
   @override
@@ -31,11 +38,14 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Losing the pointer while backgrounding must not commit or retain a seek.
-    if (state != AppLifecycleState.resumed && !_dragging) return;
+    if (state != AppLifecycleState.resumed) _cancel();
+  }
+
+  void _cancel() {
+    if (!_dragging && _preview == null) return;
     setState(() {
       _dragging = false;
-      _dragTrackId = null;
+      _dragSource = null;
       _preview = null;
     });
   }
@@ -48,21 +58,21 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
 
   void _start(double value) {
     _dragging = true;
-    _dragTrackId = widget.state.current?.id;
+    _dragSource = _source;
     setState(() => _preview = value);
   }
 
   void _change(double value) {
     if (!_dragging) {
-      widget.state.seek(value);
-    } else if (_dragTrackId == widget.state.current?.id) {
+      widget.state.seek(value.clamp(0, widget.state.seekLimitFraction));
+    } else if (_dragSource == _source) {
       setState(() => _preview = value.clamp(0, widget.state.seekLimitFraction));
     }
   }
 
   void _end(double value) {
-    if (_dragging && _dragTrackId == widget.state.current?.id) {
-      widget.state.seek(value);
+    if (_dragging && _dragSource == _source) {
+      widget.state.seek(value.clamp(0, widget.state.seekLimitFraction));
     }
     setState(() {
       _dragging = false;
@@ -72,7 +82,7 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
 
   void _nudge(double delta) {
     final AppState state = widget.state;
-    if (state.current == null) return;
+    if (!_seekable) return;
     state.seek(
       (state.progress + delta).clamp(0.0, state.seekLimitFraction).toDouble(),
     );
@@ -80,16 +90,24 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
 
   @override
   Widget build(BuildContext context) {
+    if (_dragging && _dragSource != _source) {
+      _dragging = false;
+      _dragSource = null;
+      _preview = null;
+    }
     final Widget slider = AccessibleSlider(
+      key: ValueKey(_source),
+      maxInteractiveValue: widget.state.seekLimitFraction,
       semanticLabel: '播放进度',
-      value: _dragging && _dragTrackId == widget.state.current?.id
+      value: _dragging && _dragSource == _source
           ? (_preview ?? widget.state.progress)
           : widget.state.progress,
       secondaryTrackValue: widget.state.seekLimitFraction,
       detentFeedback: true,
-      onChanged: widget.state.current == null ? null : _change,
+      onChanged: _seekable ? _change : null,
       onChangeStart: _start,
       onChangeEnd: _end,
+      onChangeCancel: _cancel,
     );
     // Material sliders spend the up/down keys on their value. Those keys must
     // always leave the rail instead: a remote's d-pad moves to the row above
@@ -97,7 +115,7 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
     // where TvScope has not been installed (or a desktop window with a
     // keyboard) cannot fall back to the bare slider. Left/right still nudge.
     return FocusableActionDetector(
-      enabled: widget.state.current != null,
+      enabled: _seekable,
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.arrowLeft): _SeekStepIntent(-_step),
         SingleActivator(LogicalKeyboardKey.arrowRight): _SeekStepIntent(_step),

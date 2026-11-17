@@ -1,5 +1,6 @@
 import 'build_safe_state.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import '../state/app_state.dart';
 import 'haptic_seek_slider.dart';
 
@@ -25,6 +26,14 @@ class PlayerSeekBar extends StatefulWidget {
 class _PlayerSeekBarState extends State<PlayerSeekBar>
     with WidgetsBindingObserver, BuildSafeState<PlayerSeekBar> {
   bool _grabbing = false;
+  Object? _grabSource;
+
+  Object get _source =>
+      (widget.state, widget.state.current?.id, widget.state.queueIndex);
+  bool get _seekable =>
+      widget.state.current != null &&
+      widget.state.current!.duration > Duration.zero &&
+      widget.state.seekLimitFraction > 0;
 
   @override
   void initState() {
@@ -49,15 +58,14 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
 
   @override
   Widget build(BuildContext context) {
-    final double railHeight = _grabbing
-        ? widget.trackHeight + 3
-        : widget.trackHeight;
-    final double thumbRadius = _grabbing
-        ? widget.thumbRadius + 3
-        : widget.thumbRadius;
     // Leaf: the only part of Now Playing that consumes 100 ms ticks.
     return Listener(
-      onPointerDown: (_) => _setGrabbing(true),
+      onPointerDown: (event) {
+        if (_seekable && event.buttons == kPrimaryButton) {
+          _grabSource = _source;
+          _setGrabbing(true);
+        }
+      },
       onPointerUp: (_) => _setGrabbing(false),
       onPointerCancel: (_) => _setGrabbing(false),
       child: AnimatedBuilder(
@@ -67,13 +75,20 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
             : widget.state,
         builder: (BuildContext context, _) => SliderTheme(
           data: SliderThemeData(
-            trackHeight: railHeight,
+            trackHeight: _grabbing && _grabSource == _source && _seekable
+                ? widget.trackHeight + 3
+                : widget.trackHeight,
             activeTrackColor: Colors.white,
             secondaryActiveTrackColor: Colors.white.withValues(alpha: 0.68),
             inactiveTrackColor: Colors.white.withValues(alpha: 0.32),
             thumbColor: Colors.white,
             overlayColor: Colors.white.withValues(alpha: 0.18),
-            thumbShape: RoundSliderThumbShape(enabledThumbRadius: thumbRadius),
+            thumbShape: RoundSliderThumbShape(
+              enabledThumbRadius:
+                  _grabbing && _grabSource == _source && _seekable
+                  ? widget.thumbRadius + 3
+                  : widget.thumbRadius,
+            ),
             overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
             trackShape: const RoundedRectSliderTrackShape(),
           ),

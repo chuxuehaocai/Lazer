@@ -6,12 +6,11 @@ import 'package:flutter/widgets.dart';
 import '../state/app_state.dart';
 import '../state/media_shortcuts.dart';
 
-/// Listens to hardware key presses for the globally configured media
-/// shortcuts.
+/// Handles globally configured media shortcuts after the focused control.
 ///
-/// The handler sits above the navigator so it keeps working on every page and
-/// over the player. Text fields are skipped, and a recorder dialog suspends it
-/// while it captures a new combination.
+/// The focus manager keeps the handler available across navigator routes while
+/// letting buttons, sliders and menus consume their own keys first. Text fields
+/// are skipped, and a recorder dialog suspends it while capturing a combination.
 class MediaShortcutListener extends StatefulWidget {
   const MediaShortcutListener({
     super.key,
@@ -30,19 +29,22 @@ class _MediaShortcutListenerState extends State<MediaShortcutListener> {
   @override
   void initState() {
     super.initState();
-    HardwareKeyboard.instance.addHandler(_handleKey);
+    FocusManager.instance.addLateKeyEventHandler(_handleKey);
   }
 
   @override
   void dispose() {
-    HardwareKeyboard.instance.removeHandler(_handleKey);
+    FocusManager.instance.removeLateKeyEventHandler(_handleKey);
     super.dispose();
   }
 
-  bool _handleKey(KeyEvent event) {
-    if (event is! KeyDownEvent) return false;
-    if (MediaShortcutRecorder.active) return false;
-    if (_isEditingText()) return false;
+  KeyEventResult _handleKey(KeyEvent event) {
+    if (event is! KeyDownEvent || event.synthesized) {
+      return KeyEventResult.ignored;
+    }
+    if (MediaShortcutRecorder.active || _isEditingText()) {
+      return KeyEventResult.ignored;
+    }
 
     final HardwareKeyboard keyboard = HardwareKeyboard.instance;
     final MediaShortcutBinding pressed = MediaShortcutBinding(
@@ -56,9 +58,9 @@ class _MediaShortcutListenerState extends State<MediaShortcutListener> {
       widget.state.mediaShortcuts,
       pressed,
     );
-    if (action == null) return false;
+    if (action == null) return KeyEventResult.ignored;
     _perform(action);
-    return true;
+    return KeyEventResult.handled;
   }
 
   void _perform(MediaShortcutAction action) {

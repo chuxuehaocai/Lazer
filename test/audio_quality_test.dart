@@ -233,8 +233,11 @@ void main() {
       final directory = await Directory.systemTemp.createTemp(
         'audio-fallback-',
       );
-      addTearDown(() => directory.delete(recursive: true));
       final disk = DiskCache(directory: () async => directory);
+      addTearDown(() async {
+        await disk.settle();
+        await directory.delete(recursive: true);
+      });
       final gateway = _QualityGateway()..offline = true;
       final track = _track(gateway);
       await disk.put(

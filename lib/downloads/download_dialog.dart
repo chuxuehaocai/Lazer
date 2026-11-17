@@ -168,6 +168,7 @@ class _DownloadDialogState extends State<_DownloadDialog>
   late bool _createFolder =
       widget.folderName != null && widget.folderName!.trim().isNotEmpty;
   bool _busy = false;
+  bool _pickingDirectory = false;
   String? _error;
 
   @override
@@ -192,6 +193,8 @@ class _DownloadDialogState extends State<_DownloadDialog>
   }
 
   Future<void> _pickDirectory() async {
+    if (_busy || _pickingDirectory) return;
+    setState(() => _pickingDirectory = true);
     try {
       final String? picked = await getDirectoryPath(
         confirmButtonText: context.tr('选择'),
@@ -204,10 +207,13 @@ class _DownloadDialogState extends State<_DownloadDialog>
     } catch (_) {
       if (!mounted) return;
       setState(() => _error = '无法打开目录选择器'); // i18n:key
+    } finally {
+      if (mounted) setState(() => _pickingDirectory = false);
     }
   }
 
   Future<void> _confirm() async {
+    if (_busy || _pickingDirectory) return;
     final String? directory = _directory;
     if (directory == null || directory.trim().isEmpty) {
       setState(() => _error = '请选择保存目录'); // i18n:key
@@ -218,12 +224,21 @@ class _DownloadDialogState extends State<_DownloadDialog>
       _error = null;
     });
     try {
-      await Directory(directory).create(recursive: true);
-      final File probe = File(
-        '$directory${Platform.pathSeparator}.lazer_write_test',
+      final Directory destination = await Directory(
+        directory,
+      ).create(recursive: true);
+      // Reserve a unique directory atomically; a fixed probe filename can
+      // overwrite an existing user file or collide with another dialog.
+      final Directory probeDirectory = await destination.createTemp(
+        '.lazer-write-',
       );
-      await probe.writeAsString('ok');
-      await probe.delete();
+      try {
+        await File(
+          '${probeDirectory.path}${Platform.pathSeparator}probe',
+        ).writeAsString('ok');
+      } finally {
+        await probeDirectory.delete(recursive: true);
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -234,8 +249,18 @@ class _DownloadDialogState extends State<_DownloadDialog>
     }
     // Do not commit a choice for a dialog that is already gone.
     if (!mounted) return;
-    await widget.state.setDownloadQuality(_quality);
-    await widget.state.setDownloadDirectory(directory);
+    try {
+      await widget.state.setDownloadQuality(_quality);
+      if (!mounted) return;
+      await widget.state.setDownloadDirectory(directory);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = '操作失败，请稍后重试。'; // i18n:key
+      });
+      return;
+    }
     if (!mounted) return;
     Navigator.of(context).pop(
       DownloadRequest(
@@ -293,6 +318,7 @@ class _DownloadDialogState extends State<_DownloadDialog>
                             'download-quality-${quality.name}',
                           ),
                           value: quality,
+                          enabled: !_busy,
                           contentPadding: EdgeInsets.zero,
                           dense: true,
                           title: Text(
@@ -331,7 +357,9 @@ class _DownloadDialogState extends State<_DownloadDialog>
                     ),
                     if (_canPickDirectory)
                       SpringTextButton(
-                        onPressed: _busy ? null : _pickDirectory,
+                        onPressed: _busy || _pickingDirectory
+                            ? null
+                            : _pickDirectory,
                         child: TrText('选择…'),
                       ),
                   ],
@@ -388,7 +416,11 @@ class _DownloadDialogState extends State<_DownloadDialog>
             // Until the default directory resolves there is nowhere to save to;
             // letting the tap through only produces an error about a choice the
             // user never had.
-            onPressed: _busy || _directory == null || _directory!.trim().isEmpty
+            onPressed:
+                _busy ||
+                    _pickingDirectory ||
+                    _directory == null ||
+                    _directory!.trim().isEmpty
                 ? null
                 : _confirm,
             child: _busy

@@ -1,5 +1,4 @@
 import '../widgets/build_safe_state.dart';
-import '../animation/apple_spring.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
@@ -12,7 +11,6 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/detail_requests.dart';
 import '../theme/apple_design.dart';
-import '../tv/tv_mode.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/catalog_links.dart';
 import 'widgets.dart';
@@ -51,19 +49,59 @@ class _AppSearchPageState extends State<AppSearchPage>
   bool _loading = false;
   String? _error;
   int _generation = 0;
+  late String _sourceKey;
+  (String?, bool)? _playback;
+
+  @override
+  void initState() {
+    super.initState();
+    _sourceKey = widget.state.activeContentKey;
+    widget.state.addListener(_stateChanged);
+  }
+
+  void _stateChanged() {
+    if (!mounted) return;
+    final state = widget.state;
+    if (_sourceKey != state.activeContentKey) {
+      _resetSource();
+      return;
+    }
+    final playback = (state.current?.id, state.playing);
+    if (_playback != playback) {
+      _playback = playback;
+      setState(() {});
+    }
+  }
+
+  void _resetSource() {
+    _sourceKey = widget.state.activeContentKey;
+    _generation++;
+    _loading = false;
+    _results = null;
+    _error = null;
+    if (widget.state.isLocalPlayback) _tab = _SearchTab.songs;
+    if (_query.isNotEmpty) {
+      unawaited(_run(_query));
+    } else {
+      setState(() {});
+    }
+  }
 
   @override
   void didUpdateWidget(covariant AppSearchPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.state != widget.state) {
-      _generation++;
-      _loading = false;
-      if (_query.isNotEmpty) unawaited(_run(_query));
+      oldWidget.state.removeListener(_stateChanged);
+      widget.state.addListener(_stateChanged);
+      _resetSource();
+    } else if (_sourceKey != widget.state.activeContentKey) {
+      _resetSource();
     }
   }
 
   @override
   void dispose() {
+    widget.state.removeListener(_stateChanged);
     _search.dispose();
     super.dispose();
   }
@@ -111,6 +149,8 @@ class _AppSearchPageState extends State<AppSearchPage>
   Future<void> _run(String query) async {
     if (query.isNotEmpty && _loading && query == _query) return;
     final int generation = ++_generation;
+    final owner = widget.state;
+    final source = owner.activeContentKey;
     if (query.isEmpty) {
       setState(() {
         _query = '';
@@ -126,14 +166,33 @@ class _AppSearchPageState extends State<AppSearchPage>
       _error = null;
     });
     try {
-      final SearchResults results = await widget.state.search(query);
-      if (!mounted || generation != _generation) return;
+      final SearchResults results = await owner.search(query);
+      if (!mounted ||
+          generation != _generation ||
+          widget.state != owner ||
+          owner.activeContentKey != source) {
+        return;
+      }
       setState(() {
         _results = results;
         _loading = false;
+        if (owner.isLocalPlayback) {
+          _tab = _SearchTab.songs;
+        } else if (_count(results, _tab) == 0) {
+          _tab =
+              _SearchTab.values
+                  .where((tab) => _count(results, tab) > 0)
+                  .firstOrNull ??
+              _SearchTab.songs;
+        }
       });
     } catch (_) {
-      if (!mounted || generation != _generation) return;
+      if (!mounted ||
+          generation != _generation ||
+          widget.state != owner ||
+          owner.activeContentKey != source) {
+        return;
+      }
       setState(() {
         _loading = false;
         _error = widget.state.isLocalPlayback
@@ -142,6 +201,13 @@ class _AppSearchPageState extends State<AppSearchPage>
       });
     }
   }
+
+  int _count(SearchResults results, _SearchTab tab) => switch (tab) {
+    _SearchTab.songs => results.tracks.length,
+    _SearchTab.albums => results.albums.length,
+    _SearchTab.artists => results.artists.length,
+    _SearchTab.playlists => results.playlists.length,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -212,26 +278,25 @@ class _AppSearchPageState extends State<AppSearchPage>
         if (!widget.state.isLocalPlayback)
           Padding(
             padding: EdgeInsets.fromLTRB(inset, 0, inset, 10),
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
               children: <Widget>[
                 _SearchTabButton(
                   label: '歌曲',
                   active: _tab == _SearchTab.songs,
                   onTap: () => setState(() => _tab = _SearchTab.songs),
                 ),
-                const SizedBox(width: 8),
                 _SearchTabButton(
                   label: '专辑',
                   active: _tab == _SearchTab.albums,
                   onTap: () => setState(() => _tab = _SearchTab.albums),
                 ),
-                const SizedBox(width: 8),
                 _SearchTabButton(
                   label: '歌手',
                   active: _tab == _SearchTab.artists,
                   onTap: () => setState(() => _tab = _SearchTab.artists),
                 ),
-                const SizedBox(width: 8),
                 _SearchTabButton(
                   label: '歌单',
                   active: _tab == _SearchTab.playlists,
@@ -244,114 +309,126 @@ class _AppSearchPageState extends State<AppSearchPage>
           child: ViewTransitionSwitcher(
             child: KeyedSubtree(
               key: ValueKey(_tab),
-              child: switch (_tab) {
-                _SearchTab.songs => ListView.builder(
-                  primary: widget.topInset > 0 ? true : null,
-                  padding: EdgeInsets.fromLTRB(
-                    inset,
-                    0,
-                    inset,
-                    28 + bottomInset,
-                  ),
-                  itemCount: results.tracks.length,
-                  itemBuilder: (BuildContext context, int i) {
-                    final Track track = results.tracks[i];
-                    return AppTrackRow(
-                      track: track,
-                      index: i,
-                      current: widget.state.current?.id == track.id,
-                      playing: widget.state.playing,
-                      onTap: () =>
-                          widget.state.playQueue(results.tracks, startIndex: i),
-                      onMenuRequested: (Offset position) => showTrackActions(
-                        context,
-                        widget.state,
-                        track,
-                        position,
-                      ),
-                    );
-                  },
-                ),
-                _SearchTab.albums => ListView.builder(
-                  primary: widget.topInset > 0 ? true : null,
-                  padding: EdgeInsets.fromLTRB(
-                    inset,
-                    0,
-                    inset,
-                    28 + bottomInset,
-                  ),
-                  itemCount: results.albums.length,
-                  itemBuilder: (BuildContext context, int i) {
-                    final Album album = results.albums[i];
-                    return AppleListTile(
-                      title: album.title,
-                      subtitle: album.artist,
-                      minHeight: 56,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      leading: AppCover(
-                        url: album.coverUrl,
-                        size: 44,
-                        radius: 6,
-                      ),
-                      onTap: () => unawaited(
-                        openAlbumDetails(context, widget.state, album),
-                      ),
-                    );
-                  },
-                ),
-                _SearchTab.artists => ListView.builder(
-                  primary: widget.topInset > 0 ? true : null,
-                  padding: EdgeInsets.fromLTRB(
-                    inset,
-                    0,
-                    inset,
-                    28 + bottomInset,
-                  ),
-                  itemCount: results.artists.length,
-                  itemBuilder: (BuildContext context, int i) {
-                    final ArtistRef artist = results.artists[i];
-                    return AppleListTile(
-                      title: artist.name,
-                      subtitle: context.tr('歌手'),
-                      minHeight: 56,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      leading: ClipOval(
-                        child: AppCover(
-                          url: artist.coverUrl,
-                          size: 44,
-                          radius: 22,
+              child: _count(results, _tab) == 0
+                  ? const AppNotice(
+                      message: '没有找到相关结果。',
+                      icon: Icons.search_rounded,
+                    )
+                  : switch (_tab) {
+                      _SearchTab.songs => ListView.builder(
+                        primary: widget.topInset > 0 ? true : null,
+                        padding: EdgeInsets.fromLTRB(
+                          inset,
+                          0,
+                          inset,
+                          28 + bottomInset,
                         ),
+                        itemCount: results.tracks.length,
+                        itemBuilder: (BuildContext context, int i) {
+                          final Track track = results.tracks[i];
+                          return AppTrackRow(
+                            track: track,
+                            index: i,
+                            current: widget.state.current?.id == track.id,
+                            playing: widget.state.playing,
+                            onTap: () => widget.state.playQueue(
+                              results.tracks,
+                              startIndex: i,
+                            ),
+                            onMenuRequested: (Offset position) =>
+                                showTrackActions(
+                                  context,
+                                  widget.state,
+                                  track,
+                                  position,
+                                ),
+                          );
+                        },
                       ),
-                      onTap: () => artistDetailRequest.value = artist,
-                    );
-                  },
-                ),
-                _SearchTab.playlists => LayoutBuilder(
-                  builder: (BuildContext context, BoxConstraints box) {
-                    final AppPlaylistGridLayout grid = AppPlaylistGridLayout(
-                      (box.maxWidth - inset * 2).clamp(0, double.infinity),
-                    );
-                    return CustomScrollView(
-                      primary: widget.topInset > 0 ? true : null,
-                      slivers: <Widget>[
-                        SliverPadding(
-                          padding: EdgeInsets.fromLTRB(
-                            inset,
-                            0,
-                            inset,
-                            28 + bottomInset,
-                          ),
-                          sliver: AppPlaylistRowsSliver(
-                            playlists: results.playlists,
-                            layout: grid,
-                            onOpen: widget.onOpenPlaylist,
-                          ),
+                      _SearchTab.albums => ListView.builder(
+                        primary: widget.topInset > 0 ? true : null,
+                        padding: EdgeInsets.fromLTRB(
+                          inset,
+                          0,
+                          inset,
+                          28 + bottomInset,
                         ),
-                      ],
-                    );
-                  },
-                ),
-              },
+                        itemCount: results.albums.length,
+                        itemBuilder: (BuildContext context, int i) {
+                          final Album album = results.albums[i];
+                          return AppleListTile(
+                            title: album.title,
+                            subtitle: album.artist,
+                            minHeight: 56,
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            leading: AppCover(
+                              url: album.coverUrl,
+                              size: 44,
+                              radius: 6,
+                            ),
+                            onTap: () => unawaited(
+                              openAlbumDetails(context, widget.state, album),
+                            ),
+                          );
+                        },
+                      ),
+                      _SearchTab.artists => ListView.builder(
+                        primary: widget.topInset > 0 ? true : null,
+                        padding: EdgeInsets.fromLTRB(
+                          inset,
+                          0,
+                          inset,
+                          28 + bottomInset,
+                        ),
+                        itemCount: results.artists.length,
+                        itemBuilder: (BuildContext context, int i) {
+                          final ArtistRef artist = results.artists[i];
+                          return AppleListTile(
+                            title: artist.name,
+                            subtitle: context.tr('歌手'),
+                            minHeight: 56,
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            leading: ClipOval(
+                              child: AppCover(
+                                url: artist.coverUrl,
+                                size: 44,
+                                radius: 22,
+                              ),
+                            ),
+                            onTap: () => artistDetailRequest.value = artist,
+                          );
+                        },
+                      ),
+                      _SearchTab.playlists => LayoutBuilder(
+                        builder: (BuildContext context, BoxConstraints box) {
+                          final AppPlaylistGridLayout grid =
+                              AppPlaylistGridLayout(
+                                (box.maxWidth - inset * 2).clamp(
+                                  0,
+                                  double.infinity,
+                                ),
+                              );
+                          return CustomScrollView(
+                            primary: widget.topInset > 0 ? true : null,
+                            slivers: <Widget>[
+                              SliverPadding(
+                                padding: EdgeInsets.fromLTRB(
+                                  inset,
+                                  0,
+                                  inset,
+                                  28 + bottomInset,
+                                ),
+                                sliver: AppPlaylistRowsSliver(
+                                  playlists: results.playlists,
+                                  layout: grid,
+                                  onOpen: widget.onOpenPlaylist,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    },
             ),
           ),
         ),
@@ -378,35 +455,23 @@ class _SearchTabButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return Semantics(
-      button: true,
       selected: active,
-      child: TvTapTarget(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        focusScale: 1.04,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: AnimatedContainer(
-              duration: MediaQuery.disableAnimationsOf(context)
-                  ? Duration.zero
-                  : AppleSpring.responsive.duration,
-              curve: ViewMotion.curve,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: active ? apple.label.withValues(alpha: .1) : null,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                context.tr(label),
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: active ? apple.label : apple.secondaryLabel,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                ),
-              ),
-            ),
+      child: SpringTextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          backgroundColor: active ? apple.label.withValues(alpha: .1) : null,
+          foregroundColor: active ? apple.label : apple.secondaryLabel,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          minimumSize: const Size(44, 44),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        child: Text(
+          context.tr(label),
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: active ? apple.label : apple.secondaryLabel,
+            fontWeight: active ? FontWeight.w600 : FontWeight.w500,
           ),
         ),
       ),
