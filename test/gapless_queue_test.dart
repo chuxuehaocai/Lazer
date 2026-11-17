@@ -387,17 +387,25 @@ void main() {
       await tester.pump();
       expect(engine.loads.length, 1);
 
-      // Switching to repeat-one drops the queued successor and does not reload
-      state.setPlayMode(LoopMode.one);
+      // Switching to repeat-all does not reload
+      state.cycleRepeat();
       await tester.pump();
+      expect(state.repeat, LoopMode.all);
+      expect(engine.loads.length, 1);
+      expect(state.successorPrepared, isTrue);
+
+      // Switching to repeat-one drops the queued successor and does not reload
+      state.cycleRepeat();
+      await tester.pump();
+      expect(state.repeat, LoopMode.one);
       expect(engine.loads.length, 1);
       expect(state.successorPrepared, isFalse);
 
-      // Switching back to repeat-all refreshes the successor without reloading
-      state.setPlayMode(LoopMode.all);
+      // Cycling back to repeat-off without reloading
+      state.cycleRepeat();
       await tester.pump();
+      expect(state.repeat, LoopMode.off);
       expect(engine.loads.length, 1);
-      expect(state.successorPrepared, isTrue);
 
       state.pause();
       await tester.pump();
