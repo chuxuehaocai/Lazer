@@ -66,6 +66,8 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  backdrop_ = std::make_unique<WindowBackdrop>(
+      flutter_controller_->engine()->messenger(), GetHandle());
   // Subwindows created by desktop_multi_window do not run the generated
   // registrant. Register the plugins a lyrics overlay needs.
   DesktopMultiWindowSetWindowCreatedCallback(
@@ -95,6 +97,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  backdrop_.reset();
   system_media_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

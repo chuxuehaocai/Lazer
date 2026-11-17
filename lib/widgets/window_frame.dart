@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../state/app_state.dart';
+import '../state/ui_preferences.dart';
 import 'window_title_area.dart';
 
 export 'window_title_area.dart';
@@ -66,23 +67,56 @@ class WindowFrame extends StatelessWidget {
     required this.child,
     this.state,
     this.navigatorKey,
+    this.enabled,
   });
 
   final Widget child;
   final AppState? state;
   final GlobalKey<NavigatorState>? navigatorKey;
 
+  /// Override frame availability for embedded previews and widget tests.
+  final bool? enabled;
+
   @override
   Widget build(BuildContext context) {
-    if (!kCustomWindowFrame) return child;
+    if (!(enabled ?? kCustomWindowFrame)) return child;
     return Directionality(
       textDirection: TextDirection.ltr,
-      child: Column(
-        children: <Widget>[
-          WindowTitleArea(state: state, navigatorKey: navigatorKey),
-          Expanded(child: child),
-        ],
-      ),
+      child:
+          state?.titleBarStyle == DesktopTitleBarStyle.inline &&
+              !usesNativeWindowButtons
+          ? Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRect(
+                  child: MediaQuery(
+                    data: MediaQuery.of(context).copyWith(
+                      padding: MediaQuery.paddingOf(context).copyWith(top: 46),
+                      viewPadding: MediaQuery.viewPaddingOf(
+                        context,
+                      ).copyWith(top: 46),
+                    ),
+                    child: child,
+                  ),
+                ),
+                Positioned(
+                  top: 6,
+                  left: 0,
+                  right: 8,
+                  child: WindowTitleArea(
+                    state: state,
+                    navigatorKey: navigatorKey,
+                    inline: true,
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              children: <Widget>[
+                WindowTitleArea(state: state, navigatorKey: navigatorKey),
+                Expanded(child: ClipRect(child: child)),
+              ],
+            ),
     );
   }
 }

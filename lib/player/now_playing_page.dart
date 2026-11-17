@@ -30,6 +30,7 @@ import '../widgets/accessible_controls.dart';
 import '../widgets/animated_notice.dart';
 import '../widgets/animated_track_cover.dart';
 import '../widgets/catalog_links.dart';
+import '../widgets/windows_backdrop.dart';
 import '../widgets/copyable_song_title.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/listen_together_dialog.dart';
@@ -53,6 +54,7 @@ Future<void> showSongComments(
   final bool compact = useCompactLayout(
     state.uiMode,
     MediaQuery.sizeOf(context).width,
+    layoutStyle: state.layoutStyle,
   );
   Widget content(BuildContext sheetContext) => Column(
     children: [
@@ -135,7 +137,11 @@ Future<void> showSongComments(
 
 /// Shared queue entry from the player header and desktop transport.
 Future<void> showPlaybackQueue(BuildContext context, AppState state) async {
-  if (!useCompactLayout(state.uiMode, MediaQuery.sizeOf(context).width)) {
+  if (!useCompactLayout(
+    state.uiMode,
+    MediaQuery.sizeOf(context).width,
+    layoutStyle: state.layoutStyle,
+  )) {
     await showAppleDialog<void>(
       context: context,
       barrierColor: context.colors.slateDark.withValues(alpha: .2),
@@ -625,6 +631,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     final compact = useCompactLayout(
       widget.state.uiMode,
       MediaQuery.sizeOf(context).width,
+      layoutStyle: widget.state.layoutStyle,
     );
     return Semantics(
       label: context.tr('歌曲封面，长按保存'),
@@ -828,7 +835,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         child: Theme(
           data: _playerTheme(context),
           child: Scaffold(
-            backgroundColor: Colors.black,
+            backgroundColor: Colors.transparent,
             // The ambient canvas is a sibling of the state-driven content, not
             // part of it: it rebuilds on its own signature (artwork and
             // background preferences) instead of once per playback report.
@@ -847,93 +854,101 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                     if (track == null) {
                       return _EmptyNowPlaying(onBack: _closePage);
                     }
-                    return LayoutBuilder(
-                      builder: (context, box) {
-                        final bool compact =
-                            !TvScope.isActive(context) &&
-                            useCompactLayout(widget.state.uiMode, box.maxWidth);
-                        if (_desktopLayout != !compact) {
-                          _desktopLayout = !compact;
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted) {
-                              _wakeControls();
-                              _armHide();
-                            }
-                          });
-                        }
-                        if (!compact) {
-                          return Stack(
-                            fit: StackFit.expand,
-                            children: <Widget>[
-                              SafeArea(
-                                child: DesktopNowPlaying(
-                                  key: const ValueKey('desktop-now-playing'),
-                                  state: widget.state,
-                                  track: track,
-                                  artwork: _cover(track),
-                                  lyrics: _settledGate(
-                                    LyricViewport(
-                                      key: ValueKey<String>(
-                                        'desktop-lyrics-${track.id}',
-                                      ),
-                                      state: widget.state,
-                                      backdropKey: _backdropKey,
-                                      onSelectionChanged: _selectionChanged,
-                                    ),
-                                  ),
-                                  comments: SongCommentsView(
+                    return Opacity(
+                      key: const ValueKey('player-content-opacity'),
+                      opacity: widget.state.uiAlpha,
+                      child: LayoutBuilder(
+                        builder: (context, box) {
+                          final bool compact =
+                              !largeScreenModeOf(context) &&
+                              useCompactLayout(
+                                widget.state.uiMode,
+                                box.maxWidth,
+                                layoutStyle: widget.state.layoutStyle,
+                              );
+                          if (_desktopLayout != !compact) {
+                            _desktopLayout = !compact;
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted) {
+                                _wakeControls();
+                                _armHide();
+                              }
+                            });
+                          }
+                          if (!compact) {
+                            return Stack(
+                              fit: StackFit.expand,
+                              children: <Widget>[
+                                SafeArea(
+                                  child: DesktopNowPlaying(
+                                    key: const ValueKey('desktop-now-playing'),
                                     state: widget.state,
                                     track: track,
-                                    controller: _commentsController,
+                                    artwork: _cover(track),
+                                    lyrics: _settledGate(
+                                      LyricViewport(
+                                        key: ValueKey<String>(
+                                          'desktop-lyrics-${track.id}',
+                                        ),
+                                        state: widget.state,
+                                        backdropKey: _backdropKey,
+                                        onSelectionChanged: _selectionChanged,
+                                      ),
+                                    ),
+                                    comments: SongCommentsView(
+                                      state: widget.state,
+                                      track: track,
+                                      controller: _commentsController,
+                                    ),
+                                    queue: PlaybackQueueView(
+                                      state: widget.state,
+                                      showHeader: false,
+                                    ),
+                                    pane: _desktopPane,
+                                    onPaneChanged: _selectDesktopPane,
+                                    onBack: _closePage,
+                                    onSaveArtwork: () =>
+                                        unawaited(_saveArtwork(track)),
+                                    onFullscreen: () =>
+                                        unawaited(_toggleFullscreen()),
+                                    controlsVisible: _controlsVisible,
+                                    playPauseFocus: _playPauseFocus,
+                                    onActivity: _controlsActivity,
+                                    onPointerStart: _beginControlPointer,
+                                    onPointerEnd: _endControlPointer,
                                   ),
-                                  queue: PlaybackQueueView(
-                                    state: widget.state,
-                                    showHeader: false,
-                                  ),
-                                  pane: _desktopPane,
-                                  onPaneChanged: _selectDesktopPane,
-                                  onBack: _closePage,
-                                  onSaveArtwork: () =>
-                                      unawaited(_saveArtwork(track)),
-                                  onFullscreen: () =>
-                                      unawaited(_toggleFullscreen()),
-                                  controlsVisible: _controlsVisible,
-                                  playPauseFocus: _playPauseFocus,
-                                  onActivity: _controlsActivity,
-                                  onPointerStart: _beginControlPointer,
-                                  onPointerEnd: _endControlPointer,
                                 ),
-                              ),
-                              ?_pullDownLayer(box),
-                            ],
+                                ?_pullDownLayer(box),
+                              ],
+                            );
+                          }
+                          return Listener(
+                            behavior: HitTestBehavior.translucent,
+                            onPointerDown: (event) {
+                              _onTouchDown();
+                              _beginControlPointer(event.pointer);
+                            },
+                            onPointerUp: (event) =>
+                                _endControlPointer(event.pointer),
+                            onPointerCancel: (event) =>
+                                _endControlPointer(event.pointer),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: <Widget>[
+                                GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  excludeFromSemantics: true,
+                                  onTap: compact && _lyricsMode
+                                      ? _stepBackFromLyrics
+                                      : null,
+                                  child: SafeArea(child: _mobile(track)),
+                                ),
+                                ?_pullDownLayer(box),
+                              ],
+                            ),
                           );
-                        }
-                        return Listener(
-                          behavior: HitTestBehavior.translucent,
-                          onPointerDown: (event) {
-                            _onTouchDown();
-                            _beginControlPointer(event.pointer);
-                          },
-                          onPointerUp: (event) =>
-                              _endControlPointer(event.pointer),
-                          onPointerCancel: (event) =>
-                              _endControlPointer(event.pointer),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: <Widget>[
-                              GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                excludeFromSemantics: true,
-                                onTap: compact && _lyricsMode
-                                    ? _stepBackFromLyrics
-                                    : null,
-                                child: SafeArea(child: _mobile(track)),
-                              ),
-                              ?_pullDownLayer(box),
-                            ],
-                          ),
-                        );
-                      },
+                        },
+                      ),
                     );
                   },
                 ),
@@ -1705,6 +1720,7 @@ class _PlayerBackdropHostState extends State<_PlayerBackdropHost> {
     state.backgroundDarkEdgeEnabled,
     state.playing,
     state.playerBackgroundQuality,
+    state.playerBackgroundOpacity,
   );
 
   @override
@@ -1739,6 +1755,23 @@ class _PlayerBackdropHostState extends State<_PlayerBackdropHost> {
   @override
   Widget build(BuildContext context) {
     final AppState state = widget.state;
+    if (state.playerBackground == AppBackgroundMode.windowsMica) {
+      return RepaintBoundary(
+        key: widget.boundaryKey,
+        child: MicaSurface(opacity: state.playerBackgroundOpacity),
+      );
+    }
+    return ColoredBox(
+      color: Colors.black,
+      child: Opacity(
+        key: const ValueKey('player-background-opacity'),
+        opacity: state.playerBackgroundOpacity,
+        child: _buildCanvas(state),
+      ),
+    );
+  }
+
+  Widget _buildCanvas(AppState state) {
     return _EntranceGatedBackdrop(
       settled: widget.settled,
       builder: (bool settled) => AlbumBlurFlow(
@@ -1761,7 +1794,7 @@ class _PlayerBackdropHostState extends State<_PlayerBackdropHost> {
             : 0,
         darkEdge: state.backgroundDarkEdgeEnabled,
         pageColor: Colors.black,
-        animationsEnabled: state.playing,
+        animationsEnabled: settled && state.playing,
         quality: state.playerBackgroundQuality,
         // The background belongs to the visible player at every point in its
         // spring. Replacing it with the entrance-only placeholder made the
@@ -1789,4 +1822,5 @@ typedef _BackdropSignature = (
   Object?, // dark edge
   Object?, // playing
   Object?, // render quality
+  Object?, // background opacity
 );

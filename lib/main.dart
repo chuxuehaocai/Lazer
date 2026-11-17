@@ -38,6 +38,7 @@ import 'tv/tv_mode.dart';
 import 'tv/lan_remote.dart';
 import 'watch/watch_shell.dart';
 import 'widgets/window_frame.dart';
+import 'widgets/windows_backdrop.dart';
 import 'widgets/app_system_tray.dart';
 import 'widgets/media_shortcut_listener.dart';
 import 'widgets/interaction_feedback.dart';
@@ -309,6 +310,9 @@ typedef _RootUiSignature = (
   bool,
   FontPreferences,
   int,
+  AppLayoutStyle,
+  AppUiMode,
+  DesktopTitleBarStyle,
 );
 
 class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
@@ -338,6 +342,9 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _state.showFrameStats,
     _state.fontPreferences,
     _state.pluginSkinRevision,
+    _state.layoutStyle,
+    _state.uiMode,
+    _state.titleBarStyle,
   );
 
   @override
@@ -467,6 +474,27 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   ) {
     final manifest = plugin.manifest;
     switch (permission) {
+      case 'data.library':
+        return (
+          context.tr('允许插件读取音乐库？'),
+          context
+              .tr('插件「{name}」请求读取歌单内容、搜索音乐库并播放选定歌曲。可在插件详情中随时撤销。')
+              .replaceAll('{name}', manifest.name),
+        );
+      case 'data.profile':
+        return (
+          context.tr('允许插件读取账号资料？'),
+          context
+              .tr('插件「{name}」请求读取已连接平台、账号 ID、昵称和头像；不会获得密码、Cookie 或登录令牌。')
+              .replaceAll('{name}', manifest.name),
+        );
+      case 'data.history':
+        return (
+          context.tr('允许插件读取收听记录？'),
+          context
+              .tr('插件「{name}」请求读取最近播放、播放次数和本机收听时长。可在插件详情中随时撤销。')
+              .replaceAll('{name}', manifest.name),
+        );
       case 'network':
         return (
           context.tr('允许插件访问网络？'),
@@ -584,21 +612,38 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
           builder: (context, child) => Stack(
             fit: StackFit.expand,
             children: <Widget>[
-              UiScaling(
+              WindowsBackdrop(
                 state: _state,
-                child: CarMetrics(
-                  child: WindowFrame(
-                    state: _state,
-                    navigatorKey: _navigatorKey,
-                    child: Builder(
-                      builder: (context) => Theme(
-                        data: Theme.of(
-                          context,
-                        ).copyWith(scaffoldBackgroundColor: Colors.transparent),
-                        child: SharedBrowseBackground(
-                          state: _state,
-                          navigation: _browseNavigation,
-                          child: child!,
+                child: UiScaling(
+                  state: _state,
+                  child: CarMetrics(
+                    child: WindowFrame(
+                      state: _state,
+                      navigatorKey: _navigatorKey,
+                      child: Builder(
+                        builder: (context) => Theme(
+                          data: Theme.of(context).copyWith(
+                            scaffoldBackgroundColor: Colors.transparent,
+                          ),
+                          child: SharedBrowseBackground(
+                            state: _state,
+                            navigation: _browseNavigation,
+                            // Inline controls share the backdrop, while the
+                            // navigator's controls always remain below their hit
+                            // area (including embedded settings detail headers).
+                            child:
+                                kCustomWindowFrame &&
+                                    _state.titleBarStyle ==
+                                        DesktopTitleBarStyle.inline &&
+                                    !usesNativeWindowButtons
+                                ? SafeArea(
+                                    left: false,
+                                    right: false,
+                                    bottom: false,
+                                    child: child!,
+                                  )
+                                : child!,
+                          ),
                         ),
                       ),
                     ),

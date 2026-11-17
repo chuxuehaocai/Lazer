@@ -39,6 +39,7 @@ import '../widgets/artwork_image.dart';
 import '../widgets/capsule_navigation_bar.dart';
 import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
+import '../widgets/listen_together_dialog.dart';
 import '../widgets/retained_content_switcher.dart';
 import '../widgets/song_comments_view.dart';
 import '../widgets/settings_detail.dart';
@@ -1226,7 +1227,9 @@ class _AppShellState extends State<AppShell>
                   // Only a shared browse backdrop needs the page to show
                   // through: the body paints the canvas itself, so the
                   // scaffold must not turn the off-mode background into a hole.
-                  backgroundColor: sharedBackground
+                  backgroundColor:
+                      sharedBackground ||
+                          state.backgroundMode == AppBackgroundMode.windowsMica
                       ? Colors.transparent
                       : canvas,
                   body: Stack(
@@ -1238,25 +1241,27 @@ class _AppShellState extends State<AppShell>
                         // hands the frame budget to the transition.
                         TickerMode(
                           enabled: !_contentSwitching,
-                          child: AlbumBlurFlowCanvas(
-                            track: state.current,
-                            mode: state.backgroundMode,
-                            pageColor: apple.background,
-                            animationsEnabled:
-                                state.backgroundMode ==
-                                AppBackgroundMode.nowPlayingDynamic,
-                            imagePath: state.backgroundImagePath,
-                            uiAlpha: state.uiAlpha,
-                            imageAlignmentX: state.backgroundImageAlignmentX,
-                            imageAlignmentY: state.backgroundImageAlignmentY,
-                            imageScale: state.backgroundImageScale,
-                            blurSigma: state.backgroundBlurEnabled
-                                ? state.backgroundBlur
-                                : 0,
-                            darkEdge: state.backgroundDarkEdgeEnabled,
-                            quality: state.dynamicBackgroundQuality,
-                            frameRate: state.browseBackgroundFps,
-                            solidColor: state.browseBackgroundColor,
+                          child: Opacity(
+                            opacity: state.backgroundOpacity,
+                            child: AlbumBlurFlowCanvas(
+                              track: state.current,
+                              mode: state.backgroundMode,
+                              pageColor: apple.background,
+                              animationsEnabled:
+                                  state.backgroundMode ==
+                                  AppBackgroundMode.nowPlayingDynamic,
+                              imagePath: state.backgroundImagePath,
+                              imageAlignmentX: state.backgroundImageAlignmentX,
+                              imageAlignmentY: state.backgroundImageAlignmentY,
+                              imageScale: state.backgroundImageScale,
+                              blurSigma: state.backgroundBlurEnabled
+                                  ? state.backgroundBlur
+                                  : 0,
+                              darkEdge: state.backgroundDarkEdgeEnabled,
+                              quality: state.dynamicBackgroundQuality,
+                              frameRate: state.browseBackgroundFps,
+                              solidColor: state.browseBackgroundColor,
+                            ),
                           ),
                         ),
                       // Content sits on a semantic system background from
@@ -1264,13 +1269,12 @@ class _AppShellState extends State<AppShell>
                       // Keeping this veil opaque enough is what makes Apple's
                       // high-contrast labels remain readable over arbitrary
                       // artwork.
-                      if (!sharedBackground)
+                      if (!sharedBackground &&
+                          state.backgroundMode != AppBackgroundMode.windowsMica)
                         Positioned.fill(
                           child: ColoredBox(
                             color: paintedBackdrop
-                                ? apple.background.withValues(
-                                    alpha: (state.uiAlpha * .9).clamp(.56, .92),
-                                  )
+                                ? apple.background.withValues(alpha: .60)
                                 : canvas,
                           ),
                         ),
@@ -1289,13 +1293,16 @@ class _AppShellState extends State<AppShell>
                             overscan.bottom,
                           );
                         }(),
-                        child: largeScreen
-                            ? _largeScreenLayout(apple)
-                            : tablet
-                            ? _tabletLayout(apple)
-                            : compact
-                            ? _compactLayout(apple)
-                            : _desktopLayout(apple, compactBar: compactBar),
+                        child: Opacity(
+                          opacity: sharedBackground ? 1 : state.uiAlpha,
+                          child: largeScreen
+                              ? _largeScreenLayout(apple)
+                              : tablet
+                              ? _tabletLayout(apple)
+                              : compact
+                              ? _compactLayout(apple)
+                              : _desktopLayout(apple, compactBar: compactBar),
+                        ),
                       ),
                     ],
                   ),
@@ -1360,7 +1367,15 @@ class _AppShellState extends State<AppShell>
                               // closing reveals the shell again, so it has to
                               // paint live instead of showing the old raster.
                               snapshotReverse: false,
-                              child: shell,
+                              child: Opacity(
+                                opacity:
+                                    _nowPlayingOpen &&
+                                        state.playerBackground ==
+                                            AppBackgroundMode.windowsMica
+                                    ? 0
+                                    : 1,
+                                child: shell,
+                              ),
                             ),
                           ),
                         ),
@@ -1375,7 +1390,9 @@ class _AppShellState extends State<AppShell>
                                 // Keep the browse page hidden under an upward
                                 // overshoot without painting a black layer over
                                 // the player's own album canvas.
-                                if (_nowPlayingMotion.value > 1)
+                                if (_nowPlayingMotion.value > 1 &&
+                                    state.playerBackground !=
+                                        AppBackgroundMode.windowsMica)
                                   const ColoredBox(color: Colors.black),
                                 child!,
                               ],
@@ -1416,7 +1433,7 @@ class _AppShellState extends State<AppShell>
               Expanded(
                 child: Column(
                   children: <Widget>[
-                    if (_hasOpenDetail) _desktopToolbar(apple),
+                    if (_hasOpenDetail && _playlist == null) _desktopToolbar(),
                     Expanded(
                       child: RepaintBoundary(
                         child: _content(
@@ -1446,7 +1463,7 @@ class _AppShellState extends State<AppShell>
   /// Detail views keep a compact desktop back affordance in the content pane.
   /// The browse root stays chrome-free, while an open artist, playlist or
   /// network pane never leaves keyboard and mouse users without a way back.
-  Widget _desktopToolbar(AppleSemanticColors apple) {
+  Widget _desktopToolbar() {
     return SizedBox(
       height: _desktopToolbarHeight,
       // Share the page canvas without adding a separate header tint.
@@ -1459,8 +1476,6 @@ class _AppShellState extends State<AppShell>
               icon: Icons.chevron_left_rounded,
               onPressed: _backToRoot,
             ),
-            const Spacer(),
-            _accountButton(apple, radius: 16),
           ],
         ),
       ),
@@ -1536,6 +1551,13 @@ class _AppShellState extends State<AppShell>
         onNowPlaying: _openNowPlaying,
         account: _accountButton(apple, radius: 22),
         playing: state.playing,
+        nowPlaying: LargeScreenNowPlaying(
+          state: state,
+          onOpen: _openNowPlaying,
+        ),
+        onListenTogether: state.supportsMusic(MusicCapability.listenTogether)
+            ? () => unawaited(showListenTogetherDialog(context, state))
+            : null,
       ),
     );
   }
@@ -1768,8 +1790,12 @@ class _AppShellState extends State<AppShell>
   Widget _sidebar(AppleSemanticColors apple) {
     return AppleGlass(
       borderRadius: BorderRadius.zero,
-      blurSigma: 16,
-      color: apple.glass.withValues(alpha: .92),
+      blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica ? 0 : 16,
+      color: apple.glass.withValues(
+        alpha: state.backgroundMode == AppBackgroundMode.windowsMica
+            ? .60
+            : .92,
+      ),
       child: SizedBox(
         width: 236,
         child: Column(
@@ -1842,6 +1868,20 @@ class _AppShellState extends State<AppShell>
                                 !_comments,
                             onTap: () => _select(_AppSection.likes),
                           ),
+                        if (state.supportsMusic(
+                          MusicCapability.listenTogether,
+                        )) ...<Widget>[
+                          const SizedBox(height: 2),
+                          AppRailItem(
+                            key: const ValueKey('rail-listen-together'),
+                            icon: Icons.group_rounded,
+                            label: '一起听',
+                            selected: false,
+                            onTap: () => unawaited(
+                              showListenTogetherDialog(context, state),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 22),
                         SizedBox(
                           height: 33,
@@ -2112,7 +2152,8 @@ class _AppShellState extends State<AppShell>
   }
 
   Widget _accountButton(AppleSemanticColors apple, {double radius = 15}) {
-    return PopupMenuButton<String>(
+    final Widget button = PopupMenuButton<String>(
+      key: const ValueKey('header-account'),
       tooltip: context.tr(state.isGuest ? '登录' : state.user.name),
       offset: const Offset(0, 42),
       color: apple.tertiaryBackground,
@@ -2127,6 +2168,17 @@ class _AppShellState extends State<AppShell>
         label: _accountInitial,
         avatarUrl: state.isGuest ? null : state.user.avatarUrl,
         signedIn: !state.isGuest,
+      ),
+    );
+    if (!_isLargeScreen(context)) return button;
+    return TvFocusHighlight(
+      borderRadius: BorderRadius.circular(radius + 6),
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          focusColor: Colors.transparent,
+          hoverColor: Colors.transparent,
+        ),
+        child: Padding(padding: const EdgeInsets.all(6), child: button),
       ),
     );
   }
@@ -2269,7 +2321,25 @@ class _AppShellState extends State<AppShell>
     }
     final Playlist? playlist = _playlist;
     if (playlist != null) {
-      return AppPlaylistPage(state: state, playlist: playlist, album: _album);
+      final double width = MediaQuery.sizeOf(context).width;
+      final bool desktop =
+          !useCompactLayout(
+            state.uiMode,
+            width,
+            layoutStyle: state.layoutStyle,
+          ) &&
+          !(useTabletLayout(
+                state.uiMode,
+                width,
+                layoutStyle: state.layoutStyle,
+              ) &&
+              (state.autoDpiScale || state.dpiScale >= .95));
+      return AppPlaylistPage(
+        state: state,
+        playlist: playlist,
+        album: _album,
+        onBack: desktop ? _backToRoot : null,
+      );
     }
     return switch (_section) {
       _AppSection.home => AppHomePage(

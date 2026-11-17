@@ -54,16 +54,23 @@ Future<({bool watch, bool round})> detectWatch() async {
 /// surface on a touch device for testing, and a TV can be told to use the
 /// standard density without losing remote navigation.
 class TvScope extends InheritedWidget {
-  const TvScope({super.key, required this.active, required super.child});
+  const TvScope({
+    super.key,
+    required this.active,
+    bool? largeScreen,
+    required super.child,
+  }) : largeScreen = largeScreen ?? active;
 
   /// Whether tappable surfaces must also be focusable with a remote.
   final bool active;
+  final bool largeScreen;
 
   static bool isActive(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<TvScope>()?.active ?? false;
 
   @override
-  bool updateShouldNotify(TvScope oldWidget) => oldWidget.active != active;
+  bool updateShouldNotify(TvScope oldWidget) =>
+      oldWidget.active != active || oldWidget.largeScreen != largeScreen;
 }
 
 /// Extra breathing room a television needs so overscan does not clip chrome.
@@ -71,7 +78,7 @@ class TvScope extends InheritedWidget {
 /// Android TV reports no safe-area padding of its own, yet many panels crop a
 /// few percent off every edge. The shell and the immersive player both inset
 /// their content with this instead of relying on [SafeArea] alone.
-EdgeInsets tvSafeInsets(BuildContext context) => TvScope.isActive(context)
+EdgeInsets tvSafeInsets(BuildContext context) => largeScreenModeOf(context)
     ? const EdgeInsets.fromLTRB(24, 16, 24, 16)
     : EdgeInsets.zero;
 
@@ -99,11 +106,11 @@ void revealTvFocus(
 
 /// Whether the ten-foot presentation is in effect.
 ///
-/// The large-screen mode owns both the layout and the input model: it replaces
-/// the source-list shell with the shelf-and-rail composition, and it is exactly
-/// the case where a remote must be able to reach everything. Off a large
-/// screen this is false and every helper in this file collapses to its child.
-bool largeScreenModeOf(BuildContext context) => TvScope.isActive(context);
+/// Layout preferences control the shelf-and-rail composition independently
+/// of remote input. A television forced to use desktop layout must retain
+/// directional navigation through [TvScope.isActive].
+bool largeScreenModeOf(BuildContext context) =>
+    context.dependOnInheritedWidgetOfExactType<TvScope>()?.largeScreen ?? false;
 
 /// The D-pad traversal used by the large-screen presentation.
 ///

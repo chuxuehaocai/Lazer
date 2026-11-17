@@ -30,7 +30,8 @@ README.md
     "websocket": ["socket.example.com"],
     "websocketServer": ["127.0.0.1:11444"],
     "storage": true,
-    "filesystem": true
+    "filesystem": true,
+    "data": ["library", "profile", "history"]
   }
 }
 ```
@@ -108,7 +109,7 @@ end
 | `host.storage_keys()` / `host.storage_clear()` | 枚举或清空插件自己的持久化空间 |
 | `host.file({operation, path, data, encoding, recursive})` / `host.files(spec)` | 申请文件管理权限后访问插件专属文件沙箱；支持 `read`、`write`、`append`、`list`、`mkdir`、`stat`、`exists`、`delete` |
 | `host.info()` / `host.plugin_info()` | 读取插件清单、宿主运行端和可用 host 特性 |
-| `host.resource(path)` / `host.read_resource(path)` / `host.resource_keys()` | 读取或枚举 ZIP 中的 JSON、TXT、Markdown 文本资源；不能访问宿主文件系统 |
+| `host.resource(path)` / `host.read_resource(path)` / `host.resource_keys()` | 读取或枚举 ZIP 中的 JSON、TXT、Markdown、HTML、CSS、JS、SVG 文本资源；不能访问宿主文件系统 |
 | `host.log(level, message, data)` | 写入经过脱敏和长度限制的宿主诊断日志 |
 | `host.sleep(milliseconds)` | 在 Lua 异步挂起一小段时间，最长 60 秒；适合轮询和限流 |
 | `host.add_setting(spec)` | 向设置页注册一个受宿主约束的设置项；返回当前值 |
@@ -120,7 +121,79 @@ end
 | `host.add_player_menu_item(spec)` | 向正在播放页右上角的“三个点”菜单注册一个项目；返回 `true` |
 | `host.player_control(spec)` | 控制播放器播放、暂停、上下首、进度跳转或调节音量；返回执行结果 |
 | `host.player_state()` / `host.player_status()` / `host.player_queue()` / `host.player_track()` | 查询当前歌曲、进度、音量、缓冲、队列索引和播放模式 |
-| `host.player_lyrics()` / `host.player_recent()` | 查询当前歌词和最近播放歌曲，适合自定义播放界面 |
+| `host.player_lyrics()` / `host.player_recent()` | 查询当前歌词和最近播放歌曲；最近播放需要 `history` 隐私权限 |
+| `host.permissions()` / `host.request_permission(scope)` | 查看本插件声明/已获准的数据权限，或主动请求一个权限；未声明的权限返回 `false` |
+| `host.library(spec)` / `host.search(spec)` | 在 `library` 权限下读取歌单、指定歌单/专辑曲目、本地音乐、搜索及按目录 ID 播放 |
+| `host.user(spec)` | 在 `profile` / `history` 权限下读取平台与账号基本资料或本机收听统计 |
+
+### 独立前端与隐私资料
+
+独立前端插件可以组合宿主页面编辑 API、主题/布局描述、播放事件与后端资料 API，
+也可以通过已授权的 TCP / WebSocket 服务连接自己实现的外部前端。ZIP 现在允许随包携带
+HTML、CSS、JavaScript 与 SVG，使用 `host.resource("frontend/index.html")` 读取。
+它们是受包大小与路径限制的只读文本资源，宿主不会执行 JavaScript，也不会赋予宿主文件系统访问能力。
+Flutter 内的页面仍由宿主渲染；本版本没有任意 Widget 注入或替换整个应用进程的接口。
+
+隐私权限必须在 `permissions.data` 中声明，并在实际读取前由用户同意。三个权限互相独立：
+
+| scope | 可读取的内容 |
+| --- | --- |
+| `library` | 当前资料库歌单、指定歌单/专辑曲目、本地音乐条目、音乐搜索；按宿主目录 ID 开始播放 |
+| `profile` | 已连接平台与能力、当前平台、账号原始 ID、昵称、头像 |
+| `history` | 最近播放，以及本机记录的播放次数、跳过次数和收听时长 |
+
+声明并不等于授权。插件可先调用 `host.request_permission("library")`，用户拒绝时返回
+`false`；直接调用受保护的数据 API 时也会先触发授权申请，拒绝则抛出 Lua 错误，可用 `pcall` 处理。
+未声明的数据权限不会弹窗，也不会触达后端。`host.permissions()` 返回
+`{declared={...}, granted={...}}`。授权按插件存储，用户可在插件详情里逐项撤销，
+撤销无需重启插件，正在加载但尚未返回 Lua 的私密数据也会被丢弃。插件更新会重新申请权限。
+旧 `host.player_recent()` 和 `player_control` 的 `recent` / `recent_tracks` / `recenttracks`
+别名同样需要 `history`，旧插件需要补充声明。
+
+```lua
+-- 不要在插件入口初始化中申请资料：安装探测阶段没有宿主资料接口。
+-- 在用户点击页面按钮、播放器菜单或外部前端发来明确请求之后调用：
+if not host.request_permission("library") then
+  return {error = "library permission declined"}
+end
+local lists = host.library({operation="playlists", offset=0, limit=50})
+local tracks = host.library({operation="tracks", id=lists.items[1].id,
+  offset=0, limit=100})
+host.library({operation="play", kind="playlist", id=lists.items[1].id,
+  index=0})
+local search = host.search({query="Miku", offset=0, limit=30})
+local info = host.user({operation="profile"}) -- 单独申请 profile
+local stats = host.user({operation="statistics", range="last7Days"}) -- history
+```
+
+`host.library` 的 `operation`：
+
+- `playlists`：当前平台的个人歌单；本地离线平台返回空列表。
+- `tracks`：`id` 指定的歌单曲目；`album`：`id` 指定的专辑曲目。
+- `local`：本地音乐库中可播放的条目，不包含文件路径。
+- `search`：`query` 为 1–256 字符，返回 `tracks`、`albums`、`artists`、`playlists` 四个分页结果。
+- `play`：`kind` 为 `song` / `album` / `playlist`（默认）；`id` 使用前述查询返回的
+  完整宿主 ID，`index` 为从零开始的起播位置。此操作只接受目录身份，不接受任意 URL 或文件路径。
+
+分页结果为 `{items, offset, limit, total, hasMore}`；`offset` 从零开始，`limit` 默认 50，
+限制为 1–200。宿主复用目录缓存，然后切出响应分页；大型远端歌单的首次加载仍取决于平台后端。
+歌单返回 `{id,name,description,coverUrl,trackCount}`，歌曲保持播放器 `track` 的通用结构。
+本地文件封面不会导出绝对路径；只返回无 URL 用户名/密码的 HTTP(S) 封面地址。
+
+`host.user` 的 `operation`：
+
+- `profile`（默认）：返回 `{activePlatform,activeConnection,accounts}`；每个账号只含
+  `{connection,platform,id,name,handle,avatarUrl}`，`id` 保留平台的原始字符串身份。
+- `platforms`：返回平台 `{id,name,connection,active,signedIn,capabilities}` 列表。
+- `statistics`：`range` 可为 `today` / `last7Days` / `last30Days` / `allTime`（默认），
+  返回 `{source="device",range,playCount,skipCount,durationMs,mostPlayed,mostSkipped}`。
+  两个歌曲排行采用相同分页结构，条目为 `{track,playCount,skipCount,durationMs}`。
+  这些是本机记录，不冒充平台账号的跨设备历史总量。
+
+账号 Cookie、密码、令牌、认证详情、插件私有存储、可播放音源 URL 及本地文件路径均不通过这些接口导出。
+外部前端应对客户端连接进行认证，只转发它真正需要的响应；网络/监听权限仍按原有清单单独申请。
+同一个 Lua VM 不能在正在执行的操作中等待宿主再次调用自身目录后端；这类重入会立即失败。
+音乐平台插件自己的前端应直接调用其 Lua 目录函数，独立前端插件可以调用其他平台后端。
 
 插件可以在入口文件执行时注册设置、插件页面和正在播放菜单项目。注册是幂等的，同一个插件内重复使用
 相同的 `id` 会更新项目。设置值由宿主持久化，插件通过 `setting_changed` 操作接收变化；
@@ -146,6 +219,7 @@ local recent = host.player_recent()
 
 -- 接收宿主广播的播放事件：
 -- operation == "player_event", args.type 为 "track" | "queue" | "lyric" | "status"
+```
 
 ```lua
 local quality = host.add_setting({

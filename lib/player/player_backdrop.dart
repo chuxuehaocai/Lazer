@@ -8,6 +8,7 @@ import '../data/models.dart';
 import '../ui/background.dart';
 import '../state/ui_preferences.dart';
 import '../theme/adaptive_contrast.dart';
+import '../widgets/windows_backdrop.dart';
 
 /// The immersive player canvas: album-colour flow + a real, heavily blurred
 /// cover bloom + Apple Music's dark vignette.
@@ -152,13 +153,18 @@ class _AlbumBlurFlowCanvasState extends State<AlbumBlurFlowCanvas>
   void didUpdateWidget(covariant AlbumBlurFlowCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.track?.id != widget.track?.id ||
-        oldWidget.track?.coverUrl != widget.track?.coverUrl) {
+        oldWidget.track?.coverUrl != widget.track?.coverUrl ||
+        oldWidget.mode != widget.mode) {
       unawaited(_updatePalette());
     }
   }
 
   Future<void> _updatePalette() async {
     final int generation = ++_generation;
+    if (widget.mode != AppBackgroundMode.nowPlayingDynamic &&
+        widget.mode != AppBackgroundMode.nowPlayingStatic) {
+      return;
+    }
     final String? coverUrl = widget.track?.coverUrl;
     // Switch the canvas in this build. Waiting for the artwork must not leave
     // the previous track's palette visible throughout the retry window.
@@ -187,6 +193,12 @@ class _AlbumBlurFlowCanvasState extends State<AlbumBlurFlowCanvas>
 
   @override
   Widget build(BuildContext context) {
+    if (widget.mode == AppBackgroundMode.windowsMica) {
+      return RepaintBoundary(
+        key: widget.boundaryKey,
+        child: const MicaSurface(),
+      );
+    }
     return ExcludeSemantics(
       child: RepaintBoundary(
         key: widget.boundaryKey,

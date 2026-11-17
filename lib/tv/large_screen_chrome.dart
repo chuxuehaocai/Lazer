@@ -21,6 +21,8 @@ import '../theme/apple_design.dart';
 import '../widgets/copyable_song_title.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/interaction_feedback.dart';
+import '../widgets/artwork_image.dart';
+import '../utils/artwork.dart';
 import 'large_screen_widgets.dart';
 import '../ui/player_bar.dart';
 
@@ -60,6 +62,8 @@ class LargeScreenNavBar extends StatelessWidget {
     required this.account,
     this.playing = false,
     this.showLikes = true,
+    this.nowPlaying,
+    this.onListenTogether,
   });
 
   final LargeScreenTab selected;
@@ -72,6 +76,8 @@ class LargeScreenNavBar extends StatelessWidget {
   final Widget account;
   final bool playing;
   final bool showLikes;
+  final Widget? nowPlaying;
+  final VoidCallback? onListenTogether;
 
   @override
   Widget build(BuildContext context) {
@@ -131,17 +137,6 @@ class LargeScreenNavBar extends StatelessWidget {
                           color: apple.separator,
                         ),
                         _NavChip(
-                          key: const ValueKey<String>(
-                            'large-screen-now-playing',
-                          ),
-                          label: '正在播放',
-                          icon: playing
-                              ? Icons.graphic_eq_rounded
-                              : Icons.play_circle_outline_rounded,
-                          selected: false,
-                          onTap: onNowPlaying,
-                        ),
-                        _NavChip(
                           key: const ValueKey<String>('large-screen-search'),
                           icon: Icons.search_rounded,
                           selected: searchActive,
@@ -154,9 +149,125 @@ class LargeScreenNavBar extends StatelessWidget {
                 ),
               ),
             ),
-            // Balances the avatar so the capsule stays optically centred.
-            const SizedBox(width: 40),
+            if (onListenTogether != null) ...<Widget>[
+              Tooltip(
+                message: context.tr('一起听'),
+                child: _NavChip(
+                  key: const ValueKey<String>('large-screen-listen-together'),
+                  icon: Icons.group_rounded,
+                  selected: false,
+                  onTap: onListenTogether!,
+                  iconOnly: true,
+                ),
+              ),
+              const SizedBox(width: 12),
+            ],
+            nowPlaying ??
+                _NavChip(
+                  key: const ValueKey<String>('large-screen-now-playing'),
+                  icon: playing
+                      ? Icons.graphic_eq_rounded
+                      : Icons.play_circle_outline_rounded,
+                  selected: false,
+                  onTap: onNowPlaying,
+                  iconOnly: true,
+                ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A dedicated player destination, independent from the navigation capsule.
+/// Only the progress ring listens to playhead ticks; artwork stays cached.
+class LargeScreenNowPlaying extends StatelessWidget {
+  const LargeScreenNowPlaying({
+    super.key,
+    required this.state,
+    required this.onOpen,
+  });
+
+  final AppState state;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final apple = AppleSemanticColors.of(context);
+    final track = state.current;
+    final String? url = artworkUrlForSize(
+      track?.coverUrl,
+      logicalEdge: 42,
+      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+    );
+    return Tooltip(
+      message: track?.title ?? context.tr('正在播放'),
+      child: Semantics(
+        button: true,
+        label: context.tr('正在播放'),
+        value: track?.title,
+        child: LargeScreenTapTarget(
+          key: const ValueKey<String>('large-screen-now-playing'),
+          borderRadius: BorderRadius.circular(29),
+          focusScale: 1.08,
+          onTap: feedbackAction(context, onOpen),
+          child: SizedBox.square(
+            dimension: 58,
+            child: Stack(
+              alignment: Alignment.center,
+              children: <Widget>[
+                AnimatedBuilder(
+                  animation: state.ticks,
+                  builder: (context, _) {
+                    final int duration = track?.duration.inMilliseconds ?? 0;
+                    final double progress = duration <= 0
+                        ? 0
+                        : (state.precisePosition.inMilliseconds / duration)
+                              .clamp(0.0, 1.0);
+                    return SizedBox.square(
+                      dimension: 50,
+                      child: CircularProgressIndicator(
+                        value: progress,
+                        strokeWidth: 2.5,
+                        backgroundColor: apple.separator,
+                        color: apple.accent,
+                      ),
+                    );
+                  },
+                ),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(21),
+                  child: SizedBox.square(
+                    dimension: 42,
+                    child: url == null || url.isEmpty
+                        ? ColoredBox(
+                            color: apple.fill,
+                            child: Icon(
+                              Icons.music_note_rounded,
+                              color: apple.secondaryLabel,
+                              size: 23,
+                            ),
+                          )
+                        : Image(
+                            image: ArtworkImage.forSize(
+                              url,
+                              logicalEdge: 42,
+                              devicePixelRatio: MediaQuery.devicePixelRatioOf(
+                                context,
+                              ),
+                            ),
+                            fit: BoxFit.cover,
+                            gaplessPlayback: true,
+                            errorBuilder: (_, _, _) => ColoredBox(
+                              color: apple.fill,
+                              child: const Icon(Icons.music_note_rounded),
+                            ),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

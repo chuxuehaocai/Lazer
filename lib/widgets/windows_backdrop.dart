@@ -1,0 +1,167 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
+
+import '../state/app_state.dart';
+import '../state/ui_preferences.dart';
+
+bool get supportsWindowsMica =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+/// Native state is shared by all routes: DWM paints the HWND, not a Flutter
+/// widget. Serialize updates so a late player-open response cannot override
+/// the backdrop selected after closing the player.
+class WindowsBackdrop extends StatefulWidget {
+  const WindowsBackdrop({super.key, required this.state, required this.child});
+  final AppState state;
+  final Widget child;
+
+  @override
+  State<WindowsBackdrop> createState() => _WindowsBackdropState();
+}
+
+class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
+  static const _channel = MethodChannel('dev.naominet.lazer/window_backdrop');
+  (bool, bool)? _requested;
+  Future<void> _pending = Future.value();
+  bool _active = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.addListener(_sync);
+    widget.state.playerPresented.addListener(_sync);
+    if (supportsWindowsMica) windowManager.addListener(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(WindowsBackdrop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.removeListener(_sync);
+      oldWidget.state.playerPresented.removeListener(_sync);
+      widget.state.addListener(_sync);
+      widget.state.playerPresented.addListener(_sync);
+    }
+    _sync();
+  }
+
+  void _sync() {
+    if (!supportsWindowsMica || !mounted) return;
+    final state = widget.state;
+    final mode = state.playerPresented.value
+        ? state.playerBackground
+        : state.backgroundMode;
+    final options = (
+      mode == AppBackgroundMode.windowsMica,
+      state.playerPresented.value ||
+          Theme.of(context).brightness == Brightness.dark,
+    );
+    if (options == _requested) return;
+    _requested = options;
+    _pending = _pending.then((_) async {
+      if (!mounted || _requested != options) return;
+      bool active = false;
+      try {
+        // Flutter's transparent pixels must reach the compositor before the
+        // documented DWM backdrop is selected. Never change window opacity.
+        await windowManager.setBackgroundColor(
+          options.$1
+              ? Colors.transparent
+              : (options.$2 ? Colors.black : Colors.white),
+        );
+        active =
+            await _channel.invokeMethod<bool>('setMica', {
+              'enabled': options.$1,
+              'dark': options.$2,
+            }) ??
+            false;
+      } on MissingPluginException {
+        // Web, old runner or tests: retain a readable opaque theme surface.
+      } on PlatformException {
+        // Composition can be unavailable in remote sessions or older Windows.
+      }
+      if (!active && options.$1) {
+        try {
+          await windowManager.setBackgroundColor(
+            options.$2 ? Colors.black : Colors.white,
+          );
+        } on MissingPluginException {
+          // Tests and a runner without window_manager still use the solid widget.
+        } on PlatformException {
+          // The Flutter surface is opaque even if the native call is unavailable.
+        }
+      }
+      if (mounted && _requested == options && active != _active) {
+        setState(() => _active = active);
+      }
+    });
+    unawaited(_pending);
+  }
+
+  void _refreshFrame() {
+    _requested = null;
+    _sync();
+  }
+
+  @override
+  void onWindowEnterFullScreen() => _refreshFrame();
+  @override
+  void onWindowLeaveFullScreen() => _refreshFrame();
+
+  @override
+  void dispose() {
+    widget.state.removeListener(_sync);
+    widget.state.playerPresented.removeListener(_sync);
+    if (supportsWindowsMica) windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      WindowsBackdropScope(active: _active, child: widget.child);
+}
+
+class WindowsBackdropScope extends InheritedWidget {
+  const WindowsBackdropScope({
+    super.key,
+    required this.active,
+    required super.child,
+  });
+  final bool active;
+  static bool activeOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<WindowsBackdropScope>()
+          ?.active ??
+      false;
+  @override
+  bool updateShouldNotify(WindowsBackdropScope oldWidget) =>
+      oldWidget.active != active;
+}
+
+/// Mica itself is system controlled. This slider changes its visible amount
+/// using a theme-colored veil; content opacity remains independent.
+class MicaSurface extends StatelessWidget {
+  const MicaSurface({super.key, this.opacity = 1});
+  final double opacity;
+  @override
+  Widget build(BuildContext context) {
+    final surface = Theme.of(context).colorScheme.surface;
+    return ColoredBox(
+      color: surface.withValues(
+        alpha: WindowsBackdropScope.activeOf(context)
+            ? 1 - opacity.clamp(0, 1)
+            : 1,
+      ),
+    );
+  }
+}

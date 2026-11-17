@@ -13,27 +13,33 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace {
 
 constexpr char kChannel[] = "lazer/desktop_lyrics";
 constexpr int kDesktopBottomGap = 24;
-constexpr int kDragHandleWidth = 24;
-constexpr int kDragHandleHeight = 56;
+constexpr UINT_PTR kPointerTimer = 0x4c5a;
 
-// Makes the overlay invisible to the mouse. WM_NCHITTEST returns
-// HTTRANSPARENT from the subclass below, so clicks reach the desktop even
-// where a lyric glyph is painted.
-void SetClickThrough(HWND window) {
+// HTTRANSPARENT only passes through windows on the same UI thread. Switch the
+// native transparency flag as the pointer crosses an actual interaction region
+// so Explorer and other applications also receive clicks outside the lyrics.
+void SetClickThrough(HWND window, bool transparent = true) {
   if (window == nullptr) return;
-  LONG_PTR style = GetWindowLongPtrW(window, GWL_EXSTYLE);
-  style |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+  const LONG_PTR previous = GetWindowLongPtrW(window, GWL_EXSTYLE);
+  LONG_PTR style = previous | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+  if (transparent) {
+    style |= WS_EX_TRANSPARENT | WS_EX_LAYERED;
+  } else {
+    style &= ~(WS_EX_TRANSPARENT | WS_EX_LAYERED);
+  }
   style &= ~WS_EX_APPWINDOW;
-  SetWindowLongPtrW(window, GWL_EXSTYLE, style);
+  if (style != previous) SetWindowLongPtrW(window, GWL_EXSTYLE, style);
 }
 
 std::wstring PositionFile() {
@@ -67,7 +73,9 @@ class DesktopLyricsPlugin {
             Detach();
             result->Success(flutter::EncodableValue(true));
           } else if (call.method_name() == "startDesktopDrag") {
-            StartDrag();
+            result->Success(flutter::EncodableValue(StartDrag()));
+          } else if (call.method_name() == "setInteractionRegions") {
+            ConfigureInteraction(call.arguments());
             result->Success(flutter::EncodableValue(true));
           } else {
             result->NotImplemented();
@@ -77,6 +85,7 @@ class DesktopLyricsPlugin {
 
   ~DesktopLyricsPlugin() {
     Detach();
+    RemoveClickThrough();
     channel_.reset();
   }
 
@@ -122,8 +131,9 @@ class DesktopLyricsPlugin {
 
     MONITORINFO monitor = {};
     monitor.cbSize = sizeof(monitor);
-    HMONITOR monitor_handle =
-        MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY);
+    HMONITOR monitor_handle = has_custom_position_
+        ? MonitorFromPoint(POINT{custom_x_, custom_y_}, MONITOR_DEFAULTTONEAREST)
+        : MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY);
     if (!GetMonitorInfoW(monitor_handle, &monitor)) return false;
 
     RECT rect = {};
@@ -156,13 +166,21 @@ class DesktopLyricsPlugin {
     // desktop lyric never eats a double-click on an icon.
     if (view_ != nullptr) SetClickThrough(view_);
     attached_ = true;
+    UpdatePointerTransparency();
     return true;
   }
 
-  void StartDrag() {
-    if (!attached_ || !IsWindow(window_)) return;
+  bool StartDrag() {
+    if (!attached_ || !IsWindow(window_)) return false;
+    dragging_ = true;
+    SetClickThrough(window_, false);
+    SetClickThrough(view_, false);
+    POINT cursor = {};
+    GetCursorPos(&cursor);
     ReleaseCapture();
-    SendMessageW(window_, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    SendMessageW(window_, WM_NCLBUTTONDOWN, HTCAPTION,
+                 MAKELPARAM(cursor.x, cursor.y));
+    dragging_ = false;
     RECT rect = {};
     if (GetWindowRect(window_, &rect)) {
       custom_x_ = rect.left;
@@ -170,6 +188,8 @@ class DesktopLyricsPlugin {
       has_custom_position_ = true;
       SavePosition();
     }
+    UpdatePointerTransparency();
+    return true;
   }
 
   void Detach() {
@@ -194,6 +214,73 @@ class DesktopLyricsPlugin {
   }
 
  private:
+  struct InteractionRect {
+    double left;
+    double top;
+    double right;
+    double bottom;
+  };
+
+  void ConfigureInteraction(const flutter::EncodableValue* value) {
+    const auto* args = value == nullptr
+        ? nullptr : std::get_if<flutter::EncodableMap>(value);
+    if (args == nullptr) return;
+    const auto locked = args->find(flutter::EncodableValue("locked"));
+    locked_ = locked != args->end() &&
+              std::holds_alternative<bool>(locked->second) &&
+              std::get<bool>(locked->second);
+    regions_.clear();
+    const auto regions = args->find(flutter::EncodableValue("regions"));
+    if (regions != args->end()) {
+      if (const auto* list =
+              std::get_if<flutter::EncodableList>(&regions->second)) {
+        for (const auto& region : *list) {
+          const auto* entries = std::get_if<flutter::EncodableList>(&region);
+          if (entries == nullptr || entries->size() != 4) continue;
+          double edges[4] = {};
+          bool valid = true;
+          for (size_t i = 0; i < 4; ++i) {
+            if (const auto* number = std::get_if<double>(&(*entries)[i])) {
+              edges[i] = *number;
+            } else {
+              valid = false;
+              break;
+            }
+            valid = valid && std::isfinite(edges[i]);
+          }
+          if (valid && edges[2] > edges[0] && edges[3] > edges[1]) {
+            regions_.push_back({edges[0], edges[1], edges[2], edges[3]});
+          }
+        }
+      }
+    }
+    InstallClickThrough();
+    UpdatePointerTransparency();
+  }
+
+  bool IsInteractivePoint(POINT point) const {
+    if (locked_ || !ScreenToClient(window_, &point)) return false;
+    // Flutter reports logical pixels; native cursor/window coordinates are
+    // physical pixels and vary as the window moves between monitors.
+    const double scale = GetDpiForWindow(window_) / 96.0;
+    if (scale <= 0) return false;
+    const double x = point.x / scale;
+    const double y = point.y / scale;
+    for (const auto& rect : regions_) {
+      if (x >= rect.left && x < rect.right &&
+          y >= rect.top && y < rect.bottom) return true;
+    }
+    return false;
+  }
+
+  void UpdatePointerTransparency() {
+    POINT cursor = {};
+    const bool interactive = dragging_ ||
+        (GetCursorPos(&cursor) && IsInteractivePoint(cursor));
+    SetClickThrough(window_, !interactive);
+    SetClickThrough(view_, !interactive);
+  }
+
   void LoadPosition() {
     const std::wstring path = PositionFile();
     if (path.empty()) return;
@@ -220,16 +307,6 @@ class DesktopLyricsPlugin {
                                path.c_str());
   }
 
-  bool IsDragHandlePoint(HWND hwnd, LPARAM lparam) const {
-    POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-    if (!ScreenToClient(hwnd, &point)) return false;
-    RECT client = {};
-    if (!GetClientRect(hwnd, &client)) return false;
-    const int top = (client.bottom - kDragHandleHeight) / 2;
-    return point.x >= 0 && point.x < kDragHandleWidth &&
-           point.y >= top && point.y < top + kDragHandleHeight;
-  }
-
   void InstallClickThrough() {
     if (root_proc_ == nullptr) {
       ProcMap()[window_] = this;
@@ -244,9 +321,11 @@ class DesktopLyricsPlugin {
           view_, GWLP_WNDPROC,
           reinterpret_cast<LONG_PTR>(&DesktopLyricsPlugin::OverlayProc)));
     }
+    SetTimer(window_, kPointerTimer, 32, nullptr);
   }
 
   void RemoveClickThrough() {
+    if (IsWindow(window_)) KillTimer(window_, kPointerTimer);
     if (window_ != nullptr && root_proc_ != nullptr) {
       if (IsWindow(window_)) {
         SetWindowLongPtrW(window_, GWLP_WNDPROC,
@@ -281,15 +360,27 @@ class DesktopLyricsPlugin {
       return DefWindowProcW(hwnd, message, wparam, lparam);
     }
     DesktopLyricsPlugin* self = it->second;
-    if (self->taskbar_created_ != 0 && message == self->taskbar_created_) {
+    if (message == WM_TIMER && wparam == kPointerTimer) {
+      self->UpdatePointerTransparency();
+      return 0;
+    }
+    if (message == WM_ENTERSIZEMOVE) self->dragging_ = true;
+    if (message == WM_EXITSIZEMOVE) {
+      self->dragging_ = false;
+      self->UpdatePointerTransparency();
+    }
+    if (self->attached_ && self->taskbar_created_ != 0 &&
+        message == self->taskbar_created_) {
       // Explorer restarted and recreated Progman. Re-own the new desktop.
       self->Attach();
       return 0;
     }
     if (message == WM_NCHITTEST) {
-      return self->IsDragHandlePoint(hwnd, lparam) ? HTCLIENT
-                                                   : HTTRANSPARENT;
+      const POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      return self->dragging_ || self->IsInteractivePoint(point)
+                 ? HTCLIENT : HTTRANSPARENT;
     }
+    if (message == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
     WNDPROC previous =
         hwnd == self->window_ ? self->root_proc_ : self->view_proc_;
     return CallWindowProcW(previous, hwnd, message, wparam, lparam);
@@ -311,6 +402,9 @@ class DesktopLyricsPlugin {
   bool has_custom_position_ = false;
   bool saved_ = false;
   bool attached_ = false;
+  bool dragging_ = false;
+  bool locked_ = false;
+  std::vector<InteractionRect> regions_;
 };
 
 std::map<FlutterDesktopPluginRegistrarRef, DesktopLyricsPlugin*>& Plugins() {

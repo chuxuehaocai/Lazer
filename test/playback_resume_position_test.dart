@@ -20,12 +20,19 @@ const Track _track = Track(
 );
 
 class _Catalog extends Catalog {
+  int resolveCalls = 0;
+  bool failResolve = false;
+
   @override
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool Function()? isCancelled,
-  }) async => 'fixture://resume';
+  }) async {
+    resolveCalls++;
+    if (failResolve) return null;
+    return 'fixture://resume';
+  }
 
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => null;
@@ -127,4 +134,37 @@ void main() {
       reason: 'the end-of-track position is not a playhead to resume at',
     );
   });
+
+  for (final String action in <String>['play', 'toggle', 'retry', 'queue']) {
+    test(
+      '$action requests a new source after the last resolution failed',
+      () async {
+        final _Catalog catalog = _Catalog()..failResolve = true;
+        final _Engine engine = _Engine();
+        final AppState state = AppState(catalog: catalog, audioEngine: engine);
+        addTearDown(state.dispose);
+        state.playQueue(<Track>[_track]);
+        await _until(() => state.playbackError != null);
+        expect(state.playing, isFalse);
+        expect(engine.active, isFalse);
+        final int failedRequests = catalog.resolveCalls;
+
+        catalog.failResolve = false;
+        switch (action) {
+          case 'play':
+            state.play();
+          case 'toggle':
+            state.togglePlay();
+          case 'retry':
+            await state.retryPlayback();
+          case 'queue':
+            state.playTrackAt(0);
+        }
+        await _until(() => engine.active);
+        expect(catalog.resolveCalls, greaterThan(failedRequests));
+        expect(state.playbackError, isNull);
+        expect(state.playing, isTrue);
+      },
+    );
+  }
 }

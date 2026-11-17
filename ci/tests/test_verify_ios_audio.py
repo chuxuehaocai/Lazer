@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import plistlib
 import re
@@ -21,6 +22,54 @@ SPEC.loader.exec_module(VERIFY)
 
 
 class IosAudioExportsTest(unittest.TestCase):
+    def build_settings(self, path, **overrides):
+        settings = {
+            "STRIP_STYLE": "non-global",
+            "OTHER_LDFLAGS": (
+                '-Wl,-force_load,"/build/native deps/liblazer-audio.a" '
+                '-Wl,-force_load,"/build/native deps/liblazer-audio-bridge.a" '
+                '-Wl,-export_dynamic'
+            ),
+        }
+        settings.update(overrides)
+        path.write_text(json.dumps([
+            {"target": "Runner", "buildSettings": settings},
+            {"target": "LazerPlayCountWidgetExtension", "buildSettings": {}},
+        ]), encoding="utf-8")
+
+    def test_expanded_runner_settings_preserve_ffi_exports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            self.build_settings(path)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(VERIFY.verify_build_settings(path), 0)
+
+    def test_effective_strip_override_cannot_remove_ffi_symbols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            for style in ("all", "", None):
+                with self.subTest(style=style):
+                    self.build_settings(path, STRIP_STYLE=style)
+                    with self.assertRaisesRegex(SystemExit, "retain external FFI symbols"):
+                        VERIFY.verify_build_settings(path)
+
+    def test_missing_runner_and_link_flags_fail_the_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text("[]", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "exactly one Runner"):
+                VERIFY.verify_build_settings(path)
+            for missing in ("liblazer-audio.a", "liblazer-audio-bridge.a", "-export_dynamic"):
+                with self.subTest(missing=missing):
+                    self.build_settings(path)
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    data[0]["buildSettings"]["OTHER_LDFLAGS"] = data[0]["buildSettings"][
+                        "OTHER_LDFLAGS"
+                    ].replace(missing, "removed")
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        VERIFY.verify_build_settings(path)
+
     def test_gate_covers_every_reader_symbol_dart_looks_up(self):
         dart = (REPO / "lib/audio/native/lazer_audio_library_io.dart").read_text(
             encoding="utf-8"

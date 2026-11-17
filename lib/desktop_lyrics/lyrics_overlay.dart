@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
@@ -20,14 +21,38 @@ import '../lyrics/spring.dart';
 import '../theme/lazer_theme.dart';
 import 'overlay_protocol.dart';
 
-const double _horizontalPadding = 26;
+const double _horizontalPadding = 34;
 const double _verticalPadding = 18;
 const double _floatingBottomGap = 72;
 const double _overlayMinWidth = 320;
 const double _overlayDefaultWidth = 420;
 const double _overlayMaxWidth = 760;
-const double _dragHandleWidth = 24;
-const double _dragHandleHeight = 56;
+const double _dragHandleWidth = 28;
+const double _dragHandleHeight = 64;
+
+/// The native window and Flutter use exactly the same logical hit regions.
+/// Empty lyric slots, shadow padding and the rest of the transparent window
+/// remain click-through; a locked floating overlay exposes no mouse targets.
+List<Rect> lyricsOverlayInteractiveRegions(
+  Size size, {
+  required bool desktop,
+  required bool locked,
+  List<Rect> lyricBounds = const <Rect>[],
+}) {
+  if (!desktop && locked) return const <Rect>[];
+  final Rect window = Offset.zero & size;
+  return <Rect>[
+    Rect.fromLTWH(
+      0,
+      (size.height - _dragHandleHeight) / 2,
+      _dragHandleWidth,
+      _dragHandleHeight,
+    ).intersect(window),
+    if (!desktop)
+      for (final Rect bounds in lyricBounds)
+        if (bounds.overlaps(window)) bounds.intersect(window),
+  ].where((rect) => !rect.isEmpty).toList(growable: false);
+}
 
 double lyricsOverlaySlotHeight(double fontSize) =>
     (fontSize * 3.0).clamp(48.0, 144.0);
@@ -126,7 +151,9 @@ Future<void> _configureOverlayWindow(LyricsOverlayLaunch launch) async {
         await windowManager.show(inactive: true);
       }
     } else {
-      await windowManager.setIgnoreMouseEvents(launch.settings.locked);
+      if (!Platform.isWindows) {
+        await windowManager.setIgnoreMouseEvents(launch.settings.locked);
+      }
       await windowManager.waitUntilReadyToShow(
         WindowOptions(
           size: size,
@@ -201,6 +228,9 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   bool _seekPending = false;
   bool _playing = false;
   bool _dragHovered = false;
+  bool _interactionSyncScheduled = false;
+  bool _interactionConfigured = false;
+  List<Rect> _interactionRegions = const <Rect>[];
   int _focus = 0;
   double _anchorMs = 0;
   int _anchorMicros = 0;
@@ -305,7 +335,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       _applyAnimationSpeed(settings);
       _refreshTextStyles();
     });
-    if (_mode == LyricsOverlayMode.floating) {
+    if (_mode == LyricsOverlayMode.floating && !Platform.isWindows) {
       unawaited(windowManager.setIgnoreMouseEvents(settings.locked));
     }
     _retarget(instant: true);
@@ -649,12 +679,11 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         decoration: TextDecoration.none,
         shadows: const <Shadow>[
           Shadow(
-            color: Color(0xE6000000),
-            blurRadius: 14,
+            color: Color(0x38000000),
+            blurRadius: 10,
             offset: Offset(0, 2),
           ),
-          Shadow(color: Color(0xB3000000), blurRadius: 4),
-          Shadow(color: Color(0x80000000), blurRadius: 1),
+          Shadow(color: Color(0x20000000), blurRadius: 3),
         ],
       ),
       _settings.fontSize * scale,
@@ -673,6 +702,13 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     final bool hasText = _lines.any(
       (LyricLine line) => line.text.trim().isNotEmpty,
     );
+    final List<Rect> regions = lyricsOverlayInteractiveRegions(
+      window,
+      desktop: desktop,
+      locked: _settings.locked,
+      lyricBounds: desktop ? const <Rect>[] : _lyricHitBounds(window),
+    );
+    _syncInteractionRegions(regions);
     final Widget block = Stack(
       clipBehavior: Clip.hardEdge,
       children: <Widget>[
@@ -687,26 +723,127 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
               _row(_focus + offset, slot, inset),
       ],
     );
-    final Widget content = desktop
-        ? SizedBox.expand(
-            child: Stack(
-              fit: StackFit.expand,
-              children: <Widget>[block, _desktopDragHandle(window.height)],
-            ),
-          )
-        : SizedBox.expand(child: block);
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: desktop
-          ? content
-          : GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (DragStartDetails details) {
-                unawaited(windowManager.startDragging());
-              },
-              child: content,
+      body: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          IgnorePointer(child: block),
+          for (final Rect rect in regions.skip(1))
+            Positioned.fromRect(
+              rect: rect,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.move,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanStart: (_) => unawaited(_startDrag()),
+                ),
+              ),
             ),
+          if (regions.isNotEmpty) _desktopDragHandle(window.height),
+        ],
+      ),
     );
+  }
+
+  List<Rect> _lyricHitBounds(Size size) {
+    if (_lines.isEmpty) {
+      return <Rect>[
+        Rect.fromCenter(
+          center: size.center(Offset.zero),
+          width: math.max(0, size.width - _horizontalPadding * 2),
+          height: math.min(size.height - _verticalPadding * 2, _slotHeight),
+        ),
+      ];
+    }
+    final theme = LazerThemeTokens.of(context);
+    final int count = _settings.lineCount.clamp(1, 5);
+    final double slot = _slotHeight;
+    final painter = TextPainter(
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+      ellipsis: '…',
+    );
+    final bounds = <Rect>[];
+    try {
+      for (int offset = -(count ~/ 2); offset < count - count ~/ 2; offset++) {
+        final int index = _focus + offset;
+        if (index < 0 || index >= _lines.length) continue;
+        final line = _lines[index];
+        if (line.text.trim().isEmpty) continue;
+        double width = 0;
+        double height = 0;
+        final texts = <String>[
+          line.text,
+          if (_settings.showRomanization && line.romanization != null)
+            line.romanization!,
+          if (line.translation != null) line.translation!,
+        ];
+        for (int i = 0; i < texts.length; i++) {
+          painter.text = TextSpan(
+            text: texts[i],
+            style: i == 0
+                ? _lyricStyle
+                : _lyricStyle.copyWith(
+                    fontSize: (_settings.fontSize * theme.lyricTranslationScale)
+                        .clamp(12, 30),
+                    height: theme.lyricTranslationLineHeight,
+                  ),
+          );
+          painter.layout(
+            maxWidth: math.max(0, size.width - _horizontalPadding * 2),
+          );
+          width = math.max(width, painter.width);
+          height += painter.height + (i == 0 ? 0 : theme.lyricTranslationGap);
+        }
+        bounds.add(
+          Rect.fromLTWH(
+            _horizontalPadding - 6,
+            _verticalPadding +
+                (offset + count ~/ 2) * slot +
+                (slot - height) / 2 -
+                6,
+            width + 12,
+            height + 12,
+          ),
+        );
+      }
+    } finally {
+      painter.dispose();
+    }
+    return bounds;
+  }
+
+  void _syncInteractionRegions(List<Rect> regions) {
+    if (!Platform.isWindows ||
+        (_interactionConfigured && listEquals(_interactionRegions, regions))) {
+      return;
+    }
+    _interactionConfigured = true;
+    _interactionRegions = regions;
+    if (_interactionSyncScheduled) return;
+    _interactionSyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _interactionSyncScheduled = false;
+      if (!mounted) return;
+      try {
+        await const MethodChannel(kDesktopLyricsChannel).invokeMethod<void>(
+          'setInteractionRegions',
+          <String, Object?>{
+            'locked': _interactionRegions.isEmpty,
+            'regions': <List<double>>[
+              for (final rect in _interactionRegions)
+                <double>[rect.left, rect.top, rect.right, rect.bottom],
+            ],
+          },
+        );
+      } on MissingPluginException {
+        // Other desktop platforms retain the normal window-manager behavior.
+      } catch (error) {
+        AppLog.shared.record('desktop lyrics interaction: $error');
+      }
+    });
   }
 
   Widget _row(int index, double slot, double inset) {
@@ -791,9 +928,11 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             // below the current one unreadable. Keeping the first row of
             // slack sharp — and capping the far end — keeps the depth cue
             // without turning the panel into a smudge.
-            final double distance = (((motion.y.value - activeY).abs() / slot) -
-                    0.8)
-                .clamp(0.0, 4.0);
+            final double distance =
+                (((motion.y.value - activeY).abs() / slot) - 0.8).clamp(
+                  0.0,
+                  4.0,
+                );
             final double sigma = _settings.blurEnabled
                 ? (distance * 1.25 * _settings.blurIntensity).clamp(0.0, 3.5)
                 : 0.0;
@@ -875,18 +1014,25 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanStart: (DragStartDetails details) {
-            unawaited(_startDesktopDrag());
+            unawaited(_startDrag());
           },
           child: AnimatedOpacity(
-            opacity: _dragHovered ? 1 : .3,
+            opacity: _dragHovered ? 1 : .45,
             duration: MotionTiming.scale(const Duration(milliseconds: 140)),
             child: Center(
               child: Container(
-                width: 4,
-                height: 30,
+                width: 20,
+                height: 44,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: .72),
-                  borderRadius: BorderRadius.circular(2),
+                  color: Colors.white.withValues(
+                    alpha: _dragHovered ? .18 : .06,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.drag_indicator_rounded,
+                  size: 18,
+                  color: Colors.white70,
                 ),
               ),
             ),
@@ -896,11 +1042,17 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     );
   }
 
-  Future<void> _startDesktopDrag() async {
+  Future<void> _startDrag() async {
     try {
-      await const MethodChannel(
-        kDesktopLyricsChannel,
-      ).invokeMethod<void>('startDesktopDrag');
+      if (_mode == LyricsOverlayMode.desktop && Platform.isWindows) {
+        final bool moved =
+            await const MethodChannel(
+              kDesktopLyricsChannel,
+            ).invokeMethod<bool>('startDesktopDrag') ??
+            false;
+        if (moved) return;
+      }
+      await windowManager.startDragging();
     } catch (error) {
       AppLog.shared.record('desktop lyrics drag: $error');
     }

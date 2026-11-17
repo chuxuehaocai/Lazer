@@ -14,6 +14,7 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 import 'plugin_manifest.dart';
+import 'plugin_data_access.dart' show pluginFrontendLua;
 import 'plugin_socket_inbox.dart';
 import 'lua_console_evaluator.dart';
 import '../diagnostics/app_log.dart';
@@ -684,6 +685,7 @@ class _WebPluginHost {
         player_track = _player_track, now_playing = _player_track,
         player_lyrics = _player_lyrics, player_recent = _player_recent,
         file = _file, files = _file, sleep = _sleep }
+      $pluginFrontendLua
       $moduleBuffers
       local modules = {}
       function require(name)
@@ -745,6 +747,7 @@ class _WebPluginHost {
       'socketServer': List<String>.of(manifest.socketServerBindings),
       'websocket': List<String>.of(manifest.websocketDomains),
       'websocketServer': List<String>.of(manifest.websocketServerBindings),
+      'data': manifest.dataPermissions,
       'storage': manifest.storage,
       'filesystem': manifest.filesystem,
     },
@@ -756,6 +759,9 @@ class _WebPluginHost {
       'player',
       'player_lyrics',
       'player_recent',
+      'frontend_library',
+      'frontend_user',
+      'data_permissions',
       'websocket',
       'sleep',
       'pages',

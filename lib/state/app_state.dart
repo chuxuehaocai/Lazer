@@ -57,6 +57,7 @@ import '../plugins/plugin_manager.dart';
 import '../plugins/plugin_market.dart';
 
 part 'music_platform_state.dart';
+part 'plugin_frontend_state.dart';
 
 /// How the session was authenticated.
 enum AuthMethod { qrcode, sms, password, cookie }
@@ -917,6 +918,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Unified layout selector. The legacy [uiMode] and [surface] preferences
   /// remain readable for migration, while new settings use this value.
   AppLayoutStyle layoutStyle = AppLayoutStyle.auto;
+  DesktopTitleBarStyle titleBarStyle = DesktopTitleBarStyle.inline;
   AppTabletRailPosition tabletRailPosition = AppTabletRailPosition.left;
 
   /// Which device form the density is tuned for; [AppSurface.auto] recognises
@@ -952,6 +954,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await (await SharedPreferences.getInstance()).setString(
       'lazer_layout_style',
       value.name,
+    );
+  }
+
+  Future<void> setTitleBarStyle(DesktopTitleBarStyle value) async {
+    if (titleBarStyle == value) return;
+    titleBarStyle = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_title_bar_style', value.name,
     );
   }
 
@@ -1024,9 +1035,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// The vertical scrim stays: it is what keeps the page's text readable.
   bool backgroundDarkEdgeEnabled = true;
 
-  /// `内容不透明度` of the app shell — how much of the backdrop the content
-  /// veil hides.
-  double uiAlpha = 0.7;
+  /// Content and backdrop are composed independently. The former legacy
+  /// preference only controlled a background veil, never the content.
+  double uiAlpha = 1;
+  double backgroundOpacity = 1;
+  double playerBackgroundOpacity = 1;
 
   /// Opacity and backdrop blur used by the compact/tablet page header.
   double headerOpacity = kHeaderOpacityDefault;
@@ -1223,8 +1236,23 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     uiAlpha = value.clamp(0.4, 1.0);
     notifyListeners();
     await (await SharedPreferences.getInstance()).setDouble(
-      'lazer_legacy_ui_alpha',
+      'lazer_content_opacity',
       uiAlpha,
+    );
+  }
+
+  Future<void> setBackgroundOpacity(double value, {bool player = false}) async {
+    if (!value.isFinite) return;
+    final next = value.clamp(0.0, 1.0);
+    if (player) {
+      playerBackgroundOpacity = next;
+    } else {
+      backgroundOpacity = next;
+    }
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      player ? 'lazer_player_background_opacity' : 'lazer_background_opacity',
+      next,
     );
   }
 
@@ -2170,7 +2198,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       browseBackgroundFps = browseFps.isFinite ? browseFps.clamp(10, 1000) : 30;
       final playerFps = prefs.getDouble('lazer_player_background_fps') ?? 30;
       playerBackgroundFps = playerFps.isFinite
-          ? (playerFps == 0 ? 30 : playerFps.clamp(10, 1000))
+          ? (playerFps == 0 ? 0 : playerFps.clamp(10, 1000))
           : 30;
       final browseColor = prefs.getInt('lazer_browse_background_color');
       browseBackgroundColor = browseColor == null ? null : Color(browseColor);
@@ -2244,9 +2272,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           backgroundImageStore.preferenceValue(restoredBackgroundImage),
         );
       }
-      uiAlpha = (prefs.getDouble('lazer_legacy_ui_alpha') ?? 0.7).clamp(
+      uiAlpha = (prefs.getDouble('lazer_content_opacity') ?? 1).clamp(
         0.4,
         1.0,
+      );
+      backgroundOpacity = (prefs.getDouble('lazer_background_opacity') ?? 1)
+          .clamp(0.0, 1.0);
+      playerBackgroundOpacity =
+          (prefs.getDouble('lazer_player_background_opacity') ?? 1)
+              .clamp(0.0, 1.0);
+      titleBarStyle = DesktopTitleBarStyleLabels.parse(
+        prefs.getString('lazer_title_bar_style'),
       );
       headerOpacity =
           (prefs.getDouble('lazer_header_opacity') ?? kHeaderOpacityDefault)
@@ -2971,7 +3007,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         {
           'id': artist.id,
           'name': artist.name,
-          if (artist.coverUrl != null) 'coverUrl': artist.coverUrl,
+          if (artist.coverUrl != null) 'coverUrl': _pluginArtwork(artist.coverUrl),
           if (artist.platformKey != null) 'platformKey': artist.platformKey,
         },
     ],
@@ -2979,10 +3015,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     'albumName': track.album,
     'albumId': track.albumId,
     if (track.albumKey != null) 'albumKey': track.albumKey,
-    'cover': track.coverUrl ?? '',
-    'coverOriginal': track.coverUrl ?? '',
-    'coverUrl': track.coverUrl ?? '',
-    'picUrl': track.coverUrl ?? '',
+    'cover': _pluginArtwork(track.coverUrl) ?? '',
+    'coverOriginal': _pluginArtwork(track.coverUrl) ?? '',
+    'coverUrl': _pluginArtwork(track.coverUrl) ?? '',
+    'picUrl': _pluginArtwork(track.coverUrl) ?? '',
     'duration': track.duration.inMilliseconds,
     'durationMs': track.duration.inMilliseconds,
     if (track.translatedTitle != null) 'translatedTitle': track.translatedTitle,
@@ -3003,6 +3039,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         ?.toString()
         .toLowerCase()
         .trim();
+    if (command != null &&
+        (command.startsWith('library_') || command.startsWith('user_'))) {
+      return _pluginFrontendRequest(command, spec);
+    }
     switch (command) {
       case 'play':
         play();

@@ -13,6 +13,7 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:path/path.dart' as p;
 
 import 'plugin_manifest.dart';
+import 'plugin_data_access.dart' show pluginFrontendLua;
 import 'plugin_sockets_io.dart';
 import 'plugin_websockets_io.dart';
 import 'lua_console_evaluator.dart';
@@ -1047,6 +1048,7 @@ host = { json_encode = _json_encode, json_decode = _json_decode,
   player_track = _player_track, now_playing = _player_track,
   player_lyrics = _player_lyrics, player_recent = _player_recent,
   file = _file, files = _file, sleep = _sleep }
+$pluginFrontendLua
 $moduleBuffers
 local modules = {}
 function require(name)
@@ -1108,6 +1110,7 @@ end
       'socketServer': List<String>.of(manifest.socketServerBindings),
       'websocket': List<String>.of(manifest.websocketDomains),
       'websocketServer': List<String>.of(manifest.websocketServerBindings),
+      'data': manifest.dataPermissions,
       'storage': manifest.storage,
       'filesystem': manifest.filesystem,
     },
@@ -1119,6 +1122,9 @@ end
       'player',
       'player_lyrics',
       'player_recent',
+      'frontend_library',
+      'frontend_user',
+      'data_permissions',
       'websocket',
       'socket',
       'sleep',

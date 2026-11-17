@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
+import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/apple_ui.dart';
@@ -259,9 +260,11 @@ class _AppPlayerBarState extends State<AppPlayerBar>
     }
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return AppleGlass(
-      borderRadius: BorderRadius.zero,
-      blurSigma: 16,
-      color: apple.glassStrong,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica ? 0 : 16,
+      color: state.backgroundMode == AppBackgroundMode.windowsMica
+          ? apple.glassStrong.withValues(alpha: .72)
+          : apple.glassStrong,
       border: Border(top: BorderSide(color: apple.separator, width: .5)),
       child: _withErrorStrip(
         apple,

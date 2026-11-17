@@ -4,6 +4,7 @@ import '../state/build_safe_notifier.dart';
 import 'package:flutter/foundation.dart';
 
 import 'plugin_manifest.dart';
+import 'plugin_data_access.dart';
 import '../gateway/music_gateway.dart';
 import '../utils/system_http.dart';
 import '../theme/lazer_theme.dart';
@@ -26,6 +27,7 @@ class InstalledPlugin {
   bool websocketGranted = false;
   bool websocketServerGranted = false;
   bool filesystemGranted = false;
+  late final PluginDataAccess dataAccess = PluginDataAccess(manifest);
   final Map<String, Object?> settingValues = <String, Object?>{};
   final List<LuaPluginSetting> settings = <LuaPluginSetting>[];
   final List<LuaPlayerMenuItem> playerMenuItems = <LuaPlayerMenuItem>[];
@@ -72,6 +74,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     String? expectedVersion,
   }) => Future.error(const PluginException('当前平台不支持 ZIP 插件安装。'));
   Future<void> setEnabled(String id, bool enabled) =>
+      Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> setDataPermission(String id, String scope, bool granted) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> setNetworkPermission(String id, bool granted) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));

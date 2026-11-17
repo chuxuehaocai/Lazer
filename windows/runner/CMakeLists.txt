@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "desktop_lyrics_plugin.cpp"
   "flutter_window.cpp"
   "system_media_controls.cpp"
+  "window_backdrop.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"

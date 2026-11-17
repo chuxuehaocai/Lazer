@@ -86,12 +86,14 @@ class AppPlaylistPage extends StatefulWidget {
     this.embedded = false,
     this.topInset = 0,
     this.album,
+    this.onBack,
   });
 
   final AppState state;
   final Playlist playlist;
   final bool embedded;
   final double topInset;
+  final VoidCallback? onBack;
 
   /// When set, the page loads album tracks instead of playlist tracks. The
   /// album still travels through [playlist] for the header and title, so both
@@ -444,6 +446,19 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
                       key: _headerKey,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
+                        if (widget.onBack != null)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: IconButton(
+                                key: const ValueKey('playlist-scroll-back'),
+                                tooltip: context.tr('返回'),
+                                icon: const Icon(Icons.chevron_left_rounded),
+                                onPressed: widget.onBack,
+                              ),
+                            ),
+                          ),
                         AppPlaylistHeader(
                           playlist: widget.playlist,
                           compact: compact,
@@ -583,16 +598,17 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
                       // Non-linear both ways: the change is legible at once and
                       // then settles, so a fast scroll does not stack fades.
                       curve: Curves.easeOutCubic,
-                      builder: (BuildContext context, double value, Widget? child) {
-                        if (value <= 0.001) return const SizedBox.shrink();
-                        return Opacity(
-                          opacity: value,
-                          child: Transform.scale(
-                            scale: .9 + .1 * value,
-                            child: child,
-                          ),
-                        );
-                      },
+                      builder:
+                          (BuildContext context, double value, Widget? child) {
+                            if (value <= 0.001) return const SizedBox.shrink();
+                            return Opacity(
+                              opacity: value,
+                              child: Transform.scale(
+                                scale: .9 + .1 * value,
+                                child: child,
+                              ),
+                            );
+                          },
                       child: FloatingActionButton.small(
                         key: const ValueKey<String>('playlist-locate'),
                         heroTag: null,

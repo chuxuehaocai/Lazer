@@ -23,10 +23,10 @@
 #endif
 #endif
 #elif defined(__cplusplus)
-#define LAZER_AUDIO_API extern "C"
+#define LAZER_AUDIO_API extern "C" __attribute__((visibility("default"))) __attribute__((used))
 #define LAZER_AUDIO_CALL
 #else
-#define LAZER_AUDIO_API
+#define LAZER_AUDIO_API __attribute__((visibility("default"))) __attribute__((used))
 #define LAZER_AUDIO_CALL
 #endif
 

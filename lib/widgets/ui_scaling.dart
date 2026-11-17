@@ -134,13 +134,15 @@ class UiScaling extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final DeviceProfile profile = state.layoutStyle == AppLayoutStyle.tv
-        ? DeviceProfile.tv
-        : resolveDeviceProfile(
-            state.surface,
-            television: state.deviceIsTelevision,
-            car: detectCarDisplay(context),
-          );
+    final DeviceProfile profile = switch (state.layoutStyle) {
+      AppLayoutStyle.tv => DeviceProfile.tv,
+      AppLayoutStyle.auto => resolveDeviceProfile(
+        state.surface,
+        television: state.deviceIsTelevision,
+        car: detectCarDisplay(context),
+      ),
+      _ => DeviceProfile.standard,
+    };
     final bool car = profile == DeviceProfile.car;
     final bool tv = profile == DeviceProfile.tv;
     final double floor = dpiScaleFloor(car: car);
@@ -159,6 +161,7 @@ class UiScaling extends StatelessWidget {
         ? child
         : _ScaledInterface(scale: renderedScale, child: child);
     return TvScope(
+      largeScreen: tv,
       // Remote navigation follows the input device, not the density choice: a
       // television told to use standard density still has no touch screen.
       active:

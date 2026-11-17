@@ -383,10 +383,9 @@ class AudioStreamCache {
   /// The file exists by the time this returns, so the engine's reader can open it
   /// immediately; the bytes arrive afterwards.
   ///
-  /// [force] starts a new download even when the cached entry exists — including
-  /// one whose download already failed. The fresh entry resumes from the bytes
-  /// already on disk, so recovering a dead download does not refetch the part
-  /// that did arrive.
+  /// Failed and cancelled downloads are retried on every new open. [force]
+  /// additionally replaces a healthy cached entry. The fresh entry resumes from
+  /// the bytes already on disk, so retrying does not refetch the part that arrived.
   Future<AudioStreamEntry> open(
     String url, {
     int? expectedBytes,
@@ -396,8 +395,13 @@ class AudioStreamCache {
     final int key = _cacheKey(url);
     final AudioStreamEntry? existing = _entries[key];
     if (existing != null && !force) {
-      if (!existing.complete && !existing.cancelled) return existing;
-      // A finished or cancelled download is restarted from what is on disk.
+      if (!existing.complete &&
+          !existing.cancelled &&
+          existing.failure == null) {
+        return existing;
+      }
+      // A completed file is reusable; a terminal failure must create a new HTTP
+      // request even when the provider returned the same signed URL again.
       existing.expectedBytes ??= expectedBytes;
       if (existing.complete) return existing;
     }

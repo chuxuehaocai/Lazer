@@ -222,6 +222,9 @@ class _PluginRow extends StatelessWidget {
     if (plugin.manifest.storage) {
       parts.add(context.tr('本地存储'));
     }
+    if (plugin.manifest.dataPermissions.isNotEmpty) {
+      parts.add(context.tr('隐私资料需授权'));
+    }
     if (plugin.manifest.filesystem) {
       parts.add(context.tr('文件管理权限'));
     }
@@ -729,6 +732,27 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+                ],
+                if (manifest.dataPermissions.isNotEmpty) ...[
+                  _sectionHeader(context, Icons.privacy_tip_outlined, context.tr('隐私资料权限'), apple),
+                  const SizedBox(height: 8),
+                  for (final scope in manifest.dataPermissions)
+                    SwitchListTile.adaptive(
+                      key: ValueKey('data-permission-${manifest.id}-$scope'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(switch (scope) {
+                        'library' => context.tr('歌单与音乐库'),
+                        'profile' => context.tr('平台与账号资料'),
+                        'history' => context.tr('播放记录与统计'),
+                        _ => scope,
+                      }),
+                      value: widget.plugin.dataAccess.granted.contains(scope),
+                      onChanged: widget.manager.busy ? null : (value) async {
+                        await widget.manager.setDataPermission(manifest.id, scope, value);
+                        if (mounted) setState(() {});
+                      },
+                    ),
                   const SizedBox(height: 16),
                 ],
                 if (manifest.filesystem) ...[

@@ -99,19 +99,41 @@ class DesktopNowPlaying extends StatelessWidget {
                       icon: const Icon(Icons.keyboard_arrow_down_rounded),
                     ),
                     const Spacer(),
-                    AccessibleIconButton(
-                      key: const ValueKey('desktop-search-osu'),
-                      tooltip: '在 osu! 中搜索',
-                      onPressed: osuBeatmapSearchUri(track) == null
-                          ? null
-                          : () => unawaited(searchInOsu(context, track)),
-                      color: context.colors.onPlayer,
-                      icon: const Icon(Icons.search_rounded),
+                    DecoratedBox(
+                      key: const ValueKey('desktop-player-actions'),
+                      decoration: BoxDecoration(
+                        color: context.colors.onPlayer.withValues(alpha: .045),
+                        borderRadius: BorderRadius.circular(28),
+                        border: Border.all(
+                          color: context.colors.onPlayer.withValues(alpha: .18),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AccessibleIconButton(
+                              key: const ValueKey('desktop-search-osu'),
+                              tooltip: '在 osu! 中搜索',
+                              onPressed: osuBeatmapSearchUri(track) == null
+                                  ? null
+                                  : () =>
+                                        unawaited(searchInOsu(context, track)),
+                              color: context.colors.onPlayer,
+                              icon: const Icon(Icons.search_rounded),
+                            ),
+                            const SizedBox(width: 2),
+                            _AddToPlaylistButton(state: state, track: track),
+                            const SizedBox(width: 2),
+                            _DownloadButton(state: state, track: track),
+                          ],
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 2),
-                    _AddToPlaylistButton(state: state, track: track),
-                    const SizedBox(width: 2),
-                    _DownloadButton(state: state, track: track),
                   ],
                 ),
               ),
@@ -417,7 +439,7 @@ class _Presentation extends StatelessWidget {
               ),
             ),
           ),
-          if (state.supportsCurrentMusic(MusicCapability.listenTogether))
+          if (state.supportsMusic(MusicCapability.listenTogether))
             AccessibleIconButton(
               tooltip: '一起听',
               onPressed: () =>
@@ -709,7 +731,7 @@ class _DesktopDock extends StatelessWidget {
           child: DecoratedBox(
             decoration: const BoxDecoration(color: Colors.transparent),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
               child: Column(
                 key: const ValueKey('now-playing-transport'),
                 mainAxisSize: MainAxisSize.min,
@@ -764,22 +786,6 @@ class _DesktopDock extends StatelessWidget {
                               ),
                             ],
                           ),
-                  ),
-                  Row(
-                    children: [
-                      _Clock(state: state),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: PlayerSeekBar(
-                          key: const ValueKey('desktop-seek-bar'),
-                          state: state,
-                          trackHeight: 3,
-                          thumbRadius: 5,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      _Clock(state: state, end: true),
-                    ],
                   ),
                   Row(
                     children: [
@@ -846,25 +852,10 @@ class _DesktopDock extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              AccessibleIconButton(
+                              _DesktopPlayPauseButton(
                                 key: const ValueKey('desktop-play-pause'),
-                                autofocus: TvScope.isActive(context),
+                                state: state,
                                 focusNode: playPauseFocus,
-                                tooltip: state.playing ? '暂停' : '播放',
-                                color: context.colors.onPlayer,
-                                onPressed: state.togglePlay,
-                                icon: AnimatedSwitcher(
-                                  switchInCurve: const AppleSpringCurve(),
-                                  switchOutCurve: const AppleSpringCurve(),
-                                  duration: const Duration(milliseconds: 180),
-                                  child: Icon(
-                                    state.playing
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
-                                    key: ValueKey(state.playing),
-                                    size: 28,
-                                  ),
-                                ),
                               ),
                               const SizedBox(width: 8),
                               AccessibleIconButton(
@@ -898,24 +889,42 @@ class _DesktopDock extends StatelessWidget {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            Flexible(child: VolumeControl(state: state)),
-                            const SizedBox(width: 2),
-                            AccessibleIconButton(
-                              key: const ValueKey('desktop-fullscreen'),
-                              tooltip: '全屏 (F)',
-                              color: context.colors.slateDark,
-                              iconSize: 22,
-                              constraints: const BoxConstraints(
-                                minWidth: 40,
-                                minHeight: 48,
+                            if (!largeScreenModeOf(context)) ...[
+                              Flexible(child: VolumeControl(state: state)),
+                              const SizedBox(width: 2),
+                              AccessibleIconButton(
+                                key: const ValueKey('desktop-fullscreen'),
+                                tooltip: '全屏 (F)',
+                                color: context.colors.slateDark,
+                                iconSize: 22,
+                                constraints: const BoxConstraints(
+                                  minWidth: 40,
+                                  minHeight: 48,
+                                ),
+                                padding: const EdgeInsets.all(8),
+                                onPressed: onFullscreen,
+                                icon: const Icon(Icons.fullscreen_rounded),
                               ),
-                              padding: const EdgeInsets.all(8),
-                              onPressed: onFullscreen,
-                              icon: const Icon(Icons.fullscreen_rounded),
-                            ),
+                            ],
                           ],
                         ),
                       ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      _Clock(state: state),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: PlayerSeekBar(
+                          key: const ValueKey('desktop-seek-bar'),
+                          state: state,
+                          trackHeight: 3,
+                          thumbRadius: 5,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _Clock(state: state, end: true),
                     ],
                   ),
                 ],
@@ -926,6 +935,60 @@ class _DesktopDock extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _DesktopPlayPauseButton extends StatelessWidget {
+  const _DesktopPlayPauseButton({
+    super.key,
+    required this.state,
+    this.focusNode,
+  });
+
+  final AppState state;
+  final FocusNode? focusNode;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool remote = TvScope.isActive(context);
+    final Color fill = Color.lerp(
+      Theme.of(context).colorScheme.primary,
+      Colors.white,
+      .32,
+    )!;
+    return TvTapTarget(
+      onTap: feedbackAction(context, state.togglePlay),
+      autofocus: remote,
+      focusNode: remote ? focusNode : null,
+      borderRadius: BorderRadius.circular(24),
+      focusScale: 1.06,
+      child: ExcludeFocus(
+        excluding: remote,
+        child: IconButton(
+          focusNode: remote ? null : focusNode,
+          tooltip: context.tr(state.playing ? '暂停' : '播放'),
+          onPressed: feedbackAction(context, state.togglePlay),
+          style: IconButton.styleFrom(
+            backgroundColor: fill,
+            foregroundColor: const Color(0xff202124),
+            shape: const CircleBorder(),
+            minimumSize: const Size.square(48),
+            fixedSize: const Size.square(48),
+            padding: EdgeInsets.zero,
+          ),
+          icon: AnimatedSwitcher(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
+            child: Icon(
+              state.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              key: ValueKey(state.playing),
+              size: 28,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _Clock extends StatelessWidget {
