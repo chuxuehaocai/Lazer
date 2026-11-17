@@ -89,6 +89,16 @@ class PackageContentsTest(unittest.TestCase):
             notices.mkdir(parents=True)
             for name in ("COPYING.LGPLv2.1", "BUILDINFO.txt", "PROFILE.txt", "ffmpeg-source.tar.gz"):
                 (notices / name).write_bytes(b"excluded material")
+            usb_source = root / "libusb"
+            usb_source.mkdir()
+            (usb_source / "COPYING").write_text("LGPL fixture", encoding="utf-8")
+            (usb_source / "core.c").write_text("/* libusb source fixture */", encoding="utf-8")
+            usb_archive = build / "libusb-1.0.a"
+            usb_archive.write_bytes(b"libusb static library")
+            (build / "lazer-audio/android-usb-relink.json").write_text(
+                json.dumps({"source": str(usb_source), "archive": str(usb_archive)}),
+                encoding="utf-8",
+            )
             output = root / "Lazer-Android-Audio-Relink-arm64-v8a.tar.gz"
             subprocess.run(
                 [sys.executable, str(REPO / "ci/package-android-audio.py"),
@@ -102,6 +112,10 @@ class PackageContentsTest(unittest.TestCase):
                 names = archive.getnames()
                 self.assertIn("objects/engine.cpp.o", names)
                 self.assertIn("ffmpeg/lib/libavcodec.a", names)
+                self.assertIn("libusb/lib/libusb-1.0.a", names)
+                self.assertIn("libusb/COPYING", names)
+                self.assertIn("libusb/source/core.c", names)
+                self.assertIn("libusb/AndroidUac2.cmake", names)
                 manifest = json.load(archive.extractfile("SHA256.json"))
                 for name, digest in manifest.items():
                     self.assertEqual(hashlib.sha256(archive.extractfile(name).read()).hexdigest(), digest)

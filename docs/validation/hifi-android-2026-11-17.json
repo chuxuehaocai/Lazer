@@ -1,0 +1,55 @@
+{
+  "scope": "Historical isolated Android HiFi APK; not a build or hardware result for the current UI branch",
+  "sourceSnapshot": "Lazer-hifi-android-test",
+  "baseCommit": "d599a918a556e04a3918ace64fab197c6acc9a62",
+  "includesUncommittedSourceChanges": true,
+  "snapshotManifestSha256": "9f8fa0e4c7228482c060332cb47ee40bf2eb9351a4d8fc7436badb45dd863103",
+  "sourceEvidence": {
+    "dist/build-manifest.json": "f9c1740e8a8d608dbba1107361b7370f3d9d690e96cb2c0bb6b2906dbdb6875f",
+    "dist/verification.txt": "002bac6575ab7a98d9aed572d049599d046fef4fbde21543227c2fdccd87208e",
+    "dist/README-HiFi-Test.txt": "4bf90e513d742b635a0e9336180b051a87208cf26225e9c22fc5e2a376b0a50f",
+    "tool/dac_acceptance.dart": "917e4411b4f065f5402d92b2b64551c7cf797f8d7c4e4707ceb6168d254ca607"
+  },
+  "historicalBuildCompletedAt": "2026-11-17T23:28:52.790400+08:00",
+  "evidenceReviewedOn": "2026-11-18",
+  "apk": {
+    "file": "Lazer-HiFi-Android-Test.apk",
+    "bytes": 91428598,
+    "sha256": "0253c3392c692efef8237f3b6ad8906100c349eed152997a0de28d35b48b12f1",
+    "sha256RecheckedOnReview": true,
+    "applicationId": "dev.naominet.lazer.hifitest",
+    "label": "Lazer HiFi Test",
+    "versionName": "2.0.300",
+    "versionCode": 300,
+    "minSdk": 26,
+    "targetSdk": 36,
+    "abis": ["arm64-v8a", "armeabi-v7a"],
+    "buildType": "release",
+    "signing": "local Android debug key, APK signature v2"
+  },
+  "engineAbi": 29,
+  "ndk": "28.2.13676358",
+  "historicalVerification": {
+    "gradleAssembleRelease": "passed",
+    "finalArmPackageRelease": "passed",
+    "zipCrcAndCompleteArmPayloads": "passed",
+    "nativeExportsSystemDependenciesAnd16KiBAlignment": "passed",
+    "apk16KiBZipAlignment": "passed",
+    "ffmpegPackagingExclusions": "passed",
+    "apkV2Signature": "passed",
+    "flutterTests": 15,
+    "nativeHostContracts": 5,
+    "hardwareTested": false
+  },
+  "historicalLogs": [
+    "build/apk-release.log",
+    "build/apk-package-arm.log",
+    "build/usb-flutter-tests.log",
+    "build/uac2-contract/Testing/Temporary/LastTest.log",
+    "build/uac2-packetizer/Testing/Temporary/LastTest.log",
+    "build/aaudio-contract/Testing/Temporary/LastTest.log"
+  ],
+  "windowsDacReportIncludedInSourceSnapshot": false,
+  "currentBranchAndroidBuildVerifiedByThisRecord": false,
+  "hardwareTested": false
+}

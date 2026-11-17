@@ -9,10 +9,25 @@ import '../theme/app_palette.dart';
 import 'accessible_controls.dart';
 
 /// App-rendered volume controls shared by both desktop player surfaces.
-class VolumeControl extends StatelessWidget {
+class VolumeControl extends StatefulWidget {
   const VolumeControl({super.key, required this.state, this.onDark = false});
   final AppState state;
   final bool onDark;
+
+  @override
+  State<VolumeControl> createState() => _VolumeControlState();
+}
+
+class _VolumeControlState extends State<VolumeControl> {
+  double? _dragStart;
+  AppState get state => widget.state;
+  bool get onDark => widget.onDark;
+
+  void _cancelDrag(BuildContext context) {
+    final start = _dragStart;
+    _dragStart = null;
+    if (start != null) unawaited(_change(context, state.setVolume(start)));
+  }
 
   Future<void> _change(BuildContext context, Future<void> action) async {
     try {
@@ -39,7 +54,7 @@ class VolumeControl extends StatelessWidget {
       final color = onDark ? context.colors.onPlayer : context.colors.slateDark;
       return LayoutBuilder(
         builder: (context, box) => SizedBox(
-          width: math.min(168, box.maxWidth),
+          width: math.min(box.maxWidth < 88 ? 48 : 168, box.maxWidth),
           child: Row(
             children: [
               AccessibleIconButton(
@@ -58,36 +73,44 @@ class VolumeControl extends StatelessWidget {
                       : Icons.volume_up_rounded,
                 ),
               ),
-              Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 3,
-                    activeTrackColor: color,
-                    inactiveTrackColor: color.withValues(alpha: .25),
-                    thumbColor: context.colors.clay,
-                    overlayColor: context.colors.clay.withValues(alpha: .12),
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 5,
+              if (box.maxWidth >= 88)
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      activeTrackColor: color,
+                      inactiveTrackColor: color.withValues(alpha: .25),
+                      thumbColor: context.colors.clay,
+                      overlayColor: context.colors.clay.withValues(alpha: .12),
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 5,
+                      ),
+                      overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 10,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                     ),
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 10,
+                    child: AccessibleSlider(
+                      semanticLabel: '音量',
+                      semanticFormatterCallback: (value) =>
+                          '${(value * 100).round()}%',
+                      value: state.volume,
+                      // The drag only touches the engine and the in-memory level;
+                      // persisting on every pointer move wrote prefs and
+                      // notified the whole shell dozens of times a second.
+                      onChangeStart: (_) => _dragStart = state.volume,
+                      onChanged: (value) {
+                        state.previewVolume(value);
+                        setState(() {});
+                      },
+                      onChangeEnd: (value) {
+                        _dragStart = null;
+                        unawaited(_change(context, state.setVolume(value)));
+                      },
+                      onChangeCancel: () => _cancelDrag(context),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                  child: AccessibleSlider(
-                    semanticLabel: '音量',
-                    semanticFormatterCallback: (value) =>
-                        '${(value * 100).round()}%',
-                    value: state.volume,
-                    // The drag only touches the engine and the in-memory level;
-                    // persisting on every pointer move wrote prefs and
-                    // notified the whole shell dozens of times a second.
-                    onChanged: state.previewVolume,
-                    onChangeEnd: (value) =>
-                        unawaited(_change(context, state.setVolume(value))),
                   ),
                 ),
-              ),
             ],
           ),
         ),

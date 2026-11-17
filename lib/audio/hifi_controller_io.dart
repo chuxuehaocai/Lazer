@@ -19,6 +19,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../state/hifi_settings.dart';
+import 'android_usb_audio.dart';
 import 'native/audio_path_log.dart';
 import 'native/engine_metrics.dart';
 import 'native/lazer_audio_devices.dart';
@@ -59,7 +60,9 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
     required this.engine,
     required this.persist,
     this.catalogApi,
-  });
+    AndroidUsbAudio? androidUsb,
+  }) : _androidUsb =
+           androidUsb ?? (Platform.isAndroid ? AndroidUsbAudio.instance : null);
 
   /// Persists a snapshot of the settings; injected so tests can observe writes.
   final Future<void> Function(HifiSettings settings) persist;
@@ -70,6 +73,10 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   /// The loaded library, for the platform catalogs. Independent of [engine] so the
   /// device list still works while the native engine is not driving playback.
   final LazerAudioApi? catalogApi;
+  final AndroidUsbAudio? _androidUsb;
+  StreamSubscription<String>? _usbDetachSubscription;
+  bool _disposed = false;
+  int _catalogGeneration = 0;
 
   HifiSettings _settings;
   List<LazerOutputDevice> _devices = const <LazerOutputDevice>[];
@@ -94,10 +101,16 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   Object? get lastApplyError => _lastApplyError;
 
   bool get nativeAvailable => engine != null;
+  bool get usesAndroidUsbDevices => _androidUsb != null;
+  bool get supportsAndroidUsb =>
+      usesAndroidUsbDevices && (catalogApi?.supportsAndroidUsb ?? false);
   bool get supportsDevices =>
-      catalogApi != null && outputDeviceCatalogKind(catalogApi!) != null;
-  bool get supportsExclusiveMode =>
-      Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+      supportsAndroidUsb ||
+      (catalogApi != null && outputDeviceCatalogKind(catalogApi!) != null);
+  bool get supportsExclusiveMode => usesAndroidUsbDevices
+      ? supportsAndroidUsb &&
+            AndroidUsbAudio.isUsbDeviceId(_settings.outputToken)
+      : Platform.isWindows || Platform.isMacOS || Platform.isLinux;
   bool get supportsDoP =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
   bool get supportsNativeDsd => Platform.isLinux;
@@ -121,6 +134,7 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   /// The default endpoint, used for the endpoint-volume row.
   LazerOutputDevice? get defaultDevice {
+    if (usesAndroidUsbDevices) return null;
     for (final LazerOutputDevice device in _devices) {
       if (device.isDefault) return device;
     }
@@ -137,7 +151,9 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
     engineDescription: nativeAvailable
         ? 'native (lazer-audio)'
         : 'just_audio${_nativeReason == null ? '' : ' ($_nativeReason)'}',
-    catalogKind: catalogApi == null
+    catalogKind: supportsAndroidUsb
+        ? 'android-usb-uac2'
+        : catalogApi == null
         ? null
         : outputDeviceCatalogKind(catalogApi!),
     streamInfo: streamInfo,
@@ -178,6 +194,10 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   /// Starts following the engine's negotiated format.
   void attach() {
+    if (_disposed) return;
+    _usbDetachSubscription ??= _androidUsb?.detachedDevices.listen((_) {
+      unawaited(refreshDevices());
+    });
     final NativeAudioEngine? native = engine;
     if (native == null) return;
     _streamInfo = native.streamInfo;
@@ -191,6 +211,10 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _catalogGeneration++;
+    unawaited(_usbDetachSubscription?.cancel());
+    _usbDetachSubscription = null;
     unawaited(_streamSubscription?.cancel());
     _streamSubscription = null;
     _persistTimer?.cancel();
@@ -204,12 +228,13 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   /// touch the DSP once, not also resend the output-device policy and query the
   /// endpoint volume on every detent. Preference writes are coalesced separately.
   Future<void> update(HifiSettings next) async {
-    if (next == _settings) return;
+    if (_disposed || next == _settings) return;
     final HifiSettings previous = _settings;
     final bool outputChanged = !_sameOutputSettings(previous, next);
     final bool endpointChanged = previous.outputToken != next.outputToken;
     final bool dspChanged = !_sameDspSettings(previous, next);
     _settings = next;
+    _schedulePersistence(next);
     notifyListeners();
     try {
       if (outputChanged) {
@@ -220,12 +245,13 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
         }
       }
       if (dspChanged) await _applyDspSettings();
+      if (_disposed || !identical(_settings, next)) return;
       _lastApplyError = null;
     } catch (error) {
+      if (_disposed || !identical(_settings, next)) return;
       _lastApplyError = error;
       debugPrint('hifi: applying settings failed: $error');
     }
-    _schedulePersistence(_settings);
     notifyListeners();
   }
 
@@ -360,6 +386,43 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   /// Re-reads the platform's output devices.
   Future<void> refreshDevices() async {
+    if (_disposed) return;
+    final usb = _androidUsb;
+    if (usb != null) {
+      final generation = ++_catalogGeneration;
+      _busy = true;
+      notifyListeners();
+      try {
+        final candidates = await usb.listDevices();
+        if (_disposed || generation != _catalogGeneration) return;
+        _devices = [
+          for (final device in candidates)
+            LazerOutputDevice(
+              token: device.id,
+              identityKey: device.id,
+              identityIsEphemeral: true,
+              displayName: device.name,
+            ),
+        ];
+        _deviceError = null;
+        _endpointVolume = null;
+      } catch (error) {
+        if (_disposed || generation != _catalogGeneration) return;
+        _devices = const [];
+        _deviceError = '$error';
+      } finally {
+        if (!_disposed && generation == _catalogGeneration) {
+          _busy = false;
+          logAudioPathEvent('device_catalog', <String, Object?>{
+            'kind': 'android-usb-uac2',
+            'count': _devices.length,
+            'error': _deviceError,
+          });
+          notifyListeners();
+        }
+      }
+      return;
+    }
     final LazerAudioApi? api = catalogApi;
     if (api == null) {
       _devices = const <LazerOutputDevice>[];
@@ -394,7 +457,7 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
         'default': defaultDevice?.displayName,
         'error': _deviceError,
       });
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 

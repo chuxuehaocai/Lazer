@@ -1,5 +1,7 @@
+import 'package:file_selector/file_selector.dart' show XFile;
 // i18n:data — interface strings declared here are translated at their render sites.
 import 'dart:async';
+import '../audio/audio_operation_queue.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -44,6 +46,7 @@ import 'listen_together.dart';
 import 'media_shortcuts.dart';
 import 'playback_queue_store.dart';
 import 'shuffle_order.dart';
+import 'station_session.dart';
 import 'hifi_settings.dart';
 import 'ui_preferences.dart';
 import 'scheduled_pause.dart';
@@ -52,11 +55,16 @@ import '../theme/font_preferences.dart';
 import '../theme/imported_font.dart';
 import '../theme/lazer_theme.dart';
 import '../ui/layout_system.dart';
+import '../plugins/plugin_native_api.dart';
+import '../plugins/plugin_native_audio_snapshot.dart';
 import '../plugins/plugin_manifest.dart' show PluginException;
 import '../plugins/plugin_manager.dart';
 import '../plugins/plugin_market.dart';
 
 part 'music_platform_state.dart';
+part 'plugin_frontend_state.dart';
+part 'app_state_station.dart';
+part 'plugin_native_state.dart';
 
 /// How the session was authenticated.
 enum AuthMethod { qrcode, sms, password, cookie }
@@ -569,6 +577,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   TrackTransition _trackTransition = TrackTransition.albumGapless;
   TrackTransition get trackTransition => _trackTransition;
 
+  /// Default, minimum and maximum duration in seconds for AutoMix overlap.
+  static const int defaultAutoMixDurationSeconds = 5;
+  static const int minAutoMixDurationSeconds = 1;
+  static const int maxAutoMixDurationSeconds = 13;
+
+  int _autoMixDurationSeconds = defaultAutoMixDurationSeconds;
+  int get autoMixDurationSeconds => _autoMixDurationSeconds;
+  Duration get autoMixDuration => Duration(seconds: _autoMixDurationSeconds);
+
   /// Whether AutoMix replaces album gapless playback.
   bool get autoMixEnabled => _trackTransition.mixes;
 
@@ -577,55 +594,90 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   String get trackTransitionDetail => autoMixError ?? _trackTransition.detail;
 
   String? autoMixError;
-  Future<void> _autoMixOperations = Future<void>.value();
+  final _autoMixOperations = AudioOperationQueue(maximumPending: 2);
 
   Future<void> setAutoMixEnabled(bool value) =>
       setTrackTransition(TrackTransition.fromAutoMix(value));
 
-  Future<void> setTrackTransition(TrackTransition value) {
-    final result = _autoMixOperations.then((_) async {
-      if (_trackTransition == value && autoMixError == null) return;
+  Future<void> setAutoMixDurationSeconds(int value) {
+    if (_presentationDisposed) return Future.value();
+    final int clamped = value.clamp(
+      minAutoMixDurationSeconds,
+      maxAutoMixDurationSeconds,
+    );
+    if (_autoMixDurationSeconds == clamped) return Future.value();
+    _autoMixDurationSeconds = clamped;
+    notifyListeners();
+    return _autoMixOperations.run(
+      () async {
+        if (_presentationDisposed || clamped != _autoMixDurationSeconds) return;
+        try {
+          final engine = audioEngine;
+          if (engine is AutoMixConfigurableAudioEngine &&
+              _trackTransition.mixes) {
+            await (engine as AutoMixConfigurableAudioEngine).setAutoMixEnabled(
+              true,
+              duration: Duration(seconds: clamped),
+            );
+          }
+          if (_presentationDisposed) return;
+          await (await SharedPreferences.getInstance()).setInt(
+            'lazer_automix_duration_seconds',
+            clamped,
+          );
+          autoMixError = null;
+        } catch (_) {
+          if (!_presentationDisposed) autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
+        }
+        if (!_presentationDisposed) notifyListeners();
+      },
+      key: 'duration',
+      onSuperseded: () {},
+    );
+  }
+
+  Future<void> setTrackTransition(
+    TrackTransition value,
+  ) => _autoMixOperations.run(
+    () async {
+      if (_presentationDisposed ||
+          (_trackTransition == value && autoMixError == null)) {
+        return;
+      }
       final engine = audioEngine;
+      final previous = _trackTransition;
       final resumeAt = precisePosition;
       try {
         if (engine is AutoMixConfigurableAudioEngine) {
           await (engine as AutoMixConfigurableAudioEngine).setAutoMixEnabled(
             value.mixes,
+            duration: autoMixDuration,
           );
         }
+        if (_presentationDisposed) return;
         _trackTransition = value;
         autoMixError = null;
         if (engine != null && _realActive && current != null) {
-          if (isNativeAudioEngine(engine)) {
-            // Switching between passthrough/integer and mixed PCM requires the
-            // native decoder to reopen, using the same engine and output device.
-            await _startAudio(resumeAt: resumeAt);
-          } else if (!autoMixEnabled &&
-              _engineHoldsSuccessor &&
-              !nextTrackContinuesAlbum) {
-            // AutoMix prepared a song from another album; album gapless playback
-            // must cut into it instead of crossing, and only reopening the
-            // current source takes a successor back from the engine.
+          if (isNativeAudioEngine(engine) && previous.mixes != value.mixes) {
+            // Native integer/passthrough and mixed PCM require a new format.
             await _startAudio(resumeAt: resumeAt);
           } else {
-            // The successor already held fits the new policy (or AutoMix has to
-            // prepare one it refused before), so the queue script is redone
-            // without interrupting the song.
-            unawaited(_prefetchNext());
+            // Editing the future queue never reloads the audible source.
+            _refreshQueueSuccessor();
           }
         }
-        await (await SharedPreferences.getInstance()).setBool(
-          'lazer_automix_enabled',
-          value.mixes,
-        );
+        if (_presentationDisposed) return;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('lazer_track_transition', value.name);
+        await prefs.setBool('lazer_automix_enabled', value.mixes);
       } catch (_) {
-        autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
+        if (!_presentationDisposed) autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
       }
       if (!_presentationDisposed) notifyListeners();
-    });
-    _autoMixOperations = result.catchError((Object _) {});
-    return result;
-  }
+    },
+    key: 'transition',
+    onSuperseded: () {},
+  );
 
   /// Tier requested for streaming. Changing it while a track is loaded reloads
   /// that track at the new tier and keeps its position.
@@ -917,6 +969,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Unified layout selector. The legacy [uiMode] and [surface] preferences
   /// remain readable for migration, while new settings use this value.
   AppLayoutStyle layoutStyle = AppLayoutStyle.auto;
+  DesktopTitleBarStyle titleBarStyle = DesktopTitleBarStyle.inline;
   AppTabletRailPosition tabletRailPosition = AppTabletRailPosition.left;
 
   /// Which device form the density is tuned for; [AppSurface.auto] recognises
@@ -951,6 +1004,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
       'lazer_layout_style',
+      value.name,
+    );
+  }
+
+  Future<void> setTitleBarStyle(DesktopTitleBarStyle value) async {
+    if (titleBarStyle == value) return;
+    titleBarStyle = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_title_bar_style',
       value.name,
     );
   }
@@ -1024,9 +1087,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// The vertical scrim stays: it is what keeps the page's text readable.
   bool backgroundDarkEdgeEnabled = true;
 
-  /// `内容不透明度` of the app shell — how much of the backdrop the content
-  /// veil hides.
-  double uiAlpha = 0.7;
+  /// Content and backdrop are composed independently. The former legacy
+  /// preference only controlled a background veil, never the content.
+  double uiAlpha = 1;
+  double backgroundOpacity = 1;
+  double playerBackgroundOpacity = 1;
 
   /// Opacity and backdrop blur used by the compact/tablet page header.
   double headerOpacity = kHeaderOpacityDefault;
@@ -1223,8 +1288,23 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     uiAlpha = value.clamp(0.4, 1.0);
     notifyListeners();
     await (await SharedPreferences.getInstance()).setDouble(
-      'lazer_legacy_ui_alpha',
+      'lazer_content_opacity',
       uiAlpha,
+    );
+  }
+
+  Future<void> setBackgroundOpacity(double value, {bool player = false}) async {
+    if (!value.isFinite) return;
+    final next = value.clamp(0.0, 1.0);
+    if (player) {
+      playerBackgroundOpacity = next;
+    } else {
+      backgroundOpacity = next;
+    }
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      player ? 'lazer_player_background_opacity' : 'lazer_background_opacity',
+      next,
     );
   }
 
@@ -1441,6 +1521,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool get desktopLyricsSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
+  // UI and plugin callers share one bounded writer. Persist the complete mode
+  // snapshot so an older floating write cannot undo a newer desktop selection.
+  late final CoalescingWriter _lyricsOverlayWriter = CoalescingWriter(() async {
+    final prefs = await SharedPreferences.getInstance();
+    final snapshot = (
+      floating: floatingLyricsEnabled,
+      desktop: desktopLyricsEnabled,
+      locked: floatingLyricsLocked,
+      lines: lyricsOverlayLines,
+    );
+    await prefs.setBool(floatingLyricsKey, snapshot.floating);
+    await prefs.setBool(desktopLyricsKey, snapshot.desktop);
+    await prefs.setBool('lazer_floating_lyrics_locked', snapshot.locked);
+    await prefs.setInt(lyricsOverlayLinesKey, snapshot.lines);
+  });
+
   Future<void> setFloatingLyricsEnabled(bool value) async {
     if (floatingLyricsEnabled == value && (!value || !desktopLyricsEnabled)) {
       return;
@@ -1448,19 +1544,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     floatingLyricsEnabled = value;
     if (value) desktopLyricsEnabled = false;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(floatingLyricsKey, value);
-    if (value) await prefs.setBool(desktopLyricsKey, false);
+    await _lyricsOverlayWriter.request();
   }
 
   Future<void> setFloatingLyricsLocked(bool value) async {
     if (floatingLyricsLocked == value) return;
     floatingLyricsLocked = value;
     notifyListeners();
-    await (await SharedPreferences.getInstance()).setBool(
-      'lazer_floating_lyrics_locked',
-      value,
-    );
+    await _lyricsOverlayWriter.request();
   }
 
   Future<void> setDesktopLyricsEnabled(bool value) async {
@@ -1471,9 +1562,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     desktopLyricsEnabled = value;
     if (value) floatingLyricsEnabled = false;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(desktopLyricsKey, value);
-    if (value) await prefs.setBool(floatingLyricsKey, false);
+    await _lyricsOverlayWriter.request();
   }
 
   Future<void> setLyricsOverlayLines(int value) async {
@@ -1484,10 +1573,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (lyricsOverlayLines == next) return;
     lyricsOverlayLines = next;
     notifyListeners();
-    await (await SharedPreferences.getInstance()).setInt(
-      lyricsOverlayLinesKey,
-      next,
-    );
+    await _lyricsOverlayWriter.request();
   }
 
   Future<void> setLyricLineSpacing(double value) async {
@@ -1647,9 +1733,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> setFontFamily(FontFamilyPreference value) async {
+    if (_presentationDisposed) return;
     final generation = ++_fontGeneration;
     await ImportedFont.load(value);
-    if (generation != _fontGeneration) return;
+    if (generation != _fontGeneration || _presentationDisposed) return;
     fontPreferences = fontPreferences.withFamily(value);
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
@@ -1659,9 +1746,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> importFont(Uint8List bytes, String name) async {
+    if (_presentationDisposed) return;
     final generation = ++_fontGeneration;
     final preference = await ImportedFont.importFile(bytes, name);
-    if (generation != _fontGeneration) return;
+    if (generation != _fontGeneration || _presentationDisposed) return;
+    await setFontFamily(preference);
+  }
+
+  Future<void> importFontSelection(XFile file) async {
+    if (_presentationDisposed) return;
+    final generation = ++_fontGeneration;
+    final preference = await ImportedFont.importSelection(file);
+    if (generation != _fontGeneration || _presentationDisposed) return;
     await setFontFamily(preference);
   }
 
@@ -1684,7 +1780,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   AppPaletteMode paletteMode = AppPaletteMode.fixed;
 
   /// The accent picked in [AppPaletteMode.custom]; null until the listener
-  /// chooses one, in which case the shipped red remains in effect.
+  /// chooses one, in which case the shipped blue remains in effect.
   Color? accentColor;
 
   /// The last artwork seed the compatibility backdrop extracted; only used while
@@ -1692,7 +1788,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Color? artworkSeed;
 
   /// The accent seed handed to the Apple theme builders. Null keeps the
-  /// shipped Apple Music red.
+  /// shipped Lazer blue.
   Color? get accentSeed => switch (paletteMode) {
     AppPaletteMode.fixed => null,
     AppPaletteMode.nowPlaying => artworkSeed,
@@ -1779,8 +1875,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// strength value that was never a decision. Ignoring that key lets the new
   /// default reach existing installs while a listener who drags the slider to
   /// any value — full strength included — keeps exactly what they chose.
-  static const String lyricBlurIntensityKey =
-      'lazer_lyric_blur_intensity_v2';
+  static const String lyricBlurIntensityKey = 'lazer_lyric_blur_intensity_v2';
 
   Future<void> setLyricBlurEnabled(bool value) async {
     lyricBlurEnabled = value;
@@ -2124,13 +2219,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       discordClientId = prefs.getString('lazer_discord_client_id') ?? '';
       skipUnavailableSongs =
           prefs.getBool('lazer_skip_unavailable_songs') ?? skipUnavailableSongs;
-      _trackTransition = TrackTransition.fromAutoMix(
-        prefs.getBool('lazer_automix_enabled') ?? autoMixEnabled,
+      _autoMixDurationSeconds =
+          (prefs.getInt('lazer_automix_duration_seconds') ??
+                  defaultAutoMixDurationSeconds)
+              .clamp(minAutoMixDurationSeconds, maxAutoMixDurationSeconds);
+      _trackTransition = TrackTransition.fromStored(
+        prefs.getString('lazer_track_transition'),
+        legacyAutoMix: prefs.getBool('lazer_automix_enabled'),
       );
       if (audioEngine is AutoMixConfigurableAudioEngine) {
         try {
           await (audioEngine as AutoMixConfigurableAudioEngine)
-              .setAutoMixEnabled(autoMixEnabled);
+              .setAutoMixEnabled(autoMixEnabled, duration: autoMixDuration);
         } catch (_) {
           _trackTransition = TrackTransition.albumGapless;
           autoMixError = '当前音频引擎不支持无缝混音，请更新音频引擎。';
@@ -2170,7 +2270,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       browseBackgroundFps = browseFps.isFinite ? browseFps.clamp(10, 1000) : 30;
       final playerFps = prefs.getDouble('lazer_player_background_fps') ?? 30;
       playerBackgroundFps = playerFps.isFinite
-          ? (playerFps == 0 ? 30 : playerFps.clamp(10, 1000))
+          ? (playerFps == 0 ? 0 : playerFps.clamp(10, 1000))
           : 30;
       final browseColor = prefs.getInt('lazer_browse_background_color');
       browseBackgroundColor = browseColor == null ? null : Color(browseColor);
@@ -2244,9 +2344,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           backgroundImageStore.preferenceValue(restoredBackgroundImage),
         );
       }
-      uiAlpha = (prefs.getDouble('lazer_legacy_ui_alpha') ?? 0.7).clamp(
-        0.4,
-        1.0,
+      uiAlpha = (prefs.getDouble('lazer_content_opacity') ?? 1).clamp(0.4, 1.0);
+      backgroundOpacity = (prefs.getDouble('lazer_background_opacity') ?? 1)
+          .clamp(0.0, 1.0);
+      playerBackgroundOpacity =
+          (prefs.getDouble('lazer_player_background_opacity') ?? 1).clamp(
+            0.0,
+            1.0,
+          );
+      titleBarStyle = DesktopTitleBarStyleLabels.parse(
+        prefs.getString('lazer_title_bar_style'),
       );
       headerOpacity =
           (prefs.getDouble('lazer_header_opacity') ?? kHeaderOpacityDefault)
@@ -2971,7 +3078,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         {
           'id': artist.id,
           'name': artist.name,
-          if (artist.coverUrl != null) 'coverUrl': artist.coverUrl,
+          if (artist.coverUrl != null)
+            'coverUrl': _pluginArtwork(artist.coverUrl),
           if (artist.platformKey != null) 'platformKey': artist.platformKey,
         },
     ],
@@ -2979,10 +3087,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     'albumName': track.album,
     'albumId': track.albumId,
     if (track.albumKey != null) 'albumKey': track.albumKey,
-    'cover': track.coverUrl ?? '',
-    'coverOriginal': track.coverUrl ?? '',
-    'coverUrl': track.coverUrl ?? '',
-    'picUrl': track.coverUrl ?? '',
+    'cover': _pluginArtwork(track.coverUrl) ?? '',
+    'coverOriginal': _pluginArtwork(track.coverUrl) ?? '',
+    'coverUrl': _pluginArtwork(track.coverUrl) ?? '',
+    'picUrl': _pluginArtwork(track.coverUrl) ?? '',
     'duration': track.duration.inMilliseconds,
     'durationMs': track.duration.inMilliseconds,
     if (track.translatedTitle != null) 'translatedTitle': track.translatedTitle,
@@ -2998,11 +3106,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     'tracks': [for (final track in queue) _pluginTrack(track)],
   };
 
+  late final PluginNativeApi _pluginNativeApi = _createPluginNativeApi();
+
   Future<Object?> _handlePluginPlayerControl(Map<String, dynamic> spec) async {
     final command = (spec['command'] ?? spec['op'] ?? spec['action'])
         ?.toString()
         .toLowerCase()
         .trim();
+    if (command != null && command.startsWith('native_')) {
+      return _pluginNativeApi.dispatch(spec);
+    }
+    if (command != null &&
+        (command.startsWith('library_') || command.startsWith('user_'))) {
+      return _pluginFrontendRequest(command, spec);
+    }
     switch (command) {
       case 'play':
         play();
@@ -3179,8 +3296,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // screen and halves the host work a gateway plugin pays while it plays.
     if (force ||
         stateChanged ||
-        now.difference(_lastBroadcastStatusAt) >=
-            const Duration(seconds: 1)) {
+        now.difference(_lastBroadcastStatusAt) >= const Duration(seconds: 1)) {
       _lastBroadcastStatusAt = now;
       _lastBroadcastPlaying = isPlaying;
       final buffered = audioEngine is BufferedAudioEngine
@@ -3331,6 +3447,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Serialises successor preparations: only the newest one may bind the index.
   int _prefetchGeneration = 0;
 
+  final _successorOperations = AudioOperationQueue(maximumPending: 2);
+
+  Future<void> _serializeSuccessor(
+    Future<void> Function() operation, {
+    required String key,
+  }) =>
+      _successorOperations.run<void>(operation, key: key, onSuperseded: () {});
+
   /// The queue index an audible overlap was mixed out of, so a rollback can
   /// return to exactly that song (shuffle is not `index - 1`).
   int? _mixFromIndex;
@@ -3358,6 +3482,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// This is what album gapless playback crosses without a reload; a different
   /// album is a normal track change.
   bool get nextTrackContinuesAlbum {
+    if (_trackTransition == TrackTransition.off) return false;
     final int? next = _autoAdvanceIndex();
     return next != null && _continuesAlbum(next);
   }
@@ -3390,9 +3515,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Identifier of the engine queue the appends belong to.
   int? _queueId;
 
-  Future<List<Track>> Function()? _stationLoader;
-  bool _stationLoading = false;
-  final Set<String> _stationSeen = <String>{};
+  StationSession? _station;
+  int _heartModeRequest = 0;
 
   List<Track> get queue => _queueSnapshot ??= List<Track>.unmodifiable(_queue);
 
@@ -3595,9 +3719,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _repeat = saved.$2;
       _stationPlayMode = null;
     }
-    _stationLoader = null;
-    _stationLoading = false;
-    _stationSeen.clear();
+    _station?.close();
+    _station = null;
     _replaceQueue(tracks, startIndex: startIndex);
   }
 
@@ -3610,14 +3733,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }) {
     if (tracks.isEmpty) return;
     _stationPlayMode ??= (_shuffle, _repeat);
-    _stationLoader = loadMore;
-    _stationLoading = false;
-    _stationSeen
-      ..clear()
-      ..addAll(tracks.map((track) => track.id));
+    _station?.close();
+    final initial = tracks.take(StationSession.maximumQueueTracks).toList();
+    _station = StationSession(loadMore, initial);
     _shuffle = false;
     _repeat = LoopMode.off;
-    _replaceQueue(tracks);
+    _replaceQueue(initial);
     unawaited(_ensureStationBuffer());
   }
 
@@ -3630,20 +3751,34 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// for the same sample again.
   Future<bool> startHeartMode() async {
     final Playlist? liked = collections.liked;
-    if (liked == null) return false;
-    int? seed;
+    if (liked == null || _presentationDisposed) return false;
+    final request = ++_heartModeRequest;
+    final generation = _generation;
+    final track = current;
+    final wasPlaying = _playing;
+    final owner = activeContentKey;
+    String? seed = track?.id;
     Future<List<Track>> load() async {
-      final int? currentSong = int.tryParse(current?.id ?? '');
       final List<Track> batch = await catalog.heartModeTracks(
         liked,
-        seedSongId: seed ?? currentSong,
+        seedTrackId: seed,
       );
-      if (batch.isNotEmpty) seed = int.tryParse(batch.last.id) ?? seed;
+      if (batch.isNotEmpty) {
+        seed = batch.last.id;
+      }
       return batch;
     }
 
     final List<Track> first = await load();
-    if (first.isEmpty) return false;
+    if (_presentationDisposed ||
+        request != _heartModeRequest ||
+        generation != _generation ||
+        current != track ||
+        _playing != wasPlaying ||
+        activeContentKey != owner ||
+        first.isEmpty) {
+      return false;
+    }
     playStationQueue(first, loadMore: load);
     return true;
   }
@@ -3809,7 +3944,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (_queue.isEmpty) return;
     _unavailableSkipCount = 0;
     _finishPlaySession();
-    if (_stationLoader != null && _queueIndex >= _queue.length - 1) {
+    if (_station != null && _queueIndex >= _queue.length - 1) {
       unawaited(_advanceStationFromTail());
       return;
     }
@@ -3929,74 +4064,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     unawaited(_ensureStationBuffer());
   }
 
-  Future<void> _advanceStationFromTail() async {
-    final int before = _queue.length;
-    await _waitForStationLoad();
-    if (_queue.length <= before) await _ensureStationBuffer(force: true);
-    if (_queue.length > before) {
-      if (!_playing) return;
-      _finishListening(manualTarget: _queue[before]);
-      _moveTo(before, direction: 1);
-      return;
-    }
-    if (!_playing) return;
-    // Next at the end of a station that has nothing new to add used to return
-    // without a word, which reads as a dead button.
-    playbackError = '暂时没有更多歌曲，请稍后重试。';
-    notifyListeners();
-  }
-
-  Future<void> _waitForStationLoad() async {
-    // A user can hit Next while the proactive tail request is still in flight.
-    // Join that work instead of treating "already loading" as an empty radio.
-    for (var tick = 0; _stationLoading && tick < 400; tick++) {
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    }
-  }
-
-  Future<bool> _ensureStationBuffer({bool force = false}) async {
-    final loader = _stationLoader;
-    if (loader == null || _stationLoading) return false;
-    if (!force && _queue.length - _queueIndex >= 6) return false;
-    _stationLoading = true;
-    try {
-      List<Track> lastLoaded = const <Track>[];
-      // Some recommendation endpoints can repeat a tiny batch. Give them a
-      // second chance before deciding there is temporarily nothing new.
-      for (var attempt = 0; attempt < 2; attempt++) {
-        final loaded = await loader();
-        lastLoaded = loaded;
-        if (_stationLoader != loader) return false;
-        final fresh = loaded.where((track) => _stationSeen.add(track.id));
-        final additions = fresh.take(30).toList();
-        if (additions.isEmpty) continue;
-        _queue.addAll(additions);
-        _markQueueChanged();
-        unawaited(_saveQueue());
-        notifyListeners();
-        return true;
-      }
-      // A finite recommendation surface must not turn a radio into a three-
-      // song loop or a stopped queue. Once every fresh result has been heard,
-      // reshuffle the returned pool and keep the station flowing.
-      final fallback =
-          lastLoaded.where((track) => track.id != current?.id).toList()
-            ..shuffle();
-      if (fallback.isNotEmpty && _stationLoader == loader) {
-        _queue.addAll(fallback.take(20));
-        _markQueueChanged();
-        unawaited(_saveQueue());
-        notifyListeners();
-        return true;
-      }
-    } catch (_) {
-      // The current radio buffer remains playable; another tail event retries.
-    } finally {
-      _stationLoading = false;
-    }
-    return false;
-  }
-
   /// Index a manual "next" moves to: never a no-op, and repeat-one still walks
   /// the queue (only playback running out honours [LoopMode.one]).
   int _manualNextIndex() {
@@ -4023,15 +4090,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void seek(double fraction) {
-    final Track? t = current;
-    if (t == null) return;
+    if (_presentationDisposed || current == null) return;
     _sampleListening();
     listeningStatistics.suspend();
-    final Duration target = t.duration * clampSeekFraction(fraction);
     // The engine cancels an audible overlap when it seeks. Going back first keeps
     // the queue position, the shown metadata and the position on the song that is
     // about to be heard.
     _leavePresentedMix();
+    final Duration target = current!.duration * clampSeekFraction(fraction);
     _position = target;
     _notePlayheadMoved();
     if (_realActive) {
@@ -4085,6 +4151,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// active so callers can safely await the command.
   Future<void> seekAsync(double fraction) async {
     final trackId = current?.id;
+    final sourceGeneration = _generation;
     seek(fraction);
     final opening = _audioOpening;
     if (opening == null || _realActive) return;
@@ -4093,7 +4160,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {
       return;
     }
-    if (_presentationDisposed || current?.id != trackId || !_realActive) return;
+    if (_presentationDisposed ||
+        sourceGeneration != _generation ||
+        current?.id != trackId ||
+        !_realActive) {
+      return;
+    }
     seek(fraction);
   }
 
@@ -4110,6 +4182,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final Track? track = current;
     if (track == null) return;
     final String trackId = track.id;
+    final sourceGeneration = _generation;
     final Future<void>? opening = _audioOpening;
     if (opening != null && !_realActive) {
       try {
@@ -4118,9 +4191,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         return;
       }
     }
-    if (_presentationDisposed || current?.id != trackId || !_realActive) return;
+    if (_presentationDisposed ||
+        sourceGeneration != _generation ||
+        current?.id != trackId ||
+        !_realActive) {
+      return;
+    }
     final AudioEngine? engine = audioEngine;
-    if (engine == null || target <= Duration.zero) return;
+    if (engine == null || target < Duration.zero) return;
     _sampleListening();
     listeningStatistics.suspend();
     _leavePresentedMix();
@@ -4278,11 +4356,31 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _refreshQueueSuccessor() {
-    // A prepared decoder belongs to the old play mode. Rebuild from the current
-    // playhead so repeat/shuffle changes cannot mix the wrong successor.
-    if (_realActive && current != null && _queueEngine != null) {
-      unawaited(_startAudio(resumeAt: precisePosition));
+    final QueueAudioEngine? engine = _queueEngine;
+    final int? queueId = _queueId;
+    ++_prefetchGeneration;
+    if (!_realActive || current == null || engine == null || queueId == null) {
+      return;
     }
+    bool isCurrent() =>
+        !_presentationDisposed && _realActive && queueId == _queueId;
+    unawaited(
+      _serializeSuccessor(() async {
+        // A later prefetch must not cancel the mode's required clear barrier.
+        if (!isCurrent()) return;
+        try {
+          // Keep the index binding until the engine confirms removal: a boundary
+          // already made audible must still be adopted by its pending index event.
+          final bool cleared = await engine.clearQueued(queueId);
+          if (!isCurrent() || !cleared) return;
+          _clearQueuedNext();
+          unawaited(_prefetchNext());
+        } catch (error) {
+          // A speculative queue edit must not interrupt the healthy source.
+          debugPrint('lazer-audio: refreshing the successor failed: $error');
+        }
+      }, key: 'mode-clear'),
+    );
   }
 
   void playTrackAt(int index) {
@@ -4433,6 +4531,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         stillCurrent: () => generation == _generation,
       );
     } catch (error) {
+      AppLog.shared.event('playback', 'resolve_failed', {
+        'engine': engine?.runtimeType.toString(),
+        'error': error.toString(),
+      });
       if (generation == _generation) {
         // A dead session is not a property of this song. Skipping through the
         // queue looking for one that plays turns "log in again" into a player
@@ -4473,7 +4575,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (queueEngine != null) {
         try {
           queueId = await queueEngine.setQueue(<String>[url]);
-        } catch (_) {
+        } catch (error) {
+          AppLog.shared.event('playback', 'queue_open_failed', {
+            'engine': engine.runtimeType.toString(),
+            'error': error.toString(),
+          });
           // The platform refused a queue (or cannot build one): keep playing
           // through the single-source path rather than failing the track.
           queueId = null;
@@ -4501,6 +4607,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         _position = reached ? resumeAt : Duration.zero;
       }
     } catch (error) {
+      AppLog.shared.event('playback', 'open_failed', {
+        'engine': engine.runtimeType.toString(),
+        'retrying': retrying,
+        'error': error.toString(),
+      });
       final bool retryable =
           _retryableStreamResolve(error) || error is StateError;
       if (generation == _generation && !retrying && retryable) {
@@ -4895,7 +5006,20 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   ///
   /// The queue engine is optional: with a plain [AudioEngine] this is a no-op
   /// and playback keeps the load-on-completion path.
-  Future<void> _prefetchNext() async {
+  Future<void> _prefetchNext() {
+    final int generation = ++_prefetchGeneration;
+    return _serializeSuccessor(
+      () => _prefetchNextImpl(generation),
+      key: 'prefetch',
+    );
+  }
+
+  Future<void> _prefetchNextImpl(int generation) async {
+    if (_presentationDisposed ||
+        !_realActive ||
+        generation != _prefetchGeneration) {
+      return;
+    }
     final QueueAudioEngine? engine = _queueEngine;
     final int? queueId = _queueId;
     if (engine == null || queueId == null || _queue.isEmpty) return;
@@ -4908,9 +5032,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         (engine as MixPresentingAudioEngine).mixPresented) {
       return;
     }
-    final int generation = ++_prefetchGeneration;
     final int? next = _autoAdvanceIndex();
-    if (next == null) {
+    if (next == null || _trackTransition == TrackTransition.off) {
       _clearQueuedNext();
       return;
     }
@@ -4931,7 +5054,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     try {
       url = await _resolveTrackUrl(
         _queue[next],
-        stillCurrent: () => queueId == _queueId && _realActive,
+        stillCurrent: () =>
+            generation == _prefetchGeneration &&
+            queueId == _queueId &&
+            _realActive &&
+            !_presentationDisposed,
       );
     } catch (_) {
       url = null;
@@ -4944,6 +5071,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return;
     }
     if (url == null || url.isEmpty) return;
+    // Some engines can cross the boundary before append's Future completes.
+    // Bind the requested song first so that event can be adopted immediately.
+    _queuedNextIndex = next;
+    _queuedNextUrl = url;
+    _queuedNextAt = DateTime.now();
     bool appended;
     try {
       appended = await engine.appendToQueue(queueId, url);
@@ -4954,10 +5086,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       // Superseded while appending: it must not claim the engine's successor.
       return;
     }
-    if (!appended || queueId != _queueId) return;
-    _queuedNextIndex = next;
-    _queuedNextUrl = url;
-    _queuedNextAt = DateTime.now();
+    if (!appended || queueId != _queueId) _clearQueuedNext();
   }
 
   /// How long a prepared successor may sit unused before it is re-resolved.
@@ -4978,7 +5107,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       return;
     }
     final int generation = _generation;
-    final int targetIndex = _queueIndex;
+    final Track? targetTrack = current;
+    final int selectionRevision = _listeningRevision;
     var crossed = false;
     try {
       crossed = await engine.playQueuedNext();
@@ -4988,7 +5118,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     // A newer switch, stop or pause owns the engine now. Do not let a delayed
     // queue operation restart playback or overwrite that newer choice.
-    if (!_playing || generation != _generation || targetIndex != _queueIndex) {
+    if (!_playing ||
+        generation != _generation ||
+        current != targetTrack ||
+        selectionRevision != _listeningRevision) {
       return;
     }
     if (!crossed) {
@@ -5231,7 +5364,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         // source must never get in front of this source's first play command.
         unawaited(_prefetchNext());
       }
-    } catch (_) {
+    } catch (error) {
+      AppLog.shared.event('playback', 'play_failed', {
+        'engine': audioEngine?.runtimeType.toString(),
+        'error': error.toString(),
+      });
       if (generation == _generation) _failPlayback('播放中断，请重试。');
     }
   }
@@ -5503,7 +5640,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _moveTo(next, direction: 1);
       return true;
     }
-    if (_stationLoader != null) {
+    if (_station != null) {
       unawaited(_continueStationAfterEnd());
       return true;
     }
@@ -5751,7 +5888,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _moveTo(next, direction: 1);
       return;
     }
-    if (_stationLoader != null) {
+    if (_station != null) {
       unawaited(_continueStationAfterEnd());
       return;
     }
@@ -5761,32 +5898,6 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _realActive = false;
     _ticker?.cancel();
     engine.stop();
-    notifyListeners();
-  }
-
-  Future<void> _continueStationAfterEnd() async {
-    final int before = _queue.length;
-    await _waitForStationLoad();
-    bool added =
-        _queue.length > before || await _ensureStationBuffer(force: true);
-    if (!added && _playing) {
-      // A tail request that lost a race with the queue snapshot looks exactly
-      // like a station that ran dry; one short retry tells them apart.
-      await Future<void>.delayed(const Duration(milliseconds: 800));
-      added = _queue.length > before || await _ensureStationBuffer(force: true);
-    }
-    if (_queue.length > before) {
-      if (!_playing) return;
-      _moveTo(before, direction: 1);
-      return;
-    }
-    // A listener who stopped gets no error; anything else is a station with
-    // nothing left to play, and stopping silently there looks like a freeze.
-    if (!_playing) return;
-    _playing = false;
-    _ticker?.cancel();
-    await audioEngine?.stop();
-    playbackError = '暂时没有更多歌曲，请稍后重试。';
     notifyListeners();
   }
 
@@ -5801,7 +5912,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (current == null) return;
     _playing = true;
     _ensureTicker();
-    if (_stationLoader != null) {
+    if (_station != null) {
       await _advanceStationFromTail();
       if (playbackError == null && !_realActive && current != null) {
         await _startAudio();
@@ -6158,9 +6269,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _musicPlatforms.cancelPending();
     pluginManager.removeListener(_onPluginManagerChanged);
     if (_injectedPluginMarket == null) _pluginMarketInstance?.dispose();
+    _pluginNativeApi.close();
     pluginManager.dispose();
     catalog.connections.close();
     _presentationDisposed = true;
+    _station?.close();
+    _station = null;
     // Detach before the tick lane is disposed: removing a listener from a
     // disposed notifier asserts in debug builds.
     networkSources.dispose();
@@ -6184,6 +6298,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _failureSubscription?.cancel();
     _bufferPulseTimer?.cancel();
     _ticker?.cancel();
+    _successorOperations.cancelPending();
+    _autoMixOperations.cancelPending();
     _tickNotifier.removeListener(_broadcastPluginPlayerState);
     _tickNotifier.dispose();
     if (_ownsDownloadManager) downloadManager.dispose();

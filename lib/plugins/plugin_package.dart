@@ -9,6 +9,19 @@ import 'plugin_manifest.dart';
 
 const maxPluginArchiveBytes = 16 * 1024 * 1024;
 
+/// Static frontend source is data, never evaluated by the Flutter host.
+bool isPluginTextResource(String name) =>
+    name != 'manifest.json' &&
+    const [
+      '.json',
+      '.md',
+      '.txt',
+      '.html',
+      '.css',
+      '.js',
+      '.svg',
+    ].any(name.endsWith);
+
 class PluginPackage {
   const PluginPackage(
     this.manifest,
@@ -57,9 +70,7 @@ PluginPackage decodePluginPackage(Uint8List bytes) {
     }
     if (name != 'manifest.json' &&
         !name.endsWith('.lua') &&
-        !name.endsWith('.md') &&
-        !name.endsWith('.txt') &&
-        !name.endsWith('.json') &&
+        !isPluginTextResource(name) &&
         name != 'LICENSE') {
       throw const FormatException('插件仅支持 Lua 源码与说明文件。');
     }
@@ -81,11 +92,7 @@ PluginPackage decodePluginPackage(Uint8List bytes) {
     },
     resources: {
       for (final entry in files.entries)
-        if (entry.key != 'manifest.json' &&
-            !entry.key.endsWith('.lua') &&
-            (entry.key.endsWith('.json') ||
-                entry.key.endsWith('.md') ||
-                entry.key.endsWith('.txt')))
+        if (isPluginTextResource(entry.key))
           entry.key: utf8.decode(entry.value),
     },
   );

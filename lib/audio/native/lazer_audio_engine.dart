@@ -23,6 +23,7 @@
 // Dart side alone would let the decoder read freed memory.
 library;
 
+import '../audio_operation_queue.dart';
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
@@ -30,8 +31,10 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import '../../storage/app_storage.dart';
+import '../../diagnostics/app_log.dart';
 
 import '../audio_engine.dart';
+import '../android_usb_audio.dart';
 import 'audio_path_log.dart';
 import 'audio_stream_cache.dart';
 import 'engine_metrics.dart';
@@ -39,6 +42,7 @@ import 'lazer_audio_abi.dart';
 import 'lazer_audio_library.dart';
 import 'lazer_audio_reader.dart';
 import 'lazer_audio_worker.dart';
+import 'native_engine_ownership.dart';
 import 'lazer_stream_info.dart';
 
 export 'lazer_stream_info.dart';
@@ -73,8 +77,15 @@ class NativeAudioEngine
     this._worker,
     this._events,
     this._cache,
-    this._deviceSettings,
-  );
+    this._deviceSettings, [
+    NativeEngineOwnershipBudget? ownershipBudget,
+    Object? reservation,
+  ]) : _ownershipBudget = ownershipBudget ?? _sharedOwnershipBudget {
+    _ownershipBudget.claim(this, reservation: reservation);
+  }
+
+  static final _sharedOwnershipBudget = NativeEngineOwnershipBudget();
+  final NativeEngineOwnershipBudget _ownershipBudget;
 
   @visibleForTesting
   factory NativeAudioEngine.forTesting({
@@ -82,7 +93,12 @@ class NativeAudioEngine
     required LazerAudioBridgeApi bridge,
     required LazerAudioWorker worker,
     required AudioStreamCache cache,
+    NativeEngineOwnershipBudget? ownershipBudget,
   }) {
+    final budget = ownershipBudget ?? NativeEngineOwnershipBudget();
+    if (budget.blocked || budget.busy) {
+      throw StateError('native ownership is unavailable');
+    }
     void ignoreEvent(
       Pointer<Void> context,
       int event,
@@ -96,6 +112,7 @@ class NativeAudioEngine
       NativeCallable<LazerAudioEventNative>.listener(ignoreEvent),
       cache,
       const LazerDeviceSettings(),
+      budget,
     ).._engineAddress = 1;
   }
 
@@ -114,6 +131,26 @@ class NativeAudioEngine
   static Future<NativeAudioEngine?> create({
     LazerDeviceSettings deviceSettings = const LazerDeviceSettings(),
     AudioStreamCache? cache,
+  }) async {
+    if (_sharedOwnershipBudget.blocked || _sharedOwnershipBudget.busy) {
+      lastStartupFailure = _sharedOwnershipBudget.blocked
+          ? 'Native audio cleanup could not be confirmed; restart the app.'
+          : 'Native audio already has an active owner.';
+      return null;
+    }
+    return _sharedOwnershipBudget.admit(
+      (reservation) => _createReserved(
+        reservation,
+        deviceSettings: deviceSettings,
+        cache: cache,
+      ),
+    );
+  }
+
+  static Future<NativeAudioEngine?> _createReserved(
+    Object reservation, {
+    required LazerDeviceSettings deviceSettings,
+    required AudioStreamCache? cache,
   }) async {
     final LazerAudioAvailability availability = LazerAudioLoader.load();
     if (!availability.isAvailable) {
@@ -146,7 +183,10 @@ class NativeAudioEngine
         events,
         streamCache,
         deviceSettings,
+        _sharedOwnershipBudget,
+        reservation,
       );
+      engine._creationInDoubt = true;
       final Object? address = await worker.call(LazerWorkerOp.create, <Object?>[
         ...deviceSettings.toDeviceMessage(),
         events.nativeFunction.address,
@@ -155,10 +195,17 @@ class NativeAudioEngine
         0,
         deviceSettings.deviceToken,
       ]);
+      engine._creationInDoubt = false;
       if (address == null) {
         throw StateError('lazer_audio_create returned no engine');
       }
       engine._engineAddress = address as int;
+      final created = engine;
+      unawaited(
+        worker.exited.then((_) {
+          if (!created._shutdownStarted) created._faultWorker();
+        }),
+      );
       if (api.readLog != null) {
         engine._logTimer = Timer.periodic(
           const Duration(seconds: 1),
@@ -193,7 +240,21 @@ class NativeAudioEngine
   Pointer<Uint8>? _logBuffer;
   final AudioStreamCache _cache;
   LazerDeviceSettings _deviceSettings;
+  StreamSubscription<String>? _usbDetachSubscription;
+  bool _usbConnectionsOpened = false;
+  bool _nativeDestroyed = false;
+  bool _creationInDoubt = false;
+  bool _destroyRequested = false;
+  bool _ownershipFaulted = false;
+  String? _workerFailure;
+  Future<void>? _shutdownFuture;
+  final Set<NativeStreamReader> _unconfirmedReaders = {};
+  static const _teardownTimeout = Duration(seconds: 5);
   int _engineAddress = 0;
+
+  String? get workerFailure => _workerFailure;
+  @visibleForTesting
+  Future<void> get shutdownSettled => _shutdownFuture ?? Future<void>.value();
 
   final StreamController<void> _completed = StreamController<void>.broadcast();
   final StreamController<void> _bufferChanges =
@@ -205,7 +266,11 @@ class NativeAudioEngine
       StreamController<LazerStreamInfo?>.broadcast();
 
   /// Serialises source mutations so a prefetch never lands in a replaced queue.
-  Future<void> _operations = Future<void>.value();
+  final AudioOperationQueue _operationQueue = AudioOperationQueue();
+  Future<void> get _operations => _operationQueue.idle;
+  final AudioOperationQueue _preparationQueue = AudioOperationQueue(
+    maximumPending: 2,
+  );
 
   int _generation = 0;
   int _transportRequest = 0;
@@ -459,7 +524,8 @@ class NativeAudioEngine
     return true;
   }
 
-  int? get _engineAddressOrNull => _engineAddress == 0 ? null : _engineAddress;
+  int? get _engineAddressOrNull =>
+      _engineAddress == 0 || _ownershipFaulted ? null : _engineAddress;
 
   /// Re-reads the negotiated format; also refreshes [streamInfo].
   LazerStreamInfo? readStreamInfo() {
@@ -507,11 +573,16 @@ class NativeAudioEngine
     _mixPresented = false;
     _completionSent = false;
     _pendingUrls = <String>[];
-    return _serialize(() async {
-      await _clearQueued();
-      if (generation != _generation) return;
-      await _openSource(url, generation);
-    });
+    return _serialize(
+      () async {
+        await _clearQueued();
+        if (generation != _generation) return;
+        await _openSource(url, generation);
+      },
+      key: 'source',
+      onSuperseded: () {},
+      essential: true,
+    );
   }
 
   @override
@@ -524,16 +595,34 @@ class NativeAudioEngine
     _completionSent = false;
     if (urls.isEmpty) {
       _pendingUrls = <String>[];
+      _position = Duration.zero;
+      _duration = null;
+      _pendingSeek = null;
+      await _serialize(
+        () async {
+          if (generation != _generation || _disposed) return;
+          await _stopSource();
+        },
+        key: 'source',
+        onSuperseded: () {},
+        essential: true,
+      );
       return queueId;
     }
     final int index = startIndex.clamp(0, urls.length - 1);
     _queueIndex = index;
     _pendingUrls = urls.sublist(index + 1);
-    await _serialize(() async {
-      await _clearQueued();
-      if (generation != _generation) return;
-      await _openSource(urls[index], generation);
-    });
+    final String source = urls[index];
+    await _serialize(
+      () async {
+        await _clearQueued();
+        if (generation != _generation) return;
+        await _openSource(source, generation);
+      },
+      key: 'source',
+      onSuperseded: () {},
+      essential: true,
+    );
     return queueId;
   }
 
@@ -555,12 +644,68 @@ class NativeAudioEngine
       await _clearQueued();
       if (queueId != _queueId || !_sourceLoaded || _disposed) return false;
     }
-    // Deliberately not part of the `_operations` chain: preparing the successor
-    // reads its first bytes, and a skip pressed meanwhile must not wait for that.
-    // A preparation that loses the race releases its own reader (see
-    // `_prepareSuccessor`), so nothing leaks.
-    unawaited(_prepareSuccessor(url));
-    return true;
+    // Separate from transport mutations: a skip can still interrupt the reader.
+    // Await retirement so a later mode refresh cannot clear a new preparation
+    // while this one's superseded-reader cleanup is still running.
+    final int generation = _generation;
+    final bool prepared = await _prepareSuccessor(url);
+    return prepared &&
+        generation == _generation &&
+        queueId == _queueId &&
+        !_disposed;
+  }
+
+  @override
+  Future<bool> clearQueued(int queueId) {
+    final int generation = _generation;
+    // Put the clear itself on the preparation lane. Waiting on an idle future
+    // would also wait for later appends, then accidentally erase their reader.
+    return _preparationQueue.run(
+      () => _serialize(() async {
+        if (_disposed ||
+            generation != _generation ||
+            queueId != _queueId ||
+            !_sourceLoaded ||
+            _mixPresented) {
+          return false;
+        }
+        // Older imported engines cannot preserve an overlap atomically. Keep
+        // their accepted successor and apply the new mode after its hand-off.
+        if (_api.clearUnheardQueuedReader == null) return false;
+        final int? address = _engineAddressOrNull;
+        if (address == null) return false;
+        final int result = _status(
+          await _callWorker(LazerWorkerOp.clearQueuedReader, <Object?>[
+            address,
+            ++_queueGeneration,
+            true,
+          ]),
+        );
+        if (_disposed || generation != _generation || queueId != _queueId) {
+          return false;
+        }
+        if (result == lazerAudioQueueAlreadyAudible) return false;
+        if (result == lazerAudioQueueAlreadyActive) {
+          final bool announced = _mixPresented;
+          _mixPresented = false;
+          _crossIntoSuccessor(position.inMilliseconds, announce: !announced);
+          return false;
+        }
+        if (result != lazerAudioOk && result != lazerAudioErrorState) {
+          throw StateError('Could not clear the successor ($result)');
+        }
+        _pendingUrls = <String>[];
+        _queuedUrl = null;
+        _queuedReader?.release();
+        _queuedReader = null;
+        _queuedEntry?.cancelIfUnleased();
+        _queuedEntry = null;
+        return true;
+      }),
+      key: 'clear',
+      onSuperseded: () => false,
+      essential: true,
+    );
   }
 
   /// The URL this engine has prepared as its successor, or null when it holds
@@ -621,7 +766,7 @@ class NativeAudioEngine
       return;
     }
     final int status = _status(
-      await _worker.call(LazerWorkerOp.play, [address]),
+      await _callWorker(LazerWorkerOp.play, [address]),
     );
     if (status != lazerAudioOk) {
       throw StateError('lazer-audio: play failed ($status): ${lastError()}');
@@ -633,7 +778,7 @@ class NativeAudioEngine
     ++_transportRequest;
     final int? address = _engineAddressOrNull;
     if (address == null) return;
-    await _worker.call(LazerWorkerOp.pause, [address]);
+    await _callWorker(LazerWorkerOp.pause, [address]);
   }
 
   @override
@@ -652,10 +797,7 @@ class NativeAudioEngine
       );
     }
     final int status = _status(
-      await _worker.call(LazerWorkerOp.seek, [
-        address,
-        position.inMilliseconds,
-      ]),
+      await _callWorker(LazerWorkerOp.seek, [address, position.inMilliseconds]),
     );
     if (status != lazerAudioOk || generation != _generation || _disposed) {
       return;
@@ -684,10 +826,7 @@ class NativeAudioEngine
       return;
     }
     final int status = _status(
-      await _worker.call(LazerWorkerOp.setVolume, <Object?>[
-        address,
-        requested,
-      ]),
+      await _callWorker(LazerWorkerOp.setVolume, <Object?>[address, requested]),
     );
     if (status == lazerAudioOk) {
       _volume = requested;
@@ -714,13 +853,13 @@ class NativeAudioEngine
   /// An existing source needs reopening to renegotiate its PCM format.
   /// The overlap the transition uses, in milliseconds.
   ///
-  /// The reference player's natural mode picks six seconds (its candidate set is
-  /// 4-8 s), which is long enough to be a real blend and short enough that two
+  /// The reference player's natural mode picks five seconds (its candidate set is
+  /// 1-13 s), which is long enough to be a real blend and short enough that two
   /// songs never fight for the floor.
-  static const int autoMixOverlapMillis = 6000;
+  static const int autoMixOverlapMillis = 5000;
 
   @override
-  Future<void> setAutoMixEnabled(bool enabled) async {
+  Future<void> setAutoMixEnabled(bool enabled, {Duration? duration}) async {
     if (!supportsAutoMix) {
       if (enabled) {
         throw UnsupportedError('This audio engine has no overlap mixer.');
@@ -729,10 +868,12 @@ class NativeAudioEngine
     }
     final int? address = _engineAddressOrNull;
     if (address == null) return;
+    final int overlapMs = (duration?.inMilliseconds ?? autoMixOverlapMillis)
+        .clamp(1000, 13000);
     final int status = _status(
-      await _worker.call(LazerWorkerOp.setAutoMix, <Object?>[
+      await _callWorker(LazerWorkerOp.setAutoMix, <Object?>[
         address,
-        enabled ? autoMixOverlapMillis : 0,
+        enabled ? overlapMs : 0,
       ]),
     );
     if (status != lazerAudioOk) {
@@ -751,11 +892,64 @@ class NativeAudioEngine
     _deviceSettings = settings;
     final int? address = _engineAddressOrNull;
     if (address == null) return;
-    await _worker.call(LazerWorkerOp.setDevice, <Object?>[
-      address,
-      ...settings.toDeviceMessage(),
-      settings.deviceToken,
-    ]);
+    final String? token = await _resolveDeviceToken(settings);
+    if (_disposed || !identical(settings, _deviceSettings)) return;
+    final int status = _status(
+      await _callWorker(LazerWorkerOp.setDevice, <Object?>[
+        address,
+        ...settings.toDeviceMessage(),
+        token,
+      ]),
+    );
+    // A running source applies the selection on its next open. Every other USB
+    // refusal must reach the settings UI instead of retaining a system route.
+    if (AndroidUsbAudio.isUsbDeviceId(settings.deviceToken) &&
+        status != lazerAudioOk &&
+        status != lazerAudioErrorState) {
+      throw StateError(
+        'USB output settings were refused ($status): ${lastError()}',
+      );
+    }
+  }
+
+  Future<String?> _resolveDeviceToken(LazerDeviceSettings settings) async {
+    final String? token = settings.deviceToken;
+    if (defaultTargetPlatform != TargetPlatform.android ||
+        token == null ||
+        !token.startsWith('android-usb')) {
+      return token;
+    }
+    if (!_api.supportsAndroidUsb) {
+      throw UnsupportedError(
+        'This audio engine has no Android USB output backend.',
+      );
+    }
+    final usb = AndroidUsbAudio.instance;
+    final int generation = _generation;
+    final String resolved = await usb.resolveDeviceId(token);
+    _usbConnectionsOpened = true;
+    if (_disposed || settings.deviceToken != _deviceSettings.deviceToken) {
+      // Android caches one connection per device. A superseded request can
+      // resolve to the FD still used by the current native output, so retain it
+      // until native destruction. A permission result arriving after destruction
+      // is too late for shutdown's closeAll and must release its connection here.
+      if (_nativeDestroyed) await usb.releaseDevice(token);
+      throw StateError('The USB output request was cancelled.');
+    }
+    if (generation != _generation) {
+      // A newer source may be using this same connection. Retain its ownership
+      // until shutdown, but never apply the old source's request to it.
+      throw StateError('The USB output request was superseded.');
+    }
+    _usbDetachSubscription ??= usb.detachedDevices.listen((deviceId) {
+      if (!_disposed && deviceId == _deviceSettings.deviceToken) {
+        _reportFailure(
+          'The USB audio device was disconnected.',
+          AudioFailureKind.device,
+        );
+      }
+    });
+    return resolved;
   }
 
   /// Applies the EQ/limiter chain.
@@ -773,7 +967,7 @@ class NativeAudioEngine
   }) async {
     final int? address = _engineAddressOrNull;
     if (address == null) return;
-    await _worker.call(LazerWorkerOp.setDsp, <Object?>[
+    await _callWorker(LazerWorkerOp.setDsp, <Object?>[
       address,
       preampDb,
       limiterEnabled ? 1 : 0,
@@ -802,7 +996,12 @@ class NativeAudioEngine
     _position = Duration.zero;
     _pendingSeek = null;
     _duration = null;
-    return _serialize(_stopSource);
+    return _serialize(
+      _stopSource,
+      key: 'source',
+      onSuperseded: () {},
+      essential: true,
+    );
   }
 
   Future<void> _stopSource() async {
@@ -811,12 +1010,21 @@ class NativeAudioEngine
       try {
         // Serialised: after this returns the engine no longer reads any source,
         // so the readers and cache entries can be dropped.
-        await _worker.call(LazerWorkerOp.stop, <Object?>[address]);
+        final stopped = _status(
+          await _callWorker(LazerWorkerOp.stop, <Object?>[address]),
+        );
+        if (stopped != lazerAudioOk) {
+          _faultWorker();
+          return;
+        }
       } catch (error) {
         debugPrint('lazer-audio: stop failed: $error');
+        return; // No ownership acknowledgement: keep every reader alive.
       }
     }
+    if ((_ownershipFaulted || _shutdownStarted) && !_nativeDestroyed) return;
     await _clearQueued();
+    if ((_ownershipFaulted || _shutdownStarted) && !_nativeDestroyed) return;
     _releaseActive();
     _publishStreamInfo(null);
   }
@@ -826,39 +1034,157 @@ class NativeAudioEngine
     unawaited(_shutdown());
   }
 
-  Future<void> _shutdown() async {
-    if (_shutdownStarted) return;
+  Future<void> _shutdown() => _shutdownFuture ??= _shutdownImpl();
+
+  Future<Object?> _callWorker(int op, List<Object?> params) async {
+    if (_ownershipFaulted || _shutdownStarted) {
+      throw const LazerWorkerNotSubmitted(
+        'native audio ownership is unconfirmed',
+      );
+    }
+    try {
+      return await _worker.call(op, params);
+    } catch (error) {
+      if (error is! LazerWorkerNotSubmitted) _faultWorker();
+      rethrow;
+    }
+  }
+
+  void _cancelOwnedReaders() {
+    final readers = <NativeStreamReader>{
+      ?_activeReader,
+      ?_queuedReader,
+      ?_openingReader,
+      ..._preparingReaders,
+      ..._unconfirmedReaders,
+    };
+    for (final reader in readers) {
+      reader.cancel();
+    }
+  }
+
+  void _faultWorker() {
+    if (_ownershipFaulted) return;
+    _ownershipFaulted = true;
+    _workerFailure = 'Native audio worker failed; playback has been stopped.';
+    _logTimer?.cancel();
+    _sourceLoaded = false;
+    _cancelOwnedReaders();
+    _publishStreamInfo(null);
+    _reportFailure(_workerFailure!, AudioFailureKind.unknown);
+    unawaited(_shutdown());
+  }
+
+  void _retireOrHold(NativeStreamReader reader) {
+    if ((_ownershipFaulted || _shutdownStarted) && !_nativeDestroyed) {
+      // Source and successor lanes admit at most four distinct native readers;
+      // faulting disables both lanes before another reader can be created.
+      _unconfirmedReaders.add(reader);
+    } else {
+      reader.release();
+    }
+  }
+
+  Future<void> _shutdownImpl() async {
     _shutdownStarted = true;
     _logTimer?.cancel();
     _drainLogs();
     _disposed = true;
+    _operationQueue.cancelPending();
+    _preparationQueue.cancelPending();
     ++_generation;
     _interruptPendingReads();
     _sourceLoaded = false;
-    final int? address = _engineAddressOrNull;
+    final int? address = _engineAddress == 0 ? null : _engineAddress;
+    _cancelOwnedReaders();
     // Let the mutation chain and any successor preparation finish (bounded, so a
     // download that never delivers cannot hang shutdown) before the engine is
     // destroyed.
-    await _serialize(
-      () async {},
-    ).timeout(const Duration(seconds: 5), onTimeout: () {});
+    await _operations.timeout(const Duration(seconds: 5), onTimeout: () {});
     await _awaitPreparations();
     _engineAddress = 0;
-    try {
-      if (address != null) {
-        await _worker.call(LazerWorkerOp.stop, <Object?>[address]);
-        await _worker.call(LazerWorkerOp.destroy, <Object?>[address]);
+    if (!_creationInDoubt) {
+      if (address == null) {
+        _nativeDestroyed = true;
+      } else if (!_ownershipFaulted) {
+        try {
+          final stopped = _status(
+            await _worker
+                .call(LazerWorkerOp.stop, [address])
+                .timeout(_teardownTimeout),
+          );
+          if (stopped != lazerAudioOk) {
+            throw StateError('native stop was not acknowledged');
+          }
+          _destroyRequested = true;
+          await _worker
+              .call(LazerWorkerOp.destroy, [address])
+              .timeout(_teardownTimeout);
+          _nativeDestroyed = true;
+        } catch (error) {
+          debugPrint('lazer-audio: shutdown failed: $error');
+        }
       }
-    } catch (error) {
-      debugPrint('lazer-audio: shutdown failed: $error');
+      if (!_nativeDestroyed && !_destroyRequested && address != null) {
+        try {
+          // Kill is only a request. Await confirmed isolate exit before a
+          // synchronous fallback can touch the same engine pointer.
+          await _worker.close().timeout(_teardownTimeout);
+          final stop = _api.stop;
+          final destroy = _api.destroy;
+          final pointer = Pointer<Void>.fromAddress(address);
+          if (stop(pointer) != lazerAudioOk) {
+            throw StateError('fallback stop failed');
+          }
+          _destroyRequested = true;
+          destroy(pointer);
+          _nativeDestroyed = true;
+        } catch (error) {
+          debugPrint(
+            'lazer-audio: native teardown could not be confirmed: $error',
+          );
+        }
+      }
+    }
+    await _usbDetachSubscription?.cancel();
+    _usbDetachSubscription = null;
+    if (!_nativeDestroyed) {
+      // A destroy request may already have executed despite its missing reply.
+      // Never retry that pointer, close its callbacks, or free its readers.
+      _ownershipFaulted = true;
+      _workerFailure =
+          'Native audio cleanup could not be confirmed; restart the app.';
+      _ownershipBudget.retain(this); // Exactly one retained owner per process.
+      _reportFailure(_workerFailure!, AudioFailureKind.unknown);
+      _cache.close();
+      try {
+        await _worker.close().timeout(_teardownTimeout);
+      } catch (_) {}
+      return;
+    }
+    if (_usbConnectionsOpened && _nativeDestroyed) {
+      // Java's connection owns the FD: close it only after native output stops.
+      try {
+        await AndroidUsbAudio.instance.closeConnections();
+      } catch (error) {
+        debugPrint('lazer-audio: closing USB connections failed: $error');
+      }
+      _usbConnectionsOpened = false;
     }
     // Readers are only freed once the engine has joined its threads.
     _releaseActive();
     _queuedReader?.release();
     _queuedReader = null;
-    _queuedEntry?.cancel();
+    _queuedEntry?.cancelIfUnleased();
     _queuedEntry = null;
-    await _worker.close();
+    for (final reader in _unconfirmedReaders) {
+      reader.release();
+    }
+    _unconfirmedReaders.clear();
+    _ownershipBudget.release(this);
+    try {
+      await _worker.close().timeout(_teardownTimeout);
+    } catch (_) {}
     _events.close();
     if (_logLevel != null) calloc.free(_logLevel!);
     if (_logBuffer != null) calloc.free(_logBuffer!);
@@ -884,14 +1210,17 @@ class NativeAudioEngine
     await idle.future.timeout(const Duration(seconds: 5), onTimeout: () {});
   }
 
-  Future<T> _serialize<T>(Future<T> Function() operation) {
-    final Future<T> result = _operations.then((_) => operation());
-    _operations = result.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-    return result;
-  }
+  Future<T> _serialize<T>(
+    Future<T> Function() operation, {
+    Object? key,
+    T Function()? onSuperseded,
+    bool essential = false,
+  }) => _operationQueue.run(
+    operation,
+    key: key,
+    onSuperseded: onSuperseded ?? () => (T == bool ? false : null) as T,
+    essential: essential,
+  );
 
   void _interruptPendingReads() {
     // Enqueuing this wake-up behind the blocked open/queue would deadlock it.
@@ -917,10 +1246,11 @@ class NativeAudioEngine
       await prepareSession?.call();
       if (generation != _generation || _disposed) return;
     }
-    final AudioStreamEntry? entry = await _cacheEntryFor(url);
-    if (generation != _generation || _disposed) return;
+    AudioStreamLease? lease = await _cacheLeaseFor(url);
+    final AudioStreamEntry? entry = lease?.entry;
     NativeStreamReader? reader;
     try {
+      if (generation != _generation || _disposed) return;
       final int? address = _engineAddressOrNull;
       if (address == null) return;
       if (entry != null) {
@@ -940,24 +1270,15 @@ class NativeAudioEngine
           bridge,
           path: entry.file.path,
           expectedBytes: length ?? entry.expectedBytes,
+          onReleased: lease?.release,
         );
         if (reader == null) {
           throw StateError('the reader bridge rejected ${entry.file.path}');
         }
         _openingReader = reader;
-        final NativeStreamReader sourceReader = reader;
-        final AudioStreamEntry sourceEntry = entry;
-        _connectEntry(sourceEntry, sourceReader);
-        entry.bindReader(
-          appended: () {
-            sourceReader.notifyAppended();
-            if (identical(_activeEntry, sourceEntry)) _emitBufferChange();
-          },
-          finished: (bool failed) {
-            sourceReader.finish(failed: failed);
-            if (identical(_activeEntry, sourceEntry)) _emitBufferChange();
-          },
-        );
+        _connectEntry(lease!, reader);
+        lease =
+            null; // The reader releases this lease after native stops using it.
       }
 
       final int status = await _openWithDsdPolicy(
@@ -967,9 +1288,32 @@ class NativeAudioEngine
         generation: generation,
       );
       if (status != lazerAudioOk) {
-        reader?.release();
+        final String detail = lastError();
+        AppLog.shared.event('audio.native', 'open_failed', {
+          'status': status,
+          'detail': detail,
+          'network': entry != null,
+          'downloaded_bytes': entry?.downloadedBytes,
+          'expected_bytes': entry?.expectedBytes,
+          'download_error': entry?.failure?.toString(),
+        });
+        if (entry != null &&
+            generation == _generation &&
+            (status == lazerAudioErrorSource ||
+                status == lazerAudioErrorDecode)) {
+          // The engine rejected the source and has closed this reader. Release
+          // its OS file handle before removing a complete but invalid response.
+          reader?.release();
+          try {
+            await _cache.discardRejectedComplete(entry);
+          } catch (error) {
+            AppLog.shared.event('audio.native', 'cache_discard_failed', {
+              'error': error.toString(),
+            });
+          }
+        }
         throw StateError(
-          'lazer-audio could not open $url ($status): ${lastError()}',
+          'lazer-audio could not open source ($status): $detail',
         );
       }
       // The engine just accepted this source, so whatever was active before is
@@ -993,11 +1337,12 @@ class NativeAudioEngine
       _duration = null;
       _publishStreamInfo(readStreamInfo());
     } catch (error) {
-      reader?.release();
-      entry?.cancel();
+      if (reader != null) _retireOrHold(reader);
+      entry?.cancelIfUnleased();
       if (generation == _generation) _sourceLoaded = false;
       rethrow;
     } finally {
+      lease?.release();
       if (identical(_openingReader, reader)) _openingReader = null;
     }
   }
@@ -1045,7 +1390,7 @@ class NativeAudioEngine
   ) async {
     if (path != null) {
       return _status(
-        await _worker.call(LazerWorkerOp.openFile, <Object?>[
+        await _callWorker(LazerWorkerOp.openFile, <Object?>[
           address,
           path,
           ...const LazerOpenSettings().toMessage(),
@@ -1053,7 +1398,7 @@ class NativeAudioEngine
       );
     }
     return _status(
-      await _worker.call(LazerWorkerOp.openReader, <Object?>[
+      await _callWorker(LazerWorkerOp.openReader, <Object?>[
         address,
         reader!.address,
         ...const LazerOpenSettings().toMessage(),
@@ -1064,13 +1409,16 @@ class NativeAudioEngine
   /// Applies the output policy; [dsdOverride] replaces the DSD field for one
   /// attempt of the auto chain.
   Future<void> _applyOutputSettings(int address, {int? dsdOverride}) async {
-    final List<Object?> message = _deviceSettings.toDeviceMessage();
+    final LazerDeviceSettings settings = _deviceSettings;
+    final String? token = await _resolveDeviceToken(settings);
+    if (_disposed) return;
+    final List<Object?> message = settings.toDeviceMessage();
     if (dsdOverride != null) message[5] = dsdOverride;
     Future<int> apply() async => _status(
-      await _worker.call(LazerWorkerOp.setDevice, <Object?>[
+      await _callWorker(LazerWorkerOp.setDevice, <Object?>[
         address,
         ...message,
-        _deviceSettings.deviceToken,
+        token,
       ]),
     );
     int status = await apply();
@@ -1079,17 +1427,22 @@ class NativeAudioEngine
       // while idle/stopped. Without this stop the previous session's format,
       // buffer, exclusive mode and DSD policy stayed in force for the rest of
       // the launch: every settings change after the first track was ignored.
-      await _worker.call(LazerWorkerOp.stop, <Object?>[address]);
+      await _callWorker(LazerWorkerOp.stop, <Object?>[address]);
       status = await apply();
     }
     if (status != lazerAudioOk) {
+      if (AndroidUsbAudio.isUsbDeviceId(settings.deviceToken)) {
+        throw StateError(
+          'USB output settings were refused ($status): ${lastError()}',
+        );
+      }
       // Playback can still proceed with the previous output config, but the
       // mismatch must be visible in the path log rather than implied.
       debugPrint(
         'lazer-audio: output settings were not applied ($status): ${lastError()}',
       );
     }
-    await _worker.call(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
+    await _callWorker(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
   }
 
   /// Prepares [url] as the successor inside the running output session.
@@ -1098,7 +1451,22 @@ class NativeAudioEngine
   /// successor, which waits for its bytes. Whoever loses the race — because the
   /// queue was replaced, the source stopped, or the app moved on — frees its own
   /// reader only after a later serialised call has made the engine drop it.
-  Future<void> _prepareSuccessor(String url) async {
+  Future<bool> _prepareSuccessor(String url) {
+    final int generation = _generation;
+    return _preparationQueue.run(
+      () async {
+        if (generation != _generation || _disposed) return false;
+        await _prepareSuccessorImpl(url);
+        return generation == _generation &&
+            !_disposed &&
+            (_queuedUrl == url || _pendingUrls.firstOrNull == url);
+      },
+      key: 'successor',
+      onSuperseded: () => false,
+    );
+  }
+
+  Future<void> _prepareSuccessorImpl(String url) async {
     final LazerAudioBridgeApi? bridge = _bridge;
     final int? address = _engineAddressOrNull;
     if (bridge == null || address == null || !_sourceLoaded || _disposed) {
@@ -1107,10 +1475,12 @@ class NativeAudioEngine
     final int generation = ++_queueGeneration;
     _preparationsInFlight++;
     AudioStreamEntry? entry;
+    AudioStreamLease? lease;
     NativeStreamReader? reader;
     NativeStreamReader? preparingReader;
     try {
-      entry = await _cacheEntryFor(url);
+      lease = await _cacheLeaseFor(url);
+      entry = lease?.entry;
       final String path = entry?.file.path ?? _localPath(url);
       final int? expectedBytes = entry == null
           ? await File(path).length()
@@ -1119,11 +1489,9 @@ class NativeAudioEngine
           : await entry.expectedLengthWithin(successorLengthWait) ??
                 entry.expectedBytes;
       if (generation != _queueGeneration || !_sourceLoaded || _disposed) return;
-      // Repeat-one and adjacent copies of the same URL share one growing
-      // download. It currently has one reader callback pair: rebinding it here
-      // would strand the audible reader, and retiring that reader would cancel
-      // the successor's download too. Keep this URL pending and reopen it on
-      // completion (or manual skip), after the old reader has finished.
+      // Keep repeat-one and adjacent copies of the audible URL pending, as in
+      // ordinary repeat playback. Reopen after completion (or manual skip)
+      // instead of asking the native engine to prepare the same source twice.
       if (entry != null && identical(entry, _activeEntry)) {
         // A different successor may already be prepared (for example before
         // repeat-one was selected). Drop it while keeping this pending repeat.
@@ -1134,6 +1502,7 @@ class NativeAudioEngine
         bridge,
         path: path,
         expectedBytes: expectedBytes,
+        onReleased: lease?.release,
       );
       if (reader == null) return;
       preparingReader = reader;
@@ -1143,21 +1512,11 @@ class NativeAudioEngine
       // completion callback still signals the bridge instead of throwing from
       // the cache's unawaited download future.
       final NativeStreamReader queuedReader = reader;
-      final AudioStreamEntry? queuedEntry = entry;
-      if (queuedEntry != null) _connectEntry(queuedEntry, queuedReader);
-      entry?.bindReader(
-        appended: () {
-          queuedReader.notifyAppended();
-          if (identical(_activeEntry, queuedEntry)) _emitBufferChange();
-        },
-        finished: (bool failed) {
-          queuedReader.finish(failed: failed);
-          if (identical(_activeEntry, queuedEntry)) _emitBufferChange();
-        },
-      );
+      if (lease != null) _connectEntry(lease, queuedReader);
+      lease = null;
       if (entry == null) queuedReader.finish();
       final int status = _status(
-        await _worker.call(LazerWorkerOp.queueReader, <Object?>[
+        await _callWorker(LazerWorkerOp.queueReader, <Object?>[
           address,
           generation,
           reader.address,
@@ -1168,13 +1527,19 @@ class NativeAudioEngine
           generation != _queueGeneration ||
           !_sourceLoaded ||
           _disposed) {
-        await _settleSupersededReader(address, reader, entry);
+        if (status < 0) {
+          // An explicit queue rejection never installed this reader. A lost RPC
+          // reply is handled by the catch path and has unknown ownership.
+          _retireOrHold(reader);
+        } else {
+          await _settleSupersededReader(address, reader, entry);
+        }
         reader = null;
         entry = null;
         return;
       }
       _queuedReader?.release();
-      _queuedEntry?.cancel();
+      _queuedEntry?.cancelIfUnleased();
       _queuedReader = reader;
       _queuedEntry = entry;
       _queuedUrl = url;
@@ -1190,9 +1555,14 @@ class NativeAudioEngine
     } catch (error) {
       debugPrint('lazer-audio: preparing $url failed: $error');
       if (reader != null) {
-        await _settleSupersededReader(address, reader, entry);
+        if (error is LazerWorkerNotSubmitted) {
+          _retireOrHold(reader);
+        } else {
+          await _settleSupersededReader(address, reader, entry);
+        }
       }
     } finally {
+      lease?.release();
       _preparingReaders.remove(preparingReader);
       _preparationsInFlight--;
       if (_preparationsInFlight == 0) {
@@ -1219,51 +1589,68 @@ class NativeAudioEngine
     NativeStreamReader reader,
     AudioStreamEntry? entry,
   ) async {
+    if (_ownershipFaulted || _shutdownStarted) {
+      _retireOrHold(reader);
+      return;
+    }
     final int generation = ++_queueGeneration;
     int result = lazerAudioErrorState;
     try {
       result = _status(
-        await _worker.call(LazerWorkerOp.clearQueuedReader, <Object?>[
+        await _callWorker(LazerWorkerOp.clearQueuedReader, <Object?>[
           address,
           generation,
         ]),
       );
     } catch (error) {
       debugPrint('lazer-audio: clearing a superseded reader failed: $error');
+      _retireOrHold(reader);
+      return;
     }
-    if (result == lazerAudioQueueAlreadyActive && !_disposed) {
+    if (result < 0) {
+      _faultWorker();
+      _retireOrHold(reader);
+      return;
+    }
+    if (result == lazerAudioQueueAlreadyActive) {
       _activeReader?.release();
-      _activeEntry?.cancel();
+      _activeEntry?.cancelIfUnleased();
       _activeReader = reader;
       _activeEntry = entry;
       _queuedReader = null;
       _queuedEntry = null;
       _queuedUrl = null;
-      _sourceLoaded = true;
+      _sourceLoaded = !_disposed;
       _completionSent = false;
       _queueIndex++;
       _emitBufferChange();
       _publishStreamInfo(readStreamInfo());
-      if (!_advanced.isClosed) _advanced.add(_queueIndex);
+      if (!_disposed && !_advanced.isClosed) _advanced.add(_queueIndex);
       return;
     }
     reader.release();
-    entry?.cancel();
+    entry?.cancelIfUnleased();
   }
 
   /// Drops the prepared successor and its cache entry.
   Future<void> _clearQueued() async {
+    if ((_ownershipFaulted || _shutdownStarted) && !_nativeDestroyed) return;
     final int? address = _engineAddressOrNull;
     final int hadQueued = _queuedReader == null ? 0 : 1;
     final int generation = ++_queueGeneration;
     if (address != null && hadQueued == 1) {
       try {
         final int result = _status(
-          await _worker.call(LazerWorkerOp.clearQueuedReader, <Object?>[
+          await _callWorker(LazerWorkerOp.clearQueuedReader, <Object?>[
             address,
             generation,
           ]),
         );
+        if (result < 0) {
+          _faultWorker();
+          return;
+        }
+        if (result == lazerAudioQueueAlreadyAudible) return;
         // The native boundary can win before its asynchronous event reaches
         // Dart. Its reader is now active and must survive until open/stop.
         if (result == lazerAudioQueueAlreadyActive) {
@@ -1274,12 +1661,13 @@ class NativeAudioEngine
         }
       } catch (error) {
         debugPrint('lazer-audio: clearing the queued source failed: $error');
+        return;
       }
     }
     _queuedUrl = null;
     _queuedReader?.release();
     _queuedReader = null;
-    _queuedEntry?.cancel();
+    _queuedEntry?.cancelIfUnleased();
     _queuedEntry = null;
   }
 
@@ -1288,11 +1676,22 @@ class NativeAudioEngine
   /// The only fact the reader needs from the entry is the track's total size: a
   /// demuxer turns a seek's timestamp into a byte offset through it, and the size
   /// arrives with the response headers — after the reader exists.
-  void _connectEntry(AudioStreamEntry entry, NativeStreamReader reader) {
-    entry.onLengthKnown = () {
-      final int? total = entry.expectedBytes;
-      if (total != null && total > 0) reader.setLength(total);
-    };
+  void _connectEntry(AudioStreamLease lease, NativeStreamReader reader) {
+    final entry = lease.entry;
+    lease.bindReader(
+      appended: () {
+        reader.notifyAppended();
+        if (identical(_activeEntry, entry)) _emitBufferChange();
+      },
+      finished: (bool failed) {
+        reader.finish(failed: failed);
+        if (identical(_activeEntry, entry)) _emitBufferChange();
+      },
+      lengthKnown: () {
+        final int? total = entry.expectedBytes;
+        if (total != null && total > 0) reader.setLength(total);
+      },
+    );
   }
 
   /// How long an open waits for the track's size before letting the decoder
@@ -1304,11 +1703,11 @@ class NativeAudioEngine
   static const Duration successorLengthWait = Duration(seconds: 5);
 
   /// Resolves the cache entry for [url], or null for a local file.
-  Future<AudioStreamEntry?> _cacheEntryFor(String url) async {
+  Future<AudioStreamLease?> _cacheLeaseFor(String url) async {
     final Uri? uri = Uri.tryParse(url);
     final String scheme = uri?.scheme.toLowerCase() ?? '';
     if (scheme == 'http' || scheme == 'https') {
-      return _cache.open(url);
+      return _cache.acquire(url);
     }
     return null;
   }
@@ -1322,7 +1721,7 @@ class NativeAudioEngine
   void _releaseActive({AudioStreamEntry? keepEntry}) {
     _activeReader?.release();
     _activeReader = null;
-    if (!identical(_activeEntry, keepEntry)) _activeEntry?.cancel();
+    if (!identical(_activeEntry, keepEntry)) _activeEntry?.cancelIfUnleased();
     _activeEntry = null;
     _emitBufferChange();
   }
@@ -1473,7 +1872,7 @@ class NativeAudioEngine
     _sourceLoaded = true;
     _mixPresented = false;
     previousReader?.release();
-    previousEntry?.cancel();
+    previousEntry?.cancelIfUnleased();
     _emitBufferChange();
     _publishStreamInfo(readStreamInfo());
     if (announce && !_advanced.isClosed) _advanced.add(_queueIndex);

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import '../interaction/app_haptics.dart';
 import '../l10n/app_localizations.dart';
 import '../tv/tv_mode.dart';
@@ -43,6 +44,8 @@ class AccessibleSlider extends StatefulWidget {
     this.label,
     this.onChangeStart,
     this.onChangeEnd,
+    this.onChangeCancel,
+    this.maxInteractiveValue,
     this.semanticLabel,
     this.semanticFormatterCallback,
     this.focusNode,
@@ -59,6 +62,10 @@ class AccessibleSlider extends StatefulWidget {
   final ValueChanged<double>? onChanged;
   final ValueChanged<double>? onChangeStart;
   final ValueChanged<double>? onChangeEnd;
+  final VoidCallback? onChangeCancel;
+
+  /// Limits seeking without changing the full rail or its buffered indicator.
+  final double? maxInteractiveValue;
   final SemanticFormatterCallback? semanticFormatterCallback;
   final FocusNode? focusNode;
   final bool autofocus;
@@ -67,28 +74,80 @@ class AccessibleSlider extends StatefulWidget {
   State<AccessibleSlider> createState() => _AccessibleSliderState();
 }
 
-class _AccessibleSliderState extends State<AccessibleSlider> {
+class _AccessibleSliderState extends State<AccessibleSlider>
+    with WidgetsBindingObserver {
   SliderDetents? _detents;
-  final Set<int> _dragPointers = <int>{};
+  int? _pointer;
+  bool _pointerInteraction = false;
   bool _sliderDragging = false;
-  late double _displayValue = widget.value;
+  bool _cancelled = false;
+  int _interaction = 0;
+  late double _displayValue = _clamp(widget.value);
+
+  double _clamp(double value) => value
+      .clamp(
+        widget.min,
+        (widget.maxInteractiveValue ?? widget.max).clamp(
+          widget.min,
+          widget.max,
+        ),
+      )
+      .toDouble();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void didUpdateWidget(covariant AccessibleSlider oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // During a drag the parent may rebuild with the value from the previous
-    // frame (for example while a setting is being persisted). Do not replace
-    // the thumb's local value with that stale value until the gesture ends.
-    if (widget.value != oldWidget.value &&
-        !_sliderDragging &&
-        _dragPointers.isEmpty) {
-      _displayValue = widget.value;
+    if (widget.onChanged == null ||
+        widget.min != oldWidget.min ||
+        widget.max != oldWidget.max) {
+      _cancelInteraction(rebuild: false);
     }
+    if (!_sliderDragging && _pointer == null) {
+      _displayValue = _clamp(widget.value);
+    }
+    _displayValue = _clamp(_displayValue);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _cancelInteraction();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _detents?.end();
+    super.dispose();
+  }
+
+  void _cancelInteraction({bool rebuild = true}) {
+    final bool active = _pointerInteraction || _sliderDragging;
+    _cancelled = true;
+    _interaction++;
+    _pointer = null;
+    _pointerInteraction = false;
+    _sliderDragging = false;
+    _detents?.end();
+    _detents = null;
+    _displayValue = _clamp(widget.value);
+    if (active) widget.onChangeCancel?.call();
+    if (rebuild && active && mounted) setState(() {});
   }
 
   void _handleChangeStart(double value, FeedbackCallback? feedback) {
+    if (widget.onChanged == null || (_cancelled && _pointerInteraction)) return;
+    if (!_pointerInteraction) {
+      _cancelled = false;
+      _interaction++;
+    }
     _sliderDragging = true;
-    _displayValue = value.clamp(widget.min, widget.max);
+    _displayValue = _clamp(value);
     if (widget.detentFeedback) {
       _detents = SliderDetents(
         min: widget.min,
@@ -97,47 +156,51 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
       )..begin(value);
       if (feedback != null) unawaited(feedback(detent: true));
     }
-    widget.onChangeStart?.call(value);
+    widget.onChangeStart?.call(_displayValue);
   }
 
   void _handleChangeEnd(double value) {
-    _detents?.end();
-    _detents = null;
-    widget.onChangeEnd?.call(value);
-    _sliderDragging = false;
-    if (mounted) setState(() {});
+    final int interaction = _interaction;
+    void finish() {
+      if (!mounted ||
+          _cancelled ||
+          interaction != _interaction ||
+          widget.onChanged == null) {
+        return;
+      }
+      _sliderDragging = false;
+      _pointerInteraction = false;
+      _pointer = null;
+      _detents?.end();
+      _detents = null;
+      widget.onChangeEnd?.call(_clamp(value));
+      setState(() => _displayValue = _clamp(widget.value));
+    }
+
+    // Material also ends its gesture on PointerCancel. Wait until that event
+    // has reached our Listener before deciding whether a pointer edit commits.
+    if (_pointerInteraction) {
+      scheduleMicrotask(finish);
+    } else {
+      finish();
+    }
   }
 
   void _handleChanged(double value, FeedbackCallback? feedback) {
-    if (!mounted || widget.onChanged == null) return;
-    final double next = value.clamp(widget.min, widget.max);
+    if (!mounted || widget.onChanged == null || _cancelled) return;
+    final double next = _clamp(value);
     setState(() => _displayValue = next);
     if (_detents != null && feedback != null && _detents!.update(next)) {
       unawaited(
         feedback(
           detent: true,
-          boundary: next <= widget.min || next >= widget.max,
+          boundary:
+              next <= widget.min ||
+              next >= (widget.maxInteractiveValue ?? widget.max),
         ),
       );
     }
     widget.onChanged!(next);
-  }
-
-  void _updateFromPointer(
-    PointerMoveEvent event,
-    double width,
-    FeedbackCallback? feedback,
-  ) {
-    if (!_dragPointers.contains(event.pointer) || widget.onChanged == null) {
-      return;
-    }
-    if (width <= 0) return;
-    double fraction = (event.localPosition.dx / width).clamp(0.0, 1.0);
-    final int? divisions = widget.divisions;
-    if (divisions != null && divisions > 0) {
-      fraction = (fraction * divisions).round() / divisions;
-    }
-    _handleChanged(widget.min + (widget.max - widget.min) * fraction, feedback);
   }
 
   @override
@@ -145,71 +208,55 @@ class _AccessibleSliderState extends State<AccessibleSlider> {
     final FeedbackCallback? feedback = widget.detentFeedback
         ? InteractionFeedback.of(context)
         : null;
-    final ValueChanged<double>? onChanged = widget.onChanged;
     return SemanticsPortal(
       child: MergeSemantics(
         child: Semantics(
           label: widget.semanticLabel == null
               ? null
               : context.tr(widget.semanticLabel!),
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) =>
-                Listener(
-                  behavior: HitTestBehavior.opaque,
-                  onPointerDown: (PointerDownEvent event) {
-                    if (widget.onChanged != null) {
-                      _dragPointers.add(event.pointer);
-                      _sliderDragging = true;
-                    }
-                  },
-                  onPointerMove: (PointerMoveEvent event) =>
-                      _updateFromPointer(event, constraints.maxWidth, feedback),
-                  onPointerUp: (PointerUpEvent event) {
-                    _dragPointers.remove(event.pointer);
-                    if (_dragPointers.isEmpty) _sliderDragging = false;
-                  },
-                  onPointerCancel: (PointerCancelEvent event) {
-                    _dragPointers.remove(event.pointer);
-                    if (_dragPointers.isEmpty) {
-                      _sliderDragging = false;
-                      // A lifecycle change can cancel a seek after the
-                      // parent has already restored its live value. Clear the
-                      // optimistic thumb when the pointer is cancelled so a
-                      // stale preview cannot remain painted on screen.
-                      if (mounted) {
-                        setState(
-                          () => _displayValue = widget.value
-                              .clamp(widget.min, widget.max)
-                              .toDouble(),
-                        );
-                      }
-                    }
-                  },
-                  child: Slider(
-                    value: _displayValue.clamp(widget.min, widget.max),
-                    min: widget.min,
-                    max: widget.max,
-                    secondaryTrackValue: widget.secondaryTrackValue,
-                    divisions: widget.divisions,
-                    label: widget.label == null
-                        ? null
-                        : context.tr(widget.label!),
-                    onChangeStart: (value) =>
-                        _handleChangeStart(value, feedback),
-                    onChanged: onChanged == null
-                        ? null
-                        : (value) => _handleChanged(value, feedback),
-                    onChangeEnd: _handleChangeEnd,
-                    semanticFormatterCallback:
-                        widget.semanticFormatterCallback == null
-                        ? null
-                        : (value) => context.tr(
-                            widget.semanticFormatterCallback!(value),
-                          ),
-                    focusNode: widget.focusNode,
-                    autofocus: widget.autofocus,
-                  ),
-                ),
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (event) {
+              if (widget.onChanged != null &&
+                  event.buttons == kPrimaryButton &&
+                  _pointer == null) {
+                _pointer = event.pointer;
+                _pointerInteraction = true;
+                _cancelled = false;
+                _interaction++;
+              }
+            },
+            onPointerUp: (event) {
+              if (_pointer == event.pointer) _pointer = null;
+            },
+            onPointerCancel: (event) {
+              if (_pointer == event.pointer) _cancelInteraction();
+            },
+            // Material owns pointer geometry, RTL, buttons and gesture-arena
+            // cancellation. A second raw move handler would duplicate changes.
+            child: Slider(
+              value: _clamp(_displayValue),
+              min: widget.min,
+              max: widget.max,
+              secondaryTrackValue: widget.secondaryTrackValue?.clamp(
+                widget.min,
+                widget.max,
+              ),
+              divisions: widget.divisions,
+              label: widget.label == null ? null : context.tr(widget.label!),
+              onChangeStart: (value) => _handleChangeStart(value, feedback),
+              onChanged: widget.onChanged == null
+                  ? null
+                  : (value) => _handleChanged(value, feedback),
+              onChangeEnd: _handleChangeEnd,
+              semanticFormatterCallback:
+                  widget.semanticFormatterCallback == null
+                  ? null
+                  : (value) =>
+                        context.tr(widget.semanticFormatterCallback!(value)),
+              focusNode: widget.focusNode,
+              autofocus: widget.autofocus,
+            ),
           ),
         ),
       ),

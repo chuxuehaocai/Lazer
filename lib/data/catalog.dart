@@ -134,8 +134,33 @@ class Catalog {
   final BillboardClient billboard;
   final AudioCache audioCache;
   final CachedLyricsStore lyricsCache;
+  static const _maximumLyricCacheTasks = 32;
+  final Map<(String, String?), Future<void>> _lyricCacheTasks = {};
 
-  Future<void> cacheLyrics(Track track, {String? audioPath}) async {
+  Future<void> cacheLyrics(Track track, {String? audioPath}) {
+    final key = (track.id, audioPath ?? track.localPath);
+    final existing = _lyricCacheTasks[key];
+    if (existing != null) return existing;
+    // Optional persistence never grows a waiting queue in front of playback.
+    // The foreground lyricsFor API remains independent of this small budget.
+    if (_lyricCacheTasks.length >= _maximumLyricCacheTasks) {
+      return Future.value();
+    }
+    final task = Future<void>.microtask(
+      () => _cacheLyrics(track, audioPath: audioPath),
+    );
+    _lyricCacheTasks[key] = task;
+    unawaited(
+      task.whenComplete(() {
+        if (identical(_lyricCacheTasks[key], task)) {
+          _lyricCacheTasks.remove(key);
+        }
+      }),
+    );
+    return task;
+  }
+
+  Future<void> _cacheLyrics(Track track, {String? audioPath}) async {
     try {
       final payload =
           await lyricsCache.read(track, audioPath: audioPath) ??
@@ -595,12 +620,27 @@ class Catalog {
   Future<List<Track>> heartModeTracks(
     Playlist liked, {
     int? seedSongId,
+    String? seedTrackId,
     int count = 30,
   }) async {
     final id = _platform.reference(liked.id, MusicEntityKind.playlist);
-    final songs = await _platform
-        .owner(id)
-        .radio(MusicRadioKind.heart, playlist: id, limit: count);
+    final owner = _platform.owner(id);
+    final requestedSeed = MusicId.tryParse(seedTrackId ?? '');
+    final seed = seedTrackId == null
+        ? (seedSongId == null
+              ? null
+              : owner.id(MusicEntityKind.song, '$seedSongId'))
+        : (requestedSeed?.provider == id.provider &&
+                  requestedSeed?.connection == id.connection &&
+                  requestedSeed?.kind == MusicEntityKind.song
+              ? requestedSeed
+              : null);
+    final songs = await owner.radio(
+      MusicRadioKind.heart,
+      playlist: id,
+      seed: seed,
+      limit: count,
+    );
     if (songs.isNotEmpty) return songs.map(_platform.track).toList();
     return List<Track>.of(await playlistTracks(liked.id))..shuffle();
   }

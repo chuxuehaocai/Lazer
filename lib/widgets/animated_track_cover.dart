@@ -38,8 +38,10 @@ class _CoverPlate {
 class _AnimatedTrackCoverState extends State<AnimatedTrackCover>
     with TickerProviderStateMixin, BuildSafeState<AnimatedTrackCover> {
   final List<_CoverPlate> _plates = [];
+  static const int _maxPlates = 3;
   late _CoverPlate _current;
   bool _reduced = false;
+  bool _visible = true;
 
   _CoverPlate _plate(Track track) {
     final plate = _CoverPlate(
@@ -85,8 +87,11 @@ class _AnimatedTrackCoverState extends State<AnimatedTrackCover>
       // Setting a controller value during inherited dependency rebuild can
       // dirty FadeTransition while its ancestor is building. Defer only this
       // reduced-motion assignment; the frame itself already renders current.
+      final current = _current;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _plates.contains(_current)) _current.opacity.value = 1;
+        if (mounted && current == _current && _plates.contains(current)) {
+          current.opacity.value = 1;
+        }
       });
     }
     for (final plate in stale) {
@@ -98,7 +103,8 @@ class _AnimatedTrackCoverState extends State<AnimatedTrackCover>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _reduced = MediaQuery.disableAnimationsOf(context);
-    if (_reduced && _plates.length > 1) _snap();
+    _visible = TickerMode.valuesOf(context).enabled;
+    if ((_reduced || !_visible) && _plates.length > 1) _snap();
   }
 
   @override
@@ -117,9 +123,16 @@ class _AnimatedTrackCoverState extends State<AnimatedTrackCover>
     _current.track = widget.track;
     _current.image = widget.image;
     if (matching == null) _plates.insert(0, _current);
-    if (_reduced) {
+    if (_reduced || !_visible) {
       _snap();
       return;
+    }
+    // A muted or repeatedly retargeted animation may never finish. Bound live
+    // image listeners and composited layers independently of completion.
+    while (_plates.length > _maxPlates) {
+      final stale = _plates.lastWhere((plate) => plate != _current);
+      _plates.remove(stale);
+      stale.opacity.dispose();
     }
     final index = _plates.indexOf(_current);
     for (final plate in _plates.skip(index + 1).toList()) {
@@ -141,7 +154,8 @@ class _AnimatedTrackCoverState extends State<AnimatedTrackCover>
     child: Stack(
       fit: StackFit.expand,
       children: [
-        for (final plate in (_reduced ? <_CoverPlate>[_current] : _plates))
+        for (final plate
+            in (_reduced || !_visible ? <_CoverPlate>[_current] : _plates))
           ExcludeSemantics(
             key: ObjectKey(plate),
             excluding: plate != _current,

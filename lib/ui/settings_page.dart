@@ -36,6 +36,7 @@ import '../widgets/hifi_settings_section.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/settings_choice.dart';
 import '../widgets/settings_row.dart';
+import '../widgets/text_input_dialog.dart';
 import '../tv/tv_mode.dart';
 import '../tv/lan_remote.dart';
 import '../updates/open_external.dart';
@@ -44,6 +45,7 @@ import '../updates/update_dialog.dart';
 import '../utils/background_image.dart';
 import '../utils/byte_format.dart';
 import '../widgets/ui_scaling.dart';
+import '../widgets/windows_backdrop.dart';
 import 'login.dart';
 import 'widgets.dart';
 import 'lyrics_cache_settings.dart';
@@ -55,6 +57,13 @@ import 'plugin_manager_page.dart';
 import 'plugin_settings.dart';
 import 'developer_console_page.dart';
 import 'custom_image_backdrop.dart';
+
+// Preferences may have been restored from another platform. Keep a portable
+// theme fallback selected rather than an unavailable dropdown entry.
+AppBackgroundMode _availableBackgroundMode(AppBackgroundMode mode) =>
+    mode == AppBackgroundMode.windowsMica && !supportsWindowsMica
+    ? AppBackgroundMode.off
+    : mode;
 
 /// A single-column, inset-grouped Settings page, following the iOS Settings
 /// information architecture rather than a desktop form grid.
@@ -203,7 +212,7 @@ class _SettingsCategoryHome extends StatelessWidget {
     final double inset = pageInset(context);
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
+        constraints: const BoxConstraints(maxWidth: 980),
         child: ListView(
           padding: EdgeInsets.fromLTRB(
             inset,
@@ -214,7 +223,6 @@ class _SettingsCategoryHome extends StatelessWidget {
           children: <Widget>[
             const ApplePageTitle(
               title: '设置',
-              subtitle: '按分类整理常用选项，减少滚动和查找。',
               padding: EdgeInsets.fromLTRB(0, 12, 0, 20),
             ),
             LayoutBuilder(
@@ -236,7 +244,7 @@ class _SettingsCategoryHome extends StatelessWidget {
                           child: TvFocusHighlight(
                             borderRadius: BorderRadius.circular(12),
                             child: AppleListTile(
-                              minHeight: twoColumns ? 88 : 76,
+                              minHeight: twoColumns ? 96 : 80,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
                                 vertical: 12,
@@ -339,13 +347,6 @@ class _SettingsOverview extends StatelessWidget {
     final double minScale = UiMetrics.minScaleOf(context);
     final double shownScale = UiMetrics.scaleOf(context);
     final bool car = UiMetrics.carOf(context);
-    final bool tablet = useTabletLayout(
-      state.uiMode,
-      MediaQuery.sizeOf(context).width,
-      layoutStyle: state.layoutStyle,
-    );
-    final DynamicBackgroundPrecision flowPrecision =
-        DynamicBackgroundPrecision.of(state.dynamicBackgroundQuality);
     final double inset = pageInset(context);
     bool show(_SettingsCategory value) => category == null || category == value;
     final String pageTitle = category?.label ?? '设置';
@@ -465,29 +466,25 @@ class _SettingsOverview extends StatelessWidget {
                             },
                           ),
                         ),
-                        if (state.layoutStyle == AppLayoutStyle.tablet ||
-                            (state.layoutStyle == AppLayoutStyle.auto &&
-                                tablet))
+                        if (!kIsWeb &&
+                            (defaultTargetPlatform == TargetPlatform.windows ||
+                                defaultTargetPlatform == TargetPlatform.linux))
                           _AppSettingRow(
-                            key: const ValueKey('tablet-rail-position-setting'),
-                            label: '平板胶囊栏位置',
-                            subtitle: '选择左侧或右侧显示导航与迷你播放器',
-                            trailing: SettingsChoice<AppTabletRailPosition>(
-                              key: ValueKey<AppTabletRailPosition>(
-                                state.tabletRailPosition,
-                              ),
-                              value: state.tabletRailPosition,
-                              items: <DropdownMenuItem<AppTabletRailPosition>>[
-                                for (final AppTabletRailPosition position
-                                    in AppTabletRailPosition.values)
-                                  DropdownMenuItem<AppTabletRailPosition>(
-                                    value: position,
-                                    child: TrText(position.label),
+                            key: const ValueKey('title-bar-style'),
+                            label: '标题栏样式',
+                            subtitle: '内联窗口按钮或独立的经典标题栏，即时生效',
+                            trailing: SettingsChoice<DesktopTitleBarStyle>(
+                              value: state.titleBarStyle,
+                              items: [
+                                for (final style in DesktopTitleBarStyle.values)
+                                  DropdownMenuItem(
+                                    value: style,
+                                    child: TrText(style.label),
                                   ),
                               ],
-                              onChanged: (AppTabletRailPosition? value) {
+                              onChanged: (value) {
                                 if (value != null) {
-                                  unawaited(state.setTabletRailPosition(value));
+                                  unawaited(state.setTitleBarStyle(value));
                                 }
                               },
                             ),
@@ -545,48 +542,6 @@ class _SettingsOverview extends StatelessWidget {
                             child: const TrText('恢复默认'),
                           ),
                         ),
-                        const _AppSectionLabel('顶边栏'),
-                        _AppSliderRow(
-                          key: const ValueKey('header-blur-slider'),
-                          label: '顶边栏模糊',
-                          valueText: '${state.headerBlur.round()} px',
-                          subtitle: '0 为不模糊；数值越大，标题栏后方的背景越柔和',
-                          value: state.headerBlur,
-                          min: kHeaderBlurMin,
-                          max: kHeaderBlurMax,
-                          divisions: ((kHeaderBlurMax - kHeaderBlurMin) / 2)
-                              .round(),
-                          onChanged: (double value) =>
-                              unawaited(state.setHeaderBlur(value)),
-                          action: SpringTextButton(
-                            key: const ValueKey('header-blur-reset'),
-                            onPressed: () => unawaited(
-                              state.setHeaderBlur(kHeaderBlurDefault),
-                            ),
-                            child: const TrText('恢复默认'),
-                          ),
-                        ),
-                        _AppSliderRow(
-                          key: const ValueKey('header-opacity-slider'),
-                          label: '顶边栏不透明度',
-                          valueText: '${(state.headerOpacity * 100).round()}%',
-                          subtitle: '数值越低背景越明显；100% 时顶边栏不再模糊背景',
-                          value: state.headerOpacity,
-                          min: kHeaderOpacityMin,
-                          max: kHeaderOpacityMax,
-                          divisions:
-                              ((kHeaderOpacityMax - kHeaderOpacityMin) / .05)
-                                  .round(),
-                          onChanged: (double value) =>
-                              unawaited(state.setHeaderOpacity(value)),
-                          action: SpringTextButton(
-                            key: const ValueKey('header-opacity-reset'),
-                            onPressed: () => unawaited(
-                              state.setHeaderOpacity(kHeaderOpacityDefault),
-                            ),
-                            child: const TrText('恢复默认'),
-                          ),
-                        ),
                         const _AppSectionLabel('底部胶囊栏'),
                         _AppSwitchRow(
                           key: const ValueKey('bottom-bar-blur-switch'),
@@ -626,13 +581,21 @@ class _SettingsOverview extends StatelessWidget {
                         const _AppSectionLabel('动态背景'),
                         _AppSettingRow(
                           label: '背景',
-                          subtitle: state.backgroundMode.detail,
+                          subtitle: _availableBackgroundMode(
+                            state.backgroundMode,
+                          ).detail,
                           trailing: SettingsChoice<AppBackgroundMode>(
                             key: const ValueKey('browse-background-mode'),
-                            value: state.backgroundMode,
+                            value: _availableBackgroundMode(
+                              state.backgroundMode,
+                            ),
                             items: <DropdownMenuItem<AppBackgroundMode>>[
                               for (final AppBackgroundMode mode
-                                  in AppBackgroundMode.values)
+                                  in AppBackgroundMode.values.where(
+                                    (mode) =>
+                                        mode != AppBackgroundMode.windowsMica ||
+                                        supportsWindowsMica,
+                                  ))
                                 DropdownMenuItem<AppBackgroundMode>(
                                   value: mode,
                                   child: TrText(mode.label),
@@ -725,16 +688,13 @@ class _SettingsOverview extends StatelessWidget {
                           key: const ValueKey('ui-alpha'),
                           label: '内容不透明度',
                           valueText: '${(state.uiAlpha * 100).round()}%',
-                          subtitle: '数值越小，背景越明显',
+                          subtitle: '调整文字、按钮与卡片的可见度，不影响背景',
                           value: state.uiAlpha.clamp(0.4, 1.0),
                           min: 0.4,
                           max: 1.0,
                           divisions: 12,
-                          onChanged:
-                              state.backgroundMode == AppBackgroundMode.off
-                              ? null
-                              : (double value) =>
-                                    unawaited(state.setAppUiAlpha(value)),
+                          onChanged: (double value) =>
+                              unawaited(state.setAppUiAlpha(value)),
                         ),
                         _BackgroundPreferences(state: state, player: false),
                         // The flowing canvas is the app's only continuously
@@ -742,36 +702,39 @@ class _SettingsOverview extends StatelessWidget {
                         // struggling GPU needs. Both halves of it are shown —
                         // the mesh it draws and how often it redraws it — so the
                         // value is verifiable rather than a blind percentage.
-                        _AppSliderRow(
-                          key: const ValueKey('dynamic-background-quality'),
-                          label: '动态背景渲染精度',
-                          valueText:
-                              '${(state.dynamicBackgroundQuality * 100).round()}%',
-                          // One literal on purpose: the translation table matches
-                          // it as a single pattern key.
-                          subtitle:
-                              '网格 ${flowPrecision.columns}×${flowPrecision.rows}，帧率单独设置',
-                          value: state.dynamicBackgroundQuality,
-                          min: kDynamicBackgroundQualityMin,
-                          max: kDynamicBackgroundQualityMax,
-                          divisions:
-                              ((kDynamicBackgroundQualityMax -
-                                          kDynamicBackgroundQualityMin) /
-                                      kDynamicBackgroundQualityStep)
-                                  .round(),
-                          onChanged: (double value) => unawaited(
-                            state.setDynamicBackgroundQuality(value),
-                          ),
-                          action: SpringTextButton(
-                            key: const ValueKey(
-                              'dynamic-background-quality-reset',
+                        if (state.backgroundMode ==
+                                AppBackgroundMode.nowPlayingDynamic ||
+                            state.backgroundMode ==
+                                AppBackgroundMode.nowPlayingStatic)
+                          _AppSliderRow(
+                            key: const ValueKey('dynamic-background-quality'),
+                            label: '动态背景渲染精度',
+                            valueText:
+                                '${(state.dynamicBackgroundQuality * 100).round()}%',
+                            // One literal on purpose: the translation table matches
+                            // it as a single pattern key.
+                            subtitle: '降低精度可减少显卡负载，帧率单独设置',
+                            value: state.dynamicBackgroundQuality,
+                            min: kDynamicBackgroundQualityMin,
+                            max: kDynamicBackgroundQualityMax,
+                            divisions:
+                                ((kDynamicBackgroundQualityMax -
+                                            kDynamicBackgroundQualityMin) /
+                                        kDynamicBackgroundQualityStep)
+                                    .round(),
+                            onChanged: (double value) => unawaited(
+                              state.setDynamicBackgroundQuality(value),
                             ),
-                            onPressed: () => unawaited(
-                              state.resetDynamicBackgroundQuality(),
+                            action: SpringTextButton(
+                              key: const ValueKey(
+                                'dynamic-background-quality-reset',
+                              ),
+                              onPressed: () => unawaited(
+                                state.resetDynamicBackgroundQuality(),
+                              ),
+                              child: const TrText('恢复默认'),
                             ),
-                            child: const TrText('恢复默认'),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -917,6 +880,22 @@ class _SettingsOverview extends StatelessWidget {
                             },
                           ),
                         ),
+                        if (state.trackTransition == TrackTransition.autoMix)
+                          _AppSliderRow(
+                            key: const ValueKey('automix-duration-slider'),
+                            label: '混音重叠时长',
+                            valueText: '${state.autoMixDurationSeconds} 秒',
+                            subtitle: '上一首与下一首在切歌时共同播放交叠的时长',
+                            value: state.autoMixDurationSeconds.toDouble(),
+                            min: AppState.minAutoMixDurationSeconds.toDouble(),
+                            max: AppState.maxAutoMixDurationSeconds.toDouble(),
+                            divisions:
+                                AppState.maxAutoMixDurationSeconds -
+                                AppState.minAutoMixDurationSeconds,
+                            onChanged: (double value) => unawaited(
+                              state.setAutoMixDurationSeconds(value.round()),
+                            ),
+                          ),
                         AppleListTile(
                           padding: SettingsSpacing.rowPadding,
                           minHeight: SettingsSpacing.rowMinHeight,
@@ -1698,29 +1677,14 @@ Future<void> _copySessionCookie(BuildContext context, AppState state) async {
 }
 
 Future<void> _editDiscordRpc(BuildContext context, AppState state) async {
-  final controller = TextEditingController(text: state.discordClientId);
   final value = await showAppleDialog<String>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const TrText('Discord 应用 ID'),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        decoration: const InputDecoration(hintText: 'Client ID'),
-      ),
-      actions: [
-        SpringTextButton(
-          onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const TrText('取消'),
-        ),
-        SpringFilledButton(
-          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-          child: const TrText('保存'),
-        ),
-      ],
+    builder: (_) => AppTextInputDialog(
+      title: context.tr('Discord 应用 ID'),
+      initialValue: state.discordClientId,
+      hintText: 'Client ID',
     ),
   );
-  controller.dispose();
   if (!context.mounted || value == null) return;
   await state.setDiscordClientId(value);
 }
@@ -2311,7 +2275,9 @@ class _BackgroundPreferences extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mode = player ? state.playerBackground : state.backgroundMode;
+    final mode = _availableBackgroundMode(
+      player ? state.playerBackground : state.backgroundMode,
+    );
     final double reported = View.of(context).display.refreshRate;
     final double refresh = (reported.isFinite && reported > 0 ? reported : 60.0)
         .clamp(10, 1000);
@@ -2337,7 +2303,11 @@ class _BackgroundPreferences extends StatelessWidget {
               key: const ValueKey('player-background-mode'),
               value: mode,
               items: [
-                for (final option in AppBackgroundMode.values)
+                for (final option in AppBackgroundMode.values.where(
+                  (mode) =>
+                      mode != AppBackgroundMode.windowsMica ||
+                      supportsWindowsMica,
+                ))
                   DropdownMenuItem(value: option, child: TrText(option.label)),
               ],
               onChanged: (value) {
@@ -2351,7 +2321,9 @@ class _BackgroundPreferences extends StatelessWidget {
               },
             ),
           ),
-        if (!player)
+        if (!player &&
+            mode != AppBackgroundMode.off &&
+            mode != AppBackgroundMode.windowsMica)
           _AppSwitchRow(
             key: const ValueKey('background-dark-edge'),
             label: '背景暗边',
@@ -2469,7 +2441,25 @@ class _BackgroundPreferences extends StatelessWidget {
                       unawaited(state.setBackgroundBlur(value, player: player))
                 : null,
           ),
-        if (player)
+        if (mode != AppBackgroundMode.off)
+          _AppSliderRow(
+            key: ValueKey(
+              player ? 'player-background-opacity' : 'background-opacity',
+            ),
+            label: '背景不透明度',
+            subtitle: '只调整背景材质或图片，不影响文字与按钮',
+            valueText:
+                '${((player ? state.playerBackgroundOpacity : state.backgroundOpacity) * 100).round()}%',
+            value: player
+                ? state.playerBackgroundOpacity
+                : state.backgroundOpacity,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            onChanged: (value) =>
+                unawaited(state.setBackgroundOpacity(value, player: player)),
+          ),
+        if (player && mode == AppBackgroundMode.nowPlayingDynamic)
           _AppSwitchRow(
             key: const ValueKey('player-background-follow-display'),
             label: '跟随屏幕刷新率',
@@ -2481,25 +2471,30 @@ class _BackgroundPreferences extends StatelessWidget {
                   )
                 : null,
           ),
-        _AppSliderRow(
-          key: ValueKey(
-            player ? 'player-background-fps' : 'browse-background-fps',
+        if (mode == AppBackgroundMode.nowPlayingDynamic)
+          _AppSliderRow(
+            key: ValueKey(
+              player ? 'player-background-fps' : 'browse-background-fps',
+            ),
+            label: player ? '播放背景帧率' : '浏览背景帧率',
+            valueText: '${shown.round()} fps',
+            value: shown,
+            min: 10,
+            max: refresh,
+            divisions: (refresh - 10).round().clamp(1, 990),
+            subtitle: player
+                ? '最低 10fps；关闭跟随屏幕后可手动调节'
+                : '默认 30fps，仅影响其他页面的动态背景',
+            onChanged:
+                mode != AppBackgroundMode.nowPlayingDynamic ||
+                    (player && stored == 0)
+                ? null
+                : (value) =>
+                      unawaited(state.setBackgroundFps(value, player: player)),
           ),
-          label: player ? '播放背景帧率' : '浏览背景帧率',
-          valueText: '${shown.round()} fps',
-          value: shown,
-          min: 10,
-          max: refresh,
-          divisions: (refresh - 10).round().clamp(1, 990),
-          subtitle: player ? '最低 10fps；关闭跟随屏幕后可手动调节' : '默认 30fps，仅影响其他页面的动态背景',
-          onChanged:
-              mode != AppBackgroundMode.nowPlayingDynamic ||
-                  (player && stored == 0)
-              ? null
-              : (value) =>
-                    unawaited(state.setBackgroundFps(value, player: player)),
-        ),
-        if (player)
+        if (player &&
+            (mode == AppBackgroundMode.nowPlayingDynamic ||
+                mode == AppBackgroundMode.nowPlayingStatic))
           _AppSliderRow(
             key: const ValueKey('player-background-quality'),
             label: '播放背景渲染精度',

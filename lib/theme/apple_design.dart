@@ -21,6 +21,7 @@ abstract final class AppleColors {
   const AppleColors._();
 
   static const Color musicRed = Color(0xFFFA2D48);
+  static const Color lazerBlue = Color(0xFF99B9E3);
   static const Color systemRed = Color(0xFFFF3B30);
   static const Color systemPink = Color(0xFFFF2D55);
   static const Color systemBlue = Color(0xFF007AFF);
@@ -38,11 +39,9 @@ abstract final class AppleColors {
 
   /// The empty canvas behind the shell when the artwork backdrop is off.
   ///
-  /// The dark theme's system background is pure black, which reads as a hole
-  /// in a desktop window; with nothing painted behind the interface this deep
-  /// warm grey keeps the window visibly a surface while still sitting below
-  /// the grouped-card tone.
-  static const Color darkCanvas = Color(0xFF141413);
+  /// A cool charcoal canvas keeps empty areas distinct from the blue-grey
+  /// navigation and grouped surfaces, including when artwork is disabled.
+  static const Color darkCanvas = Color(0xFF191C23);
 }
 
 /// Dynamic semantic colours for the current brightness.
@@ -106,32 +105,32 @@ class AppleSemanticColors extends ThemeExtension<AppleSemanticColors> {
     tertiaryFill: Color(0x14767680),
     separator: Color(0x4A3C3C43),
     opaqueSeparator: Color(0xFFC6C6C8),
-    accent: AppleColors.musicRed,
-    accentSoft: Color(0x14FA2D48),
+    accent: Color(0xFF426DAB),
+    accentSoft: Color(0x18426DAB),
     glass: Color(0xDFFBFBFD),
     glassStrong: Color(0xF2FFFFFF),
   );
 
   static const AppleSemanticColors dark = AppleSemanticColors(
-    background: Color(0xFF000000),
-    secondaryBackground: Color(0xFF1C1C1E),
-    tertiaryBackground: Color(0xFF2C2C2E),
-    groupedBackground: Color(0xFF000000),
-    secondaryGroupedBackground: Color(0xFF1C1C1E),
-    tertiaryGroupedBackground: Color(0xFF2C2C2E),
-    label: Color(0xFFFFFFFF),
-    secondaryLabel: Color(0x99EBEBF5),
-    tertiaryLabel: Color(0x4DEBEBF5),
-    quaternaryLabel: Color(0x2EEBEBF5),
-    fill: Color(0x1F767680),
-    secondaryFill: Color(0x29767680),
-    tertiaryFill: Color(0x14767680),
-    separator: Color(0x4A545458),
-    opaqueSeparator: Color(0xFF38383A),
-    accent: AppleColors.musicRed,
-    accentSoft: Color(0x1FFA2D48),
-    glass: Color(0xCC1C1C1E),
-    glassStrong: Color(0xF21C1C1E),
+    background: Color(0xFF191C23),
+    secondaryBackground: Color(0xFF242832),
+    tertiaryBackground: Color(0xFF303642),
+    groupedBackground: Color(0xFF191C23),
+    secondaryGroupedBackground: Color(0xFF242832),
+    tertiaryGroupedBackground: Color(0xFF303642),
+    label: Color(0xFFF5F6FA),
+    secondaryLabel: Color(0xFFB5BDCD),
+    tertiaryLabel: Color(0xFF858FA3),
+    quaternaryLabel: Color(0x667C879B),
+    fill: Color(0x246F7D98),
+    secondaryFill: Color(0x326F7D98),
+    tertiaryFill: Color(0x146F7D98),
+    separator: Color(0x326F7D98),
+    opaqueSeparator: Color(0xFF3A4252),
+    accent: AppleColors.lazerBlue,
+    accentSoft: Color(0x2699B9E3),
+    glass: Color(0xC920242D),
+    glassStrong: Color(0xED222731),
   );
 
   static AppleSemanticColors of(BuildContext context) =>

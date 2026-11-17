@@ -63,7 +63,7 @@ class CustomImageBackdrop extends StatelessWidget {
             child: positioned,
           );
     return RepaintBoundary(
-      child: ColoredBox(color: pageColor, child: blurred),
+      child: ClipRect(child: ColoredBox(color: pageColor, child: blurred)),
     );
   }
 }

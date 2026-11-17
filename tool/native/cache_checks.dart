@@ -2,7 +2,7 @@
 //
 // Runs against a local HTTP server and a temp directory, so it is deterministic
 // and needs neither Flutter nor the native library. Two entry points use it:
-//   * `test/audio/audio_stream_cache_test.dart` (CI, `flutter test`)
+//   * `test/native_audio_stream_cache_test.dart` (CI, `flutter test`)
 //   * `tool/native_cache_check.dart` (plain `dart`)
 //
 // Each check returns the failures it found; an empty list means the cache
@@ -184,9 +184,16 @@ Future<List<String>> verifyAudioStreamCache(Directory root) async {
       InternetAddress.loopbackIPv4,
       0,
     );
-    server.listen((HttpRequest request) {
-      request.response.statusCode = HttpStatus.notFound;
-      request.response.close();
+    int requests = 0;
+    server.listen((HttpRequest request) async {
+      requests++;
+      if (requests == 1) {
+        request.response.statusCode = HttpStatus.notFound;
+      } else {
+        request.response.contentLength = 4;
+        request.response.add(<int>[1, 2, 3, 4]);
+      }
+      await request.response.close();
     });
     final AudioStreamCache cache = await cacheAt('failure');
     final Completer<bool> finished = Completer<bool>();
@@ -204,6 +211,27 @@ Future<List<String>> verifyAudioStreamCache(Directory root) async {
       expect('failed download reports failure', reportedFailure, true);
       expect('failed download is not complete', entry.complete, false);
       expect('failed download records the error', entry.failure != null, true);
+
+      // A manual Play resolves the provider again, but a CDN may return the
+      // very same URL. An ordinary open must retry its terminal HTTP failure.
+      final AudioStreamEntry retry = await cache.open(entry.url);
+      await retry.done;
+      expect(
+        'manual retry creates a fresh entry',
+        identical(entry, retry),
+        false,
+      );
+      expect('manual retry sends a new HTTP request', requests, 2);
+      expect('manual retry completes', retry.complete, true);
+      expect('manual retry clears the old failure', retry.failure, null);
+      expect(
+        'manual retry downloads the audio',
+        await retry.file.readAsBytes(),
+        <int>[1, 2, 3, 4],
+      );
+      final AudioStreamEntry cached = await cache.open(entry.url);
+      expect('successful audio stays cached', identical(retry, cached), true);
+      expect('successful audio avoids another HTTP request', requests, 2);
     } finally {
       cache.close();
       await server.close(force: true);
@@ -504,10 +532,79 @@ Future<List<String>> verifyAudioStreamCache(Directory root) async {
         force: true,
       );
       await resumed.done;
-      expect('the ignored range was still requested', ranges.last, 'bytes=$partial-');
+      expect(
+        'the ignored range was still requested',
+        ranges.last,
+        'bytes=$partial-',
+      );
       final Uint8List bytes = await resumed.file.readAsBytes();
-      expect('a range-less resume rewrites the file', bytes.length, payload.length);
-      expect('a range-less resume holds the track once', _sameBytes(bytes, payload), true);
+      expect(
+        'a range-less resume rewrites the file',
+        bytes.length,
+        payload.length,
+      );
+      expect(
+        'a range-less resume holds the track once',
+        _sameBytes(bytes, payload),
+        true,
+      );
+    } finally {
+      cache.close();
+      await server.close(force: true);
+    }
+  }
+
+  // 10. A successful HTTP status can carry an error page. Once the decoder
+  // rejects that complete response, replay must fetch from byte zero again.
+  {
+    final errorPage = Uint8List.fromList('<html>expired link</html>'.codeUnits);
+    final audio = Uint8List.fromList(List<int>.generate(128, (index) => index));
+    final ranges = <String?>[];
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      ranges.add(request.headers.value(HttpHeaders.rangeHeader));
+      final bytes = ranges.length == 1 ? errorPage : audio;
+      request.response.contentLength = bytes.length;
+      request.response.add(bytes);
+      await request.response.close();
+    });
+    final cache = await cacheAt('rejected-complete');
+    try {
+      final url = 'http://${server.address.host}:${server.port}/track';
+      final first = await cache.open(url);
+      await first.done;
+      expect(
+        'HTTP error page initially appears complete',
+        first.complete,
+        true,
+      );
+      final discard = cache.discardRejectedComplete(first);
+      // No await between rejection and open: the reopen must join deletion,
+      // never receive the entry whose file is about to disappear.
+      final second = await cache.open(url);
+      await discard;
+      await second.done;
+      expect('rejected complete response is fetched again', ranges.length, 2);
+      expect(
+        'rejected bytes are never used as a Range prefix',
+        ranges.last,
+        null,
+      );
+      expect('replay receives a fresh entry', identical(first, second), false);
+      expect(
+        'replay receives only the healthy response',
+        _sameBytes(await second.file.readAsBytes(), audio),
+        true,
+      );
+      // A stale failure for the old entry cannot erase the successful retry.
+      await cache.discardRejectedComplete(first);
+      final third = await cache.open(url);
+      expect(
+        'stale rejection preserves the healthy cache',
+        identical(second, third),
+        true,
+      );
+      expect('healthy complete audio is still reused', ranges.length, 2);
     } finally {
       cache.close();
       await server.close(force: true);

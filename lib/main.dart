@@ -38,6 +38,7 @@ import 'tv/tv_mode.dart';
 import 'tv/lan_remote.dart';
 import 'watch/watch_shell.dart';
 import 'widgets/window_frame.dart';
+import 'widgets/windows_backdrop.dart';
 import 'widgets/app_system_tray.dart';
 import 'widgets/media_shortcut_listener.dart';
 import 'widgets/interaction_feedback.dart';
@@ -282,12 +283,16 @@ class LazerApp extends StatefulWidget {
     required this.media,
     this.discord,
     this.session,
+    this.windowFrameEnabled,
   });
   final AppState state;
   final AudioEngine audio;
   final SystemMediaController media;
   final DiscordRpcController? discord;
   final PlaybackSession? session;
+
+  /// Allows an embedded preview to exercise the complete desktop frame.
+  final bool? windowFrameEnabled;
 
   @override
   State<LazerApp> createState() => _LazerAppState();
@@ -309,6 +314,9 @@ typedef _RootUiSignature = (
   bool,
   FontPreferences,
   int,
+  AppLayoutStyle,
+  AppUiMode,
+  DesktopTitleBarStyle,
 );
 
 class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
@@ -338,6 +346,9 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _state.showFrameStats,
     _state.fontPreferences,
     _state.pluginSkinRevision,
+    _state.layoutStyle,
+    _state.uiMode,
+    _state.titleBarStyle,
   );
 
   @override
@@ -467,6 +478,37 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   ) {
     final manifest = plugin.manifest;
     switch (permission) {
+      case 'data.native_audio':
+        return (
+          context.tr('允许插件读取原生音频诊断？'),
+          context.tr('插件「{name}」请求读取音频格式、输出路径、缓冲指标和设备名称；不会获得文件路径、设备句柄或修改音频设备。').replaceAll('{name}', manifest.name),
+        );
+      case 'data.native_control':
+        return (
+          context.tr('允许插件控制桌面歌词？'),
+          context.tr('插件「{name}」请求读取和修改悬浮歌词、桌面歌词的启用状态、锁定状态和显示行数。可在插件详情中随时撤销。').replaceAll('{name}', manifest.name),
+        );
+      case 'data.library':
+        return (
+          context.tr('允许插件读取音乐库？'),
+          context
+              .tr('插件「{name}」请求读取歌单内容、搜索音乐库并播放选定歌曲。可在插件详情中随时撤销。')
+              .replaceAll('{name}', manifest.name),
+        );
+      case 'data.profile':
+        return (
+          context.tr('允许插件读取账号资料？'),
+          context
+              .tr('插件「{name}」请求读取已连接平台、账号 ID、昵称和头像；不会获得密码、Cookie 或登录令牌。')
+              .replaceAll('{name}', manifest.name),
+        );
+      case 'data.history':
+        return (
+          context.tr('允许插件读取收听记录？'),
+          context
+              .tr('插件「{name}」请求读取最近播放、播放次数和本机收听时长。可在插件详情中随时撤销。')
+              .replaceAll('{name}', manifest.name),
+        );
       case 'network':
         return (
           context.tr('允许插件访问网络？'),
@@ -584,21 +626,29 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
           builder: (context, child) => Stack(
             fit: StackFit.expand,
             children: <Widget>[
-              UiScaling(
+              WindowsBackdrop(
                 state: _state,
-                child: CarMetrics(
-                  child: WindowFrame(
-                    state: _state,
-                    navigatorKey: _navigatorKey,
-                    child: Builder(
-                      builder: (context) => Theme(
-                        data: Theme.of(
-                          context,
-                        ).copyWith(scaffoldBackgroundColor: Colors.transparent),
-                        child: SharedBrowseBackground(
-                          state: _state,
-                          navigation: _browseNavigation,
-                          child: child!,
+                child: UiScaling(
+                  state: _state,
+                  child: CarMetrics(
+                    child: WindowFrame(
+                      enabled: widget.windowFrameEnabled,
+                      state: _state,
+                      navigatorKey: _navigatorKey,
+                      child: Builder(
+                        builder: (context) => Theme(
+                          data: Theme.of(context).copyWith(
+                            scaffoldBackgroundColor: Colors.transparent,
+                          ),
+                          child: SharedBrowseBackground(
+                            state: _state,
+                            navigation: _browseNavigation,
+                            // Pages consume the frame's safe inset themselves.
+                            // The desktop rail extends into the Inline row;
+                            // reserving it for the whole Navigator would push
+                            // both the logo and page padding down a second time.
+                            child: child!,
+                          ),
                         ),
                       ),
                     ),

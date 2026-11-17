@@ -13,6 +13,8 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:path/path.dart' as p;
 
 import 'plugin_manifest.dart';
+import 'plugin_event_scheduler.dart';
+import 'plugin_data_access.dart' show pluginFrontendLua;
 import 'plugin_sockets_io.dart';
 import 'plugin_websockets_io.dart';
 import 'lua_console_evaluator.dart';
@@ -74,6 +76,9 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)? onPageEdited;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
   final void Function(Map<String, dynamic> record)? onLog;
+  late final _scheduler = PluginEventScheduler(
+    (event, args) => invoke(event, args),
+  );
   Isolate? _isolate;
   ReceivePort? _port;
   SendPort? _commands;
@@ -105,6 +110,8 @@ class LuaPluginRuntime {
   /// Whether the plugin was shut down on purpose (disabled, removed, or built
   /// from sources that cannot start). A reset never sets this.
   bool _disposed = false;
+  bool get acceptsCalls => !_disposed && !_closed;
+  int sessionRevision = 0;
 
   /// Starts the clock for one call; the caller must [Timer.cancel] it.
   Timer _armGuard(int id, Completer<Object?> result, Duration budget) {
@@ -184,7 +191,9 @@ class LuaPluginRuntime {
           final spec = Map<String, dynamic>.from(
             message['spec'] as Map? ?? const <String, dynamic>{},
           );
+          if (_closed) throw const FormatException('Plugin is closed');
           final value = switch (message['hostExtension']) {
+            'timer' => _scheduler.configure(spec),
             'setting' =>
               onSettingAdded == null
                   ? throw const FormatException(
@@ -258,12 +267,7 @@ class LuaPluginRuntime {
           'websocketServerGranted': websocketServerGranted,
           'filesystemGranted': filesystemGranted,
           'permissionRequester': permissionRequester != null,
-          'uiExtensions':
-              onSettingAdded != null ||
-              onPlayerMenuItemAdded != null ||
-              onPageAdded != null ||
-              onPageEdited != null ||
-              onPlayerControl != null,
+          'uiExtensions': true,
           'logging': onLog != null,
           'proxyMode': SystemHttpProxy.currentMode.name,
           'proxyEndpoint': SystemHttpProxy.customEndpoint,
@@ -357,11 +361,13 @@ class LuaPluginRuntime {
     if (_closed) throw const PluginException('插件已停止，请重新启用。');
     final id = ++_serial;
     final clock = Stopwatch()..start();
-    AppLog.shared.event('lua', 'call', {
-      'plugin': manifest.id,
-      'operation': operation,
-      'request': id,
-    });
+    if (operation != 'timer') {
+      AppLog.shared.event('lua', 'call', {
+        'plugin': manifest.id,
+        'operation': operation,
+        'request': id,
+      });
+    }
     final result = Completer<Object?>();
     _pending[id] = result;
     _armGuard(id, result, budget ?? timeout);
@@ -369,12 +375,14 @@ class LuaPluginRuntime {
     try {
       final value = await result.future;
       _disarmGuard(id);
-      AppLog.shared.event('lua', 'completed', {
-        'plugin': manifest.id,
-        'operation': operation,
-        'request': id,
-        'elapsed_ms': clock.elapsedMilliseconds,
-      });
+      if (operation != 'timer') {
+        AppLog.shared.event('lua', 'completed', {
+          'plugin': manifest.id,
+          'operation': operation,
+          'request': id,
+          'elapsed_ms': clock.elapsedMilliseconds,
+        });
+      }
       return value;
     } on TimeoutException {
       // The VM is unresponsive, not gone: drop the isolate and let the next call
@@ -484,7 +492,9 @@ class LuaPluginRuntime {
   }
 
   Future<void> _teardown() async {
+    sessionRevision++;
     _closed = true;
+    _scheduler.cancelAll();
     AppLog.shared.event('lua', 'closed', {'plugin': manifest.id});
     final isolate = _isolate;
     final commands = _commands;
@@ -881,6 +891,14 @@ class _PluginHost {
       _push(l, await uiExtensions!('pageEdit', spec));
       return 1;
     });
+    lua.registerAsync('_timer', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Plugin timers are unavailable');
+      }
+      final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
+      _push(l, await uiExtensions!('timer', spec));
+      return 1;
+    });
     lua.registerAsync('_player_control', (l) async {
       if (uiExtensions == null) {
         throw const FormatException('Player control is unavailable');
@@ -1042,11 +1060,12 @@ host = { json_encode = _json_encode, json_decode = _json_decode,
   update_page_element = function(spec) return page_edit("update_element", spec) end,
   remove_page_element = function(spec) return page_edit("remove_element", spec) end,
   move_page_element = function(spec) return page_edit("move_element", spec) end,
-  player_control = _player_control, player_state = _player_state,
+  timer = _timer, player_control = _player_control, player_state = _player_state,
   player_status = _player_state, player_queue = _player_queue,
   player_track = _player_track, now_playing = _player_track,
   player_lyrics = _player_lyrics, player_recent = _player_recent,
   file = _file, files = _file, sleep = _sleep }
+$pluginFrontendLua
 $moduleBuffers
 local modules = {}
 function require(name)
@@ -1108,6 +1127,7 @@ end
       'socketServer': List<String>.of(manifest.socketServerBindings),
       'websocket': List<String>.of(manifest.websocketDomains),
       'websocketServer': List<String>.of(manifest.websocketServerBindings),
+      'data': manifest.dataPermissions,
       'storage': manifest.storage,
       'filesystem': manifest.filesystem,
     },
@@ -1119,11 +1139,16 @@ end
       'player',
       'player_lyrics',
       'player_recent',
+      'frontend_library',
+      'frontend_user',
+      'data_permissions',
+      'native_host_v1',
       'websocket',
       'socket',
       'sleep',
       'pages',
       'page_edit',
+      'timer',
       'filesystem',
     ],
   };

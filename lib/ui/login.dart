@@ -88,6 +88,20 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
   QrSessionInfo? _qrInfo;
 
   AppState get state => widget.state;
+  bool get _formBusy => _submitting || _sendingCode || _navBusy;
+  bool get _routeActive => mounted && ModalRoute.of(context)?.isActive == true;
+
+  void _closeDialog() {
+    if (!_routeActive) return;
+    final route = ModalRoute.of(context)!;
+    final navigator = Navigator.of(context);
+    if (route.isCurrent) {
+      navigator.pop();
+    } else {
+      // Authentication can finish under another modal. Close only this card.
+      navigator.removeRoute(route);
+    }
+  }
 
   @override
   void initState() {
@@ -107,8 +121,13 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       _error = null;
     });
     final owner = state.activeConnectionKey;
-    final String? url = await state.beginQrLogin();
-    if (!mounted ||
+    String? url;
+    try {
+      url = await state.beginQrLogin();
+    } catch (_) {
+      // Plugin and persistence failures are recoverable from the card too.
+    }
+    if (!_routeActive ||
         _mode != _Mode.qr ||
         generation != _qrGeneration ||
         owner != state.activeConnectionKey) {
@@ -120,20 +139,21 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       _phase = url == null ? _Phase.error : _Phase.waiting;
       _error = url == null ? state.qrStartError ?? '连接失败，请检查网络后重试。' : null;
     });
-    if (url != null) {
-      _poll = Timer.periodic(const Duration(seconds: 1), (_) => _tick(url));
-      unawaited(_tick(url));
+    final pollUrl = url;
+    if (pollUrl != null) {
+      _poll = Timer.periodic(const Duration(seconds: 1), (_) => _tick(pollUrl));
+      unawaited(_tick(pollUrl));
     }
   }
 
   Future<void> _tick(String url) async {
-    if (_polling || !mounted || _mode != _Mode.qr) return;
+    if (_polling || !_routeActive || _mode != _Mode.qr) return;
     _polling = true;
     final generation = _qrGeneration;
     final owner = state.activeConnectionKey;
     try {
       final int code = await state.pollQrLogin(url);
-      if (!mounted ||
+      if (!_routeActive ||
           generation != _qrGeneration ||
           owner != state.activeConnectionKey) {
         return;
@@ -142,7 +162,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
         // The poll may confirm after the card switched to another tab; the
         // session is already adopted, so close it from here as well.
         _poll?.cancel();
-        Navigator.of(context).maybePop();
+        _closeDialog();
         return;
       }
       if (_mode != _Mode.qr && _supports(_Mode.qr)) return;
@@ -155,13 +175,23 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
           _phase = _Phase.scanned;
         }
       });
+    } catch (_) {
+      if (_routeActive &&
+          generation == _qrGeneration &&
+          owner == state.activeConnectionKey) {
+        _poll?.cancel();
+        setState(() {
+          _phase = _Phase.error;
+          _error = '连接失败，请检查网络后重试。'; // i18n:key
+        });
+      }
     } finally {
       _polling = false;
     }
   }
 
   void _switchMode(_Mode mode) {
-    if (_mode == mode) return;
+    if (_formBusy || _mode == mode) return;
     _poll?.cancel();
     ++_qrGeneration;
     setState(() {
@@ -175,7 +205,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
   }
 
   Future<void> _selectConnection(String? key) async {
-    if (key == null || _submitting || _navBusy) return;
+    if (key == null || _formBusy) return;
     _poll?.cancel();
     _qrGeneration++;
     setState(() {
@@ -186,47 +216,65 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     });
     try {
       await state.selectMusicConnection(key);
-      if (!mounted) return;
+      if (!_routeActive) return;
       setState(() {
         _mode = _Mode.values.where(_supports).firstOrNull ?? _Mode.cookie;
       });
       if (_mode == _Mode.qr) unawaited(_start());
+    } catch (_) {
+      if (mounted) setState(() => _error = '操作失败，请稍后重试。'); // i18n:key
     } finally {
       if (mounted) setState(() => _navBusy = false);
     }
   }
 
+  Future<AuthOutcome> _authenticationResult(
+    Future<AuthOutcome> Function() request, {
+    String failure = '登录失败，请稍后再试。', // i18n:key
+  }) async {
+    try {
+      return await request();
+    } catch (_) {
+      return AuthOutcome(false, error: failure);
+    }
+  }
+
   Future<void> _submitCookie() async {
     final String value = _cookie.text.trim();
-    if (value.isEmpty || _submitting) return;
+    if (value.isEmpty || _formBusy) return;
     setState(() {
       _submitting = true;
       _error = null;
     });
-    final AuthOutcome outcome = await state.signInWithCookie(value);
-    if (!mounted) return;
+    final AuthOutcome outcome = await _authenticationResult(
+      () => state.signInWithCookie(value),
+    );
+    if (!_routeActive) return;
     setState(() => _submitting = false);
     if (outcome.ok) {
-      Navigator.of(context).maybePop();
+      _closeDialog();
     } else if (_mode == _Mode.cookie) {
       setState(() => _error = outcome.error ?? '这个 Cookie 无效或已过期。'); // i18n:key
     }
   }
 
   Future<void> _sendCode() async {
+    if (_formBusy || _resendSeconds > 0) return;
     final String phone = _phone.text.trim();
     if (!_phonePattern.hasMatch(phone)) {
       setState(() => _error = '手机号格式不正确。'); // i18n:key
       return;
     }
-    if (_sendingCode || _resendSeconds > 0) return;
     setState(() {
       _sendingCode = true;
       _error = null;
       _notice = null;
     });
-    final AuthOutcome outcome = await state.sendSmsCode(phone);
-    if (!mounted) return;
+    final AuthOutcome outcome = await _authenticationResult(
+      () => state.sendSmsCode(phone),
+      failure: '验证码发送失败，请稍后重试。', // i18n:key
+    );
+    if (!_routeActive) return;
     setState(() {
       _sendingCode = false;
       if (outcome.ok) {
@@ -254,7 +302,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
   }
 
   Future<void> _submitSms() async {
-    if (_submitting) return;
+    if (_formBusy) return;
     final String phone = _phone.text.trim();
     final String code = _code.text.trim();
     if (!_phonePattern.hasMatch(phone)) {
@@ -269,11 +317,13 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       _submitting = true;
       _error = null;
     });
-    final AuthOutcome outcome = await state.signInWithPhoneCaptcha(phone, code);
-    if (!mounted) return;
+    final AuthOutcome outcome = await _authenticationResult(
+      () => state.signInWithPhoneCaptcha(phone, code),
+    );
+    if (!_routeActive) return;
     setState(() => _submitting = false);
     if (outcome.ok) {
-      Navigator.of(context).maybePop();
+      _closeDialog();
     } else if (_mode == _Mode.sms) {
       setState(() => _error = outcome.error ?? '登录失败，请稍后再试。'); // i18n:key
     }
@@ -290,7 +340,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
   }
 
   Future<void> _submitPassword() async {
-    if (_submitting) return;
+    if (_formBusy) return;
     final String account = _account.text.trim();
     final String password = _password.text;
     final String? validation = _accountValidationError(account);
@@ -306,15 +356,14 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       _submitting = true;
       _error = null;
     });
-    final AuthOutcome outcome = await state.signInWithPassword(
-      account,
-      password,
+    final AuthOutcome outcome = await _authenticationResult(
+      () => state.signInWithPassword(account, password),
     );
-    if (!mounted) return;
+    if (!_routeActive) return;
     setState(() => _submitting = false);
     if (outcome.ok) {
       _password.clear();
-      Navigator.of(context).maybePop();
+      _closeDialog();
     } else if (_mode == _Mode.password) {
       setState(() => _error = outcome.error ?? '登录失败，请稍后再试。'); // i18n:key
     }
@@ -401,9 +450,8 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                       foregroundColor: apple.secondaryLabel,
                       minimumSize: const Size(40, 40),
                     ),
-                    onPressed: _navBusy || _submitting
-                        ? null
-                        : () => Navigator.of(context).maybePop(),
+                    // Route activity also guards the mounted exit animation.
+                    onPressed: _closeDialog,
                     icon: const Icon(Icons.close_rounded, size: 18),
                   ),
                 ],
@@ -462,7 +510,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                         ),
                       ),
                   ],
-                  onChanged: _submitting || _navBusy ? null : _selectConnection,
+                  onChanged: _formBusy ? null : _selectConnection,
                 ),
               ),
               if (_methods.isNotEmpty) ...[
@@ -704,6 +752,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     return [
       TextField(
         controller: _phone,
+        enabled: !_formBusy,
         autofocus: true,
         keyboardType: TextInputType.phone,
         inputFormatters: <TextInputFormatter>[
@@ -722,6 +771,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
           Expanded(
             child: TextField(
               controller: _code,
+              enabled: !_formBusy,
               keyboardType: TextInputType.number,
               inputFormatters: <TextInputFormatter>[
                 FilteringTextInputFormatter.digitsOnly,
@@ -734,7 +784,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
           ),
           const SizedBox(width: 8),
           SpringTextButton(
-            onPressed: _sendingCode || _resendSeconds > 0 ? null : _sendCode,
+            onPressed: _formBusy || _resendSeconds > 0 ? null : _sendCode,
             child: _sendingCode
                 ? const SizedBox.square(
                     dimension: 16,
@@ -764,7 +814,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       ],
       const SizedBox(height: 14),
       SpringFilledButton(
-        onPressed: _submitting ? null : _submitSms,
+        onPressed: _formBusy ? null : _submitSms,
         child: _submitting
             ? const SizedBox.square(
                 dimension: 16,
@@ -781,7 +831,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
         key: const ValueKey('login-password-account'),
         controller: _account,
         autofocus: true,
-        enabled: !_submitting,
+        enabled: !_formBusy,
         keyboardType: TextInputType.emailAddress,
         textInputAction: TextInputAction.next,
         autocorrect: false,
@@ -796,7 +846,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       TextField(
         key: const ValueKey('login-password-password'),
         controller: _password,
-        enabled: !_submitting,
+        enabled: !_formBusy,
         obscureText: _obscurePassword,
         autocorrect: false,
         enableSuggestions: false,
@@ -831,7 +881,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       const SizedBox(height: 14),
       SpringFilledButton(
         key: const ValueKey('login-password-submit'),
-        onPressed: _submitting ? null : _submitPassword,
+        onPressed: _formBusy ? null : _submitPassword,
         child: _submitting
             ? const SizedBox.square(
                 dimension: 16,
@@ -854,6 +904,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     return [
       TextField(
         controller: _cookie,
+        enabled: !_formBusy,
         minLines: 3,
         maxLines: 5,
         autofocus: true,
@@ -873,7 +924,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
       ],
       const SizedBox(height: 14),
       SpringFilledButton(
-        onPressed: _submitting ? null : _submitCookie,
+        onPressed: _formBusy ? null : _submitCookie,
         child: _submitting
             ? const SizedBox.square(
                 dimension: 16,
@@ -892,22 +943,22 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
         children: <Widget>[
           if (_mode != _Mode.qr && _supports(_Mode.qr))
             SpringTextButton(
-              onPressed: () => _switchMode(_Mode.qr),
+              onPressed: _formBusy ? null : () => _switchMode(_Mode.qr),
               child: const TrText('扫码登录'),
             ),
           if (_mode != _Mode.sms && _supports(_Mode.sms))
             SpringTextButton(
-              onPressed: () => _switchMode(_Mode.sms),
+              onPressed: _formBusy ? null : () => _switchMode(_Mode.sms),
               child: const TrText('短信验证码登录'),
             ),
           if (_mode != _Mode.password && _supports(_Mode.password))
             SpringTextButton(
-              onPressed: () => _switchMode(_Mode.password),
+              onPressed: _formBusy ? null : () => _switchMode(_Mode.password),
               child: const TrText('密码登录'),
             ),
           if (_mode != _Mode.cookie && _supports(_Mode.cookie))
             SpringTextButton(
-              onPressed: () => _switchMode(_Mode.cookie),
+              onPressed: _formBusy ? null : () => _switchMode(_Mode.cookie),
               child: const TrText('使用 Cookie 登录'),
             ),
         ],

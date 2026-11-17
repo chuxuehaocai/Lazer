@@ -1,5 +1,7 @@
 #include "beat_grid.h"
 #include "engine.h"
+#include "audio_buffer_policy.h"
+#include "beat_grid_capture.h"
 #include "pcm_output.h"
 #include "queued_pcm_buffer.h"
 #include "dop_packer.h"
@@ -115,16 +117,19 @@ struct Engine::SourceSlot final : SourceConsumer {
         source.close();
     }
 
-    void configurePrefetch(int32_t sampleRate, int32_t periodFrames, int32_t frameBytes,
+    bool configurePrefetch(int32_t sampleRate, int32_t periodFrames, int32_t frameBytes,
         int32_t bufferedOverlapFrames = 0) {
         const size_t rate = static_cast<size_t>(std::max(sampleRate, 1));
         const size_t period = static_cast<size_t>(std::max(periodFrames, 1));
         const size_t overlap = static_cast<size_t>(std::max(bufferedOverlapFrames, 0));
         const size_t cushion = std::max(rate / 4, period * 2);
-        const size_t capacity = std::max({rate, period * 4, overlap + cushion});
+        const size_t capacity = queuedPcmCapacityFrames(sampleRate, periodFrames, frameBytes,
+            bufferedOverlapFrames);
+        if (capacity == 0) return false;
         const size_t watermark = std::min(capacity, overlap + cushion);
         pcm = std::make_unique<QueuedPcmBuffer>(capacity, watermark,
             static_cast<size_t>(std::max(frameBytes, 1)));
+        return true;
     }
 
     bool startPrefetch() {
@@ -239,8 +244,7 @@ struct Engine::SourceSlot final : SourceConsumer {
     /* Tempo and beat phase of this source's own audio, estimated from the first seconds the pump
      * decodes it: the transition places the mix on this source's beats. */
     lazer_audio::BeatGrid grid;
-    std::vector<float> gridCapture;
-    int64_t gridCaptureFrames = 0;
+    lazer_audio::BeatGridCapture gridCapture;
     /* How far into the source the analysed head started: a grid measured from a peeked head is
      * anchored at the read position, not at the file's first sample. */
     int64_t gridOriginFrames = 0;
@@ -272,7 +276,7 @@ Engine::Engine(LazerAudioEngineConfig config, std::unique_ptr<AudioOutput> outpu
     } else {
         device_.device_id = nullptr;
     }
-    if (device_.buffer_millis <= 0) device_.buffer_millis = 120;
+    device_.buffer_millis = normalizedBufferMillis(device_.buffer_millis);
 }
 
 Engine::~Engine() {
@@ -365,10 +369,23 @@ void Engine::teardown() {
     nativeDsdActive_.store(false, std::memory_order_release);
     cancelCurrentSources();
     joinThreads();
+    releasePipelineBuffers();
     if (output_ != nullptr) output_->close();
     outputSession_ = AudioOutputSession{};
     retireCurrentSources();
     state_.store(LazerAudioStateIdle, std::memory_order_release);
+}
+
+void Engine::releasePipelineBuffers() {
+    ring_.releaseStorage();
+    ringLowWatermarkFrames_.store(0, std::memory_order_relaxed);
+    ringHighWatermarkFrames_.store(0, std::memory_order_relaxed);
+    std::vector<uint8_t>().swap(convertScratch_);
+    std::vector<uint8_t>().swap(queuedPcmScratch_);
+    std::vector<uint8_t>().swap(nativeDsdScratch_);
+    std::vector<float>().swap(autoMixScratch_);
+    std::vector<float>().swap(autoMixSilenceScratch_);
+    std::vector<double>().swap(autoMixEcho_);
 }
 
 int32_t Engine::open(
@@ -382,6 +399,7 @@ int32_t Engine::open(
     paused_.store(true, std::memory_order_release);
     cancelCurrentSources();
     joinThreads();
+    releasePipelineBuffers();
     if (output_ != nullptr) output_->closeForReplacement();
     outputSession_ = AudioOutputSession{};
     retireCurrentSources();
@@ -558,7 +576,7 @@ int32_t Engine::open(
         return LazerAudioErrorInvalidArgument;
     }
     request.exclusive = device_.exclusive != 0 || requireDoP || requireNativeDsd;
-    request.bufferMillis = device_.buffer_millis > 0 ? device_.buffer_millis : 120;
+    request.bufferMillis = normalizedBufferMillis(device_.buffer_millis);
     request.bitPerfect = !autoMix && device_.bit_perfect != 0;
     request.requireDoP = requireDoP;
     request.requireNativeDsd = requireNativeDsd;
@@ -720,9 +738,12 @@ int32_t Engine::configurePipeline() {
     }
 
     const int32_t frameBytes = outputSession_.target.frameBytes();
-    const int32_t wantedFrames = std::max(
-        outputSession_.bufferFrames * 3,
-        outputSession_.target.sampleRate * std::max(device_.buffer_millis, 60) / 1000);
+    const int32_t wantedFrames = outputRingFrames(outputSession_.target.sampleRate,
+        outputSession_.bufferFrames, frameBytes, device_.buffer_millis);
+    if (wantedFrames <= 0) {
+        lastError_ = "the output period exceeds the bounded audio ring budget";
+        return LazerAudioErrorUnsupported;
+    }
     ring_.reset(wantedFrames, frameBytes);
     /* Hysteresis marks for the producer: it stops at the high mark and resumes at the low one. A
      * quarter/three-quarters split, widened to at least two render blocks when the ring is short so
@@ -748,16 +769,12 @@ int32_t Engine::configurePipeline() {
         ringHighWatermarkFrames_.store(highMark, std::memory_order_relaxed);
         producerPausedForRing_ = false;
     }
-    convertScratch_.assign(static_cast<size_t>(wantedFrames) * frameBytes, 0);
-    autoMixScratch_.assign(static_cast<size_t>(wantedFrames) *
-        static_cast<size_t>(std::max(target.channels, 1)), 0.0f);
-    /* Enough of the incoming source's head for one peek: its silent intro, and a beat grid when the
-     * pump has not analysed that source itself (the prefetch buffer holds at least the overlap). */
-    autoMixSilenceScratch_.assign(
-        static_cast<size_t>(kBeatGridCaptureSeconds * std::max(target.sampleRate, 1)) *
-        static_cast<size_t>(std::max(target.channels, 1)), 0.0f);
     const size_t queuedScratchFrames = std::max(kRenderBlockFrames,
         static_cast<size_t>(std::max(outputSession_.bufferFrames, 1)));
+    /* Conversion needs one submission block, not another copy of the complete output ring. */
+    convertScratch_.assign(queuedScratchFrames * frameBytes, 0);
+    std::vector<float>().swap(autoMixScratch_);
+    std::vector<float>().swap(autoMixSilenceScratch_);
     if (outputSession_.nativeDsd) {
         const size_t rawFrameBytes = static_cast<size_t>(std::max(target.channels, 1));
         const size_t wordBytes = static_cast<size_t>(target.containerBitsPerSample / 8);
@@ -969,8 +986,11 @@ int32_t Engine::queueReader(
         }
         const int32_t overlapFrames = static_cast<int32_t>(
             static_cast<int64_t>(autoMixMillis_.load(std::memory_order_acquire)) * target.sampleRate / 1000);
-        prepared->configurePrefetch(target.sampleRate, outputSession_.bufferFrames,
-            target.frameBytes(), overlapFrames);
+        if (!prepared->configurePrefetch(target.sampleRate, outputSession_.bufferFrames,
+                target.frameBytes(), overlapFrames)) {
+            preparingSource_.reset();
+            return LazerAudioErrorUnsupported;
+        }
         if (!prepared->startPrefetch()) {
             preparingSource_.reset();
             return LazerAudioErrorNoMemory;
@@ -984,15 +1004,20 @@ int32_t Engine::queueReader(
     return LazerAudioOk;
 }
 
-int32_t Engine::clearQueuedReader(uint64_t queueGeneration) {
+int32_t Engine::clearQueuedReader(uint64_t queueGeneration, bool preserveAudible) {
     std::shared_ptr<SourceSlot> retired;
     int32_t result = LazerAudioErrorState;
     {
         std::lock_guard lifecycleGuard(lifecycleMutex_);
         const uint64_t currentQueueGeneration = queueGeneration_.load(std::memory_order_acquire);
         if (queueGeneration <= currentQueueGeneration) return LazerAudioErrorState;
-        queueGeneration_.store(queueGeneration, std::memory_order_release);
         std::lock_guard sourceGuard(sourceMutex_);
+        // A mode change edits future audio, including before its audible event reaches Dart.
+        if (preserveAudible && nextSource_ != nullptr &&
+            nextSource_->overlapStarted.load(std::memory_order_acquire)) {
+            return LazerAudioQueueAlreadyAudible;
+        }
+        queueGeneration_.store(queueGeneration, std::memory_order_release);
         if (nextSource_ != nullptr) {
             if (nextSource_->overlapStarted.load(std::memory_order_acquire)) {
                 const double progress = std::clamp(
@@ -1246,6 +1271,7 @@ int32_t Engine::stop() {
     underrunActive_.store(0, std::memory_order_release);
     cancelCurrentSources();
     joinThreads();
+    releasePipelineBuffers();
     if (output_ != nullptr) output_->close();
     retireCurrentSources();
     {
@@ -1368,7 +1394,7 @@ int32_t Engine::setDevice(const LazerAudioDeviceConfig &device) {
     formatMatchesSource_ = false;
     dopActive_.store(false, std::memory_order_release);
     nativeDsdActive_.store(false, std::memory_order_release);
-    if (device_.buffer_millis <= 0) device_.buffer_millis = 120;
+    device_.buffer_millis = normalizedBufferMillis(device_.buffer_millis);
     return LazerAudioOk;
 }
 
@@ -1656,11 +1682,15 @@ double Engine::measureBassClash(
     const int64_t headFrames = std::min<int64_t>(
         std::max<int64_t>(static_cast<int64_t>(sampleRate), 1),
         std::max<int64_t>(candidate.pcm != nullptr ? candidate.pcm->queuedFrames() : 0, 0));
-    const int64_t capacityFrames = static_cast<int64_t>(autoMixSilenceScratch_.size() / channels);
-    const int32_t peekFrames = static_cast<int32_t>(std::min<int64_t>(headFrames, capacityFrames));
-    if (candidate.pcm != nullptr && peekFrames > 0) {
+    const int32_t capacityFrames = static_cast<int32_t>(autoMixSilenceScratch_.size() / channels);
+    for (int64_t offset = 0; candidate.pcm != nullptr && capacityFrames > 0 &&
+            offset < headFrames;) {
+        const int32_t peekFrames = static_cast<int32_t>(std::min<int64_t>(
+            headFrames - offset, capacityFrames));
         const int32_t peeked = candidate.pcm->peekFrames(
-            reinterpret_cast<uint8_t *>(autoMixSilenceScratch_.data()), peekFrames);
+            reinterpret_cast<uint8_t *>(autoMixSilenceScratch_.data()), peekFrames,
+            static_cast<size_t>(offset));
+        if (peeked <= 0) break;
         for (int32_t frame = 0; frame < peeked; ++frame) {
             for (size_t channel = 0; channel < channels; ++channel) {
                 const double value = autoMixSilenceScratch_[
@@ -1672,6 +1702,7 @@ double Engine::measureBassClash(
                 incomingLow += state * state;
             }
         }
+        offset += peeked;
     }
     const double outgoingFraction =
         outgoingTotal > 0.0 ? outgoingLow / outgoingTotal : 0.0;
@@ -1749,27 +1780,24 @@ double Engine::mixExitEffect(double input, size_t channel) {
 
 void Engine::captureBeatGridLocked(const float *samples, int32_t frames, size_t channels) {
     if (source_ == nullptr || samples == nullptr || frames <= 0 || channels == 0) return;
+    if (autoMixMillis_.load(std::memory_order_acquire) == 0) {
+        /* Ordinary playback must not collect seconds of audio or run tempo autocorrelation. */
+        source_->gridCapture = lazer_audio::BeatGridCapture{};
+        return;
+    }
     const int32_t rate = outputSession_.target.sampleRate;
     if (rate <= 0) return;
     SourceSlot &slot = *source_;
     if (slot.gridAnalysed) return;
-    const int64_t windowFrames = static_cast<int64_t>(kBeatGridCaptureSeconds * rate);
-    const int64_t remaining = windowFrames - slot.gridCaptureFrames;
-    if (remaining <= 0) return;
-    const int32_t take = static_cast<int32_t>(std::min<int64_t>(remaining, frames));
-    const size_t sampleCount = static_cast<size_t>(take) * channels;
     if (slot.gridCapture.empty()) {
-        slot.gridCapture.reserve(static_cast<size_t>(windowFrames) * channels);
+        slot.gridOriginFrames = std::max<int64_t>(slot.producedOutputFrames - frames, 0);
     }
-    slot.gridCapture.insert(slot.gridCapture.end(), samples, samples + sampleCount);
-    slot.gridCaptureFrames += take;
-    if (slot.gridCaptureFrames >= windowFrames) {
-        slot.grid = lazer_audio::estimateBeatGrid(slot.gridCapture.data(), slot.gridCaptureFrames, rate,
-            static_cast<int32_t>(channels));
+    slot.gridCapture.append(samples, frames, rate, channels);
+    if (slot.gridCapture.full()) {
+        slot.grid = slot.gridCapture.estimate();
         slot.gridAnalysed = true;
         /* The buffer has done its job: the grid is a handful of numbers from here on. */
-        slot.gridCapture.clear();
-        slot.gridCapture.shrink_to_fit();
+        slot.gridCapture = lazer_audio::BeatGridCapture{};
     }
 }
 
@@ -1828,22 +1856,19 @@ int64_t Engine::consumeIncomingSilence(SourceSlot &candidate, int32_t sampleRate
         static_cast<int64_t>(kSilenceScanSeconds * sampleRate),
         std::max<int64_t>(candidate.pcm->queuedFrames(), 0));
     if (wantedFrames < frameFrames * kSilenceIntroFrames) return 0;
-    const int64_t capacityFrames = static_cast<int64_t>(
-        autoMixSilenceScratch_.size() / channels);
-    const int32_t peekFrames = static_cast<int32_t>(
-        std::min<int64_t>(wantedFrames, capacityFrames));
-    if (peekFrames <= 0) return 0;
-    const int32_t peeked = candidate.pcm->peekFrames(
-        reinterpret_cast<uint8_t *>(autoMixSilenceScratch_.data()), peekFrames);
-    if (peeked < frameFrames * kSilenceIntroFrames) return 0;
+    if (autoMixSilenceScratch_.size() / channels < static_cast<size_t>(frameFrames)) return 0;
     int64_t silentFrames = 0;
-    for (int64_t offset = 0; offset + frameFrames <= peeked; offset += frameFrames) {
+    for (int64_t offset = 0; offset + frameFrames <= wantedFrames; offset += frameFrames) {
+        const int32_t peeked = candidate.pcm->peekFrames(
+            reinterpret_cast<uint8_t *>(autoMixSilenceScratch_.data()),
+            static_cast<int32_t>(frameFrames), static_cast<size_t>(offset));
+        if (peeked != frameFrames) break;
         double energy = 0.0;
         double peak = 0.0;
         for (int64_t frame = 0; frame < frameFrames; ++frame) {
             for (size_t channel = 0; channel < channels; ++channel) {
                 const double value = autoMixSilenceScratch_[
-                    static_cast<size_t>(offset + frame) * channels + channel];
+                    static_cast<size_t>(frame) * channels + channel];
                 energy += value * value;
                 peak = std::max(peak, std::abs(value));
             }
@@ -1958,6 +1983,14 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
         if (source_ != nullptr && candidate != nullptr && candidate->pcm != nullptr &&
             rate > 0 && channels > 0 &&
             (duration > 0 || candidate->overlapStarted.load(std::memory_order_acquire))) {
+            const size_t mixingSamples = convertScratch_.size() / frameBytes *
+                static_cast<size_t>(channels);
+            if (autoMixScratch_.size() < mixingSamples) autoMixScratch_.resize(mixingSamples);
+            const size_t analysisSamples = std::max<size_t>(kRenderBlockFrames,
+                static_cast<size_t>(std::max(rate / 50, 1))) * static_cast<size_t>(channels);
+            if (autoMixSilenceScratch_.size() < analysisSamples) {
+                autoMixSilenceScratch_.resize(analysisSamples);
+            }
             const int64_t exactTotal = source_->source.totalOutputFrames();
             const int64_t totalFrames = exactTotal > 0 ? exactTotal :
                 source_->source.description().durationMillis * rate / 1000;
@@ -2019,20 +2052,22 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
                                 const int64_t headFrames = std::min<int64_t>(
                                     std::max<int64_t>(candidate->pcm->queuedFrames(), 0),
                                     static_cast<int64_t>(kBeatGridCaptureSeconds * rate));
-                                const int32_t peekFrames = static_cast<int32_t>(std::min<int64_t>(
-                                    headFrames,
-                                    static_cast<int64_t>(autoMixSilenceScratch_.size() / channels)));
-                                if (peekFrames > 0) {
+                                const int32_t blockFrames = static_cast<int32_t>(
+                                    autoMixSilenceScratch_.size() / channels);
+                                lazer_audio::BeatGridCapture head;
+                                for (int64_t offset = 0; blockFrames > 0 && offset < headFrames;) {
+                                    const int32_t peekFrames = static_cast<int32_t>(
+                                        std::min<int64_t>(headFrames - offset, blockFrames));
                                     const int32_t peeked = candidate->pcm->peekFrames(
                                         reinterpret_cast<uint8_t *>(autoMixSilenceScratch_.data()),
-                                        peekFrames);
-                                    if (peeked > 0) {
-                                        candidate->grid = lazer_audio::estimateBeatGrid(
-                                            autoMixSilenceScratch_.data(), peeked, rate,
-                                            static_cast<int32_t>(channels));
-                                        candidate->gridOriginFrames = skipped;
-                                    }
+                                        peekFrames, static_cast<size_t>(offset));
+                                    if (peeked <= 0) break;
+                                    head.append(autoMixSilenceScratch_.data(), peeked, rate,
+                                        static_cast<size_t>(channels));
+                                    offset += peeked;
                                 }
+                                candidate->grid = head.estimate();
+                                candidate->gridOriginFrames = skipped;
                                 candidate->gridAnalysed = true;
                             }
                             /* Line the incoming song's beat phase up with the beat the outgoing song
@@ -2090,8 +2125,9 @@ int32_t Engine::accept(const uint8_t *bytes, int32_t frameCount) {
                                 autoMixExit_ = planExitEffect(
                                     std::abs(outgoingDb - incomingDb), autoMixBassAmount_);
                                 autoMixEchoDelayFrames_ = exitBeat;
-                                autoMixEchoCapacity_ =
-                                    exitBeat * kEchoTaps + std::max<int32_t>(rate, 1);
+                                autoMixEchoCapacity_ = std::min<int64_t>(
+                                    exitBeat * kEchoTaps + std::max<int32_t>(rate, 1),
+                                    kMaxMixEffectBytes / (sizeof(double) * static_cast<size_t>(channels)));
                                 autoMixEcho_.assign(
                                     static_cast<size_t>(autoMixEchoCapacity_) *
                                         static_cast<size_t>(channels), 0.0);
@@ -2690,6 +2726,7 @@ void Engine::renderLoop() {
     };
 
     while (!cancelled_.load(std::memory_order_acquire)) {
+        ring_.acknowledgeFlushForConsumer();
         const uint64_t flush = ring_.flushSequence();
         if (flush != seenFlush) {
             /* A seek cleared the ring: the frames written before it no longer describe the position. */
@@ -2738,12 +2775,13 @@ void Engine::renderLoop() {
             }
             const int32_t justPlayed = exclusiveInFlightAudioFrames_.exchange(
                 0, std::memory_order_acq_rel);
-            if (flush != seenFlush) {
-                /* A seek invalidates queued source frames; discard their old position accounting. */
-                seenFlush = flush;
-                writtenFrames_.store(0, std::memory_order_release);
-                renderedFrames_.store(0, std::memory_order_release);
-            } else if (justPlayed > 0) {
+            if (ring_.flushSequence() != flush) {
+                /* The endpoint wait may outlive a seek. Acknowledge its discard and let the next
+                 * iteration reset accounting before reading or submitting any post-seek frames. */
+                ring_.acknowledgeFlushForConsumer();
+                continue;
+            }
+            if (justPlayed > 0) {
                 renderedFrames_.fetch_add(justPlayed, std::memory_order_release);
             }
             publishTrackChanged();
@@ -2841,6 +2879,10 @@ void Engine::renderLoop() {
 
         const int32_t frameBytes = std::max(outputSession_.target.frameBytes(), 1);
         const int32_t frames = ring_.read(block.data(), room);
+        if (ring_.flushSequence() != flush) {
+            ring_.acknowledgeFlushForConsumer();
+            continue;
+        }
         if (frames == 0 && !pumpFinished_.load(std::memory_order_acquire) &&
             !waitedForQueuedBoundary && sourceEndedNow()) {
             /* A clean decoder EOF can race the pump's final session notification. Wait for that

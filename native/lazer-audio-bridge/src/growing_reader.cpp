@@ -48,7 +48,7 @@
 #if defined(_WIN32)
 #define LAZER_BRIDGE_API extern "C" __declspec(dllexport)
 #else
-#define LAZER_BRIDGE_API extern "C" __attribute__((visibility("default")))
+#define LAZER_BRIDGE_API extern "C" __attribute__((visibility("default"))) __attribute__((used))
 #endif
 
 namespace {

@@ -1,5 +1,8 @@
 #include "audio_output.h"
 #include "log_proxy.h"
+#ifdef LAZER_ANDROID_UAC2
+#include "android_uac2_output.h"
+#endif
 
 #include <aaudio/AAudio.h>
 #include <algorithm>
@@ -310,6 +313,10 @@ private:
 }  // namespace
 
 std::unique_ptr<AudioOutput> createPlatformAudioOutput() {
+#ifdef LAZER_ANDROID_UAC2
+    return routeAndroidAudioOutput(std::make_unique<AAudioOutput>());
+#else
     return std::make_unique<AAudioOutput>();
+#endif
 }
 }  // namespace lazer::audio

@@ -30,6 +30,9 @@ class PluginManifest {
       websocketServerBindings = List<String>.from(
         (json['permissions'] as Map?)?['websocketServer'] as List? ?? [],
       ),
+      dataPermissions = List<String>.from(
+        (json['permissions'] as Map?)?['data'] as List? ?? [],
+      ),
       storage = (json['permissions'] as Map?)?['storage'] == true,
       filesystem =
           (json['permissions'] as Map?)?['filesystem'] == true ||
@@ -44,6 +47,9 @@ class PluginManifest {
         apiVersion != 1 ||
         !safePath(entry) ||
         !entry.endsWith('.lua') ||
+        dataPermissions.length > dataScopes.length ||
+        dataPermissions.toSet().length != dataPermissions.length ||
+        dataPermissions.any((scope) => !dataScopes.contains(scope)) ||
         domains.length > 32 ||
         socketDomains.length > 32 ||
         websocketDomains.length > 32 ||
@@ -123,6 +129,14 @@ class PluginManifest {
       websocketDomains;
   final List<String> socketServerBindings, websocketServerBindings;
   final bool storage, filesystem;
+  final List<String> dataPermissions;
+  static const Set<String> dataScopes = {
+    'library',
+    'profile',
+    'history',
+    'native_audio',
+    'native_control',
+  };
 
   static bool safePath(String path) =>
       path.isNotEmpty &&
@@ -245,6 +259,7 @@ class PluginManifest {
       'socketServer': socketServerBindings,
       'websocket': websocketDomains,
       'websocketServer': websocketServerBindings,
+      'data': dataPermissions,
       'storage': storage,
       'filesystem': filesystem,
     },

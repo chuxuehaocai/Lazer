@@ -13,6 +13,7 @@
 #include <alsa/asoundlib.h>
 
 #include "alsa_pcm_packing.h"
+#include "alsa_output_policy.h"
 #include "output_alsa_recovery.h"
 
 namespace lazer::audio {
@@ -34,14 +35,12 @@ std::string alsaErrorText(const char *operation, int result) {
 }
 
 bool isHwDeviceName(const std::string &name) {
-    /* ALSA's `hw:` PCM is the raw hardware path. Reject aliases and all plugin wrappers rather
-     * than accidentally accepting `default`, `plughw:` or a user configured conversion chain. */
-    return name.size() > 3 && name.compare(0, 3, "hw:") == 0 &&
-        name.find_first_of("\r\n\0", 0, 3) == std::string::npos;
+    return isAlsaHardwareDevice(name);
 }
 
 bool isAllowedOutputDeviceName(const std::string &name) {
     if (isHwDeviceName(name)) return true;
+    if (isAlsaSharedDevice(name)) return true;
 #if defined(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
     /* The ALSA null PCM is enabled only in probe builds to exercise negotiation and queue control
      * on CI hosts without sound cards. It is never enumerated and release builds reject it. */
@@ -272,6 +271,11 @@ bool tryOpenConfigured(const std::string &device, unsigned int rate, unsigned in
     result = snd_pcm_hw_params_set_channels(pcm, parameters, channels);
     if (result < 0) return reject("ALSA device rejected the requested channel count", result);
     result = snd_pcm_hw_params_set_rate(pcm, parameters, rate, 0);
+    if (result < 0 && isAlsaSharedDevice(device)) {
+        unsigned int nearRate = rate;
+        int nearDirection = 0;
+        result = snd_pcm_hw_params_set_rate_near(pcm, parameters, &nearRate, &nearDirection);
+    }
     if (result < 0) return reject("ALSA device rejected the requested sample rate", result);
 
     const unsigned int periodTimeUs = 10'000;
@@ -305,7 +309,8 @@ bool tryOpenConfigured(const std::string &device, unsigned int rate, unsigned in
     if (result < 0) return reject("could not read back ALSA sample rate", result);
     result = snd_pcm_hw_params_get_channels(parameters, &actualChannels);
     if (result < 0) return reject("could not read back ALSA channel count", result);
-    if (actualFormat != format.alsaFormat || actualRate != rate || actualChannels != channels) {
+    if (actualFormat != format.alsaFormat || !acceptsAlsaRateReadback(device, rate, actualRate) ||
+        actualChannels != channels) {
         std::ostringstream message;
         const char *actualFormatName = snd_pcm_format_name(actualFormat);
         message << "ALSA negotiated a different format than requested (rate " << actualRate
@@ -560,12 +565,14 @@ int32_t AlsaOutput::open(const AudioOutputRequest &request, const StreamDescript
     }
 
 #if defined(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
-    std::string device = request.deviceId.empty() ? "hw:0,0" : request.deviceId;
+    std::string device = selectAlsaOutputDevice(request.deviceId, request.exclusive,
+        request.bitPerfect, request.requireDoP, request.requireNativeDsd);
     const bool testNativeDsdNull = request.requireNativeDsd &&
         device == "lazer-test:alsa-null";
     if (testNativeDsdNull) device = "null";
 #else
-    const std::string device = request.deviceId.empty() ? "hw:0,0" : request.deviceId;
+    const std::string device = selectAlsaOutputDevice(request.deviceId, request.exclusive,
+        request.bitPerfect, request.requireDoP, request.requireNativeDsd);
 #endif
     if ((request.requireDoP || request.requireNativeDsd) && !isHwDeviceName(device)
 #if defined(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
@@ -579,10 +586,16 @@ int32_t AlsaOutput::open(const AudioOutputRequest &request, const StreamDescript
     }
     if (!isAllowedOutputDeviceName(device)) {
 #if defined(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
-        error = "ALSA output requires a direct hw: device ID (for example hw:1,0); only the test probe accepts null";
+        error = "ALSA output requires hw:, default, pulse or pipewire; only the test probe accepts null";
 #else
-        error = "ALSA output requires a direct hw: device ID (for example hw:1,0); ALSA plugins are disabled";
+        error = "ALSA output requires hw:, default, pulse or pipewire";
 #endif
+        return LazerAudioErrorInvalidArgument;
+    }
+
+    if (isAlsaSharedDevice(device) && !allowsAlsaSharedOutput(request.exclusive,
+            request.bitPerfect, request.requireDoP, request.requireNativeDsd)) {
+        error = "ALSA exclusive, bit-perfect and direct DSD output require a direct hw: device";
         return LazerAudioErrorInvalidArgument;
     }
 
@@ -639,7 +652,7 @@ int32_t AlsaOutput::open(const AudioOutputRequest &request, const StreamDescript
             ? "the ALSA hw device does not accept a supported exact Native DSD rate, channel count and DSD_U8/U16/U32 format"
             : request.bitPerfect
             ? "the ALSA hw device does not accept the exact source PCM rate, channels and precision"
-            : "the ALSA hw device accepts none of the tried direct PCM formats";
+            : "the selected ALSA device accepts none of the tried PCM formats";
         if (!lastFailure.empty()) error += ": " + lastFailure;
         return LazerAudioErrorUnsupported;
     }
@@ -692,7 +705,8 @@ int32_t AlsaOutput::open(const AudioOutputRequest &request, const StreamDescript
     session.target = target;
     session.engineFormat = PcmFormat{target.sampleRate, target.channels};
     session.formatSelection = request.requireDoP
-        ? LazerAudioFormatSelectionDoPCarrier : configured.formatSelection;
+        ? LazerAudioFormatSelectionDoPCarrier : isAlsaSharedDevice(device)
+        ? LazerAudioFormatSelectionSharedMix : configured.formatSelection;
     session.periodFrames = periodFrames_;
     session.bufferFrames = bufferFrames_;
     session.description = "ALSA " + deviceName_ + " / " +
@@ -708,6 +722,7 @@ int32_t AlsaOutput::open(const AudioOutputRequest &request, const StreamDescript
     /* hw: bypasses ALSA conversion/mix plugins. This reports direct PCM ownership to the engine;
      * it does not certify the DAC's internal clock or downstream DSP. */
     session.exclusive = isHwDeviceName(deviceName_);
+    if (isAlsaSharedDevice(deviceName_)) session.description += " / system shared mixer";
     session.writeMode = OutputWriteMode::Variable;
     session.primeBeforeStart = false;
     session.queueDepthAvailable = true;

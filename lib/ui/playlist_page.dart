@@ -86,12 +86,14 @@ class AppPlaylistPage extends StatefulWidget {
     this.embedded = false,
     this.topInset = 0,
     this.album,
+    this.onBack,
   });
 
   final AppState state;
   final Playlist playlist;
   final bool embedded;
   final double topInset;
+  final VoidCallback? onBack;
 
   /// When set, the page loads album tracks instead of playlist tracks. The
   /// album still travels through [playlist] for the header and title, so both
@@ -291,8 +293,12 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
     // sampling them once turns the per-track work into one addition.
     final double title = _lineHeight(theme.textTheme.bodyMedium, scaler);
     final double detail = _lineHeight(theme.textTheme.bodySmall, scaler);
-    final double plain = math.max(44.0, title + detail) + 16.0;
-    final double translated = math.max(44.0, title + detail * 2) + 16.0;
+    final bool wide = MediaQuery.sizeOf(context).width >= 940;
+    final double cover = wide ? 52 : 44;
+    // Includes padding, the focus border and the vertical row margins.
+    final double chrome = wide ? 22 : 18;
+    final double plain = math.max(cover, title + detail) + chrome;
+    final double translated = math.max(cover, title + detail * 2) + chrome;
     final List<double> tops = <double>[];
     final List<double> heights = <double>[];
     var offset = 0.0;
@@ -444,6 +450,19 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
                       key: _headerKey,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
+                        if (widget.onBack != null)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: IconButton(
+                                key: const ValueKey('playlist-scroll-back'),
+                                tooltip: context.tr('返回'),
+                                icon: const Icon(Icons.chevron_left_rounded),
+                                onPressed: widget.onBack,
+                              ),
+                            ),
+                          ),
                         AppPlaylistHeader(
                           playlist: widget.playlist,
                           compact: compact,
@@ -583,16 +602,17 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
                       // Non-linear both ways: the change is legible at once and
                       // then settles, so a fast scroll does not stack fades.
                       curve: Curves.easeOutCubic,
-                      builder: (BuildContext context, double value, Widget? child) {
-                        if (value <= 0.001) return const SizedBox.shrink();
-                        return Opacity(
-                          opacity: value,
-                          child: Transform.scale(
-                            scale: .9 + .1 * value,
-                            child: child,
-                          ),
-                        );
-                      },
+                      builder:
+                          (BuildContext context, double value, Widget? child) {
+                            if (value <= 0.001) return const SizedBox.shrink();
+                            return Opacity(
+                              opacity: value,
+                              child: Transform.scale(
+                                scale: .9 + .1 * value,
+                                child: child,
+                              ),
+                            );
+                          },
                       child: FloatingActionButton.small(
                         key: const ValueKey<String>('playlist-locate'),
                         heroTag: null,

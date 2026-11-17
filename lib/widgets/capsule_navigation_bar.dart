@@ -207,9 +207,14 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
       // label is already visible when it matters.
       child: _withTooltip(
         destination.tooltip ?? destination.label,
-        GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.opaque,
+        TextButton(
+          onPressed: onTap,
+          style: TextButton.styleFrom(
+            padding: EdgeInsets.zero,
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: const StadiumBorder(),
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: IconTheme(

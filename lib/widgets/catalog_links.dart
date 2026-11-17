@@ -10,6 +10,8 @@ import '../state/app_state.dart';
 import '../state/detail_requests.dart';
 import '../theme/app_palette.dart';
 import 'interaction_feedback.dart';
+import '../tv/tv_mode.dart';
+import '../tv/large_screen_widgets.dart';
 
 Future<void> openArtists(
   BuildContext context,
@@ -97,13 +99,27 @@ class CatalogTextLink extends StatelessWidget {
       style: style,
     );
     if (onTap == null) return label;
+    if (TvScope.isActive(context)) {
+      return Semantics(
+        link: true,
+        child: LargeScreenTapTarget(
+          onTap: feedbackAction(context, onTap),
+          borderRadius: BorderRadius.circular(10),
+          focusScale: 1.02,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: label,
+          ),
+        ),
+      );
+    }
     return Semantics(
       link: true,
       child: Material(
         color: Colors.transparent,
         textStyle: style ?? DefaultTextStyle.of(context).style,
         child: InkWell(
-          borderRadius: BorderRadius.zero,
+          borderRadius: BorderRadius.circular(8),
           hoverColor: context.colors.oatWarm.withValues(alpha: .4),
           focusColor: context.colors.clay.withValues(alpha: .18),
           onTap: feedbackAction(context, onTap),

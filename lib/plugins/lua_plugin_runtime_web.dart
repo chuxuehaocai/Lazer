@@ -14,6 +14,8 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 import 'plugin_manifest.dart';
+import 'plugin_event_scheduler.dart';
+import 'plugin_data_access.dart' show pluginFrontendLua;
 import 'plugin_socket_inbox.dart';
 import 'lua_console_evaluator.dart';
 import '../diagnostics/app_log.dart';
@@ -78,6 +80,9 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)? onPageEdited;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
   final void Function(Map<String, dynamic> record)? onLog;
+  late final _scheduler = PluginEventScheduler(
+    (event, args) => _queueInvocation(event, args),
+  );
 
   final Random _random = Random.secure();
   final http.Client _client = http.Client();
@@ -86,6 +91,8 @@ class LuaPluginRuntime {
   LuaState? _lua;
   _WebPluginHost? _host;
   bool _closed = false;
+  bool get acceptsCalls => !_closed;
+  int sessionRevision = 0;
 
   Future<void> start() => _starting ??= _start();
 
@@ -110,46 +117,38 @@ class LuaPluginRuntime {
       filesystemGranted: filesystemGranted,
       permissionRequester: permissionRequester,
       onLog: onLog,
-      uiExtensions:
-          onSettingAdded == null &&
-              onPlayerMenuItemAdded == null &&
-              onPageAdded == null &&
-              onPageEdited == null &&
-              onPlayerControl == null
-          ? null
-          : (kind, spec) async => switch (kind) {
-              'setting' =>
-                onSettingAdded == null
-                    ? throw const FormatException(
-                        'Plugin settings are unavailable',
-                      )
-                    : onSettingAdded!(spec),
-              'playerMenu' =>
-                onPlayerMenuItemAdded == null
-                    ? throw const FormatException(
-                        'Plugin player menu is unavailable',
-                      )
-                    : onPlayerMenuItemAdded!(spec),
-              'page' =>
-                onPageAdded == null
-                    ? throw const FormatException(
-                        'Plugin pages are unavailable',
-                      )
-                    : onPageAdded!(spec),
-              'pageEdit' =>
-                onPageEdited == null
-                    ? throw const FormatException(
-                        'Plugin pages are unavailable',
-                      )
-                    : onPageEdited!(spec),
-              'playerControl' =>
-                onPlayerControl == null
-                    ? throw const FormatException(
-                        'Player control is unavailable',
-                      )
-                    : onPlayerControl!(spec),
-              _ => throw const FormatException('Unknown plugin extension'),
-            },
+      uiExtensions: (kind, spec) async {
+        if (_closed) throw const FormatException('Plugin is closed');
+        // Resolve async branches here before the mixed sync/async switch is
+        // widened to Object?. The Web compiler can otherwise pass a Future
+        // through to the Lua value converter and release the VM lane early.
+        return switch (kind) {
+          'timer' => _scheduler.configure(spec),
+          'setting' =>
+            onSettingAdded == null
+                ? throw const FormatException('Plugin settings are unavailable')
+                : await onSettingAdded!(spec),
+          'playerMenu' =>
+            onPlayerMenuItemAdded == null
+                ? throw const FormatException(
+                    'Plugin player menu is unavailable',
+                  )
+                : await onPlayerMenuItemAdded!(spec),
+          'page' =>
+            onPageAdded == null
+                ? throw const FormatException('Plugin pages are unavailable')
+                : await onPageAdded!(spec),
+          'pageEdit' =>
+            onPageEdited == null
+                ? throw const FormatException('Plugin pages are unavailable')
+                : await onPageEdited!(spec),
+          'playerControl' =>
+            onPlayerControl == null
+                ? throw const FormatException('Player control is unavailable')
+                : await onPlayerControl!(spec),
+          _ => throw const FormatException('Unknown plugin extension'),
+        };
+      },
     );
     await host.initialize();
     _host = host;
@@ -162,22 +161,35 @@ class LuaPluginRuntime {
     Map<String, dynamic> args = const {},
     Duration? budget,
   ]) {
+    return _queueInvocation(operation, args).timeout(budget ?? timeout);
+  }
+
+  // Timer backpressure tracks the actual VM work. A caller-facing timeout does
+  // not settle a suspended permission prompt and must not release this slot.
+  Future<Object?> _queueInvocation(
+    String operation,
+    Map<String, dynamic> args,
+  ) {
     final result = Completer<Object?>();
     _calls = _calls.then((_) async {
       final clock = Stopwatch()..start();
-      AppLog.shared.event('lua', 'call', {
-        'plugin': manifest.id,
-        'operation': operation,
-      });
+      if (operation != 'timer') {
+        AppLog.shared.event('lua', 'call', {
+          'plugin': manifest.id,
+          'operation': operation,
+        });
+      }
       try {
         await start();
         if (_closed) throw const PluginException('插件已停止，请重新启用。');
         result.complete(await _host!.invoke(operation, args));
-        AppLog.shared.event('lua', 'completed', {
-          'plugin': manifest.id,
-          'operation': operation,
-          'elapsed_ms': clock.elapsedMilliseconds,
-        });
+        if (operation != 'timer') {
+          AppLog.shared.event('lua', 'completed', {
+            'plugin': manifest.id,
+            'operation': operation,
+            'elapsed_ms': clock.elapsedMilliseconds,
+          });
+        }
       } catch (error, stack) {
         AppLog.shared.event('lua', 'failed', {
           'plugin': manifest.id,
@@ -186,7 +198,7 @@ class LuaPluginRuntime {
         result.completeError(error, stack);
       }
     });
-    return result.future.timeout(timeout);
+    return result.future;
   }
 
   Future<List<String>> evaluate(String source, [Duration? budget]) {
@@ -215,7 +227,9 @@ class LuaPluginRuntime {
 
   void close() {
     if (_closed) return;
+    sessionRevision++;
     _closed = true;
+    _scheduler.cancelAll();
     AppLog.shared.event('lua', 'closed', {'plugin': manifest.id});
     _client.close();
     _host?.closeSockets();
@@ -439,6 +453,14 @@ class _WebPluginHost {
       }
       final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
       _push(state, await uiExtensions!('pageEdit', spec));
+      return 1;
+    });
+    lua.registerAsync('_timer', (state) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Plugin timers are unavailable');
+      }
+      final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
+      _push(state, await uiExtensions!('timer', spec));
       return 1;
     });
     lua.registerAsync('_player_control', (state) async {
@@ -679,11 +701,12 @@ class _WebPluginHost {
         move_page_element = function(spec)
           return page_edit("move_element", spec)
         end,
-        player_control = _player_control, player_state = _player_state,
+        timer = _timer, player_control = _player_control, player_state = _player_state,
         player_status = _player_state, player_queue = _player_queue,
         player_track = _player_track, now_playing = _player_track,
         player_lyrics = _player_lyrics, player_recent = _player_recent,
         file = _file, files = _file, sleep = _sleep }
+      $pluginFrontendLua
       $moduleBuffers
       local modules = {}
       function require(name)
@@ -745,6 +768,7 @@ class _WebPluginHost {
       'socketServer': List<String>.of(manifest.socketServerBindings),
       'websocket': List<String>.of(manifest.websocketDomains),
       'websocketServer': List<String>.of(manifest.websocketServerBindings),
+      'data': manifest.dataPermissions,
       'storage': manifest.storage,
       'filesystem': manifest.filesystem,
     },
@@ -756,10 +780,15 @@ class _WebPluginHost {
       'player',
       'player_lyrics',
       'player_recent',
+      'frontend_library',
+      'frontend_user',
+      'data_permissions',
+      'native_host_v1',
       'websocket',
       'sleep',
       'pages',
       'page_edit',
+      'timer',
       'filesystem',
     ],
   };

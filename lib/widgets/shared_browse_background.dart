@@ -6,6 +6,7 @@ import '../ui/background.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
+import 'windows_backdrop.dart';
 
 class BrowseBackgroundScope extends InheritedWidget {
   const BrowseBackgroundScope({super.key, required super.child});
@@ -49,7 +50,9 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
       state.backgroundImageScale,
       state.backgroundBlurEnabled ? state.backgroundBlur : 0,
       state.backgroundDarkEdgeEnabled,
+      state.backgroundOpacity,
       state.uiAlpha,
+      state.playerBackground,
       state.dynamicBackgroundQuality,
       state.browseBackgroundFps,
       state.browseBackgroundColor,
@@ -109,6 +112,10 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
         final navigation = widget.navigation;
         final apple = AppleSemanticColors.of(context);
         final painted = state.backgroundMode != AppBackgroundMode.off;
+        final mica = state.backgroundMode == AppBackgroundMode.windowsMica;
+        final playerMica =
+            state.playerPresented.value &&
+            state.playerBackground == AppBackgroundMode.windowsMica;
         final canvas =
             !painted && Theme.of(context).brightness == Brightness.dark
             ? AppleColors.darkCanvas
@@ -116,44 +123,53 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
         return Stack(
           fit: StackFit.expand,
           children: [
-            ColoredBox(color: canvas),
-            if (painted)
-              TickerMode(
-                enabled:
-                    !state.playerPresented.value &&
-                    !(state.browseTransitionActive.value &&
-                        navigation.rootVisible.value &&
-                        !navigation.moving.value),
-                child: AlbumBlurFlowCanvas(
-                  track: state.current,
-                  mode: state.backgroundMode,
-                  pageColor: Colors.transparent,
-                  animationsEnabled:
-                      state.backgroundMode ==
-                      AppBackgroundMode.nowPlayingDynamic,
-                  imagePath: state.backgroundImagePath,
-                  uiAlpha: state.uiAlpha,
-                  imageAlignmentX: state.backgroundImageAlignmentX,
-                  imageAlignmentY: state.backgroundImageAlignmentY,
-                  imageScale: state.backgroundImageScale,
-                  blurSigma: state.backgroundBlurEnabled
-                      ? state.backgroundBlur
-                      : 0,
-                  darkEdge: state.backgroundDarkEdgeEnabled,
-                  quality: state.dynamicBackgroundQuality,
-                  frameRate: state.browseBackgroundFps,
-                  solidColor: state.browseBackgroundColor,
-                ),
-              ),
-            if (painted)
-              IgnorePointer(
-                child: ColoredBox(
-                  color: apple.background.withValues(
-                    alpha: (state.uiAlpha * .9).clamp(.56, .92),
+            if (!playerMica && !mica) ColoredBox(color: canvas),
+            if (!playerMica && mica)
+              MicaSurface(opacity: state.backgroundOpacity),
+            if (!playerMica && painted && !mica)
+              Opacity(
+                key: const ValueKey('browse-background-opacity'),
+                opacity: state.backgroundOpacity,
+                child: TickerMode(
+                  enabled:
+                      !state.playerPresented.value &&
+                      !(state.browseTransitionActive.value &&
+                          navigation.rootVisible.value &&
+                          !navigation.moving.value),
+                  child: AlbumBlurFlowCanvas(
+                    track: state.current,
+                    mode: state.backgroundMode,
+                    pageColor: Colors.transparent,
+                    animationsEnabled:
+                        state.backgroundMode ==
+                        AppBackgroundMode.nowPlayingDynamic,
+                    imagePath: state.backgroundImagePath,
+                    imageAlignmentX: state.backgroundImageAlignmentX,
+                    imageAlignmentY: state.backgroundImageAlignmentY,
+                    imageScale: state.backgroundImageScale,
+                    blurSigma: state.backgroundBlurEnabled
+                        ? state.backgroundBlur
+                        : 0,
+                    darkEdge: state.backgroundDarkEdgeEnabled,
+                    quality: state.dynamicBackgroundQuality,
+                    frameRate: state.browseBackgroundFps,
+                    solidColor: state.browseBackgroundColor,
                   ),
                 ),
               ),
-            child!,
+            if (!playerMica && painted && !mica)
+              IgnorePointer(
+                child: ColoredBox(
+                  color: apple.background.withValues(alpha: .60),
+                ),
+              ),
+            Opacity(
+              key: const ValueKey('browse-content-opacity'),
+              // The player separates its own canvas from its controls. Other
+              // routes, dialogs and embedded pages share this content layer.
+              opacity: state.playerPresented.value ? 1 : state.uiAlpha,
+              child: child!,
+            ),
           ],
         );
       },

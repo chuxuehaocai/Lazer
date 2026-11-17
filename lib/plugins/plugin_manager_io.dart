@@ -20,6 +20,7 @@ import '../ui/layout_system.dart';
 import 'lua_plugin_runtime.dart';
 import 'lua_theme_engine.dart';
 import 'plugin_manifest.dart';
+import 'plugin_data_access.dart';
 import 'plugin_extensions.dart';
 
 class InstalledPlugin {
@@ -37,6 +38,7 @@ class InstalledPlugin {
   bool websocketGranted = false;
   bool websocketServerGranted = false;
   bool filesystemGranted = false;
+  late final PluginDataAccess dataAccess = PluginDataAccess(manifest);
   final Map<String, Object?> settingValues = <String, Object?>{};
   final List<LuaPluginSetting> settings = <LuaPluginSetting>[];
   final List<LuaPlayerMenuItem> playerMenuItems = <LuaPlayerMenuItem>[];
@@ -113,6 +115,22 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   Future<void> Function()? afterChange;
   Future<bool> Function(InstalledPlugin plugin, String permission)?
   onPermissionRequest;
+
+  Future<void> _saveDataPermissions(InstalledPlugin plugin) async {
+    if (!_plugins.contains(plugin)) {
+      throw const PluginException('Plugin is no longer installed');
+    }
+    await File(
+      p.join((await root).path, plugin.manifest.id, '.data-permissions'),
+    ).writeAsString(jsonEncode(plugin.dataAccess.granted.toList()));
+    _notify();
+  }
+
+  Future<void> setDataPermission(String id, String scope, bool granted) async {
+    final plugin = _plugins.firstWhere((value) => value.manifest.id == id);
+    plugin.dataAccess.setGranted(scope, granted);
+    await _saveDataPermissions(plugin);
+  }
 
   Future<bool> _requestPermission(
     InstalledPlugin plugin,
@@ -405,6 +423,17 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           plugin.filesystemGranted = await File(
             p.join(item.path, '.filesystem-enabled'),
           ).exists();
+          final dataFile = File(p.join(item.path, '.data-permissions'));
+          if (await dataFile.exists()) {
+            final grants = jsonDecode(await dataFile.readAsString());
+            if (grants is List) {
+              for (final scope in manifest.dataPermissions) {
+                if (grants.contains(scope)) {
+                  plugin.dataAccess.setGranted(scope, true);
+                }
+              }
+            }
+          }
           _plugins.add(plugin);
           if (!disabled) await _start(plugin);
         } catch (_) {
@@ -437,11 +466,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             .relative(file.path, from: directory.path)
             .replaceAll('\\', '/');
         final isLua = name.endsWith('.lua');
-        final isResource =
-            name != 'manifest.json' &&
-            (name.endsWith('.json') ||
-                name.endsWith('.md') ||
-                name.endsWith('.txt'));
+        final isResource = isPluginTextResource(name);
         if (!isLua && !isResource) continue;
         total += await file.length();
         if (total > 8 * 1024 * 1024) throw const FormatException();
@@ -452,7 +477,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           resources[name] = text;
         }
       }
-      final runtime = LuaPluginRuntime(
+      late final LuaPluginRuntime runtime;
+      plugin.dataAccess.resume();
+      runtime = LuaPluginRuntime(
         manifest: plugin.manifest,
         sources: sources,
         resources: resources,
@@ -473,8 +500,31 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         onPlayerMenuItemAdded: (spec) => _registerPlayerMenuItem(plugin, spec),
         onPageAdded: (spec) => _registerPage(plugin, spec),
         onPageEdited: (spec) => _editPage(plugin, spec),
-        onPlayerControl: (spec) =>
-            onPlayerControl?.call(spec) ?? Future.value(null),
+        onPlayerControl: (spec) {
+          final revision = runtime.sessionRevision;
+          bool active() =>
+              plugin.enabled &&
+              _plugins.contains(plugin) &&
+              identical(plugin.runtime, runtime) &&
+              runtime.acceptsCalls &&
+              runtime.sessionRevision == revision;
+          return plugin.dataAccess.dispatch(
+            spec,
+            prompt: (permission) async {
+              final granted =
+                  await onPermissionRequest?.call(plugin, permission) ?? false;
+              return active() && granted;
+            },
+            persist: () => _saveDataPermissions(plugin),
+            isActive: active,
+            backend: (request) async {
+              if (!plugin.enabled || !_plugins.contains(plugin)) {
+                throw const PluginException('Plugin is disabled');
+              }
+              return onPlayerControl?.call(request);
+            },
+          );
+        },
         onLog: (record) {
           final level = record['level']?.toString() ?? 'info';
           final fields = <String, Object?>{
@@ -548,6 +598,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.error = null;
     } catch (_) {
       MediaRequestRules.remove(plugin.manifest.id);
+      plugin.dataAccess.suspend();
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
       plugin.gateways.clear();
@@ -639,6 +690,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           .where((v) => v.manifest.id == manifest.id)
           .firstOrNull;
       final enabled = previous?.enabled ?? true;
+      previous?.dataAccess.suspend();
       await beforeChange?.call(manifest.id);
       await previous?.runtime?.shutdown();
       final installed = Directory(p.join(base.path, manifest.id));
@@ -700,6 +752,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       MediaRequestRules.remove(plugin.manifest.id);
       await plugin.runtime?.shutdown();
@@ -728,6 +781,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -754,6 +808,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -782,6 +837,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -808,6 +864,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -834,6 +891,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -860,6 +918,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -887,6 +946,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       MediaRequestRules.remove(plugin.manifest.id);
       await plugin.runtime?.shutdown();
@@ -937,6 +997,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _disposed = true;
     for (final plugin in _plugins) {
       MediaRequestRules.remove(plugin.manifest.id);
+      plugin.dataAccess.suspend();
       plugin.runtime?.close();
     }
     super.dispose();

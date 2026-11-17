@@ -116,6 +116,7 @@ private:
     DffDsfReader dffReader_;
     FormatContext format_;
     CodecContext codec_;
+    AudioFrame decodeFrame_; // Reuse the shell; decoded buffers are unrefed after delivery.
     const AVCodec *codecDescriptor_ = nullptr;
     ResampleContext resampler_;
     AVStream *audioStream_ = nullptr;   /* borrowed from format_ */

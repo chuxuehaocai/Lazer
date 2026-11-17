@@ -37,6 +37,7 @@ class SongCommentsView extends StatefulWidget {
 class _SongCommentsViewState extends State<SongCommentsView> {
   final ScrollController _scroll = ScrollController();
   late int _accountId;
+  bool _loginPending = false;
   SongCommentsController get _comments => widget.controller;
 
   @override
@@ -87,28 +88,51 @@ class _SongCommentsViewState extends State<SongCommentsView> {
   }
 
   Future<void> _like(String id) async {
+    if (_loginPending) return;
+    final AppState state = widget.state;
+    final SongCommentsController comments = _comments;
+    final String songId = widget.track.id;
+    bool current() =>
+        mounted &&
+        identical(widget.state, state) &&
+        identical(_comments, comments) &&
+        widget.track.id == songId;
     if (!widget.state.signedIn) {
-      await showAppLoginDialog(context, widget.state);
-      if (!mounted || !widget.state.signedIn) return;
-      await _comments.openSong(
-        widget.track.id,
-        accountId: widget.state.user.userId,
-      );
-      if (!mounted) return;
+      setState(() => _loginPending = true);
+      try {
+        await showAppLoginDialog(context, state);
+        if (!current() || !state.signedIn) return;
+        await comments.openSong(songId, accountId: state.user.userId);
+        if (!current() || comments.trackId != songId) return;
+      } finally {
+        if (mounted) setState(() => _loginPending = false);
+      }
     }
-    await _comments.toggleLike(id);
+    await comments.toggleLike(id);
   }
 
   Future<void> _loginAgain() async {
-    final SessionUser previous = widget.state.user;
-    await showAppLoginDialog(context, widget.state);
-    if (!mounted ||
-        !widget.state.signedIn ||
-        identical(previous, widget.state.user)) {
-      return;
+    if (_loginPending) return;
+    final AppState state = widget.state;
+    final SongCommentsController comments = _comments;
+    final String songId = widget.track.id;
+    final SessionUser previous = state.user;
+    setState(() => _loginPending = true);
+    try {
+      await showAppLoginDialog(context, state);
+      if (!mounted ||
+          !identical(widget.state, state) ||
+          !identical(_comments, comments) ||
+          widget.track.id != songId ||
+          !state.signedIn ||
+          identical(previous, state.user)) {
+        return;
+      }
+      comments.dismissActionError();
+      await comments.refresh();
+    } finally {
+      if (mounted) setState(() => _loginPending = false);
     }
-    _comments.dismissActionError();
-    await _comments.refresh();
   }
 
   @override
@@ -171,7 +195,9 @@ class _SongCommentsViewState extends State<SongCommentsView> {
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         child: SpringTextButton(
-                          onPressed: () => unawaited(_loginAgain()),
+                          onPressed: _loginPending
+                              ? null
+                              : () => unawaited(_loginAgain()),
                           child: const TrText('重新登录'),
                         ),
                       ),
@@ -353,7 +379,7 @@ class _SongCommentsViewState extends State<SongCommentsView> {
     key: ValueKey<String>('comment-${comment.id}'),
     child: _CommentRow(
       comment: comment,
-      pending: _comments.isLiking(comment.id),
+      pending: _loginPending || _comments.isLiking(comment.id),
       signedIn: widget.state.signedIn,
       onLike: () => unawaited(_like(comment.id)),
     ),

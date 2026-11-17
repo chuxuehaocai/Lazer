@@ -7,6 +7,15 @@ on:
   pull_request:
     branches: [nextgen]
   workflow_dispatch:
+    inputs:
+      target:
+        description: Platforms to build
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - ios
 
 permissions:
   contents: read
@@ -37,6 +46,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install the independent frontend test client runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -51,11 +64,15 @@ jobs:
       - run: dart tool/patch_lua_dardo_plus.dart
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub --reporter expanded
+      - name: Test Web Lua callbacks and Native capability boundaries in Chrome
+        run: flutter test --no-pub --platform chrome --reporter expanded test/lua_frontend_timer_web_test.dart test/plugin_native_web_test.dart
       - run: python3 -m unittest discover -s ci/tests -p 'test_*.py'
       - name: Check interface localisation coverage
         run: python3 tool/check_i18n.py
       - name: Test platform output contracts without hardware
         run: |
+          g++ -std=c++17 -Wall -Wextra -Werror tool/validation/desktop_lyrics_geometry_test.cpp -o /tmp/lazer-lyrics-geometry
+          /tmp/lazer-lyrics-geometry
           cmake -S native/lazer-audio/tests/aaudio -B build/aaudio-contract -DCMAKE_BUILD_TYPE=Release
           cmake --build build/aaudio-contract --parallel 2
           ctest --test-dir build/aaudio-contract --output-on-failure
@@ -67,6 +84,7 @@ jobs:
 
   windows:
     name: Windows EXE (x86_64)
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     needs: check
     runs-on: windows-2022
     timeout-minutes: 60
@@ -198,6 +216,7 @@ jobs:
 
   macos-native:
     name: macOS native audio (${{ matrix.arch }})
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     needs: check
     env:
       MACOSX_DEPLOYMENT_TARGET: '12.0'
@@ -244,6 +263,7 @@ jobs:
 
   macos:
     name: macOS App (${{ matrix.arch }})
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     needs: [check, macos-native]
     strategy:
       fail-fast: false
@@ -324,6 +344,7 @@ jobs:
           retention-days: 30
 
   linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     name: Linux AppImage (${{ matrix.arch }})
     needs: check
     strategy:
@@ -462,6 +483,7 @@ jobs:
 
   android:
     name: Android APK
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     needs: check
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -590,6 +612,22 @@ jobs:
         env:
           FFMPEG_BUILD_JOBS: '4'
         run: bash ci/build-ios-audio.sh device
+      - name: Build the same Release audio profile for iOS Simulator
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: bash ci/build-ios-audio.sh simulator
+      - name: Play file and growing-reader fixtures on iOS Simulator
+        run: bash ci/smoke-ios-audio.sh
+      - name: Keep iOS runtime smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-audio-runtime-smoke
+          path: |
+            build/ios-audio-smoke/*.log
+            build/ios-audio-smoke/result.txt
+            build/ios-audio-smoke/devices.json
+          if-no-files-found: warn
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-deps-ios-arm64
@@ -634,7 +672,13 @@ jobs:
             --dart-define=LAZER_COMMIT=${{ github.sha }} \
             --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
       - name: Verify the app exports the native engine ABI
-        run: python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/Runner.xcodeproj -scheme Runner \
+            -configuration Release -sdk iphoneos -showBuildSettings -json \
+            > build/ios/audio-build-settings.json
+          python3 ci/verify-ios-audio.py --build-settings build/ios/audio-build-settings.json
+          python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
       - name: Verify app and extension bundle metadata
         run: python3 ci/verify-ios-bundle.py --app build/ios/iphoneos/Runner.app
       - name: Create unsigned IPA with the required Payload directory

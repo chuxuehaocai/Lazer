@@ -914,9 +914,9 @@ int runExistingFastGaplessCase() {
         engine->destroy();
         return fail("first successor did not prepare");
     }
-    if (engine->clearQueuedReader(2) != LazerAudioOk) {
+    if (engine->clearQueuedReader(2, true) != LazerAudioOk) {
         engine->destroy();
-        return fail("prepared successor did not cancel");
+        return fail("unheard prepared successor did not cancel");
     }
     if (engine->queueReader(1, cancelledReader, nextParams) != LazerAudioErrorState) {
         engine->destroy();
@@ -1242,7 +1242,12 @@ int runAutoMixCancelAndSeekCase() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     if (!overlapAudible || engine->pause() != LazerAudioOk ||
-        engine->clearQueuedReader(2) != LazerAudioQueueCleared || second.closeCount != 1) {
+        engine->clearQueuedReader(2, true) != LazerAudioQueueAlreadyAudible ||
+        second.closeCount != 0) {
+        engine->destroy();
+        return fail("a play-mode refresh cancelled the already audible overlap");
+    }
+    if (engine->clearQueuedReader(2) != LazerAudioQueueCleared || second.closeCount != 1) {
         engine->destroy();
         return fail("an overlapping incoming reader was not synchronously cancelled and closed");
     }

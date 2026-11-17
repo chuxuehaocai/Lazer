@@ -12,6 +12,7 @@ import '../widgets/settings_row.dart';
 import '../widgets/spring_buttons.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/settings_detail.dart';
+import '../widgets/text_input_dialog.dart';
 
 /// Renders the bounded settings controls registered by enabled Lua plugins.
 ///
@@ -299,40 +300,18 @@ class _LuaPluginPageElementView extends StatelessWidget {
   }
 
   Future<void> _editText(BuildContext context) async {
-    final controller = TextEditingController(
-      text: element.value is String ? element.value as String : '',
-    );
     final value = await showAppleDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(context.tr(element.title)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: element.maxLines,
-          maxLength: 2048,
-          decoration: InputDecoration(
-            hintText: element.placeholder.isEmpty
-                ? context.tr('输入内容')
-                : context.tr(element.placeholder),
-          ),
-          onSubmitted: element.maxLines == 1
-              ? (text) => Navigator.of(dialogContext).pop(text)
-              : null,
-        ),
-        actions: <Widget>[
-          SpringTextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const TrText('取消'),
-          ),
-          SpringFilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const TrText('保存'),
-          ),
-        ],
+      builder: (_) => AppTextInputDialog(
+        title: context.tr(element.title),
+        initialValue: element.value is String ? element.value as String : '',
+        maxLines: element.maxLines,
+        maxLength: 2048,
+        hintText: element.placeholder.isEmpty
+            ? context.tr('输入内容')
+            : context.tr(element.placeholder),
       ),
     );
-    controller.dispose();
     if (!context.mounted || value == null) return;
     await _event(context, value);
   }
@@ -508,33 +487,15 @@ class _LuaPluginSettingRow extends StatelessWidget {
   }
 
   Future<void> _editText(BuildContext context) async {
-    final controller = TextEditingController(
-      text: setting.value is String ? setting.value as String : '',
-    );
     final value = await showAppleDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(context.tr(setting.title)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 2048,
-          decoration: InputDecoration(hintText: context.tr('输入内容')),
-          onSubmitted: (text) => Navigator.of(dialogContext).pop(text),
-        ),
-        actions: <Widget>[
-          SpringTextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const TrText('取消'),
-          ),
-          SpringFilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const TrText('保存'),
-          ),
-        ],
+      builder: (_) => AppTextInputDialog(
+        title: context.tr(setting.title),
+        initialValue: setting.value is String ? setting.value as String : '',
+        maxLength: 2048,
+        hintText: context.tr('输入内容'),
       ),
     );
-    controller.dispose();
     if (!context.mounted || value == null) return;
     await _set(context, value);
   }

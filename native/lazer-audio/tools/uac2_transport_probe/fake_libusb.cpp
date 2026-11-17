@@ -58,7 +58,17 @@ unsigned char kStreamingExtra[] = {
 libusb_endpoint_descriptor g_endpoints[2]{};
 libusb_interface_descriptor g_alternate{};
 libusb_interface g_interface{};
-libusb_interface g_interfaces[1]{};
+libusb_interface g_interfaces[2]{};
+libusb_interface_descriptor g_control_alternate{};
+unsigned char kControlExtra[] = {
+    17, 0x24, 0x02, 1, 1, 1, 0, 10, 2, 3, 0, 0, 0, 0, 0, 0, 0,
+    8, 0x24, 0x0a, 10, 3, 7, 0, 0,
+};
+std::unordered_set<int> g_claimed_interfaces;
+int g_control_fault = 0;
+int g_clock_set_count = 0;
+int g_stream_alternate = 0;
+std::uint32_t g_clock_rate = 48000;
 libusb_config_descriptor g_configuration{};
 
 void InitializeDescriptors() {
@@ -97,7 +107,17 @@ void InitializeDescriptors() {
     g_configuration.bLength = LIBUSB_DT_CONFIG_SIZE;
     g_configuration.bDescriptorType = LIBUSB_DT_CONFIG;
     g_configuration.bConfigurationValue = 1;
-    g_configuration.bNumInterfaces = 1;
+    g_control_alternate.bInterfaceNumber = 0;
+    g_control_alternate.bAlternateSetting = 0;
+    g_control_alternate.bInterfaceClass = 1;
+    g_control_alternate.bInterfaceSubClass = 1;
+    g_control_alternate.bInterfaceProtocol = 0x20;
+    kControlExtra[19] = g_control_fault == 3 ? 0x0b : 0x0a;
+    g_control_alternate.extra = kControlExtra;
+    g_control_alternate.extra_length = sizeof(kControlExtra);
+    g_interfaces[1].altsetting = &g_control_alternate;
+    g_interfaces[1].num_altsetting = 1;
+    g_configuration.bNumInterfaces = 2;
     g_configuration.interface = g_interfaces;
 }
 
@@ -200,6 +220,57 @@ int LIBUSB_CALL libusb_get_active_config_descriptor(
 }
 
 void LIBUSB_CALL libusb_free_config_descriptor(libusb_config_descriptor*) {}
+
+int LIBUSB_CALL libusb_set_auto_detach_kernel_driver(libusb_device_handle*, int) { return 0; }
+int LIBUSB_CALL libusb_claim_interface(libusb_device_handle*, int number) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_control_fault == 4 && number == 1) return LIBUSB_ERROR_BUSY;
+    return g_claimed_interfaces.insert(number).second ? 0 : LIBUSB_ERROR_BUSY;
+}
+int LIBUSB_CALL libusb_release_interface(libusb_device_handle*, int number) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_claimed_interfaces.erase(number);
+    return 0;
+}
+int LIBUSB_CALL libusb_set_interface_alt_setting(libusb_device_handle*, int number, int alternate) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (number != 1 || !g_claimed_interfaces.count(number)) return LIBUSB_ERROR_NOT_FOUND;
+    g_stream_alternate = alternate;
+    return 0;
+}
+int LIBUSB_CALL libusb_control_transfer(libusb_device_handle*, uint8_t type, uint8_t request,
+    uint16_t value, uint16_t index, unsigned char* data, uint16_t length, unsigned int) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (index != 0x0a00 || !g_claimed_interfaces.count(0) || g_stream_alternate != 0)
+        return LIBUSB_ERROR_PIPE;
+    const auto put32 = [](unsigned char* p, uint32_t n) {
+        for (int i = 0; i < 4; ++i) p[i] = static_cast<unsigned char>(n >> (8 * i));
+    };
+    if (type == 0xa1 && request == 2 && value == 0x100 && (length == 2 || length == 14)) {
+        data[0] = 1; data[1] = 0;
+        if (length == 14) {
+            put32(data + 2, g_control_fault == 2 ? 96000 : 44100);
+            put32(data + 6, g_control_fault == 2 ? 96000 : 192000);
+            put32(data + 10, 0);
+        }
+        return g_control_fault == 5 ? length - 1 : length;
+    }
+    if (request == 1 && value == 0x100 && length == 4) {
+        if (type == 0x21) {
+            g_clock_rate = uint32_t(data[0]) | (uint32_t(data[1]) << 8) |
+                (uint32_t(data[2]) << 16) | (uint32_t(data[3]) << 24);
+            g_feedback_sample_rate_hz = g_clock_rate;
+            ++g_clock_set_count;
+            return 4;
+        }
+        if (type == 0xa1) { put32(data, g_control_fault == 1 ? g_clock_rate + 1 : g_clock_rate); return 4; }
+    }
+    if (type == 0xa1 && request == 1 && value == 0x200 && length == 1) {
+        data[0] = g_control_fault == 6 ? 0 : 1;
+        return 1;
+    }
+    return LIBUSB_ERROR_PIPE;
+}
 
 libusb_transfer* LIBUSB_CALL libusb_alloc_transfer(const int iso_packets) {
     if (iso_packets < 0) return nullptr;
@@ -376,7 +447,17 @@ void ResetFakeLibusbState() {
     g_streaming_bit_resolution = 16;
     g_feedback_sample_rate_hz = 48000;
     g_captured_output.clear();
+    g_claimed_interfaces.clear();
+    g_control_fault = 0;
+    g_clock_set_count = 0;
+    g_stream_alternate = 0;
+    g_clock_rate = 48000;
 }
+
+void SetControlFault(int fault) { g_control_fault = fault; }
+int ClaimedInterfaceCount() { return static_cast<int>(g_claimed_interfaces.size()); }
+int ClockSetCount() { return g_clock_set_count; }
+int StreamingAlternate() { return g_stream_alternate; }
 
 void SetFakeStreamingFormat(const std::uint8_t subslot_size, const std::uint8_t bit_resolution) {
     std::lock_guard<std::mutex> lock(g_mutex);

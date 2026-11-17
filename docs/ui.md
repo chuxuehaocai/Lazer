@@ -16,7 +16,8 @@ shell; `lib/player/` contains the adaptive player and desktop composition.
   `secondaryGroupedBackground`, `label`, `secondaryLabel`, `separator`,
   `fill`, `glass`, and the accent. Light and dark palettes are explicit, with no
   Material elevation tinting.
-- **Accent** — Apple Music red `#FA2D48` is the default. When Settings →
+- **Accent** — Lazer blue `#99B9E3` is the default, adjusted for contrast on
+  light and dark surfaces. When Settings →
   配色 is set to 跟随当前歌曲, the dominant cover colour is used as the accent;
   自定义 opens an HSV swatch picker that seeds the accent with the listener's
   own colour. Neutral surfaces remain stable either way.
@@ -69,8 +70,9 @@ defaults to 30 fps; the player follows the display unless a manual rate is set.
   composition: a separately configured album-colour canvas, a
   large shadowed cover, metadata and actions on the left, a borderless lyric
   column on the right, and a dark Apple transport shelf. Queue and comments
-  open as docked glass panels. Keyboard shortcuts (Space, arrows, M, L, Q, C,
-  F, Esc) remain.
+  open as docked glass panels. Q/F/L/C/M/Esc control the player; configured media
+  bindings handle playback, seeking and volume. Focused controls consume their
+  own keys before global media bindings, and text entry suspends those bindings.
 
 ### Phone / compact window
 
@@ -184,7 +186,12 @@ Playlist cover flights use a separate overlay ticker, retain the visible
 source composition and hand off to the detail artwork without exposing a
 placeholder frame. Back can interrupt an entrance, and another destination can
 retarget a moving flight. Navigation ancestors retain their state and scroll
-position but do not keep hidden tickers running.
+position within the retention budget but do not keep hidden tickers running.
+The switcher retains at most nine pages plus one outgoing page. It preserves the
+root and nearest available history; older destinations rebuild when revisited.
+Rapidly interrupted switches animate only the current and outgoing pages.
+Cover changes keep at most three image layers, collapsing to one while hidden
+or with reduced motion. Hidden queue indicators also detach from playback ticks.
 
 Playlist names and count lines share the cover flight's clock. Their measured
 card/header bounds and text styles interpolate in both directions; faster

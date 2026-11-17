@@ -1,6 +1,7 @@
 #pragma once
 
 #include "android_uac2_packetizer.h"
+#include "android_uac2_control.h"
 
 #include <libusb.h>
 
@@ -58,6 +59,9 @@ public:
     IsoTransportSession& operator=(const IsoTransportSession&) = delete;
     ~IsoTransportSession();
 
+    // Claims interfaces, verifies RANGE/SET_CUR/GET_CUR, then starts transfers.
+    int StartPcm(std::uint32_t rate, std::uint8_t channels, std::uint8_t minimum_bits,
+        NativeStreamConfig* negotiated, std::string* error);
     int Start(const NativeStreamConfig& config, std::string* error);
     int Write(const std::uint8_t* bytes, std::size_t length, std::uint32_t timeout_ms);
     void SetPlaying(bool playing) noexcept;
@@ -107,10 +111,11 @@ private:
     void CopyToQueueLocked(const std::uint8_t* bytes, std::size_t length) noexcept;
     void CopyFromQueueLocked(unsigned char* destination, std::size_t length) noexcept;
 
-    const int borrowed_usb_fd_;
+    [[maybe_unused]] const int borrowed_usb_fd_; // Retained as the borrowed descriptor's provenance.
     const int owned_usb_fd_;
     libusb_context* context_ = nullptr;
     libusb_device_handle* device_handle_ = nullptr;
+    ClaimedPcmInterfaces claimed_interfaces_{};
     std::thread event_thread_;
     mutable std::mutex mutex_;
     std::condition_variable changed_;

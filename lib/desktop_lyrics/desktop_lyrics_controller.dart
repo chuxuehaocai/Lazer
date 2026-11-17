@@ -1,8 +1,6 @@
 import 'dart:async';
 
-import 'package:desktop_multi_window/desktop_multi_window.dart';
-import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../diagnostics/app_log.dart';
@@ -10,55 +8,54 @@ import '../lyrics/interlude.dart';
 import '../lyrics/lyric_document.dart';
 import '../state/app_state.dart';
 import 'overlay_protocol.dart';
+import 'overlay_window_host.dart';
 
-/// Owns the one desktop-lyrics window and keeps it in sync with [AppState].
-///
-/// The controller lives in the main engine. Every message is serialized so a
-/// burst of playback ticks cannot interleave a window close with a state push.
+/// Owns at most one overlay engine, with one running and one coalesced update.
 class DesktopLyricsController {
-  DesktopLyricsController(this._state) {
+  DesktopLyricsController(this._state, {LyricsOverlayWindowHost? windowHost})
+    : _host = windowHost ?? DesktopLyricsWindowHost() {
     _state.addListener(_scheduleSync);
-    _positionTimer = Timer.periodic(
-      const Duration(milliseconds: 50),
-      (_) => _schedulePositionPush(),
-    );
     _scheduleSync();
   }
 
   final AppState _state;
-
-  WindowController? _window;
-  WindowMethodChannel? _channel;
-  String? _windowId;
+  final LyricsOverlayWindowHost _host;
+  LyricsOverlayWindow? _window;
   LyricsOverlayMode? _mode;
   bool _overlayReady = false;
   String? _pendingReadyId;
   bool _readyHandlerInstalled = false;
   bool _unavailable = false;
   bool _disposed = false;
-  bool _queued = false;
-  bool _positionPushQueued = false;
-  Future<void> _queue = Future<void>.value();
+  bool _closingWindow = false;
+  bool _closeUnconfirmed = false;
+  bool _transportFailed = false;
+  bool _syncRequested = false;
+  bool _positionRequested = false;
+  bool _drainScheduled = false;
+  bool _running = false;
+  Future<void> _idle = Future<void>.value();
+  Future<void> _closed = Future<void>.value();
   Timer? _positionTimer;
-
+  Timer? _retryTimer;
+  final Set<(String, String)> _fontRegistrations = {};
   Object? _lastFullIdentity;
   LyricsOverlaySettings? _lastSettings;
   int? _lastPositionMs;
   bool? _lastPlaying;
 
-  static bool get _desktopPlatform =>
-      !kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.windows ||
-          defaultTargetPlatform == TargetPlatform.linux ||
-          defaultTargetPlatform == TargetPlatform.macOS);
+  @visibleForTesting
+  Future<void> get idle => _idle;
+  Future<void> get closed => _closed;
+  @visibleForTesting
+  bool get debugPositionPolling => _positionTimer?.isActive ?? false;
 
   LyricsOverlayMode? get _desiredMode {
-    if (!_desktopPlatform) return null;
+    if (!_host.supported) return null;
     if (_state.desktopLyricsEnabled && _state.desktopLyricsSupported) {
       return LyricsOverlayMode.desktop;
     }
-    if (_state.floatingLyricsEnabled) return LyricsOverlayMode.floating;
-    return null;
+    return _state.floatingLyricsEnabled ? LyricsOverlayMode.floating : null;
   }
 
   LyricsOverlaySettings get _settings {
@@ -80,170 +77,233 @@ class DesktopLyricsController {
   }
 
   void _scheduleSync() {
-    if (_disposed || _queued) return;
-    _queued = true;
-    scheduleMicrotask(() {
-      _queued = false;
-      if (_disposed) return;
-      _queue = _queue.then((_) => _sync()).catchError((
-        Object error,
-        StackTrace stack,
-      ) {
-        AppLog.shared.record('desktop lyrics: $error\n$stack');
-      });
+    if (_disposed) return;
+    _syncRequested = true;
+    _updatePositionTimer();
+    _scheduleDrain();
+  }
+
+  void _scheduleDrain() {
+    if (_disposed || _running || _drainScheduled) return;
+    _drainScheduled = true;
+    final completion = Completer<void>();
+    _idle = completion.future;
+    scheduleMicrotask(() async {
+      _drainScheduled = false;
+      _running = true;
+      try {
+        while (!_disposed && (_syncRequested || _positionRequested)) {
+          final full = _syncRequested;
+          _syncRequested = false;
+          _positionRequested = false;
+          try {
+            if (full) {
+              await _sync();
+            } else {
+              await _pushPosition();
+            }
+          } catch (error, stack) {
+            AppLog.shared.record('desktop lyrics: $error\n$stack');
+          }
+        }
+      } finally {
+        _running = false;
+        completion.complete();
+      }
     });
   }
 
   Future<void> _sync() async {
-    if (_disposed) return;
-    final LyricsOverlayMode? mode = _desiredMode;
+    final mode = _desiredMode;
     if (mode == null) {
       await _close();
       return;
     }
-    if (_unavailable) return;
-    if (_window == null || _mode != mode) {
-      await _close();
+    if (_disposed || _unavailable) return;
+    final settings = _settings;
+    final font = _customFont(settings);
+    // Registered fonts cannot be unloaded. Recycle before loading another
+    // custom family/path; toggling built-in fonts, size or lock keeps the engine.
+    final recycle =
+        font != null &&
+        _fontRegistrations.isNotEmpty &&
+        !_fontRegistrations.contains(font);
+    if (_window == null || _mode != mode || recycle || _closeUnconfirmed) {
+      if (!await _close() || _disposed || _desiredMode != mode) return;
       await _open(mode);
       return;
     }
-    if (!_overlayReady) return;
-    await _push();
+    if (_overlayReady) await _push();
+    _updatePositionTimer();
   }
 
   Future<void> _open(LyricsOverlayMode mode) async {
-    await _ensureReadyHandler();
-    final launch = LyricsOverlayLaunch(mode: mode, settings: _settings);
-    final WindowController window;
+    if (!await _ensureReadyHandler() || _disposed || _desiredMode != mode) {
+      return;
+    }
+    final LyricsOverlayWindow window;
+    final launchSettings = _settings;
     try {
-      window = await WindowController.create(
-        WindowConfiguration(arguments: launch.encode(), hiddenAtLaunch: true),
+      window = await _host.create(
+        LyricsOverlayLaunch(mode: mode, settings: launchSettings),
       );
     } on MissingPluginException catch (error) {
       _unavailable = true;
       AppLog.shared.record('desktop lyrics unavailable: $error');
       return;
     }
-    if (_disposed) {
-      unawaited(_closeWindow(window));
+    _window = window;
+    _mode = mode;
+    _closeUnconfirmed = false;
+    _transportFailed = false;
+    _fontRegistrations.clear();
+    // Account for the launch configuration independently of when the child
+    // engine first registers it. A ready-before-settings race must not place
+    // two different custom fonts in a single engine.
+    _recordFont(launchSettings);
+    _overlayReady = false;
+    _resetSentState();
+    if (_disposed || _desiredMode != mode) {
+      await _close();
       return;
     }
-    _window = window;
-    _windowId = window.windowId;
-    _mode = mode;
-    _channel = WindowMethodChannel(
-      '$kLyricsOverlayChannelPrefix${window.windowId}',
-      mode: ChannelMode.unidirectional,
-    );
-    _overlayReady = false;
-    _lastFullIdentity = null;
-    _lastSettings = null;
-    _lastPositionMs = null;
-    _lastPlaying = null;
-    if (_pendingReadyId == window.windowId) {
+    if (_pendingReadyId == window.id) {
       _pendingReadyId = null;
       _overlayReady = true;
       _scheduleSync();
     }
   }
 
-  Future<void> _ensureReadyHandler() async {
-    if (_readyHandlerInstalled) return;
-    _readyHandlerInstalled = true;
+  Future<bool> _ensureReadyHandler() async {
+    if (_readyHandlerInstalled) return true;
     try {
-      await const WindowMethodChannel(
-        kLyricsOverlayReadyChannel,
-        mode: ChannelMode.unidirectional,
-      ).setMethodCallHandler(_onOverlayReady);
+      await _host.setReadyHandler(_onOverlayReady);
+      _readyHandlerInstalled = true;
+      return true;
     } catch (error) {
-      _readyHandlerInstalled = false;
       AppLog.shared.record('desktop lyrics ready channel: $error');
+      return false;
     }
   }
 
   Future<dynamic> _onOverlayReady(MethodCall call) async {
-    if (call.method != 'ready') return null;
-    final Object? arguments = call.arguments;
-    if (arguments is! Map) return null;
-    final Object? windowId = arguments['windowId'];
-    if (windowId is! String) return false;
-    if (windowId != _windowId) {
-      if (_windowId == null) _pendingReadyId = windowId;
+    if (_disposed || _closingWindow || call.method != 'ready') return false;
+    final arguments = call.arguments;
+    if (arguments is! Map || arguments['windowId'] is! String) return false;
+    final windowId = arguments['windowId'] as String;
+    if (windowId != _window?.id) {
+      if (_window == null) _pendingReadyId = windowId;
       return false;
     }
     _pendingReadyId = null;
     _overlayReady = true;
+    _transportFailed = false;
     _scheduleSync();
     return true;
   }
 
-  void _schedulePositionPush() {
-    if (_disposed || !_overlayReady || _channel == null) return;
-    if (_positionPushQueued) return;
-    _positionPushQueued = true;
-    _queue = _queue
-        .then((_) async {
-          _positionPushQueued = false;
-          await _pushPosition();
-        })
-        .catchError((Object error, StackTrace stack) {
-          _positionPushQueued = false;
-          AppLog.shared.record('desktop lyrics position: $error\n$stack');
-        });
+  void _updatePositionTimer() {
+    final needed =
+        !_disposed &&
+        _overlayReady &&
+        !_transportFailed &&
+        !_closingWindow &&
+        _window != null &&
+        _desiredMode == _mode &&
+        _state.playing;
+    if (!needed) {
+      _positionTimer?.cancel();
+      _positionTimer = null;
+    } else {
+      _positionTimer ??= Timer.periodic(const Duration(milliseconds: 50), (_) {
+        _positionRequested = true;
+        _scheduleDrain();
+      });
+    }
   }
 
   Future<void> _pushPosition() async {
-    final WindowMethodChannel? channel = _channel;
-    if (channel == null || !_overlayReady || _disposed) return;
-    final int position = _state.precisePosition.inMilliseconds;
-    final bool playing = _state.playing;
-    // While playing, send the playhead every 50 ms even when the rounded
-    // millisecond value happens to repeat; the overlay re-anchors its local
-    // clock on each packet. While paused, one packet is enough.
-    if (!playing && position == _lastPositionMs && playing == _lastPlaying) {
+    final window = _window;
+    if (window == null || !_overlayReady || _disposed) return;
+    final position = _state.precisePosition.inMilliseconds;
+    final playing = _state.playing;
+    if (!_transportFailed &&
+        !playing &&
+        position == _lastPositionMs &&
+        playing == _lastPlaying) {
       return;
     }
     try {
-      await channel.invokeMethod<void>('position', <String, Object?>{
-        'position': position,
-        'playing': playing,
-      });
+      await window.send('position', {'position': position, 'playing': playing});
       _lastPositionMs = position;
       _lastPlaying = playing;
-    } on WindowChannelException {
-      _overlayReady = false;
+      _transportSucceeded();
+      _updatePositionTimer();
+    } catch (error) {
+      _retryTransport();
+      AppLog.shared.record('desktop lyrics position: $error');
     }
   }
 
   Future<void> _push() async {
-    final WindowMethodChannel? channel = _channel;
-    if (channel == null || !_overlayReady) return;
-    final Object identity = _identity;
-    final LyricsOverlaySettings settings = _settings;
+    final window = _window;
+    if (window == null || !_overlayReady || _disposed) return;
+    final identity = _identity;
+    final settings = _settings;
     try {
       if (identity != _lastFullIdentity) {
-        await channel.invokeMethod<void>('state', _payload(settings).toMap());
+        _recordFont(settings);
+        await window.send('state', _payload(settings).toMap());
+        _transportSucceeded();
         _lastFullIdentity = identity;
         _lastSettings = settings;
       } else if (settings != _lastSettings) {
-        await channel.invokeMethod<void>('settings', settings.toMap());
+        _recordFont(settings);
+        await window.send('settings', settings.toMap());
+        _transportSucceeded();
         _lastSettings = settings;
       }
-      final int position = _state.precisePosition.inMilliseconds;
-      final bool playing = _state.playing;
-      if (position != _lastPositionMs || playing != _lastPlaying) {
-        await channel.invokeMethod<void>('position', <String, Object?>{
-          'position': position,
-          'playing': playing,
-        });
-        _lastPositionMs = position;
-        _lastPlaying = playing;
+      if (_disposed || !identical(window, _window) || _desiredMode != _mode) {
+        return;
       }
-    } on WindowChannelException {
-      // The overlay registered its handler after this push, or it is closing.
-      // A fresh ready message will schedule the next full push.
-      _overlayReady = false;
+      if (_transportFailed ||
+          _state.precisePosition.inMilliseconds != _lastPositionMs ||
+          _state.playing != _lastPlaying) {
+        await _pushPosition();
+      }
+    } catch (error) {
+      _retryTransport();
+      AppLog.shared.record('desktop lyrics state: $error');
     }
+  }
+
+  (String, String)? _customFont(LyricsOverlaySettings settings) =>
+      settings.fontPath == null
+      ? null
+      : (settings.fontFamily, settings.fontPath!);
+
+  void _recordFont(LyricsOverlaySettings settings) {
+    final font = _customFont(settings);
+    if (font != null) _fontRegistrations.add(font);
+  }
+
+  void _retryTransport() {
+    _transportFailed = true;
+    _updatePositionTimer();
+    if (_disposed || _closingWindow || _window == null) return;
+    // One backoff timer replaces all failed position packets. Readiness is a
+    // one-time handshake, so a transient IPC failure must not require another
+    // ready message that the overlay will never send.
+    _retryTimer ??= Timer(const Duration(seconds: 1), () {
+      _retryTimer = null;
+      _scheduleSync();
+    });
+  }
+
+  void _transportSucceeded() {
+    _transportFailed = false;
+    _retryTimer?.cancel();
+    _retryTimer = null;
   }
 
   Object get _identity => (
@@ -256,7 +316,7 @@ class DesktopLyricsController {
 
   LyricsOverlayPayload _payload(LyricsOverlaySettings settings) {
     final track = _state.current;
-    final List<LyricLine> lines = lyricsWithInterludes(
+    final lines = lyricsWithInterludes(
       _state.lyrics,
       track?.duration ?? Duration.zero,
     );
@@ -274,68 +334,75 @@ class DesktopLyricsController {
 
   String? _notice(List<LyricLine> lines) {
     if (_state.current == null) return '未在播放';
-    if (lines.any((LyricLine line) => line.text.trim().isNotEmpty)) return null;
+    if (lines.any((line) => line.text.trim().isNotEmpty)) return null;
     if (_state.lyricsLoading) return '歌词加载中…';
-    final String? error = _state.lyricsError;
+    final error = _state.lyricsError;
     if (error != null && error.isNotEmpty) return error;
-    if (_state.lyricsPureMusic) return '纯音乐，请欣赏';
-    return '暂无歌词';
+    return _state.lyricsPureMusic ? '纯音乐，请欣赏' : '暂无歌词';
   }
 
-  Future<void> _close() async {
-    final WindowController? window = _window;
-    final WindowMethodChannel? channel = _channel;
-    _window = null;
-    _channel = null;
-    _windowId = null;
-    _mode = null;
-    _overlayReady = false;
-    _pendingReadyId = null;
+  void _resetSentState() {
     _lastFullIdentity = null;
     _lastSettings = null;
     _lastPositionMs = null;
     _lastPlaying = null;
-    if (window != null) await _closeWindow(window, channel);
   }
 
-  Future<void> _closeWindow(
-    WindowController window, [
-    WindowMethodChannel? channel,
-  ]) async {
-    // The subwindow registers its handler from its own Dart entrypoint, which
-    // can lag a freshly created window. Retry briefly so toggling the setting
-    // right after enabling cannot leave a hidden engine behind.
-    for (var attempt = 0; attempt < 10; attempt++) {
-      try {
-        // The overlay handles `close` on its own channel. WindowController's
-        // default channel has no handler in the sub-engine, so using it here
-        // would leave the visible overlay running after the switch is turned
-        // off.
-        if (channel != null) {
-          await channel.invokeMethod<void>('close');
-        } else {
-          await window.invokeMethod<void>('close');
-        }
-        return;
-      } on WindowChannelException {
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+  Future<bool> _close() async {
+    final window = _window;
+    if (window == null) return true;
+    _closingWindow = true;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _overlayReady = false;
+    _updatePositionTimer();
+    try {
+      if (!await window.close()) {
+        _closeUnconfirmed = true;
+        AppLog.shared.record(
+          'desktop lyrics: overlay ${window.id} did not acknowledge close',
+        );
+        return false;
       }
+      _window = null;
+      _closeUnconfirmed = false;
+      _transportFailed = false;
+      _fontRegistrations.clear();
+      _mode = null;
+      _pendingReadyId = null;
+      _resetSentState();
+      return true;
+    } catch (_) {
+      _closeUnconfirmed = true;
+      rethrow;
+    } finally {
+      _closingWindow = false;
     }
-    AppLog.shared.record(
-      'desktop lyrics: overlay ${window.windowId} did not acknowledge close',
-    );
   }
 
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _syncRequested = false;
+    _positionRequested = false;
     _positionTimer?.cancel();
     _positionTimer = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _state.removeListener(_scheduleSync);
-    final WindowController? window = _window;
-    final WindowMethodChannel? channel = _channel;
-    _window = null;
-    _channel = null;
-    if (window != null) unawaited(_closeWindow(window, channel));
+    _closed =
+        () async {
+          await _idle;
+          try {
+            await _close();
+          } finally {
+            if (_readyHandlerInstalled) {
+              await _host.setReadyHandler(null);
+              _readyHandlerInstalled = false;
+            }
+          }
+        }().catchError((Object error) {
+          AppLog.shared.record('desktop lyrics shutdown: $error');
+        });
   }
 }

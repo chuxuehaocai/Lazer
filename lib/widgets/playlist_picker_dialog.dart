@@ -99,10 +99,26 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
   bool _private = false;
   bool _busy = false;
   bool _loading = false;
+  bool _loadFailed = false;
   String? _error;
   String? _busyPlaylistId;
+  Playlist? _createdPlaylist;
+  String? _createdConnection;
+  int? _createdAccount;
 
   AppState get state => widget.state;
+  bool get _routeActive => mounted && ModalRoute.of(context)?.isActive == true;
+
+  void _closeDialog([Object? result]) {
+    if (!_routeActive) return;
+    final route = ModalRoute.of(context)!;
+    final navigator = Navigator.of(context);
+    if (route.isCurrent) {
+      navigator.pop(result);
+    } else {
+      navigator.removeRoute(route, result);
+    }
+  }
 
   @override
   void initState() {
@@ -120,13 +136,24 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
   }
 
   Future<void> _loadCollections() async {
+    if (_loading) return;
     if (state.collections.created.isNotEmpty ||
         state.collections.liked != null) {
       return;
     }
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+      _error = null;
+    });
     try {
       await state.refreshCollections();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadFailed = true;
+        _error = '歌单加载失败，请重试'; // i18n:key
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -134,7 +161,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
 
   Future<void> _addTo(Playlist playlist) async {
     final Track? track = widget.track;
-    if (_busy || track == null) return;
+    if (_busy || track == null || !_routeActive) return;
     setState(() {
       _busy = true;
       _busyPlaylistId = playlist.id;
@@ -142,8 +169,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
     });
     try {
       await state.addSongToCloudPlaylist(playlist.id, track.id);
-      if (!mounted) return;
-      Navigator.of(context).pop('已添加到「${playlist.name}」'); // i18n:key
+      _closeDialog('已添加到「${playlist.name}」'); // i18n:key
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -155,7 +181,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
   }
 
   Future<void> _createAndAdd() async {
-    if (_busy) return;
+    if (_busy || !_routeActive) return;
     final String name = _name.text.trim();
     if (name.isEmpty) {
       setState(() => _error = '请输入歌单名称'); // i18n:key
@@ -170,24 +196,38 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
       _error = null;
     });
     try {
-      final Playlist? created = await state.createCloudPlaylist(
-        name,
-        privacy: _private,
-      );
-      if (created == null) throw StateError('playlist not created');
+      final String connection = state.activeConnectionKey;
+      final int account = state.user.userId;
+      Playlist? created = _createdPlaylist;
+      if (created == null) {
+        created = await state.createCloudPlaylist(name, privacy: _private);
+        if (created == null) throw StateError('playlist not created');
+        // Closing the dialog cancels the remaining UI flow, even though the
+        // remote create request itself cannot be undone.
+        if (!_routeActive) return;
+        _createdPlaylist = created;
+        _createdConnection = connection;
+        _createdAccount = account;
+      }
+      if (!state.signedIn ||
+          state.activeConnectionKey != _createdConnection ||
+          state.user.userId != _createdAccount) {
+        throw StateError('playlist account changed');
+      }
       final Track? track = widget.track;
       if (track != null) {
         await state.addSongToCloudPlaylist(created.id, track.id);
       }
-      if (!mounted) return;
-      Navigator.of(
-        context,
-      ).pop(track == null ? created : '已创建并添加到「${created.name}」'); // i18n:key
+      _closeDialog(
+        track == null ? created : '已创建并添加到「${created.name}」', // i18n:key
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = '创建失败，请稍后重试。'; // i18n:key
+        _error = _createdPlaylist == null
+            ? '创建失败，请稍后重试。' // i18n:key
+            : '添加失败，请稍后重试。'; // i18n:key
       });
     }
   }
@@ -208,13 +248,10 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
       ),
     ),
     actions: <Widget>[
-      SpringTextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const TrText('取消'),
-      ),
+      SpringTextButton(onPressed: _closeDialog, child: const TrText('取消')),
       SpringFilledButton(
         onPressed: () {
-          Navigator.of(context).pop();
+          _closeDialog();
           unawaited(showAppLoginDialog(context, state));
         },
         child: const TrText('登录'),
@@ -238,7 +275,12 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             _CreateTile(
-              onTap: _busy ? null : () => setState(() => _creating = true),
+              onTap: _busy
+                  ? null
+                  : () => setState(() {
+                      _creating = true;
+                      _error = null;
+                    }),
             ),
             if (_loading)
               const Padding(
@@ -250,7 +292,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
                   ),
                 ),
               )
-            else if (targets.isEmpty)
+            else if (targets.isEmpty && !_loadFailed)
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
                 child: Text(
@@ -287,14 +329,16 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
                   ),
                 ),
               ),
+            if (_loadFailed)
+              SpringTextButton(
+                onPressed: _loading ? null : _loadCollections,
+                child: const TrText('重试'),
+              ),
           ],
         ),
       ),
       actions: <Widget>[
-        SpringTextButton(
-          onPressed: _busy ? null : () => Navigator.of(context).pop(),
-          child: const TrText('取消'),
-        ),
+        SpringTextButton(onPressed: _closeDialog, child: const TrText('取消')),
       ],
     );
   }
@@ -313,7 +357,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
               TextField(
                 controller: _name,
                 autofocus: true,
-                enabled: !_busy,
+                enabled: !_busy && _createdPlaylist == null,
                 maxLength: 40,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => unawaited(_createAndAdd()),
@@ -347,7 +391,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
                   ),
                 ],
                 selected: <bool>{_private},
-                onSelectionChanged: _busy
+                onSelectionChanged: _busy || _createdPlaylist != null
                     ? null
                     : (Set<bool> value) =>
                           setState(() => _private = value.first),
@@ -367,18 +411,17 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
       ),
       actions: <Widget>[
         SpringTextButton(
-          onPressed: _busy
-              ? null
-              : () {
-                  if (widget.track == null) {
-                    Navigator.of(context).pop();
-                  } else {
-                    setState(() {
-                      _creating = false;
-                      _error = null;
-                    });
-                  }
-                },
+          onPressed: () {
+            if (_busy || widget.track == null) {
+              _closeDialog();
+            } else {
+              setState(() {
+                _creating = false;
+                _error = null;
+                _createdPlaylist = null;
+              });
+            }
+          },
           child: const TrText('取消'),
         ),
         SpringFilledButton(
@@ -388,7 +431,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
                   dimension: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const TrText('创建'),
+              : TrText(_createdPlaylist == null ? '创建' : '重试'),
         ),
       ],
     );

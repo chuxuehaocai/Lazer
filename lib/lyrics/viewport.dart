@@ -322,8 +322,7 @@ class _LyricViewportState extends State<LyricViewport>
     if (i == _active) return 0;
     final centre = _ys[i].value + _heights[i] * 0.5;
     final band = _rowUnit * 0.95;
-    final distance =
-        ((centre - _size.height * 0.35).abs() - band) / _rowUnit;
+    final distance = ((centre - _size.height * 0.35).abs() - band) / _rowUnit;
     if (distance <= 0) return 0;
     // Capped below the old five-pixel ceiling: past this the shape of a glyph
     // is gone, and the row reads as a stain rather than a lyric.
@@ -1086,6 +1085,7 @@ class _LyricViewportState extends State<LyricViewport>
     return _blurFilters[step] ??= ui.ImageFilter.blur(
       sigmaX: step / 8,
       sigmaY: step / 8,
+      tileMode: ui.TileMode.decal,
     );
   }
 
@@ -1131,9 +1131,8 @@ class _LyricViewportState extends State<LyricViewport>
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 SpringTextButton(
-                  onPressed: () => unawaited(
-                    widget.state.ensureCurrentLyrics(force: true),
-                  ),
+                  onPressed: () =>
+                      unawaited(widget.state.ensureCurrentLyrics(force: true)),
                   child: const TrText('重新加载歌词'),
                 ),
                 SpringTextButton(

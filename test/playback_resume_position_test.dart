@@ -7,6 +7,7 @@ import 'package:lazer_nextgen/audio/audio_engine.dart';
 import 'package:lazer_nextgen/data/audio_quality.dart';
 import 'package:lazer_nextgen/data/catalog.dart';
 import 'package:lazer_nextgen/data/models.dart';
+import 'package:lazer_nextgen/diagnostics/app_log.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 
@@ -20,18 +21,27 @@ const Track _track = Track(
 );
 
 class _Catalog extends Catalog {
+  int resolveCalls = 0;
+  bool failResolve = false;
+
   @override
   Future<String?> audioUrlFor(
     Track track, {
     AudioQuality quality = AudioQuality.exhigh,
     bool Function()? isCancelled,
-  }) async => 'fixture://resume';
+  }) async {
+    resolveCalls++;
+    if (failResolve) return null;
+    return 'fixture://resume';
+  }
 
   @override
   Future<GatewayLyrics?> lyricsFor(Track track) async => null;
 }
 
 class _Engine implements AudioEngine {
+  Object? openFailure;
+  Object? playFailure;
   final StreamController<void> completions = StreamController<void>.broadcast();
   final List<Duration> seekRequests = <Duration>[];
   @override
@@ -43,9 +53,16 @@ class _Engine implements AudioEngine {
   @override
   Stream<void> get completed => completions.stream;
   @override
-  Future<void> setUrl(String url) async => active = true;
+  Future<void> setUrl(String url) async {
+    if (openFailure != null) throw openFailure!;
+    active = true;
+  }
+
   @override
-  Future<void> play() async {}
+  Future<void> play() async {
+    if (playFailure != null) throw playFailure!;
+  }
+
   @override
   Future<void> pause() async {}
   @override
@@ -127,4 +144,68 @@ void main() {
       reason: 'the end-of-track position is not a playhead to resume at',
     );
   });
+
+  for (final String phase in <String>['open', 'play']) {
+    test(
+      '$phase failures retain native details without signed URL secrets',
+      () async {
+        AppLog.shared.clear();
+        final failure = StateError(
+          'AudioOutputUnitStart failed (OSStatus -666) '
+          'https://cdn.example/audio?signature=private-secret',
+        );
+        final engine = _Engine();
+        if (phase == 'open') {
+          engine.openFailure = failure;
+        } else {
+          engine.playFailure = failure;
+        }
+        final state = stateWith(engine);
+        state.playQueue(<Track>[_track]);
+        await _until(() => state.playbackError != null);
+        final log = AppLog.shared.snapshot();
+        expect(log, contains('${phase}_failed'));
+        expect(log, contains('OSStatus -666'));
+        expect(log, isNot(contains('private-secret')));
+        engine.openFailure = null;
+        engine.playFailure = null;
+        await state.retryPlayback();
+        await _until(() => engine.active);
+        expect(state.playbackError, isNull);
+      },
+    );
+  }
+
+  for (final String action in <String>['play', 'toggle', 'retry', 'queue']) {
+    test(
+      '$action requests a new source after the last resolution failed',
+      () async {
+        final _Catalog catalog = _Catalog()..failResolve = true;
+        final _Engine engine = _Engine();
+        final AppState state = AppState(catalog: catalog, audioEngine: engine);
+        addTearDown(state.dispose);
+        state.playQueue(<Track>[_track]);
+        await _until(() => state.playbackError != null);
+        expect(state.playing, isFalse);
+        expect(engine.active, isFalse);
+        final int failedRequests = catalog.resolveCalls;
+
+        catalog.failResolve = false;
+        switch (action) {
+          case 'play':
+            state.play();
+          case 'toggle':
+            state.togglePlay();
+          case 'retry':
+            await state.retryPlayback();
+          case 'queue':
+            state.playTrackAt(0);
+        }
+        await _until(() => engine.active);
+        expect(catalog.resolveCalls, greaterThan(failedRequests));
+        expect(state.playbackError, isNull);
+        expect(state.playing, isTrue);
+      },
+    );
+  }
 }

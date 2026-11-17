@@ -29,12 +29,27 @@ class ViewTransitionSwitcher extends StatefulWidget {
 class _ViewTransitionSwitcherState extends State<ViewTransitionSwitcher> {
   final Map<(Type, Key?), String> _identities = {};
   var _serial = 0;
+  String? _lastKey;
 
   (Type, Key?) get _identity => (widget.child.runtimeType, widget.child.key);
 
+  String _resolveKey() {
+    final identity = _identity;
+    final key = _identities.putIfAbsent(identity, () => 'view-${_serial++}');
+    // Only the current and immediate outgoing view can still be mounted. A
+    // muted switch may never complete, so completion alone cannot bound keys.
+    if (key != _lastKey) {
+      _identities.removeWhere(
+        (item, value) => item != identity && value != _lastKey,
+      );
+    }
+    _lastKey = key;
+    return key;
+  }
+
   @override
   Widget build(BuildContext context) => RetainedContentSwitcher(
-    currentKey: _identities.putIfAbsent(_identity, () => 'view-${_serial++}'),
+    currentKey: _resolveKey(),
     page: widget.child,
     retainKeys: const {},
     duration: ViewMotion.duration,

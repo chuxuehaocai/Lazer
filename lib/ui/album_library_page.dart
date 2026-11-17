@@ -44,6 +44,7 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
 
   final TextEditingController _search = TextEditingController();
   final ScrollController _scroll = ScrollController();
+  Timer? _filterDebounce;
 
   /// One cover key per album: a key made inside `itemBuilder` would remount
   /// the cover — and re-register its flight source — on every rebuild.
@@ -60,9 +61,9 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
   /// rather than the loaded count, which would creep up as the pages arrive.
   int? _total;
 
-  /// The account the list is for. A session change reloads: another account's
-  /// albums must never be shown as if they were the new one's.
-  int _loadedUid = -1;
+  /// Provider and account together identify the collection. Numeric user IDs
+  /// can overlap across providers.
+  (String, int)? _loadedOwner;
 
   /// Pages the current filter has already walked past its first page.
   int _filterPages = 0;
@@ -86,6 +87,7 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
   }
 
   bool get _signedIn => _uid > 0;
+  (String, int) get _owner => (widget.state.activeContentKey, _uid);
 
   @override
   void initState() {
@@ -96,8 +98,21 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
   }
 
   @override
+  void didUpdateWidget(covariant AppSavedAlbumsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.removeListener(_onSessionChanged);
+      widget.state.addListener(_onSessionChanged);
+      _reloadOwner();
+    } else {
+      _onSessionChanged();
+    }
+  }
+
+  @override
   void dispose() {
     ++_serial;
+    _filterDebounce?.cancel();
     widget.state.removeListener(_onSessionChanged);
     _scroll.dispose();
     _search.dispose();
@@ -108,9 +123,15 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
   /// different collection. [AppState] notifies constantly during playback, so
   /// this only compares the owner and leaves the list alone otherwise.
   void _onSessionChanged() {
-    if (!mounted || _loading) return;
-    final int uid = _uid;
-    if (uid <= 0 || uid == _loadedUid) return;
+    if (!mounted || _owner == _loadedOwner) return;
+    _reloadOwner();
+  }
+
+  void _reloadOwner() {
+    // Invalidate the old owner's request immediately, including while loading
+    // or signing out. A late reply cannot fill the new account's collection.
+    ++_serial;
+    _loading = false;
     unawaited(_load(reset: true));
   }
 
@@ -118,6 +139,7 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
   Future<void> _load({required bool reset, bool force = false}) async {
     if (!mounted || _loading) return;
     final AppState state = widget.state;
+    final owner = _owner;
     final int uid = _uid;
     if (uid <= 0) {
       setState(() {
@@ -127,7 +149,10 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
         _total = null;
         _more = false;
         _error = null;
-        _loadedUid = -1;
+        _loadedOwner = owner;
+        _coverKeys.clear();
+        _filterPages = 0;
+        _filterTruncated = false;
       });
       return;
     }
@@ -135,8 +160,9 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
     setState(() {
       _loading = true;
       _error = null;
-      _loadedUid = uid;
+      _loadedOwner = owner;
       if (reset) {
+        _coverKeys.clear();
         _albums.clear();
         _ids.clear();
         _offset = 0;
@@ -152,7 +178,12 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
         offset: reset ? 0 : _offset,
         force: force,
       );
-      if (!mounted || serial != _serial) return;
+      if (!mounted ||
+          serial != _serial ||
+          widget.state != state ||
+          _owner != owner) {
+        return;
+      }
       setState(() {
         for (final Album album in page.albums) {
           if (_ids.add(album.id)) _albums.add(album);
@@ -165,7 +196,12 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
         _loading = false;
       });
     } catch (_) {
-      if (!mounted || serial != _serial) return;
+      if (!mounted ||
+          serial != _serial ||
+          widget.state != state ||
+          _owner != owner) {
+        return;
+      }
       setState(() {
         _error = '收藏的专辑加载失败，请重试。'; // i18n:key
         _more = false;
@@ -182,7 +218,12 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
   /// list is useful and the walk stops. [AppState] rebuilds this page often,
   /// so the walk is driven by completed reads rather than by every frame.
   void _walkFilter({required bool force}) {
-    if (!mounted || !_more || _query.trim().isEmpty) return;
+    if (!mounted ||
+        _filterDebounce != null ||
+        !_more ||
+        _query.trim().isEmpty) {
+      return;
+    }
     if (_shown.isNotEmpty) return;
     if (_filterPages >= _filterPageBudget) {
       setState(() => _filterTruncated = true);
@@ -207,17 +248,48 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
   }
 
   void _onQueryChanged(String value) {
+    _filterDebounce?.cancel();
+    _filterDebounce = null;
     setState(() {
       _query = value;
       _filterPages = 0;
       _filterTruncated = false;
     });
-    // The first keystroke asks for the rest of the collection: a filter that
-    // only sees the pages already on screen would quietly miss albums.
-    if (value.trim().isNotEmpty && _more && !_loading) {
-      unawaited(_load(reset: false));
+    // Give typing a short settling interval before searching further pages.
+    // A match stops automatic reads, while the footer keeps the rest reachable.
+    if (value.trim().isNotEmpty) {
+      _filterDebounce = Timer(const Duration(milliseconds: 300), () {
+        _filterDebounce = null;
+        if (mounted && !_loading) _walkFilter(force: false);
+      });
     }
   }
+
+  void _continueFilter() {
+    if (_loading || !_more) return;
+    _filterDebounce?.cancel();
+    _filterDebounce = null;
+    _filterPages = 0;
+    _filterTruncated = false;
+    unawaited(_load(reset: false));
+  }
+
+  Widget get _filterFooter => SliverToBoxAdapter(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 22),
+      child: Center(
+        child: _loading
+            ? const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : SpringFilledButton(
+                onPressed: _continueFilter,
+                child: const TrText('加载更多专辑'),
+              ),
+      ),
+    ),
+  );
 
   /// What the grid shows: the whole collection, or the part matching [_query].
   List<Album> get _shown {
@@ -391,6 +463,7 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
             ),
           ),
         ),
+        if (_loading || (_more && _query.trim().isNotEmpty)) _filterFooter,
       ];
     }
     return <Widget>[
@@ -408,18 +481,7 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
               _albumCard(context, shown[index], cell),
         ),
       ),
-      if (_loading)
-        const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.only(top: 22),
-            child: Center(
-              child: SizedBox.square(
-                dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-          ),
-        ),
+      if (_loading || (_more && _query.trim().isNotEmpty)) _filterFooter,
       const SliverToBoxAdapter(child: SizedBox(height: 36)),
     ];
   }

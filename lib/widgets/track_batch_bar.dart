@@ -50,13 +50,17 @@ class TrackBatchBar extends StatelessWidget {
                 ),
                 SpringTextButton(
                   key: const ValueKey<String>('batch-select-all'),
-                  onPressed: onSelectAll,
-                  child: TrText(selectedCount == totalCount ? '取消全选' : '全选'),
+                  onPressed: totalCount > 0 ? onSelectAll : null,
+                  child: TrText(
+                    totalCount > 0 && selectedCount == totalCount
+                        ? '取消全选'
+                        : '全选',
+                  ),
                 ),
                 IconButton(
                   key: const ValueKey<String>('batch-download'),
                   tooltip: context.tr('下载所选歌曲'),
-                  onPressed: onDownload,
+                  onPressed: selectedCount > 0 ? onDownload : null,
                   icon: const Icon(Icons.download_rounded),
                 ),
                 IconButton(

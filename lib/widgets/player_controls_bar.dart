@@ -49,99 +49,121 @@ class PlayerControlsBar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 PlayerSeekBar(state: state, trackHeight: 3, thumbRadius: 5),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: track == null
-                          ? const TrText(
-                              '未选择曲目',
-                              style: TextStyle(color: Colors.white70),
-                            )
-                          : InkWell(
-                              onTap: feedbackAction(context, onExpand),
-                              child: Row(
-                                children: [
-                                  SizedBox.square(
-                                    dimension: 44,
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: PlateArt(
-                                        seed: track.coverSeed,
-                                        coverUrl: track.coverUrl,
-                                        accent: track.accent,
-                                        radius: BorderRadius.zero,
-                                        size: 44,
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final bool compact = constraints.maxWidth < 520;
+                    return Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: track == null
+                              ? const TrText(
+                                  '未选择曲目',
+                                  style: TextStyle(color: Colors.white70),
+                                )
+                              : InkWell(
+                                  onTap: feedbackAction(context, onExpand),
+                                  child: Row(
+                                    children: [
+                                      SizedBox.square(
+                                        dimension: 44,
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          child: PlateArt(
+                                            seed: track.coverSeed,
+                                            coverUrl: track.coverUrl,
+                                            accent: track.accent,
+                                            radius: BorderRadius.zero,
+                                            size: 44,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: AppSpacing.sm),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          track.title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: context.type.bodySm.copyWith(
-                                            color: context.colors.onPlayer,
-                                          ),
+                                      const SizedBox(width: AppSpacing.sm),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              track.title,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: context.type.bodySm
+                                                  .copyWith(
+                                                    color:
+                                                        context.colors.onPlayer,
+                                                  ),
+                                            ),
+                                            Text(
+                                              track.artist,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: context.type.caption
+                                                  .copyWith(
+                                                    color: context
+                                                        .colors
+                                                        .onDarkMuted,
+                                                  ),
+                                            ),
+                                          ],
                                         ),
-                                        Text(
-                                          track.artist,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: context.type.caption.copyWith(
-                                            color: context.colors.onDarkMuted,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                      ),
+                                    ],
                                   ),
-                                ],
+                                ),
+                        ),
+                        SizedBox(
+                          width: compact ? 144 : constraints.maxWidth * 3 / 8,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              AccessibleIconButton(
+                                tooltip: '上一首',
+                                color: context.colors.onPlayer,
+                                onPressed: track == null
+                                    ? null
+                                    : state.previous,
+                                icon: const Icon(Icons.skip_previous_rounded),
                               ),
+                              AccessibleIconButton(
+                                tooltip: state.playing ? '暂停' : '播放',
+                                color: context.colors.onPlayer,
+                                onPressed: track == null
+                                    ? null
+                                    : state.togglePlay,
+                                icon: Icon(
+                                  state.playing
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
+                                ),
+                              ),
+                              AccessibleIconButton(
+                                tooltip: '下一首',
+                                color: context.colors.onPlayer,
+                                onPressed: track == null ? null : state.next,
+                                icon: const Icon(Icons.skip_next_rounded),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (compact)
+                          SizedBox(
+                            width: 48,
+                            child: VolumeControl(state: state, onDark: true),
+                          )
+                        else
+                          Expanded(
+                            flex: 2,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: VolumeControl(state: state, onDark: true),
                             ),
-                    ),
-                    Expanded(
-                      flex: 3,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          AccessibleIconButton(
-                            tooltip: '上一首',
-                            color: context.colors.onPlayer,
-                            onPressed: state.previous,
-                            icon: const Icon(Icons.skip_previous_rounded),
                           ),
-                          AccessibleIconButton(
-                            tooltip: state.playing ? '暂停' : '播放',
-                            color: context.colors.onPlayer,
-                            onPressed: state.togglePlay,
-                            icon: Icon(
-                              state.playing
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
-                            ),
-                          ),
-                          AccessibleIconButton(
-                            tooltip: '下一首',
-                            color: context.colors.onPlayer,
-                            onPressed: state.next,
-                            icon: const Icon(Icons.skip_next_rounded),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: VolumeControl(state: state, onDark: true),
-                      ),
-                    ),
-                  ],
+                      ],
+                    );
+                  },
                 ),
               ],
             ),

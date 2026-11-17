@@ -10,6 +10,7 @@ from pathlib import Path
 ABIS = {"arm64-v8a": (2, 183), "armeabi-v7a": (1, 40), "x86_64": (2, 62)}
 APK_ABIS = ("arm64-v8a", "armeabi-v7a")
 LIBRARIES = ("liblazer-audio.so", "liblazer-audio-bridge.so")
+APK_PAYLOAD = ("libflutter.so", "libapp.so") + LIBRARIES
 SYSTEM_LIBRARIES = {
     "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so",
     "libaaudio.so", "libmediandk.so", "libz.so",
@@ -23,6 +24,8 @@ ENGINE_EXPORTS = {
     "lazer_audio_set_dsp", "lazer_audio_set_device", "lazer_audio_snapshot",
     "lazer_audio_stream_info", "lazer_audio_last_error", "lazer_audio_build_information",
     "lazer_audio_read_log",
+    # Optional for imported engines, required in the engine shipped by this build.
+    "lazer_audio_android_usb_backend_version",
 }
 BRIDGE_EXPORTS = {
     f"lazer_bridge_reader_{name}" for name in (
@@ -108,12 +111,31 @@ def verify_elf(data, abi, library, bundled=()):
     return f"{abi}/{library}: ABI exports, system dependencies, ELF and 16KB alignment verified"
 
 
+def verify_apk_payloads(apk, required_abis):
+    names = set(apk.namelist())
+    advertised = {
+        parts[1] for name in names
+        if len(parts := name.split("/")) >= 3 and parts[0] == "lib"
+        and name.endswith(".so")
+    }
+    check(set(required_abis) <= advertised,
+          f"missing required APK ABI: {sorted(set(required_abis) - advertised)}")
+    for abi in sorted(advertised):
+        missing = [library for library in APK_PAYLOAD
+                   if f"lib/{abi}/{library}" not in names
+                   or apk.getinfo(f"lib/{abi}/{library}").file_size == 0]
+        check(not missing, f"incomplete ABI {abi}: missing payload {missing}")
+        check(abi in ABIS, f"unsupported APK ABI: {abi}")
+    return sorted(advertised)
+
+
 def main():
     parser = argparse.ArgumentParser()
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--directory", type=Path)
     inputs.add_argument("--apk", type=Path)
-    parser.add_argument("--abi", choices=ABIS)
+    parser.add_argument("--abi", choices=ABIS,
+                        help="Directory ABI, or required ABI for a split APK; fat APKs require both ARM ABIs by default")
     args = parser.parse_args()
     if args.directory:
         check(args.abi, "--directory requires --abi")
@@ -122,7 +144,8 @@ def main():
             print(verify_elf((args.directory / library).read_bytes(), args.abi, library, files))
         return
     with zipfile.ZipFile(args.apk) as apk, args.apk.open("rb") as raw:
-        for abi in APK_ABIS:
+        advertised = verify_apk_payloads(apk, (args.abi,) if args.abi else APK_ABIS)
+        for abi in advertised:
             files = {Path(name).name for name in apk.namelist() if name.startswith(f"lib/{abi}/")}
             for library in LIBRARIES:
                 name = f"lib/{abi}/{library}"

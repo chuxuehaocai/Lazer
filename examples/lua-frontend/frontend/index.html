@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lazer · 独立前端</title>
+  <link rel="stylesheet" href="app.css">
+  <script defer src="client.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header><div><span class="eyebrow">LUA FRONTEND EXAMPLE</span><h1>Lazer<span> / 独立前端</span></h1></div><span id="connection-status" role="status">未连接</span></header>
+  <main>
+    <section class="connection panel" aria-labelledby="connect-title">
+      <h2 id="connect-title">连接你的播放器</h2>
+      <p>在 Lazer 的插件设置启动独立前端桥，然后复制连接页面中的地址和本次令牌。</p>
+      <form id="connect-form">
+        <label>WebSocket 地址<input id="address" value="ws://127.0.0.1:11445/lazer" required spellcheck="false"></label>
+        <label>本次连接令牌<input id="token" type="password" required autocomplete="off" spellcheck="false"></label>
+        <button type="submit">连接</button><button type="button" id="disconnect" class="secondary">断开</button>
+      </form>
+      <p id="notice" role="status" aria-live="polite">页面不保存令牌或账号数据。音乐由 Lazer 的音频后端播放。</p>
+    </section>
+    <div id="workspace" hidden>
+      <section class="now-playing panel" aria-labelledby="now-title">
+        <div class="cover-placeholder" id="cover-placeholder">♫</div><img id="cover" alt="当前歌曲封面" hidden>
+        <div class="now-copy"><span class="eyebrow">NOW PLAYING</span><h2 id="now-title">暂未播放</h2><p id="artist"></p>
+          <div class="transport"><button data-command="previous" aria-label="上一首">上一首</button><button data-command="toggle" id="toggle">播放 / 暂停</button><button data-command="next" aria-label="下一首">下一首</button><button data-command="stop" class="secondary">停止</button></div>
+          <label class="progress"><span id="time">0:00 / 0:00</span><input id="seek" type="range" min="0" max="1000" value="0" aria-label="播放进度"></label>
+          <div class="modes"><label>音量<input id="volume" type="range" min="0" max="100" value="100"></label><button id="shuffle" class="secondary">随机：关</button><label>循环<select id="repeat"><option value="off">关闭</option><option value="all">全部</option><option value="one">单曲</option></select></label></div>
+        </div>
+      </section>
+      <div class="columns">
+        <section class="panel library"><h2>音乐库</h2>
+          <div class="toolbar"><button id="playlists">我的歌单</button><button id="local" class="secondary">本地音乐</button></div>
+          <form id="search-form"><label class="sr-only" for="query">搜索歌曲</label><input id="query" placeholder="搜索歌曲" maxlength="256" required><button>搜索</button></form>
+          <p class="muted">首次访问会在 Lazer 中申请音乐库权限。</p>
+          <div id="library" class="list"></div><button id="more" class="secondary" hidden>加载更多</button>
+        </section>
+        <section class="panel"><h2>接下来播放</h2><div id="queue" class="list"></div></section>
+        <section class="panel lyrics-panel"><h2>歌词</h2><div id="lyrics" class="lyrics"></div></section>
+        <section class="panel"><h2>我的数据</h2><p class="muted">仅在点击后请求独立授权；可随时在 Lazer 的插件管理中撤销。</p>
+          <div class="toolbar"><button id="profile" class="secondary">账号与平台</button><button id="statistics" class="secondary">播放统计</button><button id="permissions" class="secondary">查看授权</button><button id="clear-data" class="secondary">清空展示</button></div>
+          <pre id="user-data" aria-live="polite"></pre>
+        </section>
+      </div>
+    </div>
+  </main>
+  <footer>HTML / CSS / JavaScript → Lua WebSocket → Lazer 后端</footer>
+</body>
+</html>

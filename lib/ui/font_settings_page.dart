@@ -9,6 +9,7 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../theme/font_preferences.dart';
+import '../theme/imported_font.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/settings_detail.dart';
@@ -200,25 +201,37 @@ class _FontFamilyCardState extends State<_FontFamilyCard>
     with BuildSafeState<_FontFamilyCard> {
   bool _busy = false;
 
-  void _showImportError() {
+  void _showImportError(Object error) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(context.tr('字体导入失败，请选择有效的 OTF 或 TTF 字体文件'))),
-    );
+    final message = error is FontImportException
+        ? switch (error.failure) {
+            FontImportFailure.sessionLimit => context.tr(
+              '本次启动已达到自定义字体加载上限，请重新启动后继续切换字体。',
+            ),
+            FontImportFailure.tooLarge => context.tr(
+              '字体文件不能超过 64 MiB，请选择较小的字体文件。',
+            ),
+          }
+        : context.tr('字体导入失败，请选择有效的 OTF 或 TTF 字体文件');
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _select(FontFamilyPreference family) async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       await widget.state.setFontFamily(family);
-    } catch (_) {
-      _showImportError();
+    } catch (error) {
+      _showImportError(error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _import() async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       final file = await openFile(
@@ -237,10 +250,10 @@ class _FontFamilyCardState extends State<_FontFamilyCard>
           ),
         ],
       );
-      if (file == null) return;
-      await widget.state.importFont(await file.readAsBytes(), file.name);
-    } catch (_) {
-      _showImportError();
+      if (file == null || !mounted) return;
+      await widget.state.importFontSelection(file);
+    } catch (error) {
+      _showImportError(error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

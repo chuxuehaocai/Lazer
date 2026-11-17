@@ -121,7 +121,10 @@ void main() {
       );
       disk = DiskCache(directory: () async => directory);
     });
-    tearDown(() async => directory.delete(recursive: true));
+    tearDown(() async {
+      await disk.settle();
+      await directory.delete(recursive: true);
+    });
 
     test('keys entries by track and quality', () async {
       expect(AudioCache.cacheKey('42', AudioQuality.lossless), '42:lossless');
@@ -233,20 +236,30 @@ void main() {
       final directory = await Directory.systemTemp.createTemp(
         'audio-fallback-',
       );
-      addTearDown(() => directory.delete(recursive: true));
       final disk = DiskCache(directory: () async => directory);
       final gateway = _QualityGateway()..offline = true;
       final track = _track(gateway);
-      await disk.put(
+      final catalog = Catalog(gateway: gateway, cache: disk);
+      File? cached;
+      addTearDown(() async {
+        if (cached != null) {
+          // Playback starts this optional job before it reaches DiskCache.
+          // Join the same owner task, then drain its registered disk work.
+          await catalog.cacheLyrics(track, audioPath: cached.path);
+        }
+        await disk.settle();
+        await directory.delete(recursive: true);
+      });
+      cached = await disk.put(
         CacheBucket.audio,
         AudioCache.cacheKey(track.id, AudioQuality.standard),
         () => Stream.value([1, 2, 3]),
         extension: 'mp3',
       );
-      final source = await Catalog(
-        gateway: gateway,
-        cache: disk,
-      ).audioSourceFor(track, quality: AudioQuality.lossless);
+      final source = await catalog.audioSourceFor(
+        track,
+        quality: AudioQuality.lossless,
+      );
       expect(source!.quality, AudioQuality.standard);
       expect(source.url, startsWith('file:'));
       expect(gateway.levels, hasLength(1));

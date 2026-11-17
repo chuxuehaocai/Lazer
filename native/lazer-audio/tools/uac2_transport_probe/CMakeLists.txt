@@ -19,6 +19,7 @@ find_package(Threads REQUIRED)
 add_executable(lazer-uac2-transport-probe
     probe.cpp
     fake_libusb.cpp
+    "${CMAKE_CURRENT_LIST_DIR}/../../src/android_uac2_control.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/../../src/android_uac2_iso_transport.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/../../src/android_uac2_packetizer.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/../../src/dop_packer.cpp")
@@ -34,3 +35,31 @@ if(UNIX)
 endif()
 add_test(NAME lazer-uac2-transport COMMAND lazer-uac2-transport-probe)
 set_tests_properties(lazer-uac2-transport PROPERTIES TIMEOUT 20)
+
+add_executable(lazer-uac2-output-probe
+    output_probe.cpp fake_libusb.cpp
+    "${CMAKE_CURRENT_LIST_DIR}/../../src/android_uac2_output.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../../src/android_uac2_control.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../../src/android_uac2_iso_transport.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../../src/android_uac2_packetizer.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/../../src/dop_packer.cpp")
+target_include_directories(lazer-uac2-output-probe PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../../src"
+    "${CMAKE_CURRENT_LIST_DIR}/../../include"
+    "${libusb_SOURCE_DIR}/libusb")
+target_compile_features(lazer-uac2-output-probe PRIVATE cxx_std_20)
+target_link_libraries(lazer-uac2-output-probe PRIVATE Threads::Threads)
+if(WIN32)
+    target_compile_definitions(lazer-uac2-output-probe PRIVATE NOMINMAX)
+endif()
+if(NOT MSVC)
+    target_compile_options(lazer-uac2-output-probe PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME lazer-uac2-output COMMAND lazer-uac2-output-probe)
+set_tests_properties(lazer-uac2-output PROPERTIES TIMEOUT 20)
+
+if(MSVC)
+    foreach(probe lazer-uac2-transport-probe lazer-uac2-output-probe)
+        target_compile_options(${probe} PRIVATE /EHsc /utf-8)
+    endforeach()
+endif()

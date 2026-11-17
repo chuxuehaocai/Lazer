@@ -39,10 +39,16 @@ double get _titleInset => usesNativeWindowButtons ? 84 : 16;
 /// sits outside the navigator (see `WindowFrame`), so pushed routes and the
 /// now-playing page never cover or move it.
 class WindowTitleArea extends StatefulWidget {
-  const WindowTitleArea({super.key, this.state, this.navigatorKey});
+  const WindowTitleArea({
+    super.key,
+    this.state,
+    this.navigatorKey,
+    this.inline = false,
+  });
 
   final AppState? state;
   final GlobalKey<NavigatorState>? navigatorKey;
+  final bool inline;
 
   @override
   State<WindowTitleArea> createState() => _WindowTitleAreaState();
@@ -285,11 +291,13 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
       height: kWindowTitleAreaHeight,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: scheme.surface,
+          color: widget.inline ? Colors.transparent : scheme.surface,
           // A hairline closes the chrome off from the page; never a shadow.
-          border: Border(
-            bottom: BorderSide(color: scheme.outlineVariant, width: .5),
-          ),
+          border: widget.inline
+              ? null
+              : Border(
+                  bottom: BorderSide(color: scheme.outlineVariant, width: .5),
+                ),
         ),
         child: Stack(
           fit: StackFit.expand,
@@ -297,59 +305,81 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
             // The strip is chrome: drag from anywhere, double-click to
             // maximize. Buttons above it take their own taps first.
             const DragToMoveArea(child: SizedBox.expand()),
-            IgnorePointer(
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Padding(
-                  padding: EdgeInsetsDirectional.only(
-                    start: _titleInset,
-                    // Keep the label clear of the caption cluster.
-                    end: usesNativeWindowButtons
-                        ? 16
-                        : kWindowCaptionButtonWidth * 3 + 12,
-                  ),
-                  child: AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 140),
-                    style: titleStyle,
-                    child: Text(
-                      kWindowTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+            if (!widget.inline)
+              IgnorePointer(
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Padding(
+                    padding: EdgeInsetsDirectional.only(
+                      start: _titleInset,
+                      // Keep the label clear of the caption cluster.
+                      end: usesNativeWindowButtons
+                          ? 16
+                          : kWindowCaptionButtonWidth * 3 + 12,
+                    ),
+                    child: AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 140),
+                      style: titleStyle,
+                      child: Text(
+                        kWindowTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
             if (!usesNativeWindowButtons)
               PositionedDirectional(
                 top: 0,
                 end: 0,
                 bottom: 0,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    _CaptionButton(
-                      key: const ValueKey<String>('window-title-minimize'),
-                      glyph: _CaptionGlyph.minimize,
-                      label: context.tr('最小化'),
-                      onPressed: _minimize,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(widget.inline ? 20 : 0),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: widget.inline
+                          ? scheme.onSurface.withValues(alpha: .045)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(
+                        widget.inline ? 20 : 0,
+                      ),
+                      border: widget.inline
+                          ? Border.all(
+                              color: scheme.onSurface.withValues(alpha: .08),
+                              width: .5,
+                            )
+                          : null,
                     ),
-                    _CaptionButton(
-                      key: const ValueKey<String>('window-title-fullscreen'),
-                      glyph: _expanded
-                          ? _CaptionGlyph.restore
-                          : _CaptionGlyph.maximize,
-                      label: middleLabel,
-                      onPressed: _toggleWindowSize,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        _CaptionButton(
+                          key: const ValueKey<String>('window-title-minimize'),
+                          glyph: _CaptionGlyph.minimize,
+                          label: context.tr('最小化'),
+                          onPressed: _minimize,
+                        ),
+                        _CaptionButton(
+                          key: const ValueKey<String>(
+                            'window-title-fullscreen',
+                          ),
+                          glyph: _expanded
+                              ? _CaptionGlyph.restore
+                              : _CaptionGlyph.maximize,
+                          label: middleLabel,
+                          onPressed: _toggleWindowSize,
+                        ),
+                        _CaptionButton(
+                          key: const ValueKey<String>('window-title-close'),
+                          glyph: _CaptionGlyph.close,
+                          label: context.tr('关闭窗口'),
+                          onPressed: _requestClose,
+                          destructive: true,
+                        ),
+                      ],
                     ),
-                    _CaptionButton(
-                      key: const ValueKey<String>('window-title-close'),
-                      glyph: _CaptionGlyph.close,
-                      label: context.tr('关闭窗口'),
-                      onPressed: _requestClose,
-                      destructive: true,
-                    ),
-                  ],
+                  ),
                 ),
               ),
           ],

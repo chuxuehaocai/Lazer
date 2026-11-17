@@ -212,6 +212,21 @@ std::size_t IsoTransportSession::MaximumSessionCount() noexcept {
     return kMaximumOutstandingSessions;
 }
 
+int IsoTransportSession::StartPcm(const std::uint32_t rate, const std::uint8_t channels,
+    const std::uint8_t minimum_bits, NativeStreamConfig* negotiated, std::string* error) {
+    NativeStreamConfig config{};
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (closed_ || stream_started_ || event_thread_.joinable()) return LIBUSB_ERROR_BUSY;
+        const int result = PreparePcmDevice(device_handle_, rate, channels, minimum_bits,
+            &config, &claimed_interfaces_, error);
+        if (result < 0) return result;
+    }
+    const int result = Start(config, error);
+    if (result >= 0 && negotiated != nullptr) *negotiated = config;
+    return result;
+}
+
 int IsoTransportSession::Start(const NativeStreamConfig& config, std::string* error) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (closed_ || device_handle_ == nullptr || context_ == nullptr) {
@@ -811,6 +826,7 @@ bool IsoTransportSession::Close(const std::uint32_t timeout_ms) noexcept {
     if (device_handle_ != nullptr) {
         // libusb_close() does not close the sys_dev descriptor. Close our duplicate only after all
         // callbacks have returned; the Android UsbDeviceConnection still owns borrowed_usb_fd_.
+        ReleasePcmDevice(device_handle_, &claimed_interfaces_);
         libusb_close(device_handle_);
         device_handle_ = nullptr;
     }
@@ -918,7 +934,7 @@ void IsoTransportSession::HandleTransferComplete(
         for (int index = 0; index < transfer->num_iso_packets; ++index) {
             if (transfer->iso_packet_desc[index].status != LIBUSB_TRANSFER_COMPLETED ||
                 transfer->iso_packet_desc[index].actual_length !=
-                    static_cast<int>(transfer->iso_packet_desc[index].length)) {
+                    transfer->iso_packet_desc[index].length) {
                 MarkFailedLocked(LIBUSB_ERROR_IO, "PCM isochronous packet did not complete");
                 changed_.notify_all();
                 return;

@@ -14,8 +14,10 @@ up an FFmpeg shared library from somewhere outside the app.
 from __future__ import annotations
 
 import argparse
+import json
 import plistlib
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -63,6 +65,39 @@ BRIDGE_SYMBOLS = [
     "lazer_bridge_reader_destroy",
     "lazer_bridge_reader_set_length",
 ]
+
+
+def verify_build_settings(path: Path) -> int:
+    """Check Xcode's effective Runner settings, including project overrides.
+
+    The force-loaded archive and export trie are only the link phase. Archive
+    stripping runs afterwards, so retaining global symbols is also required by
+    Dart FFI. Reading the expanded settings catches an xcconfig that was omitted
+    or replaced by a target-level OTHER_LDFLAGS/STRIP_STYLE override.
+    """
+    try:
+        targets = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"Invalid Xcode build settings {path}: {error}") from error
+    if not isinstance(targets, list):
+        raise SystemExit("Xcode build settings must contain a target list")
+    runners = [target.get("buildSettings") for target in targets
+               if isinstance(target, dict) and target.get("target") == "Runner"]
+    if len(runners) != 1 or not isinstance(runners[0], dict):
+        raise SystemExit("Xcode build settings must contain exactly one Runner target")
+    settings = runners[0]
+    if settings.get("STRIP_STYLE") not in ("non-global", "debugging"):
+        raise SystemExit("Runner must retain external FFI symbols: STRIP_STYLE = non-global")
+    raw = settings.get("OTHER_LDFLAGS", "")
+    flags = raw if isinstance(raw, list) else shlex.split(raw)
+    for archive in ("liblazer-audio.a", "liblazer-audio-bridge.a"):
+        if not any(flag.startswith("-Wl,-force_load,") and flag.endswith("/" + archive)
+                   for flag in flags):
+            raise SystemExit(f"Runner does not force-load {archive}")
+    if "-Wl,-export_dynamic" not in flags:
+        raise SystemExit("Runner does not export its dynamically resolved FFI symbols")
+    print("Runner: native archives force-loaded, dynamic exports and IPA strip policy retained")
+    return 0
 
 
 def run(*command: str) -> str:
@@ -307,9 +342,12 @@ def main() -> int:
     target.add_argument("--app", type=Path, help="built Runner.app directory")
     target.add_argument("--ipa", type=Path, help="finished unsigned device IPA")
     target.add_argument("--archive", type=Path, help="staged iOS archive directory")
+    target.add_argument("--build-settings", type=Path, help="Xcode -showBuildSettings -json output")
     parser.add_argument("--expect-native", action="store_true", help="fail when the engine is absent")
     args = parser.parse_args()
     verify_required_abi_matches_dart()
+    if args.build_settings is not None:
+        return verify_build_settings(args.build_settings)
     if args.ipa is not None:
         return verify_ipa(args.ipa)
     if args.app is not None:

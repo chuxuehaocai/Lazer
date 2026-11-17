@@ -44,7 +44,7 @@ const int kPlaylistColumnsMax = 6;
 
 /// How the shell picks its accent palette.
 ///
-/// [fixed] is the Apple Music red accent. [nowPlaying] derives the accent and
+/// [fixed] is Lazer's blue accent. [nowPlaying] derives the accent and
 /// ambient tint from the current cover, matching the app's album-led chrome.
 /// [custom] uses the colour the listener picked in Settings.
 enum AppPaletteMode { fixed, nowPlaying, custom }
@@ -58,7 +58,7 @@ extension AppPaletteModeLabels on AppPaletteMode {
   };
 
   String get detail => switch (this) {
-    AppPaletteMode.fixed => 'Apple Music 红色强调色',
+    AppPaletteMode.fixed => 'Lazer 蓝色强调色',
     AppPaletteMode.nowPlaying => '由当前封面主色生成强调色与浏览背景',
     AppPaletteMode.custom => '使用你挑选的强调色',
   };
@@ -82,6 +82,7 @@ enum AppBackgroundMode {
   nowPlayingStatic,
   customImage,
   solidColor,
+  windowsMica,
   off,
 }
 
@@ -92,6 +93,7 @@ extension AppBackgroundModeLabels on AppBackgroundMode {
     AppBackgroundMode.nowPlayingStatic => '静态背景',
     AppBackgroundMode.customImage => '自定义图片',
     AppBackgroundMode.solidColor => '纯色背景',
+    AppBackgroundMode.windowsMica => 'Windows DWM 云母材质',
     AppBackgroundMode.off => '不使用',
   };
 
@@ -100,6 +102,7 @@ extension AppBackgroundModeLabels on AppBackgroundMode {
     AppBackgroundMode.nowPlayingStatic => '用动态背景生成一帧，保留为静态背景',
     AppBackgroundMode.customImage => '使用你选择的图片铺满整页',
     AppBackgroundMode.solidColor => '自选背景颜色，或根据主题色生成',
+    AppBackgroundMode.windowsMica => '由 Windows 合成桌面云母材质，不支持时使用主题底色',
     AppBackgroundMode.off => '关闭画布，只保留主题底色',
   };
 
@@ -245,6 +248,21 @@ enum AppUiMode {
 /// system and available window size; the other values are useful when a
 /// detachable tablet or desktop window should keep one composition.
 enum AppLayoutStyle { auto, phone, tablet, desktop, tv }
+
+enum DesktopTitleBarStyle { inline, classic }
+
+extension DesktopTitleBarStyleLabels on DesktopTitleBarStyle {
+  String get label => switch (this) {
+    DesktopTitleBarStyle.inline => 'Inline 内联标题栏',
+    DesktopTitleBarStyle.classic => '经典标题栏',
+  };
+
+  static DesktopTitleBarStyle parse(String? value) =>
+      DesktopTitleBarStyle.values.firstWhere(
+        (style) => style.name == value,
+        orElse: () => DesktopTitleBarStyle.inline,
+      );
+}
 
 enum AppTabletRailPosition { left, right }
 

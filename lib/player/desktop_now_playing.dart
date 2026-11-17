@@ -89,7 +89,7 @@ class DesktopNowPlaying extends StatelessWidget {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 20, 8),
+                padding: const EdgeInsets.fromLTRB(16, 4, 20, 4),
                 child: Row(
                   children: [
                     AccessibleIconButton(
@@ -99,19 +99,41 @@ class DesktopNowPlaying extends StatelessWidget {
                       icon: const Icon(Icons.keyboard_arrow_down_rounded),
                     ),
                     const Spacer(),
-                    AccessibleIconButton(
-                      key: const ValueKey('desktop-search-osu'),
-                      tooltip: '在 osu! 中搜索',
-                      onPressed: osuBeatmapSearchUri(track) == null
-                          ? null
-                          : () => unawaited(searchInOsu(context, track)),
-                      color: context.colors.onPlayer,
-                      icon: const Icon(Icons.search_rounded),
+                    DecoratedBox(
+                      key: const ValueKey('desktop-player-actions'),
+                      decoration: BoxDecoration(
+                        color: context.colors.onPlayer.withValues(alpha: .045),
+                        borderRadius: BorderRadius.circular(28),
+                        border: Border.all(
+                          color: context.colors.onPlayer.withValues(alpha: .18),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AccessibleIconButton(
+                              key: const ValueKey('desktop-search-osu'),
+                              tooltip: '在 osu! 中搜索',
+                              onPressed: osuBeatmapSearchUri(track) == null
+                                  ? null
+                                  : () =>
+                                        unawaited(searchInOsu(context, track)),
+                              color: context.colors.onPlayer,
+                              icon: const Icon(Icons.search_rounded),
+                            ),
+                            const SizedBox(width: 2),
+                            _AddToPlaylistButton(state: state, track: track),
+                            const SizedBox(width: 2),
+                            _DownloadButton(state: state, track: track),
+                          ],
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 2),
-                    _AddToPlaylistButton(state: state, track: track),
-                    const SizedBox(width: 2),
-                    _DownloadButton(state: state, track: track),
                   ],
                 ),
               ),
@@ -119,33 +141,37 @@ class DesktopNowPlaying extends StatelessWidget {
                 child: LayoutBuilder(
                   builder: (context, box) {
                     final double sidePadding = (box.maxWidth * .04).clamp(
-                      24.0,
-                      64.0,
+                      28.0,
+                      80.0,
                     );
                     return Padding(
                       padding: EdgeInsets.symmetric(
                         horizontal: sidePadding,
-                        vertical: 24,
+                        vertical: 8,
                       ),
                       child: Center(
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 1280),
+                          constraints: const BoxConstraints(maxWidth: 1480),
                           child: LayoutBuilder(
                             builder: (context, content) {
-                              // Both panes share the available width equally
-                              // at every window size. Bound the artwork group
-                              // inside its pane without changing the split.
-                              final double paneGap = (content.maxWidth * .06)
-                                  .clamp(16.0, 80.0);
+                              // Give the cover a stable left column and lyrics
+                              // the wider reading lane used by the desktop
+                              // design, without wasting scarce vertical space.
+                              final double paneGap = (content.maxWidth * .075)
+                                  .clamp(24.0, 110.0);
                               return Row(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   Expanded(
+                                    flex: 42,
                                     child: Align(
                                       alignment: Alignment.center,
                                       child: ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxWidth: 440,
+                                        constraints: BoxConstraints(
+                                          maxWidth: (box.maxWidth * .35).clamp(
+                                            280.0,
+                                            520.0,
+                                          ),
                                         ),
                                         child: _Presentation(
                                           track: track,
@@ -158,6 +184,7 @@ class DesktopNowPlaying extends StatelessWidget {
                                   ),
                                   SizedBox(width: paneGap),
                                   Expanded(
+                                    flex: 58,
                                     child: RepaintBoundary(
                                       // Share page transitions so transparent
                                       // panes never overlap and outgoing TV
@@ -314,11 +341,12 @@ class _PaneTab extends StatelessWidget {
           onTap: onPressed,
           borderRadius: BorderRadius.circular(11),
           focusScale: 1.08,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: feedbackAction(context, onPressed),
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: feedbackAction(context, onPressed),
+              canRequestFocus: !TvScope.isActive(context),
+              borderRadius: BorderRadius.circular(11),
               child: AnimatedContainer(
                 duration: MediaQuery.disableAnimationsOf(context)
                     ? Duration.zero
@@ -390,7 +418,12 @@ class _Presentation extends StatelessWidget {
     }
   }
 
-  Widget _metadata(BuildContext context, {bool compact = false}) => Column(
+  Widget _metadata(
+    BuildContext context, {
+    bool compact = false,
+    bool tight = false,
+  }) => Column(
+    key: const ValueKey('desktop-player-metadata'),
     crossAxisAlignment: CrossAxisAlignment.start,
     mainAxisSize: MainAxisSize.min,
     children: [
@@ -408,7 +441,7 @@ class _Presentation extends StatelessWidget {
                 style: context.fonts.apply(
                   FontCategory.playerTitle,
                   TextStyle(
-                    fontSize: compact ? 22 : 30,
+                    fontSize: compact ? 22 : (tight ? 26 : 32),
                     fontWeight: FontWeight.w700,
                     height: 1.2,
                     color: context.colors.slateDark,
@@ -417,7 +450,7 @@ class _Presentation extends StatelessWidget {
               ),
             ),
           ),
-          if (state.supportsCurrentMusic(MusicCapability.listenTogether))
+          if (state.supportsMusic(MusicCapability.listenTogether))
             AccessibleIconButton(
               tooltip: '一起听',
               onPressed: () =>
@@ -448,32 +481,32 @@ class _Presentation extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: context.type.bodySmMuted.copyWith(
-              fontSize: compact ? 12 : 15,
+              fontSize: compact ? 12 : (tight ? 14 : 15),
             ),
           ),
         ),
-      SizedBox(height: compact ? 8 : 12),
+      SizedBox(height: compact || tight ? 8 : 12),
       ArtistNameLink(
         state: state,
         artists: track.artists,
         fallback: track.artist,
-        maxLines: 2,
+        maxLines: 1,
         style: context.fonts.apply(
           FontCategory.playerArtist,
           TextStyle(
-            fontSize: compact ? 14 : 18,
+            fontSize: compact ? 14 : (tight ? 17 : 19),
             color: context.colors.slateDark,
           ),
         ),
       ),
-      SizedBox(height: compact ? 4 : 6),
+      SizedBox(height: compact || tight ? 4 : 6),
       AlbumNameLink(
         state: state,
         track: track,
         style: context.fonts.apply(
           FontCategory.playerArtist,
           TextStyle(
-            fontSize: compact ? 12 : 15,
+            fontSize: compact ? 12 : (tight ? 14 : 15),
             color: context.colors.cloudDark,
           ),
         ),
@@ -502,7 +535,7 @@ class _Presentation extends StatelessWidget {
       }
       return _ArtworkAndMetadata(
         artwork: RepaintBoundary(child: _cover(context)),
-        metadata: _metadata(context),
+        metadata: _metadata(context, tight: box.maxHeight < 560),
       );
     },
   );
@@ -527,7 +560,7 @@ class _RenderArtworkAndMetadata extends RenderBox
           RenderBox,
           _ArtworkAndMetadataParentData
         > {
-  static const double _gap = 24;
+  static const double _gap = 16;
 
   @override
   void setupParentData(RenderBox child) {
@@ -574,12 +607,13 @@ class _RenderArtworkAndMetadata extends RenderBox
       0,
       (size.height - artworkSize - _gap - metadata.size.height) / 2,
     );
+    final double left = (size.width - artworkSize) / 2;
     (artwork.parentData! as _ArtworkAndMetadataParentData).offset = Offset(
-      0,
+      left,
       top,
     );
     (metadata.parentData! as _ArtworkAndMetadataParentData).offset = Offset(
-      0,
+      left,
       top + artworkSize + _gap,
     );
   }
@@ -703,13 +737,13 @@ class _DesktopDock extends StatelessWidget {
       visible: visible,
       child: Padding(
         key: const ValueKey('desktop-dock-content'),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: DecoratedBox(
             decoration: const BoxDecoration(color: Colors.transparent),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              padding: const EdgeInsets.fromLTRB(24, 4, 24, 0),
               child: Column(
                 key: const ValueKey('now-playing-transport'),
                 mainAxisSize: MainAxisSize.min,
@@ -764,22 +798,6 @@ class _DesktopDock extends StatelessWidget {
                               ),
                             ],
                           ),
-                  ),
-                  Row(
-                    children: [
-                      _Clock(state: state),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: PlayerSeekBar(
-                          key: const ValueKey('desktop-seek-bar'),
-                          state: state,
-                          trackHeight: 3,
-                          thumbRadius: 5,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      _Clock(state: state, end: true),
-                    ],
                   ),
                   Row(
                     children: [
@@ -846,25 +864,10 @@ class _DesktopDock extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              AccessibleIconButton(
+                              _DesktopPlayPauseButton(
                                 key: const ValueKey('desktop-play-pause'),
-                                autofocus: TvScope.isActive(context),
+                                state: state,
                                 focusNode: playPauseFocus,
-                                tooltip: state.playing ? '暂停' : '播放',
-                                color: context.colors.onPlayer,
-                                onPressed: state.togglePlay,
-                                icon: AnimatedSwitcher(
-                                  switchInCurve: const AppleSpringCurve(),
-                                  switchOutCurve: const AppleSpringCurve(),
-                                  duration: const Duration(milliseconds: 180),
-                                  child: Icon(
-                                    state.playing
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
-                                    key: ValueKey(state.playing),
-                                    size: 28,
-                                  ),
-                                ),
                               ),
                               const SizedBox(width: 8),
                               AccessibleIconButton(
@@ -892,31 +895,53 @@ class _DesktopDock extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
                       Expanded(
                         flex: 2,
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            Flexible(child: VolumeControl(state: state)),
-                            const SizedBox(width: 2),
-                            AccessibleIconButton(
-                              key: const ValueKey('desktop-fullscreen'),
-                              tooltip: '全屏 (F)',
-                              color: context.colors.slateDark,
-                              iconSize: 22,
-                              constraints: const BoxConstraints(
-                                minWidth: 40,
-                                minHeight: 48,
+                            if (!largeScreenModeOf(context)) ...[
+                              Flexible(child: VolumeControl(state: state)),
+                              const SizedBox(width: 2),
+                              AccessibleIconButton(
+                                key: const ValueKey('desktop-fullscreen'),
+                                tooltip: '全屏 (F)',
+                                color: context.colors.slateDark,
+                                iconSize: 22,
+                                constraints: const BoxConstraints(
+                                  minWidth: 40,
+                                  minHeight: 48,
+                                ),
+                                padding: const EdgeInsets.all(8),
+                                onPressed: onFullscreen,
+                                icon: const Icon(Icons.fullscreen_rounded),
                               ),
-                              padding: const EdgeInsets.all(8),
-                              onPressed: onFullscreen,
-                              icon: const Icon(Icons.fullscreen_rounded),
-                            ),
+                            ],
                           ],
                         ),
                       ),
                     ],
+                  ),
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1000),
+                      child: Row(
+                        children: [
+                          _Clock(state: state),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: PlayerSeekBar(
+                              key: const ValueKey('desktop-seek-bar'),
+                              state: state,
+                              trackHeight: 3,
+                              thumbRadius: 5,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          _Clock(state: state, end: true),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -926,6 +951,60 @@ class _DesktopDock extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _DesktopPlayPauseButton extends StatelessWidget {
+  const _DesktopPlayPauseButton({
+    super.key,
+    required this.state,
+    this.focusNode,
+  });
+
+  final AppState state;
+  final FocusNode? focusNode;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool remote = TvScope.isActive(context);
+    final Color fill = Color.lerp(
+      Theme.of(context).colorScheme.primary,
+      Colors.white,
+      .32,
+    )!;
+    return TvTapTarget(
+      onTap: feedbackAction(context, state.togglePlay),
+      autofocus: remote,
+      focusNode: remote ? focusNode : null,
+      borderRadius: BorderRadius.circular(24),
+      focusScale: 1.06,
+      child: ExcludeFocus(
+        excluding: remote,
+        child: IconButton(
+          focusNode: remote ? null : focusNode,
+          tooltip: context.tr(state.playing ? '暂停' : '播放'),
+          onPressed: feedbackAction(context, state.togglePlay),
+          style: IconButton.styleFrom(
+            backgroundColor: fill,
+            foregroundColor: const Color(0xff202124),
+            shape: const CircleBorder(),
+            minimumSize: const Size.square(48),
+            fixedSize: const Size.square(48),
+            padding: EdgeInsets.zero,
+          ),
+          icon: AnimatedSwitcher(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
+            child: Icon(
+              state.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              key: ValueKey(state.playing),
+              size: 28,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _Clock extends StatelessWidget {

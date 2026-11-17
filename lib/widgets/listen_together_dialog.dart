@@ -30,6 +30,20 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
 
   final TextEditingController _invite = TextEditingController();
 
+  bool get _routeActive =>
+      mounted && (ModalRoute.of(context)?.isActive ?? true);
+
+  void _closeDialog() {
+    if (!_routeActive) return;
+    final route = ModalRoute.of(context);
+    final navigator = Navigator.of(context);
+    if (route == null || route.isCurrent) {
+      navigator.pop();
+    } else {
+      navigator.removeRoute(route);
+    }
+  }
+
   @override
   void dispose() {
     _invite.dispose();
@@ -39,7 +53,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
   Future<void> _copyInvite(ListenTogetherController room) async {
     final String invite = '${room.roomId}|${room.inviterId ?? 0}';
     await Clipboard.setData(ClipboardData(text: invite));
-    if (!mounted) return;
+    if (!mounted || !_routeActive) return;
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(context.tr('邀请信息已复制'))));
@@ -59,9 +73,9 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480),
         child: AnimatedBuilder(
-          animation: room,
+          animation: Listenable.merge([room, widget.state]),
           builder: (BuildContext context, Widget? _) {
-            final bool signedIn = widget.state.signedIn;
+            final bool signedIn = room.accountSignedIn;
             return SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
               child: Column(
@@ -81,7 +95,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
                       ),
                       IconButton(
                         tooltip: context.tr('关闭'),
-                        onPressed: () => Navigator.of(context).pop(),
+                        onPressed: _closeDialog,
                         icon: const Icon(Icons.close_rounded),
                       ),
                     ],
@@ -222,9 +236,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
           label: Text(context.tr('复制邀请')),
         ),
         SpringOutlinedButton.icon(
-          onPressed: room.loading
-              ? null
-              : () => unawaited(room.refresh()),
+          onPressed: room.loading ? null : () => unawaited(room.refresh()),
           icon: const Icon(Icons.refresh_rounded),
           label: Text(context.tr('刷新')),
         ),
@@ -233,7 +245,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
               ? null
               : () async {
                   await room.leave();
-                  if (context.mounted) Navigator.of(context).pop();
+                  _closeDialog();
                 },
           child: Text(context.tr('结束一起听')),
         ),
@@ -250,7 +262,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
                 ? null
                 : () async {
                     final bool created = await room.create();
-                    if (created && context.mounted) {
+                    if (created && context.mounted && _routeActive) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text(context.tr('一起听房间已创建'))),
                       );
@@ -269,6 +281,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
         ),
         const SizedBox(height: 12),
         TextField(
+          enabled: !room.loading,
           controller: _invite,
           decoration: InputDecoration(
             labelText: context.tr('邀请码或邀请链接'),
@@ -301,8 +314,9 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
       ];
 
   Future<void> _join(ListenTogetherController room) async {
+    if (!_routeActive || room.loading) return;
     final bool joined = await room.join(_invite.text);
-    if (joined && mounted) {
+    if (joined && mounted && _routeActive) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(context.tr('已加入一起听'))));

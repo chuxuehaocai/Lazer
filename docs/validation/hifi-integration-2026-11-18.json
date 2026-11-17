@@ -1,0 +1,179 @@
+{
+  "scope": "Current UI branch plus Android USB HiFi integration; software/build evidence only",
+  "verifiedOn": "2026-11-18",
+  "baseCommit": "2efead48ffb836d54f4e10c1114e9f0496ad604c",
+  "branch": "codex/desktop-tv-refresh",
+  "sourceSnapshot": "Lazer-hifi-android-test (read-only integration source)",
+  "verificationTree": "build/hifi-clean-verification",
+  "unrelatedWorkspaceChangesExcluded": true,
+  "toolchain": {
+    "flutter": "3.47.0",
+    "dart": "3.13.0",
+    "ndk": "28.2.13676358",
+    "androidBuildTools": "36.0.0",
+    "gradle": "9.3.1",
+    "java": "21"
+  },
+  "apk": {
+    "sha256": "43afb866a3946f2a2c147b494cd37a3f30d5b8f08a114ec9fa13a85ce0514178",
+    "bytes": 91724514,
+    "zipCrc": "passed",
+    "libraries": [
+      {
+        "abi": "arm64-v8a",
+        "name": "liblazer-audio.so",
+        "bytes": 2830720,
+        "sha256": "ef4f878a538f366cd659e3e6d2796b9f02f8fdc7893fba332b9b42feb3c18db6",
+        "matchesStagedBytes": false,
+        "matchesStagedAfterStripUnneeded": true,
+        "stagedSha256": "08398bf3a4d2034ac6d5d9d16609fca7fafe89d717bad297696117ff594aac49"
+      },
+      {
+        "abi": "arm64-v8a",
+        "name": "liblazer-audio-bridge.so",
+        "bytes": 229328,
+        "sha256": "a07d37b3b2218bc33f8fd6dccc21d7f5f896cd53a153483859a90205c46880e8",
+        "matchesStagedBytes": false,
+        "matchesStagedAfterStripUnneeded": true,
+        "stagedSha256": "84601e5071c2a3ecdb86ea38e0bfbb3af817ec89d6f95705185be0a3b6d7acc8"
+      },
+      {
+        "abi": "armeabi-v7a",
+        "name": "liblazer-audio.so",
+        "bytes": 2348864,
+        "sha256": "c992adfb98cf3ff8b43a25d24f5038656441b7ef218437a578f7e7b19c0c719c",
+        "matchesStagedBytes": false,
+        "matchesStagedAfterStripUnneeded": true,
+        "stagedSha256": "9b416ee72d5fd065c3ff7d274898ff05113516640646ac57efc0253653f02e88"
+      },
+      {
+        "abi": "armeabi-v7a",
+        "name": "liblazer-audio-bridge.so",
+        "bytes": 132588,
+        "sha256": "874cd075ee2383fa2e5b9e5997d502efd817c263c3921b5acca1c003293a5e47",
+        "matchesStagedBytes": false,
+        "matchesStagedAfterStripUnneeded": true,
+        "stagedSha256": "2142acbde13252155335adb0094045116229a69bf191d105e2e769e3f65fefe0"
+      }
+    ],
+    "file": "build/hifi-clean-verification/build/app/outputs/flutter-apk/app-release.apk",
+    "applicationId": "dev.naominet.lazer",
+    "label": "Lazer",
+    "versionName": "2.0.300",
+    "versionCode": 300,
+    "minSdk": 26,
+    "targetSdk": 36,
+    "abis": [
+      "arm64-v8a",
+      "armeabi-v7a"
+    ],
+    "buildType": "release",
+    "signing": "local Android Debug key; APK Signature Scheme v2",
+    "installedOnDevice": false
+  },
+  "verification": {
+    "isolatedFlutter": {
+      "passed": 381,
+      "skipped": 2
+    },
+    "workspaceFlutter": {
+      "passed": 404,
+      "skipped": 2
+    },
+    "skipReason": "External NetEase plugin checkout absent",
+    "staticAnalysis": "passed",
+    "translationCompleteness": "passed",
+    "ciContracts": 8,
+    "kotlinSessionContracts": 9,
+    "nativeHostContracts": 5,
+    "androidOutputCompileAbis": [
+      "arm64-v8a",
+      "armeabi-v7a",
+      "x86_64"
+    ],
+    "fullEngineBridgeAbis": [
+      "arm64-v8a",
+      "armeabi-v7a"
+    ],
+    "relinkArchivesExecutedAndVerified": [
+      "arm64-v8a",
+      "armeabi-v7a"
+    ],
+    "windowsRelease": "passed",
+    "webJavaScriptRelease": "passed",
+    "androidAssembleRelease": "passed",
+    "apkAudioExportsDependenciesAnd16KiBAlignment": "passed",
+    "apkCompleteArmPayloads": "passed",
+    "apkZipCrc": "passed",
+    "apkSignatureV2": "passed",
+    "ffmpegPackagingExclusions": "passed"
+  },
+  "usbSessionLimits": {
+    "pendingDevices": 8,
+    "waitersPerDevice": 32,
+    "openConnections": 8
+  },
+  "hardwareTested": false,
+  "connectedAdbDevices": 0,
+  "limitations": [
+    "No Android phone or DAC playback was performed.",
+    "Digital bit transparency, analog quality and sustained high-resolution playback CPU/RSS/temperature/underruns remain unverified.",
+    "Native compiler, Gradle/plugin deprecation and Web Wasm dry-run FFI warnings remain.",
+    "This APK preserves the normal application identity and uses a local debug signing certificate."
+  ],
+  "sourceSha256": {
+    "android/app/src/main/kotlin/dev/naominet/lazer/AndroidUsbAudioPlugin.kt": "7a3655c2a780b901db67d4e5a6ec2b0d203990b1628a5114a81d7ea32f4ea2a1",
+    "android/app/src/main/kotlin/dev/naominet/lazer/MainActivity.kt": "b2373e116476bca0e163d130e017b1ce8deb693856b7f5aad41b7a72b845af97",
+    "android/app/src/main/AndroidManifest.xml": "ee8009d5b9858f5ba07dc93723fd0ced4bf4ff58e6e711cdb5862cc8d8e33237",
+    "native/lazer-audio/cmake/AndroidUac2.cmake": "c3efb3e79b89ab749a5f5edbb2cff913761d75c15242f2214a77d06af47e6005",
+    "native/lazer-audio/src/android_uac2_control.cpp": "1728114765a6c18000f8c3a0b7f85b3bb378bfc9b7767f09f227d8c65baff089",
+    "native/lazer-audio/src/android_uac2_control.h": "78ee1e339bcf2cb62048f9900489d6c86f5b387b89ae39d5bca9907a86dd9177",
+    "native/lazer-audio/src/android_uac2_output.cpp": "df6666275331b3c14cf85d38ff693bf56df952896f0e7bc696e7d9db93b9fb73",
+    "native/lazer-audio/src/android_uac2_output.h": "8d3475ba754812b09ac3fc2111332d1986f9488cd53909393f051d70994e879d",
+    "native/lazer-audio/tools/uac2_android_compile_probe/CMakeLists.txt": "d7d095f8c3aeca607ccb17ac53df3d1ffce7a537fb7dce83155b4517a3d61f7f",
+    "native/lazer-audio/tools/uac2_transport_probe/output_probe.cpp": "45bf34d833ac19dca3def32fe4b8521e78c035a34638787b9cd5284edfe0ceff",
+    "native/lazer-audio/CMakeLists.txt": "6986f5dd41b2f5e4f6dc35a705f502f567b1028032b6aab36edbf222887229fa",
+    "native/lazer-audio/src/android_uac2_iso_transport.cpp": "ecc4176489536ec0c55c6b347cf9de34d74ef8f58412ba04bab1a8ab7e8aadb4",
+    "native/lazer-audio/src/android_uac2_iso_transport.h": "e11749fd356314c2be344a4e3f2a222bb16b9e322fa35595d29eb5b9ee8704ac",
+    "native/lazer-audio/src/output_aaudio.cpp": "de02a98ce0a63c5a7bd514bffc2bd6bbaaba2a006458b5522795dc0f9c00e235",
+    "native/lazer-audio/tools/uac2_transport_probe/CMakeLists.txt": "a0df849f2125857e391739ef8d93eaba3fba50360093a341c6beffd111304416",
+    "native/lazer-audio/tools/uac2_transport_probe/fake_libusb.cpp": "512c0ae6e37e274ad4ba055d6f444677246274609d59753e3b15d508a757d4d6",
+    "lib/audio/android_usb_audio.dart": "f76e890e93d2cb9e446d31560ce2971b47e2bb556e029e982ee0c860a689f56a",
+    "lib/audio/hifi_controller_io.dart": "f194ba3be10e97e199140f07489a1a2fa31438e68f33a94e63b12022503eb2a9",
+    "lib/audio/native/lazer_audio_library_io.dart": "0e7f0e893077603d8173cef8c221e3312da3ece109c975b89b6cd45df656dba4",
+    "lib/audio/native/lazer_audio_engine.dart": "46717fe5e8c432882d2d09e37abba14af082437598ff147940713032f0b20959",
+    "lib/widgets/hifi_settings_section_io.dart": "66d1ba6323c76358310ca64f291d0ff422aadf7d47d0a7a083347dc4edf1b5a8",
+    "test/android_usb_audio_test.dart": "b7a08e02ad38af2873baedca260d0b21f4ac8f2a47cda231ce235b1c1eafd0c9",
+    "test/hifi_android_devices_test.dart": "b5ee916a4420b2e6c8a53c5a36c48c934ee2590e9d66704853d45ac3ec35cff2",
+    "tool/dac_acceptance.dart": "917e4411b4f065f5402d92b2b64551c7cf797f8d7c4e4707ceb6168d254ca607",
+    "ci/package-android-audio.py": "27b6a31727e43bfb32a516141b71b4e614b5842246d2bfd4f34a64d0cfe99382",
+    "ci/verify-android-audio.py": "eb61056550e4650f934e78251a3f0612520d9dfba9c7627a36c0bb0b438bfefa",
+    "ci/tests/test_android_audio_acceptance.py": "a111103a642ad196a5b02902a18d1de288620d0aa69867999f03ff26a1323eee",
+    "assets/l10n/en.json": "b6ce5777904119f822ceaaa6acd822c3e6d08263241df53b0d88cbfa898077b7",
+    "assets/l10n/ja.json": "edd6794d03d17960620fc4f21fca2e68a5a1d06009439d1a586c28f030d1ffae",
+    "assets/l10n/zh_Hans.json": "30b068cc124c3eca911fccb06a9178e70a03944b24dc418d864e0ebc74b9b989",
+    "assets/l10n/zh_Hant.json": "80bd8b87865b2487b35dea89a35a0d6e8ee314a07fc684b4f15f19eea8263984",
+    "android/app/src/main/kotlin/dev/naominet/lazer/UsbAudioSessionState.kt": "f0221ea3e1cd03ed48cd79b08d13b332a3657df02076a91aa93c1606597738ea",
+    "tool/usb_audio_session_check.ps1": "73c3dbf9e653f4bba5f2cfe9165e869d1510a7f66a9f1cd914275b08abeacd9e",
+    "tool/validation/usb_audio_session_contract.kt": "ecf9d9cd52db77534b5cd90622d040f7611cf586bc29455328bf9c17bcfcceca",
+    "android/app/build.gradle.kts": "176008d0db2c1f296e5ea9436cc0bcc6e2307fa971210a727b8c90cf8a243d51"
+  },
+  "localEvidenceSha256": {
+    "build/hifi-apk-build.log": "fc1c761104ffa4f80edf19a418f9e8d78987427ffe6f26c96f452f3702980e74",
+    "build/hifi-current-apk-audio-verification.log": "d074561832b6e6dc9f2a2a25ef047934c31b6913af7c7ea834721c15e3da7eff",
+    "build/hifi-current-apk-contents.log": "c60002a42b091e963be299cb538b689fa10efb1ba820f4150fe22569a5c116d5",
+    "build/hifi-current-apk-signature.log": "faca560edfbfb4cc9f5377851f3a5992c844111bb0ad5eea74c1c43a153a7f7a",
+    "build/hifi-current-apk-alignment.log": "70edeb2e53e604cbc9c20970ac53c318700b953988cd425f6d8300ea099fa66b",
+    "build/hifi-current-apk-identity.log": "8132cbff517c6e1bbcc44658d599b456c441b0db7b7ef57364c1d840b5af0f1f",
+    "build/hifi-clean-tests.jsonl": "12681c91e1511ef667118f1ffe3c98dcb2ccf53a4df4ea4a7f9120bc686923a0",
+    "build/hifi-workspace-tests.jsonl": "a36c616468f6ce094e9860e155f18cf2dce29f3bddd1048997fda8cd3b7a824e",
+    "build/hifi-clean-analyze.log": "b76aeb73d9d2a00adb2df76965a3b7fe4bf290406df408283467c0ed399cf8c8",
+    "build/hifi-workspace-analyze.log": "79f6fb1fc108a2916eea157fb13917c8e8d8e669407382c011e96baaa2efa37d",
+    "build/hifi-clean-i18n.log": "91f87901653b26c80b2383b781e1314498ffbf976e00c7898b61813eb24af190",
+    "build/hifi-clean-ci-tests.log": "dcc350d849b700500f0febb878a6db1980212ba69e14db187d63eee3c8e37fe5",
+    "build/usb-audio-session-contract/result.log": "5596009a71e2cd623450af78ba1a0b22be85a3541738788511327ea021baa1fb",
+    "build/hifi-clean-windows-build.log": "e681ac52bb6f004a74e257ed6332425d0ae4661301b92a519c00fd3a2a0148b8",
+    "build/hifi-clean-web-build.log": "f3fb4f1d816a3804552458c3acc96fe3a90c7e69755df7c3667e5cdff4db7f21",
+    "build/hifi-usb-integration/dist/relink-package-audit.json": "e9a0c443f7dc96051dcd6a27ce8a17450d3d1c024339e134aa43ca8bd35b3b51"
+  }
+}

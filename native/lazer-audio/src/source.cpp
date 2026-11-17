@@ -1,4 +1,5 @@
 #include "source.h"
+#include "decoder_packet_flow.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1177,41 +1178,43 @@ int32_t AudioSource::pump(SourceConsumer &consumer) {
 }
 
 int32_t AudioSource::decodePacket(AVPacket *packet, SourceConsumer &consumer) {
-    int result = avcodec_send_packet(codec_.get(), packet);
-    if (result == AVERROR(EAGAIN)) {
-        /* The decoder wants to drain first: run the receive loop below, which is exactly what it is
-         * asking for, and the caller's next packet arrives with the queue cleared. */
-        result = 0;
-    } else if (result == AVERROR_EOF) {
-        result = 0;
-    } else if (result < 0) {
-        lastError_ = "decode failed: " + formatContextError(result);
-        return LazerAudioErrorDecode;
-    }
-    if (result < 0) {
-        lastError_ = "decode failed: " + formatContextError(result);
-        return LazerAudioErrorDecode;
-    }
-
-    while (!consumer.isCancelled()) {
-        AudioFrame frame = AudioFrame::allocate();
-        if (!frame) {
+    if (!decodeFrame_) {
+        decodeFrame_ = AudioFrame::allocate();
+        if (!decodeFrame_) {
             lastError_ = "out of memory allocating a frame";
             return LazerAudioErrorNoMemory;
         }
-        result = avcodec_receive_frame(codec_.get(), frame.get());
-        if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
-            return LazerAudioOk;
-        }
+    }
+    int32_t outcome = LazerAudioOk;
+    const auto decoderError = [&](int result) {
         if (result < 0) {
             lastError_ = "decode failed: " + formatContextError(result);
-            return LazerAudioErrorDecode;
+            outcome = LazerAudioErrorDecode;
+            return DecoderStep::Failed;
         }
-        const int32_t emitted = emitAVFrame(frame.get(), consumer);
-        if (emitted < 0) return emitted;
-        if (cueBoundaryReached_) return LazerAudioOk;
+        return DecoderStep::Ready;
+    };
+    const DecoderFlowResult flow = pumpDecoderPacket([&] {
+        const int result = avcodec_send_packet(codec_.get(), packet);
+        if (result == AVERROR(EAGAIN)) return DecoderStep::Again;
+        if (result == AVERROR_EOF) return DecoderStep::End;
+        return decoderError(result);
+    }, [&] {
+        const int result = avcodec_receive_frame(codec_.get(), decodeFrame_.get());
+        if (result == AVERROR(EAGAIN)) return DecoderStep::Again;
+        if (result == AVERROR_EOF) return DecoderStep::End;
+        if (decoderError(result) == DecoderStep::Failed) return DecoderStep::Failed;
+        outcome = emitAVFrame(decodeFrame_.get(), consumer);
+        /* Delivery completes before unref; no decoded backing buffer is kept while parked. */
+        av_frame_unref(decodeFrame_.get());
+        if (outcome < 0) return DecoderStep::Failed;
+        return cueBoundaryReached_ ? DecoderStep::End : DecoderStep::Ready;
+    }, [&] { return consumer.isCancelled(); });
+    if (flow == DecoderFlowResult::Stalled) {
+        lastError_ = "decoder rejected a packet without making receive progress";
+        return LazerAudioErrorDecode;
     }
-    return LazerAudioOk;
+    return outcome;
 }
 
 int32_t AudioSource::emitAVFrame(AVFrame *frame, SourceConsumer &consumer) {
@@ -1605,6 +1608,7 @@ void AudioSource::releaseAvio() {
 }
 
 void AudioSource::close() {
+    decodeFrame_.reset();
     codec_.reset();
     codecDescriptor_ = nullptr;
     resampler_.reset();
