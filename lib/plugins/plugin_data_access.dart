@@ -9,6 +9,22 @@ class PluginDataAccess {
   final Set<String> _granted = {};
   final Map<String, int> _revisions = {};
   final Map<String, Future<bool>> _requests = {};
+  Object _epoch = Object();
+  bool _active = true;
+
+  /// Invalidate before the first asynchronous teardown step, not after socket
+  /// handshakes or provider cleanup finish. Grants persist across VM restarts;
+  /// requests and consent dialogs from the old VM never do.
+  void suspend() {
+    _active = false;
+    _epoch = Object();
+    _requests.clear();
+  }
+
+  void resume() {
+    _epoch = Object();
+    _active = true;
+  }
 
   Set<String> get granted => Set.unmodifiable(_granted);
 
@@ -44,13 +60,16 @@ class PluginDataAccess {
     Future<bool> Function(String permission) prompt,
     Future<void> Function() persist,
   ) async {
-    if (!manifest.dataPermissions.contains(scope)) return false;
+    if (!_active || !manifest.dataPermissions.contains(scope)) return false;
     if (_granted.contains(scope)) return true;
-    return _requests[scope] ??= _request(scope, prompt, persist).whenComplete(
-      () {
-        _requests.remove(scope);
-      },
-    );
+    final existing = _requests[scope];
+    if (existing != null) return existing;
+    late final Future<bool> pending;
+    pending = _request(scope, prompt, persist).whenComplete(() {
+      if (identical(_requests[scope], pending)) _requests.remove(scope);
+    });
+    _requests[scope] = pending;
+    return pending;
   }
 
   Future<bool> _request(
@@ -59,13 +78,20 @@ class PluginDataAccess {
     Future<void> Function() persist,
   ) async {
     final revision = _revisions[scope] ?? 0;
-    if (!await prompt('data.$scope') || revision != (_revisions[scope] ?? 0)) {
+    final epoch = _epoch;
+    if (!await prompt('data.$scope') ||
+        !_active ||
+        !identical(epoch, _epoch) ||
+        revision != (_revisions[scope] ?? 0)) {
       return false;
     }
     setGranted(scope, true);
     final grantedRevision = _revisions[scope];
     await persist();
-    return _granted.contains(scope) && grantedRevision == _revisions[scope];
+    return _active &&
+        identical(epoch, _epoch) &&
+        _granted.contains(scope) &&
+        grantedRevision == _revisions[scope];
   }
 
   Future<Object?> dispatch(
@@ -75,6 +101,14 @@ class PluginDataAccess {
     required bool Function() isActive,
     required Future<Object?> Function(Map<String, dynamic>) backend,
   }) async {
+    final epoch = _epoch;
+    void assertActive() {
+      if (!_active || !identical(epoch, _epoch) || !isActive()) {
+        throw const PluginException('Plugin is no longer active', code: 403);
+      }
+    }
+
+    assertActive();
     final command = '${spec['command'] ?? spec['op'] ?? spec['action'] ?? ''}'
         .toLowerCase()
         .trim();
@@ -85,7 +119,9 @@ class PluginDataAccess {
       };
     }
     if (command == 'permission_request') {
-      return request('${spec['scope'] ?? ''}', prompt, persist);
+      final result = await request('${spec['scope'] ?? ''}', prompt, persist);
+      assertActive();
+      return result;
     }
     final scope = requiredScope(command);
     if (scope != null && !await request(scope, prompt, persist)) {
@@ -93,9 +129,7 @@ class PluginDataAccess {
     }
     final revision = scope == null ? null : _revisions[scope];
     void assertCurrentAccess() {
-      if (!isActive()) {
-        throw const PluginException('Plugin is no longer active', code: 403);
-      }
+      assertActive();
       if (scope != null &&
           (!_granted.contains(scope) || _revisions[scope] != revision)) {
         throw const PluginException(

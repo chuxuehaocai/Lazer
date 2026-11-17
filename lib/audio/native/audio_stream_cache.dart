@@ -375,6 +375,7 @@ class AudioStreamCache {
   final Duration responseHeaderTimeout;
 
   final Map<int, AudioStreamEntry> _entries = <int, AudioStreamEntry>{};
+  final Map<int, Future<void>> _discarding = <int, Future<void>>{};
   final List<int> _order = <int>[];
   bool _closed = false;
 
@@ -393,6 +394,8 @@ class AudioStreamCache {
   }) async {
     if (_closed) throw StateError('the audio cache is closed');
     final int key = _cacheKey(url);
+    await _discarding[key];
+    if (_closed) throw StateError('the audio cache is closed');
     final AudioStreamEntry? existing = _entries[key];
     if (existing != null && !force) {
       if (!existing.complete &&
@@ -437,6 +440,38 @@ class AudioStreamCache {
     await _evict();
     unawaited(entry.download(_client));
     return entry;
+  }
+
+  /// Discards a fully downloaded response the decoder rejected as a source.
+  /// HTTP 200 can still contain an expired-link HTML/JSON error page. Keeping
+  /// that response as a complete audio file makes every later play fail without
+  /// contacting the server. Device/format-policy errors must not call this.
+  /// Incomplete downloads retain their resumable bytes and normal retry policy.
+  Future<void> discardRejectedComplete(AudioStreamEntry entry) {
+    if (!entry.complete || !identical(_entries[entry.key], entry)) {
+      return Future<void>.value();
+    }
+    final pending = _discarding[entry.key];
+    if (pending != null) return pending;
+    late final Future<void> discard;
+    discard =
+        Future<void>(() async {
+          // complete is published before the final sink close. Wait for that close
+          // before deleting, and make concurrent opens wait for this operation.
+          await entry.done;
+          if (!identical(_entries[entry.key], entry)) return;
+          if (await entry.file.exists()) await entry.file.delete();
+          if (identical(_entries[entry.key], entry)) {
+            _entries.remove(entry.key);
+            _order.remove(entry.key);
+          }
+        }).whenComplete(() {
+          if (identical(_discarding[entry.key], discard)) {
+            _discarding.remove(entry.key);
+          }
+        });
+    _discarding[entry.key] = discard;
+    return discard;
   }
 
   /// Deletes every cached file; returns how many were removed.

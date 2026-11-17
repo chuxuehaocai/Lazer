@@ -977,6 +977,21 @@ class NativeAudioEngine
           'expected_bytes': entry?.expectedBytes,
           'download_error': entry?.failure?.toString(),
         });
+        if (entry != null &&
+            generation == _generation &&
+            (status == lazerAudioErrorSource ||
+                status == lazerAudioErrorDecode)) {
+          // The engine rejected the source and has closed this reader. Release
+          // its OS file handle before removing a complete but invalid response.
+          reader?.release();
+          try {
+            await _cache.discardRejectedComplete(entry);
+          } catch (error) {
+            AppLog.shared.event('audio.native', 'cache_discard_failed', {
+              'error': error.toString(),
+            });
+          }
+        }
         throw StateError(
           'lazer-audio could not open source ($status): $detail',
         );

@@ -283,12 +283,16 @@ class LazerApp extends StatefulWidget {
     required this.media,
     this.discord,
     this.session,
+    this.windowFrameEnabled,
   });
   final AppState state;
   final AudioEngine audio;
   final SystemMediaController media;
   final DiscordRpcController? discord;
   final PlaybackSession? session;
+
+  /// Allows an embedded preview to exercise the complete desktop frame.
+  final bool? windowFrameEnabled;
 
   @override
   State<LazerApp> createState() => _LazerAppState();
@@ -618,6 +622,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                   state: _state,
                   child: CarMetrics(
                     child: WindowFrame(
+                      enabled: widget.windowFrameEnabled,
                       state: _state,
                       navigatorKey: _navigatorKey,
                       child: Builder(
@@ -628,21 +633,11 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                           child: SharedBrowseBackground(
                             state: _state,
                             navigation: _browseNavigation,
-                            // Inline controls share the backdrop, while the
-                            // navigator's controls always remain below their hit
-                            // area (including embedded settings detail headers).
-                            child:
-                                kCustomWindowFrame &&
-                                    _state.titleBarStyle ==
-                                        DesktopTitleBarStyle.inline &&
-                                    !usesNativeWindowButtons
-                                ? SafeArea(
-                                    left: false,
-                                    right: false,
-                                    bottom: false,
-                                    child: child!,
-                                  )
-                                : child!,
+                            // Pages consume the frame's safe inset themselves.
+                            // The desktop rail extends into the Inline row;
+                            // reserving it for the whole Navigator would push
+                            // both the logo and page padding down a second time.
+                            child: child!,
                           ),
                         ),
                       ),

@@ -7,6 +7,8 @@ import '../utils/system_http.dart';
 /// network plugins are enabled by the native client where ZIP storage and
 /// isolates are available.
 class LuaPluginRuntime {
+  bool get acceptsCalls => false;
+  int get sessionRevision => 0;
   LuaPluginRuntime({
     required this.manifest,
     required this.sources,

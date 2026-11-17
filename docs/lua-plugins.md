@@ -105,6 +105,7 @@ end
 | `host.cookie_compact(text)` / `host.cookie_field(text, name)` | 规范化通用 Cookie Header、读取字段 |
 | `host.cookie_merge(previous, setCookieHeaders)` | 合并响应 Cookie，保留没有被覆盖的凭据字段 |
 | `host.random_hex(count)` / `host.now()` | 随机数和 Unix 毫秒时间 |
+| `host.timer({id,intervalMs})` | 注册 `call("timer",{id})` 周期回调；100–60000 毫秒、每插件最多 4 个 |
 | `host.storage_get(key)` / `host.storage_set(key, value)` | 清单申请存储权限时使用；总量最多 1 MB |
 | `host.storage_keys()` / `host.storage_clear()` | 枚举或清空插件自己的持久化空间 |
 | `host.file({operation, path, data, encoding, recursive})` / `host.files(spec)` | 申请文件管理权限后访问插件专属文件沙箱；支持 `read`、`write`、`append`、`list`、`mkdir`、`stat`、`exists`、`delete` |
@@ -584,3 +585,21 @@ return {{synced=true,
 
 设置 → 歌词 → 显示罗马音默认开启，关闭后正在播放、桌面/悬浮歌词及歌词导出均隐藏
 音译，保留原文与翻译。没有提供音译的行不占用额外空间，也不会自动生成罗马音。
+
+
+### 可运行的独立 HTML 前端
+
+[examples/lua-frontend](../examples/lua-frontend/README.md) 提供完整 HTML/CSS/JS 页面与 Lua
+WebSocket 桥，支持播放控制、队列、歌词、歌单、搜索、用户信息与统计。直接打开本地 HTML
+即可连接原生 Lazer 后端；无需 WebView、远程 JavaScript 或 npm。打包、导入、启动和连接步骤
+以及真实 JS→WebSocket→Lua→AppState 的集成测试说明都在示例 README 中。
+
+后台服务可用 `host.timer({id="bridge",intervalMs=100})` 注册唤醒，收到
+`call("timer",{id="bridge"})` 后短暂轮询 socket。`operation="cancel"` 取消指定 ID，
+`operation="list"` 返回当前 ID 列表。重复注册替换旧计时器；最多 4 个，周期必须为
+100–60000 的整数毫秒。不额外授予数据、网络或文件权限。
+
+每个 timer 最多一个运行中或串行队列中等待的回调，慢操作期间的 tick 合并丢弃，
+不会累计任务。重设或取消不会释放未完成回调的名额，全插件最多 4 个未完成 timer 回调。
+关闭、重置、禁用插件时全部清理。取消后已经进入 VM 队列的回调可能执行一次，
+因此服务的回调还应检查自身运行标志。不要在回调内永久循环；所有回调仍受现有 VM 预算约束。

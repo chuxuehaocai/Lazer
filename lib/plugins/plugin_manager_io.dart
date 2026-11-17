@@ -477,7 +477,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           resources[name] = text;
         }
       }
-      final runtime = LuaPluginRuntime(
+      late final LuaPluginRuntime runtime;
+      plugin.dataAccess.resume();
+      runtime = LuaPluginRuntime(
         manifest: plugin.manifest,
         sources: sources,
         resources: resources,
@@ -498,19 +500,31 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         onPlayerMenuItemAdded: (spec) => _registerPlayerMenuItem(plugin, spec),
         onPageAdded: (spec) => _registerPage(plugin, spec),
         onPageEdited: (spec) => _editPage(plugin, spec),
-        onPlayerControl: (spec) => plugin.dataAccess.dispatch(
-          spec,
-          prompt: (permission) async =>
-              await onPermissionRequest?.call(plugin, permission) ?? false,
-          persist: () => _saveDataPermissions(plugin),
-          isActive: () => plugin.enabled && _plugins.contains(plugin),
-          backend: (request) async {
-            if (!plugin.enabled || !_plugins.contains(plugin)) {
-              throw const PluginException('Plugin is disabled');
-            }
-            return onPlayerControl?.call(request);
-          },
-        ),
+        onPlayerControl: (spec) {
+          final revision = runtime.sessionRevision;
+          bool active() =>
+              plugin.enabled &&
+              _plugins.contains(plugin) &&
+              identical(plugin.runtime, runtime) &&
+              runtime.acceptsCalls &&
+              runtime.sessionRevision == revision;
+          return plugin.dataAccess.dispatch(
+            spec,
+            prompt: (permission) async {
+              final granted =
+                  await onPermissionRequest?.call(plugin, permission) ?? false;
+              return active() && granted;
+            },
+            persist: () => _saveDataPermissions(plugin),
+            isActive: active,
+            backend: (request) async {
+              if (!plugin.enabled || !_plugins.contains(plugin)) {
+                throw const PluginException('Plugin is disabled');
+              }
+              return onPlayerControl?.call(request);
+            },
+          );
+        },
         onLog: (record) {
           final level = record['level']?.toString() ?? 'info';
           final fields = <String, Object?>{
@@ -584,6 +598,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.error = null;
     } catch (_) {
       MediaRequestRules.remove(plugin.manifest.id);
+      plugin.dataAccess.suspend();
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
       plugin.gateways.clear();
@@ -675,6 +690,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           .where((v) => v.manifest.id == manifest.id)
           .firstOrNull;
       final enabled = previous?.enabled ?? true;
+      previous?.dataAccess.suspend();
       await beforeChange?.call(manifest.id);
       await previous?.runtime?.shutdown();
       final installed = Directory(p.join(base.path, manifest.id));
@@ -736,6 +752,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       MediaRequestRules.remove(plugin.manifest.id);
       await plugin.runtime?.shutdown();
@@ -764,6 +781,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -790,6 +808,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -818,6 +837,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -844,6 +864,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -870,6 +891,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -896,6 +918,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       await plugin.runtime?.shutdown();
       plugin.runtime = null;
@@ -923,6 +946,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     busy = true;
     _notify();
     try {
+      plugin.dataAccess.suspend();
       await beforeChange?.call(id);
       MediaRequestRules.remove(plugin.manifest.id);
       await plugin.runtime?.shutdown();
@@ -973,6 +997,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     _disposed = true;
     for (final plugin in _plugins) {
       MediaRequestRules.remove(plugin.manifest.id);
+      plugin.dataAccess.suspend();
       plugin.runtime?.close();
     }
     super.dispose();

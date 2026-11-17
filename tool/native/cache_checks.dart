@@ -554,6 +554,63 @@ Future<List<String>> verifyAudioStreamCache(Directory root) async {
     }
   }
 
+  // 10. A successful HTTP status can carry an error page. Once the decoder
+  // rejects that complete response, replay must fetch from byte zero again.
+  {
+    final errorPage = Uint8List.fromList('<html>expired link</html>'.codeUnits);
+    final audio = Uint8List.fromList(List<int>.generate(128, (index) => index));
+    final ranges = <String?>[];
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      ranges.add(request.headers.value(HttpHeaders.rangeHeader));
+      final bytes = ranges.length == 1 ? errorPage : audio;
+      request.response.contentLength = bytes.length;
+      request.response.add(bytes);
+      await request.response.close();
+    });
+    final cache = await cacheAt('rejected-complete');
+    try {
+      final url = 'http://${server.address.host}:${server.port}/track';
+      final first = await cache.open(url);
+      await first.done;
+      expect(
+        'HTTP error page initially appears complete',
+        first.complete,
+        true,
+      );
+      final discard = cache.discardRejectedComplete(first);
+      // No await between rejection and open: the reopen must join deletion,
+      // never receive the entry whose file is about to disappear.
+      final second = await cache.open(url);
+      await discard;
+      await second.done;
+      expect('rejected complete response is fetched again', ranges.length, 2);
+      expect(
+        'rejected bytes are never used as a Range prefix',
+        ranges.last,
+        null,
+      );
+      expect('replay receives a fresh entry', identical(first, second), false);
+      expect(
+        'replay receives only the healthy response',
+        _sameBytes(await second.file.readAsBytes(), audio),
+        true,
+      );
+      // A stale failure for the old entry cannot erase the successful retry.
+      await cache.discardRejectedComplete(first);
+      final third = await cache.open(url);
+      expect(
+        'stale rejection preserves the healthy cache',
+        identical(second, third),
+        true,
+      );
+      expect('healthy complete audio is still reused', ranges.length, 2);
+    } finally {
+      cache.close();
+      await server.close(force: true);
+    }
+  }
+
   return failures;
 }
 

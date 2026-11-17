@@ -1,0 +1,12 @@
+{
+  "id": "example.frontend",
+  "name": "Independent frontend example",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "provider": "frontend",
+  "description": "A local browser frontend backed by a Lua WebSocket bridge.",
+  "permissions": {
+    "websocketServer": ["127.0.0.1:11445"],
+    "data": ["library", "profile", "history"]
+  }
+}

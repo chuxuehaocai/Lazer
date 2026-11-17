@@ -347,11 +347,6 @@ class _SettingsOverview extends StatelessWidget {
     final double minScale = UiMetrics.minScaleOf(context);
     final double shownScale = UiMetrics.scaleOf(context);
     final bool car = UiMetrics.carOf(context);
-    final bool tablet = useTabletLayout(
-      state.uiMode,
-      MediaQuery.sizeOf(context).width,
-      layoutStyle: state.layoutStyle,
-    );
     final double inset = pageInset(context);
     bool show(_SettingsCategory value) => category == null || category == value;
     final String pageTitle = category?.label ?? '设置';
@@ -494,33 +489,6 @@ class _SettingsOverview extends StatelessWidget {
                               },
                             ),
                           ),
-                        if (state.layoutStyle == AppLayoutStyle.tablet ||
-                            (state.layoutStyle == AppLayoutStyle.auto &&
-                                tablet))
-                          _AppSettingRow(
-                            key: const ValueKey('tablet-rail-position-setting'),
-                            label: '平板胶囊栏位置',
-                            subtitle: '选择左侧或右侧显示导航与迷你播放器',
-                            trailing: SettingsChoice<AppTabletRailPosition>(
-                              key: ValueKey<AppTabletRailPosition>(
-                                state.tabletRailPosition,
-                              ),
-                              value: state.tabletRailPosition,
-                              items: <DropdownMenuItem<AppTabletRailPosition>>[
-                                for (final AppTabletRailPosition position
-                                    in AppTabletRailPosition.values)
-                                  DropdownMenuItem<AppTabletRailPosition>(
-                                    value: position,
-                                    child: TrText(position.label),
-                                  ),
-                              ],
-                              onChanged: (AppTabletRailPosition? value) {
-                                if (value != null) {
-                                  unawaited(state.setTabletRailPosition(value));
-                                }
-                              },
-                            ),
-                          ),
                         const LanRemoteSettings(),
                         _AppSliderRow(
                           key: const ValueKey('dpi-scale-slider'),
@@ -571,48 +539,6 @@ class _SettingsOverview extends StatelessWidget {
                             key: const ValueKey('animation-speed-reset'),
                             onPressed: () =>
                                 unawaited(state.resetAnimationSpeed()),
-                            child: const TrText('恢复默认'),
-                          ),
-                        ),
-                        const _AppSectionLabel('顶边栏'),
-                        _AppSliderRow(
-                          key: const ValueKey('header-blur-slider'),
-                          label: '顶边栏模糊',
-                          valueText: '${state.headerBlur.round()} px',
-                          subtitle: '0 为不模糊；数值越大，标题栏后方的背景越柔和',
-                          value: state.headerBlur,
-                          min: kHeaderBlurMin,
-                          max: kHeaderBlurMax,
-                          divisions: ((kHeaderBlurMax - kHeaderBlurMin) / 2)
-                              .round(),
-                          onChanged: (double value) =>
-                              unawaited(state.setHeaderBlur(value)),
-                          action: SpringTextButton(
-                            key: const ValueKey('header-blur-reset'),
-                            onPressed: () => unawaited(
-                              state.setHeaderBlur(kHeaderBlurDefault),
-                            ),
-                            child: const TrText('恢复默认'),
-                          ),
-                        ),
-                        _AppSliderRow(
-                          key: const ValueKey('header-opacity-slider'),
-                          label: '顶边栏不透明度',
-                          valueText: '${(state.headerOpacity * 100).round()}%',
-                          subtitle: '数值越低背景越明显；100% 时顶边栏不再模糊背景',
-                          value: state.headerOpacity,
-                          min: kHeaderOpacityMin,
-                          max: kHeaderOpacityMax,
-                          divisions:
-                              ((kHeaderOpacityMax - kHeaderOpacityMin) / .05)
-                                  .round(),
-                          onChanged: (double value) =>
-                              unawaited(state.setHeaderOpacity(value)),
-                          action: SpringTextButton(
-                            key: const ValueKey('header-opacity-reset'),
-                            onPressed: () => unawaited(
-                              state.setHeaderOpacity(kHeaderOpacityDefault),
-                            ),
                             child: const TrText('恢复默认'),
                           ),
                         ),

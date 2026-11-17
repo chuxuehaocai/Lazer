@@ -968,6 +968,7 @@ class _AppShellState extends State<AppShell>
         compact: useCompactLayout(
           state.uiMode,
           MediaQuery.sizeOf(context).width,
+          layoutStyle: state.layoutStyle,
         ),
         velocity: normalizedVelocity,
         releasedPull: true,
@@ -1279,7 +1280,10 @@ class _AppShellState extends State<AppShell>
                           ),
                         ),
                       SafeArea(
-                        top: false,
+                        // A TV header shares the full width. Desktop reserves
+                        // the title area only above its content pane; compact
+                        // toolbars already consume this inset themselves.
+                        top: largeScreen,
                         bottom: false,
                         // Televisions overscan: keep the chrome inside the
                         // panel's visible box even though Android reports no
@@ -1423,6 +1427,11 @@ class _AppShellState extends State<AppShell>
   }
 
   Widget _desktopLayout(AppleSemanticColors apple, {required bool compactBar}) {
+    final double contentTopInset =
+        (_desktopToolbarHeight - MediaQuery.paddingOf(context).top).clamp(
+          0.0,
+          _desktopToolbarHeight,
+        );
     return Column(
       children: <Widget>[
         Expanded(
@@ -1431,17 +1440,24 @@ class _AppShellState extends State<AppShell>
               _sidebar(apple),
               Container(width: .5, color: apple.separator),
               Expanded(
-                child: Column(
-                  children: <Widget>[
-                    if (_hasOpenDetail && _playlist == null) _desktopToolbar(),
-                    Expanded(
-                      child: RepaintBoundary(
-                        child: _content(
-                          topInset: _hasOpenDetail ? 0 : _desktopToolbarHeight,
+                child: SafeArea(
+                  key: const ValueKey('desktop-content-safe-area'),
+                  left: false,
+                  right: false,
+                  bottom: false,
+                  child: Column(
+                    children: <Widget>[
+                      if (_hasOpenDetail && _playlist == null)
+                        _desktopToolbar(),
+                      Expanded(
+                        child: RepaintBoundary(
+                          child: _content(
+                            topInset: _hasOpenDetail ? 0 : contentTopInset,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1789,6 +1805,7 @@ class _AppShellState extends State<AppShell>
 
   Widget _sidebar(AppleSemanticColors apple) {
     return AppleGlass(
+      key: const ValueKey('desktop-sidebar'),
       borderRadius: BorderRadius.zero,
       blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica ? 0 : 16,
       color: apple.glass.withValues(
@@ -2098,7 +2115,7 @@ class _AppShellState extends State<AppShell>
     final String detail = state.user.isGuest
         ? context.tr('登录账户')
         : context.tr(state.user.vipLabel ?? '普通账户');
-    return PopupMenuButton<String>(
+    final Widget button = PopupMenuButton<String>(
       key: const ValueKey('rail-account'),
       tooltip: context.tr(state.isGuest ? '登录' : state.user.name),
       offset: const Offset(0, -6),
@@ -2149,6 +2166,7 @@ class _AppShellState extends State<AppShell>
         ),
       ),
     );
+    return _remoteAccountFocus(button, BorderRadius.circular(12));
   }
 
   Widget _accountButton(AppleSemanticColors apple, {double radius = 15}) {
@@ -2170,15 +2188,27 @@ class _AppShellState extends State<AppShell>
         signedIn: !state.isGuest,
       ),
     );
-    if (!_isLargeScreen(context)) return button;
+    return _remoteAccountFocus(
+      button,
+      BorderRadius.circular(radius + 6),
+      padding: const EdgeInsets.all(6),
+    );
+  }
+
+  Widget _remoteAccountFocus(
+    Widget button,
+    BorderRadius borderRadius, {
+    EdgeInsets padding = EdgeInsets.zero,
+  }) {
+    if (!TvScope.isActive(context)) return button;
     return TvFocusHighlight(
-      borderRadius: BorderRadius.circular(radius + 6),
+      borderRadius: borderRadius,
       child: Theme(
         data: Theme.of(context).copyWith(
           focusColor: Colors.transparent,
           hoverColor: Colors.transparent,
         ),
-        child: Padding(padding: const EdgeInsets.all(6), child: button),
+        child: Padding(padding: padding, child: button),
       ),
     );
   }
@@ -2359,6 +2389,7 @@ class _AppShellState extends State<AppShell>
         compact: useCompactLayout(
           state.uiMode,
           MediaQuery.sizeOf(context).width,
+          layoutStyle: state.layoutStyle,
         ),
         child: Builder(
           builder: (detailContext) => AppLibraryPage(

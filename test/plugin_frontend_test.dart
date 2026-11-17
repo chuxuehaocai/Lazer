@@ -299,6 +299,76 @@ void main() {
     },
   );
 
+  test('old consent cannot grant access after a VM lifecycle change', () async {
+    final access = PluginDataAccess(
+      PluginManifest.fromJson(_manifest(['profile'])),
+    );
+    final consent = Completer<bool>();
+    final pending = access.request(
+      'profile',
+      (_) => consent.future,
+      () async {},
+    );
+    access.suspend();
+    access.resume();
+    consent.complete(true);
+    expect(await pending, false);
+    expect(access.granted, isEmpty);
+    expect(
+      await access.request('profile', (_) async => true, () async {}),
+      true,
+    );
+  });
+
+  for (final action in ['disable', 'restart', 'uninstall']) {
+    test(
+      '$action invalidates private playback before asynchronous cleanup',
+      () async {
+        final plugins = await manager(['library'], appOwns: true);
+        final gate = _DelayedLoad();
+        final state = AppState(
+          catalog: _DelayedCatalog(gate),
+          pluginManager: plugins,
+          listeningStatistics: ListeningStatisticsController(
+            read: () async => null,
+            write: (_) async {},
+          ),
+          artworkSeedLoader: (_) async => null,
+        );
+        addTearDown(state.dispose);
+        plugins.onPermissionRequest = (_, _) async => true;
+        final runtime = plugins.plugins.single.runtime!;
+        final request = runtime.invoke('library', {
+          'operation': 'play',
+          'id': 'private-list',
+        });
+        final rejected = expectLater(request, throwsA(isA<PluginException>()));
+        await gate.started.future;
+        final cleanupStarted = Completer<void>();
+        final cleanupRelease = Completer<void>();
+        // Stop before runtime.shutdown even begins: provider cleanup or a slow
+        // socket close must not leave the old authorization usable.
+        plugins.beforeChange = (_) async {
+          cleanupStarted.complete();
+          await cleanupRelease.future;
+        };
+        // This test exercises teardown authorization, not catalogue reload or
+        // background cache persistence after switching music providers.
+        plugins.afterChange = null;
+        final change = action == 'uninstall'
+            ? plugins.uninstall('fixture.frontend')
+            : plugins.setEnabled('fixture.frontend', action == 'restart');
+        await cleanupStarted.future;
+        gate.release.complete();
+        await rejected;
+        expect(state.queue, isEmpty);
+        cleanupRelease.complete();
+        await change;
+        expect(state.queue, isEmpty);
+      },
+    );
+  }
+
   for (final kind in ['playlist', 'album', 'song']) {
     for (final regrant in [false, true]) {
       test(

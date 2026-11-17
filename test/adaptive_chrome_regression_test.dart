@@ -182,6 +182,56 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  for (final style in [AppLayoutStyle.phone, AppLayoutStyle.desktop]) {
+    testWidgets('remote account focus survives forced ${style.name} layout', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final state = AppState(deviceIsTelevision: true)..layoutStyle = style;
+      addTearDown(state.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppleTheme(),
+          home: TvScope(
+            active: true,
+            largeScreen: false,
+            child: AppShell(state: state),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final account = find.byKey(
+        ValueKey(
+          style == AppLayoutStyle.desktop ? 'rail-account' : 'header-account',
+        ),
+      );
+      Focus.of(
+        tester.element(
+          find.descendant(of: account, matching: find.byType(MouseRegion)).last,
+        ),
+      ).requestFocus();
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.ancestor(
+            of: account,
+            matching: find.byType(TvFocusHighlight),
+          ),
+          matching: find.byType(TvFocusOutline),
+        ),
+        findsOneWidget,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.pumpAndSettle();
+      expect(find.text('音乐平台'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   for (final bool tv in <bool>[false, true]) {
     for (final bool supportsRooms in <bool>[false, true]) {
       testWidgets(
