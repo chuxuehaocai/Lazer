@@ -180,6 +180,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
        _systemWidgets = systemWidgets ?? SystemWidgetsBridge(),
        _shuffleOrder = ShuffleOrder(random: shuffleRandom) {
     addListener(_updateSystemWidget);
+    _tickNotifier.addListener(_broadcastPluginPlayerState);
     this.pluginManager.onPlayerControl = _handlePluginPlayerControl;
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
     this.pluginManager.afterChange = _musicPlatforms.synchronizePlugins;
@@ -3004,7 +3005,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  void _broadcastPluginPlayerState() {
+  void _broadcastPluginPlayerState({bool force = false}) {
     if (_presentationDisposed) return;
     final track = current;
     if (track?.id != _lastBroadcastTrackId) {
@@ -3032,7 +3033,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final now = DateTime.now();
     final isPlaying = current != null && playing;
     final stateChanged = _lastBroadcastPlaying != isPlaying;
-    if (stateChanged ||
+    if (force ||
+        stateChanged ||
         now.difference(_lastBroadcastStatusAt) >=
             const Duration(milliseconds: 500)) {
       _lastBroadcastStatusAt = now;
@@ -3050,12 +3052,22 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (_presentationDisposed) return;
     pluginManager.broadcastPlayerEvent('lyric', {
       'lyric': [
-        for (final line in lyrics)
+        for (var i = 0; i < lyrics.length; i++)
           {
-            'time': line.time.inMilliseconds,
-            'text': line.text,
-            if (line.translation != null) 'tlyric': line.translation,
-            if (line.romanization != null) 'rlyric': line.romanization,
+            'time': lyrics[i].time.inMilliseconds,
+            'startTime': lyrics[i].time.inMilliseconds,
+            'endTime': (i + 1 < lyrics.length)
+                ? lyrics[i + 1].time.inMilliseconds
+                : (lyrics[i].time + const Duration(seconds: 4)).inMilliseconds,
+            'text': lyrics[i].text,
+            if (lyrics[i].translation != null) ...{
+              'tlyric': lyrics[i].translation,
+              'translatedLyric': lyrics[i].translation,
+            },
+            if (lyrics[i].romanization != null) ...{
+              'rlyric': lyrics[i].romanization,
+              'romanLyric': lyrics[i].romanization,
+            },
           }
       ],
       'pureMusic': lyricsPureMusic,
@@ -3905,6 +3917,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     // Position-only change: tick lane, not a structural rebuild.
     _tickNotifier.pulse();
+    _broadcastPluginPlayerState(force: true);
   }
 
   /// Applies a system or remote seek even when a new source is still opening.
@@ -5122,6 +5135,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // and of whether the player page has ever been mounted.
     currentArtwork.update(track);
     notifyListeners();
+    _broadcastPluginLyrics();
     if (track == null || key == null) return Future<void>.value();
     if (cached != null) {
       _lyricSnapshots[key] = cached;
@@ -5255,7 +5269,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricsError = '歌词暂时无法加载。';
     }
     lyricsLoading = false;
-    if (cacheable || lyricsImported || localOnly) _rememberLyrics(key);
+    if (cacheable || lyricsImported || localOnly) {
+      _rememberLyrics(key);
+      _broadcastPluginLyrics();
+    }
     notifyListeners();
   }
 
@@ -6008,6 +6025,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _failureSubscription?.cancel();
     _bufferPulseTimer?.cancel();
     _ticker?.cancel();
+    _tickNotifier.removeListener(_broadcastPluginPlayerState);
     _tickNotifier.dispose();
     if (_ownsDownloadManager) downloadManager.dispose();
     playbackCache.dispose();
