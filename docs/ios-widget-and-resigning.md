@@ -102,6 +102,75 @@ codesign -d --entitlements :- "$app" | plutil -p -
   多写的条目会被静默忽略。
 - 先签 `.appex` 再签 `.app`，顺序反了外层签名会把内层改动作废。
 
+## Windows 上自签（iLoader 等工具）
+
+**能不能在 Windows 签名：能。能不能在 Windows 构建 IPA：不能。**
+
+构建需要 macOS 与 Xcode（`ci/build-ios-audio.sh` 会编 iOS 静态库），CI 在
+`macos-26` 上产出**未签名** IPA。你下载它，然后在 Windows 上签名——签名本身不需要
+Mac，`rcodesign`（`apple-codesign`，纯 Rust）就能跑。
+
+### App Group 不是必须的，但必须"不要声明"
+
+这是最容易踩的坑：**iOS 要求二进制的 entitlements 是 profile 的子集**。仓库自带的
+`Runner.entitlements` 声明了 `com.apple.security.application-groups`，而免费
+Apple ID 的 profile 不能携带 App Groups——多声明这个权限，**安装会直接失败**
+（entitlements 与 profile 不匹配）。
+
+所以正确做法不是"删掉 plist 里的字"，而是**从 profile 派生 entitlements**：
+
+```
+profile 给什么，就签什么
+```
+
+这样免费账号签名装得上去，代价只是小部件显示"小组件未启用"——这是上一轮加的诚实文案，
+不是假装没歌。
+
+### 用仓库脚本
+
+```powershell
+cargo install apple-codesign
+
+pwsh ci/resign-ios-ipa.ps1 `
+    -Ipa dist\Lazer-v2.0.210-iOS-aarch64.ipa `
+    -P12 dev-cert.p12 `
+    -P12Password (Read-Host -AsSecureString) `
+    -Profile dev.mobileprovision `
+    -Out dist\Lazer-signed.ipa
+```
+
+脚本做的事：
+
+1. 从 `.mobileprovision` 里切出 XML plist（profile 是 CMS 信封，正文是明文 XML，
+   不需要 macOS 的 `security cms -D`）；
+2. **读取 profile 的 `Entitlements` 字典**，原样作为签名依据——这是"不必须 app group"
+   能成立的关键；
+3. 报告 profile 是否携带 App Group，让你知道小部件会不会工作；
+4. 校验 `application-identifier` 存在（否则这个 profile 根本不能签 App）；
+5. 先签 `*.appex` / `*.framework` / `*.dylib`，最后签 `Runner.app`；
+6. `rcodesign print-signature-info` 回读，确认 `com.apple.developer.team-identifier`
+   真的进了签名；
+7. 复用仓库已有的 `python ci/verify-ios-bundle.py --ipa` 校验产物。
+
+`-AppGroup` 是可选参数，只有在你的 profile **确实携带**该 group 时才用；带上它会同时
+改写两个 bundle 的 `LazerAppGroupIdentifier`（这是个 plist 字面量，不用重编）。
+
+### 关于 bundle ID
+
+免费账号的 profile 是通配符 `TEAMID.*`，能同时覆盖
+`dev.naominet.lazer` 和 `dev.naominet.lazer.PlayCountWidget`。若你的 profile
+不是通配符，只能覆盖其中一个是**装不上**的——要用通配符 profile。
+
+### 工具说明
+
+iLoader、AltStore、SideStore 这类工具在 Windows 上做的也是同一件事：拿证书 + profile
+重新签名。它们**不会**因为你的账号支持与否而改变 iOS 的 entitlement 校验规则。所以：
+
+- 工具报"签名成功"但装不上 → 大概率是 entitlements 超出 profile 范围（就是 App Group）；
+- 工具用自己的默认 entitlements 而不是你 profile 的 → 同样会超范围。
+
+用 `ci/resign-ios-ipa.ps1` 的好处是它**从 profile 派生**，且签完会回读验证。
+
 ## 验证
 
 ```bash
