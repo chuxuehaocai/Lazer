@@ -1142,6 +1142,7 @@ end
       'frontend_library',
       'frontend_user',
       'data_permissions',
+      'native_host_v1',
       'websocket',
       'socket',
       'sleep',

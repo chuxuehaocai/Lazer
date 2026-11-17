@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.21)
+project(lazer_resource_policy_probe LANGUAGES CXX)
+enable_testing()
+add_executable(lazer-audio-resource-policy-probe
+    ../lazer_audio_resource_policy_probe.cpp ../../src/beat_grid.cpp ../../src/ring_buffer.cpp)
+target_compile_features(lazer-audio-resource-policy-probe PRIVATE cxx_std_20)
+target_include_directories(lazer-audio-resource-policy-probe PRIVATE ../../src ../../include
+    ${LAZER_FFMPEG_INCLUDE_DIRS})
+if(LAZER_FFMPEG_ROOT)
+    target_include_directories(lazer-audio-resource-policy-probe PRIVATE "${LAZER_FFMPEG_ROOT}/include")
+endif()
+if(MSVC)
+    target_compile_options(lazer-audio-resource-policy-probe PRIVATE /EHsc /utf-8)
+endif()
+add_test(NAME lazer-audio-resource-policy COMMAND lazer-audio-resource-policy-probe)
+set_tests_properties(lazer-audio-resource-policy PROPERTIES TIMEOUT 20)

@@ -11,7 +11,6 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../animation/apple_spring.dart';
-import '../animation/lyric_spring.dart';
 import '../diagnostics/app_log.dart';
 import '../lyrics/interlude.dart';
 import '../lyrics/line_content.dart';
@@ -20,6 +19,10 @@ import '../lyrics/spacing.dart';
 import '../lyrics/spring.dart';
 import '../theme/lazer_theme.dart';
 import 'overlay_protocol.dart';
+import 'overlay_motion.dart';
+import 'overlay_font_loader.dart';
+
+part 'overlay_presentation.dart';
 
 const double _horizontalPadding = 34;
 const double _verticalPadding = 18;
@@ -197,23 +200,23 @@ class LyricsOverlayApp extends StatefulWidget {
     required this.launch,
     required this.channel,
     required this.bridge,
+    this.fontLoader,
   });
 
   final WindowController controller;
   final LyricsOverlayLaunch launch;
   final WindowMethodChannel channel;
   final OverlayBridge bridge;
+  final OverlayFontLoader? fontLoader;
 
   @override
   State<LyricsOverlayApp> createState() => _LyricsOverlayAppState();
 }
 
 class _LyricsOverlayAppState extends State<LyricsOverlayApp>
-    with SingleTickerProviderStateMixin {
-  static final Set<String> _loadedFonts = <String>{};
-
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final Stopwatch _clock = Stopwatch()..start();
-  final Map<int, _LineMotion> _motions = <int, _LineMotion>{};
+  final OverlayMotionBuffer _motions = OverlayMotionBuffer();
   final Map<int, ui.ImageFilter> _blurFilters = <int, ui.ImageFilter>{};
   final ValueNotifier<int> _frames = ValueNotifier<int>(0);
 
@@ -225,9 +228,17 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   Duration _lastTick = Duration.zero;
   Size? _windowSize;
   bool _windowConfigured = false;
+  bool _resizeRunning = false;
+  Size? _pendingSize;
+  bool _visible = true;
+  bool _reducedMotion = false;
+  bool _lifecycleVisible = true;
+  double? _cachedWidth;
+  double? _cachedSlotHeight;
   bool _seekPending = false;
   bool _playing = false;
   bool _dragHovered = false;
+  bool _dragRunning = false;
   bool _interactionSyncScheduled = false;
   bool _interactionConfigured = false;
   List<Rect> _interactionRegions = const <Rect>[];
@@ -235,10 +246,13 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   double _anchorMs = 0;
   int _anchorMicros = 0;
   late TextStyle _lyricStyle;
+  late LazerThemeTokens _theme;
+  (String, String)? _requestedFont;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _mode = widget.launch.mode;
     _settings = widget.launch.settings;
     _windowSize = lyricsOverlayWindowSize(widget.launch);
@@ -253,26 +267,50 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   }
 
   void _refreshTextStyles() {
+    _theme = _settings.theme == null
+        ? LazerThemeTokens.apple
+        : LazerThemeTokens.fromJson(_settings.theme!);
     _lyricStyle = _textStyle(1);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _visible = TickerMode.valuesOf(context).enabled;
+    _reducedMotion = MediaQuery.disableAnimationsOf(context);
     _refreshTextStyles();
+    _invalidateLayout();
+    _retarget(instant: true);
+    _ensureTicker();
+    if (_payload != null) unawaited(_resizeOverlay());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleVisible = state == AppLifecycleState.resumed;
+    _ensureTicker();
   }
 
   @override
   void dispose() {
     widget.bridge.handler = null;
+    WidgetsBinding.instance.removeObserver(this);
+    _clock.stop();
+    _pendingSize = null;
     _ticker?.dispose();
     _frames.dispose();
     super.dispose();
   }
 
   double get _currentPositionMs {
-    if (!_playing) return _anchorMs;
-    return _anchorMs + (_clock.elapsedMicroseconds - _anchorMicros) / 1000;
+    final value = _playing
+        ? _anchorMs + (_clock.elapsedMicroseconds - _anchorMicros) / 1000
+        : _anchorMs;
+    final duration = _payload?.duration.inMilliseconds ?? 0;
+    return value.clamp(
+      0.0,
+      duration > 0 ? duration.toDouble() : double.infinity,
+    );
   }
 
   Future<dynamic> _handle(MethodCall call) async {
@@ -315,6 +353,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       _applyAnimationSpeed(_settings);
       _refreshTextStyles();
       _lines = payload.lines;
+      _invalidateLayout();
       _anchorMs = payload.position.inMilliseconds.toDouble();
       _anchorMicros = _clock.elapsedMicroseconds;
       _playing = payload.playing;
@@ -331,7 +370,17 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
   void _applySettings(LyricsOverlaySettings settings) {
     setState(() {
+      final previous = _settings;
       _settings = settings;
+      if (previous.fontFamily != settings.fontFamily ||
+          previous.fontPath != settings.fontPath ||
+          previous.fontSize != settings.fontSize ||
+          previous.fontWeight != settings.fontWeight ||
+          previous.showRomanization != settings.showRomanization ||
+          previous.lineSpacing != settings.lineSpacing ||
+          previous.theme?.toString() != settings.theme?.toString()) {
+        _invalidateLayout();
+      }
       _applyAnimationSpeed(settings);
       _refreshTextStyles();
     });
@@ -370,6 +419,9 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       if (mounted) setState(() {});
     }
     _seekPending = false;
+    if (_visible && _lifecycleVisible && (!_playing || _reducedMotion)) {
+      _frames.value++;
+    }
     _ensureTicker();
   }
 
@@ -396,7 +448,6 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       return;
     }
     final int count = _settings.lineCount.clamp(1, 5);
-    final int leading = count ~/ 2;
     final double slot = _slotHeight;
     final int focus = _focus.clamp(0, _lines.length - 1);
     final bool atEdge = focus == 0 || focus == _lines.length - 1;
@@ -422,75 +473,42 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             endOfSong: endOfSong,
           );
 
-    final List<int> indices = <int>[];
-    final List<double> positions = <double>[];
-    final List<double> heights = <double>[];
-    for (var offset = -leading - 1; offset <= count - leading; offset++) {
-      final int index = focus + offset;
-      if (index < 0 || index >= _lines.length) continue;
-      indices.add(index);
-      positions.add(_verticalPadding + (index - focus + leading) * slot);
-      heights.add(slot);
-    }
-    if (indices.isEmpty) {
-      _motions.clear();
-      return;
-    }
-    final int activeIndex = indices.indexOf(focus);
-    // The Now Playing sheet's rows above the focus are usually off-screen, so
-    // they do not consume a stagger delay. This overlay shows only a few rows
-    // around the focus; feed the helper off-screen positions for those rows so
-    // the active line still starts immediately and only lower rows cascade.
-    final List<double> staggerPositions = <double>[
-      for (var i = 0; i < indices.length; i++)
-        i < activeIndex ? -slot * 2 : (i - activeIndex) * slot,
-    ];
-    final List<double> delays = lyricStaggerDelays(
-      staggerPositions,
-      heights,
-      activeIndex,
-      disabled: _seekPending,
+    _motions.retarget(
+      focus: focus,
+      lineCount: count,
+      documentLength: _lines.length,
+      slot: slot,
+      padding: _verticalPadding,
+      inactiveScale: 100 - _theme.lyricFocusScaleDelta,
+      params: params,
+      seeking: _seekPending,
+      instant: instant || _reducedMotion || !_visible || !_lifecycleVisible,
     );
-    final Set<int> keep = indices.toSet();
-    for (var i = 0; i < indices.length; i++) {
-      final int index = indices[i];
-      final double target = positions[i];
-      final bool active = index == focus;
-      final double scale = active ? 100 : 97;
-      final double delay = delays[i];
-      final _LineMotion? existing = _motions[index];
-      if (existing == null) {
-        final motion = _LineMotion(
-          target + (i >= activeIndex ? slot : -slot),
-          active: active,
-        );
-        _motions[index] = motion;
-        if (instant) {
-          motion.y.setPosition(target);
-          motion.scale.setPosition(scale);
-        } else {
-          motion.y.setParameters(params);
-          motion.y.setTarget(target, delay: delay);
-          motion.scale.setTarget(scale);
-        }
-      } else {
-        existing.y.setParameters(params);
-        if (instant) {
-          existing.y.setPosition(target);
-          existing.scale.setPosition(scale);
-        } else {
-          existing.y.setTarget(target, delay: delay);
-          existing.scale.setTarget(scale);
-        }
-      }
+  }
+
+  bool get _continuousFrames {
+    if (!_playing || _lines.isEmpty) return false;
+    final line = _lines[_focus.clamp(0, _lines.length - 1)];
+    final position = _currentPositionMs;
+    if (line.text.trim().isEmpty) {
+      return position < (line.end ?? line.time).inMilliseconds;
     }
-    _motions.removeWhere(
-      (int index, _LineMotion motion) =>
-          !keep.contains(index) && motion.arrived,
+    return line.words.any(
+      (word) => position < (word.start + word.duration).inMilliseconds,
     );
   }
 
   void _ensureTicker() {
+    final needed =
+        _visible &&
+        _lifecycleVisible &&
+        !_reducedMotion &&
+        (_continuousFrames || _motions.values.any((motion) => !motion.arrived));
+    if (!needed) {
+      _ticker?.stop();
+      _lastTick = Duration.zero;
+      return;
+    }
     _ticker ??= createTicker(_onTick);
     if (!_ticker!.isActive) {
       _lastTick = Duration.zero;
@@ -503,39 +521,22 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         ? 0
         : (elapsed - _lastTick).inMicroseconds / 1000000;
     _lastTick = elapsed;
-    var moving = false;
-    for (final _LineMotion motion in _motions.values) {
+    for (final motion in _motions.values) {
       motion.y.update(seconds);
       motion.scale.update(seconds);
-      moving = moving || !motion.arrived;
     }
     if (_playing) {
-      final int focus = _focusFor(_currentPositionMs);
+      final focus = _focusFor(_currentPositionMs);
       if (focus != _focus) {
         _focus = focus;
         _retarget(instant: false);
         setState(() {});
-        moving = true;
-      }
-      // The breathing dots are painted from the playback clock, not from a
-      // spring. Keep one frame per vsync while an interlude is active so they
-      // breathe even after every lyric spring has settled.
-      if (_lines.isNotEmpty) {
-        final LyricLine line = _lines[_focus.clamp(0, _lines.length - 1)];
-        final int end = (line.end ?? line.time).inMilliseconds;
-        if (line.text.trim().isEmpty && _currentPositionMs < end) {
-          moving = true;
-        }
       }
     }
-    if (moving ||
-        (_playing && _lines.isNotEmpty && _lines[_focus].words.isNotEmpty)) {
-      _frames.value++;
-    }
-    if (!_playing && !moving) {
-      _ticker?.stop();
-      _lastTick = Duration.zero;
-    }
+    // Paint the final settled frame too; otherwise a stopped ticker can leave
+    // the text a fraction of a pixel away from its final position.
+    _frames.value++;
+    _ensureTicker();
   }
 
   Future<void> _announceReady() async {
@@ -551,41 +552,62 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     }
   }
 
+  void _invalidateLayout() {
+    _cachedWidth = null;
+    _cachedSlotHeight = null;
+  }
+
   Future<void> _resizeOverlay() async {
-    if (!_windowConfigured) return;
-    final double width = _desiredOverlayWidth();
-    final double slot = _slotHeight;
-    final Size size = Size(
-      width,
-      slot * _settings.lineCount + _verticalPadding * 2,
+    if (!_windowConfigured || !mounted) return;
+    _pendingSize = Size(
+      _desiredOverlayWidth(),
+      _slotHeight * _settings.lineCount + _verticalPadding * 2,
     );
-    final Size? previous = _windowSize;
-    if (previous == size) return;
-    _windowSize = size;
+    if (_resizeRunning) return;
+    _resizeRunning = true;
     try {
-      if (_mode == LyricsOverlayMode.floating) {
-        final Offset position = await windowManager.getPosition();
-        await windowManager.setSize(size);
-        if (previous != null) {
-          await windowManager.setPosition(
-            position +
-                Offset(
-                  (previous.width - size.width) / 2,
-                  -(size.height - previous.height),
-                ),
-          );
+      while (mounted && _pendingSize != null) {
+        final size = _pendingSize!;
+        _pendingSize = null;
+        final previous = _windowSize;
+        if (size == previous) continue;
+        try {
+          if (_mode == LyricsOverlayMode.floating) {
+            final position = await windowManager.getPosition();
+            if (!mounted) return;
+            await windowManager.setSize(size);
+            if (!mounted) return;
+            // The resize succeeded even if a subsequent positioning request
+            // fails. Record reality so the next request anchors correctly.
+            _windowSize = size;
+            if (previous != null) {
+              await windowManager.setPosition(
+                position +
+                    Offset(
+                      (previous.width - size.width) / 2,
+                      -(size.height - previous.height),
+                    ),
+              );
+            }
+          } else {
+            await windowManager.setSize(size);
+            if (!mounted) return;
+            _windowSize = size;
+            await _attachToDesktop();
+          }
+        } catch (error) {
+          AppLog.shared.record('desktop lyrics resize: $error');
         }
-      } else {
-        await windowManager.setSize(size);
-        await _attachToDesktop();
       }
-    } catch (error) {
-      AppLog.shared.record('desktop lyrics resize: $error');
+    } finally {
+      _resizeRunning = false;
     }
   }
 
-  double get _slotHeight {
-    final theme = LazerThemeTokens.of(context);
+  double get _slotHeight => _cachedSlotHeight ??= _measureSlotHeight();
+
+  double _measureSlotHeight() {
+    final theme = _theme;
     final secondaryLines = _lines.fold<int>(
       0,
       (maximum, line) => math.max(
@@ -594,10 +616,14 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             (_settings.showRomanization && line.romanization != null ? 1 : 0),
       ),
     );
+    final textScaler = MediaQuery.textScalerOf(context);
     final originalHeight =
-        _settings.fontSize * theme.lyricFontScale * theme.lyricLineHeight;
+        textScaler.scale(_settings.fontSize * theme.lyricFontScale) *
+        theme.lyricLineHeight;
     final secondaryHeight =
-        (_settings.fontSize * theme.lyricTranslationScale).clamp(12, 30) *
+        textScaler.scale(
+              (_settings.fontSize * theme.lyricTranslationScale).clamp(12, 30),
+            ) *
             theme.lyricTranslationLineHeight +
         theme.lyricTranslationGap;
     return math.max(
@@ -609,7 +635,9 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     );
   }
 
-  double _desiredOverlayWidth() {
+  double _desiredOverlayWidth() => _cachedWidth ??= _measureOverlayWidth();
+
+  double _measureOverlayWidth() {
     double widest = 0;
     final TextPainter painter = TextPainter(
       textDirection: TextDirection.ltr,
@@ -638,16 +666,31 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
   Future<void> _loadFont(LyricsOverlaySettings settings) async {
     final String? path = settings.fontPath;
-    if (path == null || _loadedFonts.contains(settings.fontFamily)) return;
-    _loadedFonts.add(settings.fontFamily);
+    if (path == null) {
+      _requestedFont = null;
+      return;
+    }
+    final key = (settings.fontFamily, path);
+    if (_requestedFont == key) return;
+    _requestedFont = key;
     try {
-      final Uint8List bytes = await File(path).readAsBytes();
-      final FontLoader loader = FontLoader(settings.fontFamily)
-        ..addFont(Future<ByteData>.value(ByteData.sublistView(bytes)));
-      await loader.load();
-      if (mounted) _frames.value++;
+      await (widget.fontLoader ?? OverlayFontLoader.shared).load(
+        settings.fontFamily,
+        path,
+      );
+      if (mounted &&
+          _settings.fontFamily == settings.fontFamily &&
+          _settings.fontPath == path) {
+        setState(() {
+          _refreshTextStyles();
+          _invalidateLayout();
+        });
+        _retarget(instant: true);
+        unawaited(_resizeOverlay());
+        _frames.value++;
+      }
     } catch (error) {
-      _loadedFonts.remove(settings.fontFamily);
+      if (_requestedFont == key) _requestedFont = null;
       AppLog.shared.record('desktop lyrics font: $error');
     }
   }
@@ -656,163 +699,24 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     final int key = (sigma.clamp(0.0, 6.0) * 8).round();
     return _blurFilters.putIfAbsent(
       key,
-      () => ui.ImageFilter.blur(sigmaX: key / 8, sigmaY: key / 8),
-    );
-  }
-
-  TextStyle _textStyle(double scale) {
-    final theme = LazerThemeTokens.of(context);
-    return lyricTextStyle(
-      TextStyle(
-        fontFamily: _settings.fontFamily,
-        fontFamilyFallback: const <String>[
-          'MiSans',
-          'Microsoft YaHei',
-          'PingFang SC',
-          'Noto Sans CJK SC',
-        ],
-        fontSize: _settings.fontSize * scale * theme.lyricFontScale,
-        fontWeight: theme.lyricFontWeight(_settings.fontWeight),
-        height: theme.lyricLineHeight,
-        color: Colors.white,
-        letterSpacing: 0,
-        decoration: TextDecoration.none,
-        shadows: const <Shadow>[
-          Shadow(
-            color: Color(0x38000000),
-            blurRadius: 10,
-            offset: Offset(0, 2),
-          ),
-          Shadow(color: Color(0x20000000), blurRadius: 3),
-        ],
+      () => ui.ImageFilter.blur(
+        sigmaX: key / 8,
+        sigmaY: key / 8,
+        tileMode: ui.TileMode.decal,
       ),
-      _settings.fontSize * scale,
-      _settings.fontWeight,
-      theme: theme,
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    final bool desktop = _mode == LyricsOverlayMode.desktop;
-    final double slot = _slotHeight;
-    final int count = _settings.lineCount.clamp(1, 5);
-    final Size window = MediaQuery.sizeOf(context);
-    final double inset = _horizontalPadding;
-    final bool hasText = _lines.any(
-      (LyricLine line) => line.text.trim().isNotEmpty,
-    );
-    final List<Rect> regions = lyricsOverlayInteractiveRegions(
-      window,
-      desktop: desktop,
-      locked: _settings.locked,
-      lyricBounds: desktop ? const <Rect>[] : _lyricHitBounds(window),
-    );
-    _syncInteractionRegions(regions);
-    final Widget block = Stack(
-      clipBehavior: Clip.hardEdge,
-      children: <Widget>[
-        if (!hasText) _notice(desktop),
-        if (hasText)
-          for (
-            var offset = -(count ~/ 2);
-            offset < count - count ~/ 2;
-            offset++
-          )
-            if (_focus + offset >= 0 && _focus + offset < _lines.length)
-              _row(_focus + offset, slot, inset),
-      ],
-    );
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        fit: StackFit.expand,
-        children: <Widget>[
-          IgnorePointer(child: block),
-          for (final Rect rect in regions.skip(1))
-            Positioned.fromRect(
-              rect: rect,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.move,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) => unawaited(_startDrag()),
-                ),
-              ),
-            ),
-          if (regions.isNotEmpty) _desktopDragHandle(window.height),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Theme(
+    data: Theme.of(
+      context,
+    ).copyWith(extensions: <ThemeExtension<dynamic>>[_theme]),
+    child: _buildOverlay(context),
+  );
 
-  List<Rect> _lyricHitBounds(Size size) {
-    if (_lines.isEmpty) {
-      return <Rect>[
-        Rect.fromCenter(
-          center: size.center(Offset.zero),
-          width: math.max(0, size.width - _horizontalPadding * 2),
-          height: math.min(size.height - _verticalPadding * 2, _slotHeight),
-        ),
-      ];
-    }
-    final theme = LazerThemeTokens.of(context);
-    final int count = _settings.lineCount.clamp(1, 5);
-    final double slot = _slotHeight;
-    final painter = TextPainter(
-      textDirection: TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-      maxLines: 1,
-      ellipsis: '…',
-    );
-    final bounds = <Rect>[];
-    try {
-      for (int offset = -(count ~/ 2); offset < count - count ~/ 2; offset++) {
-        final int index = _focus + offset;
-        if (index < 0 || index >= _lines.length) continue;
-        final line = _lines[index];
-        if (line.text.trim().isEmpty) continue;
-        double width = 0;
-        double height = 0;
-        final texts = <String>[
-          line.text,
-          if (_settings.showRomanization && line.romanization != null)
-            line.romanization!,
-          if (line.translation != null) line.translation!,
-        ];
-        for (int i = 0; i < texts.length; i++) {
-          painter.text = TextSpan(
-            text: texts[i],
-            style: i == 0
-                ? _lyricStyle
-                : _lyricStyle.copyWith(
-                    fontSize: (_settings.fontSize * theme.lyricTranslationScale)
-                        .clamp(12, 30),
-                    height: theme.lyricTranslationLineHeight,
-                  ),
-          );
-          painter.layout(
-            maxWidth: math.max(0, size.width - _horizontalPadding * 2),
-          );
-          width = math.max(width, painter.width);
-          height += painter.height + (i == 0 ? 0 : theme.lyricTranslationGap);
-        }
-        bounds.add(
-          Rect.fromLTWH(
-            _horizontalPadding - 6,
-            _verticalPadding +
-                (offset + count ~/ 2) * slot +
-                (slot - height) / 2 -
-                6,
-            width + 12,
-            height + 12,
-          ),
-        );
-      }
-    } finally {
-      painter.dispose();
-    }
-    return bounds;
+  void _setDragHovered(bool value) {
+    if (_dragHovered != value) setState(() => _dragHovered = value);
   }
 
   void _syncInteractionRegions(List<Rect> regions) {
@@ -846,203 +750,12 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     });
   }
 
-  Widget _row(int index, double slot, double inset) {
-    final _LineMotion? motion = _motions[index];
-    if (motion == null) return const SizedBox.shrink();
-    final bool active = index == _focus;
-    if (_lines[index].text.trim().isEmpty) {
-      return _interludeRow(index, motion, slot, inset, active);
-    }
-    final theme = LazerThemeTokens.of(context);
-    double emphasis() =>
-        ((motion.scale.value - (100 - theme.lyricFocusScaleDelta)) /
-                theme.lyricFocusScaleDelta)
-            .clamp(0.0, 1.0);
-    final line = _lines[index];
-    final Widget text = Semantics(
-      container: true,
-      excludeSemantics: true,
-      label: lyricSemanticLabel(
-        line,
-        showRomanization: _settings.showRomanization,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          LyricLineContent(
-            line: line,
-            style: _lyricStyle,
-            active: active,
-            position: () =>
-                Duration(microseconds: (_currentPositionMs * 1000).round()),
-            repaint: _frames,
-            emphasis: emphasis,
-            maxLines: 1,
-          ),
-          for (final secondary in <String?>[
-            if (_settings.showRomanization) line.romanization,
-            line.translation,
-          ].whereType<String>()) ...[
-            SizedBox(height: theme.lyricTranslationGap),
-            Text(
-              secondary,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: _lyricStyle.copyWith(
-                fontSize: (_settings.fontSize * theme.lyricTranslationScale)
-                    .clamp(12, 30),
-                height: theme.lyricTranslationLineHeight,
-                fontWeight: theme.lyricTranslationFontWeight(
-                  _settings.fontWeight,
-                ),
-                color: Colors.white.withValues(
-                  alpha: theme.lyricTranslationAlpha,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-    final double activeY = _verticalPadding + (_settings.lineCount ~/ 2) * slot;
-    return Positioned(
-      key: ValueKey<int>(index),
-      top: 0,
-      left: inset,
-      right: inset,
-      height: slot,
-      child: RepaintBoundary(
-        child: AnimatedBuilder(
-          animation: _frames,
-          child: text,
-          builder: (BuildContext context, Widget? child) {
-            final double emphasis =
-                ((motion.scale.value - (100 - theme.lyricFocusScaleDelta)) /
-                        theme.lyricFocusScaleDelta)
-                    .clamp(0.0, 1.0);
-            final double opacity =
-                theme.lyricDimAlpha + (1 - theme.lyricDimAlpha) * emphasis;
-            // The overlay only ever shows a handful of rows, so a blur that
-            // starts at the neighbouring line leaves every line above and
-            // below the current one unreadable. Keeping the first row of
-            // slack sharp — and capping the far end — keeps the depth cue
-            // without turning the panel into a smudge.
-            final double distance =
-                (((motion.y.value - activeY).abs() / slot) - 0.8).clamp(
-                  0.0,
-                  4.0,
-                );
-            final double sigma = _settings.blurEnabled
-                ? (distance * 1.25 * _settings.blurIntensity).clamp(0.0, 3.5)
-                : 0.0;
-            return Transform.translate(
-              offset: Offset(0, motion.y.value),
-              child: ImageFiltered(
-                enabled: sigma > .03,
-                imageFilter: _blur(sigma),
-                child: Opacity(
-                  opacity: opacity,
-                  child: RepaintBoundary(child: child!),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _interludeRow(
-    int index,
-    _LineMotion motion,
-    double slot,
-    double inset,
-    bool active,
-  ) {
-    return Positioned(
-      key: ValueKey<int>(index),
-      top: 0,
-      left: inset,
-      right: inset,
-      height: slot,
-      child: RepaintBoundary(
-        child: AnimatedBuilder(
-          animation: _frames,
-          child: LyricInterludeDots(
-            line: _lines[index],
-            position: () => Duration(milliseconds: _currentPositionMs.round()),
-            repaint: _frames,
-            diameter:
-                _settings.fontSize *
-                LazerThemeTokens.of(context).lyricFontScale *
-                .3,
-            presence: () =>
-                ((motion.scale.value -
-                            (100 -
-                                LazerThemeTokens.of(
-                                  context,
-                                ).lyricFocusScaleDelta)) /
-                        LazerThemeTokens.of(context).lyricFocusScaleDelta)
-                    .clamp(0.0, 1.0),
-          ),
-          builder: (BuildContext context, Widget? child) {
-            return Transform.translate(
-              offset: Offset(0, motion.y.value),
-              child: child,
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _desktopDragHandle(double height) {
-    return Positioned(
-      left: 0,
-      top: (height - _dragHandleHeight) / 2,
-      width: _dragHandleWidth,
-      height: _dragHandleHeight,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.move,
-        onEnter: (PointerEnterEvent event) {
-          if (!_dragHovered) setState(() => _dragHovered = true);
-        },
-        onExit: (PointerExitEvent event) {
-          if (_dragHovered) setState(() => _dragHovered = false);
-        },
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onPanStart: (DragStartDetails details) {
-            unawaited(_startDrag());
-          },
-          child: AnimatedOpacity(
-            opacity: _dragHovered ? 1 : .45,
-            duration: MotionTiming.scale(const Duration(milliseconds: 140)),
-            child: Center(
-              child: Container(
-                width: 20,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(
-                    alpha: _dragHovered ? .18 : .06,
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.drag_indicator_rounded,
-                  size: 18,
-                  color: Colors.white70,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _startDrag() async {
+    if (_dragRunning ||
+        (_mode == LyricsOverlayMode.floating && _settings.locked)) {
+      return;
+    }
+    _dragRunning = true;
     try {
       if (_mode == LyricsOverlayMode.desktop && Platform.isWindows) {
         final bool moved =
@@ -1055,68 +768,8 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       await windowManager.startDragging();
     } catch (error) {
       AppLog.shared.record('desktop lyrics drag: $error');
+    } finally {
+      _dragRunning = false;
     }
   }
-
-  Widget _notice(bool desktop) {
-    final payload = _payload;
-    final String title = payload?.title ?? '';
-    final String artist = payload?.artist ?? '';
-    final String notice = payload?.notice ?? '';
-    return Positioned.fill(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(
-                title.isEmpty ? 'Lazer' : title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: _textStyle(.82).copyWith(fontWeight: FontWeight.w600),
-              ),
-              if (artist.isNotEmpty)
-                Text(
-                  artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: _textStyle(
-                    .62,
-                  ).copyWith(color: Colors.white.withValues(alpha: .72)),
-                ),
-              if (notice.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 6),
-                Text(
-                  notice,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: _textStyle(
-                    .58,
-                  ).copyWith(color: Colors.white.withValues(alpha: .58)),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LineMotion {
-  _LineMotion(double position, {required bool active})
-    : y = LyricSpring(position),
-      scale = LyricSpring(
-        active ? 100 : 97,
-        params: const LyricSpringParams(mass: 2, damping: 25, stiffness: 100),
-      );
-
-  final LyricSpring y;
-  final LyricSpring scale;
-
-  bool get arrived => y.arrived && scale.arrived;
 }

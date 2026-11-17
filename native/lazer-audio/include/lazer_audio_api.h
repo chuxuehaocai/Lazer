@@ -74,6 +74,8 @@ typedef enum LazerAudioError {
 typedef enum LazerAudioQueueClearResult {
     LazerAudioQueueCleared = LazerAudioOk,
     LazerAudioQueueAlreadyActive = 1,
+    /* Guarded clear retained a successor already playing in an overlap. */
+    LazerAudioQueueAlreadyAudible = 2,
 } LazerAudioQueueClearResult;
 
 typedef enum LazerAudioLogLevel {
@@ -628,6 +630,12 @@ LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_queue_reader(
  * installed successor. In-flight preparation is invalidated too; its cancel callback wakes a
  * blocked probe or decoder read. The caller must retain the reader context until queue_reader returns. */
 LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_clear_queued_reader(
+    LazerAudioEngine engine, uint64_t queue_generation);
+
+/* Optional additive extension: clear only an unheard successor. An overlapping successor remains
+ * installed and returns QueueAlreadyAudible; an active successor returns QueueAlreadyActive.
+ * No installed queued reader returns State. The existing ABI/table layouts are unchanged. */
+LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_clear_unheard_queued_reader(
     LazerAudioEngine engine, uint64_t queue_generation);
 
 /* Optional additive ABI extension. Polls an owned copy of one warning/error.

@@ -74,6 +74,7 @@ const int lazerAudioErrorIndexOutOfRange = -10;
 /// boundary and is the active source now.
 const int lazerAudioQueueCleared = lazerAudioOk;
 const int lazerAudioQueueAlreadyActive = 1;
+const int lazerAudioQueueAlreadyAudible = 2;
 
 /// `LazerAudioState`.
 const int lazerAudioStateIdle = 0;

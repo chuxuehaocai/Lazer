@@ -9,6 +9,10 @@ const String kLyricsOverlayReadyChannel = 'lazer.lyrics.overlay.ready';
 const String kLyricsOverlayChannelPrefix = 'lazer.lyrics.overlay.';
 const String kDesktopLyricsChannel = 'lazer/desktop_lyrics';
 
+// Flutter cannot unload individual registered fonts. The owner recycles the
+// overlay engine before a fifth distinct custom font can be registered.
+const int kOverlayCustomFontLimit = 4;
+
 enum LyricsOverlayMode { floating, desktop }
 
 class LyricsOverlayLaunch {

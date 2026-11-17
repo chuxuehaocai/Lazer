@@ -745,6 +745,8 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                         'library' => context.tr('歌单与音乐库'),
                         'profile' => context.tr('平台与账号资料'),
                         'history' => context.tr('播放记录与统计'),
+                        'native_audio' => context.tr('原生音频诊断与设备摘要'),
+                        'native_control' => context.tr('桌面与悬浮歌词控制'),
                         _ => scope,
                       }),
                       value: widget.plugin.dataAccess.granted.contains(scope),

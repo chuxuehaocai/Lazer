@@ -1,4 +1,5 @@
 import '../utils/media_requests.dart';
+import 'audio_operation_queue.dart';
 import 'dart:async';
 
 import 'package:audio_session/audio_session.dart';
@@ -110,6 +111,14 @@ abstract interface class QueueAudioEngine {
   /// knows the append did not happen and must not expect the hand-off.
   Future<bool> appendToQueue(int queueId, String url);
 
+  /// Discards successors of [queueId] without changing the audible source.
+  ///
+  /// Returns false if the queue was replaced or a successor is already audible
+  /// (for example during an overlap). Its existing index binding must then be
+  /// retained until the hand-off completes. Pending appends must settle before
+  /// this completes, so an old preparation cannot replace the next append.
+  Future<bool> clearQueued(int queueId);
+
   /// Moves to the next item of the loaded queue without reloading it.
   ///
   /// Returns `false` when the platform queue no longer has a next item. The
@@ -150,7 +159,7 @@ abstract interface class SerialQueueAudioEngine implements QueueAudioEngine {}
 /// Mixes a prepared successor into the current source before it finishes.
 /// This changes the decoding/mixing policy without changing the output engine.
 abstract interface class AutoMixConfigurableAudioEngine {
-  Future<void> setAutoMixEnabled(bool enabled);
+  Future<void> setAutoMixEnabled(bool enabled, {Duration? duration});
 }
 
 /// Why a source failed after it was loaded.
@@ -382,6 +391,7 @@ class JustAudioEngine
   /// was.
   StreamSubscription<int?>? _indexSubscription;
   bool _hadSource = false;
+  bool _disposed = false;
   bool _completionSent = false;
   int _generation = 0;
   int _playGeneration = 0;
@@ -391,6 +401,8 @@ class JustAudioEngine
   List<String> _queueUrls = <String>[];
   String? _currentUrl;
   int _queueId = 0;
+  int _queueBaseIndex = 0;
+  bool _queuePruning = false;
 
   /// Index the engine itself asked the platform for, so a platform-side index
   /// change can be told apart from our own seeks and loads.
@@ -398,7 +410,8 @@ class JustAudioEngine
 
   /// Source mutations are serialized: a prefetch append racing a track change
   /// must never append to a queue that was already replaced.
-  Future<void> _operations = Future<void>.value();
+  final AudioOperationQueue _operationQueue = AudioOperationQueue();
+  Future<void> get _operations => _operationQueue.idle;
 
   /// Last position the platform reported and when it changed.
   ///
@@ -427,17 +440,29 @@ class JustAudioEngine
     _completed.add(null);
   }
 
-  Future<T> _serialize<T>(Future<T> Function() operation) {
-    final Future<T> result = _operations.then((_) => operation());
-    _operations = result.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-    return result;
-  }
+  Future<T> _serialize<T>(
+    Future<T> Function() operation, {
+    Object? key,
+    T Function()? onSuperseded,
+    bool essential = false,
+  }) => _operationQueue.run(
+    operation,
+    key: key,
+    onSuperseded: onSuperseded ?? () => (T == bool ? false : null) as T,
+    essential: essential,
+  );
 
   void _onPlatformIndex(int? index) {
-    if (index == null) return;
+    if (index == null ||
+        index < 0 ||
+        !_hadSource ||
+        _disposed ||
+        _queuePruning) {
+      return;
+    }
+    // Queue edits can deliver an old index after their future has settled.
+    // Only the platform's current index may advance the logical queue.
+    if (index != _player.currentIndex) return;
     if (index >= 0 && index < _queueUrls.length) {
       _currentUrl = _queueUrls[index];
     }
@@ -445,7 +470,7 @@ class JustAudioEngine
     if (index == _commandedIndex) return;
     // The platform moved on without being asked: the gapless hand-off.
     _commandedIndex = index;
-    _advanced.add(index);
+    _advanced.add(index + _queueBaseIndex);
   }
 
   @override
@@ -521,10 +546,12 @@ class JustAudioEngine
 
   @override
   Future<void> setUrl(String url) {
+    if (_disposed) return Future.value();
     final generation = ++_generation;
     _hadSource = false;
     _completionSent = false;
     _queue = null;
+    _queueBaseIndex = 0;
     _queueUrls = <String>[url];
     _currentUrl = url;
     _commandedIndex = null;
@@ -532,87 +559,105 @@ class JustAudioEngine
     // otherwise a `setQueue` that failed while another track was already
     // loading let two platform loads run at once, which media_kit turns into
     // a native crash.
-    return _serialize(() async {
-      // A newer load or a stop superseded this one before its turn; opening it
-      // now would tear down whatever the newer call is opening.
-      if (generation != _generation) return;
-      final uri = Uri.parse(url);
-      try {
-        if (uri.scheme == 'file') {
-          await _player.setFilePath(uri.toFilePath()).timeout(_openTimeout);
-        } else {
-          await _player
-              .setUrl(url, headers: MediaRequestRules.headers(url))
-              .timeout(_openTimeout);
+    return _serialize(
+      () async {
+        // A newer load or a stop superseded this one before its turn; opening it
+        // now would tear down whatever the newer call is opening.
+        if (generation != _generation) return;
+        final uri = Uri.parse(url);
+        try {
+          if (uri.scheme == 'file') {
+            await _player.setFilePath(uri.toFilePath()).timeout(_openTimeout);
+          } else {
+            await _player
+                .setUrl(url, headers: MediaRequestRules.headers(url))
+                .timeout(_openTimeout);
+          }
+        } on TimeoutException {
+          _streamFailure = true;
+          rethrow;
         }
-      } on TimeoutException {
-        _streamFailure = true;
-        rethrow;
-      }
-      if (generation != _generation) return;
-      _streamFailure = false;
-      _restarting = false;
-      _progressAt = DateTime.now();
-      _lastProgressPosition = _player.position;
-      _commandedIndex = 0;
-      _hadSource = true;
-      if (_player.processingState == ProcessingState.completed) {
-        _emitCompletion();
-      }
-    });
+        if (generation != _generation) return;
+        _streamFailure = false;
+        _restarting = false;
+        _progressAt = DateTime.now();
+        _lastProgressPosition = _player.position;
+        _commandedIndex = 0;
+        _hadSource = true;
+        if (_player.processingState == ProcessingState.completed) {
+          _emitCompletion();
+        }
+      },
+      key: 'source',
+      onSuperseded: () {},
+      essential: true,
+    );
   }
 
   @override
   Future<int> setQueue(List<String> urls, {int startIndex = 0}) async {
+    if (_disposed) return _queueId;
+    final List<String> sources = List<String>.of(urls);
+    final int index = sources.isEmpty
+        ? 0
+        : startIndex.clamp(0, sources.length - 1);
     final generation = ++_generation;
     _hadSource = false;
     _completionSent = false;
     _commandedIndex = null;
     final int queueId = ++_queueId;
     _queue = null;
-    _queueUrls = List<String>.of(urls);
-    _currentUrl = urls.isEmpty
-        ? null
-        : urls[startIndex.clamp(0, urls.length - 1).toInt()];
-    return _serialize(() async {
-      // Rapid next/previous presses queue several of these; only the newest
-      // should reach the platform. The older ones return their queue id so the
-      // caller's generation check rejects them without another native load.
-      if (generation != _generation) return queueId;
-      _indexSubscription ??= _player.currentIndexStream.listen(
-        _onPlatformIndex,
-      );
-      final ConcatenatingAudioSource source = ConcatenatingAudioSource(
-        useLazyPreparation: false,
-        children: <AudioSource>[
-          for (final String url in urls)
-            AudioSource.uri(
-              Uri.parse(url),
-              headers: MediaRequestRules.headers(url),
-            ),
-        ],
-      );
-      try {
-        await _player
-            .setAudioSource(source, initialIndex: startIndex)
-            .timeout(_openTimeout);
-      } on TimeoutException {
-        _streamFailure = true;
-        rethrow;
-      }
-      if (generation != _generation) return queueId;
-      _queue = source;
-      _streamFailure = false;
-      _restarting = false;
-      _progressAt = DateTime.now();
-      _lastProgressPosition = _player.position;
-      _commandedIndex = startIndex;
-      _hadSource = true;
-      if (_player.processingState == ProcessingState.completed) {
-        _emitCompletion();
-      }
-      return queueId;
-    });
+    _queueBaseIndex = 0;
+    _queueUrls = sources;
+    _currentUrl = sources.isEmpty ? null : sources[index];
+    return _serialize(
+      () async {
+        // Rapid next/previous presses queue several of these; only the newest
+        // should reach the platform. The older ones return their queue id so the
+        // caller's generation check rejects them without another native load.
+        if (generation != _generation) return queueId;
+        if (sources.isEmpty) {
+          await _player.stop();
+          return queueId;
+        }
+        _indexSubscription ??= _player.currentIndexStream.listen(
+          _onPlatformIndex,
+        );
+        final ConcatenatingAudioSource source = ConcatenatingAudioSource(
+          useLazyPreparation: true,
+          children: <AudioSource>[
+            for (final String url in sources)
+              AudioSource.uri(
+                Uri.parse(url),
+                headers: MediaRequestRules.headers(url),
+              ),
+          ],
+        );
+        try {
+          await _player
+              .setAudioSource(source, initialIndex: index)
+              .timeout(_openTimeout);
+        } on TimeoutException {
+          _streamFailure = true;
+          rethrow;
+        }
+        if (generation != _generation) return queueId;
+        _queue = source;
+        _streamFailure = false;
+        _restarting = false;
+        _progressAt = DateTime.now();
+        _lastProgressPosition = _player.position;
+        _commandedIndex = index;
+        _hadSource = true;
+        if (_player.processingState == ProcessingState.completed) {
+          _emitCompletion();
+        }
+        return queueId;
+      },
+      key: 'source',
+      onSuperseded: () => queueId,
+      essential: true,
+    );
   }
 
   @override
@@ -620,13 +665,23 @@ class JustAudioEngine
     return _serialize(() async {
       final ConcatenatingAudioSource? queue = _queue;
       if (queue == null || queueId != _queueId) return false;
+      final int generation = _generation;
+      await _pruneConsumed(queue, generation);
+      if (_disposed || generation != _generation || queueId != _queueId) {
+        return false;
+      }
       await queue.add(
         AudioSource.uri(
           Uri.parse(url),
           headers: MediaRequestRules.headers(url),
         ),
       );
-      if (queueId != _queueId) return false;
+      if (_disposed ||
+          generation != _generation ||
+          queueId != _queueId ||
+          !identical(queue, _queue)) {
+        return false;
+      }
       _queueUrls.add(url);
       final int? currentIndex = _player.currentIndex;
       if (currentIndex != null && currentIndex < _queueUrls.length) {
@@ -636,15 +691,77 @@ class JustAudioEngine
     });
   }
 
+  /// The app owns playback history. Keeping consumed platform sources would
+  /// retain every decoder/source wrapper for the lifetime of a long session.
+  /// Rebase local indexes while preserving the logical indexes we publish.
+  Future<void> _pruneConsumed(
+    ConcatenatingAudioSource queue,
+    int generation,
+  ) async {
+    final int? index = _player.currentIndex;
+    if (index == null || index <= 0 || index >= _queueUrls.length) return;
+    final int commanded = _commandedIndex ?? index;
+    _queuePruning = true;
+    try {
+      await queue.removeRange(0, index);
+      if (_disposed || generation != _generation || !identical(queue, _queue)) {
+        return;
+      }
+      _queueUrls.removeRange(0, index);
+      _queueBaseIndex += index;
+      _commandedIndex = (commanded - index).clamp(0, _queueUrls.length - 1);
+    } finally {
+      _queuePruning = false;
+    }
+    if (generation == _generation && identical(queue, _queue)) {
+      // A natural hand-off may have happened while the platform applied the
+      // removal. Its final current index is authoritative, even if its event
+      // arrived while pruning was in progress.
+      _onPlatformIndex(_player.currentIndex);
+    }
+  }
+
   @override
-  Future<bool> playQueuedNext() {
+  Future<bool> clearQueued(int queueId) {
+    final int generation = _generation;
     return _serialize(() async {
       final ConcatenatingAudioSource? queue = _queue;
       final int? index = _player.currentIndex;
-      if (queue == null || index == null) return false;
+      if (generation != _generation ||
+          queueId != _queueId ||
+          queue == null ||
+          index == null) {
+        return false;
+      }
+      if (queue.children.length > index + 1) {
+        await queue.removeRange(index + 1, queue.children.length);
+      }
+      if (generation != _generation || queueId != _queueId) return false;
+      if (_queueUrls.length > index + 1) {
+        _queueUrls.removeRange(index + 1, _queueUrls.length);
+      }
+      return true;
+    });
+  }
+
+  @override
+  Future<bool> playQueuedNext() {
+    final int generation = _generation;
+    return _serialize(() async {
+      final ConcatenatingAudioSource? queue = _queue;
+      final int? index = _player.currentIndex;
+      if (_disposed ||
+          generation != _generation ||
+          queue == null ||
+          index == null) {
+        return false;
+      }
       if (index + 1 >= queue.children.length) return false;
       _commandedIndex = index + 1;
       await _player.seek(Duration.zero, index: index + 1);
+      if (_disposed || generation != _generation || !identical(queue, _queue)) {
+        return false;
+      }
       if (index + 1 < _queueUrls.length) {
         _currentUrl = _queueUrls[index + 1];
       }
@@ -654,6 +771,7 @@ class JustAudioEngine
 
   @override
   Future<void> play() async {
+    if (_disposed || !_hadSource) return;
     final generation = _generation;
     final playGeneration = ++_playGeneration;
     if (activateSession != null && !await activateSession!()) {
@@ -670,27 +788,41 @@ class JustAudioEngine
 
   @override
   Future<void> pause() {
+    if (_disposed) return Future.value();
     ++_playGeneration;
     return _player.pause();
   }
 
   @override
   Future<void> seek(Duration position) {
-    _commandedIndex = _player.currentIndex;
-    return _player.seek(position);
+    final int generation = _generation;
+    return _serialize(
+      () {
+        if (_disposed || generation != _generation || !_hadSource) {
+          return Future.value();
+        }
+        _commandedIndex = _player.currentIndex;
+        return _player.seek(position);
+      },
+      key: 'seek',
+      onSuperseded: () {},
+      essential: false,
+    );
   }
 
   @override
   Future<void> setVolume(double volume) =>
-      _player.setVolume(volume.clamp(0, 1));
+      _disposed ? Future.value() : _player.setVolume(volume.clamp(0, 1));
 
   @override
   Future<void> stop() {
+    if (_disposed) return Future.value();
     ++_playGeneration;
     ++_generation;
     _hadSource = false;
     _completionSent = false;
     _queue = null;
+    _queueBaseIndex = 0;
     _queueUrls = <String>[];
     _currentUrl = null;
     _streamFailure = false;
@@ -702,14 +834,24 @@ class JustAudioEngine
     // releasing the native mpv player. Ordered behind the source mutations so
     // it can never release a player that is still opening a stream — the
     // native crash a rapid switch burst (or a failed track) used to cause.
-    return _serialize(() => _player.stop());
+    return _serialize(
+      () => _player.stop(),
+      key: 'source',
+      onSuperseded: () {},
+      essential: true,
+    );
   }
 
   @override
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _operationQueue.cancelPending();
     ++_generation;
     ++_playGeneration;
     _hadSource = false;
+    _queue = null;
+    _queueBaseIndex = 0;
     _queueUrls = <String>[];
     _currentUrl = null;
     _completionSubscription.cancel();
@@ -719,6 +861,8 @@ class JustAudioEngine
     _completed.close();
     _advanced.close();
     _failures.close();
-    _player.dispose();
+    // Source mutations may still be opening the platform decoder. Destroy it
+    // only once that lane has drained, using the same ordering as stop().
+    unawaited(_operations.then((_) => _player.dispose()));
   }
 }

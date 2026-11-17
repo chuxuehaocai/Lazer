@@ -113,6 +113,11 @@ int32_t lazer_audio_clear_queued_reader(LazerAudioEngine engine, uint64_t queue_
     return handle(engine)->clearQueuedReader(queue_generation);
 }
 
+int32_t lazer_audio_clear_unheard_queued_reader(LazerAudioEngine engine, uint64_t queue_generation) {
+    if (engine == nullptr) return LazerAudioErrorInvalidArgument;
+    return handle(engine)->clearQueuedReader(queue_generation, true);
+}
+
 int32_t lazer_audio_play(LazerAudioEngine engine) {
     if (engine == nullptr) return LazerAudioErrorInvalidArgument;
     return handle(engine)->play();

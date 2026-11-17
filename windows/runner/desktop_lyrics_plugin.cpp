@@ -1,4 +1,5 @@
 #include "desktop_lyrics_plugin.h"
+#include "desktop_lyrics_geometry.h"
 
 #include <file_selector_windows/file_selector_windows.h>
 #include <flutter/flutter_engine.h>
@@ -214,12 +215,7 @@ class DesktopLyricsPlugin {
   }
 
  private:
-  struct InteractionRect {
-    double left;
-    double top;
-    double right;
-    double bottom;
-  };
+  using InteractionRect = desktop_lyrics::InteractionRect;
 
   void ConfigureInteraction(const flutter::EncodableValue* value) {
     const auto* args = value == nullptr
@@ -235,6 +231,7 @@ class DesktopLyricsPlugin {
       if (const auto* list =
               std::get_if<flutter::EncodableList>(&regions->second)) {
         for (const auto& region : *list) {
+          if (regions_.size() >= desktop_lyrics::kMaxInteractionRegions) break;
           const auto* entries = std::get_if<flutter::EncodableList>(&region);
           if (entries == nullptr || entries->size() != 4) continue;
           double edges[4] = {};
@@ -242,14 +239,21 @@ class DesktopLyricsPlugin {
           for (size_t i = 0; i < 4; ++i) {
             if (const auto* number = std::get_if<double>(&(*entries)[i])) {
               edges[i] = *number;
+            } else if (const auto* integer32 =
+                           std::get_if<int32_t>(&(*entries)[i])) {
+              edges[i] = *integer32;
+            } else if (const auto* integer64 =
+                           std::get_if<int64_t>(&(*entries)[i])) {
+              edges[i] = static_cast<double>(*integer64);
             } else {
               valid = false;
               break;
             }
             valid = valid && std::isfinite(edges[i]);
           }
-          if (valid && edges[2] > edges[0] && edges[3] > edges[1]) {
-            regions_.push_back({edges[0], edges[1], edges[2], edges[3]});
+          const InteractionRect rect{edges[0], edges[1], edges[2], edges[3]};
+          if (valid && desktop_lyrics::ValidInteractionRect(rect)) {
+            regions_.push_back(rect);
           }
         }
       }
@@ -262,21 +266,14 @@ class DesktopLyricsPlugin {
     if (locked_ || !ScreenToClient(window_, &point)) return false;
     // Flutter reports logical pixels; native cursor/window coordinates are
     // physical pixels and vary as the window moves between monitors.
-    const double scale = GetDpiForWindow(window_) / 96.0;
-    if (scale <= 0) return false;
-    const double x = point.x / scale;
-    const double y = point.y / scale;
-    for (const auto& rect : regions_) {
-      if (x >= rect.left && x < rect.right &&
-          y >= rect.top && y < rect.bottom) return true;
-    }
-    return false;
+    return desktop_lyrics::ContainsPhysicalPoint(
+        regions_, point.x, point.y, GetDpiForWindow(window_));
   }
 
   void UpdatePointerTransparency() {
     POINT cursor = {};
-    const bool interactive = dragging_ ||
-        (GetCursorPos(&cursor) && IsInteractivePoint(cursor));
+    const bool interactive = !locked_ && (dragging_ ||
+        (GetCursorPos(&cursor) && IsInteractivePoint(cursor)));
     SetClickThrough(window_, !interactive);
     SetClickThrough(view_, !interactive);
   }
@@ -321,11 +318,26 @@ class DesktopLyricsPlugin {
           view_, GWLP_WNDPROC,
           reinterpret_cast<LONG_PTR>(&DesktopLyricsPlugin::OverlayProc)));
     }
-    SetTimer(window_, kPointerTimer, 32, nullptr);
+    UpdatePointerTimer(IsWindowVisible(window_) != FALSE);
+  }
+
+  void UpdatePointerTimer(bool visible) {
+    // Locked and hidden windows are wholly click-through. Polling the cursor
+    // thirty times per second in those states does no useful work.
+    const bool needed = IsWindow(window_) &&
+        desktop_lyrics::NeedsPointerTracking(
+            visible, locked_, regions_.size());
+    if (needed && !pointer_timer_running_) {
+      pointer_timer_running_ = SetTimer(window_, kPointerTimer, 32, nullptr) != 0;
+    } else if (!needed && pointer_timer_running_) {
+      KillTimer(window_, kPointerTimer);
+      pointer_timer_running_ = false;
+    }
   }
 
   void RemoveClickThrough() {
     if (IsWindow(window_)) KillTimer(window_, kPointerTimer);
+    pointer_timer_running_ = false;
     if (window_ != nullptr && root_proc_ != nullptr) {
       if (IsWindow(window_)) {
         SetWindowLongPtrW(window_, GWLP_WNDPROC,
@@ -377,13 +389,31 @@ class DesktopLyricsPlugin {
     }
     if (message == WM_NCHITTEST) {
       const POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-      return self->dragging_ || self->IsInteractivePoint(point)
+      return !self->locked_ && (self->dragging_ || self->IsInteractivePoint(point))
                  ? HTCLIENT : HTTRANSPARENT;
     }
     if (message == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
     WNDPROC previous =
         hwnd == self->window_ ? self->root_proc_ : self->view_proc_;
-    return CallWindowProcW(previous, hwnd, message, wparam, lparam);
+    const LRESULT result = CallWindowProcW(previous, hwnd, message, wparam, lparam);
+    if ((message == WM_SHOWWINDOW || message == WM_DPICHANGED ||
+         message == WM_DISPLAYCHANGE) && hwnd == self->window_) {
+      if (message == WM_SHOWWINDOW) {
+        self->UpdatePointerTimer(wparam != FALSE);
+        self->UpdatePointerTransparency();
+      }
+      if (message == WM_DPICHANGED || message == WM_DISPLAYCHANGE) {
+        // Let Flutter process the new DPI/size before refreshing native hit
+        // testing. Display removal also clamps a saved desktop placement.
+        // A DPI change during a drag must not restore the old saved monitor
+        // position: that would prevent dragging across mixed-DPI monitors.
+        if (message == WM_DISPLAYCHANGE && self->attached_ && !self->dragging_) {
+          self->Attach();
+        }
+        self->UpdatePointerTransparency();
+      }
+    }
+    return result;
   }
 
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
@@ -404,6 +434,7 @@ class DesktopLyricsPlugin {
   bool attached_ = false;
   bool dragging_ = false;
   bool locked_ = false;
+  bool pointer_timer_running_ = false;
   std::vector<InteractionRect> regions_;
 };
 

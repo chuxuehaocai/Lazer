@@ -59,11 +59,13 @@ public:
         changed_.wait(guard, [this] { return cancelled_ || queuedFrames_ > 0 || finished_; });
     }
 
-    int32_t peekFrames(uint8_t *destination, int32_t maxFrames) const {
+    int32_t peekFrames(uint8_t *destination, int32_t maxFrames, size_t frameOffset = 0) const {
         if (destination == nullptr || maxFrames <= 0) return 0;
         std::lock_guard guard(mutex_);
-        const size_t count = std::min<size_t>(queuedFrames_, static_cast<size_t>(maxFrames));
-        copyOut(destination, count);
+        if (frameOffset >= queuedFrames_) return 0;
+        const size_t count = std::min<size_t>(queuedFrames_ - frameOffset,
+            static_cast<size_t>(maxFrames));
+        copyOut(destination, count, frameOffset);
         return static_cast<int32_t>(count);
     }
 
@@ -158,10 +160,11 @@ private:
         writeFrame_ = (writeFrame_ + frames) % capacityFrames_;
     }
 
-    void copyOut(uint8_t *destination, size_t frames) const {
-        const size_t firstFrames = std::min(frames, capacityFrames_ - readFrame_);
+    void copyOut(uint8_t *destination, size_t frames, size_t frameOffset) const {
+        const size_t startFrame = (readFrame_ + frameOffset) % capacityFrames_;
+        const size_t firstFrames = std::min(frames, capacityFrames_ - startFrame);
         const size_t firstBytes = firstFrames * frameBytes_;
-        std::memcpy(destination, storage_.data() + readFrame_ * frameBytes_, firstBytes);
+        std::memcpy(destination, storage_.data() + startFrame * frameBytes_, firstBytes);
         if (firstFrames < frames) {
             std::memcpy(destination + firstBytes, storage_.data(), (frames - firstFrames) * frameBytes_);
         }

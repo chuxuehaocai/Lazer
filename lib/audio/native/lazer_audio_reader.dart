@@ -17,8 +17,12 @@ import 'lazer_audio_library.dart';
 
 /// A reader the engine can open, kept alive until the stream is stopped.
 class NativeStreamReader {
-  NativeStreamReader._(this._bridge, this._handle, this._reader)
-    : _readerAddress = _reader.address;
+  NativeStreamReader._(
+    this._bridge,
+    this._handle,
+    this._reader,
+    this._onReleased,
+  ) : _readerAddress = _reader.address;
 
   /// Creates a reader over [path]. The file must exist; the engine blocks on
   /// reads until [notifyAppended] or [finish] is called.
@@ -29,6 +33,7 @@ class NativeStreamReader {
     LazerAudioBridgeApi bridge, {
     required String path,
     int? expectedBytes,
+    void Function()? onReleased,
   }) {
     final Pointer<Utf8> pathPointer = path.toNativeUtf8();
     final Pointer<Pointer<Void>> out = calloc<Pointer<Void>>();
@@ -47,7 +52,7 @@ class NativeStreamReader {
         ..close = bridge.closePointer
         ..context = out.value
         ..cancel = bridge.cancelPointer;
-      return NativeStreamReader._(bridge, out.value, reader);
+      return NativeStreamReader._(bridge, out.value, reader, onReleased);
     } finally {
       calloc.free(out);
       calloc.free(pathPointer);
@@ -61,6 +66,7 @@ class NativeStreamReader {
   bool _released = false;
   bool _finished = false;
   bool _cancelled = false;
+  void Function()? _onReleased;
 
   /// The `LazerAudioReader` the engine's open/queue call takes. Valid until
   /// [release] runs; the address stays unique after release so a stale handle
@@ -114,5 +120,8 @@ class NativeStreamReader {
     _released = true;
     _bridge.readerDestroy(_handle);
     calloc.free(_reader);
+    final released = _onReleased;
+    _onReleased = null;
+    released?.call();
   }
 }

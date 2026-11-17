@@ -32,8 +32,7 @@ class _MusicPlatformState {
       return;
     }
     final String namespace = gateway.cacheNamespace;
-    if (_likesHydrated.contains(namespace) ||
-        !_likesHydrating.add(namespace)) {
+    if (_likesHydrated.contains(namespace) || !_likesHydrating.add(namespace)) {
       return;
     }
     try {
@@ -227,15 +226,27 @@ class _MusicPlatformState {
           id.connection == owner.connectionId;
     }
 
-    final retained = state._queue.where((track) => !owned(track)).toList();
-    if (retained.length == state._queue.length) return;
-    final playing = state.current;
-    final position = state.precisePosition;
-    if (playing == null || owned(playing)) {
-      await _resetPlayback();
-      state._queue = retained;
-      state._queueIndex = 0;
-    } else {
+    // A sign-out can wait for a play report, a room leave or a native stop.
+    // Re-evaluate the latest queue after a superseded reset; the old retained
+    // snapshot must never replace a song the listener selected in that wait.
+    while (!state._presentationDisposed) {
+      final retained = state._queue.where((track) => !owned(track)).toList();
+      if (retained.length == state._queue.length) return;
+      final playing = state.current;
+      final position = state.precisePosition;
+      final activity = state._queueActivity;
+      final generation = state._generation;
+      bool stillCurrent() =>
+          !state._presentationDisposed &&
+          state._queueActivity == activity &&
+          state._generation == generation &&
+          state.current == playing;
+      if (playing == null || owned(playing)) {
+        if (!await _resetPlayback(retained, stillCurrent: stillCurrent)) {
+          continue;
+        }
+        return;
+      }
       final removedBefore = state._queue
           .take(state._queueIndex)
           .where(owned)
@@ -246,9 +257,10 @@ class _MusicPlatformState {
       if (state._realActive && state._playing) {
         unawaited(state._startAudio(resumeAt: position));
       }
+      state._markQueueChanged();
+      await state._saveQueue();
+      return;
     }
-    state._markQueueChanged();
-    await state._saveQueue();
   }
 
   Future<void> select(String key) async {
@@ -372,28 +384,44 @@ class _MusicPlatformState {
 
   Future<void> saveSelection() => _save();
 
-  Future<void> _resetPlayback() async {
+  Future<bool> _resetPlayback(
+    List<Track> retained, {
+    required bool Function() stillCurrent,
+  }) async {
     state._finishPlaySession();
     await state._flushPlayUploads();
+    if (!stillCurrent()) return false;
     await state.listenTogether.leave();
+    if (!stillCurrent()) return false;
     state._finishListening();
     state.pause();
+    // pause notifies synchronously; listeners may already have selected a song.
+    if (!stillCurrent()) return false;
     state._realActive = false;
     state._clearQueuedNext();
     state._queueId = null;
-    state._generation++;
+    final generation = ++state._generation;
     state._lyricGeneration++;
+    final activity = state._queueActivity;
+    final playing = state.current;
     await state.audioEngine?.stop();
-    state._queue = [];
+    if (state._presentationDisposed ||
+        state._generation != generation ||
+        state._queueActivity != activity ||
+        state.current != playing) {
+      return false;
+    }
+    // Commit the filtered snapshot once, before the next asynchronous write.
+    // There are no playback mutations after persistence can yield to a new play.
+    state._queue = retained;
     state.currentArtwork.update(null);
     state._lyricSnapshots.clear();
     state._lyricRequest = null;
     state._queueIndex = 0;
     state._markQueueChanged();
     state._position = Duration.zero;
-    state._stationLoader = null;
-    state._stationLoading = false;
-    state._stationSeen.clear();
+    state._station?.close();
+    state._station = null;
     state.lyrics = const [];
     state.lyricsLoading = false;
     state.lyricsPureMusic = false;
@@ -402,6 +430,7 @@ class _MusicPlatformState {
     state._lyricsTrackId = null;
     state._metadataLoaded.clear();
     await state._saveQueue();
+    return true;
   }
 
   void _activate(String key) {

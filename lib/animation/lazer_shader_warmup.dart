@@ -56,7 +56,11 @@ class LazerShaderWarmUp extends ShaderWarmUp {
       canvas.saveLayer(
         bounds,
         ui.Paint()
-          ..imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          ..imageFilter = ui.ImageFilter.blur(
+            sigmaX: sigma,
+            sigmaY: sigma,
+            tileMode: ui.TileMode.decal,
+          ),
       );
       canvas.drawParagraph(paragraph, const ui.Offset(8, 64));
       canvas.restore();

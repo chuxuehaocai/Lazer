@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import '../data/models.dart' show Track;
 import 'app_state.dart';
 import 'build_safe_notifier.dart';
+import 'listen_together_requests.dart';
+import 'listen_together_commands.dart';
 
 /// A participant in a listen-together room.
 class ListenTogetherMember {
@@ -70,6 +72,19 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   Timer? _heartbeat;
   bool _disposed = false;
   bool _beating = false;
+  int _epoch = 0;
+  bool _opening = false;
+  String? _roomUserId;
+  Future<void>? _refreshRequest;
+  Future<void>? _queueRequest;
+  int _remoteRequest = 0;
+  String? _remoteSongTarget;
+  int _remotePositionMs = 0;
+  int _remoteSeeks = 0;
+  final _commands = LatestRoomRequest();
+  final _publications = LatestRoomRequest();
+  final _remoteTracks = LatestRoomRequest();
+  String _queuedVersion = '';
 
   // Shared transport changes; Lua constructs any service-specific envelope.
   // commandType is PLAY / PAUSE / PROGRESS, progress is in milliseconds and
@@ -90,7 +105,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
 
   /// Highest remote command sequence already applied, so a command the service
   /// keeps returning is not replayed on every beat.
-  int _appliedSeq = 0;
+  final _commandClock = RoomCommandClock();
 
   /// True while a remote command is writing local playback, so the resulting
   /// state change is not reported back as a local one.
@@ -113,11 +128,28 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
 
   String? get _ownUserId => _owner.user?.id.value;
 
-  bool get ready => active && (roomId?.isNotEmpty ?? false);
+  bool get ready =>
+      !_disposed &&
+      active &&
+      (roomId?.isNotEmpty ?? false) &&
+      _roomOwner?.user?.id.cacheKey == _roomUserId;
+  bool get accountSignedIn => !_disposed && _owner.user != null;
+
+  bool _openingIsCurrent(int epoch, MusicGateway owner, String? user) =>
+      !_disposed &&
+      epoch == _epoch &&
+      identical(owner, _selectedOwner) &&
+      owner.user?.id.cacheKey == user;
+
+  bool _roomIsCurrent(int epoch) => ready && epoch == _epoch;
 
   @override
   void dispose() {
     _disposed = true;
+    _epoch++;
+    _commands.dispose();
+    _publications.dispose();
+    _remoteTracks.dispose();
     _heartbeat?.cancel();
     state.removeListener(_onPlaybackState);
     state.ticks.removeListener(_onPlaybackTick);
@@ -125,17 +157,22 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<bool> create() async {
-    if (!_selectedOwner.supports(MusicCapability.listenTogether)) {
+    if (_disposed || _opening || active) return false;
+    final owner = _selectedOwner;
+    final user = owner.user?.id.cacheKey;
+    if (!owner.supports(MusicCapability.listenTogether)) {
       error = '当前音乐平台不支持一起听。'; // i18n:key
       _notify();
       return false;
     }
-    if (_selectedOwner.user == null) {
+    if (user == null) {
       error = '请先登录后再一起听'; // i18n:key
       _notify();
       return false;
     }
     loading = true;
+    _opening = true;
+    final epoch = ++_epoch;
     error = null;
     _notify();
     try {
@@ -143,7 +180,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
       // opens with a song to listen to instead of an empty queue that both
       // sides would have to fill.
       final String? songId = _currentSongId;
-      final Map<String, dynamic> body = await _selectedOwner.listenTogether(
+      final Map<String, dynamic> body = await owner.listenTogether(
         songId == null || songId.isEmpty ? 'create' : 'createMulti',
         songId == null || songId.isEmpty
             ? const <String, dynamic>{}
@@ -159,14 +196,25 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
       // failure code or a missing room id rejects the room.
       final int code = (body['code'] as num?)?.toInt() ?? 200;
       final String id = '${data['roomId'] ?? body['roomId'] ?? ''}'.trim();
+      if (!_openingIsCurrent(epoch, owner, user)) {
+        if (id.isNotEmpty && owner.user?.id.cacheKey == user) {
+          try {
+            await owner.listenTogether('leave', {'roomId': id});
+          } catch (_) {
+            // The abandoned room also expires without a heartbeat.
+          }
+        }
+        return false;
+      }
       if (code != 200 || id.isEmpty) {
         error = '创建一起听房间失败，请稍后重试。'; // i18n:key
         return false;
       }
-      _roomOwner = _selectedOwner;
+      _roomOwner = owner;
+      _roomUserId = user;
       roomId = id;
       inviterId =
-          '${data['inviterId'] ?? body['inviterId'] ?? _selectedOwner.user?.id.value ?? ''}';
+          '${data['inviterId'] ?? body['inviterId'] ?? owner.user?.id.value ?? ''}';
       active = true;
       members = _membersOf(body);
       _primePlayback();
@@ -175,50 +223,66 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
       _sendPlayCommand(state.playing ? 'PLAY' : 'PAUSE');
       return true;
     } on MusicGatewayException catch (failure) {
+      if (!_openingIsCurrent(epoch, owner, user)) return false;
       error = failure.authenticationFailure
           ? '请先登录后再一起听' // i18n:key
           : '创建一起听房间失败，请稍后重试。'; // i18n:key
       return false;
     } catch (_) {
+      if (!_openingIsCurrent(epoch, owner, user)) return false;
       error = '创建一起听房间失败，请稍后重试。'; // i18n:key
       return false;
     } finally {
+      _opening = false;
       loading = false;
       _notify();
     }
   }
 
   Future<bool> join(String rawCode) async {
+    if (_disposed || _opening || active) return false;
+    final owner = _selectedOwner;
+    final user = owner.user?.id.cacheKey;
+    if (!owner.supports(MusicCapability.listenTogether)) {
+      error = '当前音乐平台不支持一起听。'; // i18n:key
+      _notify();
+      return false;
+    }
     final (String? room, String? inviter) = parseInvite(rawCode);
     if (room == null || inviter == null || inviter.isEmpty) {
       error = '邀请码无效。'; // i18n:key
       _notify();
       return false;
     }
-    if (_selectedOwner.user == null) {
+    if (user == null) {
       error = '请先登录后再一起听'; // i18n:key
       _notify();
       return false;
     }
     loading = true;
+    _opening = true;
+    final epoch = ++_epoch;
     error = null;
     _notify();
     try {
-      final Map<String, dynamic> body = await _selectedOwner.listenTogether(
-        'join',
-        {'roomId': room, 'inviterId': inviter},
-      );
+      final Map<String, dynamic> body = await owner.listenTogether('join', {
+        'roomId': room,
+        'inviterId': inviter,
+      });
+      if (!_openingIsCurrent(epoch, owner, user)) return false;
       final int code = (body['code'] as num?)?.toInt() ?? 200;
       if (code != 200) {
         error = '加入一起听失败，请检查邀请码。'; // i18n:key
         return false;
       }
-      _roomOwner = _selectedOwner;
+      _roomOwner = owner;
+      _roomUserId = user;
       roomId = room;
       inviterId = inviter;
       active = true;
       members = _membersOf(body);
       await refresh();
+      if (!_roomIsCurrent(epoch)) return false;
       _primePlayback();
       _startHeartbeat();
       // The room already has a song and a queue; the join is a sync, not a
@@ -227,14 +291,17 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
       _syncFromRoom();
       return true;
     } on MusicGatewayException catch (failure) {
+      if (!_openingIsCurrent(epoch, owner, user)) return false;
       error = failure.authenticationFailure
           ? '请先登录后再一起听' // i18n:key
           : '加入一起听失败，请检查邀请码。'; // i18n:key
       return false;
     } catch (_) {
+      if (!_openingIsCurrent(epoch, owner, user)) return false;
       error = '加入一起听失败，请检查邀请码。'; // i18n:key
       return false;
     } finally {
+      _opening = false;
       loading = false;
       _notify();
     }
@@ -244,13 +311,22 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   ///
   /// The room sheet calls this when it opens and the heartbeat calls it with
   /// the answer it already has, so a manual refresh and a beat share one path.
-  Future<void> refresh() async {
+  Future<void> refresh() {
+    if (!ready) return Future<void>.value();
+    return _refreshRequest ??= _refresh().whenComplete(() {
+      _refreshRequest = null;
+    });
+  }
+
+  Future<void> _refresh() async {
+    final epoch = _epoch;
     final String? id = roomId;
     if (id == null || id.isEmpty) return;
     try {
       final Map<String, dynamic> body = await _owner.listenTogether('status', {
         'roomId': id,
       });
+      if (!_roomIsCurrent(epoch)) return;
       _applyRoom(body);
       _notify();
     } catch (_) {
@@ -260,9 +336,18 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> leave() async {
+    if (_disposed) return;
+    _epoch++;
+    _remoteRequest++;
+    _remoteSongTarget = null;
+    _commands.cancelPending();
+    _publications.cancelPending();
+    _remoteTracks.cancelPending();
+    _queuedVersion = '';
     final String? id = roomId;
     final owner = _owner;
     _roomOwner = null;
+    _roomUserId = null;
     _heartbeat?.cancel();
     _heartbeat = null;
     active = false;
@@ -278,7 +363,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     _playlistVersion = '[]';
     _publishedVersion = '';
     _roomVersion = '';
-    _appliedSeq = 0;
+    _commandClock.clear();
     _notify();
     if (id != null && id.isNotEmpty && owner.user != null) {
       try {
@@ -294,6 +379,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// The room queue is data until the listener asks for it: another member
   /// changing the order must not silence what is playing right now.
   Future<bool> adoptRoomQueue() async {
+    if (!ready) return false;
     final List<Track> tracks = roomQueue;
     if (tracks.isEmpty) return false;
     final String? songId = _currentSongId;
@@ -327,18 +413,23 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
           uri.queryParameters['roomId'] ?? uri.queryParameters['roomid'];
       final String? inviter =
           uri.queryParameters['inviterId'] ?? uri.queryParameters['inviterid'];
-      if (room != null && inviter != null) {
-        return (room, inviter);
+      if (room != null &&
+          inviter != null &&
+          room.trim().isNotEmpty &&
+          inviter.trim().isNotEmpty) {
+        return (room.trim(), inviter.trim());
       }
+      return (null, null);
     }
     final List<String> parts = text.split(RegExp(r'[|,\s]+'));
-    if (parts.length >= 2) {
+    if (parts.length == 2 && parts.every((part) => part.trim().isNotEmpty)) {
       return (parts.first.trim(), parts[1].trim());
     }
     return (null, null);
   }
 
   void _startHeartbeat() {
+    if (!ready) return;
     _heartbeat?.cancel();
     _heartbeat = Timer.periodic(_beatInterval, (_) => _beat());
     _beat();
@@ -358,7 +449,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// has to guess which queue entry came next.
   void _onPlaybackState() {
     if (!ready) return;
-    if (_applyingRemote) {
+    if (_applyingRemote || _remoteSeeks > 0) {
       // The remote command already wrote this state; reporting it back would
       // make the two clients trade the same change forever.
       _primePlayback();
@@ -391,6 +482,10 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// Detects a seek by a jump in the 100 ms tick lane and reports PROGRESS.
   void _onPlaybackTick() {
     if (!ready) return;
+    if (_applyingRemote || _remoteSeeks > 0) {
+      _primePlayback();
+      return;
+    }
     final String? songId = _currentSongId;
     if (songId == null || songId != _lastSongId) {
       _lastSongId = songId;
@@ -425,18 +520,28 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     );
     final Map<String, Object?> command = <String, Object?>{
       'clientSeq': ++_clientSeq,
-      'commandType': type,
+      // A seek replacing a waiting PLAY/PAUSE must carry that final intent.
+      // Existing plugins already accept PLAY/PAUSE with target and progress;
+      // a standalone seek keeps its ordinary PROGRESS envelope.
+      'commandType': type == 'PROGRESS' && _commands.hasPending
+          ? (state.playing ? 'PLAY' : 'PAUSE')
+          : type,
       'formerSongId': formerSongId ?? songId,
       'playStatus': state.playing ? 'PLAY' : 'PAUSE',
       'progress': position,
       'targetSongId': songId,
       'triggerType': trigger,
     };
-    unawaited(
-      _owner
-          .listenTogether('command', {'roomId': id, 'command': command})
-          .catchError((Object _) => <String, dynamic>{}),
-    );
+    final epoch = _epoch;
+    final owner = _owner;
+    _commands.schedule(() async {
+      if (_roomIsCurrent(epoch)) {
+        await owner.listenTogether('command', {
+          'roomId': id,
+          'command': command,
+        });
+      }
+    });
   }
 
   /// The room's clock.
@@ -446,22 +551,22 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// a slow service must not queue a second heartbeat behind the first.
   void _beat() {
     final String? id = roomId;
-    if (!active || id == null || id.isEmpty || _disposed || _beating) return;
+    if (!ready || id == null || id.isEmpty || _beating) return;
+    _publishQueue();
+    final epoch = _epoch;
     _beating = true;
     final String songId = _currentSongId ?? '';
     unawaited(() async {
       try {
-        final Map<String, dynamic> body = await _owner.listenTogether(
-          'heartbeat',
-          {
-            'roomId': id,
-            'songId': songId.isEmpty ? '0' : songId,
-            'playStatus': state.playing ? 'PLAY' : 'PAUSE',
-            'progress': state.position.inMilliseconds,
-            'playlistVersion': _playlistVersion,
-          },
-        );
-        if (_disposed || roomId != id) return;
+        final Map<String, dynamic> body = await _owner
+            .listenTogether('heartbeat', {
+              'roomId': id,
+              'songId': songId.isEmpty ? '0' : songId,
+              'playStatus': state.playing ? 'PLAY' : 'PAUSE',
+              'progress': state.position.inMilliseconds,
+              'playlistVersion': _playlistVersion,
+            });
+        if (!_roomIsCurrent(epoch)) return;
         _applyRoom(body);
         // A beat that changed nothing must not rebuild the room sheet — the
         // sheet stays open while a room is active, and the answer is usually
@@ -481,11 +586,16 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// bare `{code:200}`, and the room then simply keeps its current members and
   /// track instead of being torn down by a missing field.
   void _applyRoom(Map<String, dynamic> body) {
+    body = _dataOf(body);
     final List<ListenTogetherMember> previousMembers = members;
     final List<Track> previousQueue = roomQueue;
     final bool previousInSync = queueInSync;
     final List<ListenTogetherMember> found = _membersOf(body);
-    if (found.isNotEmpty) members = found;
+    if (body['members'] is List ||
+        body['users'] is List ||
+        body['participants'] is List) {
+      if (!_sameMembers(members, found)) members = found;
+    }
     // A resumed room reports its id again; keep the local one authoritative.
     final String reportedRoom = '${body['roomId'] ?? ''}'.trim();
     if (reportedRoom.isNotEmpty && roomId == null) roomId = reportedRoom;
@@ -499,8 +609,9 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
       if (version != _playlistVersion) _syncFromRoom();
     }
     final dynamic rows = body['playlist'];
-    if (rows is List && rows.isNotEmpty) {
-      roomQueue = _tracksOf(rows);
+    if (rows is List) {
+      final tracks = _tracksOf(rows);
+      if (!_sameRoomTracks(roomQueue, tracks)) roomQueue = tracks;
       queueInSync = _sameQueue(roomQueue);
     }
     _changedByLastRoom =
@@ -515,36 +626,53 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     final Map<String, dynamic> command = Map<String, dynamic>.from(raw);
     final String type = '${command['commandType'] ?? ''}'.toUpperCase();
     if (type.isEmpty) return;
-    final int seq = (command['serverSeq'] as num?)?.toInt() ??
-        (command['clientSeq'] as num?)?.toInt() ??
-        0;
     final String user = '${command['userId'] ?? ''}'.trim();
     if (user.isNotEmpty && user == _ownUserId) return;
-    // Without a sequence the command cannot be deduplicated; only a command
-    // that names a different target is worth acting on.
-    if (seq != 0 && seq <= _appliedSeq) return;
-    if (seq != 0) _appliedSeq = seq;
+    if (!_commandClock.accept(command)) return;
     final int progress = (command['progress'] as num?)?.toInt() ?? 0;
     final String target = '${command['targetSongId'] ?? ''}'.trim();
+    final String status = '${command['playStatus'] ?? ''}'.toUpperCase();
+    final bool currentTarget = target.isEmpty || target == _currentSongId;
     _applyingRemote = true;
     try {
+      if (type == 'PAUSE' || status == 'PAUSE') {
+        _cancelRemoteStart();
+        if (state.playing) state.togglePlay();
+        // A paused snapshot can move this song's playhead. A different target
+        // is left for a later PLAY so seeking cannot change the wrong song.
+        if (currentTarget &&
+            command['progress'] is num &&
+            progress >= 0 &&
+            (progress - state.position.inMilliseconds).abs() > 2000) {
+          unawaited(_seekRemote(progress));
+        }
+        return;
+      }
       switch (type) {
         case 'PLAY':
         case 'GOTO':
           if (target.isNotEmpty && target != _currentSongId) {
-            unawaited(_playRemote(target, progress));
+            _playRemote(target, progress);
           } else {
+            _cancelRemoteStart();
             if (!state.playing) state.play();
-            if (progress > 0) unawaited(state.seekTo(_ms(progress)));
+            if (command['progress'] is num) unawaited(_seekRemote(progress));
           }
           break;
-        case 'PAUSE':
-          if (state.playing) state.togglePlay();
-          break;
         case 'PROGRESS':
-          if (progress > 0 && (progress - state.position.inMilliseconds).abs() >
-              2000) {
-            unawaited(state.seekTo(_ms(progress)));
+          if (status == 'PLAY') {
+            if (!currentTarget) {
+              _playRemote(target, progress);
+              break;
+            }
+            _cancelRemoteStart();
+            if (!state.playing) state.play();
+          }
+          if (currentTarget &&
+              command['progress'] is num &&
+              progress >= 0 &&
+              (progress - state.position.inMilliseconds).abs() > 2000) {
+            unawaited(_seekRemote(progress));
           }
           break;
         default:
@@ -564,18 +692,23 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   void _applyPlayback(Map<String, dynamic> body) {
     final String roomSong = '${body['songId'] ?? ''}'.trim();
     if (roomSong.isEmpty || roomSong == '0') return;
+    final String status = '${body['playStatus'] ?? ''}'.toUpperCase();
+    if (status == 'PAUSE') {
+      // Metadata lookup can finish long after a later pause. Do not let its
+      // eventual playQueue restart playback or let a paused room start a song.
+      _cancelRemoteStart();
+      _applyingRemote = true;
+      try {
+        if (state.playing) state.togglePlay();
+      } finally {
+        _applyingRemote = false;
+        _primePlayback();
+      }
+      return;
+    }
     if (roomSong == _lastSongId || roomSong == _currentSongId) {
-      final String status = '${body['playStatus'] ?? ''}'.toUpperCase();
       final int progress = (body['progress'] as num?)?.toInt() ?? 0;
-      if (status == 'PAUSE' && state.playing) {
-        _applyingRemote = true;
-        try {
-          state.togglePlay();
-        } finally {
-          _applyingRemote = false;
-          _primePlayback();
-        }
-      } else if (status == 'PLAY' && !state.playing) {
+      if (status == 'PLAY' && !state.playing) {
         _applyingRemote = true;
         try {
           state.play();
@@ -588,23 +721,45 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
           (progress - state.position.inMilliseconds).abs() > 8000) {
         // Two playing clients drift apart silently; a wide gap is a resync,
         // not a seek the listener made.
-        unawaited(state.seekTo(_ms(progress)));
+        unawaited(_seekRemote(progress));
       }
       return;
     }
     final int progress = (body['progress'] as num?)?.toInt() ?? 0;
-    unawaited(_playRemote(roomSong, progress));
+    _playRemote(roomSong, progress);
+  }
+
+  void _cancelRemoteStart() {
+    _remoteRequest++;
+    _remoteSongTarget = null;
+    _remoteTracks.cancelPending();
   }
 
   /// Starts the track the room is playing, from the queue when it is there.
-  Future<void> _playRemote(String remoteSongId, int progressMs) async {
+  void _playRemote(String remoteSongId, int progressMs) {
     if (!ready) return;
+    _remotePositionMs = progressMs;
+    if (_remoteSongTarget == remoteSongId) return;
+    _remoteSongTarget = remoteSongId;
+    final epoch = _epoch;
+    final request = ++_remoteRequest;
+    _remoteTracks.schedule(
+      () => _applyRemoteTrack(remoteSongId, epoch, request),
+    );
+  }
+
+  Future<void> _applyRemoteTrack(
+    String remoteSongId,
+    int epoch,
+    int request,
+  ) async {
+    if (!_roomIsCurrent(epoch) || request != _remoteRequest) return;
     final int index = state.queue.indexWhere(
       (Track track) => _remoteValue(track) == remoteSongId,
     );
-    _applyingRemote = true;
     try {
       if (index >= 0) {
+        _applyingRemote = true;
         state.playTrackAt(index);
       } else {
         final MusicGateway owner = _owner;
@@ -616,20 +771,47 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
             value: remoteSongId,
           ),
         );
+        if (!_roomIsCurrent(epoch) || request != _remoteRequest) return;
+        _applyingRemote = true;
         state.playQueue(<Track>[state.catalog.trackFromMusicSong(song)]);
       }
-      if (progressMs > 0) await state.seekTo(_ms(progressMs));
+      if (!_roomIsCurrent(epoch) || request != _remoteRequest) return;
+      if (_remotePositionMs > 0) await _seekRemote(_remotePositionMs);
     } catch (_) {
       // A track the account may not play, or a room id that expired: the beat
       // after this one retries from whatever the room reports then.
     } finally {
       _applyingRemote = false;
-      _primePlayback();
+      if (request == _remoteRequest) _remoteSongTarget = null;
+      if (_roomIsCurrent(epoch)) _primePlayback();
+    }
+  }
+
+  /// Remote seeks must not echo back as local progress commands.
+  Future<void> _seekRemote(int progressMs) async {
+    final epoch = _epoch;
+    if (!ready) return;
+    _remoteSeeks++;
+    try {
+      await state.seekTo(_ms(progressMs));
+    } catch (_) {
+      // The next room state can retry an interrupted seek.
+    } finally {
+      _remoteSeeks--;
+      if (_roomIsCurrent(epoch)) _primePlayback();
     }
   }
 
   /// Pulls the room queue after the version the service echoed changed.
-  Future<void> _syncFromRoom() async {
+  Future<void> _syncFromRoom() {
+    if (!ready) return Future<void>.value();
+    return _queueRequest ??= _pullRoomQueue().whenComplete(() {
+      _queueRequest = null;
+    });
+  }
+
+  Future<void> _pullRoomQueue() async {
+    final epoch = _epoch;
     final String? id = roomId;
     if (id == null || id.isEmpty) return;
     try {
@@ -637,11 +819,13 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
         'syncPlaylist',
         {'roomId': id},
       );
-      final dynamic rows = body['playlist'];
-      if (rows is! List || rows.isEmpty) return;
+      if (!_roomIsCurrent(epoch)) return;
+      final data = _dataOf(body);
+      final dynamic rows = data['playlist'];
+      if (rows is! List) return;
       roomQueue = _tracksOf(rows);
       queueInSync = _sameQueue(roomQueue);
-      final String version = '${body['playlistVersion'] ?? ''}'.trim();
+      final String version = '${data['playlistVersion'] ?? ''}'.trim();
       if (version.isNotEmpty) {
         _roomVersion = version;
         _playlistVersion = version;
@@ -665,29 +849,37 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     final String? id = roomId;
     if (!ready || id == null || id.isEmpty) return;
     final String version = _queueVersion();
-    if (!force && version == _publishedVersion) return;
+    if (!force && (version == _publishedVersion || version == _queuedVersion)) {
+      return;
+    }
     final DateTime now = DateTime.now();
     if (!force && now.difference(_lastQueuePush) < const Duration(seconds: 3)) {
       return;
     }
     _lastQueuePush = now;
-    _publishedVersion = version;
+    _queuedVersion = version;
     _playlistVersion = version;
-    unawaited(
-      _owner
-          .listenTogether('syncList', {
-            'roomId': id,
-            'playlistVersion': version,
-            'playlist': [
-              for (final Track track in state.queue.take(_maxQueue))
-                <String, Object?>{
-                  'id': _remoteValue(track),
-                  'version': 0,
-                },
-            ],
-          })
-          .catchError((Object _) => <String, dynamic>{}),
-    );
+    final owner = _owner;
+    final epoch = _epoch;
+    final playlist = [
+      for (final Track track in state.queue.take(_maxQueue))
+        <String, Object?>{'id': _remoteValue(track), 'version': 0},
+    ];
+    _publications.schedule(() async {
+      if (!_roomIsCurrent(epoch)) return;
+      try {
+        await owner.listenTogether('syncList', {
+          'roomId': id,
+          'playlistVersion': version,
+          'playlist': playlist,
+        });
+        if (_roomIsCurrent(epoch)) _publishedVersion = version;
+      } finally {
+        if (_roomIsCurrent(epoch) && _queuedVersion == version) {
+          _queuedVersion = '';
+        }
+      }
+    });
   }
 
   /// The queue reduced to the ids the service knows. Capped so a five hundred
@@ -696,14 +888,16 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
 
   String _queueVersion() {
     final List<String> ids = <String>[
-      for (final Track track in state.queue.take(_maxQueue)) _remoteValue(track),
+      for (final Track track in state.queue.take(_maxQueue))
+        _remoteValue(track),
     ];
     return jsonEncode(ids);
   }
 
   List<String> _upcomingIds() {
     final List<String> ids = <String>[
-      for (final Track track in state.queue.skip(1).take(40)) _remoteValue(track),
+      for (final Track track in state.queue.skip(state.queueIndex + 1).take(40))
+        _remoteValue(track),
     ];
     return ids.where((String id) => id.isNotEmpty).toList();
   }
@@ -720,7 +914,7 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   List<Track> _tracksOf(List<dynamic> rows) {
     final MusicGateway owner = _owner;
     final List<Track> tracks = <Track>[];
-    for (final Object? row in rows) {
+    for (final Object? row in rows.take(_maxQueue)) {
       if (row is! Map) continue;
       final String id = '${row['id'] ?? row['songId'] ?? ''}'.trim();
       if (id.isEmpty) continue;
@@ -747,7 +941,47 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
     return tracks;
   }
 
-  static Duration _ms(int value) => Duration(milliseconds: value < 0 ? 0 : value);
+  static Duration _ms(int value) =>
+      Duration(milliseconds: value < 0 ? 0 : value);
+
+  static bool _sameMembers(
+    List<ListenTogetherMember> a,
+    List<ListenTogetherMember> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if ((a[i].userId, a[i].name, a[i].avatarUrl) !=
+          (b[i].userId, b[i].name, b[i].avatarUrl)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool _sameRoomTracks(List<Track> a, List<Track> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if ((
+            a[i].id,
+            a[i].title,
+            a[i].artist,
+            a[i].album,
+            a[i].duration,
+            a[i].coverUrl,
+          ) !=
+          (
+            b[i].id,
+            b[i].title,
+            b[i].artist,
+            b[i].album,
+            b[i].duration,
+            b[i].coverUrl,
+          )) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   static String _remoteValue(Track track) =>
       MusicId.tryParse(track.id)?.value ?? '';
@@ -764,10 +998,11 @@ class ListenTogetherController extends ChangeNotifier with BuildSafeNotifier {
   /// answer with any of them; ids stay opaque strings either way.
   static List<ListenTogetherMember> _membersOf(Map<String, dynamic> body) {
     final Map<String, dynamic> data = _dataOf(body);
-    final dynamic list = data['members'] ?? data['users'] ?? data['participants'];
+    final dynamic list =
+        data['members'] ?? data['users'] ?? data['participants'];
     if (list is! List) return const <ListenTogetherMember>[];
     final List<ListenTogetherMember> members = <ListenTogetherMember>[];
-    for (final item in list.whereType<Map<String, dynamic>>()) {
+    for (final item in list.take(_maxQueue).whereType<Map<String, dynamic>>()) {
       final dynamic rawId = item['userId'] ?? item['uid'];
       if (rawId == null) continue;
       members.add(

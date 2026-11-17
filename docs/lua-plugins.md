@@ -125,7 +125,74 @@ end
 | `host.player_lyrics()` / `host.player_recent()` | 查询当前歌词和最近播放歌曲；最近播放需要 `history` 隐私权限 |
 | `host.permissions()` / `host.request_permission(scope)` | 查看本插件声明/已获准的数据权限，或主动请求一个权限；未声明的权限返回 `false` |
 | `host.library(spec)` / `host.search(spec)` | 在 `library` 权限下读取歌单、指定歌单/专辑曲目、本地音乐、搜索及按目录 ID 播放 |
+| `host.native(spec)` | 受限原生宿主能力：支持表、音频诊断、设备摘要和桌面歌词设置，见下节 |
 | `host.user(spec)` | 在 `profile` / `history` 权限下读取平台与账号基本资料或本机收听统计 |
+
+### 受限原生宿主能力
+
+`host.info().features` 中的 `native_host_v1` 表示宿主实现以下协议。它不表示当前
+平台具备所有能力。`host.native()` 等价于 `{operation="capabilities"}`，无需权限，
+返回 `{ok=true, supported=true, version=1, platform="windows", operations={...},
+desktopLyrics=true}`。`operations` 的键是下表中的操作，各值包含 `supported` 和
+所需 `permission`。支持状态可能随引擎改变，每次使用前应重新查询。
+
+| operation | permission | 结果 `data` |
+| --- | --- | --- |
+| `audio.status` | `native_audio` | `engine="lazer-audio"`、`streamOpen`、`source`、`output`、`metrics` |
+| `audio.devices` | `native_audio` | `snapshot="cached-catalog"`、`busy`、`total`、`truncated`、`items` |
+| `lyrics.status` | `native_control` | `scope="requested-settings"`、`mode`、`locked`、`lines`、`desktopSupported` |
+| `lyrics.configure` | `native_control` | 校验、应用后返回同 `lyrics.status`；只允许 `mode`、`locked`、`lines` |
+
+成功返回 `{ok=true, supported=true, data={...}}`。无原生引擎、无设备目录、浏览器
+或平台不支持时返回 `{ok=false, supported=false, error={code="..."}}`，不会伪造
+成功或自动启动原生引擎。未知操作也是 `unsupported_operation`。参数错误返回
+`invalid_argument`，原生快照读取失败返回 `snapshot_unavailable`，不会返回内部异常、
+动态库路径或设备 token。未声明、拒绝、撤销权限或插件失效仍抛出 Lua 错误，使用 `pcall`
+处理；`host.player_control({command="native_audio.status"})` 等原始入口受相同权限约束。
+
+`source` 包含 `codec`、`sampleRate`、`channels`、`bitsPerSample`、`formatKind`、
+`dsdRateMultiplier`、`lossless`。`output` 包含 `initialized`、同名格式字段、
+`containerBitsPerSample`、`isFloat`、`exclusive`、`dspActive`、`formatMatchesSource`、
+`bitPerfect`、`agreesWithEngine`。`bitPerfect` 从已初始化、独占、无 DSP、格式一致四个
+条件推导。`output.scope="engine-negotiated-not-dac-readback"`：结果不是 DAC 物理锁定
+读回，也不承诺系统混音器以外的行为。未打开流时 `source`/`output` 可为 `nil`。
+`metrics` 可为 `nil`，否则含 `ringFillFrames`、`ringCapacityFrames`、
+`ringLowWatermarkFrames`、`ringHighWatermarkFrames`、`underrunActive`、`underrunFrames`。
+
+设备结果只读取宿主现有目录，不扫描、不申请 USB 权限、不打开设备、不探测格式。
+最多返回 64 项，每项仅含临时 `index`、最多 256 字符的 `name`、`isDefault`、
+`isActive`、`isSelected`。`total` 与 `truncated` 明示截断；这些索引不可作为设备
+控制句柄。没有 FD、USB 路径、稳定硬件身份、流 URL、曲目路径或动态库路径。
+
+歌词 `mode` 只能是 `off` / `floating` / `desktop`，`locked` 必须为布尔值，
+`lines` 必须为 1–5 的整数，至少提供一项；其他参数均拒绝。完整校验通过后才修改。
+浮动歌词仅桌面平台支持，桌面附着仅 Windows 支持。状态是用户请求的设置，不是窗口
+已成功创建/附着的健康证明。所有改动只调用宿主已有设置入口，互斥与持久化规则与 UI
+一致；不开放窗口句柄、原生 method channel、任意 FFI、进程命令或文件操作。
+
+配置队列固定为一个执行项加一个等待项。新配置只替换尚未执行的等待项，旧等待项返回
+`{ok=false, supported=true, error={code="superseded"}}`；活动项的持久化不会提前完成。
+多字段修改按 `mode` → `locked` → `lines` 执行，每次等待之后重新验证权限与插件
+生命周期。撤销/停用不会回滚先前已授权的修改，但会阻止其余修改；重新授权不会复活旧调用。
+关闭宿主会释放等待项并阻止活动项的后续修改。不创建计时器、事件订阅、轮询任务或插件缓存。
+
+```lua
+local supported = host.native()
+if supported.operations["audio.status"].supported then
+  local success, result = pcall(host.native, {operation="audio.status"})
+  if success and result.ok then
+    -- Render result.data; do not treat the negotiated format as a DAC readback.
+  end
+end
+-- Invoke from a user action, not the plugin's installation/describe phase:
+local success, result = pcall(host.native, {
+  operation="lyrics.configure", mode="floating", locked=false, lines=3
+})
+```
+
+[完整示例](../examples/lua-native-diagnostics/README.md) 提供按需诊断页与歌词按钮，
+不注册轮询计时器；权限在首次用户操作时申请。独立前端若把这些操作转发给外部连接，
+仍须在自身桥接层验证调用者身份，并使用受限操作白名单。
 
 ### 独立前端与隐私资料
 
@@ -135,13 +202,15 @@ HTML、CSS、JavaScript 与 SVG，使用 `host.resource("frontend/index.html")` 
 它们是受包大小与路径限制的只读文本资源，宿主不会执行 JavaScript，也不会赋予宿主文件系统访问能力。
 Flutter 内的页面仍由宿主渲染；本版本没有任意 Widget 注入或替换整个应用进程的接口。
 
-隐私权限必须在 `permissions.data` 中声明，并在实际读取前由用户同意。三个权限互相独立：
+隐私权限必须在 `permissions.data` 中声明，并在实际读取前由用户同意。各项权限互相独立：
 
 | scope | 可读取的内容 |
 | --- | --- |
 | `library` | 当前资料库歌单、指定歌单/专辑曲目、本地音乐条目、音乐搜索；按宿主目录 ID 开始播放 |
 | `profile` | 已连接平台与能力、当前平台、账号原始 ID、昵称、头像 |
 | `history` | 最近播放，以及本机记录的播放次数、跳过次数和收听时长 |
+| `native_audio` | 原生音频格式、实际输出路径条件、缓冲/欠载指标和设备名称摘要 |
+| `native_control` | 桌面/悬浮歌词的启用、锁定、显示行数；包括读取这些设置 |
 
 声明并不等于授权。插件可先调用 `host.request_permission("library")`，用户拒绝时返回
 `false`；直接调用受保护的数据 API 时也会先触发授权申请，拒绝则抛出 Lua 错误，可用 `pcall` 处理。

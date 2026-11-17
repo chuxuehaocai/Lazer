@@ -280,6 +280,8 @@ endif()
 
 # Offline decode/render self test, built on demand with -DLAZER_AUDIO_BUILD_PROBE=ON.
 if(LAZER_AUDIO_BUILD_PROBE)
+    add_subdirectory(tools/alsa_route_probe)
+    add_subdirectory(tools/resource_policy_probe)
     # Exercise the complete native playback session without a physical endpoint. The test links the
     # Engine sources directly and supplies its own fake platform-output factory.
     add_executable(lazer-audio-engine-gapless-probe

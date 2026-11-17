@@ -1,4 +1,5 @@
 import '../utils/media_requests.dart';
+import 'audio_operation_queue.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -13,7 +14,7 @@ import 'audio_engine.dart';
 /// musical length) without requiring a Python runtime, model download, FFmpeg,
 /// or Rubber Band on the target device.
 class AutoMixTransitionPlanner {
-  const AutoMixTransitionPlanner({this.maximum = const Duration(seconds: 8)});
+  const AutoMixTransitionPlanner({this.maximum = const Duration(seconds: 5)});
 
   final Duration maximum;
 
@@ -74,7 +75,6 @@ class AutoMixAudioEngine
     _active = _primary;
     _watch(_primary);
     _watch(_secondary);
-    _clock = Timer.periodic(const Duration(milliseconds: 40), (_) => _tick());
   }
 
   static AudioPlayer _defaultPlayer() => AudioPlayer(
@@ -83,7 +83,7 @@ class AutoMixAudioEngine
     androidApplyAudioAttributes: false,
   );
 
-  late final AutoMixTransitionPlanner _planner;
+  late AutoMixTransitionPlanner _planner;
   final String? fallbackNotice;
   late final AudioPlayer _primary;
   late final AudioPlayer _secondary;
@@ -91,7 +91,7 @@ class AutoMixAudioEngine
   AudioPlayer? _incoming;
   final List<StreamSubscription<Object?>> _subscriptions =
       <StreamSubscription<Object?>>[];
-  late final Timer _clock;
+  Timer? _clock;
   final StreamController<void> _completed = StreamController<void>.broadcast();
   final StreamController<int> _advanced = StreamController<int>.broadcast();
   final StreamController<AudioFailure> _failures =
@@ -118,24 +118,37 @@ class AutoMixAudioEngine
   int _playGeneration = 0;
   int _queueId = 0;
   int _currentIndex = 0;
+  int _queueBaseIndex = 0;
   List<String> _queueUrls = <String>[];
   String? _activeUrl;
   double _volume = 1;
-  Future<void> _operations = Future<void>.value();
+  final AudioOperationQueue _operationQueue = AudioOperationQueue();
+  Future<void> get _operations => _operationQueue.idle;
 
   bool get enabled => _enabled;
 
   Future<void> setEnabled(bool value) => setAutoMixEnabled(value);
 
   @override
-  Future<void> setAutoMixEnabled(bool value) {
+  Future<void> setAutoMixEnabled(bool value, {Duration? duration}) {
     _enabled = value;
-    return _serialize(() async {
-      if (_disposed) return;
-      // Keep the prepared successor: AppState still owns its queue index.
-      // Turning off overlap must not discard an already accepted append.
-      if (!_enabled) await _resetOverlap();
-    });
+    if (duration != null) {
+      _planner = AutoMixTransitionPlanner(
+        maximum: Duration(
+          milliseconds: duration.inMilliseconds.clamp(1000, 13000),
+        ),
+      );
+    }
+    return _serialize(
+      () async {
+        if (_disposed) return;
+        // Keep the prepared successor: AppState still owns its queue index.
+        // Turning off overlap must not discard an already accepted append.
+        if (!_enabled) await _resetOverlap();
+      },
+      key: 'mix-settings',
+      onSuperseded: () {},
+    );
   }
 
   void _watch(AudioPlayer player) {
@@ -151,14 +164,17 @@ class AutoMixAudioEngine
     );
   }
 
-  Future<T> _serialize<T>(Future<T> Function() operation) {
-    final Future<T> result = _operations.then((_) => operation());
-    _operations = result.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace _) {},
-    );
-    return result;
-  }
+  Future<T> _serialize<T>(
+    Future<T> Function() operation, {
+    Object? key,
+    T Function()? onSuperseded,
+    bool essential = false,
+  }) => _operationQueue.run(
+    operation,
+    key: key,
+    onSuperseded: onSuperseded ?? () => (T == bool ? false : null) as T,
+    essential: essential,
+  );
 
   Future<void> _load(AudioPlayer player, String url) async {
     final Uri uri = Uri.parse(url);
@@ -234,26 +250,35 @@ class AutoMixAudioEngine
     final int id = ++_queueId;
     _sourceLoaded = false;
     _playing = false;
-    return _serialize(() async {
-      if (_disposed || generation != _generation) return id;
-      _transitioning = false;
-      _presentedIncoming = false;
-      _activeCompleted = false;
-      _incoming = null;
-      _activeUrl = null;
-      _queueUrls = List<String>.of(urls);
-      await Future.wait(<Future<void>>[_primary.stop(), _secondary.stop()]);
-      if (_disposed || generation != _generation || urls.isEmpty) return id;
-      _active = _primary;
-      _currentIndex = startIndex.clamp(0, urls.length - 1).toInt();
-      await _load(_active, urls[_currentIndex]);
-      if (_disposed || generation != _generation) return id;
-      _activeUrl = urls[_currentIndex];
-      _sourceLoaded = true;
-      await _active.setVolume(_volume);
-      if (_currentIndex + 1 < _queueUrls.length) await _prepareNext(generation);
-      return id;
-    });
+    _updateClock();
+    return _serialize(
+      () async {
+        if (_disposed || generation != _generation) return id;
+        _transitioning = false;
+        _presentedIncoming = false;
+        _activeCompleted = false;
+        _incoming = null;
+        _activeUrl = null;
+        _queueBaseIndex = 0;
+        _queueUrls = List<String>.of(urls);
+        await Future.wait(<Future<void>>[_primary.stop(), _secondary.stop()]);
+        if (_disposed || generation != _generation || urls.isEmpty) return id;
+        _active = _primary;
+        _currentIndex = startIndex.clamp(0, urls.length - 1).toInt();
+        await _load(_active, urls[_currentIndex]);
+        if (_disposed || generation != _generation) return id;
+        _activeUrl = urls[_currentIndex];
+        _sourceLoaded = true;
+        await _active.setVolume(_volume);
+        if (_currentIndex + 1 < _queueUrls.length) {
+          await _prepareNext(generation);
+        }
+        return id;
+      },
+      key: 'source',
+      onSuperseded: () => id,
+      essential: true,
+    );
   }
 
   Future<bool> _prepareNext(int generation) async {
@@ -269,6 +294,7 @@ class AutoMixAudioEngine
       await _load(target, _queueUrls[_currentIndex + 1]);
       if (_disposed || generation != _generation) return false;
       _incoming = target;
+      _updateClock();
       return true;
     } catch (_) {
       // Preparing a successor is speculative. Its failure must not report a
@@ -310,6 +336,31 @@ class AutoMixAudioEngine
   }
 
   @override
+  Future<bool> clearQueued(int queueId) {
+    final int generation = _generation;
+    return _serialize(() async {
+      if (_disposed ||
+          generation != _generation ||
+          queueId != _queueId ||
+          !_sourceLoaded ||
+          _presentedIncoming) {
+        return false;
+      }
+      final AudioPlayer? incoming = _incoming;
+      _incoming = null;
+      _updateClock();
+      if (incoming != null) await incoming.stop();
+      if (_disposed || generation != _generation || queueId != _queueId) {
+        return false;
+      }
+      if (_queueUrls.length > _currentIndex + 1) {
+        _queueUrls.removeRange(_currentIndex + 1, _queueUrls.length);
+      }
+      return true;
+    });
+  }
+
+  @override
   Future<bool> playQueuedNext() {
     final int generation = _generation;
     return _serialize(() async {
@@ -339,12 +390,14 @@ class AutoMixAudioEngine
               if (player != _incoming || generation != _generation) return;
               _transitioning = false;
               _incoming = null;
+              _updateClock();
               await _active.setVolume(_volume);
               await player.stop();
             }),
           );
         } else if (player == _active && _sourceLoaded) {
           _playing = false;
+          _updateClock();
           if (!_failures.isClosed) {
             _failures.add(
               AudioFailure('$error\n$stack', AudioFailureKind.unknown),
@@ -380,6 +433,7 @@ class AutoMixAudioEngine
       return;
     }
     _playing = true;
+    _updateClock();
     if (_activeCompleted) {
       await _serialize(() async {
         if (_disposed || generation != _generation || !_playing) return;
@@ -397,6 +451,7 @@ class AutoMixAudioEngine
   Future<void> pause() async {
     ++_playGeneration;
     _playing = false;
+    _updateClock();
     await Future.wait(<Future<void>>[_primary.pause(), _secondary.pause()]);
   }
 
@@ -421,18 +476,23 @@ class AutoMixAudioEngine
   @override
   Future<void> seek(Duration value) {
     final int generation = _generation;
-    return _serialize(() async {
-      if (_disposed || generation != _generation) return;
-      await _resetOverlap();
-      await _active.seek(value);
-      if (_disposed || generation != _generation) return;
-      // Completion keeps the decoder/source prepared for repeat-one. A seek
-      // revives that source; stop clears its URL and must stay stopped.
-      if (_activeUrl != null) {
-        _sourceLoaded = true;
-        _activeCompleted = false;
-      }
-    });
+    return _serialize(
+      () async {
+        if (_disposed || generation != _generation) return;
+        await _resetOverlap();
+        await _active.seek(value);
+        if (_disposed || generation != _generation) return;
+        // Completion keeps the decoder/source prepared for repeat-one. A seek
+        // revives that source; stop clears its URL and must stay stopped.
+        if (_activeUrl != null) {
+          _sourceLoaded = true;
+          _activeCompleted = false;
+        }
+      },
+      key: 'seek',
+      onSuperseded: () {},
+      essential: false,
+    );
   }
 
   double get _transitionProgress {
@@ -479,7 +539,7 @@ class AutoMixAudioEngine
   @override
   Future<void> setVolume(double volume) {
     _volume = volume.clamp(0, 1).toDouble();
-    return _serialize(_applyGains);
+    return _serialize(_applyGains, key: 'volume', onSuperseded: () {});
   }
 
   @override
@@ -493,9 +553,15 @@ class AutoMixAudioEngine
     _incoming = null;
     _activeUrl = null;
     _queueUrls = <String>[];
-    return _serialize(() async {
-      await Future.wait(<Future<void>>[_primary.stop(), _secondary.stop()]);
-    });
+    _updateClock();
+    return _serialize(
+      () async {
+        await Future.wait(<Future<void>>[_primary.stop(), _secondary.stop()]);
+      },
+      key: 'source',
+      onSuperseded: () {},
+      essential: true,
+    );
   }
 
   void _completedPlayer(AudioPlayer player) {
@@ -521,6 +587,7 @@ class AutoMixAudioEngine
     } else {
       _sourceLoaded = false;
       _playing = false;
+      _updateClock();
       if (!_completed.isClosed) _completed.add(null);
     }
   }
@@ -535,6 +602,20 @@ class AutoMixAudioEngine
   /// outgoing tail hides that in the hand-off itself, which is the difference
   /// between "tracks change" and an album that plays as one piece.
   static const Duration seamOverlap = Duration(milliseconds: 200);
+
+  // Paused playback and a decoder with no successor have no transition work.
+  // Keep the 25 Hz clock alive only while a hand-off can actually happen.
+  void _updateClock() {
+    if (!_disposed && _sourceLoaded && _playing && _incoming != null) {
+      _clock ??= Timer.periodic(
+        const Duration(milliseconds: 40),
+        (_) => _tick(),
+      );
+    } else {
+      _clock?.cancel();
+      _clock = null;
+    }
+  }
 
   void _tick() {
     if (_disposed ||
@@ -631,6 +712,7 @@ class AutoMixAudioEngine
       return;
     }
     _incoming = null;
+    _updateClock();
     _transitioning = false;
     _activeCompleted = false;
     _active = incoming;
@@ -644,9 +726,14 @@ class AutoMixAudioEngine
     // All getters now refer to the incoming track before the index event, so
     // listeners read its real position instead of resetting a running track.
     if (automatic && !announced && !_advanced.isClosed) {
-      _advanced.add(_currentIndex);
+      _advanced.add(_currentIndex + _queueBaseIndex);
     }
     if (!_bufferChanges.isClosed) _bufferChanges.add(null);
+    if (_currentIndex > 0) {
+      _queueUrls.removeRange(0, _currentIndex);
+      _queueBaseIndex += _currentIndex;
+      _currentIndex = 0;
+    }
     await outgoing.stop();
     if (_currentIndex + 1 < _queueUrls.length) await _prepareNext(generation);
   }
@@ -660,17 +747,19 @@ class AutoMixAudioEngine
     _presentedIncoming = true;
     _currentIndex++;
     _activeUrl = _queueUrls[_currentIndex];
-    if (!_advanced.isClosed) _advanced.add(_currentIndex);
+    if (!_advanced.isClosed) _advanced.add(_currentIndex + _queueBaseIndex);
   }
 
   @override
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _operationQueue.cancelPending();
     ++_generation;
     ++_playGeneration;
     _sourceLoaded = false;
-    _clock.cancel();
+    _clock?.cancel();
+    _clock = null;
     for (final StreamSubscription<Object?> subscription in _subscriptions) {
       unawaited(subscription.cancel());
     }

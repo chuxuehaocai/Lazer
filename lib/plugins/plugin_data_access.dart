@@ -47,6 +47,8 @@ class PluginDataAccess {
     'library_play' ||
     'library_album' ||
     'library_local' => 'library',
+    'native_audio.status' || 'native_audio.devices' => 'native_audio',
+    'native_lyrics.status' || 'native_lyrics.configure' => 'native_control',
     'user_profile' || 'user_platforms' => 'profile',
     'user_statistics' ||
     'recent' ||
@@ -177,6 +179,10 @@ end
 host.user = function(spec)
   spec = spec or {}
   return frontend_call("user_" .. (spec.operation or "profile"), spec)
+end
+host.native = function(spec)
+  spec = spec or {}
+  return frontend_call("native_" .. (spec.operation or "capabilities"), spec)
 end
 host.search = function(spec) return frontend_call("library_search", spec) end
 ''';

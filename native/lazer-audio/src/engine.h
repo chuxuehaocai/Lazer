@@ -39,7 +39,7 @@ public:
         const LazerAudioOpenParams &params);
     int32_t queueReader(uint64_t queueGeneration, const LazerAudioReader &reader,
         const LazerAudioOpenParams &params);
-    int32_t clearQueuedReader(uint64_t queueGeneration);
+    int32_t clearQueuedReader(uint64_t queueGeneration, bool preserveAudible = false);
     int32_t play();
     int32_t pause();
     int32_t stop();
@@ -74,6 +74,7 @@ private:
     /* Feeds the first seconds of the active source into its beat grid. */
     void captureBeatGridLocked(const float *samples, int32_t frames, size_t channels);
     void renderLoop();
+    void releasePipelineBuffers();
     /* Consumes the incoming source's silent intro from its prefetch buffer and returns the frames
      * it skipped, so the overlap starts on music instead of dead air. */
     int64_t consumeIncomingSilence(SourceSlot &candidate, int32_t sampleRate, size_t channels);

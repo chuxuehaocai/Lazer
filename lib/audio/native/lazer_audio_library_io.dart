@@ -153,6 +153,18 @@ class LazerAudioApi {
 
   bool get supportsAndroidUsb => _androidUsbBackendVersion?.call() == 1;
 
+  /// Optional: older imported libraries cannot safely cancel an audible mix.
+  late final int Function(Pointer<Void>, int)? clearUnheardQueuedReader = () {
+    try {
+      return _library.lookupFunction<
+        Int32 Function(Pointer<Void>, Uint64),
+        int Function(Pointer<Void>, int)
+      >('lazer_audio_clear_unheard_queued_reader');
+    } catch (_) {
+      return null;
+    }
+  }();
+
   late final int Function(Pointer<Void>) play = _library
       .lookupFunction<
         Int32 Function(Pointer<Void>),

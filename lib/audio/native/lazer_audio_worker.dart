@@ -207,24 +207,42 @@ class LazerAudioWorker {
     this._replies,
     this._sendPort,
     this._pending,
+    this._exited,
   );
 
   final Isolate _isolate;
   final ReceivePort _replies;
   final SendPort _sendPort;
   final Map<int, Completer<Object?>> _pending;
+  final Completer<void> _exited;
+  Future<void>? _closing;
   int _nextId = 1;
   bool _closed = false;
+  static const maximumPending = 256;
+  static const _teardownReserve = 2;
+
+  Future<void> get exited => _exited.future;
 
   /// Spawns the worker and waits until it has the engine library loaded.
   ///
   /// Throws when the library cannot be loaded inside the isolate, so the caller
   /// can fall back to the platform engine instead of failing playback later.
-  static Future<LazerAudioWorker> spawn() async {
+  static Future<LazerAudioWorker> spawn() => _spawn(_workerMain);
+
+  /// Runs the same RPC/exit protocol against a Dart fixture without loading a DAC.
+  static Future<LazerAudioWorker> spawnForTesting(
+    void Function(SendPort) entry,
+  ) => _spawn((start) => entry(start.replies));
+
+  static Future<LazerAudioWorker> _spawn(
+    void Function(_WorkerStart) entry,
+  ) async {
     final ReceivePort replies = ReceivePort();
     final Completer<SendPort> ready = Completer<SendPort>();
     final Completer<String> startupFailure = Completer<String>();
     final Map<int, Completer<Object?>> pending = <int, Completer<Object?>>{};
+    final exited = Completer<void>();
+    LazerAudioWorker? worker;
 
     void failPending(String reason) {
       for (final Completer<Object?> completer in pending.values) {
@@ -236,7 +254,7 @@ class LazerAudioWorker {
     }
 
     final Isolate isolate = await Isolate.spawn<_WorkerStart>(
-      _workerMain,
+      entry,
       _WorkerStart(replies.sendPort, LazerAudioLoader.importedLibraryPath),
       debugName: 'lazer-audio-worker',
       onError: replies.sendPort,
@@ -244,6 +262,15 @@ class LazerAudioWorker {
     );
 
     replies.listen((Object? message) {
+      if (message == null) {
+        worker?._closed = true;
+        failPending('the audio worker exited');
+        if (!ready.isCompleted && !startupFailure.isCompleted) {
+          startupFailure.complete('the audio worker exited before startup');
+        }
+        if (!exited.isCompleted) exited.complete();
+        return;
+      }
       if (message is SendPort) {
         if (!ready.isCompleted) ready.complete(message);
         return;
@@ -277,7 +304,13 @@ class LazerAudioWorker {
           ),
         ),
       ]);
-      return LazerAudioWorker._(isolate, replies, sendPort, pending);
+      return worker = LazerAudioWorker._(
+        isolate,
+        replies,
+        sendPort,
+        pending,
+        exited,
+      );
     } catch (_) {
       isolate.kill(priority: Isolate.immediate);
       replies.close();
@@ -291,6 +324,12 @@ class LazerAudioWorker {
   Future<Object?> call(int op, List<Object?> params) {
     if (_closed) {
       return Future<Object?>.error(StateError('the audio worker is closed'));
+    }
+    final teardown = op == LazerWorkerOp.stop || op == LazerWorkerOp.destroy;
+    if (_pending.length >= maximumPending + (teardown ? _teardownReserve : 0)) {
+      return Future.error(
+        const LazerWorkerNotSubmitted('the audio worker queue is full'),
+      );
     }
     final int id = _nextId++;
     final Completer<Object?> completer = Completer<Object?>();
@@ -325,8 +364,9 @@ class LazerAudioWorker {
   }
 
   /// Stops the isolate; in-flight calls fail with a `StateError`.
-  Future<void> close() async {
-    if (_closed) return;
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
     _closed = true;
     for (final Completer<Object?> completer in _pending.values) {
       if (!completer.isCompleted) {
@@ -335,8 +375,26 @@ class LazerAudioWorker {
     }
     _pending.clear();
     _isolate.kill(priority: Isolate.beforeNextEvent);
-    _replies.close();
+    try {
+      await exited.timeout(const Duration(seconds: 5));
+    } finally {
+      // A timeout is not an exit confirmation. Keep receiving the eventual exit
+      // so an owner never mistakes a kill request for an acknowledged teardown.
+      if (_exited.isCompleted) {
+        _replies.close();
+      } else {
+        unawaited(exited.then((_) => _replies.close()));
+      }
+    }
   }
+}
+
+/// Rejected before send: this failure cannot change native ownership.
+class LazerWorkerNotSubmitted implements Exception {
+  const LazerWorkerNotSubmitted(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }
 
 /// Startup payload: where the worker sends replies and its readiness signal.
@@ -394,7 +452,12 @@ Object? _execute(LazerAudioApi api, int op, List<Object?> params) {
     case LazerWorkerOp.queueReader:
       return _queueReader(api, params);
     case LazerWorkerOp.clearQueuedReader:
-      return api.clearQueuedReader(
+      final bool preserveAudible = params.length > 2 && params[2] == true;
+      final clear = preserveAudible
+          ? api.clearUnheardQueuedReader
+          : api.clearQueuedReader;
+      if (clear == null) return lazerAudioErrorUnsupported;
+      return clear(
         Pointer<Void>.fromAddress(params[0] as int),
         params[1] as int,
       );

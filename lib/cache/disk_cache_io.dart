@@ -27,6 +27,7 @@ class DiskCache {
   final _maintenance = <CacheBucket, Future<void>>{};
   final _pruneRequested = <CacheBucket, Uri>{};
   final Map<String, Future<void>> _jsonOperations = <String, Future<void>>{};
+  final Set<Future<void>> _fileOperations = {};
   int _serial = 0;
   final Set<Uri> _retainedFiles = <Uri>{};
 
@@ -62,7 +63,9 @@ class DiskCache {
     CacheBucket bucket,
     String key, {
     String extension = 'bin',
-  }) async {
+  }) => _trackFileOperation(_find(bucket, key, extension));
+
+  Future<File?> _find(CacheBucket bucket, String key, String extension) async {
     try {
       final file = await _path(bucket, key, extension);
       if (file == null || !await file.exists() || await file.length() == 0) {
@@ -83,7 +86,19 @@ class DiskCache {
     if (bucket == CacheBucket.data && extension == 'json') {
       return _jsonOperation(key, () => _remove(bucket, key, extension));
     }
-    return _remove(bucket, key, extension);
+    return _trackFileOperation(_remove(bucket, key, extension));
+  }
+
+  Future<T> _trackFileOperation<T>(Future<T> operation) {
+    final completion = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace stack) {},
+    );
+    _fileOperations.add(completion);
+    unawaited(
+      completion.whenComplete(() => _fileOperations.remove(completion)),
+    );
+    return operation;
   }
 
   Future<void> _remove(CacheBucket bucket, String key, String extension) async {
@@ -241,11 +256,23 @@ class DiskCache {
     } catch (_) {}
   }
 
-  /// Waits for queued LRU maintenance. Tests and shutdown paths only; normal
-  /// callers must not block on a bucket scan.
+  /// Joins registered writes, JSON operations, file access and their maintenance
+  /// until idle. Owners must join upstream background jobs before calling this;
+  /// no cache can anticipate new requests submitted after it becomes idle.
+  /// Tests and shutdown paths only; playback must not wait for bucket scans.
   Future<void> settle() async {
-    while (_maintenance.isNotEmpty) {
-      await Future.wait(_maintenance.values.toList());
+    while (_writes.isNotEmpty ||
+        _jsonOperations.isNotEmpty ||
+        _fileOperations.isNotEmpty ||
+        _maintenance.isNotEmpty) {
+      // A write may schedule pruning or a JSON callback may submit a put while
+      // this snapshot is awaited. Recheck all lanes instead of a one-time join.
+      await Future.wait<void>([
+        for (final writing in _writes.values) writing.then<void>((_) {}),
+        ..._jsonOperations.values,
+        ..._fileOperations,
+        ..._maintenance.values,
+      ]);
     }
   }
 

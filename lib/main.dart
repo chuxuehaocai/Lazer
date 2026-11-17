@@ -478,6 +478,16 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
   ) {
     final manifest = plugin.manifest;
     switch (permission) {
+      case 'data.native_audio':
+        return (
+          context.tr('允许插件读取原生音频诊断？'),
+          context.tr('插件「{name}」请求读取音频格式、输出路径、缓冲指标和设备名称；不会获得文件路径、设备句柄或修改音频设备。').replaceAll('{name}', manifest.name),
+        );
+      case 'data.native_control':
+        return (
+          context.tr('允许插件控制桌面歌词？'),
+          context.tr('插件「{name}」请求读取和修改悬浮歌词、桌面歌词的启用状态、锁定状态和显示行数。可在插件详情中随时撤销。').replaceAll('{name}', manifest.name),
+        );
       case 'data.library':
         return (
           context.tr('允许插件读取音乐库？'),

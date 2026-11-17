@@ -29,6 +29,14 @@ class LyricEdgeFade extends StatelessWidget {
     final length = vertical ? bounds.height : bounds.width;
     final extent = vertical ? verticalExtent : horizontalExtent;
     final fraction = length <= 0 ? 0.0 : math.min(0.24, extent / length);
+    if (fraction <= 0.001) {
+      return ui.Gradient.linear(
+        vertical ? bounds.topCenter : bounds.centerLeft,
+        vertical ? bounds.bottomCenter : bounds.centerRight,
+        const [ui.Color(0xFFFFFFFF), ui.Color(0xFFFFFFFF)],
+        const [0.0, 1.0],
+      );
+    }
     // Smoothstep samples avoid a visible change in slope where the fade begins.
     const levels = [0, 11, 40, 81, 128, 174, 215, 244, 255];
     final colors = [
@@ -38,9 +46,9 @@ class LyricEdgeFade extends StatelessWidget {
     ];
     final stops = [
       for (var i = 0; i < levels.length; i++)
-        fraction * i / (levels.length - 1),
+        (fraction * i / (levels.length - 1)).clamp(0.0, 1.0),
       for (var i = 0; i < levels.length; i++)
-        1 - fraction + fraction * i / (levels.length - 1),
+        (1 - fraction + fraction * i / (levels.length - 1)).clamp(0.0, 1.0),
     ];
     return ui.Gradient.linear(
       vertical ? bounds.topCenter : bounds.centerLeft,

@@ -783,6 +783,7 @@ class _WebPluginHost {
       'frontend_library',
       'frontend_user',
       'data_permissions',
+      'native_host_v1',
       'websocket',
       'sleep',
       'pages',

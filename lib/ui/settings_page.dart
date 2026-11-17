@@ -36,6 +36,7 @@ import '../widgets/hifi_settings_section.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/settings_choice.dart';
 import '../widgets/settings_row.dart';
+import '../widgets/text_input_dialog.dart';
 import '../tv/tv_mode.dart';
 import '../tv/lan_remote.dart';
 import '../updates/open_external.dart';
@@ -879,6 +880,22 @@ class _SettingsOverview extends StatelessWidget {
                             },
                           ),
                         ),
+                        if (state.trackTransition == TrackTransition.autoMix)
+                          _AppSliderRow(
+                            key: const ValueKey('automix-duration-slider'),
+                            label: '混音重叠时长',
+                            valueText: '${state.autoMixDurationSeconds} 秒',
+                            subtitle: '上一首与下一首在切歌时共同播放交叠的时长',
+                            value: state.autoMixDurationSeconds.toDouble(),
+                            min: AppState.minAutoMixDurationSeconds.toDouble(),
+                            max: AppState.maxAutoMixDurationSeconds.toDouble(),
+                            divisions:
+                                AppState.maxAutoMixDurationSeconds -
+                                AppState.minAutoMixDurationSeconds,
+                            onChanged: (double value) => unawaited(
+                              state.setAutoMixDurationSeconds(value.round()),
+                            ),
+                          ),
                         AppleListTile(
                           padding: SettingsSpacing.rowPadding,
                           minHeight: SettingsSpacing.rowMinHeight,
@@ -1660,29 +1677,14 @@ Future<void> _copySessionCookie(BuildContext context, AppState state) async {
 }
 
 Future<void> _editDiscordRpc(BuildContext context, AppState state) async {
-  final controller = TextEditingController(text: state.discordClientId);
   final value = await showAppleDialog<String>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const TrText('Discord 应用 ID'),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        decoration: const InputDecoration(hintText: 'Client ID'),
-      ),
-      actions: [
-        SpringTextButton(
-          onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const TrText('取消'),
-        ),
-        SpringFilledButton(
-          onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-          child: const TrText('保存'),
-        ),
-      ],
+    builder: (_) => AppTextInputDialog(
+      title: context.tr('Discord 应用 ID'),
+      initialValue: state.discordClientId,
+      hintText: 'Client ID',
     ),
   );
-  controller.dispose();
   if (!context.mounted || value == null) return;
   await state.setDiscordClientId(value);
 }

@@ -1,0 +1,9 @@
+{
+  "id": "example.native-diagnostics",
+  "name": "Native audio diagnostics",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "provider": "native_diagnostics",
+  "description": "On-demand audio snapshots and safe desktop lyrics controls.",
+  "permissions": {"data": ["native_audio", "native_control"]}
+}

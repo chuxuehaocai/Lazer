@@ -47,7 +47,7 @@ class PluginManifest {
         apiVersion != 1 ||
         !safePath(entry) ||
         !entry.endsWith('.lua') ||
-        dataPermissions.length > 3 ||
+        dataPermissions.length > dataScopes.length ||
         dataPermissions.toSet().length != dataPermissions.length ||
         dataPermissions.any((scope) => !dataScopes.contains(scope)) ||
         domains.length > 32 ||
@@ -130,7 +130,13 @@ class PluginManifest {
   final List<String> socketServerBindings, websocketServerBindings;
   final bool storage, filesystem;
   final List<String> dataPermissions;
-  static const Set<String> dataScopes = {'library', 'profile', 'history'};
+  static const Set<String> dataScopes = {
+    'library',
+    'profile',
+    'history',
+    'native_audio',
+    'native_control',
+  };
 
   static bool safePath(String path) =>
       path.isNotEmpty &&
