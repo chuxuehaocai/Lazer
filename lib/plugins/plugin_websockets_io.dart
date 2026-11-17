@@ -21,6 +21,10 @@ class PluginWebSockets {
     final operation = spec['operation'] as String? ?? 'open';
     final id = _id(spec);
     if (operation == 'open') {
+      final uri = Uri.parse(spec['url'] as String);
+      if (!manifest.permitsWebSocket(uri)) {
+        throw const FormatException('WebSocket permission denied');
+      }
       if (!clientGranted) {
         if (permissionRequester != null &&
             await permissionRequester!('websocket')) {
@@ -28,10 +32,6 @@ class PluginWebSockets {
         } else {
           throw const FormatException('WebSocket permission required');
         }
-      }
-      final uri = Uri.parse(spec['url'] as String);
-      if (!manifest.permitsWebSocket(uri)) {
-        throw const FormatException('WebSocket permission denied');
       }
       if (!_clients.containsKey(id) && _clients.length >= 16) {
         throw const FormatException('Too many WebSocket connections');
@@ -64,6 +64,12 @@ class PluginWebSockets {
     final operation = spec['operation'] as String? ?? 'listen';
     final id = _id(spec);
     if (operation == 'listen') {
+      final host = spec['host'] as String? ?? '127.0.0.1';
+      final port = (spec['port'] as num?)?.toInt() ?? 0;
+      final path = spec['path'] as String?;
+      if (!manifest.permitsWebSocketServer(host, port)) {
+        throw const FormatException('WebSocket server permission denied');
+      }
       if (!serverGranted) {
         if (permissionRequester != null &&
             await permissionRequester!('websocketServer')) {
@@ -71,12 +77,6 @@ class PluginWebSockets {
         } else {
           throw const FormatException('WebSocket server permission required');
         }
-      }
-      final host = spec['host'] as String? ?? '127.0.0.1';
-      final port = (spec['port'] as num?)?.toInt() ?? 0;
-      final path = spec['path'] as String?;
-      if (!manifest.permitsWebSocketServer(host, port)) {
-        throw const FormatException('WebSocket server permission denied');
       }
       if (!_servers.containsKey(id) && _servers.length >= 4) {
         throw const FormatException('Too many WebSocket servers');

@@ -43,7 +43,7 @@ class LuaPluginRuntime {
     this.onPlayerMenuItemAdded,
     this.onPlayerControl,
     this.onLog,
-  }) : networkGranted = networkGranted ?? httpHandler != null;
+  }) : networkGranted = networkGranted ?? false;
 
   final PluginManifest manifest;
   final Map<String, String> sources;
@@ -52,6 +52,9 @@ class LuaPluginRuntime {
   final Map<String, String> resources;
   final String dataDirectory;
   final Duration timeout;
+
+  /// Optional transport for deterministic HTTP integration tests. The
+  /// presence of this callback does not grant network permission.
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
   final bool networkGranted;
@@ -454,6 +457,10 @@ class _WebPluginHost {
       final operation = spec['operation'] as String? ?? 'open';
       final id = spec['id'] as String? ?? 'default';
       if (operation == 'open') {
+        final uri = Uri.parse(spec['url'] as String);
+        if (!manifest.permitsWebSocket(uri)) {
+          throw const FormatException('WebSocket permission denied');
+        }
         if (!websocketGranted) {
           if (permissionRequester != null &&
               await permissionRequester!('websocket')) {
@@ -461,10 +468,6 @@ class _WebPluginHost {
           } else {
             throw const FormatException('WebSocket permission required');
           }
-        }
-        final uri = Uri.parse(spec['url'] as String);
-        if (!manifest.permitsWebSocket(uri)) {
-          throw const FormatException('WebSocket permission denied');
         }
         if (!_websockets.containsKey(id) && _websockets.length >= 16) {
           throw const FormatException('Too many WebSocket connections');

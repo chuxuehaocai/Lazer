@@ -51,6 +51,7 @@ void main() {
       ''',
         },
         dataDirectory: directory.path,
+        networkGranted: true,
         httpHandler: (spec) async {
           final path = Uri.parse(spec['url'] as String).path;
           requests.add(path);

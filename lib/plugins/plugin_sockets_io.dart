@@ -24,6 +24,11 @@ class PluginSockets {
     final operation = spec['operation'] as String? ?? 'connect';
     final id = _id(spec);
     if (operation == 'connect' || operation == 'open') {
+      final host = spec['host'] as String? ?? '127.0.0.1';
+      final port = (spec['port'] as num?)?.toInt() ?? 0;
+      if (!manifest.permitsSocket(host, port)) {
+        throw const FormatException('Socket permission denied');
+      }
       if (!clientGranted) {
         if (permissionRequester != null &&
             await permissionRequester!('socket')) {
@@ -31,11 +36,6 @@ class PluginSockets {
         } else {
           throw const FormatException('Socket permission required');
         }
-      }
-      final host = spec['host'] as String? ?? '127.0.0.1';
-      final port = (spec['port'] as num?)?.toInt() ?? 0;
-      if (!manifest.permitsSocket(host, port)) {
-        throw const FormatException('Socket permission denied');
       }
       if (!_clients.containsKey(id) && _clients.length >= 16) {
         throw const FormatException('Too many Socket connections');
@@ -68,6 +68,11 @@ class PluginSockets {
     final operation = spec['operation'] as String? ?? 'listen';
     final id = _id(spec);
     if (operation == 'listen' || operation == 'bind') {
+      final host = spec['host'] as String? ?? '127.0.0.1';
+      final port = (spec['port'] as num?)?.toInt() ?? 0;
+      if (!manifest.permitsSocketServer(host, port)) {
+        throw const FormatException('Socket server permission denied');
+      }
       if (!serverGranted) {
         if (permissionRequester != null &&
             await permissionRequester!('socketServer')) {
@@ -75,11 +80,6 @@ class PluginSockets {
         } else {
           throw const FormatException('Socket server permission required');
         }
-      }
-      final host = spec['host'] as String? ?? '127.0.0.1';
-      final port = (spec['port'] as num?)?.toInt() ?? 0;
-      if (!manifest.permitsSocketServer(host, port)) {
-        throw const FormatException('Socket server permission denied');
       }
       if (!_servers.containsKey(id) && _servers.length >= 4) {
         throw const FormatException('Too many Socket servers');

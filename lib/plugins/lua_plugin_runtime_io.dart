@@ -39,7 +39,7 @@ class LuaPluginRuntime {
     this.onPlayerMenuItemAdded,
     this.onPlayerControl,
     this.onLog,
-  }) : networkGranted = networkGranted ?? httpHandler != null;
+  }) : networkGranted = networkGranted ?? false;
   final PluginManifest manifest;
   final Map<String, String> sources;
 
@@ -49,7 +49,8 @@ class LuaPluginRuntime {
   final Duration timeout;
 
   /// Optional transport for deterministic HTTP integration tests. The worker
-  /// still validates every URL against the manifest before reaching it.
+  /// still validates every URL against the manifest before reaching it. The
+  /// presence of this callback does not grant network permission.
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   httpHandler;
   bool networkGranted;
