@@ -119,30 +119,33 @@ class LuaPluginRuntime {
       onLog: onLog,
       uiExtensions: (kind, spec) async {
         if (_closed) throw const FormatException('Plugin is closed');
+        // Resolve async branches here before the mixed sync/async switch is
+        // widened to Object?. The Web compiler can otherwise pass a Future
+        // through to the Lua value converter and release the VM lane early.
         return switch (kind) {
           'timer' => _scheduler.configure(spec),
           'setting' =>
             onSettingAdded == null
                 ? throw const FormatException('Plugin settings are unavailable')
-                : onSettingAdded!(spec),
+                : await onSettingAdded!(spec),
           'playerMenu' =>
             onPlayerMenuItemAdded == null
                 ? throw const FormatException(
                     'Plugin player menu is unavailable',
                   )
-                : onPlayerMenuItemAdded!(spec),
+                : await onPlayerMenuItemAdded!(spec),
           'page' =>
             onPageAdded == null
                 ? throw const FormatException('Plugin pages are unavailable')
-                : onPageAdded!(spec),
+                : await onPageAdded!(spec),
           'pageEdit' =>
             onPageEdited == null
                 ? throw const FormatException('Plugin pages are unavailable')
-                : onPageEdited!(spec),
+                : await onPageEdited!(spec),
           'playerControl' =>
             onPlayerControl == null
                 ? throw const FormatException('Player control is unavailable')
-                : onPlayerControl!(spec),
+                : await onPlayerControl!(spec),
           _ => throw const FormatException('Unknown plugin extension'),
         };
       },
