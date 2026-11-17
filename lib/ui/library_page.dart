@@ -9,6 +9,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../data/catalog.dart';
 import '../data/models.dart';
@@ -293,6 +294,18 @@ class AppLibraryPage extends StatelessWidget {
   }
 }
 
+/// The band at the top and the bottom of the page that moves the page itself.
+///
+/// A card held in it is carried past the rows that happen to be on screen: the
+/// grid slides under the pointer instead of the listener having to reach the
+/// next row by hand.
+const double _kEdgeBand = 96;
+
+/// How fast the page travels with the pointer on the very rim, in logical
+/// pixels per second. The band scales it away from the rim, so the first pixel
+/// into the band creeps and the edge itself moves.
+const double _kEdgeSpeed = 1200;
+
 /// A lazily built playlist grid: one sliver row per [columns] cards.
 ///
 /// A sliver list keeps the intrinsic card height (so text scaling never
@@ -302,9 +315,12 @@ class AppLibraryPage extends StatelessWidget {
 /// it onto the overlay; while the pointer is over another card the grid
 /// previews the order it would land in, so the cards make room before the
 /// listener lets go. The lift then settles into the slot it was dropped on —
-/// or back onto its own slot when it is released anywhere else. A mouse or
-/// stylus skips the hold: there is no scroll gesture to protect there, so the
-/// card follows the pointer as soon as it moves.
+/// or back onto its own slot when it is released anywhere else. Carrying the
+/// lift into the band at the top or the bottom of the page scrolls the grid
+/// under the pointer, so a playlist can be taken past the rows that are on
+/// screen without letting go of it. A mouse or stylus skips the hold: there is
+/// no scroll gesture to protect there, so the card follows the pointer as soon
+/// as it moves.
 class _PlaylistRowsSliver extends StatefulWidget {
   const _PlaylistRowsSliver({
     required this.playlists,
@@ -400,11 +416,32 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   /// act on those callbacks.
   bool _heldByLongPress = false;
 
+  /// The pointer's latest global position while a card is in the air.
+  ///
+  /// The rim scroll reads this rather than the movement events: a finger held
+  /// still against the edge of the page reports nothing at all, and that is
+  /// exactly when the grid has to keep travelling.
+  Offset? _heldAt;
+
+  /// The page the grid is laid out in, so the rim bands are measured against
+  /// the box the cards are seen through rather than the window.
+  ScrollableState? _page;
+
+  /// Walks the page along while [_heldAt] sits in a rim band.
+  Ticker? _edge;
+  Duration _edgeElapsed = Duration.zero;
+
   @override
   void initState() {
     super.initState();
     _settle.addListener(_settleTick);
     _reflow.addListener(_reflowTick);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _page = Scrollable.maybeOf(context);
   }
 
   @override
@@ -422,6 +459,8 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
   void dispose() {
     _proxy?.remove();
     _proxy = null;
+    _edge?.dispose();
+    _edge = null;
     _settle.dispose();
     _reflow.dispose();
     _lift.dispose();
@@ -623,6 +662,7 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
     if (box == null) return;
     _grab = grabAt - box.topLeft;
     _heldByLongPress = fromHold;
+    _heldAt = at;
     // The same tap-strength pulse a card gets when it is picked up anywhere
     // else in the app.
     final FeedbackCallback? feedback = InteractionFeedback.of(context);
@@ -644,12 +684,19 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
       builder: (BuildContext context) => _flightLayer(playlist, overlay),
     );
     overlay.insert(_proxy!);
+    _startEdgeScroll();
   }
 
   void _updateDrag(Offset globalPosition) {
+    _heldAt = globalPosition;
     final String? dragging = _dragging;
     final Rect? flight = _flight.value;
     if (dragging == null || flight == null) return;
+    if (_nearRim(globalPosition)) {
+      _startEdgeScroll();
+    } else {
+      _stopEdgeScroll();
+    }
     _flight.value = Rect.fromLTWH(
       globalPosition.dx - _grab.dx,
       globalPosition.dy - _grab.dy,
@@ -657,7 +704,7 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
       flight.height,
     );
     final List<String> base = _preview ?? _committed;
-    final int? at = _slotAt(globalPosition);
+    final int? at = _claimedSlot(globalPosition);
     if (at == null || at >= base.length) return;
     // Claim the pointed slot before removing the lifted card. Looking up the
     // neighbour afterwards shifts forward moves back by one, forcing the
@@ -675,6 +722,153 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
     _slide(travel);
   }
 
+  /// Starts the rim scroll, or leaves it running if it already is.
+  void _startEdgeScroll() {
+    final Ticker ticker = _edge ??= createTicker(_edgeStep);
+    if (ticker.isActive) return;
+    _edgeElapsed = Duration.zero;
+    ticker.start();
+  }
+
+  void _stopEdgeScroll() {
+    final Ticker? ticker = _edge;
+    if (ticker == null) return;
+    if (ticker.isActive) ticker.stop();
+    _edgeElapsed = Duration.zero;
+  }
+
+  /// Carries the page under a card that is being held against a rim.
+  ///
+  /// The pointer is not moving while this runs — it is parked at the edge —
+  /// so the travel cannot come from a gesture. The card keeps the position it
+  /// was last reported at, the page moves beneath it, and the slot under the
+  /// pointer is read again after the scroll has been laid out.
+  void _edgeStep(Duration elapsed) {
+    final Duration since = elapsed - _edgeElapsed;
+    _edgeElapsed = elapsed;
+    final Offset? held = _heldAt;
+    final ScrollPosition? position = _page?.position;
+    if (held == null || position == null || _dragging == null) {
+      _stopEdgeScroll();
+      return;
+    }
+    final double seconds = since.inMicroseconds / Duration.microsecondsPerSecond;
+    // A stalled frame is not a reason to leap: one step never covers more than
+    // a frame's worth of travel.
+    if (seconds <= 0 || seconds > .1) return;
+    final Rect? view = _pageRect();
+    if (view == null) {
+      _stopEdgeScroll();
+      return;
+    }
+    final double pull = _edgePull(view, held.dy);
+    if (pull == 0 || !_overColumns(held.dx)) {
+      // Back in the middle of the page — or off the columns — there is nothing
+      // to scroll, and no reason to keep asking for frames.
+      _stopEdgeScroll();
+      return;
+    }
+    final next = (position.pixels + _kEdgeSpeed * pull * pull.abs() * seconds)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if (next == position.pixels) return;
+    position.jumpTo(next);
+    // The jump only moves pixels; the cards keep their old global boxes until
+    // this frame has been laid out, so the slot under the finger has to be
+    // read again once it has been. The pointer did not move — the page did.
+    WidgetsBinding.instance.addPostFrameCallback((Duration _) {
+      final Offset? latest = _heldAt;
+      if (!mounted || _dragging == null || latest == null) return;
+      _updateDrag(latest);
+    });
+  }
+
+  /// The box the cards are seen through: what the rim bands are measured from.
+  Rect? _pageRect() {
+    final ScrollableState? page = _page;
+    if (page == null || !page.mounted) return null;
+    final RenderObject? object = page.context.findRenderObject();
+    if (object is! RenderBox || !object.hasSize) return null;
+    return object.localToGlobal(Offset.zero) & object.size;
+  }
+
+  /// How hard [y] pulls the page towards a rim: -1 on the top edge, +1 on the
+  /// bottom one, 0 anywhere in the middle.
+  double _edgePull(Rect view, double y) {
+    // A page shorter than two bands has no middle to return to, so half its
+    // height each is the most the bands may take.
+    final double band = math.min(_kEdgeBand, view.height / 2);
+    if (band <= 0) return 0;
+    final double top = view.top + band;
+    if (y < top) return ((y - top) / band).clamp(-1.0, 1.0);
+    final double bottom = view.bottom - band;
+    if (y > bottom) return ((y - bottom) / band).clamp(0.0, 1.0);
+    return 0;
+  }
+
+  /// Whether [globalPosition] is close enough to a rim for the grid to be
+  /// scrolling itself.
+  bool _nearRim(Offset globalPosition) {
+    final Rect? view = _pageRect();
+    if (view == null || _edgePull(view, globalPosition.dy) == 0) return false;
+    // Sideways off the columns the card has nowhere to land, and a page that
+    // kept scrolling would leave the placeholder it holds far behind.
+    return _overColumns(globalPosition.dx);
+  }
+
+  /// Whether [x] is in the columns of the grid, gutter included.
+  bool _overColumns(double x) {
+    double? left;
+    double? right;
+    for (final String id in _boxes.keys) {
+      final Rect? rect = _boxOf(id);
+      if (rect == null) continue;
+      left = left == null ? rect.left : math.min(left, rect.left);
+      right = right == null ? rect.right : math.max(right, rect.right);
+    }
+    if (left == null || right == null) return false;
+    return x >= left - widget.gap && x <= right + widget.gap;
+  }
+
+  /// The slot the pointer is claiming.
+  ///
+  /// A card under the pointer wins. Failing that — and only in the rim bands,
+  /// where the page chrome can sit between the rim and the first row while the
+  /// grid slides by underneath — the nearest slot in the pointer's own column
+  /// is claimed, so a playlist carried to the top of the list is not thrown
+  /// away by letting go over the header.
+  int? _claimedSlot(Offset globalPosition) {
+    final int? under = _slotAt(globalPosition);
+    if (under != null) return under;
+    if (!_nearRim(globalPosition)) return null;
+    return _nearestSlot(globalPosition);
+  }
+
+  /// The slot closest to [globalPosition] among the cards that share its
+  /// column, for a pointer held over the page chrome rather than over a card.
+  int? _nearestSlot(Offset globalPosition) {
+    int? best;
+    double closest = double.infinity;
+    for (final String id in _boxes.keys) {
+      final int? slot = _laidOutSlots[id];
+      final Rect? rect = _boxOf(id);
+      if (slot == null || rect == null) continue;
+      final double sideways = globalPosition.dx < rect.left
+          ? rect.left - globalPosition.dx
+          : globalPosition.dx > rect.right
+          ? globalPosition.dx - rect.right
+          : 0;
+      // Further out than the gutter is another column's business.
+      if (sideways > widget.gap) continue;
+      final double score =
+          sideways * 4 + (globalPosition.dy - rect.center.dy).abs();
+      if (score < closest) {
+        closest = score;
+        best = slot;
+      }
+    }
+    return best;
+  }
+
   Future<void> _endDrag(Offset globalPosition) async {
     final String? dragging = _dragging;
     final Rect? from = _flight.value;
@@ -684,9 +878,10 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
       return;
     }
     final List<String>? preview = _preview;
-    // Released over a card: commit that order. Released over empty grid space
-    // (or outside the grid): the preview is dropped and the card goes home.
-    if (preview != null && _slotAt(globalPosition) != null) {
+    // Released over a card — or held at a rim, where the nearest slot counts:
+    // commit that order. Released over empty grid space (or outside the grid):
+    // the preview is dropped and the card goes home.
+    if (preview != null && _claimedSlot(globalPosition) != null) {
       // The preview already is the order on screen; the catalogue catches up
       // on the next rebuild, so nothing moves here.
       widget.onReorder?.call(preview);
@@ -750,6 +945,8 @@ class _PlaylistRowsSliverState extends State<_PlaylistRowsSliver>
 
   void _finishDrag() {
     _heldByLongPress = false;
+    _heldAt = null;
+    _stopEdgeScroll();
     _proxy?.remove();
     _proxy = null;
     _settle.stop();

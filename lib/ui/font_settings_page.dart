@@ -380,27 +380,35 @@ class _FontCard extends StatelessWidget {
           Row(
             children: [
               const Expanded(child: TrText('字体粗细')),
-              SettingsChoice<int>(
-                value: weight ?? 0,
-                items: [
-                  const DropdownMenuItem(value: 0, child: TrText('默认')),
-                  for (final entry in const {
-                    400: '常规', // i18n:key
-                    500: '中等', // i18n:key
-                    600: '半粗', // i18n:key
-                    700: '粗体', // i18n:key
-                  }.entries)
-                    DropdownMenuItem(
-                      value: entry.key,
-                      child: Text(
-                        context.tr(entry.value),
-                        style: TextStyle(
-                          fontWeight: FontWeight.values[entry.key ~/ 100 - 1],
+              const SizedBox(width: 12),
+              // The control lays itself out with an [Expanded] label inside, so
+              // it needs a bounded width: a bare child of a [Row] is handed
+              // infinite width, and the layout assert that follows kills the
+              // page on its first frame.
+              SizedBox(
+                width: 190,
+                child: SettingsChoice<int>(
+                  value: weight ?? 0,
+                  items: [
+                    const DropdownMenuItem(value: 0, child: TrText('默认')),
+                    for (final entry in const {
+                      400: '常规', // i18n:key
+                      500: '中等', // i18n:key
+                      600: '半粗', // i18n:key
+                      700: '粗体', // i18n:key
+                    }.entries)
+                      DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(
+                          context.tr(entry.value),
+                          style: TextStyle(
+                            fontWeight: FontWeight.values[entry.key ~/ 100 - 1],
+                          ),
                         ),
                       ),
-                    ),
-                ],
-                onChanged: (value) => onWeight(value == 0 ? null : value),
+                  ],
+                  onChanged: (value) => onWeight(value == 0 ? null : value),
+                ),
               ),
             ],
           ),
