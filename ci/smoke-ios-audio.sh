@@ -28,12 +28,20 @@ cat > "$app/Info.plist" <<'PLIST'
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>AudioSmoke</string>
 <key>CFBundleIdentifier</key><string>dev.naominet.lazer.audiosmoke</string>
+<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleName</key><string>AudioSmoke</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>MinimumOSVersion</key><string>15.0</string>
+<key>LSRequiresIPhoneOS</key><true/>
 <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+<key>UISupportedInterfaceOrientations</key><array>
+<string>UIInterfaceOrientationPortrait</string>
+<string>UIInterfaceOrientationPortraitUpsideDown</string>
+<string>UIInterfaceOrientationLandscapeLeft</string>
+<string>UIInterfaceOrientationLandscapeRight</string>
+</array>
 <key>UIBackgroundModes</key><array><string>audio</string></array>
 <key>UILaunchScreen</key><dict/>
 </dict></plist>
