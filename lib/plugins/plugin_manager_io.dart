@@ -228,14 +228,24 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       pluginName: plugin.manifest.name,
       spec: spec,
     );
-    if (!plugin.pages.any((value) => value.id == page.id) &&
-        plugin.pages.length >= 16) {
-      throw const FormatException('Too many plugin pages');
-    }
-    plugin.pages.removeWhere((value) => value.id == page.id);
-    plugin.pages.add(page);
+    LuaPluginPageEditor.register(plugin.pages, page);
     _notify();
     return true;
+  }
+
+  /// Restyles, re-shapes or extends a page this plugin already registered.
+  Future<Object?> _editPage(
+    InstalledPlugin plugin,
+    Map<String, dynamic> spec,
+  ) async {
+    final result = LuaPluginPageEditor.apply(
+      pages: plugin.pages,
+      pluginId: plugin.manifest.id,
+      pluginName: plugin.manifest.name,
+      spec: spec,
+    );
+    _notify();
+    return result;
   }
 
   Future<void> _loadSettingValues(InstalledPlugin plugin) async {
@@ -462,6 +472,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         onSettingAdded: (spec) => _registerSetting(plugin, spec),
         onPlayerMenuItemAdded: (spec) => _registerPlayerMenuItem(plugin, spec),
         onPageAdded: (spec) => _registerPage(plugin, spec),
+        onPageEdited: (spec) => _editPage(plugin, spec),
         onPlayerControl: (spec) =>
             onPlayerControl?.call(spec) ?? Future.value(null),
         onLog: (record) {
@@ -582,6 +593,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         await destination.writeAsBytes(file.value);
       }
       // Compile and initialize before touching the installed version or its data.
+      final probePages = <LuaPluginPage>[];
       final probe = LuaPluginRuntime(
         manifest: manifest,
         sources: package.sources,
@@ -601,13 +613,22 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           return true;
         },
         onPageAdded: (spec) async {
-          LuaPluginPage.fromSpec(
-            pluginId: manifest.id,
-            pluginName: manifest.name,
-            spec: spec,
+          LuaPluginPageEditor.register(
+            probePages,
+            LuaPluginPage.fromSpec(
+              pluginId: manifest.id,
+              pluginName: manifest.name,
+              spec: spec,
+            ),
           );
           return true;
         },
+        onPageEdited: (spec) async => LuaPluginPageEditor.apply(
+          pages: probePages,
+          pluginId: manifest.id,
+          pluginName: manifest.name,
+          spec: spec,
+        ),
       );
       try {
         await probe.start();

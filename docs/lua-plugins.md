@@ -113,6 +113,10 @@ end
 | `host.sleep(milliseconds)` | 在 Lua 异步挂起一小段时间，最长 60 秒；适合轮询和限流 |
 | `host.add_setting(spec)` | 向设置页注册一个受宿主约束的设置项；返回当前值 |
 | `host.add_page(spec)` | 向设置页注册一个由 Flutter 宿主渲染的插件页面；返回 `true` |
+| `host.page(id)` / `host.pages()` | 读取本插件已注册页面的当前描述或概要列表 |
+| `host.update_page(spec)` / `host.set_page_elements(spec)` | 改写页面标题与布局，或整体替换控件列表；返回编辑后的页面 |
+| `host.add_page_element(spec)` / `host.update_page_element(spec)` | 新建控件（可用 `at`、`before`、`after` 定位）或局部改写控件属性 |
+| `host.remove_page_element(spec)` / `host.move_page_element(spec)` | 删除控件或调整控件顺序 |
 | `host.add_player_menu_item(spec)` | 向正在播放页右上角的“三个点”菜单注册一个项目；返回 `true` |
 | `host.player_control(spec)` | 控制播放器播放、暂停、上下首、进度跳转或调节音量；返回执行结果 |
 | `host.player_state()` / `host.player_status()` / `host.player_queue()` / `host.player_track()` | 查询当前歌曲、进度、音量、缓冲、队列索引和播放模式 |
@@ -197,6 +201,69 @@ return {
   end
 }
 ```
+
+### 页面编辑
+
+`host.add_page(spec)` 负责首次注册；页面注册之后，Lua 仍可以在运行时改写页面布局、
+修改已有控件或新增控件。所有编辑都提交纯数据，由宿主校验后写入 Flutter，并且只作用于
+该插件自己注册的页面。
+
+| 接口 | 用途 |
+| --- | --- |
+| `host.page(id)` | 读取页面当前描述：`{id,title,subtitle,icon,layout,elements}` |
+| `host.pages()` | 列出本插件页面概要：`{id,title,subtitle,icon,elements,layout}`，`elements` 为控件数量 |
+| `host.update_page({page,...})` | 改写标题、副标题、图标与布局；省略 `page` 时可用 `id` |
+| `host.set_page_elements({page,elements})` | 整体替换控件列表；`elements={}` 清空页面 |
+| `host.add_page_element({page,...})` | 新建控件；`at`（从 1 起）、`before`、`after` 决定插入位置，缺省追加 |
+| `host.update_page_element({page,...})` | 按 `element`（或 `id`、`index`）局部改写控件；未提交的字段保持原样 |
+| `host.remove_page_element({page,element})` | 删除控件 |
+| `host.move_page_element({page,element,to})` | 调整顺序；`to` 为目标位置（从 1 起），也可直接给目标控件 ID |
+
+```lua
+-- 页面布局：控件之间的间隙、页面内边距、宽度上限、对齐与排布方式
+host.update_page({
+  page = "tools",
+  title = "工具箱",
+  gap = 18,            -- 相邻控件之间的间隙
+  inset = 14,          -- 页面左右内边距
+  maxWidth = 720,      -- 内容宽度上限，0 表示跟随应用布局
+  align = "center",    -- start / center / end / stretch
+  direction = "grid",  -- vertical / horizontal / grid
+  columns = 2,         -- grid 列数 1–4
+  card = true,         -- 是否保留分组卡片外观
+  header = true,       -- 是否保留标题与副标题
+})
+
+host.add_page_element({
+  page = "tools",
+  before = "refresh",
+  type = "toggle",
+  id = "auto_sync",
+  title = "自动同步",
+  value = true,
+  gap = 6,     -- 该控件之前的额外间隙
+  padding = 4, -- 该控件左右的内缩
+})
+
+host.update_page_element({page = "tools", id = "auto_sync", title = "自动同步收藏"})
+host.move_page_element({page = "tools", element = "auto_sync", to = 1})
+host.remove_page_element({page = "tools", element = "auto_sync"})
+
+-- 读取宿主侧的真实状态，再决定下一次编辑
+local page = host.page("tools")
+local count = #page.elements
+```
+
+`add_page` 与 `update_page` 都接受平铺的布局键（`gap`、`inset`、`maxWidth`、`align`、
+`direction`、`columns`、`card`、`header`），也可以写成嵌套的 `layout = {...}`。数值会被
+限制在宿主允许的范围：`gap`、控件 `gap` 与 `padding` 为 0–96，`inset` 为 0–96，
+`maxWidth` 为 0–2400，`columns` 为 1–4；无法识别的 `align`、`direction` 或控件字段会
+直接报错，不会被静默忽略。
+
+页面和控件的 `id` 只能使用 `[a-zA-Z0-9_.-]`，长度为 1–64。每个插件最多 16 个页面、
+每页最多 128 个控件，同一页内的控件 ID 不能重复：重复的新增或改名会被拒绝。
+`host.update_page_element` 只覆盖传入的字段，用户已经选择的开关与滑块值不会因为一次
+文案修改而丢失。
 
 ### 文件沙箱
 

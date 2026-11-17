@@ -294,6 +294,236 @@ void main() {
     );
   });
 
+  test('plugin page geometry is clamped and rejects unknown flow names', () {
+    final layout = LuaPluginPageLayout.fromSpec(const <String, Object?>{
+      'gap': 1000,
+      'inset': -5,
+      'columns': 99,
+      'align': 'center',
+      'direction': 'grid',
+      'card': false,
+    });
+    expect(layout.gap, 96);
+    expect(layout.inset, 0);
+    expect(layout.columns, 4);
+    expect(layout.align, LuaPluginPageAlign.center);
+    expect(layout.direction, LuaPluginPageDirection.grid);
+    expect(layout.card, isFalse);
+    expect(layout.maxWidth, 0);
+    expect(
+      () => LuaPluginPageLayout.fromSpec(const {'align': 'diagonal'}),
+      throwsFormatException,
+    );
+    expect(
+      () => LuaPluginPageLayout.fromSpec(const {'direction': 'spiral'}),
+      throwsFormatException,
+    );
+  });
+
+  test('a page keeps its declared layout and spacing through a patch', () {
+    final page = LuaPluginPage.fromSpec(
+      pluginId: 'demo.page',
+      pluginName: 'Page Demo',
+      spec: const <String, dynamic>{
+        'id': 'tools',
+        'title': '工具',
+        'subtitle': '插件工具页',
+        'gap': 8,
+        'inset': 12,
+        'elements': <Object?>[
+          <String, dynamic>{'type': 'section', 'title': '常用'},
+          <String, dynamic>{'type': 'button', 'id': 'refresh', 'title': '刷新'},
+        ],
+      },
+    );
+    expect(page.layout.gap, 8);
+    expect(page.layout.inset, 12);
+    expect(page.elements[1].gap, 0);
+
+    final patched = page.patch(const <String, dynamic>{
+      'title': '工具箱',
+      'gap': 18,
+      'align': 'start',
+      'direction': 'horizontal',
+    });
+    expect(patched.title, '工具箱');
+    expect(patched.id, 'tools');
+    expect(patched.layout.gap, 18);
+    expect(patched.layout.inset, 12);
+    expect(patched.layout.align, LuaPluginPageAlign.start);
+    expect(patched.layout.direction, LuaPluginPageDirection.horizontal);
+    expect(patched.elements.length, 2);
+    expect(page.patch(const {'gap': 10}).layout.gap, 10);
+    expect(page.patch(const {'columns': 9}).layout.columns, 4);
+  });
+
+  test('the page editor restyles, extends and reorders a live page', () {
+    final pages = <LuaPluginPage>[
+      LuaPluginPage.fromSpec(
+        pluginId: 'demo.page',
+        pluginName: 'Page Demo',
+        spec: const <String, dynamic>{
+          'id': 'tools',
+          'title': '工具',
+          'elements': <Object?>[
+            <String, dynamic>{'type': 'section', 'title': '常用'},
+            <String, dynamic>{'type': 'button', 'id': 'refresh', 'title': '刷新'},
+          ],
+        },
+      ),
+    ];
+    Object? apply(Map<String, dynamic> spec) => LuaPluginPageEditor.apply(
+      pages: pages,
+      pluginId: 'demo.page',
+      pluginName: 'Page Demo',
+      spec: spec,
+    );
+
+    final updated =
+        apply(<String, dynamic>{
+              'operation': 'update',
+              'page': 'tools',
+              'title': '工具箱',
+              'gap': 20,
+              'inset': 14,
+              'card': false,
+              'header': false,
+            })
+            as Map;
+    expect(updated['title'], '工具箱');
+    expect(pages.single.title, '工具箱');
+    expect(pages.single.layout.gap, 20);
+    expect(pages.single.layout.inset, 14);
+    expect(pages.single.layout.card, isFalse);
+    expect(pages.single.layout.header, isFalse);
+
+    apply(<String, dynamic>{
+      'operation': 'add_element',
+      'page': 'tools',
+      'before': 'refresh',
+      'type': 'toggle',
+      'id': 'enabled',
+      'title': '启用',
+      'value': true,
+      'gap': 6,
+    });
+    expect(pages.single.elements.map((element) => element.id), <String?>[
+      null,
+      'enabled',
+      'refresh',
+    ]);
+    expect(pages.single.elements[1].gap, 6);
+
+    apply(<String, dynamic>{
+      'operation': 'update_element',
+      'page': 'tools',
+      'id': 'enabled',
+      'title': '已启用',
+      'subtitle': '由脚本改写',
+      'padding': 4,
+    });
+    final toggle = pages.single.elements[1];
+    expect(toggle.id, 'enabled');
+    expect(toggle.title, '已启用');
+    expect(toggle.subtitle, '由脚本改写');
+    expect(toggle.value, isTrue);
+    expect(toggle.padding, 4);
+
+    apply(<String, dynamic>{
+      'operation': 'move_element',
+      'page': 'tools',
+      'element': 'refresh',
+      'to': 1,
+    });
+    expect(pages.single.elements.map((element) => element.id), <String?>[
+      'refresh',
+      null,
+      'enabled',
+    ]);
+
+    apply(<String, dynamic>{
+      'operation': 'remove_element',
+      'page': 'tools',
+      'element': 'refresh',
+    });
+    expect(pages.single.elements.map((element) => element.id), <String?>[
+      null,
+      'enabled',
+    ]);
+
+    apply(<String, dynamic>{
+      'operation': 'set_elements',
+      'page': 'tools',
+      'elements': <Object?>[
+        <String, dynamic>{'type': 'text', 'text': '只有一段说明'},
+      ],
+    });
+    expect(pages.single.elements.single.text, '只有一段说明');
+
+    final read =
+        apply(const <String, dynamic>{'operation': 'get', 'page': 'tools'})
+            as Map;
+    expect(read['id'], 'tools');
+    expect((read['elements']! as List).length, 1);
+    final list = apply(const <String, dynamic>{'operation': 'list'}) as List;
+    expect(list.single['id'], 'tools');
+    expect(list.single['elements'], 1);
+  });
+
+  test('the page editor rejects unknown pages and duplicate element ids', () {
+    final pages = <LuaPluginPage>[
+      LuaPluginPage.fromSpec(
+        pluginId: 'demo.page',
+        pluginName: 'Page Demo',
+        spec: const <String, dynamic>{
+          'id': 'tools',
+          'title': '工具',
+          'elements': <Object?>[
+            <String, dynamic>{'type': 'button', 'id': 'refresh', 'title': '刷新'},
+          ],
+        },
+      ),
+    ];
+    Object? apply(Map<String, dynamic> spec) => LuaPluginPageEditor.apply(
+      pages: pages,
+      pluginId: 'demo.page',
+      pluginName: 'Page Demo',
+      spec: spec,
+    );
+    expect(
+      () => apply(const <String, dynamic>{
+        'operation': 'update',
+        'page': 'missing',
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => apply(const <String, dynamic>{
+        'operation': 'add_element',
+        'page': 'tools',
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => apply(const <String, dynamic>{
+        'operation': 'add_element',
+        'page': 'tools',
+        'type': 'button',
+        'id': 'refresh',
+        'title': '重复',
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => apply(const <String, dynamic>{
+        'operation': 'navigate',
+        'page': 'tools',
+      }),
+      throwsFormatException,
+    );
+    expect(pages.single.elements.single.id, 'refresh');
+  });
+
   test('manifest rejects a wildcard over a public suffix', () {
     Map<String, Object> withNetwork(List<String> domains) => <String, Object>{
       'id': 'demo.network',
@@ -509,6 +739,98 @@ void main() {
       expect(await persisted.exists(), isTrue);
     },
   );
+
+  test('Lua scripts restyle and extend their own page at runtime', () async {
+    final root = await Directory.systemTemp.createTemp('lazer-plugin-page-');
+    addTearDown(() => root.delete(recursive: true));
+    final pluginId = 'demo.page-${DateTime.now().microsecondsSinceEpoch}';
+    final manifestBytes = utf8.encode(
+      jsonEncode({
+        'id': pluginId,
+        'name': 'Page Manager',
+        'version': '1.0.0',
+        'provider': 'demo',
+        'apiVersion': 1,
+        'entry': 'main.lua',
+      }),
+    );
+    final sourceBytes = utf8.encode("""
+      host.add_page({
+        id = "tools",
+        title = "工具",
+        subtitle = "插件工具页",
+        gap = 4,
+        elements = {
+          {type = "section", title = "常用"},
+          {type = "button", id = "refresh", title = "刷新"},
+        },
+      })
+      host.update_page({page = "tools", title = "工具箱", gap = 18,
+        inset = 14, align = "center"})
+      host.add_page_element({page = "tools", before = "refresh",
+        type = "toggle", id = "enabled", title = "启用", value = true,
+        gap = 6})
+      host.update_page_element({page = "tools", id = "enabled",
+        title = "已启用", subtitle = "由脚本改写"})
+      host.remove_page_element({page = "tools", element = "refresh"})
+      local snapshot = host.page("tools")
+      return {call=function(operation)
+        if operation == "describe" then return {} end
+        if operation == "snapshot" then
+          return {
+            pages = #host.pages(),
+            title = snapshot.title,
+            gap = snapshot.layout.gap,
+            inset = snapshot.layout.inset,
+            align = snapshot.layout.align,
+            count = #snapshot.elements,
+            first = snapshot.elements[1].title,
+            second = snapshot.elements[2].title,
+            tight = snapshot.elements[2].gap,
+          }
+        end
+        return {}
+      end}
+    """);
+    final archive = Archive()
+      ..addFile(
+        ArchiveFile('manifest.json', manifestBytes.length, manifestBytes),
+      )
+      ..addFile(ArchiveFile('main.lua', sourceBytes.length, sourceBytes));
+    final manager = PluginManager(rootDirectory: root);
+    addTearDown(manager.dispose);
+    final plugin = await manager.importZip(
+      Uint8List.fromList(ZipEncoder().encode(archive)),
+    );
+
+    final page = manager.pluginPages.single;
+    expect(page.id, 'tools');
+    expect(page.title, '工具箱');
+    expect(page.layout.gap, 18);
+    expect(page.layout.inset, 14);
+    expect(page.layout.align, LuaPluginPageAlign.center);
+    expect(page.elements.map((element) => element.id), <String?>[
+      null,
+      'enabled',
+    ]);
+    expect(page.elements.last.title, '已启用');
+    expect(page.elements.last.subtitle, '由脚本改写');
+    expect(page.elements.last.gap, 6);
+
+    final snapshot = await plugin.runtime!.invoke('snapshot') as Map;
+    expect(snapshot['pages'], 1);
+    expect(snapshot['title'], '工具箱');
+    expect(snapshot['gap'], 18);
+    expect(snapshot['inset'], 14);
+    expect(snapshot['align'], 'center');
+    expect(snapshot['count'], 2);
+    expect(snapshot['first'], '常用');
+    expect(snapshot['second'], '已启用');
+    expect(snapshot['tight'], 6);
+
+    await manager.invokePluginPageEvent(pluginId, 'tools', 'enabled', false);
+    expect(manager.pluginPages.single.elements.last.value, isFalse);
+  });
 
   test('a folder zip and Windows paths still resolve the plugin root', () {
     final manifestBytes = utf8.encode(

@@ -143,6 +143,10 @@ class _LuaPluginPageTile extends StatelessWidget {
 }
 
 /// Flutter-owned rendering for a Lua page description.
+///
+/// The page geometry comes from [LuaPluginPageLayout]: spacing, inset, width,
+/// alignment and flow are all data the plugin supplied, and this widget turns
+/// them into host-owned Flutter widgets.
 class LuaPluginPageView extends StatelessWidget {
   const LuaPluginPageView({
     super.key,
@@ -170,32 +174,106 @@ class LuaPluginPageView extends StatelessWidget {
           child: const Center(child: CircularProgressIndicator()),
         );
       }
+      final layout = page.layout;
       return SettingsDetailScaffold(
         title: context.tr(page.title),
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-          children: <Widget>[
-            if (page.subtitle.isNotEmpty)
-              ApplePageTitle(
-                title: page.title,
-                subtitle: page.subtitle,
-                padding: const EdgeInsets.fromLTRB(0, 4, 0, 18),
-              ),
-            AppleGroupedCard(
-              margin: EdgeInsets.zero,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final element in page.elements)
-                    _LuaPluginPageElementView(state: state, element: element),
-                ],
-              ),
-            ),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) => ListView(
+            padding: EdgeInsets.fromLTRB(layout.inset, 8, layout.inset, 32),
+            children: <Widget>[
+              if (layout.header && page.subtitle.isNotEmpty)
+                ApplePageTitle(
+                  title: page.title,
+                  subtitle: page.subtitle,
+                  padding: const EdgeInsets.fromLTRB(0, 4, 0, 18),
+                ),
+              _frame(page, layout, constraints.maxWidth - layout.inset * 2),
+            ],
+          ),
         ),
       );
     },
   );
+
+  /// Wraps the element surface in the page's width and alignment rules.
+  Widget _frame(LuaPluginPage page, LuaPluginPageLayout layout, double room) {
+    final surface = layout.card
+        ? AppleGroupedCard(
+            margin: EdgeInsets.zero,
+            child: _surface(page, layout),
+          )
+        : _surface(page, layout);
+    if (layout.maxWidth <= 0 || layout.maxWidth >= room) return surface;
+    return Align(
+      alignment: switch (layout.align) {
+        LuaPluginPageAlign.start => Alignment.topLeft,
+        LuaPluginPageAlign.end => Alignment.topRight,
+        LuaPluginPageAlign.center ||
+        LuaPluginPageAlign.stretch => Alignment.topCenter,
+      },
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: layout.maxWidth),
+        child: surface,
+      ),
+    );
+  }
+
+  Widget _surface(LuaPluginPage page, LuaPluginPageLayout layout) {
+    switch (layout.direction) {
+      case LuaPluginPageDirection.vertical:
+        final children = <Widget>[];
+        for (var i = 0; i < page.elements.length; i++) {
+          final element = page.elements[i];
+          final gap = (i == 0 ? 0.0 : layout.gap) + element.gap;
+          if (gap > 0) children.add(SizedBox(height: gap));
+          children.add(
+            _LuaPluginPageElementView(state: state, element: element),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        );
+      case LuaPluginPageDirection.horizontal:
+        final children = <Widget>[];
+        for (var i = 0; i < page.elements.length; i++) {
+          final element = page.elements[i];
+          final gap = (i == 0 ? 0.0 : layout.gap) + element.gap;
+          if (gap > 0) children.add(SizedBox(width: gap));
+          children.add(
+            Expanded(
+              child: _LuaPluginPageElementView(state: state, element: element),
+            ),
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        );
+      case LuaPluginPageDirection.grid:
+        final columns = layout.columns;
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final gap = layout.gap * (columns - 1);
+            final width = (constraints.maxWidth - gap) / columns;
+            return Wrap(
+              spacing: layout.gap,
+              runSpacing: layout.gap,
+              children: <Widget>[
+                for (final element in page.elements)
+                  SizedBox(
+                    width: width > 0 ? width : constraints.maxWidth,
+                    child: _LuaPluginPageElementView(
+                      state: state,
+                      element: element,
+                    ),
+                  ),
+              ],
+            );
+          },
+        );
+    }
+  }
 }
 
 class _LuaPluginPageElementView extends StatelessWidget {
@@ -384,7 +462,14 @@ class _LuaPluginPageElementView extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => _control(context);
+  Widget build(BuildContext context) {
+    final control = _control(context);
+    if (element.padding <= 0) return control;
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: element.padding),
+      child: control,
+    );
+  }
 }
 
 class _LuaPluginSettingRow extends StatelessWidget {

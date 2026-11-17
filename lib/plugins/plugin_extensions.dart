@@ -348,6 +348,206 @@ class LuaPluginPageElementOption {
   final String label;
 }
 
+/// Cross-axis placement of a plugin page's content column.
+enum LuaPluginPageAlign { start, center, end, stretch }
+
+extension LuaPluginPageAlignParsing on LuaPluginPageAlign {
+  static LuaPluginPageAlign parse(Object? value) {
+    switch ('$value'.toLowerCase()) {
+      case 'start':
+      case 'leading':
+      case 'left':
+        return LuaPluginPageAlign.start;
+      case 'center':
+      case 'middle':
+        return LuaPluginPageAlign.center;
+      case 'end':
+      case 'trailing':
+      case 'right':
+        return LuaPluginPageAlign.end;
+      case 'stretch':
+      case 'fill':
+      case 'full':
+        return LuaPluginPageAlign.stretch;
+      default:
+        throw const FormatException('Invalid plugin page alignment');
+    }
+  }
+
+  String get wireName => switch (this) {
+    LuaPluginPageAlign.start => 'start',
+    LuaPluginPageAlign.center => 'center',
+    LuaPluginPageAlign.end => 'end',
+    LuaPluginPageAlign.stretch => 'stretch',
+  };
+}
+
+/// How a plugin page stacks its elements.
+enum LuaPluginPageDirection { vertical, horizontal, grid }
+
+extension LuaPluginPageDirectionParsing on LuaPluginPageDirection {
+  static LuaPluginPageDirection parse(Object? value) {
+    switch ('$value'.toLowerCase()) {
+      case 'vertical':
+      case 'column':
+        return LuaPluginPageDirection.vertical;
+      case 'horizontal':
+      case 'row':
+        return LuaPluginPageDirection.horizontal;
+      case 'grid':
+      case 'wrap':
+        return LuaPluginPageDirection.grid;
+      default:
+        throw const FormatException('Invalid plugin page direction');
+    }
+  }
+
+  String get wireName => switch (this) {
+    LuaPluginPageDirection.vertical => 'vertical',
+    LuaPluginPageDirection.horizontal => 'horizontal',
+    LuaPluginPageDirection.grid => 'grid',
+  };
+}
+
+/// Bounded geometry for one plugin page.
+///
+/// A plugin may restyle spacing and flow, but every number is clamped here and
+/// the Flutter host still owns the widget tree.
+@immutable
+class LuaPluginPageLayout {
+  const LuaPluginPageLayout({
+    this.gap = 0,
+    this.inset = 20,
+    this.maxWidth = 0,
+    this.align = LuaPluginPageAlign.stretch,
+    this.direction = LuaPluginPageDirection.vertical,
+    this.columns = 1,
+    this.card = true,
+    this.header = true,
+  });
+
+  /// Space inserted between two neighbouring elements, in logical pixels.
+  final double gap;
+
+  /// Horizontal page inset; the default mirrors the built-in settings spacing.
+  final double inset;
+
+  /// Content width ceiling; `0` follows the host layout.
+  final double maxWidth;
+  final LuaPluginPageAlign align;
+  final LuaPluginPageDirection direction;
+
+  /// Column count used by [LuaPluginPageDirection.grid].
+  final int columns;
+
+  /// Whether elements stay on the grouped card surface.
+  final bool card;
+
+  /// Whether the page keeps its title and subtitle header.
+  final bool header;
+
+  /// Every key a page spec, or a layout edit, may use for geometry.
+  static const Set<String> keys = <String>{
+    'gap',
+    'spacing',
+    'inset',
+    'padding',
+    'maxWidth',
+    'width',
+    'align',
+    'direction',
+    'columns',
+    'card',
+    'header',
+  };
+
+  /// Reads the geometry keys a page spec carries next to its own fields.
+  static Map<String, Object?> flattenFrom(Map spec) => <String, Object?>{
+    for (final key in keys)
+      if (spec.containsKey(key)) key: spec[key],
+  };
+
+  /// Merges a partial layout description onto [base].
+  ///
+  /// Unknown keys are ignored and numbers are clamped, so a stale plugin can
+  /// never push a page off screen; a malformed enum still fails loudly.
+  factory LuaPluginPageLayout.fromSpec(
+    Map spec, {
+    LuaPluginPageLayout base = const LuaPluginPageLayout(),
+  }) {
+    double number(Object? value, double fallback, double min, double max) {
+      if (value is! num || !value.isFinite) return fallback;
+      return value.toDouble().clamp(min, max).toDouble();
+    }
+
+    final gap = number(
+      spec.containsKey('gap') ? spec['gap'] : spec['spacing'],
+      base.gap,
+      0,
+      96,
+    );
+    final inset = number(
+      spec.containsKey('inset') ? spec['inset'] : spec['padding'],
+      base.inset,
+      0,
+      96,
+    );
+    final maxWidth = number(
+      spec.containsKey('maxWidth') ? spec['maxWidth'] : spec['width'],
+      base.maxWidth,
+      0,
+      2400,
+    );
+    return LuaPluginPageLayout(
+      gap: gap,
+      inset: inset,
+      maxWidth: maxWidth,
+      align: spec.containsKey('align')
+          ? LuaPluginPageAlignParsing.parse(spec['align'])
+          : base.align,
+      direction: spec.containsKey('direction')
+          ? LuaPluginPageDirectionParsing.parse(spec['direction'])
+          : base.direction,
+      columns: spec['columns'] is num
+          ? (spec['columns']! as num).toInt().clamp(1, 4)
+          : base.columns,
+      card: spec['card'] is bool ? spec['card']! as bool : base.card,
+      header: spec['header'] is bool ? spec['header']! as bool : base.header,
+    );
+  }
+
+  LuaPluginPageLayout copyWith({
+    double? gap,
+    double? inset,
+    double? maxWidth,
+    LuaPluginPageAlign? align,
+    LuaPluginPageDirection? direction,
+    int? columns,
+    bool? card,
+    bool? header,
+  }) => LuaPluginPageLayout(
+    gap: gap ?? this.gap,
+    inset: inset ?? this.inset,
+    maxWidth: maxWidth ?? this.maxWidth,
+    align: align ?? this.align,
+    direction: direction ?? this.direction,
+    columns: columns ?? this.columns,
+    card: card ?? this.card,
+    header: header ?? this.header,
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'gap': gap,
+    'inset': inset,
+    'maxWidth': maxWidth,
+    'align': align.wireName,
+    'direction': direction.wireName,
+    'columns': columns,
+    'card': card,
+    'header': header,
+  };
+}
+
 class LuaPluginPageElement {
   LuaPluginPageElement({
     required this.pluginId,
@@ -367,6 +567,8 @@ class LuaPluginPageElement {
     required this.icon,
     required this.placeholder,
     required this.maxLines,
+    this.gap = 0,
+    this.padding = 0,
   });
 
   final String pluginId;
@@ -387,7 +589,16 @@ class LuaPluginPageElement {
   final String placeholder;
   final int maxLines;
 
+  /// Extra space the host inserts before this element, in logical pixels.
+  final double gap;
+
+  /// Horizontal inset applied around this element, in logical pixels.
+  final double padding;
+
   static final RegExp _idPattern = RegExp(r'^[a-zA-Z0-9_.-]{1,64}$');
+
+  /// The largest spacing one element may request.
+  static const double maxSpacing = 96;
 
   factory LuaPluginPageElement.fromSpec({
     required String pluginId,
@@ -505,8 +716,34 @@ class LuaPluginPageElement {
       icon: icon,
       placeholder: placeholder,
       maxLines: maxLines,
+      gap: _spacing(spec['gap'] ?? spec['spacing']),
+      padding: _spacing(spec['padding'] ?? spec['inset']),
     );
   }
+
+  /// The element as a data-only table, so a plugin can read back what it built.
+  Map<String, Object?> toSpec() => <String, Object?>{
+    'type': type.wireName,
+    if (id != null) 'id': id,
+    'title': title,
+    'subtitle': subtitle,
+    'text': text,
+    'value': value,
+    if (options.isNotEmpty)
+      'options': <Map<String, Object?>>[
+        for (final option in options)
+          <String, Object?>{'value': option.value, 'label': option.label},
+      ],
+    'min': min,
+    'max': max,
+    'step': step,
+    'enabled': enabled,
+    'icon': icon,
+    'placeholder': placeholder,
+    'maxLines': maxLines,
+    'gap': gap,
+    'padding': padding,
+  };
 
   LuaPluginPageElement copyWithValue(Object? next) => LuaPluginPageElement(
     pluginId: pluginId,
@@ -526,7 +763,45 @@ class LuaPluginPageElement {
     icon: icon,
     placeholder: placeholder,
     maxLines: maxLines,
+    gap: gap,
+    padding: padding,
   );
+
+  /// Rebuilds the element from its own data plus [changes].
+  ///
+  /// Partial edits stay declarative: the merged table goes through the same
+  /// validation as a freshly declared element, so a bad patch is rejected
+  /// instead of reaching Flutter.
+  LuaPluginPageElement patch(Map<String, dynamic> changes) {
+    final spec = Map<String, dynamic>.from(toSpec());
+    var retitles = false;
+    changes.forEach((key, value) {
+      switch (key) {
+        case 'label':
+        case 'name':
+          spec['title'] = value;
+          retitles = true;
+        case 'description':
+          spec['subtitle'] = value;
+        case 'content':
+          spec['text'] = value;
+        default:
+          spec[key] = value;
+      }
+    });
+    if (retitles &&
+        changes['text'] == null &&
+        changes['content'] == null &&
+        type == LuaPluginPageElementType.text) {
+      spec['text'] = spec['title'];
+    }
+    return LuaPluginPageElement.fromSpec(
+      pluginId: pluginId,
+      pluginName: pluginName,
+      pageId: pageId,
+      spec: spec,
+    );
+  }
 
   bool accepts(Object? candidate) =>
       _accepts(type, candidate, options, min, max) &&
@@ -563,6 +838,11 @@ class LuaPluginPageElement {
     if (value is num && value.isFinite) return value.toDouble();
     return fallback;
   }
+
+  static double _spacing(Object? value) {
+    if (value is! num || !value.isFinite) return 0;
+    return value.toDouble().clamp(0, maxSpacing).toDouble();
+  }
 }
 
 class LuaPluginPage {
@@ -574,6 +854,7 @@ class LuaPluginPage {
     required this.subtitle,
     required this.icon,
     required this.elements,
+    this.layout = const LuaPluginPageLayout(),
   });
 
   final String pluginId;
@@ -583,8 +864,12 @@ class LuaPluginPage {
   final String subtitle;
   final String icon;
   final List<LuaPluginPageElement> elements;
+  final LuaPluginPageLayout layout;
 
   static final RegExp _idPattern = RegExp(r'^[a-zA-Z0-9_.-]{1,64}$');
+
+  /// How many elements one page may hold.
+  static const int maxElements = 128;
 
   factory LuaPluginPage.fromSpec({
     required String pluginId,
@@ -606,10 +891,14 @@ class LuaPluginPage {
         icon is! String ||
         icon.length > 40 ||
         rawElements is! List ||
-        rawElements.isEmpty ||
-        rawElements.length > 128) {
+        rawElements.length > maxElements) {
       throw const FormatException('Invalid plugin page');
     }
+    final layout = LuaPluginPageLayout.fromSpec(<String, Object?>{
+      ...LuaPluginPageLayout.flattenFrom(spec),
+      if (spec['layout'] is Map)
+        ...Map<String, Object?>.from(spec['layout'] as Map),
+    });
     final elements = <LuaPluginPageElement>[];
     final ids = <String>{};
     for (final raw in rawElements) {
@@ -635,19 +924,411 @@ class LuaPluginPage {
       subtitle: subtitle,
       icon: icon,
       elements: List.unmodifiable(elements),
+      layout: layout,
     );
   }
 
+  /// The page as a data-only table; the same shape `host.add_page` accepts.
+  Map<String, Object?> toSpec() => <String, Object?>{
+    'id': id,
+    'title': title,
+    'subtitle': subtitle,
+    'icon': icon,
+    'layout': layout.toJson(),
+    'elements': <Map<String, Object?>>[
+      for (final element in elements) element.toSpec(),
+    ],
+  };
+
+  /// Applies a partial page edit: metadata, geometry and optionally elements.
+  ///
+  /// Flat geometry keys (`gap`, `inset`, `align`, ...) and a nested `layout`
+  /// table are both accepted, so `update_page({ gap = 12 })` stays short.
+  LuaPluginPage patch(Map<String, dynamic> changes) {
+    final spec = Map<String, dynamic>.from(toSpec());
+    final page = <String, dynamic>{};
+    final geometry = <String, Object?>{};
+    for (final entry in changes.entries) {
+      if (LuaPluginPageLayout.keys.contains(entry.key)) {
+        geometry[entry.key] = entry.value;
+        continue;
+      }
+      switch (entry.key) {
+        case 'label':
+        case 'name':
+          page['title'] = entry.value;
+        case 'description':
+          page['subtitle'] = entry.value;
+        case 'layout':
+          if (entry.value is Map) {
+            geometry.addAll(Map<String, Object?>.from(entry.value as Map));
+          }
+        default:
+          page[entry.key] = entry.value;
+      }
+    }
+    spec.addAll(page);
+    if (geometry.isNotEmpty) {
+      spec['layout'] = LuaPluginPageLayout.fromSpec(
+        geometry,
+        base: layout,
+      ).toJson();
+    }
+    return LuaPluginPage.fromSpec(
+      pluginId: pluginId,
+      pluginName: pluginName,
+      spec: spec,
+    );
+  }
+
+  LuaPluginPage copyWith({
+    String? title,
+    String? subtitle,
+    String? icon,
+    LuaPluginPageLayout? layout,
+    List<LuaPluginPageElement>? elements,
+  }) => LuaPluginPage(
+    pluginId: pluginId,
+    pluginName: pluginName,
+    id: id,
+    title: title ?? this.title,
+    subtitle: subtitle ?? this.subtitle,
+    icon: icon ?? this.icon,
+    elements: List.unmodifiable(elements ?? this.elements),
+    layout: layout ?? this.layout,
+  );
+
   LuaPluginPage copyWithElements(List<LuaPluginPageElement> next) =>
-      LuaPluginPage(
-        pluginId: pluginId,
-        pluginName: pluginName,
-        id: id,
-        title: title,
-        subtitle: subtitle,
-        icon: icon,
-        elements: List.unmodifiable(next),
+      copyWith(elements: next);
+}
+
+/// Host-side owner of the pages a plugin registered through `host.add_page`.
+///
+/// A Lua script can restyle its own pages and add, edit, reorder or drop
+/// elements, but every edit is re-validated here and stays inside that
+/// plugin's own page list.
+abstract final class LuaPluginPageEditor {
+  /// How many pages a single plugin may keep.
+  static const int maxPages = 16;
+
+  static const Set<String> _controlKeys = <String>{
+    'operation',
+    'page',
+    'pageId',
+    'page_id',
+  };
+
+  static const Set<String> _elementKeys = <String>{
+    'element',
+    'elementId',
+    'element_id',
+    'item',
+    'target',
+  };
+
+  static const Set<String> _positionKeys = <String>{
+    'at',
+    'position',
+    'before',
+    'after',
+    'to',
+    'toIndex',
+    'to_index',
+  };
+
+  /// Registers or replaces a page declared with `host.add_page`.
+  static LuaPluginPage register(List<LuaPluginPage> pages, LuaPluginPage page) {
+    if (!pages.any((value) => value.id == page.id) &&
+        pages.length >= maxPages) {
+      throw const FormatException('Too many plugin pages');
+    }
+    pages.removeWhere((value) => value.id == page.id);
+    pages.add(page);
+    return page;
+  }
+
+  /// Applies one edit operation and returns a Lua-shaped result.
+  ///
+  /// Mutations return the page table after the change, so a plugin can keep
+  /// working from the host's own state instead of its own copy.
+  static Object? apply({
+    required List<LuaPluginPage> pages,
+    required String pluginId,
+    required String pluginName,
+    required Map<String, dynamic> spec,
+  }) {
+    final operation = '${spec['operation'] ?? 'get'}'.trim().toLowerCase();
+    if (operation == 'list' || operation == 'pages') {
+      return <Map<String, Object?>>[
+        for (final page in pages)
+          <String, Object?>{
+            'id': page.id,
+            'title': page.title,
+            'subtitle': page.subtitle,
+            'icon': page.icon,
+            'elements': page.elements.length,
+            'layout': page.layout.toJson(),
+          },
+      ];
+    }
+    final selector = spec['page'] ?? spec['pageId'] ?? spec['page_id'];
+    final usesId = selector is! String || selector.trim().isEmpty;
+    if (usesId && !_idSelectsPage(operation)) {
+      throw const FormatException('Plugin page is required');
+    }
+    final pageId = usesId ? '${spec['id'] ?? ''}'.trim() : selector.trim();
+    final index = pages.indexWhere((page) => page.id == pageId);
+    if (pageId.isEmpty || index < 0) {
+      throw const FormatException('Plugin page not found');
+    }
+    final page = pages[index];
+    switch (operation) {
+      case 'get':
+      case 'read':
+        return page.toSpec();
+      case 'update':
+      case 'patch':
+        return _store(pages, index, page.patch(_changes(spec, usesId)));
+      case 'set_elements':
+      case 'elements':
+        final elements = _elements(page, spec['elements'] ?? spec['children']);
+        return _store(pages, index, page.copyWith(elements: elements));
+      case 'add_element':
+      case 'insert_element':
+        return _store(pages, index, _insert(page, spec));
+      case 'update_element':
+      case 'set_element':
+        return _store(pages, index, _updateElement(page, spec));
+      case 'remove_element':
+      case 'delete_element':
+        final elements = <LuaPluginPageElement>[...page.elements]
+          ..removeAt(_elementIndex(page, spec, allowId: true));
+        return _store(pages, index, page.copyWith(elements: elements));
+      case 'move_element':
+      case 'reorder_element':
+        return _store(pages, index, _moveElement(page, spec));
+      default:
+        throw const FormatException('Unknown plugin page edit operation');
+    }
+  }
+
+  /// Whether `id` may name the page instead of an element.
+  static bool _idSelectsPage(String operation) => const <String>{
+    'get',
+    'read',
+    'update',
+    'patch',
+    'set_elements',
+    'elements',
+  }.contains(operation);
+
+  static Map<String, dynamic> _changes(
+    Map<String, dynamic> spec,
+    bool dropId,
+  ) => <String, dynamic>{
+    for (final entry in spec.entries)
+      if (!_controlKeys.contains(entry.key) && !(dropId && entry.key == 'id'))
+        entry.key: entry.value,
+  };
+
+  static Map<String, Object?> _store(
+    List<LuaPluginPage> pages,
+    int index,
+    LuaPluginPage page,
+  ) {
+    if (pages[index].id != page.id &&
+        pages.any((value) => value.id == page.id)) {
+      throw const FormatException('Duplicate plugin page id');
+    }
+    pages[index] = page;
+    return page.toSpec();
+  }
+
+  static LuaPluginPage _insert(LuaPluginPage page, Map<String, dynamic> spec) {
+    if (page.elements.length >= LuaPluginPage.maxElements) {
+      throw const FormatException('Too many plugin page elements');
+    }
+    final raw = spec['element'] ?? spec['item'];
+    final elementSpec = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : <String, dynamic>{
+            for (final entry in spec.entries)
+              if (!_controlKeys.contains(entry.key) &&
+                  !_elementKeys.contains(entry.key) &&
+                  !_positionKeys.contains(entry.key))
+                entry.key: entry.value,
+          };
+    if (elementSpec.isEmpty) {
+      throw const FormatException('Plugin page element is required');
+    }
+    final element = LuaPluginPageElement.fromSpec(
+      pluginId: page.pluginId,
+      pluginName: page.pluginName,
+      pageId: page.id,
+      spec: elementSpec,
+    );
+    if (element.id != null &&
+        page.elements.any((value) => value.id == element.id)) {
+      throw const FormatException('Duplicate plugin page element id');
+    }
+    final elements = <LuaPluginPageElement>[...page.elements]
+      ..insert(_position(page.elements, spec), element);
+    return page.copyWith(elements: elements);
+  }
+
+  static LuaPluginPage _updateElement(
+    LuaPluginPage page,
+    Map<String, dynamic> spec,
+  ) {
+    final index = _elementIndex(page, spec, allowId: true);
+    final element = page.elements[index];
+    final explicit = _explicitElementSelector(spec);
+    final changes = <String, dynamic>{
+      for (final entry in spec.entries)
+        if (!_controlKeys.contains(entry.key) &&
+            !_elementKeys.contains(entry.key) &&
+            !_positionKeys.contains(entry.key) &&
+            !(entry.key == 'id' && !explicit) &&
+            entry.key != 'newId' &&
+            entry.key != 'new_id')
+          entry.key: entry.value,
+    };
+    final rename = spec['newId'] ?? spec['new_id'];
+    if (rename is String && rename.isNotEmpty) changes['id'] = rename;
+    if (changes.isEmpty) return page;
+    final next = element.patch(changes);
+    if (next.id != null &&
+        page.elements.any(
+          (value) => !identical(value, element) && value.id == next.id,
+        )) {
+      throw const FormatException('Duplicate plugin page element id');
+    }
+    final elements = <LuaPluginPageElement>[...page.elements]..[index] = next;
+    return page.copyWith(elements: elements);
+  }
+
+  static LuaPluginPage _moveElement(
+    LuaPluginPage page,
+    Map<String, dynamic> spec,
+  ) {
+    final from = _elementIndex(page, spec, allowId: true);
+    final element = page.elements[from];
+    final remaining = <LuaPluginPageElement>[...page.elements]..removeAt(from);
+    final target = spec['to'] ?? spec['toIndex'] ?? spec['to_index'];
+    final int resolved;
+    if (target is String && target.isNotEmpty) {
+      final index = remaining.indexWhere((element) => element.id == target);
+      if (index < 0) {
+        throw const FormatException('Plugin page element not found');
+      }
+      resolved = index;
+    } else if (target is num && target.isFinite) {
+      resolved = _index(target, remaining.length + 1);
+    } else {
+      resolved = _position(remaining, spec);
+    }
+    remaining.insert(resolved, element);
+    return page.copyWith(elements: remaining);
+  }
+
+  static List<LuaPluginPageElement> _elements(LuaPluginPage page, Object? raw) {
+    final List<Object?> specs;
+    if (raw is List) {
+      specs = raw;
+    } else if (raw is Map && raw.isEmpty) {
+      specs = const <Object?>[];
+    } else {
+      throw const FormatException('Plugin page elements are required');
+    }
+    if (specs.length > LuaPluginPage.maxElements) {
+      throw const FormatException('Too many plugin page elements');
+    }
+    final elements = <LuaPluginPageElement>[];
+    final ids = <String>{};
+    for (final item in specs) {
+      if (item is! Map) {
+        throw const FormatException('Invalid plugin page element');
+      }
+      final element = LuaPluginPageElement.fromSpec(
+        pluginId: page.pluginId,
+        pluginName: page.pluginName,
+        pageId: page.id,
+        spec: Map<String, dynamic>.from(item),
       );
+      if (element.id != null && !ids.add(element.id!)) {
+        throw const FormatException('Duplicate plugin page element id');
+      }
+      elements.add(element);
+    }
+    return elements;
+  }
+
+  static bool _explicitElementSelector(Map spec) => _elementKeys.any(
+    (key) => spec[key] is String && '${spec[key]}'.isNotEmpty,
+  );
+
+  /// Where a new element lands, as a zero-based insert index.
+  static int _position(
+    List<LuaPluginPageElement> elements,
+    Map spec, {
+    bool trailing = true,
+  }) {
+    int locate(Object? value) {
+      if (value is! String || value.isEmpty) {
+        throw const FormatException('Plugin page element not found');
+      }
+      final index = elements.indexWhere((element) => element.id == value);
+      if (index < 0) {
+        throw const FormatException('Plugin page element not found');
+      }
+      return index;
+    }
+
+    if (spec['before'] != null) return locate(spec['before']);
+    if (spec['after'] != null) return locate(spec['after']) + 1;
+    final at = spec['at'] ?? spec['position'] ?? spec['to'];
+    if (at is num && at.isFinite) return _index(at, elements.length + 1);
+    return trailing ? elements.length : 0;
+  }
+
+  static int _index(num raw, int length) =>
+      raw.round().clamp(1, length < 1 ? 1 : length).toInt() - 1;
+
+  static int _elementIndex(
+    LuaPluginPage page,
+    Map spec, {
+    required bool allowId,
+  }) {
+    for (final key in _elementKeys) {
+      final value = spec[key];
+      if (value is String && value.isNotEmpty) {
+        final index = page.elements.indexWhere(
+          (element) => element.id == value,
+        );
+        if (index < 0) {
+          throw const FormatException('Plugin page element not found');
+        }
+        return index;
+      }
+    }
+    final id = spec['id'];
+    if (allowId && !_explicitElementSelector(spec) && id is String) {
+      final index = page.elements.indexWhere((element) => element.id == id);
+      if (index < 0) {
+        throw const FormatException('Plugin page element not found');
+      }
+      return index;
+    }
+    final raw = spec['index'] ?? spec['from'] ?? spec['fromIndex'];
+    if (raw is num && raw.isFinite) {
+      final position = raw.round();
+      if (position < 1 || position > page.elements.length) {
+        throw const FormatException('Plugin page element not found');
+      }
+      return position - 1;
+    }
+    throw const FormatException('Plugin page element is required');
+  }
 }
 
 IconData luaPluginIcon(String name) => switch (name) {

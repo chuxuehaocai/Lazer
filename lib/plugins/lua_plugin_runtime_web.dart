@@ -47,6 +47,7 @@ class LuaPluginRuntime {
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
     this.onPageAdded,
+    this.onPageEdited,
     this.onPlayerControl,
     this.onLog,
   }) : networkGranted = networkGranted ?? false;
@@ -74,6 +75,7 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)?
   onPlayerMenuItemAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPageAdded;
+  final Future<Object?> Function(Map<String, dynamic> spec)? onPageEdited;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
   final void Function(Map<String, dynamic> record)? onLog;
 
@@ -112,6 +114,7 @@ class LuaPluginRuntime {
           onSettingAdded == null &&
               onPlayerMenuItemAdded == null &&
               onPageAdded == null &&
+              onPageEdited == null &&
               onPlayerControl == null
           ? null
           : (kind, spec) async => switch (kind) {
@@ -133,6 +136,12 @@ class LuaPluginRuntime {
                         'Plugin pages are unavailable',
                       )
                     : onPageAdded!(spec),
+              'pageEdit' =>
+                onPageEdited == null
+                    ? throw const FormatException(
+                        'Plugin pages are unavailable',
+                      )
+                    : onPageEdited!(spec),
               'playerControl' =>
                 onPlayerControl == null
                     ? throw const FormatException(
@@ -424,6 +433,14 @@ class _WebPluginHost {
       _push(state, await uiExtensions!('page', spec) ?? true);
       return 1;
     });
+    lua.registerAsync('_page_edit', (state) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Plugin pages are unavailable');
+      }
+      final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
+      _push(state, await uiExtensions!('pageEdit', spec));
+      return 1;
+    });
     lua.registerAsync('_player_control', (state) async {
       if (uiExtensions == null) {
         throw const FormatException('Player control is unavailable');
@@ -621,6 +638,16 @@ class _WebPluginHost {
     }
     final bootstrap =
         '''
+      local function page_edit(operation, spec)
+        local request = {}
+        if type(spec) == "table" then
+          for key, value in pairs(spec) do request[key] = value end
+        elseif spec ~= nil then
+          request.page = spec
+        end
+        request.operation = operation
+        return _page_edit(request)
+      end
       host = { json_encode = _json_encode, json_decode = _json_decode,
         now = _now, url_encode = _url_encode, url_decode = _url_decode,
         info = _host_info, plugin_info = _host_info, resource = _resource,
@@ -634,6 +661,24 @@ class _WebPluginHost {
         storage_keys = _storage_keys, storage_clear = _storage_clear,
         add_setting = _add_setting, add_player_menu_item = _add_player_menu_item,
         add_page = _add_page,
+        page = function(id) return page_edit("get", id) end,
+        pages = function() return page_edit("list", nil) end,
+        update_page = function(spec) return page_edit("update", spec) end,
+        set_page_elements = function(spec)
+          return page_edit("set_elements", spec)
+        end,
+        add_page_element = function(spec)
+          return page_edit("add_element", spec)
+        end,
+        update_page_element = function(spec)
+          return page_edit("update_element", spec)
+        end,
+        remove_page_element = function(spec)
+          return page_edit("remove_element", spec)
+        end,
+        move_page_element = function(spec)
+          return page_edit("move_element", spec)
+        end,
         player_control = _player_control, player_state = _player_state,
         player_status = _player_state, player_queue = _player_queue,
         player_track = _player_track, now_playing = _player_track,
@@ -713,6 +758,8 @@ class _WebPluginHost {
       'player_recent',
       'websocket',
       'sleep',
+      'pages',
+      'page_edit',
       'filesystem',
     ],
   };
