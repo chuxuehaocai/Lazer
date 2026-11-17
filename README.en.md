@@ -167,6 +167,7 @@ More documentation: [build details](docs/builds.md) · [system media](docs/syste
 
 ## References and thanks
 
+- ESP32 port: [Lazer for ESP](https://github.com/sanmingsaxian/lazer-for-esp).
 - The protocol implementation references [API Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced).
 - The now-playing composition references [AMLL Player](https://github.com/amll-dev/amll-player).
 - Lyric animation references [Apple Music Like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics).

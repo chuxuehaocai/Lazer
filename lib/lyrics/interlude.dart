@@ -31,7 +31,7 @@ List<LyricLine> lyricsWithInterludes(List<LyricLine> lines, Duration duration) {
     if (end == null && (next - line.time).inMilliseconds >= 12000) {
       end = line.time + const Duration(seconds: 8);
     }
-    if (end != null) {
+    if (end != null && i + 1 < lines.length) {
       if (end < line.time) end = line.time;
       if ((next - end).inMilliseconds >= 5000 &&
           // An explicit blank already describes this instrumental passage.

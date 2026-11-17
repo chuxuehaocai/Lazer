@@ -516,6 +516,13 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                 manifest.websocketServerBindings.join('\n'),
               ),
         );
+      case 'filesystem':
+        return (
+          context.tr('允许插件管理文件？'),
+          context
+              .tr('插件「{name}」请求在自己的文件沙箱中读写文件。')
+              .replaceAll('{name}', manifest.name),
+        );
       default:
         return (
           context.tr('允许插件使用额外权限？'),

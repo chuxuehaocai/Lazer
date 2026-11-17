@@ -36,6 +36,7 @@ class InstalledPlugin {
   bool socketServerGranted = false;
   bool websocketGranted = false;
   bool websocketServerGranted = false;
+  bool filesystemGranted = false;
   final Map<String, Object?> settingValues = <String, Object?>{};
   final List<LuaPluginSetting> settings = <LuaPluginSetting>[];
   final List<LuaPlayerMenuItem> playerMenuItems = <LuaPlayerMenuItem>[];
@@ -119,6 +120,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     if (permission == 'websocketServer' && plugin.websocketServerGranted) {
       return true;
     }
+    if (permission == 'filesystem' && plugin.filesystemGranted) return true;
     if (onPermissionRequest == null) return false;
     bool granted;
     try {
@@ -147,6 +149,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       'socketServer' => '.socket-server-enabled',
       'websocket' => '.websocket-enabled',
       'websocketServer' => '.websocket-server-enabled',
+      'filesystem' => '.filesystem-enabled',
       _ => null,
     };
     if (markerName == null) return;
@@ -161,6 +164,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         plugin.websocketGranted = true;
       case 'websocketServer':
         plugin.websocketServerGranted = true;
+      case 'filesystem':
+        plugin.filesystemGranted = true;
     }
     await File(
       p.join((await root).path, plugin.manifest.id, markerName),
@@ -331,6 +336,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           plugin.websocketServerGranted = await File(
             p.join(item.path, '.websocket-server-enabled'),
           ).exists();
+          plugin.filesystemGranted = await File(
+            p.join(item.path, '.filesystem-enabled'),
+          ).exists();
           _plugins.add(plugin);
           if (!disabled) await _start(plugin);
         } catch (_) {
@@ -391,6 +399,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         socketServerGranted: plugin.socketServerGranted,
         websocketGranted: plugin.websocketGranted,
         websocketServerGranted: plugin.websocketServerGranted,
+        filesystemGranted: plugin.filesystemGranted,
         permissionRequester: (permission) =>
             _requestPermission(plugin, permission),
         onSettingAdded: (spec) => _registerSetting(plugin, spec),
@@ -691,6 +700,32 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.gateways.clear();
       plugin.networkGranted = granted;
       final marker = File(p.join((await root).path, id, '.network-enabled'));
+      if (granted) {
+        await marker.writeAsString('');
+      } else if (await marker.exists()) {
+        await marker.delete();
+      }
+      if (plugin.enabled) await _start(plugin);
+      await afterChange?.call();
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> setFilesystemPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    final plugin = _plugins.firstWhere((v) => v.manifest.id == id);
+    if (plugin.filesystemGranted == granted) return;
+    busy = true;
+    _notify();
+    try {
+      await beforeChange?.call(id);
+      await plugin.runtime?.shutdown();
+      plugin.runtime = null;
+      plugin.gateways.clear();
+      plugin.filesystemGranted = granted;
+      final marker = File(p.join((await root).path, id, '.filesystem-enabled'));
       if (granted) {
         await marker.writeAsString('');
       } else if (await marker.exists()) {

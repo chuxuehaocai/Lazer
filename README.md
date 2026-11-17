@@ -146,6 +146,7 @@ macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 
 ## 参考与致谢
 
+- ESP32 版本：[Lazer for ESP](https://github.com/sanmingsaxian/lazer-for-esp)。
 - 正在播放页版式参考 [AMLL Player](https://github.com/amll-dev/amll-player)。
 - 歌词动画参考 [Apple Music Like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics)。
 - 还有屏幕前的你

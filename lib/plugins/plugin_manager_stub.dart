@@ -25,6 +25,7 @@ class InstalledPlugin {
   bool socketServerGranted = false;
   bool websocketGranted = false;
   bool websocketServerGranted = false;
+  bool filesystemGranted = false;
   final Map<String, Object?> settingValues = <String, Object?>{};
   final List<LuaPluginSetting> settings = <LuaPluginSetting>[];
   final List<LuaPlayerMenuItem> playerMenuItems = <LuaPlayerMenuItem>[];
@@ -75,6 +76,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   Future<void> setEnabled(String id, bool enabled) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> setNetworkPermission(String id, bool granted) =>
+      Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
+  Future<void> setFilesystemPermission(String id, bool granted) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));
   Future<void> setSocketPermission(String id, bool granted) =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));

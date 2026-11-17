@@ -29,12 +29,13 @@ README.md
     "socketServer": ["127.0.0.1:9001"],
     "websocket": ["socket.example.com"],
     "websocketServer": ["127.0.0.1:11444"],
-    "storage": true
+    "storage": true,
+    "filesystem": true
   }
 }
 ```
 
-`id`、`provider` 和版本号必须符合规范；入口与 Lua 模块路径只能使用正斜杠，不能包含 `..`。网络权限只允许 HTTPS，并且请求的主机必须精确匹配 `permissions.network`，或匹配以 `*.` 开头的子域规则。`host.http` 和 `host.http_json` 在真正发出请求前都必须获得网络权限；插件第一次访问声明的网络域名时，客户端会向用户申请网络权限，拒绝后请求不会发出。TCP Socket、WebSocket 连接和服务端监听分别使用各自的权限范围，也必须在建立连接或开始监听前获得用户授权。插件 ZIP 最大 16 MB，解压后最大 8 MB，单个文件最大 2 MB。
+`id`、`provider` 和版本号必须符合规范；入口与 Lua 模块路径只能使用正斜杠，不能包含 `..`。网络权限只允许 HTTPS，并且请求的主机必须精确匹配 `permissions.network`，或匹配以 `*.` 开头的子域规则。`host.http` 和 `host.http_json` 在真正发出请求前都必须获得网络权限；插件第一次访问声明的网络域名时，客户端会向用户申请网络权限，拒绝后请求不会发出。TCP Socket、WebSocket 连接和服务端监听分别使用各自的权限范围，也必须在建立连接或开始监听前获得用户授权。文件管理权限只允许访问插件自己的文件沙箱，首次读写前单独申请；沙箱禁止路径穿越和符号链接，并限制单文件 4 MB、总量 16 MB。插件 ZIP 最大 16 MB，解压后最大 8 MB，单个文件最大 2 MB。
 
 入口文件返回一个带 `call(operation, args)` 的表。`args` 和返回值只能是 `nil`、布尔值、数字、字符串、数组或字符串键表：
 
@@ -105,6 +106,7 @@ end
 | `host.random_hex(count)` / `host.now()` | 随机数和 Unix 毫秒时间 |
 | `host.storage_get(key)` / `host.storage_set(key, value)` | 清单申请存储权限时使用；总量最多 1 MB |
 | `host.storage_keys()` / `host.storage_clear()` | 枚举或清空插件自己的持久化空间 |
+| `host.file({operation, path, data, encoding, recursive})` / `host.files(spec)` | 申请文件管理权限后访问插件专属文件沙箱；支持 `read`、`write`、`append`、`list`、`mkdir`、`stat`、`exists`、`delete` |
 | `host.info()` / `host.plugin_info()` | 读取插件清单、宿主运行端和可用 host 特性 |
 | `host.resource(path)` / `host.read_resource(path)` / `host.resource_keys()` | 读取或枚举 ZIP 中的 JSON、TXT、Markdown 文本资源；不能访问宿主文件系统 |
 | `host.log(level, message, data)` | 写入经过脱敏和长度限制的宿主诊断日志 |
@@ -113,6 +115,7 @@ end
 | `host.add_player_menu_item(spec)` | 向正在播放页右上角的“三个点”菜单注册一个项目；返回 `true` |
 | `host.player_control(spec)` | 控制播放器播放、暂停、上下首、进度跳转或调节音量；返回执行结果 |
 | `host.player_state()` / `host.player_status()` / `host.player_queue()` / `host.player_track()` | 查询当前歌曲、进度、音量、缓冲、队列索引和播放模式 |
+| `host.player_lyrics()` / `host.player_recent()` | 查询当前歌词和最近播放歌曲，适合自定义播放界面 |
 
 插件可以在入口文件执行时注册设置和正在播放菜单项目。注册是幂等的，同一个插件内重复使用
 相同的 `id` 会更新项目。设置值由宿主持久化，插件通过 `setting_changed` 操作接收变化；
@@ -131,6 +134,8 @@ if queue.length > 0 and queue.currentIndex < queue.length - 1 then
 end
 host.player_control({ command = "repeat", mode = "all" })
 host.player_control({ command = "shuffle", enabled = true })
+local lyrics = host.player_lyrics()
+local recent = host.player_recent()
 
 -- 接收宿主广播的播放事件：
 -- operation == "player_event", args.type 为 "track" | "queue" | "lyric" | "status"
@@ -168,6 +173,27 @@ return {
   end
 }
 ```
+
+### 文件沙箱
+
+清单声明 `permissions.filesystem=true` 后，宿主会在第一次调用文件接口时申请“文件管理”权限。
+文件接口只接受相对路径，根目录是插件自己的 `lua_plugin_data/<plugin-id>/files`，不能访问
+插件目录、应用目录或其他插件的数据。文本默认使用 UTF-8；`encoding="binary"` 返回或写入
+字节数组，`encoding="base64"` 用 Base64 字符串传递二进制内容。
+
+```lua
+local spec = {operation="write", path="cache/state.json",
+  data=host.json_encode({version=1})}
+host.file(spec)
+local state = host.json_decode(host.file({operation="read", path="cache/state.json"}))
+for _, entry in ipairs(host.file({operation="list", path="cache"})) do
+  host.log("debug", entry.path, entry)
+end
+```
+
+`delete` 默认只删除空目录；传入 `recursive=true` 才会删除目录及其内容。文件沙箱单个文件
+最多 4 MB、总量最多 16 MB，目录项最多 2048 个。浏览器运行时使用同源的持久化沙箱，接口
+和权限语义与原生运行时一致。
 
 设置规格必须包含 `id` 和 `title`（也可用 `label`）。`select` 需要非空 `options`，
 每项包含字符串 `value` 和 `label`；`number` 可提供 `min`、`max`、`step`；`text` 最多

@@ -37,42 +37,143 @@ class LyricLine {
 /// lyrics later, which is the direction the tag is defined in. Lines that would
 /// land before zero are clamped to the start of the song. Without this, a file
 /// that ships an offset highlights and seeks one offset away from the words.
+final RegExp _lrcStamp = RegExp(r'\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]');
+final RegExp _lrcWordStamp = RegExp(r'<(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?>');
+final RegExp _lrcOffsetTag = RegExp(
+  r'\[offset:\s*([+-]?\d+)\s*\]',
+  caseSensitive: false,
+);
+
 List<LyricLine> parseLrc(String? source) {
   if (source == null || source.trim().isEmpty) return const [];
-  final stamp = RegExp(r'\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]');
-  final offsetTag = RegExp(
-    r'\[offset:\s*([+-]?\d+)\s*\]',
-    caseSensitive: false,
-  );
   final rows = source.split(RegExp(r'[\r\n]+'));
-  Duration offset = Duration.zero;
+  final offset = _lrcOffset(rows);
+  if (rows.any((row) => _lrcWordStamp.hasMatch(row))) {
+    final enhanced = _parseEnhancedLrc(rows, offset);
+    if (enhanced.isNotEmpty) return enhanced;
+  }
+  return _parsePlainLrc(rows, offset);
+}
+
+Duration _lrcOffset(List<String> rows) {
+  var offset = Duration.zero;
   for (final row in rows) {
-    final match = offsetTag.firstMatch(row);
-    final int? milliseconds = match == null
-        ? null
-        : int.tryParse(match.group(1)!);
+    final match = _lrcOffsetTag.firstMatch(row);
+    final milliseconds = match == null ? null : int.tryParse(match.group(1)!);
     if (milliseconds != null) offset = Duration(milliseconds: milliseconds);
   }
+  return offset;
+}
+
+Duration _lrcTime(Match match) {
+  final fraction = (match.group(3) ?? '').padRight(3, '0');
+  return Duration(
+    minutes: int.parse(match.group(1)!),
+    seconds: int.parse(match.group(2)!),
+    milliseconds: int.parse(fraction),
+  );
+}
+
+Duration _shiftLrcTime(Duration value, Duration offset) {
+  final shifted = value + offset;
+  return shifted.isNegative ? Duration.zero : shifted;
+}
+
+List<LyricLine> _parsePlainLrc(List<String> rows, Duration offset) {
   final lines = <LyricLine>[];
   for (final row in rows) {
-    final matches = stamp.allMatches(row).toList();
+    final matches = _lrcStamp.allMatches(row).toList();
     if (matches.isEmpty) continue;
     final text = row.substring(matches.last.end).trim();
     for (final match in matches) {
       final seconds = int.parse(match.group(2)!);
       if (seconds >= 60) continue;
-      final fraction = (match.group(3) ?? '').padRight(3, '0');
-      final base = Duration(
-        minutes: int.parse(match.group(1)!),
-        seconds: seconds,
-        milliseconds: int.parse(fraction),
-      );
-      final shifted = base + offset;
-      lines.add(LyricLine(shifted.isNegative ? Duration.zero : shifted, text));
+      lines.add(LyricLine(_shiftLrcTime(_lrcTime(match), offset), text));
     }
   }
   lines.sort((a, b) => a.time.compareTo(b.time));
   return lines;
+}
+
+/// Parses enhanced LRC/ELRC rows such as:
+///
+/// `[00:00.000]<00:00.000>春<00:00.242>归<00:00.484>处`
+///
+/// Word timestamps are absolute song positions. The duration of a word is
+/// the distance to the next word; the last word uses the next line's start
+/// when available. A one millisecond minimum keeps malformed or repeated
+/// timestamps renderable without creating a negative duration.
+List<LyricLine> _parseEnhancedLrc(List<String> rows, Duration offset) {
+  final parsed = <_EnhancedLrcLine>[];
+  for (final row in rows) {
+    final wordMatches = _lrcWordStamp.allMatches(row).toList();
+    if (wordMatches.isEmpty) continue;
+    final lineMatches = _lrcStamp.allMatches(row).toList();
+    final timedWords = <_EnhancedLrcWord>[];
+    for (var i = 0; i < wordMatches.length; i++) {
+      final match = wordMatches[i];
+      final end = i + 1 < wordMatches.length
+          ? wordMatches[i + 1].start
+          : row.length;
+      final text = row.substring(match.end, end);
+      if (text.isEmpty) continue;
+      final seconds = int.parse(match.group(2)!);
+      if (seconds >= 60) continue;
+      timedWords.add(
+        _EnhancedLrcWord(_shiftLrcTime(_lrcTime(match), offset), text),
+      );
+    }
+    if (timedWords.isEmpty) continue;
+    final lineTimes = lineMatches.isEmpty
+        ? <Duration>[timedWords.first.start]
+        : [
+            for (final match in lineMatches)
+              if (int.parse(match.group(2)!) < 60)
+                _shiftLrcTime(_lrcTime(match), offset),
+          ];
+    for (final time in lineTimes) {
+      parsed.add(_EnhancedLrcLine(time, timedWords));
+    }
+  }
+  if (parsed.isEmpty) return const [];
+  parsed.sort((a, b) => a.time.compareTo(b.time));
+  final lines = <LyricLine>[];
+  for (var i = 0; i < parsed.length; i++) {
+    final line = parsed[i];
+    final nextLineTime = i + 1 < parsed.length ? parsed[i + 1].time : null;
+    final words = <LyricWord>[];
+    for (var wordIndex = 0; wordIndex < line.words.length; wordIndex++) {
+      final word = line.words[wordIndex];
+      final nextWord = wordIndex + 1 < line.words.length
+          ? line.words[wordIndex + 1].start
+          : nextLineTime;
+      final end = nextWord == null || nextWord <= word.start
+          ? word.start + const Duration(milliseconds: 1)
+          : nextWord;
+      words.add(LyricWord(word.start, end - word.start, word.text));
+    }
+    lines.add(
+      LyricLine(
+        line.time,
+        line.words.map((word) => word.text).join(),
+        words: words,
+        end: words.last.start + words.last.duration,
+      ),
+    );
+  }
+  return lines;
+}
+
+class _EnhancedLrcLine {
+  const _EnhancedLrcLine(this.time, this.words);
+  final Duration time;
+  final List<_EnhancedLrcWord> words;
+}
+
+class _EnhancedLrcWord {
+  const _EnhancedLrcWord(this.start, this.text);
+  final Duration start;
+  final String text;
 }
 
 /// Port of WordLyrics.kt; word offsets are absolute song positions. The

@@ -19,6 +19,7 @@ class LuaPluginRuntime {
     this.socketServerGranted = false,
     this.websocketGranted = false,
     this.websocketServerGranted = false,
+    this.filesystemGranted = false,
     this.permissionRequester,
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
@@ -37,6 +38,7 @@ class LuaPluginRuntime {
   final bool socketServerGranted;
   final bool websocketGranted;
   final bool websocketServerGranted;
+  final bool filesystemGranted;
   final Future<bool> Function(String permission)? permissionRequester;
   final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)?

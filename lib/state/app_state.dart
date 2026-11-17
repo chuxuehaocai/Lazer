@@ -3064,6 +3064,37 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       case 'nowplaying':
       case 'now_playing':
         return current == null ? null : _pluginTrack(current!);
+      case 'lyrics':
+      case 'getlyrics':
+      case 'get_lyrics':
+        return {
+          'loading': lyricsLoading,
+          'pureMusic': lyricsPureMusic,
+          'imported': lyricsImported,
+          if (lyricsError != null) 'error': lyricsError,
+          'lines': [
+            for (final line in lyrics)
+              {
+                'text': line.text,
+                'time': line.time.inMilliseconds,
+                'startTime': line.time.inMilliseconds,
+                if (line.translation != null) ...{
+                  'translation': line.translation,
+                  'translatedLyric': line.translation,
+                },
+                if (line.romanization != null) ...{
+                  'romanization': line.romanization,
+                  'romanLyric': line.romanization,
+                },
+              },
+          ],
+        };
+      case 'recent':
+      case 'recent_tracks':
+      case 'recenttracks':
+        return [
+          for (final track in recentTracks.take(100)) _pluginTrack(track),
+        ];
       case 'play_index':
       case 'playat':
       case 'play_at':

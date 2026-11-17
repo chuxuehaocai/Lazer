@@ -19,6 +19,10 @@ import 'lua_console_evaluator.dart';
 import '../diagnostics/app_log.dart';
 import '../utils/system_http.dart';
 
+const _pluginFileMaxBytes = 4 * 1024 * 1024;
+const _pluginFilesMaxBytes = 16 * 1024 * 1024;
+const _pluginFilesMaxEntries = 2048;
+
 /// Browser implementation of the Lua gateway runtime.
 ///
 /// The VM is still isolated from Flutter objects and filesystem APIs. Browser
@@ -38,6 +42,7 @@ class LuaPluginRuntime {
     this.socketServerGranted = false,
     this.websocketGranted = false,
     this.websocketServerGranted = false,
+    this.filesystemGranted = false,
     this.permissionRequester,
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
@@ -62,6 +67,7 @@ class LuaPluginRuntime {
   final bool socketServerGranted;
   final bool websocketGranted;
   final bool websocketServerGranted;
+  final bool filesystemGranted;
   final Future<bool> Function(String permission)? permissionRequester;
   final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)?
@@ -97,6 +103,7 @@ class LuaPluginRuntime {
       socketServerGranted: socketServerGranted,
       websocketGranted: websocketGranted,
       websocketServerGranted: websocketServerGranted,
+      filesystemGranted: filesystemGranted,
       permissionRequester: permissionRequester,
       onLog: onLog,
       uiExtensions:
@@ -212,6 +219,7 @@ class _WebPluginHost {
     this.socketServerGranted = false,
     this.websocketGranted = false,
     this.websocketServerGranted = false,
+    this.filesystemGranted = false,
     this.permissionRequester,
     this.onLog,
     this.uiExtensions,
@@ -228,12 +236,15 @@ class _WebPluginHost {
   bool networkGranted;
   bool socketGranted, socketServerGranted;
   bool websocketGranted, websocketServerGranted;
+  bool filesystemGranted;
   final Future<bool> Function(String permission)? permissionRequester;
   final void Function(Map<String, dynamic> record)? onLog;
   final Future<Object?> Function(String kind, Map<String, dynamic> spec)?
   uiExtensions;
   final ConsoleCapableLuaState lua = ConsoleCapableLuaState();
   Map<String, dynamic> storage = <String, dynamic>{};
+  final Map<String, String> files = <String, String>{};
+  final Set<String> directories = <String>{};
   final Map<String, html.WebSocket> _websockets = <String, html.WebSocket>{};
 
   final Map<String, PluginSocketInbox> _websocketInboxes = {};
@@ -262,6 +273,7 @@ class _WebPluginHost {
 
   Future<void> initialize() async {
     _loadStorage();
+    _loadFiles();
     lua.openLibs();
     for (final key in [
       'io',
@@ -432,11 +444,38 @@ class _WebPluginHost {
       _push(state, await uiExtensions!('playerControl', {'command': 'track'}));
       return 1;
     });
+    lua.registerAsync('_player_lyrics', (state) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      _push(
+        state,
+        await uiExtensions!('playerControl', {'command': 'lyrics'}) ??
+            const <String, dynamic>{},
+      );
+      return 1;
+    });
+    lua.registerAsync('_player_recent', (state) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      _push(
+        state,
+        await uiExtensions!('playerControl', {'command': 'recent'}) ??
+            const <Object?>[],
+      );
+      return 1;
+    });
     lua.registerAsync('_sleep', (state) async {
       final requested = state.checkInteger(1) ?? 0;
       final milliseconds = requested.clamp(0, 60000);
       await Future<void>.delayed(Duration(milliseconds: milliseconds));
       _push(state, true);
+      return 1;
+    });
+    lua.registerAsync('_file', (state) async {
+      final spec = Map<String, dynamic>.from(_read(state, 1) as Map);
+      _push(state, await _file(spec));
       return 1;
     });
     lua.registerAsync('_http', (state) async {
@@ -579,7 +618,9 @@ class _WebPluginHost {
         add_setting = _add_setting, add_player_menu_item = _add_player_menu_item,
         player_control = _player_control, player_state = _player_state,
         player_status = _player_state, player_queue = _player_queue,
-        player_track = _player_track, now_playing = _player_track, sleep = _sleep }
+        player_track = _player_track, now_playing = _player_track,
+        player_lyrics = _player_lyrics, player_recent = _player_recent,
+        file = _file, files = _file, sleep = _sleep }
       $moduleBuffers
       local modules = {}
       function require(name)
@@ -642,6 +683,7 @@ class _WebPluginHost {
       'websocket': List<String>.of(manifest.websocketDomains),
       'websocketServer': List<String>.of(manifest.websocketServerBindings),
       'storage': manifest.storage,
+      'filesystem': manifest.filesystem,
     },
     'features': [
       'http',
@@ -649,8 +691,11 @@ class _WebPluginHost {
       'storage',
       'resources',
       'player',
+      'player_lyrics',
+      'player_recent',
       'websocket',
       'sleep',
+      'filesystem',
     ],
   };
 
@@ -717,6 +762,320 @@ class _WebPluginHost {
       html.window.localStorage.remove(_localStorageKey);
     } else {
       html.window.localStorage[_localStorageKey] = value;
+    }
+  }
+
+  String get _filesStorageKey => 'lazer.plugin.files.$dataKey';
+
+  void _loadFiles() {
+    if (!manifest.filesystem) return;
+    final value = html.window.localStorage[_filesStorageKey];
+    if (value == null || value.isEmpty) return;
+    try {
+      final decoded =
+          jsonDecode(utf8.decode(base64Url.decode(value)))
+              as Map<dynamic, dynamic>;
+      final rawFiles = decoded['files'] is Map
+          ? decoded['files'] as Map
+          : decoded;
+      for (final entry in rawFiles.entries) {
+        final path = entry.key.toString();
+        if (!PluginManifest.safePath(path) || entry.value is! String) continue;
+        final bytes = base64Url.decode(entry.value as String);
+        if (bytes.length <= _pluginFileMaxBytes) {
+          files[path] = entry.value as String;
+        }
+      }
+      final rawDirectories = decoded['directories'];
+      if (rawDirectories is List) {
+        directories.addAll(
+          rawDirectories.whereType<String>().where(
+            (path) => PluginManifest.safePath(path),
+          ),
+        );
+      }
+    } catch (_) {
+      files.clear();
+      directories.clear();
+    }
+  }
+
+  void _saveFiles() {
+    if (!manifest.filesystem) return;
+    try {
+      final value = base64Url.encode(
+        utf8.encode(
+          jsonEncode(<String, dynamic>{
+            'files': files,
+            'directories': directories.toList()..sort(),
+          }),
+        ),
+      );
+      if (value.length > (_pluginFilesMaxBytes * 2)) {
+        throw const FormatException('Filesystem storage full');
+      }
+      html.window.localStorage[_filesStorageKey] = value;
+    } catch (error) {
+      if (error is FormatException) rethrow;
+      throw const FormatException('Filesystem storage unavailable');
+    }
+  }
+
+  Future<Object?> _file(Map<String, dynamic> spec) async {
+    if (!manifest.filesystem) {
+      throw const FormatException('Filesystem permission required');
+    }
+    if (!filesystemGranted) {
+      if (permissionRequester != null &&
+          await permissionRequester!('filesystem')) {
+        filesystemGranted = true;
+      } else {
+        throw const FormatException('Filesystem permission required');
+      }
+    }
+    final operation = (spec['operation'] as String? ?? 'read')
+        .toLowerCase()
+        .trim();
+    final pathValue = spec['path'] as String? ?? '';
+    final path = _filePath(pathValue, allowRoot: operation == 'list');
+    switch (operation) {
+      case 'exists':
+        return files.containsKey(path) || _directorySet().contains(path);
+      case 'stat':
+        return _fileStat(path);
+      case 'list':
+        return _fileList(path);
+      case 'read':
+        return _fileRead(path, spec['encoding'] as String?);
+      case 'write':
+      case 'append':
+        if (path.isEmpty) throw const FormatException('File path required');
+        final oldFiles = Map<String, String>.of(files);
+        final oldDirectories = Set<String>.of(directories);
+        try {
+          final result = _fileWrite(
+            path,
+            spec['data'],
+            encoding: spec['encoding'] as String?,
+            append: operation == 'append',
+          );
+          _saveFiles();
+          return result;
+        } catch (_) {
+          files
+            ..clear()
+            ..addAll(oldFiles);
+          directories
+            ..clear()
+            ..addAll(oldDirectories);
+          rethrow;
+        }
+      case 'mkdir':
+        if (path.isEmpty) {
+          throw const FormatException('Directory path required');
+        }
+        final oldDirectories = Set<String>.of(directories);
+        try {
+          _addDirectory(path);
+          _saveFiles();
+          return true;
+        } catch (_) {
+          directories
+            ..clear()
+            ..addAll(oldDirectories);
+          rethrow;
+        }
+      case 'delete':
+        if (path.isEmpty) throw const FormatException('File path required');
+        final oldFiles = Map<String, String>.of(files);
+        final oldDirectories = Set<String>.of(directories);
+        try {
+          final removed = _fileDelete(
+            path,
+            recursive: spec['recursive'] == true,
+          );
+          if (removed) _saveFiles();
+          return removed;
+        } catch (_) {
+          files
+            ..clear()
+            ..addAll(oldFiles);
+          directories
+            ..clear()
+            ..addAll(oldDirectories);
+          rethrow;
+        }
+      default:
+        throw FormatException('Unsupported file operation: $operation');
+    }
+  }
+
+  String _filePath(String value, {required bool allowRoot}) {
+    if (value.isEmpty && allowRoot) return '';
+    if (!PluginManifest.safePath(value)) {
+      throw const FormatException('Invalid file path');
+    }
+    return value;
+  }
+
+  Map<String, dynamic>? _fileStat(String path) {
+    final encoded = files[path];
+    if (encoded != null) {
+      return {
+        'path': path,
+        'type': 'file',
+        'size': base64Url.decode(encoded).length,
+        'modifiedMs': 0,
+      };
+    }
+    if (_directorySet().contains(path)) {
+      return {'path': path, 'type': 'directory', 'size': 0, 'modifiedMs': 0};
+    }
+    return null;
+  }
+
+  List<Map<String, dynamic>> _fileList(String path) {
+    if (files.containsKey(path)) {
+      throw const FormatException('Not a directory');
+    }
+    if (path.isNotEmpty && !_directorySet().contains(path)) {
+      throw const FormatException('Directory not found');
+    }
+    final prefix = path.isEmpty ? '' : '$path/';
+    final entries = <String, Map<String, dynamic>>{};
+    for (final directory in _directorySet()) {
+      if (!directory.startsWith(prefix) || directory == path) continue;
+      final rest = directory.substring(prefix.length);
+      final name = rest.split('/').first;
+      final entryPath = '$prefix$name';
+      entries[entryPath] = {
+        'name': name,
+        'path': entryPath,
+        'type': 'directory',
+      };
+    }
+    for (final file in files.keys) {
+      if (!file.startsWith(prefix)) continue;
+      final rest = file.substring(prefix.length);
+      final name = rest.split('/').first;
+      final entryPath = '$prefix$name';
+      if (rest.contains('/')) {
+        entries[entryPath] = {
+          'name': name,
+          'path': entryPath,
+          'type': 'directory',
+        };
+      } else {
+        entries[entryPath] = {
+          'name': name,
+          'path': entryPath,
+          'type': 'file',
+          'size': base64Url.decode(files[file]!).length,
+        };
+      }
+    }
+    final result = entries.values.toList()
+      ..sort((a, b) => (a['path'] as String).compareTo(b['path'] as String));
+    if (result.length > _pluginFilesMaxEntries) {
+      throw const FormatException('Too many files');
+    }
+    return result;
+  }
+
+  Object _fileRead(String path, String? encoding) {
+    final encoded = files[path];
+    if (encoded == null) throw const FormatException('File not found');
+    final bytes = base64Url.decode(encoded);
+    if (bytes.length > _pluginFileMaxBytes) {
+      throw const FormatException('File too large');
+    }
+    if (encoding == 'binary') return bytes;
+    if (encoding == 'base64') return base64Encode(bytes);
+    return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  Map<String, dynamic> _fileWrite(
+    String path,
+    Object? value, {
+    String? encoding,
+    required bool append,
+  }) {
+    final bytes = _fileBytes(value, encoding);
+    final oldBytes = files[path] == null
+        ? const <int>[]
+        : base64Url.decode(files[path]!);
+    final next = append ? <int>[...oldBytes, ...bytes] : <int>[...bytes];
+    if (next.length > _pluginFileMaxBytes ||
+        _fileUsage() - oldBytes.length + next.length > _pluginFilesMaxBytes) {
+      throw const FormatException('Filesystem storage full');
+    }
+    _addDirectory(
+      path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : '',
+    );
+    files[path] = base64Url.encode(next);
+    return {'path': path, 'size': next.length};
+  }
+
+  List<int> _fileBytes(Object? value, String? encoding) {
+    if (value is String) {
+      if (encoding == 'base64') {
+        try {
+          return base64Decode(value);
+        } catch (_) {
+          throw const FormatException('Invalid base64 data');
+        }
+      }
+      return utf8.encode(value);
+    }
+    if (value is List) {
+      final bytes = <int>[];
+      for (final item in value) {
+        if (item is! num || item.toInt() < 0 || item.toInt() > 255) {
+          throw const FormatException('Binary data must contain bytes');
+        }
+        bytes.add(item.toInt());
+      }
+      return bytes;
+    }
+    throw const FormatException('File data must be text or bytes');
+  }
+
+  int _fileUsage() => files.values.fold<int>(
+    0,
+    (total, value) => total + base64Url.decode(value).length,
+  );
+
+  bool _fileDelete(String path, {required bool recursive}) {
+    if (files.remove(path) != null) return true;
+    final prefix = '$path/';
+    final hasChildren =
+        files.keys.any((value) => value.startsWith(prefix)) ||
+        directories.any((value) => value.startsWith(prefix));
+    if (hasChildren && !recursive) {
+      throw const FormatException('Directory is not empty');
+    }
+    final removed = directories.remove(path);
+    files.removeWhere((value, _) => value.startsWith(prefix));
+    directories.removeWhere((value) => value.startsWith(prefix));
+    return removed || hasChildren;
+  }
+
+  Set<String> _directorySet() {
+    final result = <String>{...directories};
+    for (final file in files.keys) {
+      final parts = file.split('/');
+      for (var length = 1; length < parts.length; length++) {
+        result.add(parts.take(length).join('/'));
+      }
+    }
+    return result;
+  }
+
+  void _addDirectory(String path) {
+    if (path.isEmpty) return;
+    final parts = path.split('/');
+    for (var length = 1; length <= parts.length; length++) {
+      directories.add(parts.take(length).join('/'));
     }
   }
 

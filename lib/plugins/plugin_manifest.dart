@@ -30,7 +30,11 @@ class PluginManifest {
       websocketServerBindings = List<String>.from(
         (json['permissions'] as Map?)?['websocketServer'] as List? ?? [],
       ),
-      storage = (json['permissions'] as Map?)?['storage'] == true {
+      storage = (json['permissions'] as Map?)?['storage'] == true,
+      filesystem =
+          (json['permissions'] as Map?)?['filesystem'] == true ||
+          (json['permissions'] as Map?)?['files'] == true ||
+          (json['permissions'] as Map?)?['file'] == true {
     if (!RegExp(r'^[a-z][a-z0-9_.-]{2,79}$').hasMatch(id) ||
         !RegExp(r'^[a-z][a-z0-9_-]{1,39}$').hasMatch(provider) ||
         provider == 'local' ||
@@ -118,7 +122,7 @@ class PluginManifest {
       socketDomains,
       websocketDomains;
   final List<String> socketServerBindings, websocketServerBindings;
-  final bool storage;
+  final bool storage, filesystem;
 
   static bool safePath(String path) =>
       path.isNotEmpty &&
@@ -242,6 +246,7 @@ class PluginManifest {
       'websocket': websocketDomains,
       'websocketServer': websocketServerBindings,
       'storage': storage,
+      'filesystem': filesystem,
     },
   };
 }

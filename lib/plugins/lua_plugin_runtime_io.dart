@@ -19,6 +19,10 @@ import 'lua_console_evaluator.dart';
 import '../diagnostics/app_log.dart';
 import '../utils/system_http.dart';
 
+const _pluginFileMaxBytes = 4 * 1024 * 1024;
+const _pluginFilesMaxBytes = 16 * 1024 * 1024;
+const _pluginFilesMaxEntries = 2048;
+
 /// Each VM has its own isolate, session, serial call queue and time budget.
 /// No executable, dynamic library, JIT or platform-specific Lua installation.
 class LuaPluginRuntime {
@@ -34,6 +38,7 @@ class LuaPluginRuntime {
     this.socketServerGranted = false,
     this.websocketGranted = false,
     this.websocketServerGranted = false,
+    this.filesystemGranted = false,
     this.permissionRequester,
     this.onSettingAdded,
     this.onPlayerMenuItemAdded,
@@ -58,6 +63,7 @@ class LuaPluginRuntime {
   bool socketServerGranted;
   bool websocketGranted;
   bool websocketServerGranted;
+  bool filesystemGranted;
   final Future<bool> Function(String permission)? permissionRequester;
   final Future<Object?> Function(Map<String, dynamic> spec)? onSettingAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)?
@@ -238,6 +244,7 @@ class LuaPluginRuntime {
           'socketServerGranted': socketServerGranted,
           'websocketGranted': websocketGranted,
           'websocketServerGranted': websocketServerGranted,
+          'filesystemGranted': filesystemGranted,
           'permissionRequester': permissionRequester != null,
           'uiExtensions':
               onSettingAdded != null ||
@@ -292,6 +299,8 @@ class LuaPluginRuntime {
         websocketGranted = true;
       case 'websocketServer':
         websocketServerGranted = true;
+      case 'filesystem':
+        filesystemGranted = true;
     }
   }
 
@@ -533,6 +542,7 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
     socketServerGranted: config['socketServerGranted'] == true,
     websocketGranted: config['websocketGranted'] == true,
     websocketServerGranted: config['websocketServerGranted'] == true,
+    filesystemGranted: config['filesystemGranted'] == true,
     permissionRequester: config['permissionRequester'] == true
         ? (permission) async {
             final reply = ReceivePort();
@@ -651,6 +661,7 @@ class _PluginHost {
     this.socketServerGranted = false,
     this.websocketGranted = false,
     this.websocketServerGranted = false,
+    this.filesystemGranted = false,
     this.permissionRequester,
     this.uiExtensions,
     this.onLog,
@@ -664,6 +675,7 @@ class _PluginHost {
   bool networkGranted;
   bool socketGranted, socketServerGranted;
   bool websocketGranted, websocketServerGranted;
+  bool filesystemGranted;
   final Future<bool> Function(String permission)? permissionRequester;
   final Future<Object?> Function(String kind, Map<String, dynamic> spec)?
   uiExtensions;
@@ -870,11 +882,38 @@ class _PluginHost {
       _push(l, await uiExtensions!('playerControl', {'command': 'track'}));
       return 1;
     });
+    lua.registerAsync('_player_lyrics', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      _push(
+        l,
+        await uiExtensions!('playerControl', {'command': 'lyrics'}) ??
+            const <String, dynamic>{},
+      );
+      return 1;
+    });
+    lua.registerAsync('_player_recent', (l) async {
+      if (uiExtensions == null) {
+        throw const FormatException('Player control is unavailable');
+      }
+      _push(
+        l,
+        await uiExtensions!('playerControl', {'command': 'recent'}) ??
+            const <Object?>[],
+      );
+      return 1;
+    });
     lua.registerAsync('_sleep', (l) async {
       final requested = l.checkInteger(1) ?? 0;
       final milliseconds = requested.clamp(0, 60000);
       await Future<void>.delayed(Duration(milliseconds: milliseconds));
       _push(l, true);
+      return 1;
+    });
+    lua.registerAsync('_file', (l) async {
+      final spec = Map<String, dynamic>.from(_read(l, 1) as Map);
+      _push(l, await _file(spec));
       return 1;
     });
     lua.registerAsync('_http', (l) async {
@@ -955,7 +994,9 @@ host = { json_encode = _json_encode, json_decode = _json_decode,
   add_setting = _add_setting, add_player_menu_item = _add_player_menu_item,
   player_control = _player_control, player_state = _player_state,
   player_status = _player_state, player_queue = _player_queue,
-  player_track = _player_track, now_playing = _player_track, sleep = _sleep }
+  player_track = _player_track, now_playing = _player_track,
+  player_lyrics = _player_lyrics, player_recent = _player_recent,
+  file = _file, files = _file, sleep = _sleep }
 $moduleBuffers
 local modules = {}
 function require(name)
@@ -1018,6 +1059,7 @@ end
       'websocket': List<String>.of(manifest.websocketDomains),
       'websocketServer': List<String>.of(manifest.websocketServerBindings),
       'storage': manifest.storage,
+      'filesystem': manifest.filesystem,
     },
     'features': [
       'http',
@@ -1025,9 +1067,12 @@ end
       'storage',
       'resources',
       'player',
+      'player_lyrics',
+      'player_recent',
       'websocket',
       'socket',
       'sleep',
+      'filesystem',
     ],
   };
 
@@ -1044,6 +1089,239 @@ end
     temp.renameSync(target.path);
     storage = next;
   }
+
+  Future<Object?> _file(Map<String, dynamic> spec) async {
+    if (!manifest.filesystem) {
+      throw const FormatException('Filesystem permission required');
+    }
+    if (!filesystemGranted) {
+      if (permissionRequester != null &&
+          await permissionRequester!('filesystem')) {
+        filesystemGranted = true;
+      } else {
+        throw const FormatException('Filesystem permission required');
+      }
+    }
+    final operation = (spec['operation'] as String? ?? 'read')
+        .toLowerCase()
+        .trim();
+    final pathValue = spec['path'] as String? ?? '';
+    final allowRoot = operation == 'list';
+    final path = _filePath(pathValue, allowRoot: allowRoot);
+    await _assertNoSymlink(path);
+    switch (operation) {
+      case 'exists':
+        return (await FileSystemEntity.type(path, followLinks: false)) !=
+            FileSystemEntityType.notFound;
+      case 'stat':
+        return _fileStat(path);
+      case 'list':
+        return _fileList(path);
+      case 'read':
+        return _fileRead(path, spec['encoding'] as String?);
+      case 'write':
+      case 'append':
+        if (pathValue.isEmpty) {
+          throw const FormatException('File path required');
+        }
+        return _fileWrite(
+          path,
+          spec['data'],
+          encoding: spec['encoding'] as String?,
+          append: operation == 'append',
+        );
+      case 'mkdir':
+        if (pathValue.isEmpty) {
+          throw const FormatException('Directory path required');
+        }
+        await Directory(path).create(recursive: true);
+        return true;
+      case 'delete':
+        if (pathValue.isEmpty) {
+          throw const FormatException('File path required');
+        }
+        final type = await FileSystemEntity.type(path, followLinks: false);
+        if (type == FileSystemEntityType.notFound) return false;
+        if (type == FileSystemEntityType.file) {
+          await File(path).delete();
+        } else if (type == FileSystemEntityType.directory) {
+          await Directory(path).delete(recursive: spec['recursive'] == true);
+        } else {
+          throw const FormatException('Unsupported filesystem entry');
+        }
+        return true;
+      default:
+        throw FormatException('Unsupported file operation: $operation');
+    }
+  }
+
+  String _filePath(String value, {required bool allowRoot}) {
+    if (value.isEmpty && allowRoot) return p.join(dataPath, 'files');
+    if (!PluginManifest.safePath(value)) {
+      throw const FormatException('Invalid file path');
+    }
+    final root = p.normalize(p.join(dataPath, 'files'));
+    final path = p.normalize(p.join(root, value.replaceAll('/', p.separator)));
+    if (path != root && !path.startsWith('$root${p.separator}')) {
+      throw const FormatException('Invalid file path');
+    }
+    return path;
+  }
+
+  Future<void> _assertNoSymlink(String path) async {
+    final root = p.normalize(p.join(dataPath, 'files'));
+    final relative = p.relative(path, from: root);
+    if (relative == '.') return;
+    var current = root;
+    for (final segment in relative.split(p.separator)) {
+      current = p.join(current, segment);
+      final type = await FileSystemEntity.type(current, followLinks: false);
+      if (type == FileSystemEntityType.link) {
+        throw const FormatException('Symbolic links are not allowed');
+      }
+      if (type == FileSystemEntityType.notFound) break;
+    }
+  }
+
+  Future<Object?> _fileStat(String path) async {
+    final type = await FileSystemEntity.type(path, followLinks: false);
+    if (type == FileSystemEntityType.notFound) return null;
+    if (type == FileSystemEntityType.link) {
+      throw const FormatException('Symbolic links are not allowed');
+    }
+    final stat = await FileStat.stat(path);
+    return {
+      'path': _fileRelative(path),
+      'type': type == FileSystemEntityType.directory ? 'directory' : 'file',
+      'size': stat.size,
+      'modifiedMs': stat.modified.millisecondsSinceEpoch,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> _fileList(String path) async {
+    final directory = Directory(path);
+    if (!await directory.exists()) return <Map<String, dynamic>>[];
+    if (await FileSystemEntity.type(path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      throw const FormatException('Not a directory');
+    }
+    final entries = <Map<String, dynamic>>[];
+    await for (final entity in directory.list(followLinks: false)) {
+      if (entries.length >= _pluginFilesMaxEntries) {
+        throw const FormatException('Too many files');
+      }
+      final type = await FileSystemEntity.type(entity.path, followLinks: false);
+      if (type == FileSystemEntityType.link ||
+          type == FileSystemEntityType.notFound) {
+        continue;
+      }
+      final item = <String, dynamic>{
+        'name': p.basename(entity.path),
+        'path': _fileRelative(entity.path),
+        'type': type == FileSystemEntityType.directory ? 'directory' : 'file',
+      };
+      if (type == FileSystemEntityType.file) {
+        item['size'] = await File(entity.path).length();
+      }
+      entries.add(item);
+    }
+    entries.sort(
+      (a, b) => (a['path'] as String).compareTo(b['path'] as String),
+    );
+    return entries;
+  }
+
+  Future<Object?> _fileRead(String path, String? encoding) async {
+    final type = await FileSystemEntity.type(path, followLinks: false);
+    if (type != FileSystemEntityType.file) {
+      throw const FormatException('File not found');
+    }
+    final bytes = await File(path).readAsBytes();
+    if (bytes.length > _pluginFileMaxBytes) {
+      throw const FormatException('File too large');
+    }
+    if (encoding == 'binary') return bytes;
+    if (encoding == 'base64') return base64Encode(bytes);
+    return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  Future<Map<String, dynamic>> _fileWrite(
+    String path,
+    Object? value, {
+    String? encoding,
+    required bool append,
+  }) async {
+    final bytes = _fileBytes(value, encoding);
+    if (bytes.length > _pluginFileMaxBytes) {
+      throw const FormatException('File too large');
+    }
+    await _assertNoSymlink(p.dirname(path));
+    final file = File(path);
+    final type = await FileSystemEntity.type(path, followLinks: false);
+    if (type == FileSystemEntityType.directory ||
+        type == FileSystemEntityType.link) {
+      throw const FormatException('Invalid file target');
+    }
+    final previous = type == FileSystemEntityType.file
+        ? await file.length()
+        : 0;
+    final usage = await _fileUsage();
+    final nextSize = append ? previous + bytes.length : bytes.length;
+    if (nextSize > _pluginFileMaxBytes ||
+        usage - previous + nextSize > _pluginFilesMaxBytes) {
+      throw const FormatException('Filesystem storage full');
+    }
+    await file.parent.create(recursive: true);
+    if (append) {
+      await file.writeAsBytes(bytes, mode: FileMode.append, flush: true);
+    } else {
+      await file.writeAsBytes(bytes, flush: true);
+    }
+    return {'path': _fileRelative(path), 'size': nextSize};
+  }
+
+  List<int> _fileBytes(Object? value, String? encoding) {
+    if (value is String) {
+      if (encoding == 'base64') {
+        try {
+          return base64Decode(value);
+        } catch (_) {
+          throw const FormatException('Invalid base64 data');
+        }
+      }
+      return utf8.encode(value);
+    }
+    if (value is List) {
+      return [
+        for (final item in value)
+          if (item is num && item.toInt() >= 0 && item.toInt() <= 255)
+            item.toInt()
+          else
+            throw const FormatException('Binary data must contain bytes'),
+      ];
+    }
+    throw const FormatException('File data must be text or bytes');
+  }
+
+  Future<int> _fileUsage() async {
+    final root = Directory(p.join(dataPath, 'files'));
+    if (!await root.exists()) return 0;
+    var total = 0;
+    await for (final entity in root.list(recursive: true, followLinks: false)) {
+      if (await FileSystemEntity.type(entity.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        continue;
+      }
+      total += await File(entity.path).length();
+      if (total > _pluginFilesMaxBytes) {
+        throw const FormatException('Filesystem storage full');
+      }
+    }
+    return total;
+  }
+
+  String _fileRelative(String path) =>
+      p.relative(path, from: p.join(dataPath, 'files')).replaceAll('\\', '/');
 
   Future<Map<String, dynamic>> _http(Map<String, dynamic> spec) async {
     final uri = Uri.parse(spec['url'] as String);

@@ -222,6 +222,9 @@ class _PluginRow extends StatelessWidget {
     if (plugin.manifest.storage) {
       parts.add(context.tr('本地存储'));
     }
+    if (plugin.manifest.filesystem) {
+      parts.add(context.tr('文件管理权限'));
+    }
     if (parts.isEmpty) {
       return context.tr('无需特殊权限');
     }
@@ -725,6 +728,43 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                         ),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (manifest.filesystem) ...[
+                  _sectionHeader(context, Icons.folder_copy_outlined, context.tr('文件管理权限'), apple),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Text(
+                      context.tr('允许插件在自己的文件沙箱中读写、列出和删除文件；不会访问沙箱外的路径。'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: apple.secondaryLabel,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        context.tr('允许文件管理'),
+                        style: theme.textTheme.bodySmall?.copyWith(color: apple.label),
+                      ),
+                      Switch(
+                        key: ValueKey('filesystem-permission-${manifest.id}'),
+                        value: widget.plugin.filesystemGranted,
+                        onChanged: widget.manager.busy
+                            ? null
+                            : (value) async {
+                                await widget.manager.setFilesystemPermission(
+                                  manifest.id,
+                                  value,
+                                );
+                                if (mounted) setState(() {});
+                              },
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                 ],

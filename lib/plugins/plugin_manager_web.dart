@@ -34,6 +34,7 @@ class InstalledPlugin {
   bool socketServerGranted = false;
   bool websocketGranted = false;
   bool websocketServerGranted = false;
+  bool filesystemGranted = false;
   final Map<String, Object?> settingValues = <String, Object?>{};
   final List<LuaPluginSetting> settings = <LuaPluginSetting>[];
   final List<LuaPlayerMenuItem> playerMenuItems = <LuaPlayerMenuItem>[];
@@ -118,6 +119,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     if (permission == 'websocketServer' && plugin.websocketServerGranted) {
       return true;
     }
+    if (permission == 'filesystem' && plugin.filesystemGranted) return true;
     if (onPermissionRequest == null) return false;
     bool granted;
     try {
@@ -152,6 +154,9 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       case 'websocketServer':
         plugin.websocketServerGranted = true;
         saved['websocketServerGranted'] = true;
+      case 'filesystem':
+        plugin.filesystemGranted = true;
+        saved['filesystemGranted'] = true;
       default:
         return;
     }
@@ -237,6 +242,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
           plugin.websocketGranted = value['websocketGranted'] == true;
           plugin.websocketServerGranted =
               value['websocketServerGranted'] == true;
+          plugin.filesystemGranted = value['filesystemGranted'] == true;
           final rawSettings = value['settingValues'];
           if (rawSettings is Map) {
             plugin.settingValues.addAll(Map<String, Object?>.from(rawSettings));
@@ -280,6 +286,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         socketServerGranted: plugin.socketServerGranted,
         websocketGranted: plugin.websocketGranted,
         websocketServerGranted: plugin.websocketServerGranted,
+        filesystemGranted: plugin.filesystemGranted,
         permissionRequester: (permission) =>
             _requestPermission(plugin, permission),
         onSettingAdded: (spec) => _registerSetting(plugin, spec),
@@ -527,6 +534,34 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
       saved['networkGranted'] = granted;
+      await prefs.setString(_key(id), jsonEncode(saved));
+      if (plugin.enabled) {
+        await _start(plugin, saved['sources'], saved['resources']);
+      }
+      await afterChange?.call();
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> setFilesystemPermission(String id, bool granted) async {
+    if (busy) throw const PluginException('正在处理插件，请稍候。');
+    final plugin = _plugins.firstWhere((value) => value.manifest.id == id);
+    if (plugin.filesystemGranted == granted) return;
+    busy = true;
+    _notify();
+    try {
+      await beforeChange?.call(id);
+      await plugin.runtime?.shutdown();
+      plugin.runtime = null;
+      plugin.gateways.clear();
+      plugin.settings.clear();
+      plugin.playerMenuItems.clear();
+      plugin.filesystemGranted = granted;
+      final prefs = await SharedPreferences.getInstance();
+      final saved = jsonDecode(prefs.getString(_key(id)) ?? '{}') as Map;
+      saved['filesystemGranted'] = granted;
       await prefs.setString(_key(id), jsonEncode(saved));
       if (plugin.enabled) {
         await _start(plugin, saved['sources'], saved['resources']);
