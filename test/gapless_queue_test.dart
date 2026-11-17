@@ -394,12 +394,13 @@ void main() {
       expect(engine.loads.length, 1);
       expect(state.successorPrepared, isTrue);
 
-      // Switching to repeat-one drops the queued successor and does not reload
+      // Switching to repeat-one queues the track itself and does not reload
       state.cycleRepeat();
       await tester.pump();
       expect(state.repeat, LoopMode.one);
       expect(engine.loads.length, 1);
-      expect(state.successorPrepared, isFalse);
+      expect(engine.appends.last, 'url-0');
+      expect(state.successorPrepared, isTrue);
 
       // Cycling back to repeat-off without reloading
       state.cycleRepeat();

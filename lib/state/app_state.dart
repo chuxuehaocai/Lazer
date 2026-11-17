@@ -4900,7 +4900,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
     final int generation = ++_prefetchGeneration;
     final int? next = _autoAdvanceIndex();
-    if (next == null || _repeat == LoopMode.one) {
+    if (next == null) {
       _clearQueuedNext();
       return;
     }
