@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -71,14 +71,14 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Configure FFmpeg install prefix
         shell: pwsh
         run: Add-Content -Path $env:GITHUB_ENV -Value "LAZER_FFMPEG_ROOT=$env:RUNNER_TEMP\lazer-ffmpeg"
       - name: Restore the Windows FFmpeg SDK
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/lazer-ffmpeg
           key: windows-x86_64-ffmpeg-${{ hashFiles('native/lazer-audio/tools/build_dsd_ffmpeg.sh') }}
@@ -188,7 +188,7 @@ jobs:
             Pop-Location
             Remove-Item -LiteralPath $probe -Force
           }
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Lazer-Windows-x86_64
           path: dist/*
@@ -211,7 +211,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -234,7 +234,7 @@ jobs:
           dart run tool/build_native_audio.dart --ffmpeg-root "$ffmpeg_root"
           mkdir -p dist
           cp build/native-audio/*.dylib dist/
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-deps-macos-${{ matrix.arch }}
           path: dist/
@@ -262,7 +262,7 @@ jobs:
       FLUTTER_XCODE_DEVELOPMENT_TEAM: ''
       FLUTTER_XCODE_ARCHS: ${{ matrix.xcode_archs }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -275,7 +275,7 @@ jobs:
       - run: flutter config --enable-macos-desktop
       - run: flutter pub get --enforce-lockfile
       - run: dart tool/patch_lua_dardo_plus.dart
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: native-deps-macos-arm64
           path: build/native-dependencies
@@ -315,7 +315,7 @@ jobs:
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" dist/Lazer-macOS-${{ matrix.arch }}.zip
           (cd dist && shasum -a 256 Lazer-macOS-${{ matrix.arch }}.zip > Lazer-macOS-${{ matrix.arch }}.zip.sha256)
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Lazer-macOS-${{ matrix.arch }}
           path: dist/
@@ -341,7 +341,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install Linux build, GTK, audio and packaging dependencies
@@ -452,7 +452,7 @@ jobs:
           if grep -Eq 'Unhandled exception|error while loading shared libraries|Cannot find libmpv' build/appimage-smoke.log; then
             exit 1
           fi
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Lazer-Linux-${{ matrix.arch }}
           path: dist/*
@@ -474,10 +474,10 @@ jobs:
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6
         with:
           distribution: temurin
           java-version: '21'
@@ -568,7 +568,7 @@ jobs:
           (cd dist && sha256sum Lazer-Android-universal.apk > Lazer-Android-universal.apk.sha256)
       - name: Verify Android packages exclude FFmpeg source and notices
         run: python3 ci/verify-package-contents.py dist
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Lazer-Android-universal
           path: dist/*
@@ -582,7 +582,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: xcodebuild -version
@@ -590,7 +590,7 @@ jobs:
         env:
           FFMPEG_BUILD_JOBS: '4'
         run: bash ci/build-ios-audio.sh device
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-deps-ios-arm64
           path: build/ios-audio/device/stage/
@@ -604,7 +604,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -615,7 +615,7 @@ jobs:
       - run: xcodebuild -version
       - run: flutter pub get --enforce-lockfile
       - run: dart tool/patch_lua_dardo_plus.dart
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: native-deps-ios-arm64
           path: build/native-deps-ios
@@ -651,7 +651,7 @@ jobs:
           python3 ci/verify-ios-audio.py --ipa dist/Lazer-iOS-aarch64.ipa
           python3 ci/verify-package-contents.py dist/Lazer-iOS-aarch64.ipa
           (cd dist && shasum -a 256 Lazer-iOS-aarch64.ipa > Lazer-iOS-aarch64.ipa.sha256)
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Lazer-iOS-aarch64
           path: |
@@ -671,7 +671,7 @@ jobs:
       actions: read
       contents: write
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Download all platform artifacts
