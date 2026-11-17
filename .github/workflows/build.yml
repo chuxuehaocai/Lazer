@@ -7,6 +7,15 @@ on:
   pull_request:
     branches: [nextgen]
   workflow_dispatch:
+    inputs:
+      target:
+        description: Platforms to build
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - ios
 
 permissions:
   contents: read
@@ -67,6 +76,7 @@ jobs:
 
   windows:
     name: Windows EXE (x86_64)
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     needs: check
     runs-on: windows-2022
     timeout-minutes: 60
@@ -198,6 +208,7 @@ jobs:
 
   macos-native:
     name: macOS native audio (${{ matrix.arch }})
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     needs: check
     env:
       MACOSX_DEPLOYMENT_TARGET: '12.0'
@@ -244,6 +255,7 @@ jobs:
 
   macos:
     name: macOS App (${{ matrix.arch }})
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     needs: [check, macos-native]
     strategy:
       fail-fast: false
@@ -324,6 +336,7 @@ jobs:
           retention-days: 30
 
   linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     name: Linux AppImage (${{ matrix.arch }})
     needs: check
     strategy:
@@ -462,6 +475,7 @@ jobs:
 
   android:
     name: Android APK
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target != 'ios' }}
     needs: check
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -590,6 +604,22 @@ jobs:
         env:
           FFMPEG_BUILD_JOBS: '4'
         run: bash ci/build-ios-audio.sh device
+      - name: Build the same Release audio profile for iOS Simulator
+        env:
+          FFMPEG_BUILD_JOBS: '4'
+        run: bash ci/build-ios-audio.sh simulator
+      - name: Play file and growing-reader fixtures on iOS Simulator
+        run: bash ci/smoke-ios-audio.sh
+      - name: Keep iOS runtime smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-audio-runtime-smoke
+          path: |
+            build/ios-audio-smoke/console.log
+            build/ios-audio-smoke/result.txt
+            build/ios-audio-smoke/devices.json
+          if-no-files-found: warn
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-deps-ios-arm64

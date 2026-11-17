@@ -9,6 +9,8 @@
  */
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <thread>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -69,6 +71,7 @@ struct FakeUnitState {
 FakeUnitState g_unit;
 bool g_componentAvailable = true;
 bool g_changeGrantedChannels = false;
+OSStatus g_startStatus = noErr;
 int g_instancesCreated = 0;
 int g_instancesDisposed = 0;
 bool g_inRenderCallback = false;
@@ -237,6 +240,7 @@ OSStatus AudioUnitReset(AudioUnit unit, AudioUnitScope, AudioUnitElement) {
 
 OSStatus AudioOutputUnitStart(AudioUnit unit) {
     if (unit == nullptr) return -1;
+    if (g_startStatus != noErr) return g_startStatus;
     g_unit.running = true;
     ++g_unit.startCalls;
     return noErr;
@@ -390,7 +394,8 @@ void testReportsGrantedFacts() {
         static_cast<int64_t>(kAudioFormatFlagIsFloat), "sets the float flag");
     checkEqual(g_unit.setFormatElement, 0, "sets the format on the output element");
     checkEqual(g_unit.setFormatScope, 1, "sets the format on the input scope of that element");
-    check(g_unit.maximumFramesPerSlice >= 1024, "leaves slice headroom above one IO period");
+    checkEqual(g_unit.maximumFramesPerSlice, 0,
+        "preserves the IO unit's system-managed maximum slice size");
 
     checkEqual(session.target.sampleRate, 48000, "reports the granted sample rate");
     checkEqual(session.target.channels, 2, "reports stereo");
@@ -773,6 +778,49 @@ void testRecoveryFailureIsTemporaryAndCallbackDoesNoRecovery() {
     check(g_unit.running, "successful retry restarts previously running playback");
 }
 
+void testExplicitPlayReportsRecoveryFailure() {
+    g_session = FakeSession{};
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error);
+    ++g_session.state.revision; // A route event between open() and first play().
+    g_session.failActivation = true;
+    checkEqual(output->start(error), LazerAudioErrorDevice,
+        "an available session that rejects first-play recovery reports failure");
+    check(error.find("fake session refused activation") != std::string::npos,
+        "first-play recovery preserves the session error");
+    g_session.failActivation = false;
+    checkEqual(output->start(error), LazerAudioOk, "explicit retry can recover the same source");
+    check(g_unit.running, "retry actually starts the AudioUnit");
+}
+
+void testPersistentRecoveryFailureIsBounded() {
+    for (const bool activationFailure : {true, false}) {
+        g_session = FakeSession{};
+        auto output = createPlatformAudioOutput();
+        AudioOutputSession session{};
+        std::string error;
+        openDefault(*output, session, error);
+        output->start(error);
+        ++g_session.state.revision;
+        g_session.failActivation = activationFailure;
+        g_startStatus = activationFailure ? noErr : -666;
+        checkEqual(output->writableFrames(error), 0, "brief recovery failure remains back-pressure");
+        check(error.empty(), "brief recovery failure is not terminal");
+        std::this_thread::sleep_for(std::chrono::milliseconds(3050));
+        checkEqual(output->queuedFrames(error), -1, "persistent failure cannot park playback forever");
+        check(error.find(activationFailure ? "fake session refused activation" : "OSStatus -666") !=
+            std::string::npos, "persistent recovery retains its concrete native error");
+        checkEqual(static_cast<int64_t>(output->waitForReady(0, error)),
+            static_cast<int64_t>(OutputWaitResult::Error), "persistent failure reaches the render loop");
+        g_session.failActivation = false;
+        g_startStatus = noErr;
+        checkEqual(output->start(error), LazerAudioOk, "user retry resets the recovery budget");
+        check(g_unit.running, "recovered retry resumes actual output");
+    }
+}
+
 void testBackgroundSourceReplacementPreservesSession() {
     g_session = FakeSession{};
     auto output = createPlatformAudioOutput();
@@ -817,6 +865,8 @@ int main() {
     testNoResumeAndPausedOutputsStayStopped();
     testMediaServicesLossResetAndActivationEpoch();
     testRecoveryFailureIsTemporaryAndCallbackDoesNoRecovery();
+    testExplicitPlayReportsRecoveryFailure();
+    testPersistentRecoveryFailureIsBounded();
     testBackgroundSourceReplacementPreservesSession();
     if (failures != 0) {
         std::printf("%d RemoteIO contract check(s) failed\n", failures);

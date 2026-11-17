@@ -30,6 +30,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import '../../storage/app_storage.dart';
+import '../../diagnostics/app_log.dart';
 
 import '../audio_engine.dart';
 import 'audio_path_log.dart';
@@ -967,9 +968,17 @@ class NativeAudioEngine
         generation: generation,
       );
       if (status != lazerAudioOk) {
-        reader?.release();
+        final String detail = lastError();
+        AppLog.shared.event('audio.native', 'open_failed', {
+          'status': status,
+          'detail': detail,
+          'network': entry != null,
+          'downloaded_bytes': entry?.downloadedBytes,
+          'expected_bytes': entry?.expectedBytes,
+          'download_error': entry?.failure?.toString(),
+        });
         throw StateError(
-          'lazer-audio could not open $url ($status): ${lastError()}',
+          'lazer-audio could not open source ($status): $detail',
         );
       }
       // The engine just accepted this source, so whatever was active before is

@@ -4473,6 +4473,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         stillCurrent: () => generation == _generation,
       );
     } catch (error) {
+      AppLog.shared.event('playback', 'resolve_failed', {
+        'engine': engine?.runtimeType.toString(),
+        'error': error.toString(),
+      });
       if (generation == _generation) {
         // A dead session is not a property of this song. Skipping through the
         // queue looking for one that plays turns "log in again" into a player
@@ -4513,7 +4517,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       if (queueEngine != null) {
         try {
           queueId = await queueEngine.setQueue(<String>[url]);
-        } catch (_) {
+        } catch (error) {
+          AppLog.shared.event('playback', 'queue_open_failed', {
+            'engine': engine.runtimeType.toString(),
+            'error': error.toString(),
+          });
           // The platform refused a queue (or cannot build one): keep playing
           // through the single-source path rather than failing the track.
           queueId = null;
@@ -4541,6 +4549,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         _position = reached ? resumeAt : Duration.zero;
       }
     } catch (error) {
+      AppLog.shared.event('playback', 'open_failed', {
+        'engine': engine.runtimeType.toString(),
+        'retrying': retrying,
+        'error': error.toString(),
+      });
       final bool retryable =
           _retryableStreamResolve(error) || error is StateError;
       if (generation == _generation && !retrying && retryable) {
@@ -5271,7 +5284,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         // source must never get in front of this source's first play command.
         unawaited(_prefetchNext());
       }
-    } catch (_) {
+    } catch (error) {
+      AppLog.shared.event('playback', 'play_failed', {
+        'engine': audioEngine?.runtimeType.toString(),
+        'error': error.toString(),
+      });
       if (generation == _generation) _failPlayback('播放中断，请重试。');
     }
   }

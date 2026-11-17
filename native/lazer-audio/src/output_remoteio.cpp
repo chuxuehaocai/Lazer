@@ -100,7 +100,7 @@ public:
             return LazerAudioErrorDevice;
         }
 
-        if (createUnit(info, error) != LazerAudioOk) {
+        if (createUnit(error) != LazerAudioOk) {
             close();
             return LazerAudioErrorDevice;
         }
@@ -143,6 +143,7 @@ public:
         requestedRunning_ = false;
         opened_ = false;
         rebuildRequired_ = false;
+        clearRecoveryFailure();
         disposeUnit();
         queue_.reset();
         frameBytes_.store(0, std::memory_order_release);
@@ -164,9 +165,19 @@ public:
         iosSessionRequestResume();
         requestedRunning_ = true;
         nextRecoveryAttempt_ = {};
+        clearRecoveryFailure();
         // An interrupted/unavailable device is temporary back-pressure, not a
         // bad music file. A later producer poll performs the eventual restart.
-        if (!synchronizeSession(false)) return LazerAudioOk;
+        if (!synchronizeSession(false)) {
+            // A real activation/initialization error is different from an
+            // interruption. Returning Ok here used to leave the first play
+            // permanently parked with no error the app could report.
+            if (!recoveryFailure_.empty()) {
+                error = recoveryFailure_;
+                return LazerAudioErrorDevice;
+            }
+            return LazerAudioOk;
+        }
         if (running_) return LazerAudioOk;
         const OSStatus status = AudioOutputUnitStart(unit_);
         if (status != noErr) {
@@ -235,7 +246,7 @@ public:
             error = "iOS audio output disconnected";
             return -1;
         }
-        if (!synchronizeSession()) return 0;
+        if (!synchronizeSession()) return recoveryExpired(error) ? -1 : 0;
         return static_cast<int32_t>(std::min<size_t>(
             queue_.writableFrames(), static_cast<size_t>(std::numeric_limits<int32_t>::max())));
     }
@@ -248,6 +259,7 @@ public:
             return -1;
         }
         synchronizeSession();
+        if (recoveryExpired(error)) return -1;
         return static_cast<int32_t>(std::min<size_t>(
             queue_.queuedFrames(), static_cast<size_t>(std::numeric_limits<int32_t>::max())));
     }
@@ -268,6 +280,7 @@ public:
             return LazerAudioErrorInvalidArgument;
         }
         synchronizeSession();
+        if (recoveryExpired(error)) return LazerAudioErrorDevice;
         if (frameCount == 0) return 0;
         // A notification can arrive after writableFrames() granted capacity.
         // Retain that in-flight producer block even while the unit is stopped;
@@ -304,7 +317,7 @@ private:
         unit_ = nullptr;
     }
 
-    int32_t createUnit(const IosSessionInfo &info, std::string &error) {
+    int32_t createUnit(std::string &error) {
         const int32_t channels = target_.channels;
         AudioComponentDescription description{};
         description.componentType = kAudioUnitType_Output;
@@ -353,19 +366,10 @@ private:
             return LazerAudioErrorDevice;
         }
 
-        const int32_t ioFrames = info.ioBufferFrames > 0 ? info.ioBufferFrames : 512;
-        // A slice smaller than what the device asks for would make the unit
-        // split callbacks; leaving headroom above it keeps one callback per IO
-        // period on every route we have seen (44.1 kHz through 192 kHz).
-        UInt32 sliceFrames = static_cast<UInt32>(
-            std::clamp<int64_t>(static_cast<int64_t>(ioFrames) * 2, 1024, 8192));
-        status = AudioUnitSetProperty(unit_, kAudioUnitProperty_MaximumFramesPerSlice,
-            kAudioUnitScope_Global, kOutputBus, &sliceFrames, sizeof(sliceFrames));
-        if (status != noErr) {
-            error = statusText("RemoteIO maximum frames", status);
-            disposeUnit();
-            return LazerAudioErrorDevice;
-        }
+        // I/O units already size their slices for the hardware, including screen
+        // sleep and route sample-rate conversion. Do not replace that negotiated
+        // value with a smaller software cap (formerly 1024..8192 frames).
+        // https://developer.apple.com/documentation/audiotoolbox/kaudiounitproperty_maximumframesperslice
 
         AURenderCallbackStruct callback{};
         callback.inputProc = &RemoteIOOutput::renderThunk;
@@ -414,6 +418,29 @@ private:
         return LazerAudioOk;
     }
 
+    void clearRecoveryFailure() {
+        recoveryFailure_.clear();
+        recoveryFailedAt_ = {};
+    }
+
+    void recordRecoveryFailure(const std::string &error) {
+        const auto now = std::chrono::steady_clock::now();
+        if (recoveryFailure_.empty()) recoveryFailedAt_ = now;
+        recoveryFailure_ = error.empty() ? "iOS audio output recovery failed" : error;
+        nextRecoveryAttempt_ = now + std::chrono::milliseconds(50);
+    }
+
+    bool recoveryExpired(std::string &error) const {
+        // Keep short route-reconfiguration failures recoverable, but do not
+        // claim endless back-pressure after a persistent NSError/OSStatus.
+        // Real system interruptions and missing media services do not spend
+        // this budget: only failed attempts while the session is available do.
+        if (recoveryFailure_.empty() || std::chrono::steady_clock::now() -
+                recoveryFailedAt_ < std::chrono::seconds(3)) return false;
+        error = recoveryFailure_;
+        return true;
+    }
+
     bool synchronizeSession(bool resume = true) {
         auto state = iosSessionState();
         if (state.revision != sessionRevision_) {
@@ -425,6 +452,7 @@ private:
             if (!state.mayResume) requestedRunning_ = false;
         }
         if (state.interrupted || !state.mediaServicesAvailable || !state.mayResume) {
+            clearRecoveryFailure();
             disposeUnit();
             rebuildRequired_ = true;
             return false;
@@ -443,26 +471,31 @@ private:
             state = iosSessionState();
             sessionRevision_ = state.revision;
             if (!state.mayResume) requestedRunning_ = false;
-            if (activated != LazerAudioOk || state.interrupted ||
-                !state.mediaServicesAvailable || !state.mayResume ||
-                createUnit(info, recoveryError) != LazerAudioOk) {
+            if (state.interrupted || !state.mediaServicesAvailable || !state.mayResume) {
+                clearRecoveryFailure();
                 disposeUnit();
                 nextRecoveryAttempt_ = now + std::chrono::milliseconds(50);
+                return false;
+            }
+            if (activated != LazerAudioOk || createUnit(recoveryError) != LazerAudioOk) {
+                disposeUnit();
+                recordRecoveryFailure(recoveryError);
                 return false;
             }
             rebuildRequired_ = false;
         }
         if (unit_ == nullptr || !initialized_) return false;
         if (resume && requestedRunning_ && !running_) {
-            if (AudioOutputUnitStart(unit_) != noErr) {
+            const OSStatus status = AudioOutputUnitStart(unit_);
+            if (status != noErr) {
                 disposeUnit();
                 rebuildRequired_ = true;
-                nextRecoveryAttempt_ = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(50);
+                recordRecoveryFailure(statusText("AudioOutputUnitStart during recovery", status));
                 return false;
             }
             running_ = true;
         }
+        clearRecoveryFailure();
         return true;
     }
 
@@ -527,6 +560,8 @@ private:
     int32_t bufferMillis_ = 120;
     uint64_t sessionRevision_ = 0;
     std::chrono::steady_clock::time_point nextRecoveryAttempt_{};
+    std::chrono::steady_clock::time_point recoveryFailedAt_{};
+    std::string recoveryFailure_;
     TargetFormat target_{};
     std::atomic<int32_t> frameBytes_{0};
     /// The IO period the route granted, in frames; 0 before the first open.
