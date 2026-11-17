@@ -25,10 +25,15 @@ import '../widgets/interaction_feedback.dart';
 import '../widgets/listen_together_dialog.dart';
 import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/volume_control.dart';
+import '../widgets/window_chrome.dart';
 import 'osu_search.dart';
 import '../theme/font_preferences.dart';
 
 enum DesktopNowPlayingPane { lyrics, comments, queue }
+
+bool _usesWindowCapsule(BuildContext context) =>
+    WindowChromeScope.maybeLayoutOf(context)?.inline == true &&
+    !TvScope.isActive(context);
 
 /// Desktop listening workspace with an unscrolled, collapsible transport dock.
 class DesktopNowPlaying extends StatelessWidget {
@@ -65,6 +70,15 @@ class DesktopNowPlaying extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool tv = TvScope.isActive(context);
+    final bool inlineChrome = _usesWindowCapsule(context);
+    final bool inlineFrame =
+        WindowChromeScope.maybeLayoutOf(context)?.inline == true;
+    final double headerInset = inlineFrame
+        ? MediaQuery.paddingOf(context).top
+        : 0;
+    // Lyrics can extend behind the floating header. Lists and their controls
+    // need to begin below it; this must not shift the artwork's center.
+    final double paneTopInset = headerInset + (inlineChrome ? 0 : 64);
     return Focus(
       // A remote needs the first focusable control, not an empty root node;
       // the shell's TvFocusRegion claims focus on a television.
@@ -85,36 +99,139 @@ class DesktopNowPlaying extends StatelessWidget {
         onPointerUp: (event) => onPointerEnd?.call(event.pointer),
         onPointerCancel: (event) => onPointerEnd?.call(event.pointer),
         child: SafeArea(
+          top: WindowChromeScope.maybeLayoutOf(context)?.inline != true,
           minimum: tvSafeInsets(context),
-          child: Column(
+          child: Stack(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 20, 4),
-                child: Row(
+              // The floating header must not shift the artwork and metadata
+              // below the center of the listening canvas.
+              Positioned.fill(
+                child: Column(
                   children: [
-                    AccessibleIconButton(
-                      key: const ValueKey('desktop-close'),
-                      tooltip: '返回',
-                      onPressed: onBack,
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                    ),
-                    const Spacer(),
-                    DecoratedBox(
-                      key: const ValueKey('desktop-player-actions'),
-                      decoration: BoxDecoration(
-                        color: context.colors.onPlayer.withValues(alpha: .045),
-                        borderRadius: BorderRadius.circular(28),
-                        border: Border.all(
-                          color: context.colors.onPlayer.withValues(alpha: .18),
-                        ),
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, box) {
+                          final double sidePadding = (box.maxWidth * .04).clamp(
+                            28.0,
+                            80.0,
+                          );
+                          return Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: sidePadding,
+                              vertical: 8,
+                            ),
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 1480,
+                                ),
+                                child: LayoutBuilder(
+                                  builder: (context, content) {
+                                    // Give the cover a stable left column and lyrics
+                                    // the wider reading lane used by the desktop
+                                    // design, without wasting scarce vertical space.
+                                    final double paneGap =
+                                        (content.maxWidth * .075).clamp(
+                                          24.0,
+                                          110.0,
+                                        );
+                                    return Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Expanded(
+                                          flex: 42,
+                                          child: Align(
+                                            alignment: Alignment.center,
+                                            child: ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth: (box.maxWidth * .35)
+                                                    .clamp(280.0, 520.0),
+                                              ),
+                                              child: _Presentation(
+                                                track: track,
+                                                state: state,
+                                                artwork: artwork,
+                                                onSaveArtwork: onSaveArtwork,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(width: paneGap),
+                                        Expanded(
+                                          flex: 58,
+                                          child: Padding(
+                                            padding: EdgeInsets.only(
+                                              top:
+                                                  pane ==
+                                                      DesktopNowPlayingPane
+                                                          .lyrics
+                                                  ? 0
+                                                  : paneTopInset,
+                                            ),
+                                            child: RepaintBoundary(
+                                              // Share page transitions so transparent
+                                              // panes never overlap and outgoing TV
+                                              // controls leave traversal immediately.
+                                              child: ViewTransitionSwitcher(
+                                                child: KeyedSubtree(
+                                                  key: ValueKey(pane),
+                                                  child: switch (pane) {
+                                                    DesktopNowPlayingPane
+                                                        .lyrics =>
+                                                      lyrics,
+                                                    DesktopNowPlayingPane
+                                                        .comments =>
+                                                      comments,
+                                                    DesktopNowPlayingPane
+                                                        .queue =>
+                                                      queue,
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
+                    ),
+                    _DesktopDock(
+                      state: state,
+                      playPauseFocus: playPauseFocus,
+                      visible: controlsVisible,
+                      pane: pane,
+                      onPaneChanged: onPaneChanged,
+                      onFullscreen: onFullscreen,
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: WindowChromeHeader(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 20, 4),
+                    child: Row(
+                      children: [
+                        WindowChromeCollapse(
+                          child: AccessibleIconButton(
+                            key: const ValueKey('desktop-close'),
+                            tooltip: '返回',
+                            onPressed: onBack,
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                          ),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        const Spacer(),
+                        WindowChromeActions(
                           children: [
                             AccessibleIconButton(
                               key: const ValueKey('desktop-search-osu'),
@@ -123,104 +240,19 @@ class DesktopNowPlaying extends StatelessWidget {
                                   ? null
                                   : () =>
                                         unawaited(searchInOsu(context, track)),
-                              color: context.colors.onPlayer,
+                              color: inlineChrome
+                                  ? null
+                                  : context.colors.onPlayer,
                               icon: const Icon(Icons.search_rounded),
                             ),
-                            const SizedBox(width: 2),
                             _AddToPlaylistButton(state: state, track: track),
-                            const SizedBox(width: 2),
                             _DownloadButton(state: state, track: track),
                           ],
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, box) {
-                    final double sidePadding = (box.maxWidth * .04).clamp(
-                      28.0,
-                      80.0,
-                    );
-                    return Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: sidePadding,
-                        vertical: 8,
-                      ),
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 1480),
-                          child: LayoutBuilder(
-                            builder: (context, content) {
-                              // Give the cover a stable left column and lyrics
-                              // the wider reading lane used by the desktop
-                              // design, without wasting scarce vertical space.
-                              final double paneGap = (content.maxWidth * .075)
-                                  .clamp(24.0, 110.0);
-                              return Row(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Expanded(
-                                    flex: 42,
-                                    child: Align(
-                                      alignment: Alignment.center,
-                                      child: ConstrainedBox(
-                                        constraints: BoxConstraints(
-                                          maxWidth: (box.maxWidth * .35).clamp(
-                                            280.0,
-                                            520.0,
-                                          ),
-                                        ),
-                                        child: _Presentation(
-                                          track: track,
-                                          state: state,
-                                          artwork: artwork,
-                                          onSaveArtwork: onSaveArtwork,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(width: paneGap),
-                                  Expanded(
-                                    flex: 58,
-                                    child: RepaintBoundary(
-                                      // Share page transitions so transparent
-                                      // panes never overlap and outgoing TV
-                                      // controls leave traversal immediately.
-                                      child: ViewTransitionSwitcher(
-                                        child: KeyedSubtree(
-                                          key: ValueKey(pane),
-                                          child: switch (pane) {
-                                            DesktopNowPlayingPane.lyrics =>
-                                              lyrics,
-                                            DesktopNowPlayingPane.comments =>
-                                              comments,
-                                            DesktopNowPlayingPane.queue =>
-                                              queue,
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              _DesktopDock(
-                state: state,
-                playPauseFocus: playPauseFocus,
-                visible: controlsVisible,
-                pane: pane,
-                onPaneChanged: onPaneChanged,
-                onFullscreen: onFullscreen,
               ),
             ],
           ),
@@ -247,7 +279,7 @@ class _AddToPlaylistButton extends StatelessWidget {
           ? () =>
                 unawaited(showAddToPlaylistDialog(context, state, track: track))
           : null,
-      color: context.colors.onPlayer,
+      color: _usesWindowCapsule(context) ? null : context.colors.onPlayer,
       icon: const Icon(Icons.playlist_add_rounded),
     );
   }
@@ -264,6 +296,7 @@ class _DownloadButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool inlineChrome = _usesWindowCapsule(context);
     // Local files (imports, scans and downloads played back from the library)
     // have no service id to resolve.
     if (!track.isServiceTrack || track.localPath != null) {
@@ -271,7 +304,7 @@ class _DownloadButton extends StatelessWidget {
         key: const ValueKey('desktop-download'),
         tooltip: '本地歌曲无需下载',
         onPressed: null,
-        color: context.colors.cloudDark,
+        color: inlineChrome ? null : context.colors.cloudDark,
         icon: const Icon(Icons.download_rounded),
       );
     }
@@ -296,14 +329,20 @@ class _DownloadButton extends StatelessWidget {
                 ? showDownloadQueueSheet(context, state)
                 : downloadTracks(context, state, <Track>[track]),
           ),
-          color: queued ? context.colors.clayDeep : context.colors.onPlayer,
+          color: inlineChrome
+              ? null
+              : queued
+              ? context.colors.clayDeep
+              : context.colors.onPlayer,
           icon: active
               ? SizedBox.square(
                   dimension: 20,
                   child: CircularProgressIndicator(
                     value: task?.progress,
                     strokeWidth: 2.4,
-                    color: context.colors.clayDeep,
+                    color: inlineChrome
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : context.colors.clayDeep,
                   ),
                 )
               : Icon(

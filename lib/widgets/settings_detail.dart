@@ -464,7 +464,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             children: <Widget>[
               if (hasTopBar)
                 Positioned(
-                  top: 8,
+                  top: 0,
                   left: 8,
                   right: 8,
                   child: Row(
@@ -529,7 +529,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: EdgeInsets.fromLTRB(inset - 12, 12, inset, 0),
+                padding: EdgeInsets.fromLTRB(inset - 12, 0, inset, 0),
                 child: Row(
                   children: [
                     AccessibleIconButton(

@@ -39,6 +39,7 @@ import '../widgets/playback_queue_view.dart';
 import '../widgets/player_seek_bar.dart';
 import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/song_comments_view.dart';
+import '../widgets/window_chrome.dart';
 import 'desktop_now_playing.dart';
 import 'artwork_lyrics_layout.dart';
 import '../theme/font_preferences.dart';
@@ -181,6 +182,7 @@ class NowPlayingPage extends StatefulWidget {
     required this.state,
     this.onClose,
     this.entranceSettled,
+    this.presentationActive,
     this.pullDown,
   });
 
@@ -191,6 +193,10 @@ class NowPlayingPage extends StatefulWidget {
   /// still until then, and it follows the notifier directly so the whole page
   /// does not rebuild on the frame the entrance lands.
   final ValueListenable<bool>? entranceSettled;
+
+  /// The host marks a committed dismissal before the page leaves the tree.
+  /// Drag previews keep this active so cancellation preserves the chrome.
+  final ValueListenable<bool>? presentationActive;
 
   /// Host of the pull-down dismissal. Only the compact presentation arms the
   /// gesture: it drags the whole page away from the top half of the screen and
@@ -204,7 +210,9 @@ class NowPlayingPage extends StatefulWidget {
 class _NowPlayingPageState extends State<NowPlayingPage>
     with BuildSafeState<NowPlayingPage> {
   bool _lyricsMode = false;
-  bool _controlsVisible = true;
+  final ValueNotifier<bool> _controlsVisibility = ValueNotifier(true);
+  bool get _controlsVisible => _controlsVisibility.value;
+  WindowChromeController? _windowChrome;
   // Defaults to the non-destructive branch: a semantics-driven tap never
   // passes through onPointerDown, so it must not fold the lyrics away.
   bool _controlsHiddenAtTouchDown = true;
@@ -266,6 +274,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       widget.state.catalog.connections,
     );
     widget.state.addListener(_preferencesChanged);
+    widget.presentationActive?.addListener(_syncWindowChromePresentation);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(widget.state.ensureCurrentLyrics());
     });
@@ -285,6 +294,29 @@ class _NowPlayingPageState extends State<NowPlayingPage>
           : _lyricsMode) &&
       !widget.state.lyricsLoading &&
       widget.state.lyrics.isNotEmpty;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final WindowChromeController? chrome = WindowChromeScope.maybeOf(context);
+    if (chrome == _windowChrome) return;
+    _windowChrome?.detach(_controlsVisibility);
+    _windowChrome = chrome;
+    _syncWindowChromePresentation();
+  }
+
+  void _syncWindowChromePresentation() {
+    if (!(widget.presentationActive?.value ?? true)) {
+      _windowChrome?.detach(_controlsVisibility);
+      return;
+    }
+    _windowChrome?.attach(
+      _controlsVisibility,
+      onActivity: _controlsActivity,
+      onPointerStart: _beginControlPointer,
+      onPointerEnd: _endControlPointer,
+    );
+  }
 
   void _preferencesChanged() {
     if (_themeSeed != widget.state.accentSeed ||
@@ -345,12 +377,14 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       _hideTimer = Timer(const Duration(milliseconds: 16), _hideControls);
       return;
     }
-    setState(() => _controlsVisible = false);
+    setState(() => _controlsVisibility.value = false);
   }
 
   void _wakeControls() {
     _hideTimer?.cancel();
-    if (!_controlsVisible && mounted) setState(() => _controlsVisible = true);
+    if (!_controlsVisible && mounted) {
+      setState(() => _controlsVisibility.value = true);
+    }
   }
 
   void _controlsActivity() {
@@ -377,6 +411,9 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   @override
   void dispose() {
+    widget.presentationActive?.removeListener(_syncWindowChromePresentation);
+    _windowChrome?.detach(_controlsVisibility);
+    _controlsVisibility.dispose();
     _playPauseFocus.dispose();
     widget.state.playerPresentationChanged(false);
     _hideTimer?.cancel();
@@ -389,7 +426,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     setState(() {
       _lyricsMode = !_lyricsMode;
       if (!_lyricsMode) _selectionOpen = false;
-      _controlsVisible = true;
+      _controlsVisibility.value = true;
     });
     _armHide();
   }
@@ -457,6 +494,8 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   void _closePage() {
+    _windowChrome?.detach(_controlsVisibility);
+    _wakeControls();
     final VoidCallback? onClose = widget.onClose;
     if (onClose != null) {
       onClose();
@@ -514,7 +553,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     setState(() {
       _desktopPane = pane;
       _selectionOpen = false;
-      _controlsVisible = true;
+      _controlsVisibility.value = true;
     });
     _armHide();
   }
@@ -522,6 +561,13 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   @override
   void didUpdateWidget(covariant NowPlayingPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.presentationActive != widget.presentationActive) {
+      oldWidget.presentationActive?.removeListener(
+        _syncWindowChromePresentation,
+      );
+      widget.presentationActive?.addListener(_syncWindowChromePresentation);
+      _syncWindowChromePresentation();
+    }
     if (oldWidget.state != widget.state) {
       oldWidget.state.removeListener(_preferencesChanged);
       widget.state.addListener(_preferencesChanged);
@@ -882,6 +928,11 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                               fit: StackFit.expand,
                               children: <Widget>[
                                 SafeArea(
+                                  top:
+                                      WindowChromeScope.maybeLayoutOf(
+                                        context,
+                                      )?.inline !=
+                                      true,
                                   child: DesktopNowPlaying(
                                     key: const ValueKey('desktop-now-playing'),
                                     state: widget.state,

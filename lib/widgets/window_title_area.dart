@@ -8,6 +8,7 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import 'app_system_tray.dart';
+import 'window_chrome_surface.dart';
 
 /// Window title shown in the title area — also pushed to the native window so
 /// the taskbar and Alt+Tab agree with the bar.
@@ -16,8 +17,8 @@ const String kWindowTitle = 'Lazer';
 /// Height of the title area: 40px = 10 × the 4px base unit. Caption buttons are
 /// 46px wide and fill that height, flush to the trailing edge the way native
 /// system buttons sit.
-const double kWindowTitleAreaHeight = 40;
-const double kWindowCaptionButtonWidth = 46;
+const double kWindowTitleAreaHeight = kWindowChromeHeight;
+const double kWindowCaptionButtonWidth = kWindowChromeButtonWidth;
 const double _glyphBox = 18;
 
 /// Whether the platform draws its own caption buttons. macOS must keep its
@@ -44,11 +45,17 @@ class WindowTitleArea extends StatefulWidget {
     this.state,
     this.navigatorKey,
     this.inline = false,
+    this.leadingWidth = 0,
+    this.visible = true,
   });
 
   final AppState? state;
   final GlobalKey<NavigatorState>? navigatorKey;
   final bool inline;
+  final double leadingWidth;
+
+  /// Keeps native close handling mounted when the phone layout hides chrome.
+  final bool visible;
 
   @override
   State<WindowTitleArea> createState() => _WindowTitleAreaState();
@@ -274,6 +281,7 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.visible) return const SizedBox.shrink();
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final TextStyle titleStyle =
@@ -334,51 +342,39 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
                 top: 0,
                 end: 0,
                 bottom: 0,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(widget.inline ? 20 : 0),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: widget.inline
-                          ? scheme.onSurface.withValues(alpha: .045)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(
-                        widget.inline ? 20 : 0,
+                child: WindowChromeSurface(
+                  inline: widget.inline,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      if (widget.inline)
+                        SizedBox(
+                          key: const ValueKey('window-chrome-extension'),
+                          width: widget.leadingWidth,
+                          height: kWindowChromeHeight,
+                        ),
+                      _CaptionButton(
+                        key: const ValueKey<String>('window-title-minimize'),
+                        glyph: _CaptionGlyph.minimize,
+                        label: context.tr('最小化'),
+                        onPressed: _minimize,
                       ),
-                      border: widget.inline
-                          ? Border.all(
-                              color: scheme.onSurface.withValues(alpha: .08),
-                              width: .5,
-                            )
-                          : null,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        _CaptionButton(
-                          key: const ValueKey<String>('window-title-minimize'),
-                          glyph: _CaptionGlyph.minimize,
-                          label: context.tr('最小化'),
-                          onPressed: _minimize,
-                        ),
-                        _CaptionButton(
-                          key: const ValueKey<String>(
-                            'window-title-fullscreen',
-                          ),
-                          glyph: _expanded
-                              ? _CaptionGlyph.restore
-                              : _CaptionGlyph.maximize,
-                          label: middleLabel,
-                          onPressed: _toggleWindowSize,
-                        ),
-                        _CaptionButton(
-                          key: const ValueKey<String>('window-title-close'),
-                          glyph: _CaptionGlyph.close,
-                          label: context.tr('关闭窗口'),
-                          onPressed: _requestClose,
-                          destructive: true,
-                        ),
-                      ],
-                    ),
+                      _CaptionButton(
+                        key: const ValueKey<String>('window-title-fullscreen'),
+                        glyph: _expanded
+                            ? _CaptionGlyph.restore
+                            : _CaptionGlyph.maximize,
+                        label: middleLabel,
+                        onPressed: _toggleWindowSize,
+                      ),
+                      _CaptionButton(
+                        key: const ValueKey<String>('window-title-close'),
+                        glyph: _CaptionGlyph.close,
+                        label: context.tr('关闭窗口'),
+                        onPressed: _requestClose,
+                        destructive: true,
+                      ),
+                    ],
                   ),
                 ),
               ),

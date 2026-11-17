@@ -80,8 +80,8 @@ void main() {
       final rail = find.byKey(const ValueKey('desktop-sidebar'));
       final home = find.byType(AppHomePage);
       expect(tester.getTopLeft(rail).dy, 0);
-      expect(tester.getTopLeft(home).dy, 46);
-      expect(tester.widget<AppHomePage>(home).topInset, 4);
+      expect(tester.getTopLeft(home).dy, 56);
+      expect(tester.widget<AppHomePage>(home).topInset, 0);
       expect(tester.getTopLeft(find.text('Lazer').first).dy, lessThan(40));
 
       // The title's hit area stays above page controls, including embedded
@@ -95,7 +95,7 @@ void main() {
       await tester.tap(find.text('Interface & layout'));
       await tester.pumpAndSettle();
       final back = find.byKey(const ValueKey('settings-detail-back'));
-      expect(tester.getTopLeft(back).dy, greaterThanOrEqualTo(46));
+      expect(tester.getTopLeft(back).dy, greaterThanOrEqualTo(56));
       expect(back.hitTestable(), findsOneWidget);
       await tester.tap(back);
       await tester.pumpAndSettle();
@@ -115,7 +115,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(tester.getTopLeft(back).dy, greaterThanOrEqualTo(46));
+      expect(tester.getTopLeft(back).dy, greaterThanOrEqualTo(56));
       expect(back.hitTestable(), findsOneWidget);
       await tester.tap(back);
       await tester.pumpAndSettle();
@@ -157,13 +157,22 @@ void main() {
       expect(find.byType(LargeScreenNavBar), findsOneWidget);
       expect(
         tester.getTopLeft(find.byType(LargeScreenNavBar)).dy,
-        greaterThanOrEqualTo(46 * kLargeScreenComponentScale),
+        greaterThanOrEqualTo(56 * kLargeScreenComponentScale),
       );
       await state.setLayoutStyle(AppLayoutStyle.phone);
       await tester.pump();
       await tester.pump();
       expect(find.byType(LargeScreenNavBar), findsNothing);
       expect(rail, findsNothing);
+      for (final name in ['minimize', 'fullscreen', 'close']) {
+        expect(find.byKey(ValueKey('window-title-$name')), findsNothing);
+      }
+      expect(
+        MediaQuery.paddingOf(
+          tester.element(find.byType(CapsuleNavigationBar)),
+        ).top,
+        0,
+      );
       await tester.tap(
         find.descendant(
           of: find.byType(CapsuleNavigationBar),
@@ -181,6 +190,10 @@ void main() {
       await tester.pump();
       expect(rail, findsOneWidget);
       expect(tester.getTopLeft(rail).dy, 0);
+      expect(
+        find.byKey(const ValueKey('window-title-minimize')).hitTestable(),
+        findsOneWidget,
+      );
       expect(tester.widget<SettingsDetailHost>(libraryHost).compact, isFalse);
       expect(tester.takeException(), isNull);
       await tester.pumpAndSettle();

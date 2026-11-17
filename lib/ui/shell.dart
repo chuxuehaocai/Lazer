@@ -160,6 +160,10 @@ class _AppShellState extends State<AppShell>
   final ValueNotifier<bool> _playerSettled = BuildSafeValueNotifier<bool>(true);
   bool get _nowPlayingSettled => _playerSettled.value;
 
+  /// Hands the window chrome back as soon as a dismissal is committed,
+  /// while retaining the player page for its remaining exit animation.
+  final ValueNotifier<bool> _playerChromeActive = BuildSafeValueNotifier(false);
+
   /// The player page widget, built once per opening and handed to the tree
   /// unchanged. Rebuilding the shell — a playback report, the entrance
   /// settling — must not rebuild the player's subtree: it is the most
@@ -522,6 +526,7 @@ class _AppShellState extends State<AppShell>
       _playerSettled.value = true;
     } else if (status == AnimationStatus.dismissed && _nowPlayingOpen) {
       // The next opening builds a fresh page with fresh state.
+      _playerChromeActive.value = false;
       setState(() {
         _nowPlayingOpen = false;
         _playerPage = null;
@@ -552,6 +557,7 @@ class _AppShellState extends State<AppShell>
     state: state,
     onClose: _closeNowPlaying,
     entranceSettled: _playerSettled,
+    presentationActive: _playerChromeActive,
     pullDown: _playerPull,
   );
 
@@ -579,6 +585,7 @@ class _AppShellState extends State<AppShell>
       _networkSourcePath = null;
       _networkPodcastId = null;
       _nowPlayingOpen = false;
+      _playerChromeActive.value = false;
       oldWidget.state.removeListener(_onAppStateChanged);
       widget.state.addListener(_onAppStateChanged);
       _playerPage = null;
@@ -591,6 +598,7 @@ class _AppShellState extends State<AppShell>
     _updateTimer?.cancel();
     state.removeListener(_onAppStateChanged);
     _playerSettled.dispose();
+    _playerChromeActive.dispose();
     _backProgress.dispose();
     _repaint.dispose();
     _nowPlayingMotion
@@ -918,6 +926,7 @@ class _AppShellState extends State<AppShell>
     }
     setState(() {
       _nowPlayingOpen = true;
+      _playerChromeActive.value = true;
       _playerSettled.value = false;
     });
     PlayerPageMotion.animate(
@@ -934,6 +943,7 @@ class _AppShellState extends State<AppShell>
 
   void _closeNowPlaying() {
     if (!_nowPlayingOpen) return;
+    _playerChromeActive.value = false;
     setState(() {
       _playerSettled.value = false;
       _coveredShellStale = true;
@@ -977,6 +987,7 @@ class _AppShellState extends State<AppShell>
       );
       return;
     }
+    _playerChromeActive.value = false;
     unawaited(state.feedback());
     setState(() {
       _playerSettled.value = false;
@@ -1131,6 +1142,7 @@ class _AppShellState extends State<AppShell>
     }
     _backCommitted = true;
     if (_backPlayer) {
+      _playerChromeActive.value = false;
       // The gesture already moved the player completely offscreen. Retire it
       // at that endpoint instead of starting another close spring at .001.
       _nowPlayingMotion.animateBack(0, duration: Duration.zero);

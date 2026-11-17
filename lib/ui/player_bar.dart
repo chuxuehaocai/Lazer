@@ -260,7 +260,9 @@ class _AppPlayerBarState extends State<AppPlayerBar>
     }
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return AppleGlass(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      // This dock spans the window edge to edge and meets the sidebar above.
+      // Square corners keep the shared edge continuous.
+      borderRadius: BorderRadius.zero,
       blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica ? 0 : 16,
       color: state.backgroundMode == AppBackgroundMode.windowsMica
           ? apple.glassStrong.withValues(alpha: .58)
