@@ -463,6 +463,7 @@ class _WordPainter extends CustomPainter {
                   ..imageFilter = ui.ImageFilter.blur(
                     sigmaX: motion.glowRadiusEm * layout.fontSize,
                     sigmaY: motion.glowRadiusEm * layout.fontSize,
+                    tileMode: ui.TileMode.decal,
                   )
                   ..colorFilter = ColorFilter.mode(
                     Colors.white.withValues(alpha: motion.glow),

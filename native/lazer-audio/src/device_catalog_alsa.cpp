@@ -251,6 +251,14 @@ int32_t buildCatalog(LazerAudioOutputDeviceCatalog *outCatalog) {
 
     try {
         auto catalog = std::make_unique<LazerAudioOutputDeviceCatalogT>();
+
+        CatalogEntry defaultEntry;
+        defaultEntry.deviceToken = "default";
+        defaultEntry.identityKey = "alsa:default";
+        defaultEntry.displayName = "系统默认 (ALSA default / PipeWire / Pulse)";
+        defaultEntry.flags = LazerAudioOutputDeviceFlagActive | LazerAudioOutputDeviceFlagDefault;
+        catalog->entries.push_back(std::move(defaultEntry));
+
         int cardNumber = -1;
         int result = snd_card_next(&cardNumber);
         if (result < 0) return result == -ENOMEM

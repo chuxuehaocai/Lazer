@@ -626,7 +626,11 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     final int key = (sigma.clamp(0.0, 6.0) * 8).round();
     return _blurFilters.putIfAbsent(
       key,
-      () => ui.ImageFilter.blur(sigmaX: key / 8, sigmaY: key / 8),
+      () => ui.ImageFilter.blur(
+        sigmaX: key / 8,
+        sigmaY: key / 8,
+        tileMode: ui.TileMode.decal,
+      ),
     );
   }
 

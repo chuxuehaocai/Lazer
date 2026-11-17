@@ -1086,6 +1086,7 @@ class _LyricViewportState extends State<LyricViewport>
     return _blurFilters[step] ??= ui.ImageFilter.blur(
       sigmaX: step / 8,
       sigmaY: step / 8,
+      tileMode: ui.TileMode.decal,
     );
   }
 

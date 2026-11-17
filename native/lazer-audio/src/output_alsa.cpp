@@ -42,12 +42,12 @@ bool isHwDeviceName(const std::string &name) {
 
 bool isAllowedOutputDeviceName(const std::string &name) {
     if (isHwDeviceName(name)) return true;
+    if (name == "default" || name == "pulse" || name == "pipewire") return true;
 #if defined(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
     /* The ALSA null PCM is enabled only in probe builds to exercise negotiation and queue control
      * on CI hosts without sound cards. It is never enumerated and release builds reject it. */
     return name == "null";
 #else
-    (void) name;
     return false;
 #endif
 }
@@ -272,6 +272,11 @@ bool tryOpenConfigured(const std::string &device, unsigned int rate, unsigned in
     result = snd_pcm_hw_params_set_channels(pcm, parameters, channels);
     if (result < 0) return reject("ALSA device rejected the requested channel count", result);
     result = snd_pcm_hw_params_set_rate(pcm, parameters, rate, 0);
+    if (result < 0 && !isHwDeviceName(device)) {
+        unsigned int nearRate = rate;
+        int direction = 0;
+        result = snd_pcm_hw_params_set_rate_near(pcm, parameters, &nearRate, &direction);
+    }
     if (result < 0) return reject("ALSA device rejected the requested sample rate", result);
 
     const unsigned int periodTimeUs = 10'000;
@@ -305,7 +310,7 @@ bool tryOpenConfigured(const std::string &device, unsigned int rate, unsigned in
     if (result < 0) return reject("could not read back ALSA sample rate", result);
     result = snd_pcm_hw_params_get_channels(parameters, &actualChannels);
     if (result < 0) return reject("could not read back ALSA channel count", result);
-    if (actualFormat != format.alsaFormat || actualRate != rate || actualChannels != channels) {
+    if (actualFormat != format.alsaFormat || (isHwDeviceName(device) && actualRate != rate) || actualChannels != channels) {
         std::ostringstream message;
         const char *actualFormatName = snd_pcm_format_name(actualFormat);
         message << "ALSA negotiated a different format than requested (rate " << actualRate
@@ -560,12 +565,16 @@ int32_t AlsaOutput::open(const AudioOutputRequest &request, const StreamDescript
     }
 
 #if defined(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
-    std::string device = request.deviceId.empty() ? "hw:0,0" : request.deviceId;
+    std::string device = request.deviceId.empty()
+        ? ((request.requireDoP || request.requireNativeDsd || request.bitPerfect) ? "hw:0,0" : "default")
+        : request.deviceId;
     const bool testNativeDsdNull = request.requireNativeDsd &&
         device == "lazer-test:alsa-null";
     if (testNativeDsdNull) device = "null";
 #else
-    const std::string device = request.deviceId.empty() ? "hw:0,0" : request.deviceId;
+    std::string device = request.deviceId.empty()
+        ? ((request.requireDoP || request.requireNativeDsd || request.bitPerfect) ? "hw:0,0" : "default")
+        : request.deviceId;
 #endif
     if ((request.requireDoP || request.requireNativeDsd) && !isHwDeviceName(device)
 #if defined(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
@@ -579,9 +588,9 @@ int32_t AlsaOutput::open(const AudioOutputRequest &request, const StreamDescript
     }
     if (!isAllowedOutputDeviceName(device)) {
 #if defined(LAZER_AUDIO_TEST_ALLOW_ALSA_NULL)
-        error = "ALSA output requires a direct hw: device ID (for example hw:1,0); only the test probe accepts null";
+        error = "ALSA output requires a direct hw: device ID or 'default'; only the test probe accepts null";
 #else
-        error = "ALSA output requires a direct hw: device ID (for example hw:1,0); ALSA plugins are disabled";
+        error = "ALSA output requires a direct hw: device ID or 'default'; ALSA plugins are disabled";
 #endif
         return LazerAudioErrorInvalidArgument;
     }
@@ -630,6 +639,26 @@ int32_t AlsaOutput::open(const AudioOutputRequest &request, const StreamDescript
                 if (found) break;
             }
             if (found) break;
+        }
+
+        /* If opening the hardware device failed (e.g. EBUSY when PipeWire/Pulse holds the device)
+         * and bit-perfect mode is not requested, attempt fallback to the system default PCM plugin. */
+        if (!found && device != "default" && !request.bitPerfect && !request.requireDoP) {
+            std::string fallbackFailure;
+            for (const unsigned int rate : rates) {
+                for (const unsigned int channelCount : channels) {
+                    for (const FormatChoice &format : formats) {
+                        if (tryOpenConfigured("default", rate, channelCount, format,
+                            request.bufferMillis, configured, fallbackFailure)) {
+                            found = true;
+                            device = "default";
+                            break;
+                        }
+                    }
+                    if (found) break;
+                }
+                if (found) break;
+            }
         }
     }
     if (!found) {
