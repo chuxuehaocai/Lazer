@@ -30,7 +30,11 @@ String _findPackageRoot() {
     if (package['name'] != 'lua_dardo_plus') continue;
     final rootUri = package['rootUri'] as String?;
     if (rootUri == null) break;
-    return Uri.parse(rootUri).toFilePath(windows: Platform.isWindows);
+    final parsedRoot = Uri.parse(rootUri);
+    final resolvedRoot = parsedRoot.isAbsolute
+        ? parsedRoot
+        : configFile.uri.resolveUri(parsedRoot);
+    return resolvedRoot.toFilePath(windows: Platform.isWindows);
   }
 
   throw StateError('lua_dardo_plus is not present in package_config.json.');
