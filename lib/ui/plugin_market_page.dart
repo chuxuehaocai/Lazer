@@ -35,7 +35,7 @@ class _PluginMarketViewState extends State<PluginMarketView>
     with BuildSafeState<PluginMarketView> {
   // Downloads and the source catalogue belong to the app, not to one visit.
   // Creating a client per visit also left every old client's pool open.
-  late final market = widget.market ?? widget.state.pluginMarket;
+  PluginMarket get market => widget.market ?? widget.state.pluginMarket;
   String _query = '';
   @override
   void initState() {
@@ -43,8 +43,16 @@ class _PluginMarketViewState extends State<PluginMarketView>
     unawaited(market.restore());
   }
 
+  @override
+  void didUpdateWidget(covariant PluginMarketView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previous = oldWidget.market ?? oldWidget.state.pluginMarket;
+    if (previous != market) unawaited(market.restore());
+  }
+
   Future<void> _editSource() async {
-    var source = market.source;
+    final owner = market;
+    var source = owner.source;
     final value = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -68,11 +76,11 @@ class _PluginMarketViewState extends State<PluginMarketView>
         ],
       ),
     );
-    if (value == null || !mounted) return;
+    if (value == null || !mounted || owner != market) return;
     try {
-      await market.setSource(value);
+      await owner.setSource(value);
     } catch (error) {
-      if (mounted) {
+      if (mounted && owner == market) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(context.tr(_errorText(error)))));

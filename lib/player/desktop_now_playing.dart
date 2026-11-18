@@ -38,7 +38,6 @@ bool _usesWindowCapsule(BuildContext context) =>
 /// Desktop listening workspace with an unscrolled, collapsible transport dock.
 class DesktopNowPlaying extends StatelessWidget {
   static const double artworkMaxWidth = 520;
-  static const double compactBreakpoint = artworkMaxWidth * 1.2;
 
   const DesktopNowPlaying({
     super.key,

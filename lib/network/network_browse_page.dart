@@ -6,6 +6,7 @@ import '../data/models.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
+import '../theme/lazer_theme.dart';
 import '../tv/tv_mode.dart';
 import '../utils/byte_format.dart';
 import '../widgets/apple_ui.dart';
@@ -48,6 +49,12 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
   Object? _error;
   bool _loading = false;
   int _request = 0;
+  int _playRequest = 0;
+
+  Object get _session =>
+      (widget.state, widget.controller, widget.sourceId, _path, _request);
+
+  bool _matchesSession(Object session) => session == _session;
 
   NetworkSourcesController get network => widget.controller;
 
@@ -58,6 +65,18 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
     super.initState();
     _path = widget.initialPath ?? _source?.rootPath ?? '/';
     unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(covariant NetworkBrowsePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.sourceId != widget.sourceId ||
+        oldWidget.initialPath != widget.initialPath) {
+      _path = widget.initialPath ?? _source?.rootPath ?? '/';
+      _listing = null;
+      unawaited(_load());
+    }
   }
 
   Future<void> _load() async {
@@ -84,7 +103,12 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
   }
 
   void _openFolder(String path) {
-    setState(() => _path = path);
+    setState(() {
+      // A new path must not expose the old folder's playable/scannable rows
+      // while its listing is pending. Refreshing this path can keep its rows.
+      if (_path != path) _listing = null;
+      _path = path;
+    });
     unawaited(_load());
   }
 
@@ -104,36 +128,27 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
       if (entry.isAudio) entry,
   ]..sort(byFolderThenName);
 
-  Future<void> _playAll() async {
-    final List<RemoteEntry> audio = _audio;
-    if (audio.isEmpty) return;
+  Future<void> _playAll() => _play(0);
+
+  Future<void> _play(int index) async {
+    final audio = _audio;
+    if (index < 0 || index >= audio.length) return;
+    final session = _session;
+    final request = ++_playRequest;
+    final state = widget.state;
     try {
       final List<Track> tracks = await network.indexFolder(
         widget.sourceId,
         audio,
       );
-      if (!mounted) return;
-      widget.state.playQueue(tracks);
+      if (!mounted || !_matchesSession(session) || request != _playRequest) {
+        return;
+      }
+      state.playQueue(tracks, startIndex: index);
     } catch (error) {
-      if (!mounted) return;
-      showNetworkMessage(
-        context,
-        networkErrorSentence(context, error),
-        error: true,
-      );
-    }
-  }
-
-  Future<void> _play(int index) async {
-    try {
-      final List<Track> tracks = await network.indexFolder(
-        widget.sourceId,
-        _audio,
-      );
-      if (!mounted) return;
-      widget.state.playQueue(tracks, startIndex: index);
-    } catch (error) {
-      if (!mounted) return;
+      if (!mounted || !_matchesSession(session) || request != _playRequest) {
+        return;
+      }
       showNetworkMessage(
         context,
         networkErrorSentence(context, error),
@@ -144,9 +159,10 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
 
   Future<void> _scanHere() async {
     if (network.scanning) return;
+    final session = _session;
     try {
       final result = await network.scan(widget.sourceId, _path);
-      if (!mounted) return;
+      if (!mounted || !_matchesSession(session)) return;
       showNetworkMessage(
         context,
         result.cancelled
@@ -154,7 +170,7 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
             : '已索引 ${result.added} 首，更新 ${result.updated} 首',
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || !_matchesSession(session)) return;
       showNetworkMessage(
         context,
         networkErrorSentence(context, error),
@@ -164,6 +180,7 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
   }
 
   Future<void> _showFileMenu(RemoteEntry entry, Offset position) async {
+    final session = _session;
     final RenderBox? overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
@@ -185,7 +202,7 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
         ),
       ],
     );
-    if (!mounted || action == null) return;
+    if (!mounted || !_matchesSession(session) || action == null) return;
     if (action == 'play') {
       final int index = _audio.indexWhere(
         (RemoteEntry e) => e.path == entry.path,
@@ -199,13 +216,13 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
   @override
   Widget build(BuildContext context) {
     final double inset = pageInset(context);
-    final NetworkSource? source = _source;
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final List<RemoteEntry> folders = _folders;
     final List<RemoteEntry> audio = _audio;
     return AnimatedBuilder(
       animation: network,
       builder: (BuildContext context, Widget? child) {
+        final NetworkSource? source = _source;
         return Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 980),
@@ -250,8 +267,7 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
                           ),
                           if (!widget.embedded)
                             NetworkBackButton(
-                              onPressed: () =>
-                                  Navigator.of(context).maybePop(),
+                              onPressed: () => Navigator.of(context).maybePop(),
                             ),
                         ],
                       ),
@@ -261,7 +277,9 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
                 SliverPadding(
                   padding: EdgeInsets.symmetric(horizontal: inset),
                   sliver: SliverToBoxAdapter(
-                    child: Row(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: <Widget>[
                         if (audio.isNotEmpty)
                           SpringFilledButton.tonalIcon(
@@ -275,7 +293,6 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
                             ),
                             label: const TrText('播放全部'),
                           ),
-                        const SizedBox(width: 8),
                         SpringOutlinedButton.icon(
                           key: const ValueKey<String>('network-browse-scan'),
                           onPressed: network.scanning
@@ -324,45 +341,43 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
                   if (folders.isNotEmpty)
                     SliverPadding(
                       padding: EdgeInsets.fromLTRB(inset, 16, inset, 0),
-                      sliver: SliverToBoxAdapter(
-                        child: AppleGroupedCard(
-                          margin: EdgeInsets.zero,
-                          child: Column(
+                      sliver: DecoratedSliver(
+                        decoration: BoxDecoration(
+                          color: apple.secondaryGroupedBackground,
+                          borderRadius: BorderRadius.circular(
+                            LazerThemeTokens.of(context).groupedCardRadius,
+                          ),
+                          border: Border.all(color: apple.separator, width: .5),
+                        ),
+                        sliver: SliverList.builder(
+                          itemCount: folders.length,
+                          itemBuilder: (context, i) => Column(
                             children: <Widget>[
-                              for (int i = 0; i < folders.length; i++)
-                                Column(
-                                  children: <Widget>[
-                                    if (i > 0)
-                                      Container(
-                                        height: .5,
-                                        color: apple.separator,
-                                      ),
-                                    AppleListTile(
-                                      key: ValueKey<String>(
-                                        'network-folder-${folders[i].path}',
-                                      ),
-                                      leading: AppleIconTile(
-                                        icon: Icons.folder_rounded,
-                                        color: apple.accent,
-                                      ),
-                                      title: folders[i].name,
-                                      subtitle: context.tr('文件夹'),
-                                      showChevron: true,
-                                      onTap: () => _openFolder(folders[i].path),
-                                      trailing: TextButton(
-                                        key: ValueKey<String>(
-                                          'network-folder-scan-${folders[i].path}',
-                                        ),
-                                        onPressed: network.scanning
-                                            ? null
-                                            : () => unawaited(
-                                                _scanFolder(folders[i]),
-                                              ),
-                                        child: const TrText('扫描'),
-                                      ),
-                                    ),
-                                  ],
+                              if (i > 0)
+                                Container(height: .5, color: apple.separator),
+                              AppleListTile(
+                                key: ValueKey<String>(
+                                  'network-folder-${folders[i].path}',
                                 ),
+                                leading: AppleIconTile(
+                                  icon: Icons.folder_rounded,
+                                  color: apple.accent,
+                                ),
+                                title: folders[i].name,
+                                subtitle: context.tr('文件夹'),
+                                showChevron: true,
+                                onTap: () => _openFolder(folders[i].path),
+                                trailing: TextButton(
+                                  key: ValueKey<String>(
+                                    'network-folder-scan-${folders[i].path}',
+                                  ),
+                                  onPressed: network.scanning
+                                      ? null
+                                      : () =>
+                                            unawaited(_scanFolder(folders[i])),
+                                  child: const TrText('扫描'),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -424,9 +439,10 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
 
   Future<void> _scanFolder(RemoteEntry entry) async {
     if (network.scanning) return;
+    final session = _session;
     try {
       final result = await network.scan(widget.sourceId, entry.path);
-      if (!mounted) return;
+      if (!mounted || !_matchesSession(session)) return;
       showNetworkMessage(
         context,
         result.cancelled
@@ -434,7 +450,7 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
             : '已索引 ${result.added} 首，更新 ${result.updated} 首',
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || !_matchesSession(session)) return;
       showNetworkMessage(
         context,
         networkErrorSentence(context, error),

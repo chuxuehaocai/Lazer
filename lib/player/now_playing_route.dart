@@ -79,6 +79,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
       useCompactLayout(
         state.uiMode,
         MediaQuery.sizeOf(navigator!.context).width,
+        layoutStyle: state.layoutStyle,
       );
 
   /// The controller is the actual visible openness, for both finger drags and

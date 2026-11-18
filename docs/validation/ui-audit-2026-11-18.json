@@ -1,0 +1,345 @@
+{
+  "date": "2026-11-18",
+  "baseCommit": "66da4831f423690476caf7b3a140422088bea189",
+  "scope": "Windows profile synthetic rendering samples during this UI audit. No real audio or network load. P95 ranges are per-sample ranges, not a combined percentile.",
+  "runs": [
+    {
+      "buildMode": "profile",
+      "operatingSystem": "\"Windows 10 Pro\" 10.0 (Build 26300)",
+      "refreshRate": 144.0,
+      "logicalSize": [
+        1280,
+        800
+      ],
+      "note": "Synthetic local artwork and word-timed lyrics; no audio/network. Cold = first open for each background mode. Includes entry and 1.6s tail.",
+      "samples": [
+        {
+          "mode": "nowPlayingDynamic",
+          "attempt": 0,
+          "cold": true,
+          "frames": 224,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.378,
+          "buildWorstMs": 10.554,
+          "rasterP95Ms": 4.652,
+          "rasterWorstMs": 6.264,
+          "framesOverBudget": 1
+        },
+        {
+          "mode": "nowPlayingDynamic",
+          "attempt": 1,
+          "cold": false,
+          "frames": 224,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.433,
+          "buildWorstMs": 6.093,
+          "rasterP95Ms": 4.607,
+          "rasterWorstMs": 6.965,
+          "framesOverBudget": 1
+        },
+        {
+          "mode": "nowPlayingDynamic",
+          "attempt": 2,
+          "cold": false,
+          "frames": 226,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.483,
+          "buildWorstMs": 8.541,
+          "rasterP95Ms": 6.034,
+          "rasterWorstMs": 7.804,
+          "framesOverBudget": 3
+        },
+        {
+          "mode": "nowPlayingDynamic",
+          "attempt": 3,
+          "cold": false,
+          "frames": 225,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.307,
+          "buildWorstMs": 6.809,
+          "rasterP95Ms": 4.327,
+          "rasterWorstMs": 6.658,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingStatic",
+          "attempt": 0,
+          "cold": true,
+          "frames": 227,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.338,
+          "buildWorstMs": 5.899,
+          "rasterP95Ms": 4.331,
+          "rasterWorstMs": 5.675,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingStatic",
+          "attempt": 1,
+          "cold": false,
+          "frames": 227,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.354,
+          "buildWorstMs": 6.793,
+          "rasterP95Ms": 4.506,
+          "rasterWorstMs": 6.82,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingStatic",
+          "attempt": 2,
+          "cold": false,
+          "frames": 227,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.417,
+          "buildWorstMs": 5.717,
+          "rasterP95Ms": 4.995,
+          "rasterWorstMs": 7.298,
+          "framesOverBudget": 2
+        },
+        {
+          "mode": "nowPlayingStatic",
+          "attempt": 3,
+          "cold": false,
+          "frames": 212,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.36,
+          "buildWorstMs": 5.77,
+          "rasterP95Ms": 4.853,
+          "rasterWorstMs": 9.412,
+          "framesOverBudget": 2
+        },
+        {
+          "mode": "windowsMica",
+          "attempt": 0,
+          "cold": true,
+          "frames": 225,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.332,
+          "buildWorstMs": 5.874,
+          "rasterP95Ms": 2.378,
+          "rasterWorstMs": 4.065,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "windowsMica",
+          "attempt": 1,
+          "cold": false,
+          "frames": 222,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.445,
+          "buildWorstMs": 5.638,
+          "rasterP95Ms": 2.69,
+          "rasterWorstMs": 5.905,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "windowsMica",
+          "attempt": 2,
+          "cold": false,
+          "frames": 225,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.332,
+          "buildWorstMs": 6.041,
+          "rasterP95Ms": 2.465,
+          "rasterWorstMs": 3.992,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "windowsMica",
+          "attempt": 3,
+          "cold": false,
+          "frames": 224,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.331,
+          "buildWorstMs": 6.155,
+          "rasterP95Ms": 2.428,
+          "rasterWorstMs": 3.806,
+          "framesOverBudget": 0
+        }
+      ],
+      "summary": {
+        "frames": 2688,
+        "framesOverBudget": 9,
+        "overBudgetPercent": 0.3348,
+        "buildP95RangeMs": [
+          0.307,
+          0.483
+        ],
+        "rasterP95RangeMs": [
+          2.378,
+          6.034
+        ]
+      }
+    },
+    {
+      "buildMode": "profile",
+      "operatingSystem": "\"Windows 10 Pro\" 10.0 (Build 26300)",
+      "refreshRate": 144.0,
+      "logicalSize": [
+        390.0,
+        800.0
+      ],
+      "note": "Synthetic local artwork and word-timed lyrics; no audio/network. Cold = first open for each background mode. Includes entry and 1.6s tail.",
+      "samples": [
+        {
+          "mode": "nowPlayingDynamic",
+          "attempt": 0,
+          "cold": true,
+          "frames": 225,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.133,
+          "buildWorstMs": 5.536,
+          "rasterP95Ms": 2.441,
+          "rasterWorstMs": 3.499,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingDynamic",
+          "attempt": 1,
+          "cold": false,
+          "frames": 225,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.142,
+          "buildWorstMs": 3.251,
+          "rasterP95Ms": 1.902,
+          "rasterWorstMs": 2.916,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingDynamic",
+          "attempt": 2,
+          "cold": false,
+          "frames": 225,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.125,
+          "buildWorstMs": 3.446,
+          "rasterP95Ms": 1.77,
+          "rasterWorstMs": 3.646,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingDynamic",
+          "attempt": 3,
+          "cold": false,
+          "frames": 239,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.135,
+          "buildWorstMs": 3.487,
+          "rasterP95Ms": 2.121,
+          "rasterWorstMs": 3.141,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingStatic",
+          "attempt": 0,
+          "cold": true,
+          "frames": 151,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.122,
+          "buildWorstMs": 4.428,
+          "rasterP95Ms": 1.793,
+          "rasterWorstMs": 2.938,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingStatic",
+          "attempt": 1,
+          "cold": false,
+          "frames": 151,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.103,
+          "buildWorstMs": 3.232,
+          "rasterP95Ms": 2.072,
+          "rasterWorstMs": 7.574,
+          "framesOverBudget": 1
+        },
+        {
+          "mode": "nowPlayingStatic",
+          "attempt": 2,
+          "cold": false,
+          "frames": 151,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.096,
+          "buildWorstMs": 3.205,
+          "rasterP95Ms": 2.288,
+          "rasterWorstMs": 3.022,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "nowPlayingStatic",
+          "attempt": 3,
+          "cold": false,
+          "frames": 151,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.108,
+          "buildWorstMs": 3.453,
+          "rasterP95Ms": 2.471,
+          "rasterWorstMs": 5.572,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "windowsMica",
+          "attempt": 0,
+          "cold": true,
+          "frames": 151,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.098,
+          "buildWorstMs": 3.373,
+          "rasterP95Ms": 0.302,
+          "rasterWorstMs": 0.376,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "windowsMica",
+          "attempt": 1,
+          "cold": false,
+          "frames": 151,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.086,
+          "buildWorstMs": 3.242,
+          "rasterP95Ms": 0.313,
+          "rasterWorstMs": 0.366,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "windowsMica",
+          "attempt": 2,
+          "cold": false,
+          "frames": 151,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.095,
+          "buildWorstMs": 3.434,
+          "rasterP95Ms": 0.325,
+          "rasterWorstMs": 0.387,
+          "framesOverBudget": 0
+        },
+        {
+          "mode": "windowsMica",
+          "attempt": 3,
+          "cold": false,
+          "frames": 151,
+          "budgetMs": 6.944444444444445,
+          "buildP95Ms": 0.102,
+          "buildWorstMs": 3.854,
+          "rasterP95Ms": 0.319,
+          "rasterWorstMs": 0.415,
+          "framesOverBudget": 0
+        }
+      ],
+      "summary": {
+        "frames": 2122,
+        "framesOverBudget": 1,
+        "overBudgetPercent": 0.0471,
+        "buildP95RangeMs": [
+          0.086,
+          0.142
+        ],
+        "rasterP95RangeMs": [
+          0.302,
+          2.471
+        ]
+      }
+    }
+  ]
+}

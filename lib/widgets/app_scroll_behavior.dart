@@ -148,15 +148,31 @@ class _WheelMomentum extends StatefulWidget {
 }
 
 class _WheelMomentumState extends State<_WheelMomentum>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   Ticker? _ticker;
   double _velocity = 0;
   Duration _last = Duration.zero;
+  bool _visible = true;
+  bool _lifecycleVisible = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _ticker ??= createTicker(_tick);
+    _visible = TickerMode.valuesOf(context).enabled;
+    if (!_visible) _stop();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleVisible = state == AppLifecycleState.resumed;
+    if (!_lifecycleVisible) _stop();
   }
 
   ScrollPosition? get _position {
@@ -200,7 +216,7 @@ class _WheelMomentumState extends State<_WheelMomentum>
   }
 
   void _wheel(PointerSignalEvent event) {
-    if (event is! PointerScrollEvent) return;
+    if (event is! PointerScrollEvent || !_visible || !_lifecycleVisible) return;
     // Stock Flutter applies a wheel step synchronously with no momentum. The
     // default settings must feel exactly like that, so leave the signal alone
     // until the inertia sliders are actually moved.
@@ -235,7 +251,11 @@ class _WheelMomentumState extends State<_WheelMomentum>
     // that synchronous step before the next painted frame, only if this
     // viewport actually consumed it (nested scroll views remain independent).
     scheduleMicrotask(() {
-      if (!mounted || _position != position || position.pixels == before) {
+      if (!mounted ||
+          !_visible ||
+          !_lifecycleVisible ||
+          _position != position ||
+          position.pixels == before) {
         return;
       }
       final consumed = position.pixels - before;
@@ -255,6 +275,7 @@ class _WheelMomentumState extends State<_WheelMomentum>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.dispose();
     _ticker = null;
     super.dispose();

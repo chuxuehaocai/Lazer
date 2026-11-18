@@ -115,12 +115,11 @@ class _WindowFrameState extends State<WindowFrame>
       return false;
     }
     final width = MediaQuery.sizeOf(context).width;
-    // The shell prefers its tablet composition where the two ranges overlap.
-    final tablet =
-        useTabletLayout(state.uiMode, width, layoutStyle: state.layoutStyle) &&
-        (state.autoDpiScale || state.dpiScale >= .95);
-    return !tablet &&
-        useCompactLayout(state.uiMode, width, layoutStyle: state.layoutStyle);
+    return useCompactLayout(
+      state.uiMode,
+      width,
+      layoutStyle: state.layoutStyle,
+    );
   }
 
   @override

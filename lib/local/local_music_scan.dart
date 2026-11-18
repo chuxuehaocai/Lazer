@@ -54,56 +54,82 @@ Future<LocalScanResult?> scanMusicFolder(
   AppState state,
   Directory root, {
   bool rememberRoot = true,
+  LocalMusicScanner? scanner,
 }) async {
   final ValueNotifier<int> found = BuildSafeValueNotifier<int>(0);
   bool stop = false;
+  Timer? progressTimer;
   final NavigatorState navigator = Navigator.of(context, rootNavigator: true);
-  unawaited(
-    showAppleDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) => AlertDialog(
-        title: TrText('扫描本地音乐'),
-        content: SizedBox(
-          width: 340,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                root.path,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 14),
-              ValueListenableBuilder<int>(
-                valueListenable: found,
-                builder: (BuildContext context, int value, Widget? child) {
-                  return TrText('已找到 $value 首');
-                },
-              ),
-              const SizedBox(height: 10),
-              const LinearProgressIndicator(minHeight: 4),
-            ],
-          ),
+  final dialog = AppleDialogRoute<void>(
+    context: context,
+    themes: InheritedTheme.capture(from: context, to: navigator.context),
+    barrierDismissible: false,
+    builder: (BuildContext context) => AlertDialog(
+      title: TrText('扫描本地音乐'),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              root.path,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 14),
+            ValueListenableBuilder<int>(
+              valueListenable: found,
+              builder: (BuildContext context, int value, Widget? child) {
+                return TrText('已找到 $value 首');
+              },
+            ),
+            const SizedBox(height: 10),
+            const LinearProgressIndicator(minHeight: 4),
+          ],
         ),
-        actions: <Widget>[
-          SpringTextButton(onPressed: () => stop = true, child: TrText('取消')),
-        ],
       ),
+      actions: <Widget>[
+        SpringTextButton(onPressed: () => stop = true, child: TrText('取消')),
+      ],
     ),
   );
+  unawaited(navigator.push<void>(dialog));
+  unawaited(
+    dialog.popped.then((_) {
+      stop = true;
+      progressTimer?.cancel();
+    }),
+  );
+  unawaited(
+    dialog.completed.then((_) {
+      // Navigator teardown disposes routes without completing `popped`.
+      // Stop progress before releasing its notifier in that path as well.
+      stop = true;
+      progressTimer?.cancel();
+      found.dispose();
+    }),
+  );
+
+  void closeDialog() {
+    if (!navigator.mounted || !dialog.isActive) return;
+    // A scan can finish after Back, or while another route is in front.
+    // Close only the progress route that this operation owns.
+    if (dialog.isCurrent) {
+      navigator.pop();
+    } else {
+      navigator.removeRoute(dialog);
+    }
+  }
+
   LocalScanResult result;
   int latestFound = 0;
-  final Timer progressTimer = Timer.periodic(
-    const Duration(milliseconds: 100),
-    (_) {
-      if (found.value != latestFound) found.value = latestFound;
-    },
-  );
+  progressTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+    if (found.value != latestFound) found.value = latestFound;
+  });
   try {
-    result = await LocalMusicScanner().scan(
+    result = await (scanner ?? LocalMusicScanner()).scan(
       root,
       existing: state.localLibrary.tracks,
       isCanceled: () => stop,
@@ -111,15 +137,13 @@ Future<LocalScanResult?> scanMusicFolder(
     );
   } catch (_) {
     progressTimer.cancel();
-    if (navigator.mounted) navigator.pop();
+    closeDialog();
     if (context.mounted) _message(context, '扫描失败，请检查文件夹后重试');
-    found.dispose();
     return null;
   }
   progressTimer.cancel();
-  found.value = result.tracks.length;
-  if (navigator.mounted) navigator.pop();
-  found.dispose();
+  if (dialog.isActive) found.value = result.tracks.length;
+  closeDialog();
   if (rememberRoot) await state.localLibrary.addScanRoot(root.path);
   await state.localLibrary.addTracks(result.tracks);
   await state.localLibrary.refreshMissing();

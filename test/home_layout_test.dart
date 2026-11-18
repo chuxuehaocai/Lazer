@@ -166,7 +166,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.getSize(find.byKey(const ValueKey('recent-tracks'))).height,
-      236,
+      214,
     );
     expect(tester.getSize(find.byType(AppArtistTrackCard).first).width, 350);
     await tester.pumpWidget(

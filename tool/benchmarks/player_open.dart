@@ -89,6 +89,9 @@ class _BenchmarkState extends AppState {
     );
   }
   late final List<Track> _tracks;
+  int _index = 0;
+  bool _playing = true;
+  Duration _position = const Duration(seconds: 98);
   @override
   Future<void> bootstrap() async {}
   @override
@@ -96,17 +99,41 @@ class _BenchmarkState extends AppState {
   @override
   Future<void> ensureCurrentLyrics({bool force = false}) async {}
   @override
-  Track get current => _tracks.first;
+  Track get current => _tracks[_index];
   @override
   List<Track> get queue => _tracks;
   @override
   List<Track> get recentTracks => _tracks;
   @override
-  bool get playing => true;
+  bool get playing => _playing;
   @override
-  Duration get precisePosition => const Duration(seconds: 98);
+  Duration get precisePosition => _position;
   @override
   Duration get position => precisePosition;
+  @override
+  void togglePlay() {
+    _playing = !_playing;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> next() async {
+    _index = (_index + 1) % _tracks.length;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> previous() async {
+    _index = (_index - 1) % _tracks.length;
+    notifyListeners();
+  }
+
+  @override
+  void seek(double fraction) {
+    _position = Duration(milliseconds: (300000 * fraction).round());
+    notifyListeners();
+  }
+
   @override
   HomeFeed get home => HomeFeed(
     featuredTracks: _tracks,
@@ -187,15 +214,26 @@ Future<void> main() async {
   // This executable is an isolated rendering test, never a user session.
   // ignore: invalid_use_of_visible_for_testing_member
   SharedPreferences.setMockInitialValues({});
+  final requestedWidth = double.tryParse(
+    Platform.environment['LAZER_BENCHMARK_WIDTH'] ?? '',
+  );
+  final width = requestedWidth != null && requestedWidth.isFinite
+      ? requestedWidth.clamp(320.0, 2560.0)
+      : 1280.0;
+  final windowSize = Size(width, 800);
   final output = await Directory(
     'build/benchmarks',
   ).absolute.create(recursive: true);
   final state = _BenchmarkState(await _cover(output));
   await state.setIndependentPlayback(true);
   await initWindowFrame();
-  await windowManager.setSize(const Size(1280, 800));
+  await windowManager.setSize(windowSize);
   final media = SystemMediaController(state);
   runApp(LazerApp(state: state, audio: _UnusedAudio(), media: media));
+  if (Platform.environment['LAZER_UI_REVIEW'] == '1') {
+    await windowManager.setTitle('Lazer - Mobile UI review');
+    return;
+  }
   await Future<void>.delayed(const Duration(seconds: 3));
   final refresh = WidgetsBinding
       .instance
@@ -226,7 +264,27 @@ Future<void> main() async {
       for (var attempt = 0; attempt < 4; attempt++) {
         frames.clear();
         capture = true;
-        _widget<AppPlayerBar>().onOpen();
+        if (useCompactLayout(
+          state.uiMode,
+          width,
+          layoutStyle: state.layoutStyle,
+        )) {
+          Element? cover;
+          void findCover(Element element) {
+            if (element.widget.key == const ValueKey('bottom-track-cover')) {
+              cover = element;
+            }
+            if (cover == null) element.visitChildren(findCover);
+          }
+
+          findCover(WidgetsBinding.instance.rootElement!);
+          if (cover == null) throw StateError('No mobile player entry');
+          // Use the production entry callback; the phone has no hidden bar.
+          final entry = cover!.widget as Semantics;
+          entry.properties.onTap!();
+        } else {
+          _widget<AppPlayerBar>().onOpen();
+        }
         await Future<void>.delayed(const Duration(milliseconds: 1600));
         capture = false;
         if (frames.isEmpty) {
@@ -250,14 +308,14 @@ Future<void> main() async {
           : 'debug',
       'operatingSystem': Platform.operatingSystemVersion,
       'refreshRate': refresh,
-      'logicalSize': [1280, 800],
+      'logicalSize': [windowSize.width, windowSize.height],
       'note':
           'Synthetic local artwork and word-timed lyrics; no audio/network. '
           'Cold = first open for each background mode. Includes entry and 1.6s tail.',
       'samples': samples,
     };
     await File(
-      '${output.path}/player-open.json',
+      '${output.path}/player-open-${width.round()}.json',
     ).writeAsString(const JsonEncoder.withIndent('  ').convert(report));
     debugPrint(jsonEncode(report));
   } finally {

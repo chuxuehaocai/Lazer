@@ -6,6 +6,40 @@ import 'package:flutter/material.dart';
 import 'word_motion.dart';
 import '../data/lyrics.dart';
 
+final _cjk = RegExp(r'[぀-ヿ㐀-鿿가-힯]');
+
+bool _emphasizesWord(LyricWord word) {
+  final length = word.text.trim().characters.length;
+  return word.duration >= const Duration(milliseconds: 1000) &&
+      (_cjk.hasMatch(word.text) || length > 1 && length <= 7);
+}
+
+double _wordSettlingMs(double durationMs, bool emphasized, bool last) =>
+    math.max(1000, durationMs) * (last ? 1.2 : 1) * (emphasized ? 2 : 1);
+
+/// Includes the trailing float and glyph stagger after the sung word ends.
+/// Both lyric hosts use the painter's settling bound to stop idle frames.
+Duration lyricWordMotionEnd(LyricLine line) {
+  var end = Duration.zero;
+  for (var i = 0; i < line.words.length; i++) {
+    final word = line.words[i];
+    final until =
+        word.start +
+        Duration(
+          microseconds:
+              (_wordSettlingMs(
+                        word.duration.inMicroseconds / 1000,
+                        _emphasizesWord(word),
+                        i == line.words.length - 1,
+                      ) *
+                      1000)
+                  .ceil(),
+        );
+    if (until > end) end = until;
+  }
+  return end;
+}
+
 class TimedLyricText extends StatefulWidget {
   const TimedLyricText({
     super.key,
@@ -127,8 +161,7 @@ class _Word {
   /// The emphasized motion includes per-glyph stagger and a trailing float.
   /// Two durations cover both, including the special treatment for the last
   /// word, after which its glyphs are static and can be painted as one clip.
-  double get settledAtMs =>
-      math.max(1000, durationMs) * (last ? 1.2 : 1) * (emphasized ? 2 : 1);
+  double get settledAtMs => _wordSettlingMs(durationMs, emphasized, last);
 }
 
 class _WordLayout {
@@ -178,11 +211,7 @@ class _WordLayout {
       final double startMs = word.start.inMicroseconds / 1000;
       final double durationMs = word.duration.inMicroseconds / 1000;
       final chars = word.text.characters.toList();
-      final trimmedLength = word.text.trim().characters.length;
-      final bool emphasized =
-          word.duration >= const Duration(milliseconds: 1000) &&
-          (_WordPainter.cjk.hasMatch(word.text) ||
-              trimmedLength > 1 && trimmedLength <= 7);
+      final bool emphasized = _emphasizesWord(word);
       final List<_Segment> wordSegments = <_Segment>[];
       final rects = bright
           .getBoxesForSelection(
@@ -336,7 +365,6 @@ class _WordPainter extends CustomPainter {
   final _WordLayout layout;
   final Duration Function() position;
   final double Function() emphasis;
-  static final cjk = RegExp(r'[぀-ヿ㐀-鿿가-힯]');
   @override
   void paint(Canvas canvas, Size size) {
     final focus = emphasis().clamp(0.0, 1.0);

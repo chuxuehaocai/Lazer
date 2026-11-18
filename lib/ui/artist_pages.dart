@@ -340,7 +340,7 @@ class _ArtistReleaseShelf extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 220,
+    height: 160 + mediaCardCaptionHeight(context).clamp(60, double.infinity),
     child: ScrollConfiguration(
       behavior: shelfScrollBehavior(context),
       child: ListView.separated(

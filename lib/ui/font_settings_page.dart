@@ -365,7 +365,7 @@ class _FontCard extends StatelessWidget {
           ),
           TrText(detail, style: Theme.of(context).textTheme.bodySmall),
           Padding(
-            padding: EdgeInsets.symmetric(vertical: desktop ? 12 : 12),
+            padding: const EdgeInsets.symmetric(vertical: 12),
             child: Text(
               context.tr(sample),
               style: style,

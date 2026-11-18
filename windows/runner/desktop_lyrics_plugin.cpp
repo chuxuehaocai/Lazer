@@ -1,5 +1,6 @@
 #include "desktop_lyrics_plugin.h"
 #include "desktop_lyrics_geometry.h"
+#include "desktop_lyrics_window.h"
 
 #include <file_selector_windows/file_selector_windows.h>
 #include <flutter/flutter_engine.h>
@@ -27,21 +28,7 @@ constexpr char kChannel[] = "lazer/desktop_lyrics";
 constexpr int kDesktopBottomGap = 24;
 constexpr UINT_PTR kPointerTimer = 0x4c5a;
 
-// HTTRANSPARENT only passes through windows on the same UI thread. Switch the
-// native transparency flag as the pointer crosses an actual interaction region
-// so Explorer and other applications also receive clicks outside the lyrics.
-void SetClickThrough(HWND window, bool transparent = true) {
-  if (window == nullptr) return;
-  const LONG_PTR previous = GetWindowLongPtrW(window, GWL_EXSTYLE);
-  LONG_PTR style = previous | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
-  if (transparent) {
-    style |= WS_EX_TRANSPARENT | WS_EX_LAYERED;
-  } else {
-    style &= ~(WS_EX_TRANSPARENT | WS_EX_LAYERED);
-  }
-  style &= ~WS_EX_APPWINDOW;
-  if (style != previous) SetWindowLongPtrW(window, GWL_EXSTYLE, style);
-}
+using desktop_lyrics::SetClickThrough;
 
 std::wstring PositionFile() {
   wchar_t appdata[MAX_PATH] = {};
@@ -163,9 +150,6 @@ class DesktopLyricsPlugin {
     ShowWindow(window_, SW_SHOWNOACTIVATE);
     SetClickThrough(window_);
     InstallClickThrough();
-    // The Flutter view is a child window; mark it click-through too so a
-    // desktop lyric never eats a double-click on an icon.
-    if (view_ != nullptr) SetClickThrough(view_);
     attached_ = true;
     UpdatePointerTransparency();
     return true;
@@ -175,7 +159,6 @@ class DesktopLyricsPlugin {
     if (!attached_ || !IsWindow(window_)) return false;
     dragging_ = true;
     SetClickThrough(window_, false);
-    SetClickThrough(view_, false);
     POINT cursor = {};
     GetCursorPos(&cursor);
     ReleaseCapture();
@@ -275,7 +258,6 @@ class DesktopLyricsPlugin {
     const bool interactive = !locked_ && (dragging_ ||
         (GetCursorPos(&cursor) && IsInteractivePoint(cursor)));
     SetClickThrough(window_, !interactive);
-    SetClickThrough(view_, !interactive);
   }
 
   void LoadPosition() {

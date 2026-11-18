@@ -101,6 +101,19 @@ jobs:
           path: ${{ runner.temp }}/lazer-ffmpeg
           key: windows-x86_64-ffmpeg-${{ hashFiles('native/lazer-audio/tools/build_dsd_ffmpeg.sh') }}
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+      - name: Test desktop lyrics native transparency
+        shell: pwsh
+        run: |
+          $probeDirectory = Join-Path $env:RUNNER_TEMP 'lazer-desktop-lyrics'
+          New-Item -ItemType Directory -Force -Path $probeDirectory | Out-Null
+          $probe = Join-Path $probeDirectory 'desktop-lyrics-window-test.exe'
+          $object = Join-Path $probeDirectory 'desktop-lyrics-window-test.obj'
+          # Keep assert checks active independently of release build settings.
+          & cl.exe /nologo /std:c++17 /EHsc /W4 /WX /UNDEBUG `
+            tool/validation/desktop_lyrics_window_test.cpp "/Fe:$probe" "/Fo:$object" /link user32.lib
+          if ($LASTEXITCODE -ne 0) { throw 'Could not compile the desktop lyrics window contract' }
+          & $probe
+          if ($LASTEXITCODE -ne 0) { throw 'The desktop lyrics window contract failed' }
       - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         with:
           msystem: MSYS

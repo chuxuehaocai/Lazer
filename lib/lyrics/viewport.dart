@@ -26,6 +26,7 @@ import '../widgets/lyric_selection_toolbar.dart';
 import '../widgets/lyric_image_dialog.dart';
 import '../widgets/lyric_edge_fade.dart';
 import 'line_content.dart';
+import 'timed_line.dart' show lyricWordMotionEnd;
 import '../widgets/lyric_text_hit_region.dart';
 import '../theme/lazer_theme.dart';
 
@@ -68,6 +69,7 @@ class _LyricViewportState extends State<LyricViewport>
   List<double> _interludePresence = [];
   List<Duration?> _retainedInterludePositions = [];
   bool _hasWordTimings = false;
+  List<Duration> _wordMotionEnds = const [];
   List<LyricSpring> _ys = [];
   List<LyricSpring> _scales = [];
   List<double> _heights = [];
@@ -85,7 +87,8 @@ class _LyricViewportState extends State<LyricViewport>
   bool? _showRomanization;
   (TextStyle, TextStyle)? _typography;
   int _active = -1;
-  bool _playing = false;
+  bool _visible = true;
+  bool _lifecycleVisible = true;
   bool _manual = false;
   bool _dragging = false;
   int? _middlePointer;
@@ -121,7 +124,16 @@ class _LyricViewportState extends State<LyricViewport>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
+    _lifecycleVisible = state == AppLifecycleState.resumed;
+    if (!_lifecycleVisible) {
+      _ticker?.stop();
+      _resume?.cancel();
+      return;
+    }
+    if (_visible) _resumeVisibleLyrics();
+  }
+
+  void _resumeVisibleLyrics() {
     _resume?.cancel();
     _dragging = false;
     _middlePointer = null;
@@ -150,6 +162,16 @@ class _LyricViewportState extends State<LyricViewport>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _ticker ??= createTicker(_tick);
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (_visible != visible) {
+      _visible = visible;
+      if (!visible) {
+        _ticker?.stop();
+        _resume?.cancel();
+      } else if (_lifecycleVisible) {
+        _resumeVisibleLyrics();
+      }
+    }
     MotionSnapshot.invalidate(context);
   }
 
@@ -214,7 +236,7 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _onLane() {
-    if (!mounted) return;
+    if (!mounted || !_visible || !_lifecycleVisible) return;
     _paintPosition = widget.state.precisePosition;
     final candidate = _activeAt(_paintPosition);
     final seeking = _isSeek();
@@ -273,12 +295,10 @@ class _LyricViewportState extends State<LyricViewport>
       });
       MotionSnapshot.invalidate(context);
     }
-    if (_playing != widget.state.playing) {
-      _playing = widget.state.playing;
-      // Resuming mid-song must restart word animation even though no spring
-      // is retargeted; the old code got this (and a full stagger restart) by
-      // retargeting every row on the play-state change.
-      if (_playing && (_hasWordTimings || _activeInterlude)) _start();
+    // Playback notifications also wake a settled line after a seek, or the
+    // next word line after a quiet interval. Do not reset manual coast here.
+    if (widget.state.playing && (_activeWordMotion || _activeInterlude)) {
+      _ensureTickerStarted();
     }
     // Only a paused seek changes the word mask without a running ticker. A
     // playback tick (10 Hz) must not repaint every mounted row.
@@ -344,16 +364,26 @@ class _LyricViewportState extends State<LyricViewport>
   );
 
   void _start() {
-    final Ticker? ticker = _ticker;
     // Any new velocity (drag release, wheel impulse) starts a fresh glide
     // rather than continuing the previous spline's clock.
     _coast = null;
     _coastTime = 0;
+    _ensureTickerStarted();
+  }
+
+  void _ensureTickerStarted() {
+    if (!_visible || !_lifecycleVisible) return;
+    final Ticker? ticker = _ticker;
     if (ticker != null && !ticker.isActive) {
       _lastFrame = Duration.zero;
       ticker.start();
     }
   }
+
+  bool get _activeWordMotion =>
+      _active >= 0 &&
+      _active < _wordMotionEnds.length &&
+      _paintPosition < _wordMotionEnds[_active];
 
   bool get _activeInterlude =>
       _active >= 0 &&
@@ -472,7 +502,7 @@ class _LyricViewportState extends State<LyricViewport>
         (_manual && _velocity.abs() > 5) ||
         (sheetIsLive &&
             widget.state.playing &&
-            (_hasWordTimings || _activeInterlude)) ||
+            (_activeWordMotion || _activeInterlude)) ||
         (sheetIsLive && interludesMoving);
     var positionsChanged = presenceChanged;
     var emphasisChanged = false;
@@ -672,6 +702,7 @@ class _LyricViewportState extends State<LyricViewport>
         widget.state.lyrics,
         widget.state.current?.duration ?? Duration.zero,
       );
+      _wordMotionEnds = [for (final line in _lines) lyricWordMotionEnd(line)];
       _interludePresence = [for (final _ in _lines) 0];
       _retainedInterludePositions = [for (final _ in _lines) null];
     }
@@ -1301,6 +1332,7 @@ class _LyricViewportState extends State<LyricViewport>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _wall.stop();
     _resume?.cancel();
     for (final notifier in _rowFrames) {
       notifier.dispose();

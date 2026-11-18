@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/ui/player_bar.dart';
+import 'package:lazer_nextgen/ui/widgets.dart';
 
 Animation<Offset> playerSlideAnimation(WidgetTester tester) => tester
     .widget<SlideTransition>(
@@ -38,12 +39,12 @@ Future<void> pumpPlayerTransition(
   await tester.pump();
 }
 
-/// Taps whatever the shell presents as its now-playing control: the transport
-/// bar on windows wide enough for it, otherwise the cover beside the capsule.
+/// Opens the phone's round artwork entry or the desktop transport.
 Future<void> tapNowPlayingControl(WidgetTester tester, {String? title}) async {
-  final Finder cover = find.byKey(const ValueKey<String>('bottom-track-cover'));
-  if (cover.evaluate().isNotEmpty) {
-    await tester.tap(cover);
+  final phoneCover = find.byKey(const ValueKey('bottom-track-cover'));
+  if (phoneCover.evaluate().isNotEmpty) {
+    expect(phoneCover.hitTestable(), findsOneWidget);
+    await tester.tap(phoneCover);
     return;
   }
   final Finder bar = find.byType(AppPlayerBar);
@@ -52,7 +53,10 @@ Future<void> tapNowPlayingControl(WidgetTester tester, {String? title}) async {
     findsOneWidget,
     reason: 'the shell must expose one now-playing control',
   );
-  await tester.tap(
-    title == null ? bar : find.descendant(of: bar, matching: find.text(title)),
+  final target = find.descendant(
+    of: bar,
+    matching: title == null ? find.byType(AppCover) : find.text(title),
   );
+  expect(target.hitTestable(), findsOneWidget);
+  await tester.tap(target);
 }

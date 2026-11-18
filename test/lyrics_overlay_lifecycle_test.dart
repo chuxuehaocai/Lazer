@@ -142,6 +142,44 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('word repaint preserves its tail then releases the ticker', (
+    tester,
+  ) async {
+    final bridge = await mount(tester);
+    await bridge.handler!(
+      MethodCall(
+        'state',
+        const LyricsOverlayPayload(
+          title: 'Track',
+          artist: 'Artist',
+          notice: null,
+          lines: [
+            LyricLine(
+              Duration.zero,
+              'First',
+              words: [LyricWord(Duration.zero, Duration(seconds: 1), 'First')],
+            ),
+          ],
+          settings: _settings,
+          position: Duration(milliseconds: 1400),
+          duration: Duration(seconds: 30),
+          playing: true,
+        ).toMap(),
+      ),
+    );
+    await tester.pump();
+    // The vocal duration has ended, but the last emphasized word still floats.
+    expect(tester.binding.transientCallbackCount, greaterThan(0));
+    await bridge.handler!(
+      const MethodCall('position', {'position': 3000, 'playing': true}),
+    );
+    for (var i = 0; i < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(tester.binding.transientCallbackCount, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('reduced motion snaps focus and avoids continuous word repaint', (
     tester,
   ) async {

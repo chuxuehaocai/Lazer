@@ -7,6 +7,9 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'tokens.dart' show AppFonts;
+export 'tokens.dart' show AppFonts;
+
 // ---------------------------------------------------------------------------
 // Colors
 // ---------------------------------------------------------------------------
@@ -61,39 +64,6 @@ abstract final class AppColors {
 // ---------------------------------------------------------------------------
 // Typography
 // ---------------------------------------------------------------------------
-
-/// Type roles follow DESIGN.md (serif voice / sans chrome / mono utility),
-/// but every role renders with bundled MiSans as the primary family.
-/// Previously CJK glyphs in serif roles fell back to SimSun's bitmap render
-/// (the "jagged" look); MiSans is hinted + antialiased on every platform.
-abstract final class AppFonts {
-  /// Bundled family (see pubspec fonts). Weight-mapped via FontWeight:
-  /// w400/w500/w600/w700 resolve to MiSans Regular/Medium/Semibold/Bold.
-  static const String sans = 'MiSans';
-  static const List<String> sansFallback = <String>[
-    'Segoe UI',
-    'Microsoft YaHei UI',
-    'Microsoft YaHei',
-    'sans-serif',
-  ];
-
-  // Serif role — globally bound to MiSans per user request; Georgia kept
-  // only as an escape hatch fallback for exotic glyphs.
-  static const String serif = 'MiSans';
-  static const List<String> serifFallback = <String>[
-    'Georgia',
-    'Microsoft YaHei',
-    'serif',
-  ];
-
-  // Mono role — globally MiSans; Consolas as fallback for glyph coverage.
-  static const String mono = 'MiSans';
-  static const List<String> monoFallback = <String>[
-    'Consolas',
-    'Courier New',
-    'monospace',
-  ];
-}
 
 /// Type scale from DESIGN.md. Roles: caption / body-sm / body / subheading /
 /// heading / display.

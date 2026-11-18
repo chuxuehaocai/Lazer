@@ -16,18 +16,11 @@ import '../widgets/apple_ui.dart';
 import '../widgets/copyable_song_title.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/playback_queue_view.dart';
+import '../widgets/player_seek_bar.dart';
 import 'widgets.dart';
 
-/// The app transport bar, ported from `PlayerBar` in
-/// `DesktopPlayerApp.kt`:
-///
-/// ```
-/// Surface(height = 84, surface @ 0.96 × uiAlpha, 1 dp outlineVariant border)
-///   Row(padding 20)
-///     Row(width 250)        now-playing tile (cover 50, title, translation, artist)
-///     Column(weight 1)      transport row + thin seek row
-///     Row(width 168, end)   volume, queue, now playing
-/// ```
+/// Shared transport for the shell and pushed catalog details.
+/// Narrow containers use the same phone controls on every platform.
 class AppPlayerBar extends StatefulWidget {
   const AppPlayerBar({
     super.key,
@@ -66,12 +59,17 @@ typedef _PlayerBarSignature = (
   double,
   bool,
   String?,
+  AppUiMode,
+  AppLayoutStyle,
+  AppBackgroundMode,
+  bool,
 );
 
 class _AppPlayerBarState extends State<AppPlayerBar>
     with BuildSafeState<AppPlayerBar> {
   late _PlayerBarSignature _signature;
   Widget? _bar;
+  (bool, double)? _layout;
   AppState get state => widget.state;
 
   _PlayerBarSignature get _currentSignature => (
@@ -83,6 +81,10 @@ class _AppPlayerBarState extends State<AppPlayerBar>
     state.volume,
     state.signedIn,
     state.playbackError,
+    state.uiMode,
+    state.layoutStyle,
+    state.backgroundMode,
+    state.supportsCurrentMusic(MusicCapability.comments),
   );
 
   @override
@@ -134,7 +136,27 @@ class _AppPlayerBarState extends State<AppPlayerBar>
   }
 
   @override
-  Widget build(BuildContext context) => _bar ??= _buildBar(context);
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (_, constraints) {
+      final compact =
+          widget.compact ||
+          useCompactLayout(
+            state.uiMode,
+            constraints.maxWidth,
+            layoutStyle: state.layoutStyle,
+          );
+      final layout = (compact, constraints.maxWidth);
+      if (_layout != layout) {
+        _layout = layout;
+        _bar = null;
+      }
+      return _bar ??= _buildBar(
+        context,
+        compact: compact,
+        width: constraints.maxWidth,
+      );
+    },
+  );
 
   /// The failure note the bar shows when playback stopped without the listener
   /// asking it to.
@@ -195,9 +217,13 @@ class _AppPlayerBarState extends State<AppPlayerBar>
     );
   }
 
-  Widget _buildBar(BuildContext context) {
+  Widget _buildBar(
+    BuildContext context, {
+    required bool compact,
+    required double width,
+  }) {
     final Track? track = state.current;
-    if (widget.compact) {
+    if (compact) {
       final AppleSemanticColors apple = AppleSemanticColors.of(context);
       return AppleGlass(
         borderRadius: widget.floating
@@ -211,10 +237,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
         child: _withErrorStrip(
           apple,
           ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: widget.floating ? 56 : 60,
-              maxHeight: widget.floating ? double.infinity : 60,
-            ),
+            constraints: BoxConstraints(minHeight: widget.floating ? 56 : 60),
             child: Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: 10,
@@ -239,7 +262,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                         : Icons.play_arrow_rounded,
                     tooltip: state.playing ? '暂停' : '播放',
                     iconSize: 27,
-                    size: widget.floating ? 44 : 30,
+                    size: 44,
                     onPressed: track == null ? null : state.togglePlay,
                   ),
                   const SizedBox(width: 2),
@@ -247,7 +270,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                     icon: Icons.skip_next_rounded,
                     tooltip: '下一首',
                     iconSize: 25,
-                    size: widget.floating ? 44 : 30,
+                    size: 44,
                     onPressed: track == null ? null : state.next,
                   ),
                 ],
@@ -270,14 +293,16 @@ class _AppPlayerBarState extends State<AppPlayerBar>
       border: Border(top: BorderSide(color: apple.separator, width: .5)),
       child: _withErrorStrip(
         apple,
-        SizedBox(
-          height: 92,
+        ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 92),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               children: [
                 SizedBox(
-                  width: 264,
+                  // Preserve room for transport and time labels as a desktop
+                  // window approaches the shared phone breakpoint.
+                  width: math.min(264, width * .25),
                   child: _NowPlayingTile(
                     track: track,
                     onTap: track == null ? null : widget.onOpen,
@@ -596,324 +621,46 @@ class _PlayButton extends StatelessWidget {
 }
 
 /// Elapsed time, thin seek bar, total time — the second row of the centre.
-class _SeekRow extends StatefulWidget {
+class _SeekRow extends StatelessWidget {
   const _SeekRow({required this.state});
 
   final AppState state;
 
   @override
-  State<_SeekRow> createState() => _SeekRowState();
-}
-
-class _SeekRowState extends State<_SeekRow> with BuildSafeState<_SeekRow> {
-  double? _drag;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      // TickerMode does not mute ChangeNotifier notifications. The shell
-      // disables it while the full player covers this bar, so stop listening
-      // to position ticks until the bar is visible again.
-      animation: TickerMode.valuesOf(context).enabled
-          ? widget.state.all
-          : widget.state,
-      builder: (BuildContext context, _) {
-        final ThemeData theme = Theme.of(context);
-        final ColorScheme scheme = theme.colorScheme;
-        final TextStyle? label = theme.textTheme.labelSmall?.copyWith(
-          color: scheme.onSurfaceVariant,
-          fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-        );
-        final Track? track = widget.state.current;
-        final double duration = (track?.duration.inMilliseconds ?? 0)
-            .toDouble();
-        final double position = widget.state.precisePosition.inMilliseconds
-            .toDouble();
-        final double fraction =
-            _drag ??
-            (duration > 0 ? (position / duration).clamp(0.0, 1.0) : 0.0);
-        final Duration elapsed = Duration(
-          milliseconds: (fraction * duration).round(),
-        );
-        return Row(
-          children: [
-            Text(formatDuration(elapsed), style: label),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: AppThinSeekBar(
-                  progress: fraction,
-                  bufferedProgress: widget.state.bufferedFraction,
-                  seekLimit: widget.state.seekLimitFraction,
-                  semanticLabel: '播放进度',
-                  onSeek: duration <= 0
-                      ? null
-                      : (double value) {
-                          final double target = widget.state.clampSeekFraction(
-                            value,
-                          );
-                          setState(() => _drag = target);
-                          widget.state.seek(target);
-                        },
-                  onSeekFinished: duration <= 0
-                      ? null
-                      : () => setState(() => _drag = null),
-                ),
+  Widget build(BuildContext context) => AnimatedBuilder(
+    // Only the rail and time labels consume position updates.
+    animation: TickerMode.valuesOf(context).enabled ? state.all : state,
+    builder: (context, _) {
+      final scheme = Theme.of(context).colorScheme;
+      final label = Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: scheme.onSurfaceVariant,
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+      );
+      return Row(
+        children: [
+          Text(formatDuration(state.precisePosition), style: label),
+          Expanded(
+            child: SizedBox(
+              height: 32,
+              child: PlayerSeekBar(
+                state: state,
+                trackHeight: 3,
+                thumbRadius: 5,
+                color: scheme.primary,
               ),
             ),
-            Text(
-              formatDuration(track?.duration ?? Duration.zero),
-              style: label,
-            ),
-          ],
-        );
-      },
-    );
-  }
+          ),
+          Text(
+            formatDuration(state.current?.duration ?? Duration.zero),
+            style: label,
+          ),
+        ],
+      );
+    },
+  );
 }
 
-/// `ThinSeekBar`: a 3 dp rounded track with a 10 dp thumb over a hit strip.
-///
-/// The bar measures 14 dp in the transport bar. The mobile now-playing page
-/// passes [height] 48, matching the app rail's generous drag target.
-///
-/// [onSeek] reports every preview position while a gesture is in flight.
-/// When [onSeekCommit] is supplied the gesture is treated like the mobile
-/// player: dragging only moves the rail and the label, and the seek lands on
-/// release. Without it the caller keeps the bar's historical continuous-seek
-/// behaviour.
-class AppThinSeekBar extends StatefulWidget {
-  const AppThinSeekBar({
-    super.key,
-    required this.progress,
-    this.bufferedProgress,
-    this.seekLimit,
-    this.onSeek,
-    this.onSeekFinished,
-    this.onSeekCommit,
-    this.height = 14,
-    this.semanticLabel,
-  });
-
-  final double progress;
-
-  /// Muted lead-in painted behind the played fraction, as on the mobile rail.
-  final double? bufferedProgress;
-
-  /// Furthest fraction the current stream can seek to.
-  final double? seekLimit;
-  final ValueChanged<double>? onSeek;
-  final VoidCallback? onSeekFinished;
-  final ValueChanged<double>? onSeekCommit;
-
-  /// Height of the transparent hit strip around the 3 dp track.
-  final double height;
-
-  /// Spoken purpose of this rail; null leaves only the percentage value.
-  final String? semanticLabel;
-
-  @override
-  State<AppThinSeekBar> createState() => _AppThinSeekBarState();
-}
-
-class _AppThinSeekBarState extends State<AppThinSeekBar>
-    with BuildSafeState<AppThinSeekBar> {
-  double? _drag;
-  bool _focused = false;
-  Timer? _nudgeTimer;
-
-  double _limit(double fraction) =>
-      fraction.clamp(0.0, (widget.seekLimit ?? 1.0).clamp(0.0, 1.0)).toDouble();
-
-  void _seekTo(double dx, double width) {
-    if (widget.onSeek == null || width <= 0) return;
-    final double fraction = _limit(dx / width);
-    setState(() => _drag = fraction);
-    widget.onSeek!(fraction);
-  }
-
-  void _finish() {
-    final double? fraction = _drag;
-    if (fraction == null) return;
-    widget.onSeekCommit?.call(fraction);
-    widget.onSeekFinished?.call();
-    if (mounted) setState(() => _drag = null);
-  }
-
-  /// A D-pad step: move the playhead without a pointer and treat the new
-  /// position as committed. The preview fraction stays pinned briefly so the
-  /// rail does not snap back while the engine finishes the seek.
-  void _nudge(double delta) {
-    if (widget.onSeek == null) return;
-    final double base = _drag ?? widget.progress;
-    final double next = _limit(base + delta);
-    setState(() => _drag = next);
-    widget.onSeek!(next);
-    widget.onSeekCommit?.call(next);
-    widget.onSeekFinished?.call();
-    _nudgeTimer?.cancel();
-    _nudgeTimer = Timer(const Duration(milliseconds: 900), () {
-      if (mounted) setState(() => _drag = null);
-    });
-  }
-
-  @override
-  void dispose() {
-    _nudgeTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final double height = widget.height;
-    final double fraction = (_drag ?? widget.progress).clamp(0.0, 1.0);
-    final double buffered = math.max(
-      fraction,
-      (widget.bufferedProgress ?? fraction).clamp(0.0, 1.0),
-    );
-    return FocusableActionDetector(
-      enabled: TvScope.isActive(context) && widget.onSeek != null,
-      shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.arrowLeft): _SeekNudgeIntent(-0.02),
-        SingleActivator(LogicalKeyboardKey.arrowRight): _SeekNudgeIntent(0.02),
-        SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(
-          TraversalDirection.up,
-        ),
-        SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(
-          TraversalDirection.down,
-        ),
-      },
-      actions: <Type, Action<Intent>>{
-        _SeekNudgeIntent: CallbackAction<_SeekNudgeIntent>(
-          onInvoke: (_SeekNudgeIntent intent) {
-            _nudge(intent.delta);
-            return null;
-          },
-        ),
-      },
-      onFocusChange: (bool value) => setState(() => _focused = value),
-      child: SizedBox(
-        height: height,
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            final double width = constraints.maxWidth;
-            final double thumbTravel = math.max(0.0, width - 10);
-            final Color track = scheme.surfaceContainerHighest.withValues(
-              alpha: 0.95,
-            );
-            return Semantics(
-              label: widget.semanticLabel == null
-                  ? null
-                  : context.tr(widget.semanticLabel!),
-              value: '${(fraction * 100).round()}%',
-              child: MouseRegion(
-                cursor: widget.onSeek == null
-                    ? SystemMouseCursors.basic
-                    : SystemMouseCursors.click,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: widget.onSeek == null
-                      ? null
-                      : (TapDownDetails details) =>
-                            _seekTo(details.localPosition.dx, width),
-                  onTapUp: widget.onSeek == null
-                      ? null
-                      : (TapUpDetails details) => _finish(),
-                  onTapCancel: widget.onSeek == null
-                      ? null
-                      : () {
-                          widget.onSeekFinished?.call();
-                          setState(() => _drag = null);
-                        },
-                  onHorizontalDragStart: widget.onSeek == null
-                      ? null
-                      : (DragStartDetails details) =>
-                            _seekTo(details.localPosition.dx, width),
-                  onHorizontalDragUpdate: widget.onSeek == null
-                      ? null
-                      : (DragUpdateDetails details) =>
-                            _seekTo(details.localPosition.dx, width),
-                  onHorizontalDragEnd: widget.onSeek == null
-                      ? null
-                      : (DragEndDetails details) => _finish(),
-                  onHorizontalDragCancel: widget.onSeek == null
-                      ? null
-                      : _finish,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        top: (height - 3) / 2,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: track,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const SizedBox(height: 3),
-                        ),
-                      ),
-                      Positioned(
-                        left: 0,
-                        top: (height - 3) / 2,
-                        width: width * buffered,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: scheme.onSurfaceVariant.withValues(
-                              alpha: 0.34,
-                            ),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const SizedBox(height: 3),
-                        ),
-                      ),
-                      Positioned(
-                        left: 0,
-                        top: (height - 3) / 2,
-                        width: width * fraction,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: scheme.primary,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const SizedBox(height: 3),
-                        ),
-                      ),
-                      Positioned(
-                        left: thumbTravel * fraction,
-                        top: (height - 10) / 2,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: scheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const SizedBox.square(dimension: 10),
-                        ),
-                      ),
-                      if (_focused)
-                        Positioned.fill(
-                          child: IgnorePointer(
-                            child: TvFocusOutline(
-                              borderRadius: BorderRadius.circular(5),
-                              width: 2,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// Vertical twin of [AppThinSeekBar] used by the volume popover.
+/// Vertical volume rail used by the volume popover.
 ///
 /// Same 3 dp track and 10 dp thumb as the horizontal rail, filled from the
 /// bottom up. Keeping the slider vertical is what lets the popover stay a

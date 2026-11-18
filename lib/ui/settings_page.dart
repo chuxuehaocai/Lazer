@@ -210,9 +210,10 @@ class _SettingsCategoryHome extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final double inset = pageInset(context);
+    final bool compact = compactBrowsePresentation(context);
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 980),
+        constraints: BoxConstraints(maxWidth: compact ? 760 : 980),
         child: ListView(
           padding: EdgeInsets.fromLTRB(
             inset,
@@ -221,9 +222,10 @@ class _SettingsCategoryHome extends StatelessWidget {
             36 + MediaQuery.paddingOf(context).bottom,
           ),
           children: <Widget>[
-            const ApplePageTitle(
+            ApplePageTitle(
               title: '设置',
-              padding: EdgeInsets.fromLTRB(0, 12, 0, 20),
+              subtitle: compact ? '按分类整理常用选项，减少滚动和查找。' : null,
+              padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
             ),
             LayoutBuilder(
               builder: (BuildContext context, BoxConstraints constraints) {
@@ -244,7 +246,9 @@ class _SettingsCategoryHome extends StatelessWidget {
                           child: TvFocusHighlight(
                             borderRadius: BorderRadius.circular(12),
                             child: AppleListTile(
-                              minHeight: twoColumns ? 96 : 80,
+                              minHeight: compact
+                                  ? (twoColumns ? 88 : 76)
+                                  : (twoColumns ? 96 : 80),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 16,
                                 vertical: 12,
@@ -347,6 +351,10 @@ class _SettingsOverview extends StatelessWidget {
     final double minScale = UiMetrics.minScaleOf(context);
     final double shownScale = UiMetrics.scaleOf(context);
     final bool car = UiMetrics.carOf(context);
+    final displayRefresh = View.of(context).display.refreshRate;
+    final frameBudget =
+        1000 /
+        (displayRefresh.isFinite && displayRefresh > 0 ? displayRefresh : 60);
     final double inset = pageInset(context);
     bool show(_SettingsCategory value) => category == null || category == value;
     final String pageTitle = category?.label ?? '设置';
@@ -1333,9 +1341,9 @@ class _SettingsOverview extends StatelessWidget {
                       children: <Widget>[
                         _AppSettingRow(
                           label: '动画帧预算',
-                          subtitle: '全部界面动画按 10 ms 设计；低帧目标不低于 90 fps',
+                          subtitle: '按当前显示器刷新率计算每帧预算',
                           trailing: Text(
-                            '10 ms',
+                            '${frameBudget.toStringAsFixed(2)} ms',
                             style: theme.textTheme.labelMedium?.copyWith(
                               color: apple.secondaryLabel,
                               fontFeatures: const <FontFeature>[
@@ -1413,7 +1421,7 @@ class _SettingsOverview extends StatelessWidget {
                           ),
                         _AppSwitchRow(
                           label: '显示帧数',
-                          subtitle: '实时显示 UI、GPU、低帧和 100 fps 帧预算',
+                          subtitle: '实时显示 UI、栅格耗时、低帧和显示器刷新预算',
                           value: state.showFrameStats,
                           onChanged: (bool value) =>
                               unawaited(state.setShowFrameStats(value)),
@@ -2459,17 +2467,19 @@ class _BackgroundPreferences extends StatelessWidget {
             onChanged: (value) =>
                 unawaited(state.setBackgroundOpacity(value, player: player)),
           ),
-        if (player && mode == AppBackgroundMode.nowPlayingDynamic)
+        if (mode == AppBackgroundMode.nowPlayingDynamic)
           _AppSwitchRow(
-            key: const ValueKey('player-background-follow-display'),
+            key: ValueKey(
+              player
+                  ? 'player-background-follow-display'
+                  : 'browse-background-follow-display',
+            ),
             label: '跟随屏幕刷新率',
-            subtitle: '播放背景按当前屏幕刷新率运行',
+            subtitle: player ? '播放背景按当前屏幕刷新率运行' : '浏览背景按当前屏幕刷新率运行',
             value: stored == 0,
-            onChanged: mode == AppBackgroundMode.nowPlayingDynamic
-                ? (value) => unawaited(
-                    state.setBackgroundFps(value ? 0 : refresh, player: true),
-                  )
-                : null,
+            onChanged: (value) => unawaited(
+              state.setBackgroundFps(value ? 0 : refresh, player: player),
+            ),
           ),
         if (mode == AppBackgroundMode.nowPlayingDynamic)
           _AppSliderRow(
@@ -2482,12 +2492,8 @@ class _BackgroundPreferences extends StatelessWidget {
             min: 10,
             max: refresh,
             divisions: (refresh - 10).round().clamp(1, 990),
-            subtitle: player
-                ? '最低 10fps；关闭跟随屏幕后可手动调节'
-                : '默认 30fps，仅影响其他页面的动态背景',
-            onChanged:
-                mode != AppBackgroundMode.nowPlayingDynamic ||
-                    (player && stored == 0)
+            subtitle: '最低 10fps；关闭跟随屏幕后可手动调节',
+            onChanged: stored == 0
                 ? null
                 : (value) =>
                       unawaited(state.setBackgroundFps(value, player: player)),

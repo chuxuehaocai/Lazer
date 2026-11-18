@@ -9,6 +9,24 @@ import '../animation/view_transitions.dart';
 import 'tokens.dart';
 import 'lazer_theme.dart';
 
+/// The resolved presentation travels with the theme through route overlays
+/// and retained pages. A forced phone layout must keep its phone surfaces
+/// even when the window has enough space for the desktop composition.
+@immutable
+class AppThemePresentation extends ThemeExtension<AppThemePresentation> {
+  const AppThemePresentation({required this.compact});
+
+  final bool compact;
+
+  @override
+  AppThemePresentation copyWith({bool? compact}) =>
+      AppThemePresentation(compact: compact ?? this.compact);
+
+  @override
+  AppThemePresentation lerp(AppThemePresentation? other, double t) =>
+      other == null || t < .5 ? this : other;
+}
+
 /// Apple-platform semantic colours and typography.
 ///
 /// The values follow the Human Interface Guidelines rather than Material's
@@ -42,6 +60,7 @@ abstract final class AppleColors {
   /// A cool charcoal canvas keeps empty areas distinct from the blue-grey
   /// navigation and grouped surfaces, including when artwork is disabled.
   static const Color darkCanvas = Color(0xFF191C23);
+  static const Color mobileDarkCanvas = Color(0xFF141413);
 }
 
 /// Dynamic semantic colours for the current brightness.
@@ -131,6 +150,52 @@ class AppleSemanticColors extends ThemeExtension<AppleSemanticColors> {
     accentSoft: Color(0x2699B9E3),
     glass: Color(0xC920242D),
     glassStrong: Color(0xED222731),
+  );
+
+  /// The phone palette shipped in 2.0.210. Desktop colours are independent
+  /// so changing window chrome cannot silently restyle the mobile interface.
+  static const AppleSemanticColors mobileLight = AppleSemanticColors(
+    background: Color(0xFFFFFFFF),
+    secondaryBackground: Color(0xFFF2F2F7),
+    tertiaryBackground: Color(0xFFFFFFFF),
+    groupedBackground: Color(0xFFF2F2F7),
+    secondaryGroupedBackground: Color(0xFFFFFFFF),
+    tertiaryGroupedBackground: Color(0xFFF2F2F7),
+    label: Color(0xFF000000),
+    secondaryLabel: Color(0x993C3C43),
+    tertiaryLabel: Color(0x4D3C3C43),
+    quaternaryLabel: Color(0x2E3C3C43),
+    fill: Color(0x1F767680),
+    secondaryFill: Color(0x29767680),
+    tertiaryFill: Color(0x14767680),
+    separator: Color(0x4A3C3C43),
+    opaqueSeparator: Color(0xFFC6C6C8),
+    accent: AppleColors.musicRed,
+    accentSoft: Color(0x14FA2D48),
+    glass: Color(0xDFFBFBFD),
+    glassStrong: Color(0xF2FFFFFF),
+  );
+
+  static const AppleSemanticColors mobileDark = AppleSemanticColors(
+    background: Color(0xFF000000),
+    secondaryBackground: Color(0xFF1C1C1E),
+    tertiaryBackground: Color(0xFF2C2C2E),
+    groupedBackground: Color(0xFF000000),
+    secondaryGroupedBackground: Color(0xFF1C1C1E),
+    tertiaryGroupedBackground: Color(0xFF2C2C2E),
+    label: Color(0xFFFFFFFF),
+    secondaryLabel: Color(0x99EBEBF5),
+    tertiaryLabel: Color(0x4DEBEBF5),
+    quaternaryLabel: Color(0x2EEBEBF5),
+    fill: Color(0x1F767680),
+    secondaryFill: Color(0x29767680),
+    tertiaryFill: Color(0x14767680),
+    separator: Color(0x4A545458),
+    opaqueSeparator: Color(0xFF38383A),
+    accent: AppleColors.musicRed,
+    accentSoft: Color(0x1FFA2D48),
+    glass: Color(0xCC1C1C1E),
+    glassStrong: Color(0xF21C1C1E),
   );
 
   static AppleSemanticColors of(BuildContext context) =>
@@ -293,13 +358,17 @@ TextTheme appleTextTheme({
 /// stable, exactly as Apple's tint-color model separates chrome from content.
 ThemeData buildAppleTheme({
   Brightness brightness = Brightness.light,
+  bool compact = false,
   Color? seedAccent,
   FontPreferences fonts = const FontPreferences(),
   LazerThemeTokens ui = LazerThemeTokens.apple,
 }) {
-  final AppleSemanticColors base = brightness == Brightness.dark
-      ? AppleSemanticColors.dark
-      : AppleSemanticColors.light;
+  final AppleSemanticColors base = switch ((compact, brightness)) {
+    (true, Brightness.dark) => AppleSemanticColors.mobileDark,
+    (true, Brightness.light) => AppleSemanticColors.mobileLight,
+    (false, Brightness.dark) => AppleSemanticColors.dark,
+    (false, Brightness.light) => AppleSemanticColors.light,
+  };
   final Color accent = seedAccent == null
       ? base.accent
       : adaptiveAccent(seedAccent, base.background);
@@ -383,7 +452,12 @@ ThemeData buildAppleTheme({
     highlightColor: apple.fill,
     visualDensity: VisualDensity.standard,
     materialTapTargetSize: MaterialTapTargetSize.padded,
-    extensions: <ThemeExtension<dynamic>>[apple, fonts, ui],
+    extensions: <ThemeExtension<dynamic>>[
+      apple,
+      fonts,
+      ui,
+      AppThemePresentation(compact: compact),
+    ],
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: <TargetPlatform, PageTransitionsBuilder>{
         // Both sides must use the same fade-through contract. Platform-default

@@ -44,7 +44,7 @@ const int kPlaylistColumnsMax = 6;
 
 /// How the shell picks its accent palette.
 ///
-/// [fixed] is Lazer's blue accent. [nowPlaying] derives the accent and
+/// [fixed] uses the active layout's default accent. [nowPlaying] derives the accent and
 /// ambient tint from the current cover, matching the app's album-led chrome.
 /// [custom] uses the colour the listener picked in Settings.
 enum AppPaletteMode { fixed, nowPlaying, custom }
@@ -58,7 +58,7 @@ extension AppPaletteModeLabels on AppPaletteMode {
   };
 
   String get detail => switch (this) {
-    AppPaletteMode.fixed => 'Lazer 蓝色强调色',
+    AppPaletteMode.fixed => '随界面布局使用默认强调色',
     AppPaletteMode.nowPlaying => '由当前封面主色生成强调色与浏览背景',
     AppPaletteMode.custom => '使用你挑选的强调色',
   };
@@ -124,15 +124,6 @@ extension AppBackgroundModeLabels on AppBackgroundMode {
 const int kFlowMeshColumns = 28;
 const int kFlowMeshRows = 18;
 
-/// Update cadence at full precision. A 60 Hz cap keeps the mesh motion smooth
-/// on high-refresh displays without running the painter faster than the UI can
-/// present useful frames.
-const Duration kFlowFrameIntervalFull = Duration(milliseconds: 16);
-
-/// Update cadence at the lowest precision — three times cheaper, still a
-/// drifting canvas.
-const Duration kFlowFrameIntervalLow = Duration(milliseconds: 100);
-
 /// Smallest precision the `动态背景渲染精度` slider offers.
 const double kDynamicBackgroundQualityMin = 0.1;
 
@@ -142,9 +133,8 @@ const double kDynamicBackgroundQualityMax = 1;
 /// One slider notch, five percent.
 const double kDynamicBackgroundQualityStep = 0.05;
 
-/// Default precision. 80% draws the same colour field with 22x14 vertices and
-/// refreshes at roughly 50 Hz, leaving the mesh visibly smooth while keeping
-/// its vertex count below the authored maximum.
+/// Default mesh precision. Frame cadence is controlled independently by the
+/// background FPS setting, which can follow every display refresh.
 const double kDynamicBackgroundQualityDefault = 0.8;
 
 /// Clamps to the supported range and snaps to [kDynamicBackgroundQualityStep],
@@ -161,19 +151,12 @@ double normalizeDynamicBackgroundQuality(double value) {
   return (clamped * 100).roundToDouble() / 100;
 }
 
-/// What one precision setting actually draws: the mesh geometry handed to
-/// `drawVertices` and the interval between two mesh updates.
-///
-/// This is the whole meaning of the setting — there is no hidden second knob.
-/// At 10% the canvas is a 4x3 field refreshed about ten times per second; at
-/// 100% it is the 28x18 field refreshed at 60 Hz. The cadence accelerates
-/// earlier than the mesh density so the default 80% setting stays fluid.
+/// Mesh geometry at a precision setting, independent of animation frame rate.
 class DynamicBackgroundPrecision {
   const DynamicBackgroundPrecision({
     required this.quality,
     required this.columns,
     required this.rows,
-    required this.frameInterval,
   });
 
   /// The normalized 0.1 … 1.0 setting this plan was derived from.
@@ -183,52 +166,29 @@ class DynamicBackgroundPrecision {
   final int columns;
   final int rows;
 
-  /// Delay between two mesh updates.
-  final Duration frameInterval;
-
   factory DynamicBackgroundPrecision.of(double quality) {
     final double q = normalizeDynamicBackgroundQuality(quality);
-    final double qualityProgress =
-        (q - kDynamicBackgroundQualityMin) /
-        (kDynamicBackgroundQualityMax - kDynamicBackgroundQualityMin);
-    // Most of the perceptual gain comes from moving the mesh above 30 fps.
-    // Spend more of the cadence budget in the middle of the slider range,
-    // where its grid is still substantially cheaper than the full mesh.
-    final double cadenceProgress = math.pow(qualityProgress, 0.2).toDouble();
-    final int span =
-        kFlowFrameIntervalLow.inMicroseconds -
-        kFlowFrameIntervalFull.inMicroseconds;
     return DynamicBackgroundPrecision(
       quality: q,
       // Four quads across and three down is the floor: below that the warp
       // stops reading as a mesh and the vertices become visible corners.
       columns: math.max(4, (kFlowMeshColumns * q).round()),
       rows: math.max(3, (kFlowMeshRows * q).round()),
-      frameInterval: Duration(
-        microseconds:
-            (kFlowFrameIntervalLow.inMicroseconds - span * cadenceProgress)
-                .round(),
-      ),
     );
   }
 
   /// Vertices the painter uploads per frame.
   int get vertexCount => (columns + 1) * (rows + 1);
 
-  /// Mesh updates per second.
-  double get updatesPerSecond =>
-      Duration.microsecondsPerSecond / frameInterval.inMicroseconds;
-
   @override
   bool operator ==(Object other) =>
       other is DynamicBackgroundPrecision &&
       other.quality == quality &&
       other.columns == columns &&
-      other.rows == rows &&
-      other.frameInterval == frameInterval;
+      other.rows == rows;
 
   @override
-  int get hashCode => Object.hash(quality, columns, rows, frameInterval);
+  int get hashCode => Object.hash(quality, columns, rows);
 }
 
 /// How the shell picks between the desktop and the mobile presentation.
@@ -367,36 +327,36 @@ extension AppUiModeLabels on AppUiMode {
   );
 }
 
-/// Whether the shell should draw its compact presentation.
+/// Whether a surface should draw the shared phone presentation.
 ///
-/// [width] is the width available to the shell in logical pixels.
+/// [width] is the available width after interface scaling. A desktop/tablet
+/// preference cannot force controls into a window narrower than the phone
+/// breakpoint. Explicit television layouts keep their remote-first chrome.
 bool useCompactLayout(
   AppUiMode mode,
   double width, {
   AppLayoutStyle layoutStyle = AppLayoutStyle.auto,
-}) => switch (layoutStyle) {
-  AppLayoutStyle.phone => true,
-  AppLayoutStyle.tablet || AppLayoutStyle.desktop || AppLayoutStyle.tv => false,
-  AppLayoutStyle.auto => switch (mode) {
-    AppUiMode.mobile => true,
-    AppUiMode.desktop => false,
-    AppUiMode.auto => width < kCompactBreakpoint,
-  },
-};
+}) {
+  if (layoutStyle == AppLayoutStyle.tv) return false;
+  if (width < kCompactBreakpoint) return true;
+  return layoutStyle == AppLayoutStyle.phone ||
+      (layoutStyle == AppLayoutStyle.auto && mode == AppUiMode.mobile);
+}
 
 /// Tablet keeps a navigation rail and a full content pane without spending
 /// the width of the desktop source list. Forced desktop/mobile modes retain
-/// their explicit choice.
+/// their explicit choice where the available width can accommodate it.
 bool useTabletLayout(
   AppUiMode mode,
   double width, {
   AppLayoutStyle layoutStyle = AppLayoutStyle.auto,
 }) {
+  if (useCompactLayout(mode, width, layoutStyle: layoutStyle)) return false;
   if (layoutStyle == AppLayoutStyle.tablet) return true;
   if (layoutStyle != AppLayoutStyle.auto) return false;
   // Android and iOS tablets use the tablet composition by default. In a
   // desktop window the same breakpoint keeps the layout from becoming airy.
-  return mode == AppUiMode.auto && width >= 600 && width < kTabletBreakpoint;
+  return mode == AppUiMode.auto && width < kTabletBreakpoint;
 }
 
 // ---------------------------------------------------------------------------

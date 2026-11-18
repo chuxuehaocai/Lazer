@@ -45,6 +45,8 @@ import 'artwork_lyrics_layout.dart';
 import '../theme/font_preferences.dart';
 import 'osu_search.dart';
 
+typedef _PlayerSheetAction = FutureOr<void> Function();
+
 /// Shared comments entry from the player header.
 Future<void> showSongComments(
   BuildContext context, {
@@ -217,6 +219,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   // passes through onPointerDown, so it must not fold the lyrics away.
   bool _controlsHiddenAtTouchDown = true;
   bool _saving = false;
+  bool _artworkActionOpen = false;
   bool _selectionOpen = false;
   bool _commentsOpen = false;
   bool _queueOpen = false;
@@ -249,18 +252,26 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   Color? _themeSeed;
   FontPreferences? _themeFonts;
   ThemeData? _cachedPlayerTheme;
-  (Color, FontPreferences)? _cachedPlayerThemeKey;
+  (Color, FontPreferences, bool)? _cachedPlayerThemeKey;
 
   ThemeData _playerTheme(BuildContext context) {
     final Color accent =
         widget.state.accentSeed ?? Theme.of(context).colorScheme.primary;
-    final key = (accent, widget.state.fontPreferences);
+    final bool compact =
+        !largeScreenModeOf(context) &&
+        useCompactLayout(
+          widget.state.uiMode,
+          MediaQuery.sizeOf(context).width,
+          layoutStyle: widget.state.layoutStyle,
+        );
+    final key = (accent, widget.state.fontPreferences, compact);
     if (_cachedPlayerThemeKey != key) {
       _cachedPlayerThemeKey = key;
       _cachedPlayerTheme = buildAppleTheme(
         brightness: Brightness.dark,
         seedAccent: accent,
         fonts: widget.state.fontPreferences,
+        compact: compact,
       );
     }
     return _cachedPlayerTheme!;
@@ -289,6 +300,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       !_commentsOpen &&
       !_queueOpen &&
       !_moreOpen &&
+      !_artworkActionOpen &&
       (_desktopLayout == true
           ? _desktopPane == DesktopNowPlayingPane.lyrics
           : _lyricsMode) &&
@@ -432,13 +444,15 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   Future<void> _queue() async {
+    if (_queueOpen) return;
     _queueOpen = true;
     _hideTimer?.cancel();
-    await showPlaybackQueue(context, widget.state);
-    if (!mounted) return;
-    _queueOpen = false;
-    _wakeControls();
-    _armHide();
+    try {
+      await showPlaybackQueue(context, widget.state);
+    } finally {
+      _queueOpen = false;
+      if (mounted) _controlsActivity();
+    }
   }
 
   Future<void> _showSleepTimer() async {
@@ -489,8 +503,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     } else {
       widget.state.startSleepTimer(duration);
     }
-    _wakeControls();
-    _armHide();
   }
 
   void _closePage() {
@@ -528,16 +540,17 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     }
     _commentsOpen = true;
     _hideTimer?.cancel();
-    await showSongComments(
-      context,
-      state: widget.state,
-      track: track,
-      controller: _commentsController,
-    );
-    if (!mounted) return;
-    _commentsOpen = false;
-    _wakeControls();
-    _armHide();
+    try {
+      await showSongComments(
+        context,
+        state: widget.state,
+        track: track,
+        controller: _commentsController,
+      );
+    } finally {
+      _commentsOpen = false;
+      if (mounted) _controlsActivity();
+    }
   }
 
   void _selectDesktopPane(DesktopNowPlayingPane pane) {
@@ -611,37 +624,34 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   );
 
   Future<void> _saveArtwork(Track track) async {
-    if (_saving) return;
+    if (_artworkActionOpen) return;
+    _artworkActionOpen = true;
     _hideTimer?.cancel();
-    final confirmed = await showAppleDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const TrText('保存封面图片？'),
-        content: TrText('将「${track.title}」的封面保存在设备中。'),
-        actions: [
-          SpringTextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: context.colors.slateDark,
-            ),
-            onPressed: () => Navigator.pop(context, false),
-            child: const TrText('取消'),
-          ),
-          SpringFilledButton(
-            onPressed: track.coverUrl == null
-                ? null
-                : () => Navigator.pop(context, true),
-            child: const TrText('保存'),
-          ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    if (confirmed != true) {
-      _armHide();
-      return;
-    }
-    setState(() => _saving = true);
     try {
+      final confirmed = await showAppleDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const TrText('保存封面图片？'),
+          content: TrText('将「${track.title}」的封面保存在设备中。'),
+          actions: [
+            SpringTextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: context.colors.slateDark,
+              ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const TrText('取消'),
+            ),
+            SpringFilledButton(
+              onPressed: track.coverUrl == null
+                  ? null
+                  : () => Navigator.pop(context, true),
+              child: const TrText('保存'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+      setState(() => _saving = true);
       final saved = await saveCover(track.coverUrl!, track.title);
       if (mounted && saved) {
         ScaffoldMessenger.of(
@@ -655,8 +665,11 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         ).showSnackBar(const SnackBar(content: TrText('保存失败，请检查相册权限或稍后重试。')));
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
-      _armHide();
+      _artworkActionOpen = false;
+      if (mounted) {
+        setState(() => _saving = false);
+        _controlsActivity();
+      }
     }
   }
 
@@ -774,97 +787,90 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     if (widget.state.current == null || _moreOpen) return;
     _moreOpen = true;
     _hideTimer?.cancel();
-    await showAppleModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: context.colors.ivoryLight,
-      showDragHandle: true,
-      builder: (BuildContext sheetContext) => AnimatedBuilder(
-        animation: Listenable.merge([
-          widget.state,
-          widget.state.listenTogether,
-        ]),
-        builder: (BuildContext context, Widget? child) {
-          final Track? track = widget.state.current;
-          if (track == null) {
-            return SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                child: Row(
-                  children: <Widget>[
-                    const Expanded(child: TrText('没有正在播放的曲目')),
-                    AccessibleIconButton(
-                      tooltip: '关闭',
-                      onPressed: () => Navigator.of(sheetContext).pop(),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
+    bool sheetClosed = false;
+    try {
+      final action = await showAppleModalBottomSheet<_PlayerSheetAction>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: context.colors.ivoryLight,
+        showDragHandle: true,
+        builder: (BuildContext sheetContext) => AnimatedBuilder(
+          animation: Listenable.merge([
+            widget.state,
+            widget.state.listenTogether,
+          ]),
+          builder: (BuildContext context, Widget? child) {
+            void selectAction([_PlayerSheetAction? action]) {
+              if (sheetClosed ||
+                  !sheetContext.mounted ||
+                  ModalRoute.of(sheetContext)?.isCurrent != true) {
+                return;
+              }
+              sheetClosed = true;
+              Navigator.of(sheetContext).pop(action);
+            }
+
+            final Track? track = widget.state.current;
+            if (track == null) {
+              return SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                  child: Row(
+                    children: <Widget>[
+                      const Expanded(child: TrText('没有正在播放的曲目')),
+                      AccessibleIconButton(
+                        tooltip: '关闭',
+                        onPressed: selectAction,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
                 ),
+              );
+            }
+            return _NowPlayingMoreSheet(
+              state: widget.state,
+              track: track,
+              pluginMenuItems: widget.state.pluginManager.playerMenuItems,
+              lyricsOpen: _lyricsMode,
+              onClose: selectAction,
+              onLyrics: () => selectAction(_toggleLyrics),
+              onTogether: () => selectAction(
+                () => showListenTogetherDialog(this.context, widget.state),
               ),
-            );
-          }
-          return _NowPlayingMoreSheet(
-            state: widget.state,
-            track: track,
-            pluginMenuItems: widget.state.pluginManager.playerMenuItems,
-            lyricsOpen: _lyricsMode,
-            onLyrics: () {
-              Navigator.of(sheetContext).pop();
-              _toggleLyrics();
-            },
-            onTogether: () {
-              Navigator.of(sheetContext).pop();
-              unawaited(showListenTogetherDialog(this.context, widget.state));
-            },
-            onSaveArtwork: () {
-              Navigator.of(sheetContext).pop();
-              unawaited(_saveArtwork(track));
-            },
-            onSearchOsu: () {
-              Navigator.of(sheetContext).pop();
-              unawaited(searchInOsu(this.context, widget.state.current));
-            },
-            onAddToPlaylist: () {
-              Navigator.of(sheetContext).pop();
-              unawaited(
-                showAddToPlaylistDialog(
+              onSaveArtwork: () => selectAction(() => _saveArtwork(track)),
+              onSearchOsu: () => selectAction(
+                () => searchInOsu(this.context, widget.state.current),
+              ),
+              onAddToPlaylist: () => selectAction(
+                () => showAddToPlaylistDialog(
                   this.context,
                   widget.state,
                   track: track,
                 ),
-              );
-            },
-            onDownload: () {
-              Navigator.of(sheetContext).pop();
-              unawaited(
-                downloadTracks(this.context, widget.state, <Track>[track]),
-              );
-            },
-            onComments: () {
-              Navigator.of(sheetContext).pop();
-              unawaited(_openComments());
-            },
-            onQueue: () {
-              Navigator.of(sheetContext).pop();
-              unawaited(_queue());
-            },
-            onSleepTimer: () {
-              Navigator.of(sheetContext).pop();
-              unawaited(_showSleepTimer());
-            },
-            onPluginMenu: (item) {
-              Navigator.of(sheetContext).pop();
-              unawaited(_invokePlayerMenu(item, track));
-            },
-          );
-        },
-      ),
-    );
-    if (!mounted) return;
-    _moreOpen = false;
-    _wakeControls();
-    _armHide();
+              ),
+              onDownload: () => selectAction(
+                () =>
+                    downloadTracks(this.context, widget.state, <Track>[track]),
+              ),
+              onComments: () => selectAction(_openComments),
+              onQueue: () => selectAction(_queue),
+              onSleepTimer: () => selectAction(_showSleepTimer),
+              onPluginMenu: (item) =>
+                  selectAction(() => _invokePlayerMenu(item, track)),
+            );
+          },
+        ),
+      );
+      // Keep the idle timer suspended while the selected action owns a child
+      // sheet or an asynchronous plugin operation. Closing More is only the
+      // handoff; every action (including cancellation) shares this cleanup.
+      if (mounted && action != null) await action();
+    } finally {
+      _moreOpen = false;
+      if (mounted) _controlsActivity();
+    }
   }
 
   @override
@@ -902,28 +908,13 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                       opacity: widget.state.uiAlpha,
                       child: LayoutBuilder(
                         builder: (context, box) {
-                          // Reuse the phone player once the window is only
-                          // slightly wider than the desktop artwork.
-                          final bool windowPlayer =
-                              WindowChromeScope.maybeOf(context) != null &&
-                              !TvScope.isActive(context) &&
-                              widget.state.layoutStyle != AppLayoutStyle.tv;
-                          final bool automaticWindow =
-                              windowPlayer &&
-                              widget.state.layoutStyle == AppLayoutStyle.auto &&
-                              widget.state.uiMode == AppUiMode.auto;
                           final bool compact =
                               !largeScreenModeOf(context) &&
-                              ((windowPlayer &&
-                                      box.maxWidth <=
-                                          DesktopNowPlaying
-                                              .compactBreakpoint) ||
-                                  (!automaticWindow &&
-                                      useCompactLayout(
-                                        widget.state.uiMode,
-                                        box.maxWidth,
-                                        layoutStyle: widget.state.layoutStyle,
-                                      )));
+                              useCompactLayout(
+                                widget.state.uiMode,
+                                box.maxWidth,
+                                layoutStyle: widget.state.layoutStyle,
+                              );
                           if (_desktopLayout != !compact) {
                             if (compact) _lyricsMode = false;
                             _desktopLayout = !compact;
@@ -1044,13 +1035,25 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     }
     switch (event.logicalKey) {
       case LogicalKeyboardKey.keyQ:
-        unawaited(_queue());
+        if (_desktopLayout == true) {
+          _selectDesktopPane(DesktopNowPlayingPane.queue);
+        } else {
+          unawaited(_queue());
+        }
       case LogicalKeyboardKey.keyF:
         unawaited(_toggleFullscreen());
       case LogicalKeyboardKey.keyL:
-        _toggleLyrics();
+        if (_desktopLayout == true) {
+          _selectDesktopPane(DesktopNowPlayingPane.lyrics);
+        } else {
+          _toggleLyrics();
+        }
       case LogicalKeyboardKey.keyC:
-        unawaited(_openComments());
+        if (_desktopLayout == true) {
+          _selectDesktopPane(DesktopNowPlayingPane.comments);
+        } else {
+          unawaited(_openComments());
+        }
       case LogicalKeyboardKey.keyM:
         unawaited(widget.state.toggleMute());
       case LogicalKeyboardKey.escape:
@@ -1394,6 +1397,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
     required this.track,
     required this.pluginMenuItems,
     required this.lyricsOpen,
+    required this.onClose,
     required this.onLyrics,
     required this.onTogether,
     required this.onSaveArtwork,
@@ -1410,6 +1414,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
   final Track track;
   final List<LuaPlayerMenuItem> pluginMenuItems;
   final bool lyricsOpen;
+  final VoidCallback onClose;
   final VoidCallback onLyrics;
   final VoidCallback onTogether;
   final VoidCallback onSaveArtwork;
@@ -1439,7 +1444,7 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                   AccessibleIconButton(
                     key: const ValueKey('now-playing-more-close'),
                     tooltip: '关闭',
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: onClose,
                     icon: const Icon(Icons.close_rounded),
                   ),
                 ],

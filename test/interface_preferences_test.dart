@@ -46,6 +46,11 @@ void main() {
       final first = create();
       await first.bootstrap();
       expect(first.uiAlpha, 1);
+      expect(first.browseBackgroundFps, 0);
+      expect(first.playerBackgroundFps, 0);
+      await first.setBackgroundFps(144);
+      expect(first.browseBackgroundFps, 144);
+      await first.setBackgroundFps(0);
       await first.setAppUiAlpha(.65);
       await first.setBackgroundOpacity(.25);
       await first.setBackgroundOpacity(.8, player: true);
@@ -60,6 +65,7 @@ void main() {
       expect(restored.playerBackgroundOpacity, .8);
       expect(restored.titleBarStyle, DesktopTitleBarStyle.classic);
       expect(restored.playerBackgroundFps, 0);
+      expect(restored.browseBackgroundFps, 0);
       await restored.setAppUiAlpha(double.nan);
       await restored.setBackgroundOpacity(double.infinity);
       expect(restored.uiAlpha, .65);

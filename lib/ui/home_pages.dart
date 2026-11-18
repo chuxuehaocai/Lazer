@@ -27,6 +27,17 @@ import 'widgets.dart';
 import 'page_utils.dart';
 import 'login.dart';
 
+double _phoneCoverCardHeight(BuildContext context, double minimum) => math.max(
+  minimum,
+  // The legacy title is larger than a track caption. Reserve its measured
+  // scaled lines plus the icon row and insets when accessibility text grows.
+  mediaCardCaptionHeight(
+        context,
+        titleStyle: Theme.of(context).textTheme.titleMedium,
+      ) +
+      61,
+);
+
 /// Daily recommendations use the same independent detail page as playlists.
 Playlist dailyRecommendationsPlaylist(
   HomeFeed feed, {
@@ -176,7 +187,9 @@ class _AppHomePageState extends State<AppHomePage>
         .where((artist) => artist.hasIdentity)
         .firstOrNull;
     final double inset = pageInset(context);
-    final bool compact = MediaQuery.sizeOf(context).width < kTabletBreakpoint;
+    final bool phone = compactBrowsePresentation(context);
+    final bool compact =
+        phone || MediaQuery.sizeOf(context).width < kTabletBreakpoint;
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -201,6 +214,7 @@ class _AppHomePageState extends State<AppHomePage>
                 delegate: SliverChildListDelegate(<Widget>[
                   if (showPluginHome) ...<Widget>[
                     HomeActionShelf(
+                      compact: phone,
                       serverLibrary: !supportsRecommendations,
                       busy: _startingStation,
                       covers: <String?>[
@@ -243,12 +257,13 @@ class _AppHomePageState extends State<AppHomePage>
                           ? null
                           : () => widget.state.playQueue(recent),
                     ),
-                    SizedBox(height: compact ? 28 : 30),
+                    SizedBox(height: phone ? 34 : (compact ? 28 : 30)),
                   ],
                   AppSectionHeader(title: '最近播放'),
-                  const SizedBox(height: 12),
+                  SizedBox(height: phone ? 10 : 12),
                   if (recent.isNotEmpty)
                     HomeRecentTrackShelf(
+                      compact: phone,
                       currentTrackId: widget.state.current?.id,
                       tracks: recent,
                       onPlay: widget.onPlayTrack,
@@ -262,7 +277,7 @@ class _AppHomePageState extends State<AppHomePage>
                   else
                     const AppNotice(message: '还没有最近播放记录'),
                   if (feed.albums.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 30),
+                    SizedBox(height: phone ? 36 : 30),
                     const AppSectionHeader(title: '为你推荐的新发行'),
                     const SizedBox(height: 14),
                     _HomeReleaseShelf(
@@ -380,6 +395,7 @@ class HomeActionShelf extends StatelessWidget {
     this.large = false,
     this.serverLibrary = false,
     this.dailyOpensPlaylist = true,
+    this.compact,
   });
 
   final bool busy;
@@ -395,9 +411,12 @@ class HomeActionShelf extends StatelessWidget {
 
   /// Guests on TV open sign-in instead of navigating to a collection.
   final bool dailyOpensPlaylist;
+  final bool? compact;
 
   @override
   Widget build(BuildContext context) {
+    final bool phone =
+        !large && (compact ?? compactBrowsePresentation(context));
     final items =
         <({String title, String subtitle, IconData icon, VoidCallback? tap})>[
           (
@@ -431,7 +450,8 @@ class HomeActionShelf extends StatelessWidget {
         final double gap = large ? 18 : 14;
         // Four cards fill a desktop row, including at 1280px window width.
         // Phone widths retain a swipeable shelf instead of tiny captions.
-        final bool fitRow = constraints.maxWidth >= (large ? 960 : 740);
+        final bool fitRow =
+            !phone && constraints.maxWidth >= (large ? 960 : 740);
         final double cardWidth = fitRow
             ? (constraints.maxWidth - (items.length - 1) * gap) /
                   math.max(1, items.length)
@@ -440,6 +460,8 @@ class HomeActionShelf extends StatelessWidget {
             : 228;
         final double tileHeight = large
             ? 216
+            : phone
+            ? _phoneCoverCardHeight(context, 154)
             : fitRow
             ? (cardWidth * .66).clamp(148.0, 184.0)
             : 154;
@@ -465,6 +487,7 @@ class HomeActionShelf extends StatelessWidget {
                   width: cardWidth,
                   height: tileHeight,
                   large: large,
+                  compact: phone,
                   title: item.title,
                   detail: item.subtitle,
                   icon: item.icon,
@@ -524,6 +547,7 @@ class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf>
   final ScrollController _controller = ScrollController(
     keepScrollOffset: false,
   );
+  bool _layoutRefreshPending = false;
 
   @override
   void initState() {
@@ -541,7 +565,10 @@ class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf>
   }
 
   void _refreshAfterLayout() {
+    if (_layoutRefreshPending) return;
+    _layoutRefreshPending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _layoutRefreshPending = false;
       if (mounted) setState(() {});
     });
   }
@@ -621,11 +648,17 @@ class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf>
                       children: <Widget>[
                         _ShelfArrow(
                           icon: Icons.chevron_left_rounded,
+                          label: MaterialLocalizations.of(
+                            context,
+                          ).previousPageTooltip,
                           visible: attached && pixels > 1,
                           onTap: () => _page(-1),
                         ),
                         _ShelfArrow(
                           icon: Icons.chevron_right_rounded,
+                          label: MaterialLocalizations.of(
+                            context,
+                          ).nextPageTooltip,
                           visible: attached && pixels < max - 1,
                           onTap: () => _page(1),
                         ),
@@ -644,10 +677,12 @@ class _PagedHorizontalShelfState extends State<_PagedHorizontalShelf>
 class _ShelfArrow extends StatelessWidget {
   const _ShelfArrow({
     required this.icon,
+    required this.label,
     required this.visible,
     required this.onTap,
   });
   final IconData icon;
+  final String label;
   final bool visible;
   final VoidCallback onTap;
 
@@ -656,23 +691,37 @@ class _ShelfArrow extends StatelessWidget {
     ignoring: !visible,
     child: ExcludeFocus(
       excluding: !visible,
-      child: AnimatedOpacity(
-        curve: const AppleSpringCurve(),
-        opacity: visible ? 1 : 0,
-        duration: MediaQuery.disableAnimationsOf(context)
-            ? Duration.zero
-            : AppleSpring.responsive.duration,
-        child: Material(
-          color: AppleSemanticColors.of(
-            context,
-          ).tertiaryBackground.withValues(alpha: .94),
-          elevation: 8,
-          shadowColor: Colors.black26,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: visible ? onTap : null,
-            child: SizedBox.square(dimension: 38, child: Icon(icon, size: 24)),
+      child: ExcludeSemantics(
+        excluding: !visible,
+        child: AnimatedOpacity(
+          curve: const AppleSpringCurve(),
+          opacity: visible ? 1 : 0,
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : AppleSpring.responsive.duration,
+          child: Material(
+            color: AppleSemanticColors.of(
+              context,
+            ).tertiaryBackground.withValues(alpha: .94),
+            elevation: 8,
+            shadowColor: Colors.black26,
+            shape: const CircleBorder(),
+            child: Tooltip(
+              message: label,
+              excludeFromSemantics: true,
+              child: Semantics(
+                button: true,
+                label: label,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: visible ? onTap : null,
+                  child: SizedBox.square(
+                    dimension: 38,
+                    child: Icon(icon, size: 24),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -729,6 +778,50 @@ class _CoverMosaic extends StatelessWidget {
   }
 }
 
+/// The phone keeps the original square artwork tiles without continuously
+/// repainting a repeated off-screen strip. Only tiles covering the card exist.
+class _PhoneCoverMosaic extends StatelessWidget {
+  const _PhoneCoverMosaic({required this.covers, this.tile = 76});
+
+  final List<String?> covers;
+  final double tile;
+
+  @override
+  Widget build(BuildContext context) {
+    final artwork = covers
+        .whereType<String>()
+        .where((url) => url.isNotEmpty)
+        .take(8)
+        .toList(growable: false);
+    if (artwork.isEmpty) return const SizedBox.expand();
+    return RepaintBoundary(
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final rows = (box.maxHeight / tile).ceil();
+          final columns = (box.maxWidth / tile).ceil();
+          return ClipRect(
+            child: Stack(
+              children: [
+                for (var column = 0; column < columns; column++)
+                  for (var row = 0; row < rows; row++)
+                    Positioned(
+                      left: column * tile,
+                      top: row * tile,
+                      child: AppCover(
+                        url: artwork[(column * rows + row) % artwork.length],
+                        size: tile,
+                        radius: 0,
+                      ),
+                    ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class LocalRecentHome extends StatelessWidget {
   const LocalRecentHome({
     super.key,
@@ -765,6 +858,7 @@ class LocalRecentHome extends StatelessWidget {
                 const AppNotice(message: '还没有最近播放记录')
               else
                 HomeRecentTrackShelf(
+                  compact: compactBrowsePresentation(context),
                   currentTrackId: state.current?.id,
                   tracks: recent,
                   onPlay: onPlayTrack,
@@ -788,18 +882,24 @@ class HomeRecentTrackShelf extends StatelessWidget {
     required this.onPlay,
     this.currentTrackId,
     this.onMenuRequested,
+    this.compact,
   });
   final String? currentTrackId;
   final List<Track> tracks;
   final void Function(List<Track>, int) onPlay;
   final void Function(Track, Offset)? onMenuRequested;
+  final bool? compact;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       if (tracks.isEmpty) return const SizedBox.shrink();
+      final bool phone = compact ?? compactBrowsePresentation(context);
+      if (phone) {
+        return _phoneShelf(context, box.maxWidth);
+      }
       const double gap = 10;
-      const double rowHeight = 72;
+      final double rowHeight = mediaTrackCardHeight(context);
       final int columns = ((box.maxWidth + gap) / 270).floor().clamp(1, 3);
       final int pageSize = columns * 3;
       final int rows = (math.min(tracks.length, pageSize) / columns).ceil();
@@ -844,10 +944,43 @@ class HomeRecentTrackShelf extends StatelessWidget {
     },
   );
 
-  Widget _track(int index) => AppArtistTrackCard(
+  Widget _phoneShelf(BuildContext context, double availableWidth) {
+    const rows = 3;
+    const columnGap = 10.0;
+    const rowGap = 8.0;
+    final visibleColumns = availableWidth >= 920
+        ? 3
+        : availableWidth >= 560
+        ? 2
+        : 1;
+    final width =
+        (availableWidth - (visibleColumns - 1) * columnGap) / visibleColumns;
+    final rowHeight = mediaTrackCardHeight(context, compact: true);
+    return _PagedHorizontalShelf(
+      key: const ValueKey<String>('recent-tracks'),
+      height: rows * rowHeight + (rows - 1) * rowGap,
+      gap: columnGap,
+      itemCount: (tracks.length / rows).ceil(),
+      itemBuilder: (context, column) => SizedBox(
+        width: width,
+        child: Column(
+          children: [
+            for (var row = 0; row < rows; row++) ...[
+              if (row > 0) const SizedBox(height: rowGap),
+              if (column * rows + row < tracks.length)
+                _track(column * rows + row, compact: true),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _track(int index, {bool compact = false}) => AppArtistTrackCard(
     key: ValueKey('recent-track:${tracks[index].id}'),
     track: tracks[index],
     current: currentTrackId == tracks[index].id,
+    compact: compact,
     onTap: () => onPlay(tracks, index),
     onMenuRequested: onMenuRequested == null
         ? null
@@ -868,7 +1001,8 @@ class _HomeReleaseShelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _PagedHorizontalShelf(
     key: const ValueKey<String>('new-releases'),
-    height: compact ? 204 : 226,
+    height:
+        (compact ? 146 : 168) + math.max(58, mediaCardCaptionHeight(context)),
     itemCount: albums.length,
     gap: 16,
     itemBuilder: (context, index) {
@@ -1028,152 +1162,172 @@ class ChartShelf extends StatelessWidget {
   final bool large;
 
   @override
-  Widget build(BuildContext context) => _PagedHorizontalShelf(
-    key: const ValueKey<String>('charts'),
-    height: large ? 344 : (compact ? 274 : 294),
-    itemCount: charts.length,
-    gap: large ? 22 : 16,
-    showArrows: !large,
-    itemBuilder: (context, index) {
-      final chart = charts[index];
-      return StableCoverKey(
-        key: ValueKey<String>('chart:${chart.id}'),
-        builder: (GlobalKey coverKey) {
-          void open() {
-            rememberCoverTransition('chart:${chart.id}', coverKey);
-            onOpen(chart);
-          }
+  Widget build(BuildContext context) {
+    final phone = !large && compactBrowsePresentation(context);
+    final small = compact || phone;
+    return _PagedHorizontalShelf(
+      key: const ValueKey<String>('charts'),
+      height: large ? 344 : (small ? 274 : 294),
+      itemCount: charts.length,
+      gap: large ? 22 : 16,
+      showArrows: !large,
+      itemBuilder: (context, index) {
+        final chart = charts[index];
+        return StableCoverKey(
+          key: ValueKey<String>('chart:${chart.id}'),
+          builder: (GlobalKey coverKey) {
+            void open() {
+              rememberCoverTransition('chart:${chart.id}', coverKey);
+              onOpen(chart);
+            }
 
-          final Widget card = SizedBox(
-            width: large ? 336 : (compact ? 246 : 278),
-            child: Material(
-              color: Colors.black,
-              borderRadius: BorderRadius.circular(18),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: feedbackAction(context, open),
-                child: CoverTransitionSource(
-                  key: coverKey,
-                  identity: 'chart:${chart.id}',
-                  morphArtwork: true,
-                  radius: 18,
-                  child: ColoredBox(
-                    color: Colors.black,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: <Widget>[
-                        Transform.scale(
-                          scale: 1.32,
-                          child: _CoverMosaic(
-                            covers: chart.entries
-                                .map(chartEntryCover)
-                                .toList(growable: false),
-                            rows: 3,
+            final Widget card = SizedBox(
+              width: large ? 336 : (small ? 246 : 278),
+              child: Material(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(18),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: feedbackAction(context, open),
+                  child: CoverTransitionSource(
+                    key: coverKey,
+                    identity: 'chart:${chart.id}',
+                    morphArtwork: true,
+                    radius: 18,
+                    child: ColoredBox(
+                      color: Colors.black,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: <Widget>[
+                          Transform.scale(
+                            scale: 1.32,
+                            child: phone
+                                ? Transform.rotate(
+                                    angle: -.11,
+                                    child: _PhoneCoverMosaic(
+                                      covers: chart.entries
+                                          .map(chartEntryCover)
+                                          .toList(growable: false),
+                                      tile: 82,
+                                    ),
+                                  )
+                                : _CoverMosaic(
+                                    covers: chart.entries
+                                        .map(chartEntryCover)
+                                        .toList(growable: false),
+                                    rows: 3,
+                                  ),
                           ),
-                        ),
-                        ColoredBox(color: Colors.black.withValues(alpha: .68)),
-                        const DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: <Color>[
-                                Color(0x12000000),
-                                Color(0xF2000000),
-                              ],
-                              stops: <double>[.22, 1],
+                          ColoredBox(
+                            color: Colors.black.withValues(alpha: .68),
+                          ),
+                          const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: <Color>[
+                                  Color(0x12000000),
+                                  Color(0xF2000000),
+                                ],
+                                stops: <double>[.22, 1],
+                              ),
                             ),
                           ),
-                        ),
-                        Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            large ? 22 : 18,
-                            large ? 22 : 18,
-                            large ? 22 : 18,
-                            large ? 20 : 16,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              ChartLogo(chart: chart, large: large),
-                              const Spacer(),
-                              Text(
-                                chart.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(
-                                      fontSize: large ? 27 : null,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -.6,
-                                    ),
-                              ),
-                              TrText(
-                                chart.issueLabel,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(
-                                      fontSize: large ? 16 : null,
-                                      color: Colors.white70,
-                                    ),
-                              ),
-                              SizedBox(height: large ? 12 : 9),
-                              for (final entry in chart.entries.take(3))
-                                Padding(
-                                  padding: EdgeInsets.only(top: large ? 7 : 5),
-                                  child: Row(
-                                    children: <Widget>[
-                                      SizedBox(
-                                        width: large ? 32 : 24,
-                                        child: Text(
-                                          '${entry.rank}',
-                                          style: TextStyle(
-                                            fontSize: large ? 17 : null,
-                                            color: Colors.white60,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                        ),
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              large ? 22 : 18,
+                              large ? 22 : 18,
+                              large ? 22 : 18,
+                              large ? 20 : 16,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                ChartLogo(chart: chart, large: large),
+                                const Spacer(),
+                                Text(
+                                  chart.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(
+                                        fontSize: large ? 27 : null,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -.6,
                                       ),
-                                      Expanded(
-                                        child: Text(
-                                          entry.title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontSize: large ? 17 : null,
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
                                 ),
-                            ],
+                                TrText(
+                                  chart.issueLabel,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        fontSize: large ? 16 : null,
+                                        color: Colors.white70,
+                                      ),
+                                ),
+                                SizedBox(height: large ? 12 : 9),
+                                for (final entry in chart.entries.take(3))
+                                  Padding(
+                                    padding: EdgeInsets.only(
+                                      top: large ? 7 : 5,
+                                    ),
+                                    child: Row(
+                                      children: <Widget>[
+                                        SizedBox(
+                                          width: large ? 32 : 24,
+                                          child: Text(
+                                            '${entry.rank}',
+                                            style: TextStyle(
+                                              fontSize: large ? 17 : null,
+                                              color: Colors.white60,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            entry.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: large ? 17 : null,
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          );
-          // Chart cards used InkWell only, so a TV remote could pass over them
-          // without a focus stop or visible selection. Give the large layout
-          // the same focus ring and spring lift as every other TV card.
-          return large
-              ? LargeScreenTapTarget(
-                  onTap: feedbackAction(context, open),
-                  borderRadius: BorderRadius.circular(18),
-                  focusScale: 1.035,
-                  child: card,
-                )
-              : card;
-        },
-      );
-    },
-  );
+            );
+            // Chart cards used InkWell only, so a TV remote could pass over them
+            // without a focus stop or visible selection. Give the large layout
+            // the same focus ring and spring lift as every other TV card.
+            return large
+                ? LargeScreenTapTarget(
+                    onTap: feedbackAction(context, open),
+                    borderRadius: BorderRadius.circular(18),
+                    focusScale: 1.035,
+                    child: card,
+                  )
+                : card;
+          },
+        );
+      },
+    );
+  }
 }
 
 String? chartEntryCover(ChartEntry entry) =>
@@ -1275,7 +1429,8 @@ class _RecommendationShelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _PagedHorizontalShelf(
     key: const ValueKey<String>('recommendations'),
-    height: compact ? 202 : 224,
+    height:
+        (compact ? 144 : 168) + math.max(58, mediaCardCaptionHeight(context)),
     itemCount: playlists.length,
     gap: 16,
     itemBuilder: (context, index) => AppPlaylistCard(
@@ -1306,6 +1461,9 @@ class _StationStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final height = compactBrowsePresentation(context)
+        ? _phoneCoverCardHeight(context, 154)
+        : 154.0;
     final stations =
         <({String title, String detail, IconData icon, VoidCallback? tap})>[
           (
@@ -1336,13 +1494,13 @@ class _StationStrip extends StatelessWidget {
         ];
     return _PagedHorizontalShelf(
       key: const ValueKey<String>('stations'),
-      height: 154,
+      height: height,
       itemCount: stations.length,
       itemBuilder: (context, index) {
         final station = stations[index];
         return FilledCoverCard(
           width: 272,
-          height: 154,
+          height: height,
           title: station.title,
           detail: station.detail,
           icon: station.icon,
@@ -1377,6 +1535,7 @@ class FilledCoverCard extends StatelessWidget {
     required this.covers,
     this.onTap,
     this.large = false,
+    this.compact,
   });
 
   final double width;
@@ -1390,16 +1549,19 @@ class FilledCoverCard extends StatelessWidget {
   /// Ten-foot sizing: a wider card, a larger caption and a two-row mosaic of
   /// bigger covers, used by the large-screen shortcuts.
   final bool large;
+  final bool? compact;
 
   @override
   Widget build(BuildContext context) {
+    final bool phone =
+        !large && (compact ?? compactBrowsePresentation(context));
     final VoidCallback? tap = onTap == null
         ? null
         : feedbackAction(context, onTap!);
     final BorderRadius radius = BorderRadius.circular(large ? 18 : 16);
     return SizedBox(
       width: width,
-      height: height,
+      height: phone ? _phoneCoverCardHeight(context, height) : height,
       child: MouseRegion(
         cursor: tap == null
             ? SystemMouseCursors.basic
@@ -1418,21 +1580,27 @@ class FilledCoverCard extends StatelessWidget {
                     context,
                   ).secondaryGroupedBackground,
                   child: Opacity(
-                    opacity: tap == null ? .2 : .82,
-                    child: _CoverMosaic(covers: covers),
+                    opacity: tap == null
+                        ? (phone ? .18 : .2)
+                        : (phone ? .58 : .82),
+                    child: phone
+                        ? _PhoneCoverMosaic(covers: covers)
+                        : _CoverMosaic(covers: covers),
                   ),
                 ),
-                const DecoratedBox(
+                DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: <Color>[
-                        Color(0x22000000),
-                        Color(0x44000000),
-                        Color(0xE8000000),
-                      ],
-                      stops: <double>[0, .4, 1],
+                      colors: phone
+                          ? const <Color>[Color(0x22000000), Color(0xE0000000)]
+                          : const <Color>[
+                              Color(0x22000000),
+                              Color(0x44000000),
+                              Color(0xE8000000),
+                            ],
+                      stops: phone ? null : const <double>[0, .4, 1],
                     ),
                   ),
                 ),
@@ -1452,7 +1620,7 @@ class FilledCoverCard extends StatelessWidget {
                           Icon(
                             Icons.play_circle_fill_rounded,
                             color: Colors.white,
-                            size: large ? 35 : 30,
+                            size: large ? 35 : (phone ? 29 : 30),
                           ),
                         ],
                       ),
@@ -1463,7 +1631,7 @@ class FilledCoverCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(
-                              fontSize: large ? 21 : 18,
+                              fontSize: large ? 21 : (phone ? null : 18),
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
                             ),
@@ -1473,7 +1641,7 @@ class FilledCoverCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontSize: large ? 15.5 : 13,
+                          fontSize: large ? 15.5 : (phone ? null : 13),
                           color: Colors.white70,
                         ),
                       ),
@@ -1491,9 +1659,11 @@ class FilledCoverCard extends StatelessWidget {
                     child: Ink(
                       decoration: BoxDecoration(
                         borderRadius: radius,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: .12),
-                        ),
+                        border: phone
+                            ? null
+                            : Border.all(
+                                color: Colors.white.withValues(alpha: .12),
+                              ),
                       ),
                     ),
                   ),

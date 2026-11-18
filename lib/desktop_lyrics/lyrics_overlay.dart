@@ -17,6 +17,7 @@ import '../lyrics/line_content.dart';
 import '../lyrics/lyric_document.dart';
 import '../lyrics/spacing.dart';
 import '../lyrics/spring.dart';
+import '../lyrics/timed_line.dart' show lyricWordMotionEnd;
 import '../theme/lazer_theme.dart';
 import 'overlay_protocol.dart';
 import 'overlay_motion.dart';
@@ -128,6 +129,9 @@ Future<void> runLyricsOverlay(
 Future<void> _configureOverlayWindow(LyricsOverlayLaunch launch) async {
   final Size size = lyricsOverlayWindowSize(launch);
   try {
+    await windowManager.setTitle(
+      launch.mode == LyricsOverlayMode.desktop ? 'Lazer 桌面歌词' : 'Lazer 悬浮歌词',
+    );
     await windowManager.setAsFrameless();
     await windowManager.setResizable(false);
     await windowManager.setHasShadow(false);
@@ -224,6 +228,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   late LyricsOverlaySettings _settings;
   LyricsOverlayPayload? _payload;
   List<LyricLine> _lines = const <LyricLine>[];
+  List<Duration> _wordMotionEnds = const [];
   Ticker? _ticker;
   Duration _lastTick = Duration.zero;
   Size? _windowSize;
@@ -353,6 +358,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       _applyAnimationSpeed(_settings);
       _refreshTextStyles();
       _lines = payload.lines;
+      _wordMotionEnds = [for (final line in _lines) lyricWordMotionEnd(line)];
       _invalidateLayout();
       _anchorMs = payload.position.inMilliseconds.toDouble();
       _anchorMicros = _clock.elapsedMicroseconds;
@@ -493,9 +499,9 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     if (line.text.trim().isEmpty) {
       return position < (line.end ?? line.time).inMilliseconds;
     }
-    return line.words.any(
-      (word) => position < (word.start + word.duration).inMilliseconds,
-    );
+    return position <
+        _wordMotionEnds[_focus.clamp(0, _lines.length - 1)].inMicroseconds /
+            1000;
   }
 
   void _ensureTicker() {

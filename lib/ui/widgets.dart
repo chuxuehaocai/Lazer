@@ -4,6 +4,7 @@ import '../animation/apple_spring.dart';
 
 import '../data/models.dart';
 import '../l10n/app_localizations.dart';
+import '../state/ui_preferences.dart' show kCompactBreakpoint;
 import '../theme/apple_design.dart';
 import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
@@ -122,6 +123,49 @@ class AppCover extends StatelessWidget {
     );
   }
 }
+
+final Map<(TextStyle?, TextStyle?, TextScaler, TextDirection), double>
+_mediaCardCaptionHeights = {};
+
+/// Space for an artwork card's two caption lines at the active font size.
+/// Horizontal shelves need a bounded height, including accessibility scaling.
+double mediaCardCaptionHeight(BuildContext context, {TextStyle? titleStyle}) {
+  final textTheme = Theme.of(context).textTheme;
+  final title = titleStyle ?? textTheme.bodyMedium;
+  final scaler = MediaQuery.textScalerOf(context);
+  final direction = Directionality.of(context);
+  final key = (title, textTheme.bodySmall, scaler, direction);
+  final cached = _mediaCardCaptionHeights[key];
+  if (cached != null) return cached;
+  double lineHeight(TextStyle? style) {
+    final painter = TextPainter(
+      text: TextSpan(text: 'Ag国', style: style),
+      textDirection: direction,
+      textScaler: scaler,
+      maxLines: 1,
+    )..layout();
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
+
+  final height = 9 + lineHeight(title) + lineHeight(textTheme.bodySmall);
+  if (_mediaCardCaptionHeights.length >= 16) {
+    _mediaCardCaptionHeights.remove(_mediaCardCaptionHeights.keys.first);
+  }
+  return _mediaCardCaptionHeights[key] = height;
+}
+
+bool compactBrowsePresentation(BuildContext context) =>
+    !largeScreenModeOf(context) &&
+    ((Theme.of(context).extension<AppThemePresentation>()?.compact ?? false) ||
+        MediaQuery.sizeOf(context).width < kCompactBreakpoint);
+
+double mediaTrackCardHeight(BuildContext context, {bool compact = false}) =>
+    (mediaCardCaptionHeight(context) + (compact ? 7 : 9)).clamp(
+      compact ? 66 : 72,
+      double.infinity,
+    );
 
 /// A playlist card in the Apple Music browse/library style: artwork, title and
 /// a quiet metadata line. On pointer platforms the cover raises a play badge.
@@ -322,7 +366,9 @@ class _AppTrackRowState extends State<AppTrackRow>
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
-    final bool wide = MediaQuery.sizeOf(context).width >= 940;
+    final bool compact = compactBrowsePresentation(context);
+    final bool wide = !compact && MediaQuery.sizeOf(context).width >= 940;
+    final radius = BorderRadius.circular(compact ? 8 : 10);
     final bool highlighted = _hovering || _focused;
     final String? translated = widget.track.translatedTitle?.trim();
     final Color titleColor = widget.current ? apple.accent : apple.label;
@@ -334,11 +380,11 @@ class _AppTrackRowState extends State<AppTrackRow>
         button: !widget.selectionMode,
         selected: widget.selectionMode ? widget.selected : null,
         child: TvFocusHighlight(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: radius,
           child: InkWell(
             onTap: feedbackAction(context, widget.onTap),
             onFocusChange: (value) => setState(() => _focused = value),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: radius,
             onSecondaryTapDown: widget.onMenuRequested == null
                 ? null
                 : (TapDownDetails details) =>
@@ -359,7 +405,7 @@ class _AppTrackRowState extends State<AppTrackRow>
               duration: const Duration(milliseconds: 120),
               margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
               padding: EdgeInsets.symmetric(
-                horizontal: 10,
+                horizontal: compact ? 8 : 10,
                 vertical: wide ? 9 : 7,
               ),
               decoration: BoxDecoration(
@@ -370,13 +416,15 @@ class _AppTrackRowState extends State<AppTrackRow>
                     : highlighted
                     ? apple.fill
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: _focused
-                      ? apple.accent.withValues(alpha: .65)
-                      : Colors.transparent,
-                  width: 1,
-                ),
+                borderRadius: radius,
+                border: compact && !_focused
+                    ? null
+                    : Border.all(
+                        color: _focused
+                            ? apple.accent.withValues(alpha: .65)
+                            : Colors.transparent,
+                        width: 1,
+                      ),
               ),
               child: Row(
                 children: <Widget>[
@@ -420,7 +468,7 @@ class _AppTrackRowState extends State<AppTrackRow>
                   AppCover(
                     url: widget.track.coverUrl,
                     size: wide ? 52 : 44,
-                    radius: 8,
+                    radius: compact ? 6 : 8,
                     iconSize: 16,
                   ),
                   const SizedBox(width: 12),
@@ -708,11 +756,13 @@ class AppArtistTrackCard extends StatefulWidget {
     required this.current,
     required this.onTap,
     this.onMenuRequested,
+    this.compact,
   });
   final Track track;
   final bool current;
   final VoidCallback onTap;
   final ValueChanged<Offset>? onMenuRequested;
+  final bool? compact;
 
   @override
   State<AppArtistTrackCard> createState() => _AppArtistTrackCardState();
@@ -725,6 +775,8 @@ class _AppArtistTrackCardState extends State<AppArtistTrackCard>
   @override
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final bool compact = widget.compact ?? compactBrowsePresentation(context);
+    final radius = BorderRadius.circular(compact ? 10 : 12);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
@@ -732,7 +784,7 @@ class _AppArtistTrackCardState extends State<AppArtistTrackCard>
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: radius,
           onTap: feedbackAction(context, widget.onTap),
           onFocusChange: (value) => setState(() => _focused = value),
           onSecondaryTapDown: widget.onMenuRequested == null
@@ -740,23 +792,29 @@ class _AppArtistTrackCardState extends State<AppArtistTrackCard>
               : (details) => widget.onMenuRequested!(details.globalPosition),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            height: 72,
-            padding: const EdgeInsets.all(8),
+            height: mediaTrackCardHeight(context, compact: compact),
+            padding: EdgeInsets.all(compact ? 7 : 8),
             decoration: BoxDecoration(
               color: widget.current
                   ? apple.accentSoft
                   : _hover || _focused
                   ? apple.fill
+                  : compact
+                  ? apple.secondaryGroupedBackground
                   : apple.secondaryGroupedBackground.withValues(alpha: .70),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: radius,
               border: Border.all(
                 color: _focused ? apple.accent : apple.separator,
-                width: _focused ? 1 : .7,
+                width: _focused ? 1 : (compact ? .5 : .7),
               ),
             ),
             child: Row(
               children: <Widget>[
-                AppCover(url: widget.track.coverUrl, size: 56, radius: 8),
+                AppCover(
+                  url: widget.track.coverUrl,
+                  size: compact ? 52 : 56,
+                  radius: compact ? 6 : 8,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(

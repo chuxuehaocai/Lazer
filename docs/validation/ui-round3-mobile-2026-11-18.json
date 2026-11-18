@@ -1,0 +1,156 @@
+{
+  "buildMode": "profile",
+  "operatingSystem": "\"Windows 10 Pro\" 10.0 (Build 26300)",
+  "refreshRate": 144.0,
+  "logicalSize": [
+    390.0,
+    800.0
+  ],
+  "note": "Synthetic local artwork and word-timed lyrics; no audio/network. Cold = first open for each background mode. Includes entry and 1.6s tail.",
+  "samples": [
+    {
+      "mode": "nowPlayingDynamic",
+      "attempt": 0,
+      "cold": true,
+      "frames": 224,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.152,
+      "buildWorstMs": 5.323,
+      "rasterP95Ms": 1.895,
+      "rasterWorstMs": 3.82,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "nowPlayingDynamic",
+      "attempt": 1,
+      "cold": false,
+      "frames": 223,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.133,
+      "buildWorstMs": 3.785,
+      "rasterP95Ms": 2.727,
+      "rasterWorstMs": 12.362,
+      "framesOverBudget": 8
+    },
+    {
+      "mode": "nowPlayingDynamic",
+      "attempt": 2,
+      "cold": false,
+      "frames": 224,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.148,
+      "buildWorstMs": 3.302,
+      "rasterP95Ms": 1.667,
+      "rasterWorstMs": 2.483,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "nowPlayingDynamic",
+      "attempt": 3,
+      "cold": false,
+      "frames": 240,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.139,
+      "buildWorstMs": 5.398,
+      "rasterP95Ms": 1.786,
+      "rasterWorstMs": 2.456,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "nowPlayingStatic",
+      "attempt": 0,
+      "cold": true,
+      "frames": 151,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.098,
+      "buildWorstMs": 3.33,
+      "rasterP95Ms": 1.798,
+      "rasterWorstMs": 2.457,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "nowPlayingStatic",
+      "attempt": 1,
+      "cold": false,
+      "frames": 148,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.111,
+      "buildWorstMs": 3.447,
+      "rasterP95Ms": 3.473,
+      "rasterWorstMs": 15.392,
+      "framesOverBudget": 7
+    },
+    {
+      "mode": "nowPlayingStatic",
+      "attempt": 2,
+      "cold": false,
+      "frames": 151,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.112,
+      "buildWorstMs": 3.282,
+      "rasterP95Ms": 1.817,
+      "rasterWorstMs": 2.588,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "nowPlayingStatic",
+      "attempt": 3,
+      "cold": false,
+      "frames": 150,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.102,
+      "buildWorstMs": 2.827,
+      "rasterP95Ms": 1.793,
+      "rasterWorstMs": 2.51,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "windowsMica",
+      "attempt": 0,
+      "cold": true,
+      "frames": 151,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.11,
+      "buildWorstMs": 3.065,
+      "rasterP95Ms": 0.321,
+      "rasterWorstMs": 0.42,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "windowsMica",
+      "attempt": 1,
+      "cold": false,
+      "frames": 151,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.11,
+      "buildWorstMs": 2.863,
+      "rasterP95Ms": 0.352,
+      "rasterWorstMs": 0.613,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "windowsMica",
+      "attempt": 2,
+      "cold": false,
+      "frames": 151,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.101,
+      "buildWorstMs": 3.52,
+      "rasterP95Ms": 0.335,
+      "rasterWorstMs": 0.454,
+      "framesOverBudget": 0
+    },
+    {
+      "mode": "windowsMica",
+      "attempt": 3,
+      "cold": false,
+      "frames": 151,
+      "budgetMs": 6.944444444444445,
+      "buildP95Ms": 0.103,
+      "buildWorstMs": 2.858,
+      "rasterP95Ms": 0.313,
+      "rasterWorstMs": 0.367,
+      "framesOverBudget": 0
+    }
+  ]
+}

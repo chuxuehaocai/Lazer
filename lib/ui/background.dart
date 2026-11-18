@@ -204,7 +204,7 @@ class AlbumFlowBackground extends StatefulWidget {
     this.cornerRadius = 0,
     this.quality = kDynamicBackgroundQualityDefault,
     this.preview = false,
-    this.frameRate = 30,
+    this.frameRate,
   });
 
   final List<Color> colors;
@@ -231,6 +231,8 @@ class AlbumFlowBackground extends StatefulWidget {
   /// stops moving, using the same five colours, so the handover is a warp
   /// appearing rather than a colour change.
   final bool preview;
+
+  /// Null or zero follows every display frame; positive values set a cap.
   final double? frameRate;
 
   @override
@@ -342,21 +344,17 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   void _configureFrameRate() {
     final double reported = _view?.display.refreshRate ?? 60;
     final double refresh = reported.isFinite && reported > 0 ? reported : 60;
-    final double requestedRaw = widget.frameRate?.clamp(10, 1000) ?? refresh;
-    // Canvas mesh recording and browser compositing compete on the same UI
-    // thread. A 30 fps cap keeps scrolling and text input responsive on web;
-    // native surfaces retain the requested display cadence.
-    final double requested = kIsWeb ? math.min(requestedRaw, 30) : requestedRaw;
-    _paintEveryVsync =
-        !kIsWeb && (widget.frameRate == null || requested >= refresh);
-    _frameInterval = Duration(
-      microseconds: (1000000 / math.min(refresh, requested)).round(),
-    );
+    final cap = widget.frameRate;
+    final double requested = cap == null || !cap.isFinite || cap <= 0
+        ? refresh
+        : cap.clamp(10, 1000);
+    _paintEveryVsync = requested >= refresh;
+    _frameInterval = _paintEveryVsync
+        ? Duration.zero
+        : Duration(microseconds: (1000000 / requested).round());
+    _nextFrameUs = 0;
     if (_flowClockAttached) {
-      albumFlowClock._listen(
-        _advance,
-        _paintEveryVsync ? Duration.zero : _frameInterval,
-      );
+      albumFlowClock._listen(_advance, _frameInterval);
     }
   }
 
@@ -439,10 +437,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
             Duration.microsecondsPerSecond %
             10000;
         _flowClockAttached = true;
-        albumFlowClock._listen(
-          _advance,
-          _paintEveryVsync ? Duration.zero : _frameInterval,
-        );
+        albumFlowClock._listen(_advance, _frameInterval);
       }
     } else {
       if (_flowClockAttached) albumFlowClock.removeListener(_advance);
@@ -453,9 +448,11 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
   void _advance() {
     final int now = albumFlowClock.elapsed.inMicroseconds;
     if (!_paintEveryVsync && now < _nextFrameUs) return;
-    final int interval = _frameInterval.inMicroseconds;
-    _nextFrameUs +=
-        interval * math.max(1, ((now - _nextFrameUs) / interval).floor() + 1);
+    if (!_paintEveryVsync) {
+      final int interval = _frameInterval.inMicroseconds;
+      _nextFrameUs +=
+          interval * math.max(1, ((now - _nextFrameUs) / interval).floor() + 1);
+    }
     // Slowly rotating/breathing mesh: AMLL drives its WebGL mesh from a
     // 10-second time base, with a volume-responsive UV rotation.
     _phase = (now / Duration.microsecondsPerSecond) % 10000;

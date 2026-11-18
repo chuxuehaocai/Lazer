@@ -6,6 +6,7 @@ import '../animation/apple_modal.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
 import '../widgets/spring_buttons.dart';
+import '../widgets/text_input_dialog.dart';
 import 'podcast_feed.dart';
 import 'remote_source.dart';
 
@@ -191,53 +192,18 @@ Future<String?> showNetworkTextPrompt(
   bool obscure = false,
   String? description,
 }) {
-  final TextEditingController controller = TextEditingController(
-    text: initialValue,
-  );
   return showAppleDialog<String>(
     context: context,
-    builder: (BuildContext dialogContext) => AlertDialog(
-      title: Text(context.tr(title)),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            if (description != null) ...<Widget>[
-              Text(
-                context.tr(description),
-                style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
-                  color: AppleSemanticColors.of(dialogContext).secondaryLabel,
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            NetworkField(
-              label: label,
-              hint: hint,
-              controller: controller,
-              obscure: obscure,
-              autofocus: true,
-              onSubmitted: (String value) =>
-                  Navigator.of(dialogContext).pop(value.trim()),
-            ),
-          ],
-        ),
-      ),
-      actions: <Widget>[
-        SpringTextButton(
-          onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const TrText('取消'),
-        ),
-        SpringFilledButton(
-          onPressed: () =>
-              Navigator.of(dialogContext).pop(controller.text.trim()),
-          child: TrText(confirmLabel),
-        ),
-      ],
+    builder: (BuildContext dialogContext) => AppTextInputDialog(
+      title: dialogContext.tr(title),
+      initialValue: initialValue,
+      labelText: dialogContext.tr(label),
+      hintText: hint == null ? null : dialogContext.tr(hint),
+      description: description == null ? null : dialogContext.tr(description),
+      obscureText: obscure,
+      confirmLabel: confirmLabel,
     ),
-  ).whenComplete(controller.dispose);
+  ).then((value) => value?.trim());
 }
 
 /// Shows a translated snack bar for a network action.
@@ -323,10 +289,7 @@ class NetworkBusyBanner extends StatelessWidget {
             ),
           ),
           if (onCancel != null)
-            SpringTextButton(
-              onPressed: onCancel,
-              child: const TrText('取消'),
-            ),
+            SpringTextButton(onPressed: onCancel, child: const TrText('取消')),
         ],
       ),
     );

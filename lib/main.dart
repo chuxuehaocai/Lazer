@@ -27,6 +27,7 @@ import 'diagnostics/console_window.dart';
 import 'diagnostics/crash_dump.dart';
 import 'ui/shell.dart';
 import 'theme/apple_design.dart';
+import 'theme/adaptive_app_theme.dart';
 import 'theme/lazer_theme.dart';
 import 'state/app_state.dart';
 import 'state/ui_preferences.dart';
@@ -445,23 +446,39 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
           result.complete(false);
           return;
         }
+        var responded = false;
         final granted = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
-          builder: (dialogContext) => AlertDialog(
-            title: Text(title),
-            content: SingleChildScrollView(child: Text(description)),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: Text(dialogContext.tr('拒绝')),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: Text(dialogContext.tr('允许')),
-              ),
-            ],
-          ),
+          builder: (dialogContext) {
+            void respond(bool allow) {
+              // A popped dialog stays mounted during its reverse animation,
+              // while the queue may already be showing the next permission.
+              if (responded ||
+                  !mounted ||
+                  !dialogContext.mounted ||
+                  ModalRoute.of(dialogContext)?.isCurrent != true) {
+                return;
+              }
+              responded = true;
+              Navigator.of(dialogContext).pop(allow);
+            }
+
+            return AlertDialog(
+              title: Text(title),
+              content: SingleChildScrollView(child: Text(description)),
+              actions: [
+                TextButton(
+                  onPressed: () => respond(false),
+                  child: Text(dialogContext.tr('拒绝')),
+                ),
+                FilledButton(
+                  onPressed: () => respond(true),
+                  child: Text(dialogContext.tr('允许')),
+                ),
+              ],
+            );
+          },
         );
         result.complete(granted == true);
       } catch (_) {
@@ -481,12 +498,16 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
       case 'data.native_audio':
         return (
           context.tr('允许插件读取原生音频诊断？'),
-          context.tr('插件「{name}」请求读取音频格式、输出路径、缓冲指标和设备名称；不会获得文件路径、设备句柄或修改音频设备。').replaceAll('{name}', manifest.name),
+          context
+              .tr('插件「{name}」请求读取音频格式、输出路径、缓冲指标和设备名称；不会获得文件路径、设备句柄或修改音频设备。')
+              .replaceAll('{name}', manifest.name),
         );
       case 'data.native_control':
         return (
           context.tr('允许插件控制桌面歌词？'),
-          context.tr('插件「{name}」请求读取和修改悬浮歌词、桌面歌词的启用状态、锁定状态和显示行数。可在插件详情中随时撤销。').replaceAll('{name}', manifest.name),
+          context
+              .tr('插件「{name}」请求读取和修改悬浮歌词、桌面歌词的启用状态、锁定状态和显示行数。可在插件详情中随时撤销。')
+              .replaceAll('{name}', manifest.name),
         );
       case 'data.library':
         return (
@@ -630,24 +651,27 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                 state: _state,
                 child: UiScaling(
                   state: _state,
-                  child: CarMetrics(
-                    child: WindowFrame(
-                      enabled: widget.windowFrameEnabled,
-                      state: _state,
-                      navigatorKey: _navigatorKey,
-                      child: Builder(
-                        builder: (context) => Theme(
-                          data: Theme.of(context).copyWith(
-                            scaffoldBackgroundColor: Colors.transparent,
-                          ),
-                          child: SharedBrowseBackground(
-                            state: _state,
-                            navigation: _browseNavigation,
-                            // Pages consume the frame's safe inset themselves.
-                            // The desktop rail extends into the Inline row;
-                            // reserving it for the whole Navigator would push
-                            // both the logo and page padding down a second time.
-                            child: child!,
+                  child: AdaptiveAppTheme(
+                    state: _state,
+                    child: CarMetrics(
+                      child: WindowFrame(
+                        enabled: widget.windowFrameEnabled,
+                        state: _state,
+                        navigatorKey: _navigatorKey,
+                        child: Builder(
+                          builder: (context) => Theme(
+                            data: Theme.of(context).copyWith(
+                              scaffoldBackgroundColor: Colors.transparent,
+                            ),
+                            child: SharedBrowseBackground(
+                              state: _state,
+                              navigation: _browseNavigation,
+                              // Pages consume the frame's safe inset themselves.
+                              // The desktop rail extends into the Inline row;
+                              // reserving it for the whole Navigator would push
+                              // both the logo and page padding down a second time.
+                              child: child!,
+                            ),
                           ),
                         ),
                       ),

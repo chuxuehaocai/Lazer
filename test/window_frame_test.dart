@@ -262,16 +262,20 @@ void main() {
       expect(find.byKey(_minimizeKey), findsNothing);
       expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 0);
 
-      // At 650px the shell chooses tablet ahead of the overlapping phone range.
+      // Phone and tablet ranges are exclusive, including explicit desktop.
       tester.view.physicalSize = const Size(650, 900);
       await tester.pumpAndSettle();
-      expect(find.byKey(_minimizeKey).hitTestable(), findsOneWidget);
-      expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 56);
+      expect(find.byKey(_minimizeKey), findsNothing);
+      expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 0);
 
       tester.view.physicalSize = const Size(475, 900);
       await tester.pumpAndSettle();
       expect(find.byKey(_minimizeKey), findsNothing);
       await harness.state.setLayoutStyle(AppLayoutStyle.desktop);
+      await tester.pumpAndSettle();
+      expect(find.byKey(_minimizeKey), findsNothing);
+      expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 0);
+      tester.view.physicalSize = const Size(720, 900);
       await tester.pumpAndSettle();
       expect(find.byKey(_minimizeKey).hitTestable(), findsOneWidget);
       expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 56);

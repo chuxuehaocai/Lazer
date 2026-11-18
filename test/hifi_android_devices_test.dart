@@ -23,6 +23,12 @@ class _CatalogApi extends LazerAudioApi {
   @override
   String Function(Pointer<Void>) get lastError =>
       (_) => 'USB test refusal';
+
+  // A real DLL may already have been loaded by the desktop catalog test.
+  // The fixture's sentinel engine address must never reach its log reader.
+  @override
+  int Function(Pointer<Void>, Pointer<Int32>, Pointer<Uint8>, int)?
+  get readLog => null;
 }
 
 class _UnusedBridge implements LazerAudioBridgeApi {

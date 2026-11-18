@@ -38,8 +38,9 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
   final _filter = TextEditingController();
   final _focus = FocusNode();
   final _scroll = ScrollController();
-  late final ConsoleSession _console =
+  late ConsoleSession _console =
       widget.session ?? LocalConsoleSession(widget.state!);
+  late bool _ownsConsole;
   int _historyIndex = 0;
   String _draft = '';
   bool _showLogs = false;
@@ -47,9 +48,27 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
   @override
   void initState() {
     super.initState();
+    _ownsConsole = widget.session == null;
     _console.addListener(_changed);
     _filter.addListener(_changed);
     _historyIndex = _console.history.length;
+  }
+
+  @override
+  void didUpdateWidget(covariant DeveloperConsoleView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.session == widget.session &&
+        (widget.session != null || oldWidget.state == widget.state)) {
+      return;
+    }
+    _console.removeListener(_changed);
+    if (_ownsConsole) _console.dispose();
+    _console = widget.session ?? LocalConsoleSession(widget.state!);
+    _ownsConsole = widget.session == null;
+    _console.addListener(_changed);
+    _historyIndex = _console.history.length;
+    _input.clear();
+    _draft = '';
   }
 
   void _changed() {
@@ -73,8 +92,9 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
     if (text.trim().isEmpty) return;
     _input.clear();
     _draft = '';
-    await _console.execute(text);
-    if (!mounted) return;
+    final owner = _console;
+    await owner.execute(text);
+    if (!mounted || owner != _console) return;
     _historyIndex = _console.history.length;
     _focus.requestFocus();
   }
@@ -98,7 +118,7 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
   @override
   void dispose() {
     _console.removeListener(_changed);
-    if (widget.session == null) _console.dispose();
+    if (_ownsConsole) _console.dispose();
     _input.dispose();
     _filter.dispose();
     _focus.dispose();
@@ -136,11 +156,7 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
               children: [
                 Padding(padding: EdgeInsets.all(inset), child: heading),
                 Expanded(
-                  child: Center(
-                    child: Text(
-                      context.tr('开发者控制台已关闭。请在设置中启用。'),
-                    ),
-                  ),
+                  child: Center(child: Text(context.tr('开发者控制台已关闭。请在设置中启用。'))),
                 ),
               ],
             )

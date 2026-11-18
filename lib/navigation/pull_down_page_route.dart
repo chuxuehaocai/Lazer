@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 
 import '../animation/apple_spring.dart';
+import '../state/ui_preferences.dart' show kCompactBreakpoint;
 import 'system_back_gesture.dart';
 
 /// A vertical page transition with a platform-independent top-edge back drag.
@@ -191,7 +192,7 @@ class PullDownPageRoute<T> extends MaterialPageRoute<T> {
       child: page,
       builder: (context, child) => LayoutBuilder(
         builder: (context, box) => _TopEdgeBackGesture(
-          enabled: isMobilePlatform || box.maxWidth < 720,
+          enabled: isMobilePlatform || box.maxWidth < kCompactBreakpoint,
           // The visible page edge moves down with an interrupted transition.
           // Expand the hit strip by that same amount so the user can grab it
           // again without waiting for the spring to finish.

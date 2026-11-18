@@ -187,6 +187,9 @@ class _AppShellState extends State<AppShell>
   /// its settling tail and any changes of direction.
   bool _contentSwitching = false;
   String? _shownContentKey;
+  // Reparent the same content host when the responsive chrome changes shape.
+  // Search input, scroll position and detail history survive window resizing.
+  final GlobalKey _contentHostKey = GlobalKey(debugLabel: 'browse-content');
 
   /// The browse tree is fully covered while the player is up. Caching it
   /// keeps playback notifications (track changes, lyric loads, download
@@ -204,7 +207,6 @@ class _AppShellState extends State<AppShell>
   Color? _coveredShellAccent;
   bool? _coveredShellCompact;
   bool? _coveredShellTablet;
-  bool? _coveredShellCompactBar;
   bool? _coveredShellBackdrop;
   bool? _coveredShellLargeScreen;
 
@@ -1162,6 +1164,13 @@ class _AppShellState extends State<AppShell>
       data:
           buildAppleTheme(
             brightness: brightness,
+            compact:
+                !_isLargeScreen(context) &&
+                useCompactLayout(
+                  state.uiMode,
+                  MediaQuery.sizeOf(context).width,
+                  layoutStyle: state.layoutStyle,
+                ),
             seedAccent: accent,
             fonts: state.fontPreferences,
             ui:
@@ -1193,14 +1202,11 @@ class _AppShellState extends State<AppShell>
             window.width,
             layoutStyle: state.layoutStyle,
           );
-          final bool tablet =
-              useTabletLayout(
-                state.uiMode,
-                window.width,
-                layoutStyle: state.layoutStyle,
-              ) &&
-              (state.autoDpiScale || state.dpiScale >= .95);
-          final bool compactBar = window.width < 1_000;
+          final bool tablet = useTabletLayout(
+            state.uiMode,
+            window.width,
+            layoutStyle: state.layoutStyle,
+          );
           final bool paintedBackdrop =
               state.backgroundMode != AppBackgroundMode.off;
           // The "follow the song" palette still needs the artwork seed when
@@ -1220,7 +1226,6 @@ class _AppShellState extends State<AppShell>
               _coveredShellAccent == accent &&
               _coveredShellCompact == compact &&
               _coveredShellTablet == tablet &&
-              _coveredShellCompactBar == compactBar &&
               _coveredShellBackdrop == backdrop &&
               _coveredShellLargeScreen == largeScreen;
           final Widget? cachedShell = _coveredShell;
@@ -1318,11 +1323,9 @@ class _AppShellState extends State<AppShell>
                           opacity: sharedBackground ? 1 : state.uiAlpha,
                           child: largeScreen
                               ? _largeScreenLayout(apple)
-                              : tablet
-                              ? _tabletLayout(apple)
-                              : compact
+                              : compact || tablet
                               ? _compactLayout(apple)
-                              : _desktopLayout(apple, compactBar: compactBar),
+                              : _desktopLayout(apple),
                         ),
                       ),
                     ],
@@ -1335,7 +1338,6 @@ class _AppShellState extends State<AppShell>
             _coveredShellAccent = accent;
             _coveredShellCompact = compact;
             _coveredShellTablet = tablet;
-            _coveredShellCompactBar = compactBar;
             _coveredShellBackdrop = backdrop;
             _coveredShellLargeScreen = largeScreen;
           }
@@ -1443,7 +1445,7 @@ class _AppShellState extends State<AppShell>
     );
   }
 
-  Widget _desktopLayout(AppleSemanticColors apple, {required bool compactBar}) {
+  Widget _desktopLayout(AppleSemanticColors apple) {
     final double contentTopInset =
         (_desktopToolbarHeight - MediaQuery.paddingOf(context).top).clamp(
           0.0,
@@ -1483,7 +1485,6 @@ class _AppShellState extends State<AppShell>
         RepaintBoundary(
           child: AppPlayerBar(
             state: state,
-            compact: compactBar,
             comments: _comments,
             onComments: _toggleComments,
             onOpen: _openNowPlaying,
@@ -1714,19 +1715,6 @@ class _AppShellState extends State<AppShell>
     );
   }
 
-  /// A tablet has enough room for a persistent destination rail, but a full
-  /// desktop source list would crowd the content pane in portrait mode.
-  Widget _tabletLayout(AppleSemanticColors apple) {
-    // Tablets use the same floating navigation language as phones. The wider
-    // canvas gets a larger capsule, while the page and toolbar remain shared.
-    return Column(
-      children: <Widget>[
-        _mobileToolbar(apple),
-        Expanded(child: RepaintBoundary(child: _content())),
-      ],
-    );
-  }
-
   Widget _mobileBottomBar() {
     final sections = [
       _AppSection.home,
@@ -1744,73 +1732,52 @@ class _AppShellState extends State<AppShell>
         heightFactor: 1,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 480),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  Expanded(
-                    child: CapsuleNavigationBar(
-                      selectedIndex: sections
-                          .indexOf(_section)
-                          .clamp(0, sections.length - 1),
-                      blurEnabled: state.bottomBarBlurEnabled,
-                      blurSigma: state.bottomBarBlur,
-                      onDestinationSelected: (int index) =>
-                          _select(sections[index]),
-                      destinations: <NavigationDestination>[
-                        NavigationDestination(
-                          icon: const Icon(Icons.home_outlined),
-                          selectedIcon: const Icon(Icons.home_rounded),
-                          label: context.tr('主页'),
-                        ),
-                        NavigationDestination(
-                          icon: const Icon(Icons.search_outlined),
-                          selectedIcon: const Icon(Icons.search_rounded),
-                          label: context.tr('搜索'),
-                        ),
-                        NavigationDestination(
-                          icon: const Icon(Icons.library_music_outlined),
-                          selectedIcon: const Icon(Icons.library_music_rounded),
-                          label: context.tr('音乐库'),
-                        ),
-                        if (!state.isLocalPlayback)
-                          NavigationDestination(
-                            icon: const Icon(Icons.favorite_border_rounded),
-                            selectedIcon: const Icon(Icons.favorite_rounded),
-                            label: context.tr('我喜欢'),
-                          ),
-                        NavigationDestination(
-                          icon: const Icon(Icons.settings_outlined),
-                          selectedIcon: const Icon(Icons.settings_rounded),
-                          label: context.tr('设置'),
-                        ),
-                      ],
+              Expanded(
+                child: CapsuleNavigationBar(
+                  selectedIndex: sections
+                      .indexOf(_section)
+                      .clamp(0, sections.length - 1),
+                  blurEnabled: state.bottomBarBlurEnabled,
+                  blurSigma: state.bottomBarBlur,
+                  onDestinationSelected: (int index) =>
+                      _select(sections[index]),
+                  destinations: <NavigationDestination>[
+                    NavigationDestination(
+                      icon: const Icon(Icons.home_outlined),
+                      selectedIcon: const Icon(Icons.home_rounded),
+                      label: context.tr('主页'),
                     ),
-                  ),
-                  if (state.current != null) ...<Widget>[
-                    const SizedBox(width: 10),
-                    _BottomTrackCover(state: state, onOpen: _openNowPlaying),
-                    Opacity(
-                      opacity: 0,
-                      child: SizedBox(
-                        width: 1,
-                        height: 1,
-                        child: AppPlayerBar(
-                          state: state,
-                          compact: true,
-                          floating: true,
-                          comments: _comments,
-                          onComments: _toggleComments,
-                          onOpen: _openNowPlaying,
-                        ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.search_outlined),
+                      selectedIcon: const Icon(Icons.search_rounded),
+                      label: context.tr('搜索'),
+                    ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.library_music_outlined),
+                      selectedIcon: const Icon(Icons.library_music_rounded),
+                      label: context.tr('音乐库'),
+                    ),
+                    if (!state.isLocalPlayback)
+                      NavigationDestination(
+                        icon: const Icon(Icons.favorite_border_rounded),
+                        selectedIcon: const Icon(Icons.favorite_rounded),
+                        label: context.tr('我喜欢'),
                       ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.settings_outlined),
+                      selectedIcon: const Icon(Icons.settings_rounded),
+                      label: context.tr('设置'),
                     ),
                   ],
-                ],
+                ),
               ),
+              if (state.current != null) ...<Widget>[
+                const SizedBox(width: 10),
+                _BottomTrackCover(state: state, onOpen: _openNowPlaying),
+              ],
             ],
           ),
         ),
@@ -2237,6 +2204,7 @@ class _AppShellState extends State<AppShell>
     final bool motion = !MediaQuery.disableAnimationsOf(context);
     final bool largeScreen = _isLargeScreen(context);
     return RetainedContentSwitcher(
+      key: _contentHostKey,
       currentKey: _contentKey,
       retainKeys: {
         ..._browseHistory.map((location) => location.key),
@@ -2376,12 +2344,7 @@ class _AppShellState extends State<AppShell>
             width,
             layoutStyle: state.layoutStyle,
           ) &&
-          !(useTabletLayout(
-                state.uiMode,
-                width,
-                layoutStyle: state.layoutStyle,
-              ) &&
-              (state.autoDpiScale || state.dpiScale >= .95));
+          !useTabletLayout(state.uiMode, width, layoutStyle: state.layoutStyle);
       return AppPlaylistPage(
         state: state,
         playlist: playlist,
@@ -2770,6 +2733,8 @@ class _PlayerPull implements PlayerPullDown {
   }
 }
 
+/// The phone's player entry shares one row with the navigation capsule.
+/// Position ticks update only the ring, leaving artwork and navigation intact.
 class _BottomTrackCover extends StatelessWidget {
   const _BottomTrackCover({required this.state, required this.onOpen});
 
@@ -2781,22 +2746,21 @@ class _BottomTrackCover extends StatelessWidget {
     final track = state.current;
     if (track == null) return const SizedBox.shrink();
     final apple = AppleSemanticColors.of(context);
-    // This cover is the only now-playing control the capsule bar keeps, so it
-    // announces itself: the track title is the label and opening the player is
-    // the action. The gesture detector stays out of semantics so the cover is
-    // one node instead of a labelled button wrapping an unlabelled tap target.
-    return Semantics(
-      key: const ValueKey<String>('bottom-track-cover'),
-      button: true,
-      label: track.title,
-      onTap: onOpen,
-      child: GestureDetector(
+    return TextButton(
+      onPressed: onOpen,
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        fixedSize: const Size.square(48),
+        minimumSize: const Size.square(48),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: const CircleBorder(),
+      ),
+      child: Semantics(
+        key: const ValueKey<String>('bottom-track-cover'),
+        label: track.title,
         onTap: onOpen,
-        behavior: HitTestBehavior.opaque,
-        excludeFromSemantics: true,
-        child: AnimatedBuilder(
-          animation: state.all,
-          builder: (BuildContext context, _) => SizedBox.square(
+        child: RepaintBoundary(
+          child: SizedBox.square(
             dimension: 48,
             child: Stack(
               fit: StackFit.expand,
@@ -2805,11 +2769,21 @@ class _BottomTrackCover extends StatelessWidget {
                   padding: const EdgeInsets.all(2),
                   child: AppCover(url: track.coverUrl, size: 44, radius: 22),
                 ),
-                CircularProgressIndicator(
-                  value: state.progress.clamp(0, 1),
-                  strokeWidth: 2.5,
-                  color: apple.accent,
-                  backgroundColor: apple.separator.withValues(alpha: .45),
+                ExcludeSemantics(
+                  child: AnimatedBuilder(
+                    // TickerMode alone does not mute ChangeNotifier ticks.
+                    // The full player covers this ring, so detach its position
+                    // listener until the shell becomes visible again.
+                    animation: TickerMode.valuesOf(context).enabled
+                        ? state.all
+                        : state,
+                    builder: (context, _) => CircularProgressIndicator(
+                      value: state.progress.clamp(0, 1),
+                      strokeWidth: 2.5,
+                      color: apple.accent,
+                      backgroundColor: apple.separator.withValues(alpha: .45),
+                    ),
+                  ),
                 ),
               ],
             ),

@@ -21,8 +21,8 @@ String diagnosticReport(AppState state) => AppLog.redact(
     'Dart: ${kIsWeb ? "web" : Platform.version}',
     'Audio engine: ${state.hifi?.status.engineDescription ?? "system"}',
     'Developer console: ${state.developerConsoleEnabled ? "enabled" : "disabled"}',
-    'Background: ${state.backgroundMode.name}, ${state.browseBackgroundFps} fps',
-    'Player background: ${state.playerBackground.name}, ${state.playerBackgroundFps == 0 ? "display refresh rate" : state.playerBackgroundFps} fps',
+    'Background: ${state.backgroundMode.name}, ${_backgroundFrameRate(state.browseBackgroundFps)}',
+    'Player background: ${state.playerBackground.name}, ${_backgroundFrameRate(state.playerBackgroundFps)}',
     'Queue length: ${state.queueLength}',
     if (WidgetsBinding.instance is LazerWidgetsBinding)
       'Accessibility: ${(WidgetsBinding.instance as LazerWidgetsBinding).semanticsDiagnostics}',
@@ -31,6 +31,9 @@ String diagnosticReport(AppState state) => AppLog.redact(
     AppLog.shared.snapshot(),
   ].join('\n'),
 );
+
+String _backgroundFrameRate(double value) =>
+    value == 0 ? 'uncapped (display refresh rate)' : '$value fps';
 
 Future<void> exportLogs(BuildContext context, AppState state) async {
   await exportLogText(context, diagnosticReport(state));

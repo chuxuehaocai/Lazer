@@ -12,6 +12,10 @@ class AppTextInputDialog extends StatefulWidget {
     this.hintText,
     this.maxLines = 1,
     this.maxLength,
+    this.labelText,
+    this.description,
+    this.obscureText = false,
+    this.confirmLabel = '保存',
   });
 
   final String title;
@@ -19,6 +23,10 @@ class AppTextInputDialog extends StatefulWidget {
   final String? hintText;
   final int maxLines;
   final int? maxLength;
+  final String? labelText;
+  final String? description;
+  final bool obscureText;
+  final String confirmLabel;
 
   @override
   State<AppTextInputDialog> createState() => _AppTextInputDialogState();
@@ -46,20 +54,37 @@ class _AppTextInputDialogState extends State<AppTextInputDialog> {
     title: Text(widget.title),
     content: SizedBox(
       width: 360,
-      child: TextField(
-        controller: _controller,
-        autofocus: true,
-        maxLines: widget.maxLines,
-        maxLength: widget.maxLength,
-        decoration: InputDecoration(hintText: widget.hintText),
-        onSubmitted: widget.maxLines == 1 ? _close : null,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (widget.description != null) ...[
+            Text(
+              widget.description!,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+          ],
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            obscureText: widget.obscureText,
+            maxLines: widget.maxLines,
+            maxLength: widget.maxLength,
+            decoration: InputDecoration(
+              hintText: widget.hintText,
+              labelText: widget.labelText,
+            ),
+            onSubmitted: widget.maxLines == 1 ? _close : null,
+          ),
+        ],
       ),
     ),
     actions: [
       SpringTextButton(onPressed: _close, child: const TrText('取消')),
       SpringFilledButton(
         onPressed: () => _close(_controller.text),
-        child: const TrText('保存'),
+        child: TrText(widget.confirmLabel),
       ),
     ],
   );

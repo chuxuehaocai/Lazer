@@ -14,10 +14,12 @@ class PlayerSeekBar extends StatefulWidget {
     required this.state,
     this.trackHeight = 4,
     this.thumbRadius = 7,
+    this.color = Colors.white,
   });
 
   final AppState state;
   final double trackHeight, thumbRadius;
+  final Color color;
 
   @override
   State<PlayerSeekBar> createState() => _PlayerSeekBarState();
@@ -78,11 +80,11 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
             trackHeight: _grabbing && _grabSource == _source && _seekable
                 ? widget.trackHeight + 3
                 : widget.trackHeight,
-            activeTrackColor: Colors.white,
-            secondaryActiveTrackColor: Colors.white.withValues(alpha: 0.68),
-            inactiveTrackColor: Colors.white.withValues(alpha: 0.32),
-            thumbColor: Colors.white,
-            overlayColor: Colors.white.withValues(alpha: 0.18),
+            activeTrackColor: widget.color,
+            secondaryActiveTrackColor: widget.color.withValues(alpha: 0.68),
+            inactiveTrackColor: widget.color.withValues(alpha: 0.32),
+            thumbColor: widget.color,
+            overlayColor: widget.color.withValues(alpha: 0.18),
             thumbShape: RoundSliderThumbShape(
               enabledThumbRadius:
                   _grabbing && _grabSource == _source && _seekable

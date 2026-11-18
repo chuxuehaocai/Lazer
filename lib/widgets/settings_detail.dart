@@ -6,6 +6,7 @@ import '../animation/apple_spring.dart';
 import '../l10n/app_localizations.dart';
 import '../navigation/system_back_gesture.dart';
 import '../theme/apple_design.dart';
+import '../ui/widgets.dart' show compactBrowsePresentation;
 
 import 'accessible_controls.dart';
 
@@ -464,7 +465,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             children: <Widget>[
               if (hasTopBar)
                 Positioned(
-                  top: 0,
+                  top: compactBrowsePresentation(context) ? 8 : 0,
                   left: 8,
                   right: 8,
                   child: Row(

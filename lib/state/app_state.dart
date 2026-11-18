@@ -1100,8 +1100,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Whether the compact/tablet floating capsule navigation filters the page.
   bool bottomBarBlurEnabled = true;
   double bottomBarBlur = kBottomBarBlurDefault;
-  double browseBackgroundFps = 30;
-  double playerBackgroundFps = 30;
+  // Zero follows display VSync, without an application-imposed frame cap.
+  double browseBackgroundFps = 0;
+  double playerBackgroundFps = 0;
   AppBackgroundMode playerBackground = AppBackgroundMode.nowPlayingDynamic;
   Color? browseBackgroundColor, playerBackgroundColor;
   String? playerBackgroundImagePath;
@@ -1113,9 +1114,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> setBackgroundFps(double fps, {bool player = false}) async {
     if (!fps.isFinite) return;
-    final double value = player && fps == 0
-        ? 0
-        : fps.clamp(10, 1000).roundToDouble();
+    final double value = fps == 0 ? 0 : fps.clamp(10, 1000).roundToDouble();
     if (player) {
       playerBackgroundFps = value;
     } else {
@@ -1788,7 +1787,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   Color? artworkSeed;
 
   /// The accent seed handed to the Apple theme builders. Null keeps the
-  /// shipped Lazer blue.
+  /// default accent for the current presentation.
   Color? get accentSeed => switch (paletteMode) {
     AppPaletteMode.fixed => null,
     AppPaletteMode.nowPlaying => artworkSeed,
@@ -2266,12 +2265,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
                 ? AppBackgroundMode.nowPlayingStatic.name
                 : AppBackgroundMode.nowPlayingDynamic.name),
       );
-      final browseFps = prefs.getDouble('lazer_browse_background_fps') ?? 30;
-      browseBackgroundFps = browseFps.isFinite ? browseFps.clamp(10, 1000) : 30;
-      final playerFps = prefs.getDouble('lazer_player_background_fps') ?? 30;
+      final browseFps = prefs.getDouble('lazer_browse_background_fps') ?? 0;
+      browseBackgroundFps = browseFps.isFinite
+          ? (browseFps == 0 ? 0 : browseFps.clamp(10, 1000))
+          : 0;
+      final playerFps = prefs.getDouble('lazer_player_background_fps') ?? 0;
       playerBackgroundFps = playerFps.isFinite
           ? (playerFps == 0 ? 0 : playerFps.clamp(10, 1000))
-          : 30;
+          : 0;
       final browseColor = prefs.getInt('lazer_browse_background_color');
       browseBackgroundColor = browseColor == null ? null : Color(browseColor);
       final playerColor = prefs.getInt('lazer_player_background_color');

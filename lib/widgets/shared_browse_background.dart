@@ -118,7 +118,10 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
             state.playerBackground == AppBackgroundMode.windowsMica;
         final canvas =
             !painted && Theme.of(context).brightness == Brightness.dark
-            ? AppleColors.darkCanvas
+            ? ((Theme.of(context).extension<AppThemePresentation>()?.compact ??
+                      false)
+                  ? AppleColors.mobileDarkCanvas
+                  : AppleColors.darkCanvas)
             : apple.background;
         return Stack(
           fit: StackFit.expand,

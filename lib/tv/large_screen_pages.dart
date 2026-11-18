@@ -1995,25 +1995,63 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage>
   String? _error;
   String _query = '';
 
-  /// In-flight search token. Typing or submitting again invalidates the old
-  /// request, so a late answer can never leave the spinner up for a query the
-  /// field no longer contains.
+  /// Clearing, submitting another query, or changing providers invalidates
+  /// pending results. Typing alone remains a draft until Enter is pressed.
   int _request = 0;
+  late String _sourceKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _sourceKey = widget.state.activeContentKey;
+    widget.state.addListener(_sourceChanged);
+  }
+
+  void _sourceChanged() {
+    if (!mounted || _sourceKey == widget.state.activeContentKey) return;
+    _resetSource();
+  }
+
+  void _resetSource() {
+    _sourceKey = widget.state.activeContentKey;
+    _request++;
+    _results = SearchResults.empty;
+    _error = null;
+    _searching = false;
+    if (widget.state.isLocalPlayback) _kind = _SearchKind.songs;
+    if (_query.isNotEmpty) {
+      unawaited(_search(_query));
+    } else {
+      setState(() {});
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant LargeScreenSearchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.removeListener(_sourceChanged);
+      widget.state.addListener(_sourceChanged);
+      _resetSource();
+    } else {
+      _sourceChanged();
+    }
+  }
 
   @override
   void dispose() {
+    widget.state.removeListener(_sourceChanged);
     _controller.dispose();
     super.dispose();
   }
 
   void _onChanged(String value) {
-    // Typing only updates the clear affordance. A query is committed on
-    // Enter, so the remote/keyboard does not fire a request per keystroke.
-    // It also cancels the previous search: its answer describes different text.
+    // As on the phone page, typing edits a draft. Keep the committed query's
+    // pending result until Enter submits a replacement or the field is cleared.
+    if (value.trim().isNotEmpty) return;
     _request++;
     setState(() {
       _searching = false;
-      if (value.trim().isNotEmpty) return;
       _query = '';
       _results = SearchResults.empty;
       _error = null;
@@ -2022,31 +2060,64 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage>
 
   void _submit(String value) {
     final String query = value.trim();
+    if (query.isEmpty) {
+      _onChanged('');
+      return;
+    }
+    if (_searching && query == _query) return;
     setState(() => _query = query);
-    if (query.isNotEmpty) unawaited(_search(query));
+    unawaited(_search(query));
   }
 
   Future<void> _search(String query) async {
     final int request = ++_request;
+    final owner = widget.state;
+    final source = owner.activeContentKey;
     setState(() {
       _searching = true;
       _error = null;
     });
     try {
-      final SearchResults results = await widget.state.search(query);
-      if (!mounted || request != _request) return;
+      final SearchResults results = await owner.search(query);
+      if (!mounted ||
+          request != _request ||
+          owner != widget.state ||
+          source != owner.activeContentKey) {
+        return;
+      }
       setState(() {
         _results = results;
         _searching = false;
+        if (owner.isLocalPlayback) {
+          _kind = _SearchKind.songs;
+        } else if (_count(results, _kind) == 0) {
+          _kind =
+              _SearchKind.values
+                  .where((kind) => _count(results, kind) > 0)
+                  .firstOrNull ??
+              _SearchKind.songs;
+        }
       });
     } catch (_) {
-      if (!mounted || request != _request) return;
+      if (!mounted ||
+          request != _request ||
+          owner != widget.state ||
+          source != owner.activeContentKey) {
+        return;
+      }
       setState(() {
         _error = '搜索失败，请检查网络后重试。';
         _searching = false;
       });
     }
   }
+
+  int _count(SearchResults results, _SearchKind kind) => switch (kind) {
+    _SearchKind.songs => results.tracks.length,
+    _SearchKind.albums => results.albums.length,
+    _SearchKind.artists => results.artists.length,
+    _SearchKind.playlists => results.playlists.length,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -2077,16 +2148,15 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage>
           ),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: inset),
-            child: Row(
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 10,
               children: <Widget>[
                 for (final _SearchKind kind in _SearchKind.values)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: LargeScreenChoiceChip(
-                      label: kind.label,
-                      selected: kind == _kind,
-                      onTap: () => setState(() => _kind = kind),
-                    ),
+                  LargeScreenChoiceChip(
+                    label: kind.label,
+                    selected: kind == _kind,
+                    onTap: () => setState(() => _kind = kind),
                   ),
               ],
             ),
