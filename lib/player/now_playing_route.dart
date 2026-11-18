@@ -31,6 +31,7 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   bool _systemGestureSettling = false;
   bool _leaving = false;
   bool _disposed = false;
+  AppLifecycleListener? _lifecycle;
 
   @override
   AnimationController createAnimationController() =>
@@ -51,16 +52,24 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   void install() {
     super.install();
     animation!.addStatusListener(_onStatus);
+    _lifecycle = AppLifecycleListener(onStateChange: _onLifecycleChanged);
   }
 
   void _onStatus(AnimationStatus status) {
     _settled.value = status == AnimationStatus.completed;
   }
 
+  void _onLifecycleChanged(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) return;
+    cancelPull();
+    handleCancelBackGesture();
+  }
+
   @override
   void dispose() {
     _disposed = true;
     _dragging = false;
+    _lifecycle?.dispose();
     _clearSystemGestureRelease();
     final nav = _systemGestureNavigator;
     if (nav != null) {

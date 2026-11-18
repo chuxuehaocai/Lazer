@@ -150,4 +150,21 @@ void main() {
     expect(nav.canPop(), isFalse);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'backgrounding cancels predictive back without a terminal event',
+    (tester) async {
+      final (route, nav) = await _mount(tester);
+      route.handleStartBackGesture(progress: .6);
+      expect(nav.userGestureInProgress, isTrue);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(nav.userGestureInProgress, isFalse);
+      expect(route.openness, closeTo(1, .001));
+      expect(route.canStart, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

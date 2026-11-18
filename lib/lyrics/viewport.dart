@@ -155,7 +155,7 @@ class _LyricViewportState extends State<LyricViewport>
     // lock now instead of reviving an unfinished long press when shown again.
     if (_selection.active) {
       _changeSelection(const LyricSelection(), resume: false);
-    } else {
+    } else if (_manual) {
       setState(() {});
     }
     _manual = false;
@@ -164,6 +164,9 @@ class _LyricViewportState extends State<LyricViewport>
   void _resumeVisibleLyrics() {
     _resume?.cancel();
     _resetGesture();
+    // Apply fresh recognizer keys after a background transition without
+    // scheduling a layout frame while idle lyrics are suspended.
+    setState(() {});
     _lastMedia = null;
     _manual = _selection.active;
     _onLane();
