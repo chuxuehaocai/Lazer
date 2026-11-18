@@ -608,6 +608,28 @@ class HifiSettings {
   final HifiEqualizerState equalizer;
   final HifiCrossfeedState crossfeed;
 
+  /// The settings supported by the iOS RemoteIO path.
+  ///
+  /// Preferences can arrive from a desktop backup. Leaving its strict output
+  /// policy selected would make every iOS open fail, while a remembered
+  /// bit-perfect request would also bypass the user's EQ. Keep the DSP choices
+  /// and buffer, but expose and apply the system route with DSD decoded to PCM.
+  HifiSettings forIosOutput() {
+    if (outputToken == null &&
+        outputName == null &&
+        !exclusiveMode &&
+        !bitPerfect &&
+        dsdOutputMode == HifiDsdOutputMode.convertToPcm) {
+      return this;
+    }
+    return copyWith(
+      clearOutput: true,
+      exclusiveMode: false,
+      bitPerfect: false,
+      dsdOutputMode: HifiDsdOutputMode.convertToPcm,
+    );
+  }
+
   /// Bit-perfect streams the decoded integer samples untouched, which also means
   /// the software volume and the EQ are bypassed — so the two cannot both be
   /// claimed. The page disables the contradictory combination instead of letting

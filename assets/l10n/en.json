@@ -1404,5 +1404,10 @@
   "桌面与悬浮歌词控制": "Desktop and floating lyrics control",
   "本次启动已达到自定义字体加载上限，请重新启动后继续切换字体。": "The custom font loading limit for this session has been reached. Restart the app to load another font.",
   "字体文件不能超过 64 MiB，请选择较小的字体文件。": "Font files must be no larger than 64 MiB. Choose a smaller font file.",
-  "按分类整理常用选项，减少滚动和查找。": "Common options grouped by category for less scrolling and searching."
+  "按分类整理常用选项，减少滚动和查找。": "Common options grouped by category for less scrolling and searching.",
+  "音频设置未应用：{error}": "Audio settings were not applied: {error}",
+  "iOS 管理输出路由；连接 USB DAC 或在控制中心选择耳机、AirPlay 设备": "iOS manages the output route. Connect a USB DAC or select headphones or an AirPlay device in Control Center.",
+  "DSD 由原生引擎解码为 PCM；iOS 输出不支持 DoP 或 Native DSD 直通": "The native engine decodes DSD to PCM. The iOS output does not support DoP or Native DSD passthrough.",
+  "iOS 原生播放支持均衡器、限幅器和耳机串扰；采样率由当前路由协商，不保证独占或 Bit-perfect": "Native iOS playback supports EQ, limiting and headphone crossfeed. The current route negotiates the sample rate; exclusive or bit-perfect output is not guaranteed.",
+  "iOS 使用应用内置的原生引擎；切换播放引擎后，下次启动应用时生效": "iOS uses the native engine bundled with the app. Switching playback engines takes effect after restarting the app."
 }

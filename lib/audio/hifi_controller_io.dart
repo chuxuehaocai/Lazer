@@ -56,12 +56,15 @@ class HifiStatus {
 /// Owns the HiFi settings for the running app.
 class HifiController extends ChangeNotifier with BuildSafeNotifier {
   HifiController(
-    this._settings, {
+    HifiSettings settings, {
     required this.engine,
     required this.persist,
     this.catalogApi,
     AndroidUsbAudio? androidUsb,
-  }) : _androidUsb =
+  }) : _settings = defaultTargetPlatform == TargetPlatform.iOS
+           ? settings.forIosOutput()
+           : settings,
+       _androidUsb =
            androidUsb ?? (Platform.isAndroid ? AndroidUsbAudio.instance : null);
 
   /// Persists a snapshot of the settings; injected so tests can observe writes.
@@ -101,19 +104,27 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   Object? get lastApplyError => _lastApplyError;
 
   bool get nativeAvailable => engine != null;
+  bool get usesIosSystemRoute => defaultTargetPlatform == TargetPlatform.iOS;
   bool get usesAndroidUsbDevices => _androidUsb != null;
   bool get supportsAndroidUsb =>
       usesAndroidUsbDevices && (catalogApi?.supportsAndroidUsb ?? false);
   bool get supportsDevices =>
-      supportsAndroidUsb ||
-      (catalogApi != null && outputDeviceCatalogKind(catalogApi!) != null);
+      !usesIosSystemRoute &&
+      (supportsAndroidUsb ||
+          (catalogApi != null && outputDeviceCatalogKind(catalogApi!) != null));
   bool get supportsExclusiveMode => usesAndroidUsbDevices
       ? supportsAndroidUsb &&
             AndroidUsbAudio.isUsbDeviceId(_settings.outputToken)
-      : Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+      : !usesIosSystemRoute &&
+            (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
   bool get supportsDoP =>
-      Platform.isWindows || Platform.isMacOS || Platform.isLinux;
-  bool get supportsNativeDsd => Platform.isLinux;
+      !usesIosSystemRoute &&
+      (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+  bool get supportsNativeDsd => !usesIosSystemRoute && Platform.isLinux;
+
+  /// Shared with AppState so controls and the applied DSP see the same policy.
+  HifiSettings normalizeSettings(HifiSettings settings) =>
+      usesIosSystemRoute ? settings.forIosOutput() : settings;
 
   /// Whether the vendored engine can enforce the selected DSD rate policy.
   bool get supportsDsdRatePolicy => _settings.dsdRatePolicy.isSupported;
@@ -228,11 +239,20 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   /// touch the DSP once, not also resend the output-device policy and query the
   /// endpoint volume on every detent. Preference writes are coalesced separately.
   Future<void> update(HifiSettings next) async {
-    if (_disposed || next == _settings) return;
+    next = normalizeSettings(next);
+    if (_disposed) return;
+    if (next == _settings) {
+      if (_lastApplyError != null) await apply();
+      return;
+    }
     final HifiSettings previous = _settings;
-    final bool outputChanged = !_sameOutputSettings(previous, next);
+    // A previous partial apply may have changed output but refused DSP (or the
+    // reverse). Retry both before clearing its error, even when this edit only
+    // changes a buffer size or another unrelated preference.
+    final bool retry = _lastApplyError != null;
+    final bool outputChanged = retry || !_sameOutputSettings(previous, next);
     final bool endpointChanged = previous.outputToken != next.outputToken;
-    final bool dspChanged = !_sameDspSettings(previous, next);
+    final bool dspChanged = retry || !_sameDspSettings(previous, next);
     _settings = next;
     _schedulePersistence(next);
     notifyListeners();
@@ -257,8 +277,19 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   /// Pushes the current settings into the engine.
   Future<void> apply() async {
-    await _applyOutputSettings(refreshVolume: true);
-    await _applyDspSettings();
+    if (_disposed) return;
+    final HifiSettings snapshot = _settings;
+    try {
+      await _applyOutputSettings(refreshVolume: true);
+      await _applyDspSettings();
+      if (_disposed || !identical(_settings, snapshot)) return;
+      _lastApplyError = null;
+    } catch (error) {
+      if (_disposed || !identical(_settings, snapshot)) return;
+      _lastApplyError = error;
+      debugPrint('hifi: applying settings failed: $error');
+    }
+    notifyListeners();
   }
 
   Future<void> _applyOutputSettings({required bool refreshVolume}) async {
@@ -387,6 +418,15 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   /// Re-reads the platform's output devices.
   Future<void> refreshDevices() async {
     if (_disposed) return;
+    if (usesIosSystemRoute) {
+      // iOS chooses outputs through AVAudioSession and Control Center. A desktop
+      // catalog (or a saved UID) must not appear as a selectable iOS endpoint.
+      _devices = const <LazerOutputDevice>[];
+      _deviceError = null;
+      _endpointVolume = null;
+      notifyListeners();
+      return;
+    }
     final usb = _androidUsb;
     if (usb != null) {
       final generation = ++_catalogGeneration;

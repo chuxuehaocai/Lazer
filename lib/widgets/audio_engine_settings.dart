@@ -2,6 +2,7 @@ import 'build_safe_state.dart';
 import 'spring_buttons.dart';
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../audio/native/imported_engine.dart';
@@ -23,6 +24,8 @@ class _AudioEngineSettingsState extends State<AudioEngineSettings>
     with BuildSafeState<AudioEngineSettings> {
   bool _importing = false;
   String? _error;
+  bool get _bundledOnly =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   Future<void> _import() async {
     setState(() {
@@ -51,7 +54,9 @@ class _AudioEngineSettingsState extends State<AudioEngineSettings>
       children: [
         SettingsRow(
           label: '音频引擎', // i18n:key
-          subtitle: '切换引擎或导入后，下次启动应用时生效', // i18n:key
+          subtitle: _bundledOnly
+              ? 'iOS 使用应用内置的原生引擎；切换播放引擎后，下次启动应用时生效'
+              : '切换引擎或导入后，下次启动应用时生效', // i18n:key
           expandControl: true,
           trailing: SettingsChoice<bool>(
             key: const ValueKey('audio-engine-choice'),
@@ -73,22 +78,23 @@ class _AudioEngineSettingsState extends State<AudioEngineSettings>
             },
           ),
         ),
-        AppleListTile(
-          padding: SettingsSpacing.rowPadding,
-          minHeight: SettingsSpacing.rowMinHeight,
-          title: context.tr('导入 Audio Engine'),
-          subtitle: context.tr(
-            widget.state.importedEnginePath == null
-                ? '使用应用内置引擎，可导入当前平台的引擎和依赖库'
-                : '已选择导入的引擎',
+        if (!_bundledOnly)
+          AppleListTile(
+            padding: SettingsSpacing.rowPadding,
+            minHeight: SettingsSpacing.rowMinHeight,
+            title: context.tr('导入 Audio Engine'),
+            subtitle: context.tr(
+              widget.state.importedEnginePath == null
+                  ? '使用应用内置引擎，可导入当前平台的引擎和依赖库'
+                  : '已选择导入的引擎',
+            ),
+            trailing: SpringTextButton(
+              key: const ValueKey('import-audio-engine'),
+              onPressed: _importing ? null : _import,
+              child: TrText(_importing ? '导入中' : '选择文件'),
+            ),
           ),
-          trailing: SpringTextButton(
-            key: const ValueKey('import-audio-engine'),
-            onPressed: _importing ? null : _import,
-            child: TrText(_importing ? '导入中' : '选择文件'),
-          ),
-        ),
-        if (widget.state.importedEnginePath != null)
+        if (!_bundledOnly && widget.state.importedEnginePath != null)
           AppleListTile(
             padding: SettingsSpacing.rowPadding,
             minHeight: SettingsSpacing.rowMinHeight,

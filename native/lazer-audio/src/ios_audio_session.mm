@@ -120,10 +120,12 @@ int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
             }
         }
 
-        // Both of these are requests: the route decides. Reading them back below is
-        // what the engine is allowed to call a fact.
+        // Compare preferences to preferences: the current route can already run
+        // at the requested rate while a stale preference still names the previous
+        // track's clock. That stale value could take effect on the next USB route.
+        // Both requests are hints; only the activated route values below are facts.
         if (preferredSampleRate > 0 &&
-            std::fabs(session.sampleRate - static_cast<double>(preferredSampleRate)) > 0.5) {
+            std::fabs(session.preferredSampleRate - static_cast<double>(preferredSampleRate)) > 0.5) {
             [session setPreferredSampleRate:static_cast<double>(preferredSampleRate) error:nil];
         }
         if (bufferMillis > 0 && std::fabs(session.preferredIOBufferDuration -

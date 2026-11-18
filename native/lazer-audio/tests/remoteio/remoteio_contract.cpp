@@ -71,6 +71,8 @@ struct FakeUnitState {
 FakeUnitState g_unit;
 bool g_componentAvailable = true;
 bool g_changeGrantedChannels = false;
+UInt32 g_maximumSliceFrames = 4096;
+bool g_failMaximumSliceReadback = false;
 OSStatus g_startStatus = noErr;
 int g_instancesCreated = 0;
 int g_instancesDisposed = 0;
@@ -202,6 +204,13 @@ OSStatus AudioUnitSetProperty(AudioUnit unit, AudioUnitPropertyID id, AudioUnitS
 OSStatus AudioUnitGetProperty(AudioUnit unit, AudioUnitPropertyID id, AudioUnitScope,
     AudioUnitElement, void *outData, UInt32 *ioDataSize) {
     if (unit == nullptr || outData == nullptr || ioDataSize == nullptr) return -1;
+    if (id == kAudioUnitProperty_MaximumFramesPerSlice) {
+        check(!g_unit.running, "queries maximum slice before the unit starts");
+        if (g_failMaximumSliceReadback || *ioDataSize < sizeof(g_maximumSliceFrames)) return -1;
+        std::memcpy(outData, &g_maximumSliceFrames, sizeof(g_maximumSliceFrames));
+        *ioDataSize = sizeof(g_maximumSliceFrames);
+        return noErr;
+    }
     if (id != kAudioUnitProperty_StreamFormat ||
         *ioDataSize < sizeof(AudioStreamBasicDescription) || !g_unit.formatSet) {
         return -1;
@@ -542,6 +551,97 @@ void testWaitForReadySeesTheDeviceDrain() {
     output->close();
 }
 
+void testHighResolutionSleepSlicesFitTheQueue() {
+    g_session = FakeSession{};
+    g_session.sampleRate = 192000;
+    g_session.ioBufferFrames = 256;
+    g_session.route = "USBAudio";
+    g_maximumSliceFrames = 16384;
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    auto requested = request();
+    requested.bufferMillis = 20;
+    requested.desired.sampleRate = 192000;
+    auto described = source();
+    described.sampleRate = 192000;
+    described.bitsPerSample = 24;
+    openDefault(*output, session, error, requested, described);
+    checkEqual(session.target.sampleRate, 192000, "accepts a high-resolution USB route clock");
+    checkEqual(session.periodFrames, 256, "keeps the actual IO period independent of slice reserve");
+    check(output->writableFrames(error) >= static_cast<int32_t>(g_maximumSliceFrames) * 2,
+        "a short requested buffer still reserves two maximum sleep slices");
+    std::vector<float> samples(static_cast<size_t>(g_maximumSliceFrames) * 2);
+    for (size_t index = 0; index < samples.size(); ++index) {
+        samples[index] = static_cast<float>(static_cast<int>(index % 65536) - 32768) / 8388608.0f;
+    }
+    for (int pass = 0; pass < 3; ++pass) {
+        checkEqual(output->write(reinterpret_cast<const uint8_t *>(samples.data()),
+                static_cast<int32_t>(g_maximumSliceFrames), error), g_maximumSliceFrames,
+            "accepts a complete maximum slice at 192 kHz");
+        output->start(error);
+        const auto pulled = pullAudio(static_cast<int32_t>(g_maximumSliceFrames), 2);
+        check(pulled == samples, "large sleep callbacks preserve every 24-bit PCM sample");
+    }
+    output->close();
+    g_maximumSliceFrames = 4096;
+}
+
+void testRouteSliceGrowthPreservesWrappedPcm() {
+    g_session = FakeSession{};
+    g_session.sampleRate = 192000;
+    g_maximumSliceFrames = 4096;
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    auto requested = request();
+    requested.bufferMillis = 20;
+    openDefault(*output, session, error, requested);
+    const int32_t capacity = output->writableFrames(error);
+    std::vector<float> original(static_cast<size_t>(capacity) * 2, 0.125f);
+    output->write(reinterpret_cast<const uint8_t *>(original.data()), capacity, error);
+    output->start(error);
+    pullAudio(capacity - 3, 2);
+    const std::vector<float> appended(32 * 2, -0.625f);
+    output->write(reinterpret_cast<const uint8_t *>(appended.data()), 32, error);
+    checkEqual(output->queuedFrames(error), 35, "sets up wrapped PCM before changing the route");
+
+    g_session.sampleRate = 48000;
+    g_session.ioBufferFrames = 1024;
+    g_maximumSliceFrames = 32768; // Client-rate conversion enlarges the system slice.
+    ++g_session.state.revision;
+    checkEqual(output->queuedFrames(error), 35, "growing the slice reserve retains all queued frames");
+    check(output->writableFrames(error) + 35 >= 65536,
+        "recovery reserves the new route's larger client-rate slices");
+    checkNear(g_unit.format.mSampleRate, 192000, 0.5,
+        "growing the queue preserves the high-resolution client clock");
+    const auto pulled = pullAudio(35, 2);
+    check(std::all_of(pulled.begin(), pulled.begin() + 6,
+        [](float sample) { return sample == 0.125f; }), "the old queue's tail stays first");
+    check(std::equal(pulled.begin() + 6, pulled.end(), appended.begin()),
+        "wrapped samples follow the old tail without corruption or silence");
+    output->close();
+    g_maximumSliceFrames = 4096;
+}
+
+void testInvalidMaximumSlicesAreReported() {
+    for (const int variant : {0, 1, 2}) {
+        g_session = FakeSession{};
+        g_failMaximumSliceReadback = variant == 0;
+        g_maximumSliceFrames = variant == 1 ? 0 : 1000000;
+        auto output = createPlatformAudioOutput();
+        AudioOutputSession session{};
+        std::string error;
+        checkEqual(output->open(request(), source(), session, error, nullptr),
+            LazerAudioErrorDevice, "rejects an unreported, zero or unbounded maximum slice");
+        check(!error.empty(), "explains the invalid maximum slice");
+        check(!output->isOpen(), "a failed slice negotiation cannot leave an output open");
+        checkEqual(g_session.deactivateCalls, 1, "invalid slice negotiation releases the session");
+    }
+    g_failMaximumSliceReadback = false;
+    g_maximumSliceFrames = 4096;
+}
+
 void testMissingUnitAndSessionFailureAreReported() {
     g_session = FakeSession{};
     g_componentAvailable = false;
@@ -858,6 +958,9 @@ int main() {
     testRenderFillsEveryBufferItIsGiven();
     testBufferDepthIsTheDeviceLatencyNotTheSoftwareQueue();
     testWaitForReadySeesTheDeviceDrain();
+    testHighResolutionSleepSlicesFitTheQueue();
+    testRouteSliceGrowthPreservesWrappedPcm();
+    testInvalidMaximumSlicesAreReported();
     testMissingUnitAndSessionFailureAreReported();
     testRejectsChangedCallbackLayout();
     testRouteChangesKeepTheClientClockAndQueuedPcm();

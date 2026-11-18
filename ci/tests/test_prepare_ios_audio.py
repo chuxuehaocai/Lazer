@@ -93,6 +93,7 @@ class IosAudioPreparationTest(unittest.TestCase):
         self.calls.clear()
         self.prepare("iphonesimulator")
         self.assertEqual(self.calls[0][-1], "simulator")
+        self.assertEqual(self.calls[1][-2:], ["--platform", "simulator"])
         for platform in ("device", "simulator"):
             self.assertTrue(
                 (self.repo / "build/ios-audio" / platform / "stage/inputs.sha256").is_file()

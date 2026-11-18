@@ -901,13 +901,11 @@ class NativeAudioEngine
         token,
       ]),
     );
-    // A running source applies the selection on its next open. Every other USB
-    // refusal must reach the settings UI instead of retaining a system route.
-    if (AndroidUsbAudio.isUsbDeviceId(settings.deviceToken) &&
-        status != lazerAudioOk &&
-        status != lazerAudioErrorState) {
+    // A running source applies the selection on its next open. Every other
+    // refusal must reach the settings UI instead of looking successfully applied.
+    if (status != lazerAudioOk && status != lazerAudioErrorState) {
       throw StateError(
-        'USB output settings were refused ($status): ${lastError()}',
+        'Output settings were refused ($status): ${lastError()}',
       );
     }
   }
@@ -967,16 +965,23 @@ class NativeAudioEngine
   }) async {
     final int? address = _engineAddressOrNull;
     if (address == null) return;
-    await _callWorker(LazerWorkerOp.setDsp, <Object?>[
-      address,
-      preampDb,
-      limiterEnabled ? 1 : 0,
-      limiterThresholdDb,
-      <Object?>[for (final LazerEqBandSettings band in bands) band.toMessage()],
-      crossfeed.toMessage(),
-      // Empty means the engine's default order; see `HifiSettings.dspStageOrder`.
-      stageOrder,
-    ]);
+    final int status = _status(
+      await _callWorker(LazerWorkerOp.setDsp, <Object?>[
+        address,
+        preampDb,
+        limiterEnabled ? 1 : 0,
+        limiterThresholdDb,
+        <Object?>[
+          for (final LazerEqBandSettings band in bands) band.toMessage(),
+        ],
+        crossfeed.toMessage(),
+        // Empty means the engine's default order; see `HifiSettings.dspStageOrder`.
+        stageOrder,
+      ]),
+    );
+    if (status != lazerAudioOk) {
+      throw StateError('DSP settings were refused ($status): ${lastError()}');
+    }
   }
 
   /// Deletes the audio cache; playback stops because its files are gone.
@@ -1431,15 +1436,8 @@ class NativeAudioEngine
       status = await apply();
     }
     if (status != lazerAudioOk) {
-      if (AndroidUsbAudio.isUsbDeviceId(settings.deviceToken)) {
-        throw StateError(
-          'USB output settings were refused ($status): ${lastError()}',
-        );
-      }
-      // Playback can still proceed with the previous output config, but the
-      // mismatch must be visible in the path log rather than implied.
-      debugPrint(
-        'lazer-audio: output settings were not applied ($status): ${lastError()}',
+      throw StateError(
+        'Output settings were refused ($status): ${lastError()}',
       );
     }
     await _callWorker(LazerWorkerOp.setVolume, <Object?>[address, _volume]);

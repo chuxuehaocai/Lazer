@@ -66,6 +66,25 @@ BRIDGE_SYMBOLS = [
     "lazer_bridge_reader_set_length",
 ]
 
+# LC_BUILD_VERSION platform values from Apple's mach-o/loader.h. Device and
+# Simulator archives can both be arm64; checking the CPU alone cannot tell
+# whether a downloaded or locally cached archive is usable by this SDK.
+MACHO_PLATFORMS = {"device": {"2", "IOS"}, "simulator": {"7", "IOSSIMULATOR"}}
+
+
+def verify_platform(path: Path, platform: str) -> None:
+    output = run("otool", "-l", "-arch", "arm64", str(path))
+    platforms = set(re.findall(
+        r"\bcmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (\S+)", output
+    ))
+    if not platforms:
+        raise SystemExit(f"{path.name} has no arm64 LC_BUILD_VERSION platform metadata")
+    if not platforms <= MACHO_PLATFORMS[platform]:
+        raise SystemExit(
+            f"{path.name} targets Mach-O platform {', '.join(sorted(platforms))}; "
+            f"expected iOS {platform}. Device and Simulator arm64 archives are not interchangeable."
+        )
+
 
 def verify_build_settings(path: Path) -> int:
     """Check Xcode's effective Runner settings, including project overrides.
@@ -141,12 +160,13 @@ def exported_symbols(binary: Path) -> set[str]:
     return symbols
 
 
-def verify_executable(binary: Path) -> int:
+def verify_executable(binary: Path, platform: str = "device") -> int:
     if not binary.is_file():
         raise SystemExit(f"missing executable: {binary}")
     arch = run("lipo", "-info", str(binary))
     if "arm64" not in arch:
         raise SystemExit(f"{binary.name} is not an arm64 executable: {arch.strip()}")
+    verify_platform(binary, platform)
 
     symbols = exported_symbols(binary)
     source = "the dynamic export trie"
@@ -215,14 +235,14 @@ def bundle_executable(info, label: str) -> str:
     return executable
 
 
-def verify_app(path: Path) -> int:
+def verify_app(path: Path, platform: str = "device") -> int:
     if (path / "Resources").exists():
         raise SystemExit(f"{path} has a reserved top-level Resources directory")
     try:
         info = plistlib.loads((path / "Info.plist").read_bytes())
     except (OSError, plistlib.InvalidFileException, ValueError) as error:
         raise SystemExit(f"Invalid app {path}: {error}") from error
-    return verify_executable(path / bundle_executable(info, str(path)))
+    return verify_executable(path / bundle_executable(info, str(path)), platform)
 
 
 def verify_ipa(path: Path) -> int:
@@ -300,7 +320,7 @@ def verify_required_abi_matches_dart() -> None:
         raise SystemExit(1)
 
 
-def verify_archive(directory: Path) -> int:
+def verify_archive(directory: Path, platform: str = "device") -> int:
     if not directory.is_dir():
         raise SystemExit(f"missing directory: {directory}")
     required = [
@@ -317,6 +337,7 @@ def verify_archive(directory: Path) -> int:
             raise SystemExit(f"missing archive: {archive}")
         if "arm64" not in run("lipo", "-info", str(archive)):
             raise SystemExit(f"{name} is not an arm64 archive")
+        verify_platform(archive, platform)
     symbols = defined_symbols(directory / "liblazer-audio.a")
     missing = [name for name in ABI_SYMBOLS if name not in symbols]
     if missing:
@@ -331,7 +352,8 @@ def verify_archive(directory: Path) -> int:
         )
         return 1
     print(
-        f"{directory}: {len(required)} arm64 archives, engine ABI and bridge exports complete"
+        f"{directory}: {len(required)} iOS {platform} arm64 archives, "
+        "engine ABI and bridge exports complete"
     )
     return 0
 
@@ -343,16 +365,20 @@ def main() -> int:
     target.add_argument("--ipa", type=Path, help="finished unsigned device IPA")
     target.add_argument("--archive", type=Path, help="staged iOS archive directory")
     target.add_argument("--build-settings", type=Path, help="Xcode -showBuildSettings -json output")
+    parser.add_argument("--platform", choices=MACHO_PLATFORMS, default="device",
+                        help="expected Mach-O platform (default: device)")
     parser.add_argument("--expect-native", action="store_true", help="fail when the engine is absent")
     args = parser.parse_args()
     verify_required_abi_matches_dart()
     if args.build_settings is not None:
         return verify_build_settings(args.build_settings)
     if args.ipa is not None:
+        if args.platform != "device":
+            parser.error("an IPA must target the device platform")
         return verify_ipa(args.ipa)
     if args.app is not None:
-        return verify_app(args.app)
-    return verify_archive(args.archive)
+        return verify_app(args.app, args.platform)
+    return verify_archive(args.archive, args.platform)
 
 
 if __name__ == "__main__":

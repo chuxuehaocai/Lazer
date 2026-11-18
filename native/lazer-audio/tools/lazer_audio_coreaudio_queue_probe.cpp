@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 
 using lazer::audio::CoreAudioPcmQueue;
 using lazer::audio::coreAudioCallbackHostTimeIsStale;
@@ -94,6 +95,15 @@ int main() {
         0x09, 0x0a, 0x19, 0x1a,
     }};
     ok &= expect(queue.write(second.data(), 2) == 2, "write wraps around the ring boundary");
+    ok &= expect(!queue.reservePreservingFrames(std::numeric_limits<size_t>::max()),
+        "reject a growth request whose byte count overflows without allocating");
+    ok &= expect(queue.capacityFrames() == 3 && queue.queuedFrames() == 3,
+        "failed growth leaves the queue and its queued PCM intact");
+    ok &= expect(queue.reservePreservingFrames(8), "grow a wrapped queue while stopped");
+    ok &= expect(queue.capacityFrames() == 8 && queue.queuedFrames() == 3,
+        "successful growth changes capacity without changing queued frame count");
+    ok &= expect(queue.reservePreservingFrames(2) && queue.capacityFrames() == 8,
+        "a smaller reserve request never shrinks or discards queued frames");
     std::array<uint8_t, 12> interleaved{};
     std::array<uint8_t *, 1> output{{interleaved.data()}};
     std::array<size_t, 1> outputCapacity{{interleaved.size()}};

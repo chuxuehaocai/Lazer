@@ -216,22 +216,25 @@ audio.path event=format codec=dsd_lsbf_planar source=DSD64x output=DoP @ 176400 
 
 ---
 
-## 11. iOS（新增，全部待在真机上验证）
+## 11. iOS（模拟器已有基础播放证据，真机待验证）
 
 iOS 的引擎是**静态链接**进 `Runner` 二进制的（`liblazer-audio.a` + reader bridge + 四个 FFmpeg 静态库），
 后端是新写的 RemoteIO（`native/lazer-audio/src/output_remoteio.cpp`），会话由 `AVAudioSession` 承担。
-CI 能证明的只有：两套契约（AAudio / RemoteIO）在假实现上通过、arm64 静态库导出 18 个 ABI 符号、
-`Runner` 的可执行文件导出表里有这些符号且没有多余动态库依赖。**以下每一项都还没有在设备上跑过。**
+2026-11-18 的[既有 CI](https://github.com/chuxuehaocai/Lazer/actions/runs/44229836575)
+在提交 `ce0c24a` 上通过了 Xcode 26.6 的真机/模拟器归档构建、原生模拟器播放
+（`PASS file=341ms reader=352ms ABI=29`）与 IPA 导出检查。
+这证明旧版本的真实 FFmpeg/reader/RemoteIO 链路能在模拟器推进播放时钟，
+不代表本轮修改或下表真机检查已经通过。本轮修复和验证范围见 [iOS 音频记录](ios-audio.md)。
 
 装机前提：未签名 IPA 需自行签名（Sideloadly / AltStore / 自有证书）。装好后先看
 设置 → 高保真播放 → 播放引擎，以及诊断日志：应当显示原生引擎。
 若走系统引擎，日志会保留原因（符号找不到 / ABI 不符 / 会话启动失败）。
 
-CI 已经替你证明、不必重复的部分（`ios-native` + `ios` 两个任务，macos-15）：
-六个 arm64 静态归档同一次构建产出；`Runner` 可执行文件的**动态导出表**里有引擎的 18 个
-ABI 符号与 reader bridge 的全部 10 个导出（`dyld_info -exports`，读的是动态加载器真正用的导出
-trie，不是被 strip 的符号表），包内没有 FFmpeg 动态库。也就是说 `DynamicLibrary.process()`
-在设备上**应当**能解析到引擎；剩下要验证的是解析到之后，声音有没有正确地送出去。
+现有 CI 的通过记录包含六个 arm64 静态归档；`Runner` 的**动态导出表**具有引擎的
+19 个符号与 reader bridge 的 11 个导出，包内没有额外 FFmpeg 动态库。
+本轮进一步增加 Mach-O 真机/模拟器平台检查，以及 `ios-flutter-integration` 任务，
+直接运行 Dart FFI、worker、HiFi 控制器和实际音频输出测试；后者成为 IPA 的依赖任务。
+新增任务尚未在本机执行，不能将已有 CI 的通过结果套用到本轮更改。
 
 | 检查项 | 怎么做 | 预期 |
 | --- | --- | --- |
@@ -241,11 +244,12 @@ trie，不是被 strip 的符号表），包内没有 FFmpeg 动态库。也就�
 | 中断 | 来电、Siri、闹钟、其它 App 抢占 | 暂停并上报；回来后**不自动从错误位置续播** |
 | 后台与锁屏 | 锁屏、切后台、控制中心操作 | 继续播放，控制中心的进度/歌词跟随 |
 | 无缝切歌与拖动 | 连续切歌、长按进度条拖动、暂停/恢复 | 无卡顿爆音；无欠载累积 |
-| 能力文案 | 设置里看独占 / 位完美 / DSD | 必须显示**不可用**（iOS 没有独占与直通 DSD） |
+| 能力文案 | 设置里看独占 / 位完美 / DSD | 本后端独占、位完美、DSD 直通不可用；DSD 解码转 PCM 可播放，EQ/限幅器/串扰可配置 |
 | 长时稳定性 | 连续播放 ≥ 1 小时，观察发热与欠载 | 无逐渐恶化的爆音；内存不增长 |
 
-已知限制（不是缺陷，是平台事实）：iOS 声音始终经过系统混音；`preferredSampleRate` 只是请求，
-路由可以拒绝；蓝牙/AirPlay 会引入额外延迟与重编码。
+本实现经系统管理的 RemoteIO PCM 路由输出，未实现 USB 独占或直接 DSD 传输。
+`preferredSampleRate` 只是请求，路由可以拒绝；输出格式描述客户端会话，不是 DAC 位流读回。
+蓝牙/AirPlay 的延迟和编码由系统路由决定。
 
 ### 自动验证与真机边界
 

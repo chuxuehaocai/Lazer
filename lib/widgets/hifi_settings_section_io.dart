@@ -141,6 +141,23 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                     ),
                   ),
                 ),
+              if (native && hifi.lastApplyError != null)
+                _WarningRow('音频设置未应用：${hifi.lastApplyError}'),
+              if (native && hifi.usesIosSystemRoute) ...<Widget>[
+                const _SettingRow(
+                  label: '输出设备',
+                  subtitle: 'iOS 管理输出路由；连接 USB DAC 或在控制中心选择耳机、AirPlay 设备',
+                  trailing: TrText('系统默认输出设备'),
+                ),
+                const _SettingRow(
+                  label: 'DSD 输出',
+                  subtitle: 'DSD 由原生引擎解码为 PCM；iOS 输出不支持 DoP 或 Native DSD 直通',
+                  trailing: Text('PCM'),
+                ),
+                const _WarningRow(
+                  'iOS 原生播放支持均衡器、限幅器和耳机串扰；采样率由当前路由协商，不保证独占或 Bit-perfect',
+                ),
+              ],
               if (native && hifi.supportsDevices)
                 _SettingRow(
                   label: '输出设备',

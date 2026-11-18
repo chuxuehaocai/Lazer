@@ -8,7 +8,7 @@
  * same queue the HAL backend fills, so the engine's render thread sees the
  * familiar "write, report capacity, wait" contract.
  *
- * Precision is honestly downgraded here: iOS has no exclusive access, so
+ * Precision is honestly downgraded here: this backend has no exclusive access, so
  * bit-perfect, DoP and native DSD requests are refused the way AAudio refuses
  * them, and the session reports SharedMix.
  */
@@ -58,8 +58,8 @@ public:
         session = AudioOutputSession{};
 
         if (request.bitPerfect || request.requireDoP || request.requireNativeDsd) {
-            error = "iOS audio is always mixed; exclusive, bit-perfect and direct DSD output "
-                    "are unavailable";
+            error = "iOS uses a system-managed PCM route; exclusive, bit-perfect and direct DSD "
+                    "output are unavailable in this backend";
             return LazerAudioErrorUnsupported;
         }
 
@@ -297,6 +297,7 @@ private:
     /// How long the device needs to render one period, bounded so a pathological
     /// route cannot park the producer for longer than a frame budget.
     [[nodiscard]] int32_t ioPeriodMillis() const noexcept {
+        std::lock_guard<std::recursive_mutex> guard(mutex_);
         const int32_t frames = ioPeriodFrames_.load(std::memory_order_acquire);
         const int32_t rate = target_.sampleRate;
         if (frames <= 0 || rate <= 0) return 20;
@@ -389,6 +390,39 @@ private:
             return LazerAudioErrorDevice;
         }
         initialized_ = true;
+
+        // The hardware may ask for much larger blocks while the display sleeps,
+        // or when RemoteIO converts a high-rate client stream to a new route.
+        // A queue sized only from the normal IO period can never supply a whole
+        // such callback, causing repeated underruns even with a fast decoder.
+        UInt32 maximumSliceFrames = 0;
+        UInt32 maximumSliceSize = sizeof(maximumSliceFrames);
+        status = AudioUnitGetProperty(unit_, kAudioUnitProperty_MaximumFramesPerSlice,
+            kAudioUnitScope_Global, kOutputBus, &maximumSliceFrames, &maximumSliceSize);
+        if (status != noErr || maximumSliceSize != sizeof(maximumSliceFrames) ||
+            maximumSliceFrames == 0) {
+            error = status != noErr ? statusText("RemoteIO maximum render slice", status)
+                : "RemoteIO did not report a valid maximum render slice";
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+        const int64_t maximumQueueFrames = std::max<int64_t>(kMinimumQueueFrames,
+            static_cast<int64_t>(target_.sampleRate) * kMaximumQueueSeconds);
+        if (maximumSliceFrames > maximumQueueFrames) {
+            error = "RemoteIO requires a render slice larger than the bounded output queue";
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
+        // Room for a second maximum slice lets the producer refill while the
+        // device consumes the first. Allocation happens before the unit starts;
+        // recovery preserves all queued PCM rather than resetting the source.
+        const size_t sliceCapacity = static_cast<size_t>(std::min<int64_t>(
+            static_cast<int64_t>(maximumSliceFrames) * 2, maximumQueueFrames));
+        if (!queue_.reservePreservingFrames(sliceCapacity)) {
+            error = "Could not grow the iOS output queue for the negotiated render slice";
+            disposeUnit();
+            return LazerAudioErrorDevice;
+        }
         // Read back what the unit accepted instead of trusting the request.
         AudioStreamBasicDescription granted{};
         UInt32 grantedSize = sizeof(granted);
@@ -481,6 +515,13 @@ private:
                 disposeUnit();
                 recordRecoveryFailure(recoveryError);
                 return false;
+            }
+            if (info.sampleRate > 0 && info.ioBufferFrames > 0) {
+                const int64_t clientFrames = static_cast<int64_t>(info.ioBufferFrames) *
+                    target_.sampleRate / info.sampleRate;
+                ioPeriodFrames_.store(static_cast<int32_t>(std::clamp<int64_t>(
+                    clientFrames, 1, std::numeric_limits<int32_t>::max())),
+                    std::memory_order_release);
             }
             rebuildRequired_ = false;
         }

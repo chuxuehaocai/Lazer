@@ -22,6 +22,13 @@ SPEC.loader.exec_module(VERIFY)
 
 
 class IosAudioExportsTest(unittest.TestCase):
+    def setUp(self):
+        # Most tests isolate symbol/package checks. Platform inspection has its
+        # own cases below, with actual otool output shapes.
+        self.platform_patch = patch.object(VERIFY, "verify_platform")
+        self.platform_patch.start()
+        self.addCleanup(self.platform_patch.stop)
+
     def build_settings(self, path, **overrides):
         settings = {
             "STRIP_STYLE": "non-global",
@@ -236,6 +243,55 @@ class IosAudioExportsTest(unittest.TestCase):
                             patch.object(VERIFY, "defined_symbols", side_effect=symbols), \
                             contextlib.redirect_stderr(io.StringIO()):
                         self.assertEqual(VERIFY.verify_archive(root), 1)
+
+
+class IosMachOPlatformTest(unittest.TestCase):
+    def output(self, *platforms):
+        return "\n".join(
+            f"archive.a(member{index}.o):\nLoad command 1\n"
+            f"      cmd LC_BUILD_VERSION\n  cmdsize 24\n platform {platform}\n"
+            "    minos 15.0\n      sdk 26.0\n   ntools 0\n"
+            for index, platform in enumerate(platforms)
+        )
+
+    def test_device_and_simulator_accept_numeric_and_verbose_platform_names(self):
+        for platform, markers in (("device", ("2", "IOS")),
+                                  ("simulator", ("7", "IOSSIMULATOR"))):
+            with self.subTest(platform=platform), \
+                    patch.object(VERIFY, "run", return_value=self.output(*markers)) as command:
+                VERIFY.verify_platform(Path("archive.a"), platform)
+                command.assert_called_once_with("otool", "-l", "-arch", "arm64", "archive.a")
+
+    def test_wrong_or_mixed_platform_objects_fail_even_if_all_are_arm64(self):
+        for platform, markers in (("device", ("7",)), ("simulator", ("2",)),
+                                  ("device", ("2", "7")), ("simulator", ("7", "1"))):
+            with self.subTest(platform=platform, markers=markers), \
+                    patch.object(VERIFY, "run", return_value=self.output(*markers)):
+                with self.assertRaisesRegex(SystemExit, "not interchangeable"):
+                    VERIFY.verify_platform(Path("archive.a"), platform)
+
+    def test_missing_platform_metadata_cannot_pass_as_device(self):
+        with patch.object(VERIFY, "run", return_value="archive.a: architecture arm64"):
+            with self.assertRaisesRegex(SystemExit, "no arm64 LC_BUILD_VERSION"):
+                VERIFY.verify_platform(Path("archive.a"), "device")
+
+    def test_archive_checks_every_ffmpeg_and_engine_member_platform(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            names = ("liblazer-audio.a", "liblazer-audio-bridge.a", "libavformat.a",
+                     "libavcodec.a", "libavutil.a", "libswresample.a")
+            for name in names:
+                (root / name).touch()
+            def run(*command):
+                return "arm64" if command[0] == "lipo" else self.output("7")
+            with patch.object(VERIFY, "run", side_effect=run) as command, \
+                    patch.object(VERIFY, "defined_symbols",
+                                 return_value=set(VERIFY.ABI_SYMBOLS + VERIFY.BRIDGE_SYMBOLS)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(VERIFY.verify_archive(root, "simulator"), 0)
+                checked = {Path(call.args[-1]).name for call in command.call_args_list
+                           if call.args[0] == "otool"}
+                self.assertEqual(checked, set(names))
 
 
 if __name__ == "__main__":

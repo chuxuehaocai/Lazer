@@ -318,7 +318,7 @@ Status of this port:
 | ReplayGain | Supported per source by the ABI; the app does not compute or pass it yet. |
 | Linux/macOS playback | Not run. The code is the master branch's, unchanged, but ALSA/CoreAudio device behaviour is unverified here. |
 | Android | Wired at the build and load layers: CI builds the engine for `arm64-v8a` and `armeabi-v7a`, stages them into `jniLibs` and verifies the APK, and `LazerAudioLoader` resolves `liblazer-audio.so` on `androidArm64`/`androidX64`. See `docs/android-audio.md`. **`armeabi-v7a` is not in the loader's candidate list**, so a 32-bit ARM build ships the engine without ever selecting it; Android has no exclusive/bit-perfect/DSD path (AAudio shared PCM only). |
-| iOS | The Runner's **Prepare Audio Engine** phase builds and caches the static arm64 engine, reader bridge and FFmpeg SDK for local Xcode/Flutter builds. CI supplies its prebuilt archives through `ios/Flutter/LazerAudio.xcconfig`; both paths use the same linker flags and `DynamicLibrary.process()` loader. The backend is RemoteIO (`src/output_remoteio.cpp`), its state machine is covered by `tests/remoteio` on every host, and the iOS job checks the executable's dynamic export trie. iOS is a shared mix: no exclusive mode, no bit-perfect, no direct DSD. **Physical iOS playback is still unverified here** — see `docs/audio-engine-hardware-verification.md` section 11. |
+| iOS | The Runner's **Prepare Audio Engine** phase builds/caches static arm64 engine, reader bridge and FFmpeg archives; CI supplies the same archives through SDK-specific `ios/Flutter/LazerAudio.xcconfig` overrides. Dart uses `DynamicLibrary.process()`. RemoteIO supports PCM, DSD decoded to PCM and the native DSP chain; this backend does not offer exclusive/bit-perfect/DSD passthrough. The output queue accommodates the system's maximum render slice and preserves PCM on route recovery. CI checks Mach-O platform, exported symbols, native Simulator playback and the Flutter worker/HiFi integration before producing an IPA. **The new Flutter gate and physical playback remain unverified locally**; see [iOS implementation and validation](ios-audio.md). |
 
 Nothing here is evidence that a DAC received the source bits unaltered: the engine
 reports what the platform endpoint accepted, which is necessary but not sufficient, and
@@ -371,5 +371,7 @@ labelled as such instead of silently behaving like the fallback.
 3. Feed ReplayGain from the local-library metadata into `LazerOpenSettings`.
 4. Verify on Linux (ALSA `hw:`) and macOS (CoreAudio HAL, Hog Mode).
 5. Run `flutter test integration_test/ios_native_engine_test.dart -d <ios-device>`
-   on macOS to verify factory selection, worker startup, silent PCM playback,
-   pause, seek and stop through the linked iOS engine.
+   on macOS to verify factory selection, worker startup, 24-bit high-rate PCM,
+   DSD64-to-PCM, measured preamp attenuation, EQ/crossfeed, HTTP reader playback,
+   pause, seek and stop through the linked iOS engine. CI runs the same target on
+   an isolated Simulator; USB DAC and background/route behavior still need a device.
