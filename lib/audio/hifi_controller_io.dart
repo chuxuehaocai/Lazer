@@ -118,12 +118,11 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
             AndroidUsbAudio.isUsbDeviceId(_settings.outputToken)
       : !usesIosSystemRoute &&
             (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
-  bool get supportsDoP => usesIosSystemRoute
-      ? nativeAvailable
-      : Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+  bool get supportsDoP =>
+      !usesIosSystemRoute &&
+      (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
   // A capability to request strict output, not a claim about the connected DAC.
-  bool get supportsBitPerfect =>
-      usesIosSystemRoute ? nativeAvailable : supportsExclusiveMode;
+  bool get supportsBitPerfect => !usesIosSystemRoute && supportsExclusiveMode;
   bool get supportsNativeDsd => !usesIosSystemRoute && Platform.isLinux;
 
   /// Shared with AppState so controls and the applied DSP see the same policy.

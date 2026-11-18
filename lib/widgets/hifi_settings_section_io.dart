@@ -3,12 +3,8 @@
 // i18n:data — every CJK literal below is an interface key rendered through
 // `context.tr` (directly or by SettingsRow).
 //
-// It exists to make the native engine's capabilities reachable without ever
-// overstating them: every row says what the choice does, and the readout at the
-// end shows the format the engine actually negotiated rather than what was asked
-// for. A device that refused exclusive mode, a bit-perfect request the endpoint
-// could not honour, or a DoP policy without a DSD source all stay visible instead
-// of being reported as "enabled".
+// The readout at the end shows the format the engine actually negotiated rather
+// than what was requested.
 library;
 
 import 'build_safe_state.dart';
@@ -150,8 +146,10 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                   subtitle: 'iOS 管理输出路由；连接 USB DAC 或在控制中心选择耳机、AirPlay 设备',
                   trailing: TrText('系统默认输出设备'),
                 ),
-                const _WarningRow(
-                  'iOS 普通播放支持 EQ、限幅器和耳机串扰；USB 严格输出是实验性路径，不代表硬件独占或 DAC 位校验通过',
+                const _SettingRow(
+                  label: '独占 / 严格 PCM / DoP',
+                  subtitle: 'iOS 不支持独占、严格 PCM 或 DoP，使用系统共享输出',
+                  trailing: TrText('不支持'),
                 ),
                 _SettingRow(
                   label: '音量',
@@ -189,11 +187,11 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                     ),
                   ),
                 ),
-              if (native)
+              if (native && !hifi.usesIosSystemRoute)
                 _SwitchRow(
                   label: '独占输出',
                   subtitle: hifi.supportsExclusiveMode
-                      ? '独占模式请求设备不再与系统混音共用；实际是否独占以引擎报告的会话格式为准'
+                      ? '使用设备独占输出'
                       : '该平台不支持独占输出',
                   value: settings.exclusiveMode,
                   enabled: hifi.supportsExclusiveMode,
@@ -205,55 +203,18 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                     ),
                   ),
                 ),
-              if (native)
+              if (native && !hifi.usesIosSystemRoute)
                 _SwitchRow(
-                  label: hifi.usesIosSystemRoute
-                      ? 'USB 严格 PCM（实验性）'
-                      : 'Bit-perfect 输出',
+                  label: 'Bit-perfect 输出',
                   subtitle: _bitPerfectSubtitle(hifi, settings),
                   value: settings.bitPerfect,
                   enabled: hifi.supportsBitPerfect,
                   onChanged: (bool value) => _update(
                     settings.copyWith(
                       bitPerfect: value,
-                      exclusiveMode: hifi.usesIosSystemRoute
-                          ? false
-                          : value
-                          ? true
-                          : settings.exclusiveMode,
-                      dsdOutputMode: value && hifi.usesIosSystemRoute
-                          ? HifiDsdOutputMode.convertToPcm
-                          : settings.dsdOutputMode,
+                      exclusiveMode: value ? true : settings.exclusiveMode,
                     ),
                   ),
-                ),
-              if (native &&
-                  hifi.usesIosSystemRoute &&
-                  settings.directOutputRequested)
-                const _WarningRow(
-                  '严格 PCM / DoP 需要应用音量和 iOS 系统音量均为 100%，否则拒绝播放；应用不会自动提高音量，请先调低 DAC 或耳放音量',
-                ),
-              if (native &&
-                  !hifi.usesIosSystemRoute &&
-                  _needsVolumeWarning(settings))
-                const _WarningRow(
-                  '严格 PCM / DoP 需要软件音量为 100%，否则拒绝播放；应用不会自动提高音量，请先调低 DAC 或耳放音量',
-                ),
-              if (native && hifi.usesIosSystemRoute)
-                const _WarningRow('输出策略在重新打开歌曲后生效；当前实际路径请查看下方信号路径'),
-              if (native &&
-                  hifi.usesIosSystemRoute &&
-                  settings.directOutputRequested &&
-                  widget.state.autoMixEnabled)
-                const _WarningRow(
-                  'USB 严格输出需要关闭混音：在“播放→切歌衔接”选择“从不生效”或“只对同一专辑生效”',
-                ),
-              // The engine refuses processing while bit-perfect is active, so the
-              // page states that the EQ/limiter/crossfeed are held out of the path
-              // instead of showing them as applied.
-              if (native && settings.dspBypassedByDirectOutput)
-                const _WarningRow(
-                  '直通策略已选择：软件增益、均衡器、限幅器和耳机串扰被旁路；返回普通 PCM 后恢复已保存的 DSP 设置',
                 ),
               // The chain is explicit now (ABI v27), so the order is a setting rather
               // than something the engine decides: it is part of the audio result, and
@@ -309,9 +270,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                       for (final HifiDsdOutputMode mode
                           in HifiDsdOutputMode.values)
                         if ((mode != HifiDsdOutputMode.requireNative ||
-                                hifi.supportsNativeDsd) &&
-                            (!hifi.usesIosSystemRoute ||
-                                mode != HifiDsdOutputMode.auto))
+                            hifi.supportsNativeDsd))
                           DropdownMenuItem<HifiDsdOutputMode>(
                             value: mode,
                             child: TrText(mode.label),
@@ -320,24 +279,11 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                     onChanged: (HifiDsdOutputMode? value) {
                       if (value != null) {
                         unawaited(
-                          _update(
-                            settings.copyWith(
-                              dsdOutputMode: value,
-                              bitPerfect:
-                                  hifi.usesIosSystemRoute &&
-                                      value == HifiDsdOutputMode.requireDoP
-                                  ? false
-                                  : settings.bitPerfect,
-                            ),
-                          ),
+                          _update(settings.copyWith(dsdOutputMode: value)),
                         );
                       }
                     },
                   ),
-                ),
-              if (native && hifi.usesIosSystemRoute)
-                const _WarningRow(
-                  '仅在确认 USB DAC 支持 DoP 时手动选择；仅支持 PCM 的 DAC 可能输出噪声。默认使用 DSD 转 PCM',
                 ),
               if (native && hifi.supportsDoP && !hifi.usesIosSystemRoute)
                 _SettingRow(
@@ -427,7 +373,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                 _SwitchRow(
                   label: '启用 crossfeed',
                   subtitle: settings.directOutputRequested
-                      ? '直通输出时 DSP 被旁路，先关闭严格 PCM 或选择 DSD 转 PCM'
+                      ? '直通输出已启用，crossfeed 暂不可用'
                       : '把每声道延时、低通后混入对侧，减轻耳机里"声音在脑中"的感觉',
                   value: settings.crossfeedActive,
                   enabled: !settings.directOutputRequested,
@@ -513,15 +459,17 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
         return '系统音频输出；选择 USB DAC 可绕过系统混音与重采样';
       }
       return hifi.selectedDevice == null
-          ? 'USB DAC 未连接；直通播放将停止，不会回退到系统输出'
-          : 'USB DAC 直通；首次使用需要 USB 授权，实际格式以播放信息为准';
+          ? 'USB DAC 未连接；连接后可使用直通输出'
+          : 'USB DAC 直通；首次使用需要授权';
     }
     if (settings.outputToken == null) return '系统默认输出设备';
     final LazerOutputDevice? device = hifi.selectedDevice;
     if (device == null) {
       return settings.outputName == null
-          ? '已保存的设备当前不可用，将回退到系统默认'
-          : '${settings.outputName}（当前不可用，将回退到系统默认）';
+          ? '已保存的设备当前不可用'
+          : context
+                .tr('{name}（当前不可用）')
+                .replaceAll('{name}', settings.outputName!);
     }
     final StringBuffer buffer = StringBuffer(device.displayName);
     if (!device.isActive) buffer.write(context.tr('（未激活）'));
@@ -536,31 +484,22 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
   }
 
   String _bitPerfectSubtitle(HifiController hifi, HifiSettings settings) {
-    if (hifi.usesIosSystemRoute) {
-      return '仅 USB 路由：保留 16/24-bit 无损整数样本并匹配源采样率，旁路 DSP；路由、格式或音量不符合时拒绝播放，不等于物理 DAC 位校验';
-    }
     if (settings.bitPerfect) {
-      return '要求设备接受与源完全相同的整数格式；不满足时打开会失败，而不是悄悄转成 PCM';
+      return '保持源格式，旁路软件音量和 DSP';
     }
-    return '解码后的整数样本直接送设备，同时旁路软件音量与 EQ';
+    return '尽量保持源格式输出';
   }
 
   String _dsdSubtitle(HifiController hifi, HifiSettings settings) {
-    if (hifi.usesIosSystemRoute &&
-        settings.dsdOutputMode == HifiDsdOutputMode.requireDoP) {
-      return '仅兼容 DoP 的 USB DAC：要求精确 24-bit 载波，应用与 iOS 系统音量均为 100%；失败不回退，格式协商不能确认 DAC 的 DoP 解码能力';
-    }
     switch (settings.dsdOutputMode) {
       case HifiDsdOutputMode.auto:
-        return '按设备能力自动选择：原生 DSD → DoP → PCM，逐级回退';
+        return '自动选择可用的 DSD 输出方式';
       case HifiDsdOutputMode.convertToPcm:
-        return 'DSD 源码解码为 PCM，任何设备都能播放';
+        return '转换为 PCM 输出';
       case HifiDsdOutputMode.requireDoP:
-        return '要求精确的 24-bit DoP 载波；设备不接受时拒绝播放，不回退';
+        return '使用 DoP 载波输出 DSD';
       case HifiDsdOutputMode.requireNative:
-        return hifi.supportsNativeDsd
-            ? '要求 ALSA 原生 DSD 字格式，仅 Linux hw: 直连可用'
-            : '仅 Linux ALSA 直连支持原生 DSD';
+        return hifi.supportsNativeDsd ? '使用 ALSA 原生 DSD 格式' : '当前平台不支持原生 DSD';
     }
   }
 
@@ -575,9 +514,6 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
     final String detail = mode.detail;
     return mode.isSupported ? detail : '$detail（需要测量阶段，本引擎未实现）';
   }
-
-  bool _needsVolumeWarning(HifiSettings settings) =>
-      settings.directOutputRequested && widget.state.volume < 0.999;
 }
 
 /// One row in the grouped card, matching the settings page's own rows.
@@ -707,10 +643,16 @@ class _DevicePicker extends StatelessWidget {
             },
           ),
         ),
-        IconButton(
-          tooltip: context.tr('刷新设备列表'),
-          onPressed: hifi.busy ? null : () => unawaited(hifi.refreshDevices()),
-          icon: const Icon(Icons.refresh, size: 18),
+        Semantics(
+          label: context.tr('刷新设备列表'),
+          button: true,
+          enabled: !hifi.busy,
+          child: IconButton(
+            onPressed: hifi.busy
+                ? null
+                : () => unawaited(hifi.refreshDevices()),
+            icon: const Icon(Icons.refresh, size: 18),
+          ),
         ),
       ],
     );
@@ -792,8 +734,8 @@ class _EqualizerControls extends StatelessWidget {
               _SwitchRow(
                 label: '启用均衡器',
                 subtitle: settings.directOutputRequested
-                    ? '直通输出时 DSP 被旁路，先关闭严格 PCM 或选择 DSD 转 PCM'
-                    : 'DSP 处理会改变样本，因此不再属于 bit-perfect 路径',
+                    ? '直通输出已启用，均衡器暂不可用'
+                    : '均衡器和限幅器参与 DSP',
                 value: settings.eqActive,
                 enabled: !settings.directOutputRequested,
                 onChanged: (bool value) => _update(
@@ -1011,6 +953,7 @@ class SignalPathReadout {
 List<SignalPathReadout> signalPathReadouts({
   required LazerStreamInfo? info,
   LazerEngineMetrics? metrics,
+  bool iosSystemRoute = false,
 }) {
   final OutputPathState? path = info?.outputPath;
   final String failing = path?.failingConditions.join('; ') ?? '';
@@ -1032,30 +975,37 @@ List<SignalPathReadout> signalPathReadouts({
                 '${info.outputIsFloat ? ' float' : ''}'
                 '${info.outputContainerBitsPerSample > info.outputBitsPerSample ? '（${info.outputContainerBitsPerSample}-bit 容器）' : ''}',
     ),
-    SignalPathReadout(
-      '格式选择',
-      info == null
-          ? '—'
-          : _FormatCard.selectionLabel(info.outputFormatSelection),
-    ),
-    SignalPathReadout(
-      'Bit-perfect',
-      path == null
-          ? '—'
-          : path.bitPerfect
-          ? path.transparentUsb
-                ? 'USB 严格输出（未作硬件位校验）'
-                : '是（独占 · 无 DSP · 格式一致）'
-          : '否（$failing）',
-    ),
-    SignalPathReadout('独占', path == null ? '—' : (path.exclusive ? '是' : '否')),
+    if (iosSystemRoute)
+      const SignalPathReadout('严格输出', '不支持')
+    else ...<SignalPathReadout>[
+      SignalPathReadout(
+        '格式选择',
+        info == null
+            ? '—'
+            : _FormatCard.selectionLabel(info.outputFormatSelection),
+      ),
+      SignalPathReadout(
+        'Bit-perfect',
+        path == null
+            ? '—'
+            : path.bitPerfect
+            ? path.transparentUsb
+                  ? 'USB 严格输出（未作硬件位校验）'
+                  : '是（独占 · 无 DSP · 格式一致）'
+            : '否（$failing）',
+      ),
+      SignalPathReadout(
+        '独占',
+        path == null ? '—' : (path.exclusive ? '是' : '否'),
+      ),
+      SignalPathReadout(
+        '格式与源一致',
+        path == null ? '—' : (path.formatMatchesSource ? '是' : '否'),
+      ),
+    ],
     SignalPathReadout(
       'DSP',
       path == null ? '—' : (path.dspActive ? '在信号路径中' : '不在信号路径中'),
-    ),
-    SignalPathReadout(
-      '格式与源一致',
-      path == null ? '—' : (path.formatMatchesSource ? '是' : '否'),
     ),
     // The output-side counters the HiFi work has to be able to point at.
     SignalPathReadout('输出缓冲', metrics == null ? '—' : metrics.summary),
@@ -1082,6 +1032,7 @@ class _FormatCard extends StatelessWidget {
     final List<SignalPathReadout> rows = signalPathReadouts(
       info: hifi.streamInfo,
       metrics: hifi.readMetrics(),
+      iosSystemRoute: hifi.usesIosSystemRoute,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1117,15 +1068,6 @@ class _FormatCard extends StatelessWidget {
                     ],
                   ),
                 ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Text(
-                  context.tr('这里的格式是引擎与平台协商的结果，不是从 DAC 读回的格式，也不代表链路中没有系统重采样'),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: apple.secondaryLabel,
-                  ),
-                ),
-              ),
             ],
           ),
         ),

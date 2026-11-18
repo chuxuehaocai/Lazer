@@ -610,26 +610,21 @@ class HifiSettings {
 
   /// The settings supported by the iOS RemoteIO path.
   ///
-  /// iOS owns the route and cannot grant desktop exclusive access. Strict USB
-  /// PCM and explicit DoP remain requests that the output validates at open.
-  /// Auto never tries a DoP carrier on an unverified DAC: use PCM by default.
+  /// iOS owns the route, so the app uses ordinary shared output and converts
+  /// DSD sources to PCM. Exclusive output, strict PCM and DoP stay unavailable.
   HifiSettings forIosOutput() {
-    final mode = dsdOutputMode == HifiDsdOutputMode.requireDoP
-        ? HifiDsdOutputMode.requireDoP
-        : HifiDsdOutputMode.convertToPcm;
-    final strictPcm = bitPerfect && mode != HifiDsdOutputMode.requireDoP;
     if (outputToken == null &&
         outputName == null &&
         !exclusiveMode &&
-        bitPerfect == strictPcm &&
-        dsdOutputMode == mode) {
+        !bitPerfect &&
+        dsdOutputMode == HifiDsdOutputMode.convertToPcm) {
       return this;
     }
     return copyWith(
       clearOutput: true,
       exclusiveMode: false,
-      bitPerfect: strictPcm,
-      dsdOutputMode: mode,
+      bitPerfect: false,
+      dsdOutputMode: HifiDsdOutputMode.convertToPcm,
     );
   }
 

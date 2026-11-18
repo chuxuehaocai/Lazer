@@ -23,8 +23,8 @@ Flutter fixture output
 00:01 +2: iOS decodes high resolution PCM and DSD through RemoteIO
 00:02 +3: iOS HiFi controller applies audible-path DSP
 00:03 +4: iOS plays HTTP audio through the native growing reader
-00:04 +5: iOS strict USB PCM refuses a non-USB route without fallback
-00:05 +6: iOS required DoP refuses a non-USB route without PCM fallback
+00:04 +5: iOS normalizes a saved strict PCM request and plays RemoteIO
+00:05 +6: iOS normalizes a saved DoP request and plays DSD as PCM
 00:06 +7: All tests passed!
 """
 
@@ -103,12 +103,13 @@ class IosFlutterAudioRunnerTest(unittest.TestCase):
 
     def test_zero_exit_with_a_missing_expected_test_cannot_create_a_pass(self):
         output = DEFAULT_FLUTTER_OUTPUT.replace(
-            "iOS required DoP refuses a non-USB route without PCM fallback",
+            "iOS normalizes a saved DoP request and plays DSD as PCM",
             "an unrelated test",
         )
         with self.assertRaisesRegex(
             RUNNER.SMOKE.SmokeFailure,
-            "expected integration tests did not run: iOS required DoP",
+            "expected integration tests did not run: "
+            "iOS normalizes a saved DoP request and plays DSD as PCM",
         ):
             self.run_session(self.session(flutter_output=output))
         self.assertFalse((self.out / "result.txt").exists())

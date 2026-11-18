@@ -265,98 +265,73 @@ void main() {
     );
   });
 
-  testWidgets('iOS strict USB PCM refuses a non-USB route without fallback', (
+  testWidgets('iOS normalizes a saved strict PCM request and plays RemoteIO', (
     tester,
   ) async {
     await tester.runAsync(
-      () => _proveNonUsbRefusal(
+      () => _proveIosSharedPlayback(
         const HifiSettings(
           bitPerfect: true,
           dsdOutputMode: HifiDsdOutputMode.convertToPcm,
           equalizer: HifiEqualizerState(limiterEnabled: false),
         ),
-        'strict.wav',
+        'normalized-pcm-request.wav',
         _pcmWav(bits: 24),
+        expectDsdSource: false,
       ),
     );
   });
 
-  testWidgets('iOS required DoP refuses a non-USB route without PCM fallback', (
+  testWidgets('iOS normalizes a saved DoP request and plays DSD as PCM', (
     tester,
   ) async {
     await tester.runAsync(
-      () => _proveNonUsbRefusal(
+      () => _proveIosSharedPlayback(
         const HifiSettings(
           dsdOutputMode: HifiDsdOutputMode.requireDoP,
           equalizer: HifiEqualizerState(limiterEnabled: false),
         ),
-        'strict.dsf',
+        'normalized-dop.dsf',
         _silentDsf(),
+        expectDsdSource: true,
       ),
     );
   });
 }
 
-Future<void> _proveNonUsbRefusal(
+Future<void> _proveIosSharedPlayback(
   HifiSettings settings,
   String name,
-  Uint8List bytes,
-) async {
+  Uint8List bytes, {
+  required bool expectDsdSource,
+}) async {
   await _withNativeEngine((engine, directory) async {
-    final session = await AudioSession.instance;
-    final outputs = await session.getDevices(
-      includeInputs: false,
-      includeOutputs: true,
-    );
-    expect(outputs, isNotEmpty, reason: 'the current iOS route must be known');
-    // A real USB DAC is a separate hardware test. Never send an unverified DAC
-    // a DoP carrier merely because somebody ran the Simulator integration suite
-    // on an attached iPhone. CI has a non-USB Simulator route and runs both cases.
-    // ignore: experimental_member_use
-    if (outputs.any((output) => output.type == AudioDeviceType.usbAudio)) {
-      markTestSkipped('non-USB rejection requires a speaker/headphone route');
-      return;
-    }
-
     final hifi = HifiController(settings, engine: engine, persist: (_) async {})
       ..attach();
     try {
-      // This is engine gain only; never change the user's system volume. The
-      // silent fixture and route refusal ensure the test emits no DoP payload.
-      await engine.setVolume(1);
+      expect(hifi.supportsExclusiveMode, isFalse);
+      expect(hifi.supportsBitPerfect, isFalse);
+      expect(hifi.supportsDoP, isFalse);
+      expect(hifi.settings.exclusiveMode, isFalse);
+      expect(hifi.settings.bitPerfect, isFalse);
+      expect(hifi.settings.dsdOutputMode, HifiDsdOutputMode.convertToPcm);
+      expect(hifi.settings.outputToken, isNull);
+
+      // Existing preferences can contain either old strict policy. Hydration
+      // must clear them before the first native request is sent.
+      await engine.setVolume(0);
       await hifi.apply();
       expect(hifi.lastApplyError, isNull);
-      expect(hifi.settings.bitPerfect, settings.bitPerfect);
-      expect(hifi.settings.dsdOutputMode, settings.dsdOutputMode);
+
       final source = File('${directory.path}/$name');
       await source.writeAsBytes(bytes);
-      await expectLater(
-        engine.setUrl(source.uri.toString()),
-        throwsA(
-          isA<StateError>().having(
-            (error) => error.message.toString(),
-            'native USB-only refusal',
-            allOf(contains('($lazerAudioErrorUnsupported)'), contains('USB')),
-          ),
-        ),
-      );
-      expect(engine.active, isFalse, reason: 'strict policy must not play PCM');
-
-      // Recovery is explicit: changing policy is the user's decision, not an
-      // automatic fallback hidden behind a successful strict-mode open.
-      await hifi.update(
-        settings.copyWith(
-          bitPerfect: false,
-          dsdOutputMode: HifiDsdOutputMode.convertToPcm,
-        ),
-      );
-      expect(hifi.lastApplyError, isNull);
-      await engine.setVolume(0);
       await engine.setUrl(source.uri.toString());
       await _proveClock(engine);
       final info = engine.readStreamInfo()!;
+      expect(info.hasDsdSource, expectDsdSource);
       expect(info.bitPerfectActive, isFalse);
       expect(info.isDoPOutput, isFalse);
+      expect(info.isNativeDsdOutput, isFalse);
       expect(info.outputExclusive, isFalse);
     } finally {
       hifi.dispose();

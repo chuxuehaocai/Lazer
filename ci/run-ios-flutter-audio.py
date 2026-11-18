@@ -22,8 +22,8 @@ EXPECTED_TESTS = (
     "iOS decodes high resolution PCM and DSD through RemoteIO",
     "iOS HiFi controller applies audible-path DSP",
     "iOS plays HTTP audio through the native growing reader",
-    "iOS strict USB PCM refuses a non-USB route without fallback",
-    "iOS required DoP refuses a non-USB route without PCM fallback",
+    "iOS normalizes a saved strict PCM request and plays RemoteIO",
+    "iOS normalizes a saved DoP request and plays DSD as PCM",
 )
 
 _TEST_SUMMARY = re.compile(

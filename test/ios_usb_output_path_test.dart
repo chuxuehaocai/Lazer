@@ -4,7 +4,6 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_abi.dart';
 import 'package:lazer_nextgen/audio/native/lazer_stream_info.dart';
-import 'package:lazer_nextgen/audio/native/output_path_state.dart';
 import 'package:lazer_nextgen/widgets/hifi_settings_section_io.dart';
 
 void main() {
@@ -22,66 +21,22 @@ void main() {
   });
   tearDown(() => calloc.free(native));
 
-  for (final (selection, kind, label) in [
-    (
-      lazerAudioFormatSelectionIosUsbPcm,
-      lazerAudioOutputFormatPcm,
-      'USB 严格 PCM（实验性）',
-    ),
-    (
-      lazerAudioFormatSelectionIosUsbDoP,
-      lazerAudioOutputFormatDoP,
-      'USB DoP 载波（实验性）',
-    ),
-  ]) {
-    test(
-      '$label reports validated client transport without hardware exclusivity',
-      () {
-        native.ref
-          ..outputFormatSelection = selection
-          ..outputFormatKind = kind;
-        final info = LazerStreamInfo.fromNative(native.ref);
-        final path = info.outputPath;
-        expect(info.isStrictIosUsbOutput, isTrue);
-        expect(path.transparentUsb, isTrue);
-        expect(path.exclusive, isFalse);
-        expect(path.bitPerfect, isTrue);
-        expect(path.agreesWithEngine, isTrue);
-        expect(path.failingConditions, isEmpty);
-        expect(path.bitPerfectMeaning, contains('未验证物理 DAC'));
-        final direct = OutputPathState.fromNative(native.ref);
-        expect(direct.transparentUsb, isTrue);
-        expect(direct.bitPerfect, path.bitPerfect);
-        final rows = {
-          for (final row in signalPathReadouts(info: info))
-            row.label: row.value,
-        };
-        expect(rows['独占'], '否');
-        expect(rows['Bit-perfect'], 'USB 严格输出（未作硬件位校验）');
-        expect(rows['格式选择'], label);
-      },
-    );
-  }
-
-  test('strict USB classification cannot conceal DSP or a format mismatch', () {
-    native.ref.outputFormatSelection = lazerAudioFormatSelectionIosUsbPcm;
-    native.ref.outputDspActive = 1;
-    var path = LazerStreamInfo.fromNative(native.ref).outputPath;
-    expect(path.bitPerfect, isFalse);
-    expect(path.agreesWithEngine, isFalse);
-    expect(path.failingConditions, contains('DSP 在信号路径中'));
+  test('iOS product path hides dormant strict transport telemetry', () {
+    // Format-selection values 13/14 remain in ABI 30 for historical and
+    // diagnostic compatibility, but iOS never exposes that policy.
     native.ref
-      ..outputDspActive = 0
-      ..outputFormatMatchesSource = 0;
-    path = LazerStreamInfo.fromNative(native.ref).outputPath;
-    expect(path.bitPerfect, isFalse);
-    expect(path.failingConditions, contains('输出格式与源不一致'));
-    native.ref
-      ..outputFormatMatchesSource = 1
-      ..outputFormatInitialized = 0;
-    path = LazerStreamInfo.fromNative(native.ref).outputPath;
-    expect(path.bitPerfect, isFalse);
-    expect(path.failingConditions, contains('没有已初始化的输出会话'));
+      ..outputFormatSelection = lazerAudioFormatSelectionIosUsbPcm
+      ..outputFormatKind = lazerAudioOutputFormatPcm;
+    final info = LazerStreamInfo.fromNative(native.ref);
+    final rows = {
+      for (final row in signalPathReadouts(info: info, iosSystemRoute: true))
+        row.label: row.value,
+    };
+    expect(rows['严格输出'], '不支持');
+    expect(rows, isNot(contains('Bit-perfect')));
+    expect(rows, isNot(contains('独占')));
+    expect(rows, isNot(contains('格式选择')));
+    expect(rows, isNot(contains('格式与源一致')));
   });
 
   test('ordinary shared output does not inherit the USB strict claim', () {

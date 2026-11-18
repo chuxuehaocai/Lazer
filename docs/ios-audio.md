@@ -14,46 +14,45 @@ Flutter NativeAudioEngine → Dart worker isolate → 静态链接的 C ABI
 | 功能 | 当前实现 |
 | --- | --- |
 | 本地和网络音乐 | 原生 FFmpeg 与 reader bridge；输出使用 RemoteIO |
-| 普通高采样率/24-bit PCM | 解码源格式，向 AVAudioSession 请求采样率，再采用路由授予的输出时钟 |
-| USB 严格 PCM / Bit-perfect 请求 | 保留设置并交给后端检查；要求兼容 USB 路由、16/24-bit 无损整数源、相同实际时钟和不改变样本的输出链；条件不符则失败 |
-| DSD 文件 | 默认解码为 PCM；用户明确选择 DoP 后尝试严格 24-bit 载波，拒绝时不暗中转 PCM；原始 Native DSD 仍不可用 |
-| EQ、前级、限幅器 | 使用已有原生 DSP 链，可实时应用；拒绝信息回传设置页 |
+| 普通共享播放 | 由 iOS 管理当前音频路由和混音；应用使用 RemoteIO 共享输出 |
+| 独占输出 | **不支持** |
+| 严格 PCM 直通 / Bit-perfect | **不支持** |
+| DSD 文件 | 始终转换为 PCM，再由 RemoteIO 共享输出播放 |
+| DoP / Native DSD | **不支持** |
+| EQ、前级、限幅器 | 使用已有原生 DSP 链，可实时应用；失败信息回传设置页 |
 | 耳机串扰 | 原生 crossfeed，包括 Bauer、BS2B、Meier 和自定义参数 |
 | DSP 顺序 | 传入原生链并持久化，重启读取保存的顺序 |
 | USB DAC/耳机/AirPlay | 由 iOS 管理当前输出；连接 DAC 或在控制中心切换路由 |
-| 硬件独占 | 不提供 macOS Hog Mode；严格 USB 的 nonmixable 会话不等于硬件独占，`outputExclusive` 仍为 false |
 
-上述是实现范围，并非全部真机验收结果。系统授予的采样率可能不同于请求；
-普通 PCM 路由恢复时保留现有客户端时钟，避免已排队的样本变调，由 AudioUnit 适配新的硬件时钟。
-严格 PCM/DoP 不可用这种重采样恢复掩盖条件变化；USB、格式、音量或会话条件失效时必须停止。
-信号路径显示的会话格式不能当作 DAC 的物理位流证明。
+iOS 不允许本应用稳定取得并兑现“独占、严格 PCM 直通、Bit-perfect 或 DoP”
+这组产品承诺，因此设置页不再提供这些选项。系统授予的采样率可能不同于请求；
+播放中恢复普通共享路由时保留现有客户端时钟，避免已排队样本变调，并由 AudioUnit
+适配新的硬件时钟。信号路径显示的会话格式只描述应用交给系统共享输出的客户端格式，
+不是 DAC 的物理位流读回。
 
-## USB 严格输出的边界
+## 不支持的输出模式
 
-此前版本将 iOS 的 Bit-perfect 与 DoP 一并禁用，这属于旧后端的实现限制，
-不能作为 iOS 平台不可能实现的结论。公开产品已有 iOS
-[Bit-perfect PCM](https://www.neutroncode.com/faq/38-bit-perfect-output) 和
-[DoP 输出](https://intl.onkyo.ru/downloads/applications/hf_player.html) 的说明。
+仓库曾实现并验证过有条件开启的 RemoteIO 严格 USB PCM 与 DoP 后端，也保留了
+ABI 30 内 format selection `13/14` 的枚举值。该实现无法绕过 iOS 对路由、混音和音量控制权的
+平台限制，无法在产品层稳定保证独占或严格直通，因此不再是可选择的用户功能。
+原生代码和 ABI 可以继续作为 dormant 实现保留；产品代码必须保持其不可达。
 
-本轮通过公开的 AVAudioSession 和 RemoteIO 实现有条件的严格 USB 路径：
+当前 `HifiSettings.forIosOutput()` 在启动设置同步和控制器规范化时，一律清除 iOS
+输出设备覆盖，并写入：
 
-- 使用 playback/nonmixable 会话，按源或 DoP 载波请求时钟，并核对激活后的实际值。
-  [Apple 明确 preferred 值只是请求](https://developer.apple.com/library/archive/qa/qa1631/_index.html)。
-- PCM 保持 16/24-bit 整数样本，绕过重采样、软件音量、EQ、限幅、串扰、归一化和淡变。
-  最终回调转成能够精确表示这些样本的 Float32；严格模式拒绝 32-bit 整数和浮点源。
-- DoP 保留 DSD 数据与交替 marker；DSD64/128 对应 176.4/352.8 kHz 的 24-bit 载波。
-  这是 DSD 装进 PCM 帧传输，不是 DSD 解码为 PCM。
-  [DoP 标准](https://dsd-guide.com/sites/default/files/white-papers/DoP_openStandard_1v1.pdf)
-  同时要求在发送前确认接收硬件能力。
-- App 增益必须为 1，系统音量和输出路由也要满足后端检查；不擅自提高用户系统音量。
-  [系统音量只能由用户直接设置](https://developer.apple.com/documentation/avfaudio/avaudiosession/outputvolume)。
-- iOS 的自动 DSD 策略使用 PCM；只有用户明确选择 DoP 才发送载波。USB 设备名称、
-  高采样率支持或 `outputExclusive=false` 都不能单独判定 DoP 是否可用。
+- `exclusiveMode: false`
+- `bitPerfect: false`
+- `dsdOutputMode: convertToPcm`
 
-“严格请求被接受”证明应用与系统会话满足所检查的条件；没有 USB 抓取、数字回环或
-DAC 自带 bit-test，不能把它写成已经验证 DAC 收到完全相同的位流。
-nonmixable 是会话行为，[Apple 说明它会中断其他 nonmixable 会话](https://developer.apple.com/documentation/AVFAudio/AVAudioSession/Category-swift.struct/playback)，
-它不是硬件独占锁。
+旧版本保存的严格设置也会在这里被清理。`HifiController` 对 iOS 报告
+`supportsExclusiveMode = false`、`supportsBitPerfect = false` 和
+`supportsDoP = false`。设置页只显示一条简短状态：
+
+> 独占 / 严格 PCM / DoP：不支持，使用系统共享输出。
+
+iOS 不再显示独占开关、严格 PCM 开关、DoP 选择器以及严格音量、AutoMix 或 DSP
+旁路警告。普通输出、应用音量、DSP、EQ、crossfeed、输出缓冲和响度归一化仍可使用。
+设备刷新按钮去掉了 hover Tooltip，但仍保留“刷新设备列表”的无障碍语义。
 
 ## NICEHCK 原道 NK1
 
@@ -63,9 +62,10 @@ nonmixable 是会话行为，[Apple 说明它会中断其他 nonmixable 会话](
 把所有批次当成同一 USB 设备。页面没有明确声明 DSD 或 DoP 支持，也未给出具体 iOS
 版本的兼容性保证。384 kHz PCM 能力不等于 DoP 解包能力。
 
-NK1 的优先验收项目是 16/24-bit PCM 严格输出和按源切换采样率；DSD 曲目默认转 PCM。
-在厂家确认该批次支持 DoP，或以可控测试验证前，不把 NK1 标为 DoP/Native DSD 兼容设备。
-普通音乐出声、显示 176.4 kHz 或接通 USB 都不能替代 DSD 解码能力验证。
+在 iOS 产品中，NK1 只通过系统共享 RemoteIO 路由播放；DSD 曲目一律转换为 PCM。
+可以检查接通 USB 后的共享输出、音高、声道和系统实际授予的输出格式，但这些检查不会让
+NK1 获得严格 PCM、Bit-perfect 或 DoP 能力。厂家标称的 384 kHz PCM 规格不能推导
+应用层独占、物理位流透明或 DSD 解包能力。
 
 ## 2026-11-18 基础播放修复
 
@@ -73,8 +73,8 @@ NK1 的优先验收项目是 16/24-bit PCM 严格输出和按源切换采样率�
   原先仅按普通 IO 周期分配的小缓冲可能在每次回调中持续欠载。恢复路由时保留已排队样本，
   按客户端/硬件时钟比例更新生产线程轮询周期；分配不在实时回调执行。
 - 采样率偏好与 `preferredSampleRate` 比较，避免当前路由恰好匹配、旧偏好却影响下一次 USB 路由。
-- 清除不属于 iOS 路由的桌面设备 ID 和硬件独占偏好；保留 EQ、串扰、缓冲和 DSP 顺序。
-  本轮严格 USB 修订保留 Bit-perfect 和明确的 DoP 请求，不再统一改写成普通 PCM。
+- 清除不属于 iOS 路由的桌面设备 ID、硬件独占偏好、Bit-perfect 和 DoP 请求；
+  DSD 输出统一改为 PCM。保留 EQ、串扰、缓冲和 DSP 顺序。
 - 原生 DSP/输出拒绝不再被当作设置成功；失败后可重试相同配置。
 - iOS 构建覆盖按 SDK 区分 device 和 simulator；检查 Mach-O 平台，避免仅凭 arm64
   将真机归档交给模拟器链接。完整导出检查在原生归档构建阶段执行。
@@ -99,9 +99,9 @@ python3 ci/run-ios-flutter-audio.py
 运行器执行 `integration_test/ios_native_engine_test.dart`，覆盖进程内符号解析、
 原生引擎选择、worker、24-bit 44.1/96/192 kHz 源、DSD64 转 PCM、实际输出时钟、
 前级 −12 dB 的遥测变化、EQ/串扰播放、HTTP reader 与暂停/seek/恢复。
-另增加两项非 USB 路由测试：经 HiFi 控制器请求严格 PCM 和 DoP，要求原生打开明确拒绝、
-不偷偷回退；随后用户显式改回 PCM，验证引擎仍能播放。连接 USB 的真机运行时这两项会跳过，
-避免在未知 DAC 上发 DoP 载波；CI 模拟器应执行全部 7 项。
+另有两个平台能力用例：分别写入 `bitPerfect: true` 与 `requireDoP` 的旧设置，确认
+`HifiController` 将其规范化为普通共享输出和 DSD 转 PCM，随后 RemoteIO 仍能正常播放。
+CI 模拟器应执行全部 7 项。
 高采样率测试允许路由授予较低速率，不把模拟器当作高采样率 DAC。
 DSP 测试信号约为 −66 dBFS，其余播放夹具静音。
 
@@ -178,7 +178,11 @@ DSD64 转 96 kHz PCM、−12 dB 前级效果、EQ/串扰及 HTTP reader 播放�
 ZIP CRC、应用/Widget 元数据与包内容检查均通过；安装需要用户签名。
 这个历史 IPA 不包含本轮严格 USB PCM/DoP 改动，不能用它验收新增功能。
 
-### 严格 USB 版本构建记录
+### 历史严格 USB 分支构建记录（产品层未启用）
+
+以下记录说明原生严格后端曾经构建、测试并产出过 IPA。它保留为工程历史证据，
+**不表示当前 iOS 产品支持独占、严格 PCM 或 DoP**。后续产品实现已将这些选项从
+iOS 设置和控制器能力面移除。
 
 2026-11-18，版本 `2.0.301+301` 的构建提交为
 `59ee5b2aa31f706c161d5960b889bf739d0a4a8f`，
@@ -186,8 +190,8 @@ ZIP CRC、应用/Widget 元数据与包内容检查均通过；安装需要用�
 使用 `macos-26` 执行 iOS 原生、Flutter 集成和 IPA 任务。真机/模拟器原生构建与
 模拟器播放已通过，原生播放记录为 `PASS file=330ms reader=330ms ABI=29`。
 Flutter iOS 集成日志以 `+7: All tests passed!` 结束，全部 7 项执行通过，无跳过项。
-其中两个新增用例确认严格 USB PCM 和强制 DoP 在非 USB 路由上明确拒绝打开、不自动回退，
-并在显式关闭严格输出后恢复普通 PCM 播放。整个 CI 已成功完成，真机 IPA 构建、
+其中两个当时的用例确认严格 USB PCM 和强制 DoP 在非 USB 路由上明确拒绝打开、不自动回退，
+并在显式关闭严格输出后恢复普通共享播放。整个 CI 已成功完成，真机 IPA 构建、
 引擎动态导出、应用/Widget 元数据及最终包内容检查均通过。
 
 本轮最终本地检查已通过：Flutter 全量测试 727 项（另 2 项因缺少外部插件 checkout
@@ -209,30 +213,30 @@ Float32 桥接、DoP marker/idle、条件变化后回调静音与状态失效，
 `build/ios-usb-validation/native/` 和 `build/ios-usb-validation/flutter/`。
 全量 Flutter 测试中的 2 项跳过不属于上述 7 项 iOS 集成测试。
 
-- 新 IPA：`dist/ios-usb-direct-59ee5b2/Lazer-iOS-aarch64.ipa`，
+- 历史 IPA：`dist/ios-usb-direct-59ee5b2/Lazer-iOS-aarch64.ipa`，
   51,942,200 字节，版本 `2.0.301+301`；
   [CI artifact 14400824937](https://github.com/chuxuehaocai/Lazer/actions/runs/44243421544/artifacts/14400824937)。
 - SHA-256：`3ab253c6c7b18431e0fe37d6eb68669120ee0c853fa6165d7fb86a4f7bbecd86`，
   与 CI sidecar 一致。本地复核通过 ZIP CRC、应用和 Widget 元数据、包内容检查，
   并确认新严格 USB 原生代码及本地化资源存在；记录在 `build/ios-usb-validation/delivery.json`。
-  IPA 未签名，安装仍需用户自行签名。
-- NK1 实机 PCM、兼容 DAC 的 DoP、USB 位流验证：待实机验收。
+  IPA 未签名。这个历史包中的严格入口已经不构成当前产品能力承诺。
 
-尚未进行 USB DAC 或 NK1 物理设备测试，也未验证锁屏、来电/Siri、物理路由插拔或长时播放。
-模拟器拒绝路径通过不代表 USB 严格输出或 DAC 的 DoP 已经验收。操作步骤见
+尚未验证 NK1、锁屏、来电/Siri、物理路由插拔或长时播放。历史模拟器的严格拒绝路径
+不代表当前产品应重新开放独占、严格 PCM 或 DoP。当前 iOS 真机边界见
 [真机验收第 11 节](audio-engine-hardware-verification.md#11-ios模拟器已有基础播放证据真机待验证)。
 
 ## 2.0.302 整合审计（2026-11-18）
 
 本轮以 `b18ad0c` 的 `nextgen` 为基础，合入 `59ee5b2` 的 USB 分支；后者完整包含
-`655e816` 的 Native HiFi 分支。最新歌词修复也在这次整合的代码中。
+`655e816` 的 Native HiFi 分支。最新的产品决定保留其中 dormant 原生严格后端，
+但从 iOS 设置和控制器能力面移除独占、严格 PCM 与 DoP。最新歌词修复也在这次整合的代码中。
 版本更新为 `2.0.302+302`，以区分此前生成的 `2.0.301+301` IPA。
 
 审计修复：
 
 - 原生替换播放失败时释放保留的输出和 AVAudioSession；非法源、ReplayGain、
   设备打开失败与不支持的 Native DSD/严格 PCM 请求均有回归。
-- 严格输出的打开决策与音量、AutoMix、DSP、设备控制串行；拒绝正在打开时改变策略，
+- dormant 严格后端的打开决策与音量、AutoMix、DSP、设备控制串行；拒绝正在打开时改变策略，
   通过可控并发 gate 和 Ready 回调重入验证。Dart 和 C++ 都在 clamp 前拒绝非有限音量。
 - 固定 period 输出也进行有界启动预填等待，避免解码首帧尚未到达就先写整包静音；
   使用真实 reader 和 endpoint 双 gate 复现并验证，保留原有精确字节断言。
@@ -252,8 +256,9 @@ Clang 23、`-Wall -Wextra -Werror` 构建并通过契约检查；统一重编后
 98 项、静态分析、本地化及 AAudio/RemoteIO 契约。Apple 构建与集成也全部通过：
 iOS 原生 audio job 的设备/模拟器 smoke 均为 `PASS file=320ms reader=330ms ABI=29`；
 Flutter iOS 集成 7 项实际执行且无跳过，覆盖 Native engine 选择、factory 与 worker、
-高解析 PCM/DSD RemoteIO、HiFi DSP、HTTP growing reader、严格 USB PCM 拒绝和非 USB
-DoP 强制请求拒绝。
+共享 RemoteIO 高解析与 DSD-to-PCM 播放、HiFi DSP、HTTP growing reader，以及提交
+`04a422c` 当时的严格请求拒绝用例。后续产品收口改为验证严格旧设置被规范化，然后继续
+通过普通共享 RemoteIO 播放。
 
 最终 artifact [14428681263](https://github.com/chuxuehaocai/Lazer/actions/runs/44299255732/artifacts/14428681263)
 为 `Lazer-iOS-aarch64.ipa`，大小 51,943,175 字节，SHA-256 为

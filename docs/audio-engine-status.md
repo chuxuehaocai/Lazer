@@ -10,6 +10,10 @@
 * 快照：分支 `nextgen`，提交 `2592602`，核实时间 2026-10-31，宿主 Windows x64。
 * 本机环境：Flutter 3.47.8（`D:\flutter`）、VS 2022 Community、Windows 开发者模式=1、
   非管理员账号、DSD-capable FFmpeg 前缀 `build/third_party/ffmpeg`。
+* 本文的 bit-perfect、独占、DoP 与 Native DSD 记录针对通用引擎和历史桌面探针。
+  iOS 产品只提供系统共享 RemoteIO 与 DSD 转 PCM，明确不提供独占、严格 PCM、
+  DoP 或 Native DSD；这里的探针结果不构成 iOS 能力承诺，详见
+  [iOS 音频实现](ios-audio.md)。
 
 ---
 

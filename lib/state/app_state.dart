@@ -4627,12 +4627,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       });
       if (error is AudioOutputRefused) {
         if (generation == _generation) {
-          _failPlayback(
-            defaultTargetPlatform == TargetPlatform.iOS &&
-                    hifiSettings.directOutputRequested
-                ? 'USB 严格输出条件未满足。请先调低 DAC 或耳放音量，再确认 USB DAC、100% 应用及系统音量，并关闭混音；DoP 还要求 DAC 明确支持。请检查后重新打开歌曲。'
-                : '音频输出设置未能应用，请检查输出设备后重新打开歌曲。',
-          );
+          _failPlayback('音频输出设置未能应用，请检查输出设备后重新打开歌曲。');
         }
         return;
       }
