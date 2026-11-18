@@ -89,6 +89,7 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   double? _endpointVolume;
   StreamSubscription<LazerStreamInfo?>? _streamSubscription;
   Object? _lastApplyError;
+  Object? _lastDspApplyError;
   Timer? _persistTimer;
   HifiSettings? _pendingPersist;
   Future<void> _persistQueue = Future<void>.value();
@@ -117,9 +118,12 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
             AndroidUsbAudio.isUsbDeviceId(_settings.outputToken)
       : !usesIosSystemRoute &&
             (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
-  bool get supportsDoP =>
-      !usesIosSystemRoute &&
-      (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+  bool get supportsDoP => usesIosSystemRoute
+      ? nativeAvailable
+      : Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+  // A capability to request strict output, not a claim about the connected DAC.
+  bool get supportsBitPerfect =>
+      usesIosSystemRoute ? nativeAvailable : supportsExclusiveMode;
   bool get supportsNativeDsd => !usesIosSystemRoute && Platform.isLinux;
 
   /// Shared with AppState so controls and the applied DSP see the same policy.
@@ -216,6 +220,16 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
       LazerStreamInfo? info,
     ) {
       _streamInfo = info;
+      // A strict output can refuse DSP until the next source is opened. The
+      // engine replays that saved request before opening, so a new snapshot
+      // with no pending DSP confirms recovery without resending settings here.
+      if (info != null &&
+          _lastDspApplyError != null &&
+          identical(_lastApplyError, _lastDspApplyError) &&
+          !native.hasPendingDspSettings) {
+        _lastApplyError = null;
+        _lastDspApplyError = null;
+      }
       notifyListeners();
     });
   }
@@ -256,6 +270,7 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
     _settings = next;
     _schedulePersistence(next);
     notifyListeners();
+    bool applyingDsp = false;
     try {
       if (outputChanged) {
         final NativeAudioEngine? native = engine;
@@ -264,12 +279,17 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
           if (endpointChanged) await refreshEndpointVolume();
         }
       }
-      if (dspChanged) await _applyDspSettings();
+      if (dspChanged) {
+        applyingDsp = true;
+        await _applyDspSettings();
+      }
       if (_disposed || !identical(_settings, next)) return;
       _lastApplyError = null;
+      _lastDspApplyError = null;
     } catch (error) {
       if (_disposed || !identical(_settings, next)) return;
       _lastApplyError = error;
+      _lastDspApplyError = applyingDsp ? error : null;
       debugPrint('hifi: applying settings failed: $error');
     }
     notifyListeners();
@@ -279,14 +299,18 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   Future<void> apply() async {
     if (_disposed) return;
     final HifiSettings snapshot = _settings;
+    bool applyingDsp = false;
     try {
       await _applyOutputSettings(refreshVolume: true);
+      applyingDsp = true;
       await _applyDspSettings();
       if (_disposed || !identical(_settings, snapshot)) return;
       _lastApplyError = null;
+      _lastDspApplyError = null;
     } catch (error) {
       if (_disposed || !identical(_settings, snapshot)) return;
       _lastApplyError = error;
+      _lastDspApplyError = applyingDsp ? error : null;
       debugPrint('hifi: applying settings failed: $error');
     }
     notifyListeners();

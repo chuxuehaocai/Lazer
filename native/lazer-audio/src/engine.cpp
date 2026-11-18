@@ -533,6 +533,16 @@ int32_t Engine::open(
     }
 
     const bool autoMix = autoMixMillis_.load(std::memory_order_acquire) > 0;
+    if (autoMix && output_ != nullptr && output_->strictDirectOutputRequests() &&
+        (device_.bit_perfect != 0 ||
+            doPOutputApplies(device_.dsd_output_mode, currentSource().description()) ||
+            nativeDsdOutputApplies(device_.dsd_output_mode, currentSource().description()))) {
+        setErrorLocked("turn AutoMix off before requesting strict USB PCM or DoP output",
+            LazerAudioErrorUnsupported);
+        currentSource().close();
+        publishTerminal(LazerAudioEventFailed, LazerAudioErrorUnsupported, 0);
+        return LazerAudioErrorUnsupported;
+    }
     const bool requireDoP = !autoMix && doPOutputApplies(
         device_.dsd_output_mode, currentSource().description());
     const bool requireNativeDsd = !autoMix && nativeDsdOutputApplies(
@@ -637,7 +647,7 @@ int32_t Engine::configurePipeline() {
     }
     nativeDsdActive_.store(false, std::memory_order_release);
     if (outputSession_.doP) {
-        if (!description.dsd || !description.rawDsd || !outputSession_.exclusive ||
+        if (!description.dsd || !description.rawDsd || !outputSession_.hasExactTransport() ||
             target.sampleRate <= 0 || target.sampleRate * 2 != description.sampleRate ||
             target.channels != description.channels || target.bitsPerSample != 24 ||
             target.frameBytes() != target.channels * 3) {
@@ -700,13 +710,14 @@ int32_t Engine::configurePipeline() {
         (target.bitsPerSample == 16 || target.bitsPerSample == 24 || target.bitsPerSample == 32);
     if (!outputSession_.doP && !outputSession_.nativeDsd &&
         autoMixMillis_.load(std::memory_order_acquire) == 0 &&
-        device_.bit_perfect != 0 && !exactPcmFormat) {
-        lastError_ = "bit-perfect output requires exact mono or stereo lossless integer PCM format";
+        device_.bit_perfect != 0 && (!exactPcmFormat || !outputSession_.hasExactTransport())) {
+        lastError_ = "bit-perfect output requires exact mono or stereo lossless integer PCM "
+            "and an exclusive or validated USB transport";
         return LazerAudioErrorUnsupported;
     }
     if (!outputSession_.doP && !outputSession_.nativeDsd) {
         dspBypassed_ = autoMixMillis_.load(std::memory_order_acquire) == 0 &&
-            device_.bit_perfect != 0 && outputSession_.exclusive && exactPcmFormat;
+            device_.bit_perfect != 0 && outputSession_.hasExactTransport() && exactPcmFormat;
     }
     if (outputSession_.doP) {
         /* DoP words are an encoded DSD bitstream. They must reach the carrier untouched, with
@@ -800,7 +811,7 @@ int32_t Engine::configurePipeline() {
      * they are active, so the three conditions on the PCM rule hold by construction. */
     const bool dsdCarrierExact = outputSession_.doP || outputSession_.nativeDsd;
     formatMatchesSource_ = dsdCarrierExact ? true : exactPcmFormat;
-    bitPerfectActive_.store(dsdCarrierExact ? outputSession_.exclusive : dspBypassed_,
+    bitPerfectActive_.store(dsdCarrierExact ? outputSession_.hasExactTransport() : dspBypassed_,
         std::memory_order_release);
     return LazerAudioOk;
 }
@@ -893,7 +904,7 @@ int32_t Engine::queueReader(
             preparedDescription.sampleRate == activeDescription.sampleRate &&
             preparedDescription.channels == activeDescription.channels &&
             (preparedDescription.channels == 1 || preparedDescription.channels == 2);
-        const bool compatibleCarrier = outputSession_.doP && outputSession_.exclusive &&
+        const bool compatibleCarrier = outputSession_.doP && outputSession_.hasExactTransport() &&
             sessionTarget.sampleRate > 0 &&
             sessionTarget.sampleRate == target.sampleRate &&
             static_cast<int64_t>(sessionTarget.sampleRate) * 2 == preparedDescription.sampleRate &&
@@ -1344,6 +1355,13 @@ int32_t Engine::setVolume(double volume) {
 
 int32_t Engine::setAutoMix(int32_t durationMillis) {
     if (durationMillis < 0 || durationMillis > 30'000) return LazerAudioErrorInvalidArgument;
+    if (durationMillis > 0 && output_ != nullptr && output_->strictDirectOutputRequests() &&
+        (bitPerfectActive_.load(std::memory_order_acquire) ||
+            dopActive_.load(std::memory_order_acquire))) {
+        setError("turn strict USB PCM or DoP off before enabling AutoMix",
+            LazerAudioErrorUnsupported);
+        return LazerAudioErrorUnsupported;
+    }
     autoMixMillis_.store(durationMillis, std::memory_order_release);
     return LazerAudioOk;
 }
@@ -1353,7 +1371,7 @@ int32_t Engine::setDsp(const LazerAudioDspConfig &dsp) {
     /* A module that would alter the samples. Bypassed stages (a disabled band, a limiter that is
      * off) do not count: sending them is how the settings layer keeps its state in one piece. */
     const bool wantsProcessing = dsp.preamp_db != 0.0 || dsp.band_count > 0 ||
-        dsp.limiter_enabled != 0 || dsp.crossfeed_enabled != 0;
+        dsp.limiter_enabled != 0 || dsp.crossfeed_enabled != 0 || dsp.impulse_response_frames > 0;
     if (wantsProcessing && (dopActive_.load(std::memory_order_acquire) ||
             nativeDsdActive_.load(std::memory_order_acquire))) {
         setError("EQ and limiter are unavailable while direct DSD output is active",
@@ -1513,8 +1531,8 @@ void Engine::streamInfo(LazerAudioStreamInfo &out) {
          * them here is what makes the derived answer agree with `bit_perfect_active`. */
         out.output_dsp_active = dspInPath() ? 1 : 0;
         out.output_format_matches_source = formatMatchesSource_ ? 1 : 0;
+        out.bit_perfect_active = bitPerfectActive_.load(std::memory_order_acquire) ? 1 : 0;
     }
-    out.bit_perfect_active = bitPerfectActive_.load(std::memory_order_acquire) ? 1 : 0;
 }
 
 bool Engine::dspInPath() const {

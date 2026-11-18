@@ -136,6 +136,10 @@ const int lazerAudioFormatSelectionNativeDsdU16Be = 10;
 const int lazerAudioFormatSelectionNativeDsdU32Le = 11;
 const int lazerAudioFormatSelectionNativeDsdU32Be = 12;
 
+/// Validated iOS USB application transport; not hardware-exclusive access.
+const int lazerAudioFormatSelectionIosUsbPcm = 13;
+const int lazerAudioFormatSelectionIosUsbDoP = 14;
+
 /// `LazerAudioEqBandKind`.
 const int lazerAudioEqBandPeak = 0;
 const int lazerAudioEqBandLowShelf = 1;

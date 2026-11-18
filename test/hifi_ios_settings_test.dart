@@ -15,6 +15,7 @@ import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/playback_queue_store.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/hifi_settings_section_io.dart';
+import 'package:lazer_nextgen/widgets/settings_choice.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _Api implements LazerAudioApi {
@@ -50,10 +51,15 @@ class _Worker implements LazerAudioWorker {
   final dsps = <List<Object?>>[];
   int dspResult = lazerAudioOk;
   int deviceResult = lazerAudioOk;
+  bool clearRefusalsOnStop = false;
 
   @override
   Future<Object?> call(int op, List<Object?> params) async {
     events.add(LazerWorkerOp.describe(op));
+    if (op == LazerWorkerOp.stop && clearRefusalsOnStop) {
+      deviceResult = lazerAudioOk;
+      dspResult = lazerAudioOk;
+    }
     if (op == LazerWorkerOp.setDevice) {
       devices.add(List<Object?>.of(params));
       return deviceResult;
@@ -83,7 +89,6 @@ void main() {
     outputToken: 'desktop:dac',
     outputName: 'Desktop DAC',
     exclusiveMode: true,
-    bitPerfect: true,
     dsdOutputMode: HifiDsdOutputMode.requireNative,
     buffer: HifiBufferSize.large,
     equalizer: HifiEqualizerState(enabled: true, preampDb: -3),
@@ -123,7 +128,8 @@ void main() {
       expect(hifi.usesIosSystemRoute, isTrue);
       expect(hifi.supportsDevices, isFalse);
       expect(hifi.supportsExclusiveMode, isFalse);
-      expect(hifi.supportsDoP, isFalse);
+      expect(hifi.supportsDoP, isTrue);
+      expect(hifi.supportsBitPerfect, isTrue);
       expect(hifi.supportsNativeDsd, isFalse);
       expect(hifi.settings.outputToken, isNull);
       expect(hifi.settings.outputName, isNull);
@@ -171,33 +177,36 @@ void main() {
     expect(hifi.endpointVolume, isNull);
   });
 
-  test(
-    'updated imported output choices stay consistent with applied DSP',
-    () async {
-      await hifi.update(
-        restored.copyWith(
-          equalizer: restored.equalizer.copyWith(preampDb: -8),
-          dsdOutputMode: HifiDsdOutputMode.requireDoP,
-        ),
-      );
-      expect(hifi.settings.bitPerfect, isFalse);
-      expect(hifi.settings.outputToken, isNull);
-      expect(hifi.settings.dsdOutputMode, HifiDsdOutputMode.convertToPcm);
-      expect(worker.dsps.single[1], -8);
-      expect(worker.dsps.single[4] as List, hasLength(10));
-      // Disposal flushes the debounced preference write.
-      hifi.dispose();
-      await Future<void>.delayed(Duration.zero);
-      expect(writes.single.bitPerfect, isFalse);
-      expect(writes.single.outputToken, isNull);
-      expect(writes.single.dsdOutputMode, HifiDsdOutputMode.convertToPcm);
-      hifi = HifiController(
-        const HifiSettings(),
-        engine: null,
-        persist: (_) async {},
-      );
-    },
-  );
+  test('explicit DoP bypasses saved DSP and PCM restores it', () async {
+    await hifi.update(
+      restored.copyWith(
+        equalizer: restored.equalizer.copyWith(preampDb: -8),
+        dsdOutputMode: HifiDsdOutputMode.requireDoP,
+      ),
+    );
+    expect(hifi.settings.bitPerfect, isFalse);
+    expect(hifi.settings.outputToken, isNull);
+    expect(hifi.settings.dsdOutputMode, HifiDsdOutputMode.requireDoP);
+    expect(worker.dsps.single[1], 0);
+    expect(worker.dsps.single[2], 0);
+    expect(worker.dsps.single[4] as List, isEmpty);
+    expect((worker.dsps.single[5] as List)[0], 0);
+    expect(worker.devices.single[6], lazerAudioDsdOutputRequireDoP);
+    expect(hifi.settings.dspBypassedByDirectOutput, isTrue);
+    // Disposal flushes the debounced preference write.
+    hifi.dispose();
+    await Future<void>.delayed(Duration.zero);
+    expect(writes.single.bitPerfect, isFalse);
+    expect(writes.single.outputToken, isNull);
+    expect(writes.single.dsdOutputMode, HifiDsdOutputMode.requireDoP);
+    hifi = HifiController(writes.single, engine: engine, persist: (_) async {});
+    await hifi.update(
+      hifi.settings.copyWith(dsdOutputMode: HifiDsdOutputMode.convertToPcm),
+    );
+    expect(worker.dsps.last[1], -8);
+    expect(worker.dsps.last[4] as List, hasLength(10));
+    expect((worker.dsps.last[5] as List)[0], 1);
+  });
 
   test(
     'native DSP refusal reaches the controller and a retry clears it',
@@ -210,6 +219,35 @@ void main() {
       worker.dspResult = lazerAudioOk;
       await hifi.apply();
       expect(hifi.lastApplyError, isNull);
+    },
+  );
+
+  test(
+    'leaving a live strict track restores saved DSP before the next open',
+    () async {
+      await hifi.update(hifi.settings.copyWith(bitPerfect: true));
+      await engine.setUrl('${directory.path}/strict.wav');
+      worker.deviceResult = lazerAudioErrorState;
+      worker.dspResult = lazerAudioErrorUnsupported;
+      worker.clearRefusalsOnStop = true;
+      await hifi.update(hifi.settings.copyWith(bitPerfect: false));
+      expect(hifi.lastApplyError, isA<StateError>());
+      expect(engine.hasPendingDspSettings, isTrue);
+      worker.events.clear();
+      await engine.setUrl('${directory.path}/processed.wav');
+      expect(engine.hasPendingDspSettings, isFalse);
+      expect(worker.dsps.last[1], -3);
+      expect(worker.dsps.last[2], 1);
+      expect(worker.dsps.last[4] as List, hasLength(10));
+      expect((worker.dsps.last[5] as List)[0], 1);
+      expect(
+        worker.events.indexOf('stop'),
+        lessThan(worker.events.indexOf('set_dsp')),
+      );
+      expect(
+        worker.events.indexOf('set_dsp'),
+        lessThan(worker.events.indexOf('open_file')),
+      );
     },
   );
 
@@ -326,8 +364,17 @@ void main() {
     );
     await tester.pump();
     expect(find.byKey(const ValueKey('import-audio-engine')), findsNothing);
-    expect(find.byKey(const ValueKey('hifi-dsd-mode')), findsNothing);
-    expect(find.text('PCM'), findsOneWidget);
+    expect(find.byKey(const ValueKey('hifi-dsd-mode')), findsOneWidget);
+    final modes = tester.widget<SettingsChoice<HifiDsdOutputMode>>(
+      find.byKey(const ValueKey('hifi-dsd-mode')),
+    );
+    expect(modes.value, HifiDsdOutputMode.convertToPcm);
+    expect(modes.items.map((item) => item.value), [
+      HifiDsdOutputMode.convertToPcm,
+      HifiDsdOutputMode.requireDoP,
+    ]);
+    expect(find.textContaining('仅在确认 USB DAC 支持 DoP'), findsOneWidget);
+    expect(find.text('USB 严格 PCM（实验性）'), findsOneWidget);
     expect(find.textContaining('iOS 管理输出路由'), findsOneWidget);
     expect(find.textContaining('iOS 使用应用内置的原生引擎'), findsOneWidget);
     worker.dspResult = lazerAudioErrorUnsupported;
@@ -337,6 +384,88 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('iOS default and auto never probe DoP without explicit selection', () {
+    for (final mode in [
+      HifiDsdOutputMode.auto,
+      HifiDsdOutputMode.requireNative,
+      HifiDsdOutputMode.convertToPcm,
+    ]) {
+      final settings = restored.copyWith(dsdOutputMode: mode).forIosOutput();
+      expect(settings.dsdOutputMode, HifiDsdOutputMode.convertToPcm);
+      expect(settings.toOutputRequest().dsdOutputMode.fallbackChain, [
+        HifiDsdOutputMode.convertToPcm,
+      ]);
+    }
+    final dop = restored
+        .copyWith(bitPerfect: true, dsdOutputMode: HifiDsdOutputMode.requireDoP)
+        .forIosOutput();
+    expect(dop.dsdOutputMode, HifiDsdOutputMode.requireDoP);
+    expect(dop.bitPerfect, isFalse);
+  });
+
+  test(
+    'iOS strict PCM remains independent of hardware exclusive access',
+    () async {
+      final strict = restored.copyWith(
+        bitPerfect: true,
+        dsdOutputMode: HifiDsdOutputMode.convertToPcm,
+      );
+      await hifi.update(strict);
+      expect(hifi.settings.bitPerfect, isTrue);
+      expect(hifi.settings.exclusiveMode, isFalse);
+      expect(hifi.settings.outputToken, isNull);
+      expect(worker.devices.single[1], 0);
+      expect(worker.devices.single[5], 1);
+      expect(worker.dsps.single[1], 0);
+      expect(worker.dsps.single[2], 0);
+      expect(worker.dsps.single[4] as List, isEmpty);
+      expect((worker.dsps.single[5] as List)[0], 0);
+    },
+  );
+
+  testWidgets('iOS strict PCM and DoP selectors never raise software volume', (
+    tester,
+  ) async {
+    final state = AppState(hifi: hifi, hifiSettings: hifi.settings);
+    await state.setVolume(0.25);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(),
+        home: Scaffold(
+          body: SingleChildScrollView(child: HifiSettingsSection(state: state)),
+        ),
+      ),
+    );
+    await tester.pump();
+    Switch strictSwitch() =>
+        tester.widgetList<Switch>(find.byType(Switch)).elementAt(1);
+    expect(strictSwitch().onChanged, isNotNull);
+    strictSwitch().onChanged!(true);
+    await tester.pump();
+    expect(state.hifiSettings.bitPerfect, isTrue);
+    expect(state.hifiSettings.exclusiveMode, isFalse);
+    expect(state.volume, 0.25);
+    final modes = tester.widget<SettingsChoice<HifiDsdOutputMode>>(
+      find.byKey(const ValueKey('hifi-dsd-mode')),
+    );
+    modes.onChanged!(HifiDsdOutputMode.requireDoP);
+    await tester.pump();
+    expect(state.hifiSettings.bitPerfect, isFalse);
+    expect(state.hifiSettings.dsdOutputMode, HifiDsdOutputMode.requireDoP);
+    expect(state.volume, 0.25);
+    expect(find.textContaining('应用不会自动提高音量'), findsOneWidget);
+    strictSwitch().onChanged!(true);
+    await tester.pump();
+    expect(state.hifiSettings.dsdOutputMode, HifiDsdOutputMode.convertToPcm);
+    expect(state.hifiSettings.bitPerfect, isTrue);
+    expect(state.hifiSettings.exclusiveMode, isFalse);
+    expect(state.volume, 0.25);
+    await tester.pumpWidget(const SizedBox.shrink());
+    state.dispose();
+    await tester.pump(const Duration(milliseconds: 200));
     debugDefaultTargetPlatformOverride = null;
   });
 

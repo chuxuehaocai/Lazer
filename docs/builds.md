@@ -68,11 +68,17 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   The `ios-flutter-integration` job then builds the actual Flutter app against
   the Simulator archives and runs `integration_test/ios_native_engine_test.dart`.
   It covers in-process FFI loading, the Dart worker, PCM at 44.1/96/192 kHz,
-  DSD-to-PCM decoding, HiFi DSP and HTTP reader playback/seek. It creates and
+  DSD-to-PCM decoding, HiFi DSP and HTTP reader playback/seek. Two additional
+  non-USB route cases require strict PCM and explicit DoP to fail without
+  fallback, then verify recovery after an explicit switch back to PCM. It creates and
   deletes its own Simulator, bounds setup and execution, and uploads logs and
   the result as `ios-flutter-audio-integration`. An unsuccessful integration
   run blocks the IPA job. These Simulator checks do not establish USB DAC
   negotiation, physical sound quality or bit-perfect delivery on real hardware.
+  Strict USB PCM and explicit DoP use route/format/gain checks rather than a
+  platform-wide iOS disable. Hardware exclusive mode remains unavailable;
+  nonmixable playback must not be reported as a hardware lock. NK1 PCM and DoP
+  compatibility have separate acceptance criteria in [ios-audio.md](ios-audio.md).
   The IPA job verifies the built executable's dynamic export trie, then repeats
   the check on the executable read from the finished IPA before uploading it.
   Both gates require the engine's 19 ABI symbols and all eleven reader bridge

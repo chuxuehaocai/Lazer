@@ -52,6 +52,7 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   bool get usesIosSystemRoute => false;
   bool get supportsDevices => false;
   bool get supportsExclusiveMode => false;
+  bool get supportsBitPerfect => false;
   bool get supportsDoP => false;
   bool get supportsNativeDsd => false;
   bool get supportsDsdRatePolicy => false;

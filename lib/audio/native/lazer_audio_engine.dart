@@ -285,6 +285,8 @@ class NativeAudioEngine
   bool _shutdownStarted = false;
   bool _completionSent = false;
   double _volume = 1;
+  List<Object?>? _pendingDspSettings;
+  bool get hasPendingDspSettings => _pendingDspSettings != null;
 
   AudioStreamEntry? _activeEntry;
   NativeStreamReader? _activeReader;
@@ -965,23 +967,22 @@ class NativeAudioEngine
   }) async {
     final int? address = _engineAddressOrNull;
     if (address == null) return;
+    final List<Object?> settings = <Object?>[
+      preampDb,
+      limiterEnabled ? 1 : 0,
+      limiterThresholdDb,
+      <Object?>[for (final LazerEqBandSettings band in bands) band.toMessage()],
+      crossfeed.toMessage(),
+      List<int>.of(stageOrder),
+    ];
+    _pendingDspSettings = settings;
     final int status = _status(
-      await _callWorker(LazerWorkerOp.setDsp, <Object?>[
-        address,
-        preampDb,
-        limiterEnabled ? 1 : 0,
-        limiterThresholdDb,
-        <Object?>[
-          for (final LazerEqBandSettings band in bands) band.toMessage(),
-        ],
-        crossfeed.toMessage(),
-        // Empty means the engine's default order; see `HifiSettings.dspStageOrder`.
-        stageOrder,
-      ]),
+      await _callWorker(LazerWorkerOp.setDsp, <Object?>[address, ...settings]),
     );
     if (status != lazerAudioOk) {
       throw StateError('DSP settings were refused ($status): ${lastError()}');
     }
+    if (identical(_pendingDspSettings, settings)) _pendingDspSettings = null;
   }
 
   /// Deletes the audio cache; playback stops because its files are gone.
@@ -1439,6 +1440,26 @@ class NativeAudioEngine
       throw StateError(
         'Output settings were refused ($status): ${lastError()}',
       );
+    }
+    // Leaving a strict track queues a normal output policy, but the old stream
+    // still refuses DSP until it is stopped above. Replay that refused request
+    // here so the next ordinary track restores the user's saved EQ and gain.
+    final List<Object?>? pendingDsp = _pendingDspSettings;
+    if (pendingDsp != null) {
+      final int dspStatus = _status(
+        await _callWorker(LazerWorkerOp.setDsp, <Object?>[
+          address,
+          ...pendingDsp,
+        ]),
+      );
+      if (dspStatus != lazerAudioOk) {
+        throw StateError(
+          'DSP settings were refused ($dspStatus): ${lastError()}',
+        );
+      }
+      if (identical(_pendingDspSettings, pendingDsp)) {
+        _pendingDspSettings = null;
+      }
     }
     await _callWorker(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
   }

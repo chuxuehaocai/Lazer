@@ -610,23 +610,26 @@ class HifiSettings {
 
   /// The settings supported by the iOS RemoteIO path.
   ///
-  /// Preferences can arrive from a desktop backup. Leaving its strict output
-  /// policy selected would make every iOS open fail, while a remembered
-  /// bit-perfect request would also bypass the user's EQ. Keep the DSP choices
-  /// and buffer, but expose and apply the system route with DSD decoded to PCM.
+  /// iOS owns the route and cannot grant desktop exclusive access. Strict USB
+  /// PCM and explicit DoP remain requests that the output validates at open.
+  /// Auto never tries a DoP carrier on an unverified DAC: use PCM by default.
   HifiSettings forIosOutput() {
+    final mode = dsdOutputMode == HifiDsdOutputMode.requireDoP
+        ? HifiDsdOutputMode.requireDoP
+        : HifiDsdOutputMode.convertToPcm;
+    final strictPcm = bitPerfect && mode != HifiDsdOutputMode.requireDoP;
     if (outputToken == null &&
         outputName == null &&
         !exclusiveMode &&
-        !bitPerfect &&
-        dsdOutputMode == HifiDsdOutputMode.convertToPcm) {
+        bitPerfect == strictPcm &&
+        dsdOutputMode == mode) {
       return this;
     }
     return copyWith(
       clearOutput: true,
       exclusiveMode: false,
-      bitPerfect: false,
-      dsdOutputMode: HifiDsdOutputMode.convertToPcm,
+      bitPerfect: strictPcm,
+      dsdOutputMode: mode,
     );
   }
 
@@ -634,19 +637,28 @@ class HifiSettings {
   /// the software volume and the EQ are bypassed — so the two cannot both be
   /// claimed. The page disables the contradictory combination instead of letting
   /// the engine reject it at open time.
-  bool get eqActive => equalizer.enabled && !bitPerfect;
+  bool get eqActive => equalizer.enabled && !directOutputRequested;
 
   /// Crossfeed mixes the channels into each other, so it is processing too and is
   /// bypassed by the same promise bit-perfect makes.
-  bool get crossfeedActive => crossfeed.altersSignal && !bitPerfect;
+  bool get crossfeedActive => crossfeed.altersSignal && !directOutputRequested;
+
+  /// Strict PCM and explicit DSD transports cannot apply software gain or DSP.
+  /// Keep the saved controls intact so returning to PCM processing restores them.
+  bool get directOutputRequested =>
+      bitPerfect ||
+      dsdOutputMode == HifiDsdOutputMode.requireDoP ||
+      dsdOutputMode == HifiDsdOutputMode.requireNative;
+
+  bool get dspConfigured =>
+      equalizer.enabled ||
+      crossfeed.altersSignal ||
+      equalizer.limiterEnabled ||
+      equalizer.preampDb.abs() > 0.0001;
 
   /// Whether anything in the DSP chain alters the samples: the EQ, its limiter, the
   /// preamp or crossfeed.
-  bool get dspActive =>
-      eqActive ||
-      crossfeedActive ||
-      equalizer.limiterEnabled ||
-      equalizer.preampDb.abs() > 0.0001;
+  bool get dspActive => !directOutputRequested && dspConfigured;
 
   HifiSettings copyWith({
     bool? preferNativeEngine,
@@ -728,15 +740,15 @@ class HifiSettings {
   /// Crossfeed is dropped when the settings would break the bit-perfect promise, and
   /// its delay/cutoff follow the chosen algorithm.
   ///
-  /// A bit-perfect session routes the decoded samples straight to the device, and
-  /// the engine refuses processing requests while it is active. The request is
+  /// A strict PCM or explicit DSD session bypasses processing, and the engine
+  /// refuses processing requests while it is active. The request is
   /// therefore neutralised here rather than sent and rejected: reporting "EQ could
   /// not be applied" for settings the user has not touched would be noise. Nothing
-  /// is discarded — turning bit-perfect off re-sends the same settings, and
-  /// [dspBypassedByBitPerfect] is what the page states meanwhile.
+  /// is discarded — returning to ordinary PCM re-sends the same settings, and
+  /// [dspBypassedByDirectOutput] is what the page states meanwhile.
   LazerDspRequest toDspRequest() => LazerDspRequest(
-    preampDb: bitPerfect ? 0 : equalizer.preampDb,
-    limiterEnabled: !bitPerfect && equalizer.limiterEnabled,
+    preampDb: directOutputRequested ? 0 : equalizer.preampDb,
+    limiterEnabled: !directOutputRequested && equalizer.limiterEnabled,
     limiterThresholdDb: equalizer.limiterThresholdDb,
     crossfeedEnabled: crossfeedActive,
     crossfeedStrength: crossfeed.strength,
@@ -749,7 +761,8 @@ class HifiSettings {
 
   /// True when the user has DSP configured that bit-perfect keeps out of the
   /// signal path: the page says so instead of showing the EQ as applied.
-  bool get dspBypassedByBitPerfect => bitPerfect && dspActive;
+  bool get dspBypassedByBitPerfect => bitPerfect && dspConfigured;
+  bool get dspBypassedByDirectOutput => directOutputRequested && dspConfigured;
 }
 
 /// One band, in the shape the engine's DSP config takes.

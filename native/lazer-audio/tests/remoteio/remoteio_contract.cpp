@@ -66,6 +66,8 @@ struct FakeUnitState {
     int setFormatElement = -1;
     int setFormatScope = -1;
     double requestedSampleRate = 0.0;
+    AudioUnitPropertyListenerProc formatListener = nullptr;
+    void *formatListenerContext = nullptr;
 };
 
 FakeUnitState g_unit;
@@ -77,6 +79,10 @@ OSStatus g_startStatus = noErr;
 int g_instancesCreated = 0;
 int g_instancesDisposed = 0;
 bool g_inRenderCallback = false;
+bool g_useHardwareFormat = false;
+AudioStreamBasicDescription g_hardwareFormat{};
+bool g_failHardwareReadback = false;
+bool g_failFormatListener = false;
 
 /* Pulls `frames` from the backend's callback exactly as the device would. */
 std::vector<float> pullAudio(int32_t frames, int32_t channels) {
@@ -201,7 +207,7 @@ OSStatus AudioUnitSetProperty(AudioUnit unit, AudioUnitPropertyID id, AudioUnitS
     }
 }
 
-OSStatus AudioUnitGetProperty(AudioUnit unit, AudioUnitPropertyID id, AudioUnitScope,
+OSStatus AudioUnitGetProperty(AudioUnit unit, AudioUnitPropertyID id, AudioUnitScope scope,
     AudioUnitElement, void *outData, UInt32 *ioDataSize) {
     if (unit == nullptr || outData == nullptr || ioDataSize == nullptr) return -1;
     if (id == kAudioUnitProperty_MaximumFramesPerSlice) {
@@ -216,10 +222,33 @@ OSStatus AudioUnitGetProperty(AudioUnit unit, AudioUnitPropertyID id, AudioUnitS
         return -1;
     }
     std::memcpy(outData, &g_unit.format, sizeof(g_unit.format));
+    if (scope == kAudioUnitScope_Output) {
+        if (g_failHardwareReadback) return -1;
+        if (g_useHardwareFormat) std::memcpy(outData, &g_hardwareFormat, sizeof(g_hardwareFormat));
+    }
     if (g_changeGrantedChannels) {
         static_cast<AudioStreamBasicDescription *>(outData)->mChannelsPerFrame = 1;
     }
     *ioDataSize = sizeof(g_unit.format);
+    return noErr;
+}
+
+OSStatus AudioUnitAddPropertyListener(AudioUnit, AudioUnitPropertyID,
+    AudioUnitPropertyListenerProc listener, void *context) {
+    check(!g_inRenderCallback, "callback never registers property listeners");
+    if (g_failFormatListener) return -1;
+    g_unit.formatListener = listener;
+    g_unit.formatListenerContext = context;
+    return noErr;
+}
+
+OSStatus AudioUnitRemovePropertyListenerWithUserData(AudioUnit, AudioUnitPropertyID,
+    AudioUnitPropertyListenerProc listener, void *context) {
+    check(!g_inRenderCallback, "callback never removes property listeners");
+    check(g_unit.formatListener == listener && g_unit.formatListenerContext == context,
+        "removes the registered listener before destroying its owner");
+    g_unit.formatListener = nullptr;
+    g_unit.formatListenerContext = nullptr;
     return noErr;
 }
 
@@ -283,6 +312,13 @@ struct FakeSession {
     bool notifyDuringActivation = false;
     int stateReads = 0;
     lazer::audio::IosSessionState state{};
+    uint64_t realtimeRevision = 0;
+    bool usbOnly = false;
+    std::string routeUid;
+    int32_t outputChannels = 2;
+    bool nonMixablePlayback = true;
+    bool unityVolume = true;
+    bool strictRequested = false;
 };
 
 FakeSession g_session;
@@ -297,18 +333,23 @@ IosSessionState iosSessionState() noexcept {
     return g_session.state;
 }
 
+uint64_t iosSessionRealtimeRevision() noexcept {
+    return g_session.state.revision + g_session.realtimeRevision;
+}
+
 void iosSessionRequestResume() noexcept {
     check(!g_inRenderCallback, "the callback never requests session resumption");
     g_session.state.mayResume = true;
 }
 
 int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
-    IosSessionInfo &info, std::string &error) {
+    IosSessionInfo &info, std::string &error, bool strictUsb) {
     check(!g_inRenderCallback, "the callback never activates the session");
     ++g_session.activateCalls;
     if (g_session.notifyDuringActivation) ++g_session.state.revision;
     g_session.requestedSampleRate = preferredSampleRate;
     g_session.requestedBufferMillis = bufferMillis;
+    g_session.strictRequested = strictUsb;
     if (g_session.failActivation || (g_session.background && !g_session.active)) {
         error = "fake session refused activation";
         return LazerAudioErrorDevice;
@@ -318,6 +359,12 @@ int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
     info.ioBufferFrames = g_session.ioBufferFrames;
     info.outputLatencyFrames = g_session.outputLatencyFrames;
     info.route = g_session.route;
+    info.revision = iosSessionRealtimeRevision();
+    info.routeUid = g_session.routeUid;
+    info.usbOnly = g_session.usbOnly;
+    info.outputChannels = g_session.outputChannels;
+    info.nonMixablePlayback = g_session.nonMixablePlayback;
+    info.unityVolume = g_session.unityVolume;
     g_session.active = true;
     return LazerAudioOk;
 }
@@ -949,6 +996,351 @@ void testBackgroundSourceReplacementPreservesSession() {
     check(!g_session.active, "explicit stop returns audio focus");
 }
 
+void resetUsbFixture(int32_t rate = 44100) {
+    g_session = FakeSession{};
+    g_session.sampleRate = rate;
+    g_session.route = "USBAudio";
+    g_session.routeUid = "usb-test-dac-1";
+    g_session.usbOnly = true;
+    g_useHardwareFormat = false;
+    g_failHardwareReadback = false;
+    g_failFormatListener = false;
+    g_changeGrantedChannels = false;
+    g_maximumSliceFrames = 4096;
+    g_failMaximumSliceReadback = false;
+    g_startStatus = noErr;
+}
+
+StreamDescription integerSource(int32_t bits = 24, int32_t rate = 44100) {
+    auto value = source();
+    value.bitsPerSample = bits;
+    value.sampleRate = rate;
+    value.integerPcm = true;
+    value.canonicalChannelLayout = true;
+    value.decoderFormatMatchesStream = true;
+    return value;
+}
+
+AudioOutputRequest strictPcmRequest(int32_t rate = 44100) {
+    auto value = request();
+    value.bitPerfect = true;
+    value.desired.sampleRate = rate;
+    return value;
+}
+
+void packInteger(std::vector<uint8_t> &bytes, int32_t value, int32_t width) {
+    const auto word = static_cast<uint32_t>(value);
+    for (int32_t byte = 0; byte < width; ++byte) {
+        bytes.push_back(static_cast<uint8_t>(word >> (byte * 8)));
+    }
+}
+
+int32_t exactFloatInteger(float value, int32_t bits) {
+    return static_cast<int32_t>(value * (bits == 16 ? 32768.0f : 8388608.0f));
+}
+
+void testUsbPcmPreservesIntegerSamples() {
+    for (const int32_t bits : {16, 24}) {
+        for (const int32_t rate : {44100, 96000, 192000}) {
+            resetUsbFixture(rate);
+            auto output = createPlatformAudioOutput();
+            AudioOutputSession session{};
+            std::string error;
+            openDefault(*output, session, error, strictPcmRequest(rate), integerSource(bits, rate));
+            check(output->strictDirectOutputRequests(), "iOS rejects unavailable strict requests without fallback");
+            check(session.transparentUsb && !session.exclusive && !session.doP,
+                "USB exact transport is distinct from hardware exclusive ownership");
+            checkEqual(session.formatSelection, LazerAudioFormatSelectionIosUsbPcm,
+                "publishes the USB PCM negotiation fact");
+            checkEqual(session.target.bitsPerSample, bits, "engine keeps original integer precision");
+            checkEqual(session.target.containerBitsPerSample, bits, "engine queue uses packed integer words");
+            check(g_session.strictRequested, "strict playback requests non-mixing USB session");
+            checkEqual(output->start(error), LazerAudioOk, "starts exact PCM output");
+            uint32_t random = 0x1384ba75;
+            for (int32_t block = 0; block < 64; ++block) {
+                std::vector<int32_t> expected;
+                std::vector<uint8_t> bytes;
+                for (int32_t sample = 0; sample < 1024; ++sample) {
+                    // Exhaust every 16-bit value, and span the signed 24-bit
+                    // domain deterministically, including min/max/zero/LSB.
+                    random = random * 1664525U + 1013904223U;
+                    int32_t value = bits == 16 ? block * 1024 + sample - 32768
+                        : static_cast<int32_t>(random & 0xFFFFFFU) - 8388608;
+                    if (bits == 24 && block == 0 && sample < 7) {
+                        const int32_t edges[] = {-8388608, -8388607, -1, 0, 1, 8388606, 8388607};
+                        value = edges[sample];
+                    }
+                    expected.push_back(value);
+                    packInteger(bytes, value, bits / 8);
+                }
+                checkEqual(output->write(bytes.data(), 512, error), 512, "queues exact packed integer block");
+                const auto pulled = pullAudio(512, 2);
+                for (size_t sample = 0; sample < expected.size(); ++sample) {
+                    checkEqual(exactFloatInteger(pulled[sample], bits), expected[sample],
+                        "every source sample survives the Float32 bridge exactly");
+                }
+            }
+            const auto empty = pullAudio(7, 2);
+            check(std::all_of(empty.begin(), empty.end(), [](float value) { return value == 0; }),
+                "PCM starvation emits digital zero");
+        }
+    }
+}
+
+void testUsbSourceAndRouteRefusals() {
+    for (int variant = 0; variant < 17; ++variant) {
+        resetUsbFixture();
+        auto described = integerSource();
+        auto asked = strictPcmRequest();
+        switch (variant) {
+            case 0: described.bitsPerSample = 32; break;
+            case 1: described.integerPcm = false; break;
+            case 2: described.lossless = false; break;
+            case 3: described.canonicalChannelLayout = false; break;
+            case 4: described.decoderFormatMatchesStream = false; break;
+            case 5: described.channels = 6; break;
+            case 6: described.dsd = true; break;
+            case 7: asked.desired.sampleRate = 48000; break;
+            case 8: g_session.usbOnly = false; break;
+            case 9: g_session.routeUid.clear(); break;
+            case 10: g_session.nonMixablePlayback = false; break;
+            case 11: g_session.unityVolume = false; break;
+            case 12: g_session.sampleRate = 48000; break;
+            case 13: g_session.outputChannels = 1; break;
+            case 14: asked.desired.doP = true; break;
+            case 15: described.bitsPerSample = 20; break;
+            case 16: described.sampleRate = 0; break;
+        }
+        auto output = createPlatformAudioOutput();
+        AudioOutputSession session{};
+        std::string error;
+        checkEqual(output->open(asked, described, session, error, nullptr),
+            LazerAudioErrorUnsupported, "strict PCM fails closed on unsupported source or route");
+        check(!error.empty() && !output->isOpen(), "refused direct request has an explanation and no open output");
+        check(!session.transparentUsb && !session.exclusive, "refusal never publishes transport capability");
+    }
+}
+
+void testUsbHardwareFormatReadback() {
+    for (int variant = 0; variant < 15; ++variant) {
+        resetUsbFixture();
+        g_useHardwareFormat = true;
+        g_hardwareFormat = {};
+        g_hardwareFormat.mSampleRate = 44100;
+        g_hardwareFormat.mFormatID = kAudioFormatLinearPCM;
+        g_hardwareFormat.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+        g_hardwareFormat.mChannelsPerFrame = 2;
+        g_hardwareFormat.mBitsPerChannel = 32;
+        g_hardwareFormat.mFramesPerPacket = 1;
+        g_hardwareFormat.mBytesPerFrame = 8;
+        g_hardwareFormat.mBytesPerPacket = 8;
+        const bool success = variant < 4;
+        switch (variant) {
+            case 0: break;
+            case 1:
+                g_hardwareFormat.mFormatFlags |= kAudioFormatFlagIsNonInterleaved;
+                g_hardwareFormat.mBytesPerFrame = g_hardwareFormat.mBytesPerPacket = 4;
+                break;
+            case 2:
+                g_hardwareFormat.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+                g_hardwareFormat.mBitsPerChannel = 24;
+                g_hardwareFormat.mBytesPerFrame = g_hardwareFormat.mBytesPerPacket = 6;
+                break;
+            case 3:
+                g_hardwareFormat.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsAlignedHigh;
+                g_hardwareFormat.mBitsPerChannel = 24;
+                break;
+            case 4: g_hardwareFormat.mSampleRate = 48000; break;
+            case 5: g_hardwareFormat.mChannelsPerFrame = 1; break;
+            case 6: g_hardwareFormat.mFormatID = 0; break;
+            case 7: g_hardwareFormat.mFormatFlags |= kAudioFormatFlagIsBigEndian; break;
+            case 8: g_hardwareFormat.mFramesPerPacket = 2; break;
+            case 9: g_hardwareFormat.mBytesPerPacket = 0; break;
+            case 10: g_hardwareFormat.mBitsPerChannel = 16; break;
+            case 11:
+                g_hardwareFormat.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+                g_hardwareFormat.mBitsPerChannel = 16;
+                g_hardwareFormat.mBytesPerFrame = g_hardwareFormat.mBytesPerPacket = 4;
+                break;
+            case 12: g_hardwareFormat.mFormatFlags |= 1U << 15; break;
+            case 13: g_failHardwareReadback = true; break;
+            case 14: g_failFormatListener = true; break;
+        }
+        auto output = createPlatformAudioOutput();
+        AudioOutputSession session{};
+        std::string error;
+        const auto status = output->open(strictPcmRequest(), integerSource(), session, error, nullptr);
+        check(success ? status == LazerAudioOk : status < 0,
+            "USB direct mode verifies both sides of the AudioUnit, including precision and observer setup");
+    }
+    resetUsbFixture();
+}
+
+void testUsbChangesMuteBeforeProducerPoll() {
+    for (int variant = 0; variant < 5; ++variant) {
+        resetUsbFixture();
+        auto output = createPlatformAudioOutput();
+        AudioOutputSession session{};
+        std::string error;
+        openDefault(*output, session, error, strictPcmRequest(), integerSource());
+        output->start(error);
+        std::vector<uint8_t> bytes;
+        for (int sample = 0; sample < 16; ++sample) packInteger(bytes, 123456 + sample, 3);
+        checkEqual(output->write(bytes.data(), 8, error), 8, "queues direct data before change");
+        const int before = g_session.activateCalls;
+        switch (variant) {
+            case 0: g_session.unityVolume = false; ++g_session.realtimeRevision; break;
+            case 1:
+                g_session.usbOnly = false;
+                g_session.route = "Speaker";
+                g_session.state.mayResume = false;
+                ++g_session.state.revision;
+                break;
+            case 2: g_session.sampleRate = 48000; ++g_session.state.revision; break;
+            case 3: g_session.routeUid = "usb-test-dac-2"; ++g_session.state.revision; break;
+            case 4:
+                g_failHardwareReadback = true;
+                g_unit.formatListener(g_unit.formatListenerContext, reinterpret_cast<AudioUnit>(&g_unit),
+                    kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0);
+                break;
+        }
+        const auto muted = pullAudio(4, 2);
+        check(!output->isOpen(), "invalidated USB output stops advertising its initialized exact transport immediately");
+        check(std::all_of(muted.begin(), muted.end(), [](float value) { return value == 0; }),
+            "callback emits zero immediately after route/clock/volume invalidation");
+        checkEqual(g_session.activateCalls, before, "callback never calls Objective-C session recovery");
+        checkEqual(output->writableFrames(error), -1, "changed direct endpoint fails closed before producer writes");
+        check(!error.empty() && !g_unit.running, "unsafe route produces concrete error and stopped unit");
+        // Restoring the same DAC permits an explicit, fully revalidated retry.
+        g_session.usbOnly = true;
+        g_session.route = "USBAudio";
+        g_session.routeUid = "usb-test-dac-1";
+        g_session.sampleRate = 44100;
+        g_session.unityVolume = true;
+        g_failHardwareReadback = false;
+        ++g_session.state.revision;
+        checkEqual(output->start(error), LazerAudioOk, "explicit retry revalidates restored direct endpoint");
+        check(output->isOpen(), "restored endpoint advertises exact transport only after revalidation");
+        const auto retained = pullAudio(8, 2);
+        for (size_t sample = 0; sample < retained.size(); ++sample) {
+            checkEqual(exactFloatInteger(retained[sample], 24), 123456 + static_cast<int32_t>(sample),
+                "muted callbacks never consume queued music");
+        }
+    }
+}
+
+StreamDescription rawDsdSource() {
+    StreamDescription value{};
+    value.dsd = true;
+    value.rawDsd = true;
+    value.dsdRateMultiplier = 64;
+    value.sampleRate = 352800;
+    value.channels = 2;
+    return value;
+}
+
+AudioOutputRequest doPRequest() {
+    auto value = request();
+    value.requireDoP = true;
+    value.desired.sampleRate = 176400;
+    value.desired.channels = 2;
+    value.desired.bitsPerSample = 24;
+    value.desired.containerBitsPerSample = 24;
+    value.desired.doP = true;
+    return value;
+}
+
+void testUsbDoPPayloadAndUnderrunClock() {
+    resetUsbFixture(176400);
+    auto output = createPlatformAudioOutput();
+    AudioOutputSession session{};
+    std::string error;
+    openDefault(*output, session, error, doPRequest(), rawDsdSource());
+    check(session.transparentUsb && session.doP && session.target.doP && !session.exclusive,
+        "DoP reports exact USB carrier without claiming hardware exclusive access");
+    checkEqual(session.formatSelection, LazerAudioFormatSelectionIosUsbDoP, "publishes USB DoP selection");
+    output->start(error);
+    const uint8_t payload[] = {0x12, 0x34, 0, 0xAB, 0xCD, 0};
+    checkEqual(output->write(payload, 1, error), 1, "queues stereo DoP payload");
+    auto first = pullAudio(3, 2);
+    const uint32_t expected[] = {0x053412, 0x05CDAB, 0xFA6969, 0xFA6969, 0x056969, 0x056969};
+    for (size_t sample = 0; sample < first.size(); ++sample) {
+        checkEqual(static_cast<uint32_t>(exactFloatInteger(first[sample], 24)) & 0xFFFFFFU,
+            expected[sample], "DoP preserves payload and emits continuous alternating idle markers");
+    }
+    output->write(payload, 1, error);
+    auto next = pullAudio(1, 2);
+    checkEqual(static_cast<uint32_t>(exactFloatInteger(next[0], 24)) & 0xFFFFFFU,
+        0xFA3412, "DoP real data resumes the marker clock after starvation");
+    output->reset(error);
+    output->start(error);
+    auto idle = pullAudio(1, 2);
+    checkEqual(static_cast<uint32_t>(exactFloatInteger(idle[0], 24)) & 0xFFFFFFU,
+        0x056969, "seek/reset starts a new valid DoP marker epoch");
+    g_session.usbOnly = false;
+    ++g_session.state.revision;
+    const auto unplugged = pullAudio(2, 2);
+    check(std::all_of(unplugged.begin(), unplugged.end(), [](float value) { return value == 0; }),
+        "invalidated DoP route receives PCM zero, never DSD markers or idle noise");
+}
+
+void testUsbDoPRejectsInvalidCarrierContracts() {
+    for (int variant = 0; variant < 12; ++variant) {
+        resetUsbFixture(176400);
+        auto described = rawDsdSource();
+        auto asked = doPRequest();
+        switch (variant) {
+            case 0: described.rawDsd = false; break;
+            case 1: described.dsd = false; break;
+            case 2: described.dsdRateMultiplier = 0; break;
+            case 3: described.sampleRate = 384000; break;
+            case 4: asked.desired.sampleRate = 192000; break;
+            case 5: asked.desired.containerBitsPerSample = 32; break;
+            case 6: asked.desired.bitsPerSample = 16; break;
+            case 7: asked.desired.channels = 1; break;
+            case 8: asked.desired.doP = false; break;
+            case 9: asked.bitPerfect = true; break;
+            case 10: g_session.usbOnly = false; break;
+            case 11: g_session.unityVolume = false; break;
+        }
+        auto output = createPlatformAudioOutput();
+        AudioOutputSession session{};
+        std::string error;
+        checkEqual(output->open(asked, described, session, error, nullptr), LazerAudioErrorUnsupported,
+            "invalid DoP transport cannot silently become shared PCM or native DSD");
+        check(!output->isOpen() && !session.doP, "refused DoP has no live carrier");
+    }
+    resetUsbFixture();
+}
+
+void testUsbMalformedCallbacksFailClosed() {
+    for (int variant = 0; variant < 3; ++variant) {
+        resetUsbFixture(variant == 2 ? 176400 : 44100);
+        auto output = createPlatformAudioOutput();
+        AudioOutputSession session{};
+        std::string error;
+        openDefault(*output, session, error,
+            variant == 2 ? doPRequest() : strictPcmRequest(),
+            variant == 2 ? rawDsdSource() : integerSource());
+        output->start(error);
+        if (variant == 0 || variant == 2) {
+            const auto malformed = pullAudioTwoBuffers(3, 2);
+            const auto zero = [](float value) { return value == 0; };
+            check(std::all_of(malformed.first.begin(), malformed.first.end(), zero) &&
+                std::all_of(malformed.second.begin(), malformed.second.end(), zero),
+                "malformed direct callback clears every destination instead of producing noise");
+        } else {
+            const auto oversized = pullAudio(static_cast<int32_t>(g_maximumSliceFrames) + 1, 2);
+            check(std::all_of(oversized.begin(), oversized.end(), [](float value) { return value == 0; }),
+                "unnegotiated oversized callback never overflows preallocated integer scratch");
+        }
+        check(!output->isOpen(), "malformed callback withdraws the strict transport status immediately");
+        checkEqual(output->writableFrames(error), -1, "producer receives the terminal callback-layout error");
+        check(error.find("callback layout") != std::string::npos, "callback failure explains its cause");
+        check(!g_unit.running, "malformed callback stops the AudioUnit from the control thread");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -971,6 +1363,13 @@ int main() {
     testExplicitPlayReportsRecoveryFailure();
     testPersistentRecoveryFailureIsBounded();
     testBackgroundSourceReplacementPreservesSession();
+    testUsbPcmPreservesIntegerSamples();
+    testUsbSourceAndRouteRefusals();
+    testUsbHardwareFormatReadback();
+    testUsbChangesMuteBeforeProducerPoll();
+    testUsbDoPPayloadAndUnderrunClock();
+    testUsbDoPRejectsInvalidCarrierContracts();
+    testUsbMalformedCallbacksFailClosed();
     if (failures != 0) {
         std::printf("%d RemoteIO contract check(s) failed\n", failures);
         return 1;

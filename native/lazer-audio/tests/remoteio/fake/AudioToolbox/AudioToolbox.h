@@ -27,7 +27,11 @@ constexpr OSStatus noErr = 0;
 
 constexpr AudioFormatID kAudioFormatLinearPCM = 0x6C70636D;  // 'lpcm'
 constexpr AudioFormatFlags kAudioFormatFlagIsFloat = 1U << 0;
+constexpr AudioFormatFlags kAudioFormatFlagIsBigEndian = 1U << 1;
+constexpr AudioFormatFlags kAudioFormatFlagIsSignedInteger = 1U << 2;
 constexpr AudioFormatFlags kAudioFormatFlagIsPacked = 1U << 3;
+constexpr AudioFormatFlags kAudioFormatFlagIsAlignedHigh = 1U << 4;
+constexpr AudioFormatFlags kAudioFormatFlagIsNonInterleaved = 1U << 5;
 
 constexpr UInt32 kAudioUnitType_Output = 0x61756F75;          // 'auou'
 constexpr UInt32 kAudioUnitSubType_RemoteIO = 0x72696F63;      // 'rioc'
@@ -83,6 +87,13 @@ struct AURenderCallbackStruct {
     AURenderCallback inputProc;
     void *inputProcRefCon;
 };
+
+using AudioUnitPropertyListenerProc = void (*)(void *, AudioUnit, AudioUnitPropertyID,
+    AudioUnitScope, AudioUnitElement);
+OSStatus AudioUnitAddPropertyListener(AudioUnit, AudioUnitPropertyID,
+    AudioUnitPropertyListenerProc, void *);
+OSStatus AudioUnitRemovePropertyListenerWithUserData(AudioUnit, AudioUnitPropertyID,
+    AudioUnitPropertyListenerProc, void *);
 
 AudioComponent AudioComponentFindNext(AudioComponent inComponent,
     const AudioComponentDescription *inDesc);

@@ -50,6 +50,13 @@ struct AudioOutputSession {
     bool exclusive = false;
     bool primeBeforeStart = false;
     bool queueDepthAvailable = true;
+    /* iOS USB route validated at the source clock with unity gain and no mixing.
+     * This is an exact application transport contract, not hardware ownership or
+     * a physical-DAC bit test. The backend must stop if those conditions change. */
+    bool transparentUsb = false;
+    [[nodiscard]] bool hasExactTransport() const noexcept {
+        return exclusive || transparentUsb;
+    }
     /* Set only by CoreAudio from the initialized virtual ASBD; this is HAL format metadata, not a
      * guarantee of bit-perfect output or physical DAC behavior. */
     bool coreAudioMixabilityKnown = false;
@@ -87,6 +94,10 @@ public:
     /* A source replacement retires the stream but keeps application-level audio
      * focus where the platform requires it. Explicit stop/teardown still close(). */
     virtual void closeForReplacement() { close(); }
+
+    /* Some system-managed backends expose only an explicitly requested strict
+     * path. Mixing must not silently turn that request into processed PCM. */
+    [[nodiscard]] virtual bool strictDirectOutputRequests() const noexcept { return false; }
 
     virtual int32_t start(std::string &error) = 0;
     virtual int32_t stop(std::string &error) = 0;

@@ -24,6 +24,7 @@ class OutputPathState {
     required this.channels,
     required this.engineReportedBitPerfect,
     required this.isDsdPath,
+    this.transparentUsb = false,
   });
 
   /// Reads the facts out of the engine's `LazerAudioStreamInfo`.
@@ -41,6 +42,9 @@ class OutputPathState {
       channels: info.outputChannels,
       engineReportedBitPerfect: info.bitPerfectActive != 0,
       isDsdPath: dsdOutput,
+      transparentUsb:
+          info.outputFormatSelection == lazerAudioFormatSelectionIosUsbPcm ||
+          info.outputFormatSelection == lazerAudioFormatSelectionIosUsbDoP,
     );
   }
 
@@ -51,6 +55,11 @@ class OutputPathState {
 
   /// The output session holds the endpoint exclusively.
   final bool exclusive;
+
+  /// iOS USB negotiated a strict client format with the engine's processing
+  /// bypassed. This is a transport contract, not hardware exclusivity or proof
+  /// that the physical DAC received every bit unchanged.
+  final bool transparentUsb;
 
   /// The float DSP/volume chain is on the signal path.
   final bool dspActive;
@@ -69,15 +78,21 @@ class OutputPathState {
   /// its bit-perfect meaning is defined separately (phase 5).
   final bool isDsdPath;
 
-  /// Bit-perfect requires all three conditions at once.
+  /// Engine-transparent output requires all three conditions at once.
   ///
   /// For a DoP or Native DSD session [formatMatchesSource] means the carrier (or
   /// the endpoint's DSD word format) carries the decoded bitstream exactly — the
   /// engine refuses to open such a session otherwise — so the same three
-  /// conditions decide it. Derived here instead of copied from the engine so a
+  /// conditions decide it. iOS USB validates its client format instead of
+  /// claiming hardware exclusivity; the UI must identify that narrower verdict.
+  /// Derived here instead of copied from the engine so a
   /// stale flag cannot light the indicator: the engine's own answer is only
   /// compared against it ([agreesWithEngine]).
-  bool get bitPerfect => live && exclusive && !dspActive && formatMatchesSource;
+  bool get bitPerfect =>
+      live &&
+      (exclusive || transparentUsb) &&
+      !dspActive &&
+      formatMatchesSource;
 
   /// Whether the engine's flag and the three conditions tell the same story.
   ///
@@ -89,15 +104,18 @@ class OutputPathState {
   /// Empty exactly when [bitPerfect] is true.
   List<String> get failingConditions => <String>[
     if (!live) '没有已初始化的输出会话',
-    if (live && !exclusive) '输出不是独占',
+    if (live && !exclusive && !transparentUsb) '输出不是独占',
     if (live && dspActive) 'DSP 在信号路径中',
     if (live && !formatMatchesSource)
       isDsdPath ? 'DoP 载波 / 原生 DSD 字格式与源不一致' : '输出格式与源不一致',
   ];
 
   /// What a bit-perfect verdict means for this path, for the panel's wording.
-  String get bitPerfectMeaning =>
-      isDsdPath ? 'DSD 位流原样进入 DoP 载波 / 原生 DSD 字' : 'PCM 样本原样进入设备';
+  String get bitPerfectMeaning => transparentUsb
+      ? 'USB 客户端样本保持不变；未验证物理 DAC'
+      : isDsdPath
+      ? 'DSD 位流原样进入 DoP 载波 / 原生 DSD 字'
+      : 'PCM 样本原样进入设备';
 
   /// The format the session actually runs, for the diagnostics panel.
   String get formatLabel =>
