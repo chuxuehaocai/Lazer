@@ -10,6 +10,7 @@ import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/widgets/lyric_selection_toolbar.dart';
 import 'package:lazer_nextgen/widgets/lyric_text_hit_region.dart';
+import 'package:lazer_nextgen/widgets/lyric_viewport.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Track _track(String id) => Track(
@@ -34,6 +35,7 @@ class _MobileState extends AppState {
 
   Track selected = _track('first');
   bool isPlaying = false;
+  final seeks = <double>[];
   @override
   Track get current => selected;
   @override
@@ -44,6 +46,8 @@ class _MobileState extends AppState {
   Future<void> ensureCurrentLyrics({bool force = false}) async {}
   @override
   void playerPresentationChanged(bool visible) {}
+  @override
+  void seek(double fraction) => seeks.add(fraction);
 
   void nextTrack() {
     selected = _track('next');
@@ -103,8 +107,85 @@ Future<void> _backgroundTap(WidgetTester tester) async {
   await tester.pump();
 }
 
+Offset _lyricPoint(WidgetTester tester) =>
+    tester
+        .getRect(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is LyricTextHitRegion && widget.text == 'Second lyric',
+          ),
+        )
+        .centerLeft +
+    const Offset(15, 0);
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('lyric seeking follows fully hidden playback controls', (
+    tester,
+  ) async {
+    final state = _MobileState();
+    await _mount(tester, state);
+    await tester.tapAt(_lyricPoint(tester));
+    await tester.pump();
+    expect(state.seeks, isEmpty);
+    expect(_layout(tester).lyricsVisible, isTrue);
+    expect(_layout(tester).controlsVisible, isTrue);
+
+    state.startPlayback();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(_layout(tester).controlsVisible, isFalse);
+    // The logical flag flips before the visible chrome finishes fading out.
+    await tester.tapAt(_lyricPoint(tester));
+    await tester.pump();
+    expect(state.seeks, isEmpty);
+    expect(_layout(tester).lyricsVisible, isTrue);
+
+    await tester.pumpAndSettle();
+    await tester.tapAt(_lyricPoint(tester));
+    await tester.pump();
+    expect(state.seeks, [10 / 180]);
+    expect(_layout(tester).controlsVisible, isFalse);
+
+    await _backgroundTap(tester);
+    expect(_layout(tester).controlsVisible, isTrue);
+    await tester.tapAt(_lyricPoint(tester));
+    await tester.pump();
+    expect(state.seeks, [10 / 180]);
+    expect(_layout(tester).lyricsVisible, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a tap begun during control dismissal cannot seek afterward', (
+    tester,
+  ) async {
+    final state = _MobileState();
+    await _mount(tester, state);
+    state.startPlayback();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 160));
+    expect(
+      tester.widget<LyricViewport>(find.byType(LyricViewport)).seekEnabled!.value,
+      isFalse,
+    );
+    final pointer = await tester.startGesture(_lyricPoint(tester));
+    // Let the chrome finish before releasing this same pointer. A long press
+    // would select text, so keep the hold shorter than its recognition delay.
+    for (var frame = 0; frame < 25; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(
+      tester.widget<LyricViewport>(find.byType(LyricViewport)).seekEnabled!.value,
+      isTrue,
+    );
+    await pointer.up();
+    await tester.pump();
+    expect(state.seeks, isEmpty);
+    expect(_layout(tester).lyricsVisible, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('selection immediately disables and re-enables pull down', (
     tester,

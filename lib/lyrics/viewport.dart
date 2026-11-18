@@ -9,6 +9,7 @@ import '../l10n/app_localizations.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -37,12 +38,17 @@ class LyricViewport extends StatefulWidget {
     required this.state,
     this.backdropKey,
     this.onSelectionChanged,
+    this.seekEnabled,
   });
   final AppState state;
 
   /// The live player backdrop boundary, captured when exporting an image.
   final GlobalKey? backdropKey;
   final ValueChanged<bool>? onSelectionChanged;
+
+  /// Whether tapping a lyric may change playback. Selection stays available.
+  /// A listenable lets an in-flight tap check the latest control visibility.
+  final ValueListenable<bool>? seekEnabled;
 
   @override
   State<LyricViewport> createState() => _LyricViewportState();
@@ -112,6 +118,8 @@ class _LyricViewportState extends State<LyricViewport>
   String? _trackId;
   int _dragArmedAt = -1000;
   int _gestureRevision = 0;
+  final Set<int> _lyricTapPointers = {};
+  bool _tapSeekingAllowed = false;
   bool _extendingSelection = false;
   final GlobalKey _viewportKey = GlobalKey();
   late double _blurTarget = widget.state.lyricBlurEnabled ? 1 : 0;
@@ -122,6 +130,7 @@ class _LyricViewportState extends State<LyricViewport>
     super.initState();
     _trackId = widget.state.current?.id;
     widget.state.all.addListener(_onLane);
+    widget.seekEnabled?.addListener(_seekAvailabilityChanged);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -137,6 +146,8 @@ class _LyricViewportState extends State<LyricViewport>
 
   void _resetGesture() {
     _gestureRevision++;
+    _lyricTapPointers.clear();
+    _tapSeekingAllowed = false;
     _dragging = false;
     _middlePointer = null;
     _extendingSelection = false;
@@ -205,12 +216,25 @@ class _LyricViewportState extends State<LyricViewport>
   @override
   void didUpdateWidget(covariant LyricViewport oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.seekEnabled != widget.seekEnabled) {
+      oldWidget.seekEnabled?.removeListener(_seekAvailabilityChanged);
+      widget.seekEnabled?.addListener(_seekAvailabilityChanged);
+      _seekAvailabilityChanged();
+    }
     if (oldWidget.state != widget.state) {
       oldWidget.state.all.removeListener(_onLane);
       widget.state.all.addListener(_onLane);
       _blurIntensity = widget.state.lyricBlurIntensity.clamp(0.0, 1.0);
     }
     _updateBlur();
+  }
+
+  bool get _seekingEnabled => widget.seekEnabled?.value ?? true;
+
+  void _seekAvailabilityChanged() {
+    if (!_seekingEnabled) _tapSeekingAllowed = false;
+    // Cached rows also own their accessibility actions.
+    setState(_rowCache.clear);
   }
 
   void _followLine(Duration position) {
@@ -846,7 +870,7 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _seek(int index) {
-    if (!_canInteractWithLine(index)) return;
+    if (!_seekingEnabled || !_canInteractWithLine(index)) return;
     final duration = widget.state.current?.duration.inMilliseconds ?? 0;
     if (duration <= 0) return;
     _resume?.cancel();
@@ -858,7 +882,7 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _tapLine(int index) {
-    if (!_canInteractWithLine(index)) return;
+    if (!_seekingEnabled || !_canInteractWithLine(index)) return;
     unawaited(widget.state.feedback());
     _seek(index);
   }
@@ -981,11 +1005,11 @@ class _LyricViewportState extends State<LyricViewport>
   bool _canInteractWithLine(int index) =>
       _canInteract && index >= 0 && index < _lines.length;
 
-  void _activateLine(int index) {
+  void _activateLine(int index, {bool allowSeek = true}) {
     if (!_canInteractWithLine(index)) return;
     if (_selection.active) {
       _changeSelection(_selection.toggle(_lines, index));
-    } else {
+    } else if (allowSeek) {
       _tapLine(index);
     }
   }
@@ -1003,7 +1027,9 @@ class _LyricViewportState extends State<LyricViewport>
       // whose row index has been reused by a shorter replacement document.
       key: ValueKey((_sourceLines, _trackId, _gestureRevision)),
       behavior: HitTestBehavior.opaque,
-      onTap: () => _activateLine(index),
+      // Keep claiming text taps while seeking is disabled so they do not fall
+      // through to the player's background gesture and close the lyric pane.
+      onTap: () => _activateLine(index, allowSeek: _tapSeekingAllowed),
       onLongPress: () => _selectLyrics(index),
       onLongPressMoveUpdate: (event) => _extendSelection(event.globalPosition),
       onLongPressEnd: (_) => _dragArmedAt = _wall.elapsedMilliseconds,
@@ -1027,7 +1053,9 @@ class _LyricViewportState extends State<LyricViewport>
             _lines[index],
             showRomanization: widget.state.showLyricRomanization,
           ),
-    onTap: _lines[index].text.trim().isEmpty
+    onTap:
+        _lines[index].text.trim().isEmpty ||
+            (!_selection.active && !_seekingEnabled)
         ? null
         : () => _activateLine(index),
     onLongPress: _lines[index].text.trim().isEmpty
@@ -1270,6 +1298,10 @@ class _LyricViewportState extends State<LyricViewport>
               Listener(
                 onPointerSignal: _wheel,
                 onPointerDown: (event) {
+                  if (_lyricTapPointers.isEmpty) {
+                    _tapSeekingAllowed = _seekingEnabled;
+                  }
+                  _lyricTapPointers.add(event.pointer);
                   if (event.buttons & kMiddleMouseButton != 0) {
                     _middlePointer = event.pointer;
                     _dragging = true;
@@ -1282,6 +1314,7 @@ class _LyricViewportState extends State<LyricViewport>
                   }
                 },
                 onPointerUp: (event) {
+                  _lyricTapPointers.remove(event.pointer);
                   if (event.pointer == _middlePointer) {
                     _middlePointer = null;
                     _dragging = false;
@@ -1289,6 +1322,8 @@ class _LyricViewportState extends State<LyricViewport>
                   }
                 },
                 onPointerCancel: (event) {
+                  _lyricTapPointers.remove(event.pointer);
+                  _tapSeekingAllowed = false;
                   if (event.pointer == _middlePointer) {
                     _middlePointer = null;
                     _dragging = false;
@@ -1410,6 +1445,7 @@ class _LyricViewportState extends State<LyricViewport>
     }
     _copiedTimer?.cancel();
     widget.state.all.removeListener(_onLane);
+    widget.seekEnabled?.removeListener(_seekAvailabilityChanged);
     _ticker?.dispose();
     _blur.dispose();
     _frames.dispose();

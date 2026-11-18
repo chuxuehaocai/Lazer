@@ -213,6 +213,8 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     with WidgetsBindingObserver, BuildSafeState<NowPlayingPage> {
   bool _lyricsMode = false;
   final ValueNotifier<bool> _controlsVisibility = ValueNotifier(true);
+  final ValueNotifier<bool> _mobileLyricSeeking = ValueNotifier(false);
+  bool _mobileControlsHidden = false;
   bool get _controlsVisible => _controlsVisibility.value;
   WindowChromeController? _windowChrome;
   // Defaults to the non-destructive branch: a semantics-driven tap never
@@ -282,6 +284,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   @override
   void initState() {
     super.initState();
+    _controlsVisibility.addListener(_syncMobileLyricSeeking);
     WidgetsBinding.instance.addObserver(this);
     widget.state.playerPresentationChanged(true);
     _commentsController = SongCommentsController(
@@ -410,6 +413,15 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     setState(() => _controlsVisibility.value = false);
   }
 
+  void _syncMobileLyricSeeking() {
+    _mobileLyricSeeking.value = !_controlsVisible && _mobileControlsHidden;
+  }
+
+  void _mobileControlsHiddenChanged(bool hidden) {
+    _mobileControlsHidden = hidden;
+    _syncMobileLyricSeeking();
+  }
+
   void _wakeControls() {
     _hideTimer?.cancel();
     if (!_controlsVisible && mounted) {
@@ -458,6 +470,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     widget.presentationActive?.removeListener(_syncWindowChromePresentation);
     _windowChrome?.detach(_controlsVisibility);
     _controlsVisibility.dispose();
+    _mobileLyricSeeking.dispose();
     _playPauseFocus.dispose();
     widget.state.playerPresentationChanged(false);
     _hideTimer?.cancel();
@@ -646,10 +659,9 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             Expanded(
               child: _settledGate(
                 LyricViewport(
-                  key: ValueKey<String>(
-                    'mobile-lyrics-${trackId ?? ''}',
-                  ),
+                  key: ValueKey<String>('mobile-lyrics-${trackId ?? ''}'),
                   state: widget.state,
+                  seekEnabled: _mobileLyricSeeking,
                   backdropKey: _backdropKey,
                   onSelectionChanged: (active) =>
                       _selectionChanged(trackId, active),
@@ -1136,6 +1148,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   Widget _mobile(Track track) => ArtworkLyricsLayout(
     lyricsVisible: _lyricsMode,
     controlsVisible: !_lyricsMode || _controlsVisible,
+    onControlsHiddenChanged: _mobileControlsHiddenChanged,
     header: _headerControls(),
     summary: Padding(
       padding: const EdgeInsets.fromLTRB(24, 18, 24, 6),

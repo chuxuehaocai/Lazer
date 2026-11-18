@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -21,6 +23,7 @@ class _PlaybackState extends AppState {
 
   final lane = ChangeNotifier();
   final seeks = <double>[];
+  int feedbackCalls = 0;
   Duration playhead = Duration.zero;
   String trackId = 'mobile-lyrics';
 
@@ -47,7 +50,9 @@ class _PlaybackState extends AppState {
   Duration get precisePosition => playhead;
 
   @override
-  Future<void> feedback({bool detent = false, bool boundary = false}) async {}
+  Future<void> feedback({bool detent = false, bool boundary = false}) async {
+    feedbackCalls++;
+  }
 
   @override
   void seek(double fraction) {
@@ -67,6 +72,7 @@ Future<void> _show(
   WidgetTester tester,
   _PlaybackState state, {
   bool visible = true,
+  ValueListenable<bool>? seekEnabled,
   ValueChanged<bool>? onSelectionChanged,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
@@ -81,6 +87,7 @@ Future<void> _show(
         child: Scaffold(
           body: LyricViewport(
             state: state,
+            seekEnabled: seekEnabled,
             onSelectionChanged: onSelectionChanged,
           ),
         ),
@@ -100,6 +107,150 @@ LyricSelectionToolbar _toolbar(WidgetTester tester) =>
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets(
+    'lyric taps seek and give feedback only while seeking is enabled',
+    (tester) async {
+      final state = _PlaybackState();
+      final gate = ValueNotifier(false);
+      addTearDown(state.dispose);
+      addTearDown(gate.dispose);
+      await _show(tester, state, seekEnabled: gate);
+      await _settle(tester);
+
+      await tester.tap(find.text('Line 1'));
+      await tester.pump();
+      expect(state.seeks, isEmpty);
+      expect(state.feedbackCalls, 0);
+
+      gate.value = true;
+      await tester.pump();
+      await tester.tap(find.text('Line 1'));
+      await tester.pump();
+      expect(state.seeks, [2 / 60]);
+      expect(state.feedbackCalls, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('seek gating updates cached lyric accessibility actions', (
+    tester,
+  ) async {
+    final state = _PlaybackState();
+    final gate = ValueNotifier(true);
+    addTearDown(state.dispose);
+    addTearDown(gate.dispose);
+    final semantics = tester.ensureSemantics();
+    await _show(tester, state, seekEnabled: gate);
+    await _settle(tester);
+
+    SemanticsNode line() =>
+        tester.getSemantics(find.bySemanticsLabel('Line 1'));
+    expect(line().getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+    gate.value = false;
+    await tester.pump();
+    expect(line().getSemanticsData().hasAction(SemanticsAction.tap), isFalse);
+    expect(
+      line().getSemanticsData().hasAction(SemanticsAction.longPress),
+      isTrue,
+    );
+
+    gate.value = true;
+    await tester.pump();
+    final enabledLine = line();
+    expect(
+      enabledLine.getSemanticsData().hasAction(SemanticsAction.tap),
+      isTrue,
+    );
+    enabledLine.owner!.performAction(enabledLine.id, SemanticsAction.tap);
+    await tester.pump();
+    expect(state.seeks, [2 / 60]);
+    expect(state.feedbackCalls, 1);
+    semantics.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('disabled seeking preserves long press and selection taps', (
+    tester,
+  ) async {
+    final state = _PlaybackState();
+    final gate = ValueNotifier(false);
+    addTearDown(state.dispose);
+    addTearDown(gate.dispose);
+    final semantics = tester.ensureSemantics();
+    await _show(tester, state, seekEnabled: gate);
+    await _settle(tester);
+
+    await tester.longPress(find.text('Line 0'));
+    await tester.pump();
+    expect(_toolbar(tester).count, 1);
+    expect(state.feedbackCalls, 1);
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Line 1'))
+          .getSemanticsData()
+          .hasAction(SemanticsAction.tap),
+      isTrue,
+    );
+    await tester.tap(find.text('Line 1'));
+    await tester.pump();
+    expect(_toolbar(tester).count, 2);
+    await tester.tap(find.text('Line 0'));
+    await tester.pump();
+    expect(_toolbar(tester).count, 1);
+    await tester.tap(find.text('Line 1'));
+    await _settle(tester);
+
+    expect(find.byType(LyricSelectionToolbar), findsNothing);
+    expect(state.seeks, isEmpty);
+    expect(state.feedbackCalls, 1);
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Line 1'))
+          .getSemanticsData()
+          .hasAction(SemanticsAction.tap),
+      isFalse,
+    );
+    semantics.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final initiallyEnabled in [false, true]) {
+    testWidgets(
+      initiallyEnabled
+          ? 'closing and reopening the gate invalidates an in-flight lyric tap'
+          : 'opening the gate cannot authorize an already held lyric tap',
+      (tester) async {
+        final state = _PlaybackState();
+        final gate = ValueNotifier(initiallyEnabled);
+        addTearDown(state.dispose);
+        addTearDown(gate.dispose);
+        await _show(tester, state, seekEnabled: gate);
+        await _settle(tester);
+
+        final touch = await tester.startGesture(
+          tester.getCenter(find.text('Line 1')),
+        );
+        if (initiallyEnabled) {
+          gate.value = false;
+        }
+        // Both notifications can arrive between rendered frames. A tap that
+        // crossed a disabled interval must not regain permission on pointer up.
+        gate.value = true;
+        await tester.pump();
+        await touch.up();
+        await tester.pump();
+        expect(state.seeks, isEmpty);
+        expect(state.feedbackCalls, 0);
+
+        await tester.tap(find.text('Line 1'));
+        await tester.pump();
+        expect(state.seeks, [2 / 60]);
+        expect(state.feedbackCalls, 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
 
   testWidgets('closing selection while a finger is held does not revive it', (
     tester,
