@@ -33,6 +33,7 @@ import 'audio_engine_settings.dart';
 import 'settings_detail.dart';
 import 'settings_choice.dart';
 import 'settings_row.dart';
+import 'volume_control.dart';
 
 /// Renders the 高保真播放 group: engine status, output device, exclusive/bit-perfect
 /// policy, DSD mode, buffer, equaliser and the live format readout.
@@ -152,6 +153,12 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                 const _WarningRow(
                   'iOS 普通播放支持 EQ、限幅器和耳机串扰；USB 严格输出是实验性路径，不代表硬件独占或 DAC 位校验通过',
                 ),
+                _SettingRow(
+                  label: '音量',
+                  subtitle: '应用音量；系统音量请在控制中心调整',
+                  expandControl: true,
+                  trailing: VolumeControl(state: widget.state),
+                ),
               ],
               if (native && hifi.supportsDevices)
                 _SettingRow(
@@ -220,19 +227,27 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                     ),
                   ),
                 ),
-              if (native && _needsVolumeWarning(settings))
-                const _WarningRow(
-                  '严格 PCM / DoP 需要软件音量为 100%，否则拒绝播放；应用不会自动提高音量，请先调低 DAC 或耳放音量',
-                ),
               if (native &&
                   hifi.usesIosSystemRoute &&
                   settings.directOutputRequested)
+                const _WarningRow(
+                  '严格 PCM / DoP 需要应用音量和 iOS 系统音量均为 100%，否则拒绝播放；应用不会自动提高音量，请先调低 DAC 或耳放音量',
+                ),
+              if (native &&
+                  !hifi.usesIosSystemRoute &&
+                  _needsVolumeWarning(settings))
+                const _WarningRow(
+                  '严格 PCM / DoP 需要软件音量为 100%，否则拒绝播放；应用不会自动提高音量，请先调低 DAC 或耳放音量',
+                ),
+              if (native && hifi.usesIosSystemRoute)
                 const _WarningRow('输出策略在重新打开歌曲后生效；当前实际路径请查看下方信号路径'),
               if (native &&
                   hifi.usesIosSystemRoute &&
                   settings.directOutputRequested &&
                   widget.state.autoMixEnabled)
-                const _WarningRow('USB 严格输出不能使用 AutoMix；请先关闭无缝混音，再开始播放'),
+                const _WarningRow(
+                  'USB 严格输出需要关闭混音：在“播放→切歌衔接”选择“从不生效”或“只对同一专辑生效”',
+                ),
               // The engine refuses processing while bit-perfect is active, so the
               // page states that the EQ/limiter/crossfeed are held out of the path
               // instead of showing them as applied.
@@ -533,7 +548,7 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
   String _dsdSubtitle(HifiController hifi, HifiSettings settings) {
     if (hifi.usesIosSystemRoute &&
         settings.dsdOutputMode == HifiDsdOutputMode.requireDoP) {
-      return '仅兼容 DoP 的 USB DAC：要求精确 24-bit 载波与 100% 软件音量；失败不回退，格式协商不能确认 DAC 的 DoP 解码能力';
+      return '仅兼容 DoP 的 USB DAC：要求精确 24-bit 载波，应用与 iOS 系统音量均为 100%；失败不回退，格式协商不能确认 DAC 的 DoP 解码能力';
     }
     switch (settings.dsdOutputMode) {
       case HifiDsdOutputMode.auto:
