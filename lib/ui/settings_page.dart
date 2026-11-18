@@ -57,6 +57,7 @@ import 'plugin_manager_page.dart';
 import 'plugin_settings.dart';
 import 'developer_console_page.dart';
 import 'custom_image_backdrop.dart';
+import 'web_egress_settings.dart';
 
 // Preferences may have been restored from another platform. Keep a portable
 // theme fallback selected rather than an unavailable dropdown entry.
@@ -157,7 +158,10 @@ extension _SettingsCategoryLabels on _SettingsCategory {
     _SettingsCategory.interaction => '震动、返回行为和快捷键', // i18n:key
     _SettingsCategory.performance => '动画、开发者控制台和诊断', // i18n:key
     _SettingsCategory.account => '登录、平台连接和插件', // i18n:key
-    _SettingsCategory.network => '直连、系统代理与自定义端点', // i18n:key
+    _SettingsCategory.network =>
+      kIsWeb
+          ? 'Web 客户端 IP 所属国家或地区' // i18n:key
+          : '直连、系统代理与自定义端点', // i18n:key
     _SettingsCategory.about => '版本、更新、日志和开源信息', // i18n:key
   };
 
@@ -1551,7 +1555,10 @@ class _SettingsOverview extends StatelessWidget {
                 ],
                 if (show(_SettingsCategory.network)) ...[
                   const _AppSectionLabel('网络代理'),
-                  _NetworkProxySection(state: state),
+                  if (kIsWeb)
+                    const WebEgressSettingsSection()
+                  else
+                    _NetworkProxySection(state: state),
                 ],
                 if (show(_SettingsCategory.about)) ...[
                   const _AppSectionLabel('关于'),

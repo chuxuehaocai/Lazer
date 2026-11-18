@@ -10,6 +10,8 @@
 class WindowBackdrop {
  public:
   WindowBackdrop(flutter::BinaryMessenger* messenger, HWND window);
+  ~WindowBackdrop();
+  void HandleWindowMessage(UINT message);
  private:
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
 };

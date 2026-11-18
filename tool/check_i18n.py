@@ -494,6 +494,7 @@ def load_tables() -> dict[str, dict[str, str]]:
 SAME_AS_ZH_OK = {
     "ja": {
         "保存",
+        "日本",
         "最小化",
         "最大化",
         "音量",

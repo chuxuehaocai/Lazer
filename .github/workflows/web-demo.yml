@@ -38,6 +38,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -45,6 +48,8 @@ jobs:
           cache: true
       - run: flutter pub get --enforce-lockfile
       - run: dart tool/patch_lua_dardo_plus.dart
+      - name: Test web packaging and the HTTP bridge
+        run: node --test ci/vercel-web/*.test.js
       - name: Build the browser bundle
         run: >-
           flutter build web --release --no-web-resources-cdn
@@ -66,6 +71,8 @@ jobs:
         run: node ci/vercel-web/prepare-output.js
       - name: Verify the packed directory
         run: node ci/vercel-web/verify-output.js
+      - name: Decode the bundled fonts with both browser engines
+        run: node ci/vercel-web/verify-fonts.mjs
       - name: Link the Vercel project
         if: github.event_name != 'pull_request'
         # The CLI reads either .vercel/project.json or these two variables; write

@@ -119,13 +119,14 @@ flutter pub get
 dart tool/patch_lua_dardo_plus.dart
 flutter build web --release --no-web-resources-cdn
 
-# 2. Pack the Vercel Build Output with the lazer_demo wrapper
-#    (it provides the same-origin /api/plugin-http function)
-cd ../lazer_ncm/lazer_demo
-node tool/prepare-vercel-output.js
+# 2. Pack and verify the static site and same-origin /api/plugin-http function
+node ci/vercel-web/prepare-output.js
+node ci/vercel-web/verify-output.js
 
 # 3. Deploy with the Vercel CLI
-vercel deploy --prebuilt --prod --project lazer_demo
+export VERCEL_ORG_ID=team_38TeUJcXlno06LvmAuureTRh
+export VERCEL_PROJECT_ID=prj_4G5sAItdYPHxXo6DX0Dfjy2bvr7v
+vercel deploy --prebuilt --prod
 ```
 
 On a fresh account, create the project and disable SSO protection first; otherwise the public domain shows a login wall:
@@ -137,9 +138,11 @@ vercel project protection disable lazer_demo --sso --yes
 
 Notes:
 
-- The static output comes from this repository's `build/web`; `lazer_demo` only holds the Vercel Function and packing script. The packer content-hashes the CanvasKit directory and `main.dart.js` and serves them with an immutable cache, so return visits do not download those megabytes again.
-- The packer also replaces the full MiSans files with the subsets in `web/assets/assets/fonts/` (about 2.3 MB per weight, covering GB2312, Big5 level 1, JIS level 1 and the UI strings; the full files are about 8 MB per weight). Flutter copies the `web/` overlay over the generated bundle last, so a plain `flutter build web` ships them too; rerun `python tool/subset_web_fonts.py` to rebuild them. Native builds keep the full fonts.
-- `api/plugin-http.js` only accepts HTTPS hosts declared by the calling plugin manifest and rejects loopback, private, link-local and metadata addresses. Forwarded requests carry `X-Real-IP` / `X-Forwarded-For` generated from api-enhanced's mainland China ranges; browsers cannot override those headers.
+- Both local deployments and CI use this repository's packer and `ci/vercel-web/api/`. CanvasKit, entrypoint, fonts and other assets have separate content hashes and one-year immutable caching. HTML revalidates, the bootstrap is inline, and fonts load in parallel with the entrypoint. Updating translations or images does not invalidate engine or font caches.
+- Web MiSans subsets cover GB2312, Big5 level 1, JIS level 1 and UI strings. Vercel serves WOFF2: approximately 5.25 MB for all four weights, down from 9.79 MB of TTF. Install `fonttools` and `brotli`, then run `python tool/subset_web_fonts.py` to regenerate both formats. Native builds keep full fonts. Startup resources are same-origin, without a Google font/engine CDN dependency.
+- The HTTP bridge runs in Hong Kong (`hkg1`) to stay close to mainland music services. Requests have a deadline and bounded payloads; responses are never cached. Cross-border connectivity still affects mainland loading, and Vercel has no mainland compute region.
+- Web Settings → Network proxy → Web client IP saves a separate country/region, defaulting to mainland China. The other 15 choices cover all 19 Vercel compute regions and apply to the next plugin request. This selects synthetic `X-Real-IP` / `X-Forwarded-For` headers for upstreams that honor them; **it does not change the real network exit or allocate a dedicated IP**. CN retains the api-enhanced ranges; other choices use an attributed RIR registration snapshot, which may differ from an upstream's GeoIP database. Real mainland egress requires a separate mainland proxy. [Vercel regions](https://vercel.com/docs/regions) · [Outbound IPs](https://vercel.com/docs/networking/static-ips)
+- `api/plugin-http.js` accepts only HTTPS hosts declared by the calling plugin manifest and rejects loopback, private, link-local and metadata addresses. Browsers and plugins cannot override its generated client-IP headers. Regenerate the non-CN snapshot with `node ci/vercel-web/update-forwarded-ip-ranges.js`.
 - Uploaded Lua is untrusted. A production deployment should still keep a domain allowlist, rate limits, and redacted logs.
 
 ## Automated builds

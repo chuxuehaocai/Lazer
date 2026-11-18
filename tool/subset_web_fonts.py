@@ -15,7 +15,11 @@ The result is written to ``web/assets/assets/fonts``.  Flutter copies the
 web`` ships these files in place of the full ones.  Native builds read
 ``assets/fonts`` and keep the full glyph repertoire.
 
-Usage: python tool/subset_web_fonts.py
+TTF remains available to ordinary Flutter builds. The Vercel packer selects the
+WOFF2 equivalent without changing glyph coverage or any native font assets.
+
+Usage: pip install 'fonttools[woff]==4.60.1'
+       python tool/subset_web_fonts.py
 """
 
 from __future__ import annotations
@@ -137,9 +141,13 @@ def main() -> int:
         # Keep the committed subsets byte-for-byte reproducible.
         font["head"].modified = 0
         font.save(target)
+        web_target = os.path.splitext(target)[0] + ".woff2"
+        font.flavor = "woff2"
+        font.save(web_target)
         print(
             f"{family}: {len(charset)} codepoints, "
-            f"{os.path.getsize(target) / 1024 / 1024:.2f} MB -> {target}"
+            f"TTF {os.path.getsize(target):,} bytes, "
+            f"WOFF2 {os.path.getsize(web_target):,} bytes -> {web_target}"
         )
     return 0
 

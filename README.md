@@ -118,9 +118,11 @@ vercel project protection disable lazer_demo --sso --yes
 
 说明：
 
-- 静态产物来自本仓库的 `build/web`；`lazer_demo` 只保留 Vercel Function 和打包入口，它的 `tool/prepare-vercel-output.js` 只是转发到本仓库的 `ci/vercel-web/prepare-output.js`。`ci/vercel-web/api/` 是 CI 部署的函数副本，本机壳工程用 `../lazer_ncm/lazer_demo/api/` 里的同名文件，改动需要同步两处。打包脚本会给 CanvasKit 目录和 `main.dart.js` 生成内容哈希文件名，并配置 `immutable` 缓存，回访不再重复下载这几 MB 资源。
-- 打包脚本还会用 `web/assets/assets/fonts/` 里的字体子集替换 Web 构建中的完整 MiSans（约 2.3 MB/字重，覆盖 GB2312、Big5 一级、JIS 一级和界面字符串；完整字体约 8 MB/字重）。Flutter 构建最后会把这层 `web/` 资源覆盖到产物上，所以普通 `flutter build web` 也会自动带上子集；需要重新生成时运行 `python tool/subset_web_fonts.py`。原生构建继续使用完整字体。
-- `api/plugin-http.js` 只接受调用方插件清单声明的 HTTPS 域名，拒绝 loopback、私网、链路本地和 metadata 地址；转发时附加从 api-enhanced 国内网段生成的 `X-Real-IP` / `X-Forwarded-For`，浏览器不能自行覆盖这两个头。
+- 静态产物来自本仓库的 `build/web`，函数代码以 `ci/vercel-web/api/` 为准。本地和 CI 都用本仓库的打包脚本，避免壳工程副本不同步。脚本给 CanvasKit、入口 JS、字体和其他资源分别生成内容哈希并设置一年 `immutable` 缓存；HTML 保持重验证，启动脚本内联，字体与入口并行加载。仅更新翻译或图片时不会使字体和引擎缓存失效。
+- Web 使用 `web/assets/assets/fonts/` 里的 MiSans 子集（覆盖 GB2312、Big5 一级、JIS 一级和界面字符串），Vercel 打包进一步使用 WOFF2，四个字重合计约 5.25 MB，原 TTF 合计约 9.79 MB。安装 `fonttools`、`brotli` 后运行 `python tool/subset_web_fonts.py` 可同时重建 TTF/WOFF2；原生构建继续使用完整字体。资源来自站点自身，无需访问 Google 字体/引擎 CDN。
+- `/api/plugin-http` 固定部署在香港 `hkg1`，避免默认美国区域到大陆音乐服务的往返。代理限制请求时长与响应大小，响应不缓存。大陆实际访问速度仍受跨境线路影响，Vercel 不提供大陆计算节点。
+- Web 的“设置 → 网络代理 → Web 出口 IP”独立保存客户端 IP 国家/地区，默认中国大陆，另提供 Vercel 全部 19 个计算区域覆盖的 15 个国家/地区，切换后下一次插件请求立即生效。它选择 `X-Real-IP` / `X-Forwarded-For` 的地址，仅对信任这类请求头的上游有效，**不改变真实网络出口或分配独享 IP**。大陆保留原 api-enhanced 网段；其余使用有来源记录的 RIR 注册地快照，注册地与上游 GeoIP 判定可能不同。Vercel 的真实出口为动态地址，并无公开固定网段；真实大陆出口需要另行提供大陆代理。[Vercel 地区列表](https://vercel.com/docs/regions) · [出口 IP](https://vercel.com/docs/networking/static-ips)
+- `api/plugin-http.js` 只接受调用方插件清单声明的 HTTPS 域名，拒绝 loopback、私网、链路本地和 metadata 地址；浏览器或插件不能覆盖代理生成的客户端 IP 请求头。更新非大陆地址快照可运行 `node ci/vercel-web/update-forwarded-ip-ranges.js`。
 - 上传的 Lua 插件按不受信任代码处理；生产环境仍应配置域名白名单、限流和日志脱敏。
 
 ## 自动构建

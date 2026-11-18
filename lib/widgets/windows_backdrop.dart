@@ -34,7 +34,12 @@ class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
     super.initState();
     widget.state.addListener(_sync);
     widget.state.playerPresented.addListener(_sync);
-    if (supportsWindowsMica) windowManager.addListener(this);
+    if (supportsWindowsMica) {
+      windowManager.addListener(this);
+      _channel.setMethodCallHandler((call) async {
+        if (call.method == 'refresh') _refreshFrame();
+      });
+    }
   }
 
   @override
@@ -72,13 +77,10 @@ class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
       if (!mounted || _requested != options) return;
       bool active = false;
       try {
-        // Flutter's transparent pixels must reach the compositor before the
-        // documented DWM backdrop is selected. Never change window opacity.
-        await windowManager.setBackgroundColor(
-          options.$1
-              ? Colors.transparent
-              : (options.$2 ? Colors.black : Colors.white),
-        );
+        // DWM owns the native background. window_manager.setBackgroundColor
+        // installs a legacy accent gradient that hides the Mica material.
+        // The native runner extends the frame; MicaSurface exposes transparent
+        // Flutter pixels only after that complete operation succeeds.
         active =
             await _channel.invokeMethod<bool>('setMica', {
               'enabled': options.$1,
@@ -89,17 +91,6 @@ class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
         // Web, old runner or tests: retain a readable opaque theme surface.
       } on PlatformException {
         // Composition can be unavailable in remote sessions or older Windows.
-      }
-      if (!active && options.$1) {
-        try {
-          await windowManager.setBackgroundColor(
-            options.$2 ? Colors.black : Colors.white,
-          );
-        } on MissingPluginException {
-          // Tests and a runner without window_manager still use the solid widget.
-        } on PlatformException {
-          // The Flutter surface is opaque even if the native call is unavailable.
-        }
       }
       if (mounted && _requested == options && active != _active) {
         setState(() => _active = active);
@@ -122,7 +113,10 @@ class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
   void dispose() {
     widget.state.removeListener(_sync);
     widget.state.playerPresented.removeListener(_sync);
-    if (supportsWindowsMica) windowManager.removeListener(this);
+    if (supportsWindowsMica) {
+      windowManager.removeListener(this);
+      _channel.setMethodCallHandler(null);
+    }
     super.dispose();
   }
 

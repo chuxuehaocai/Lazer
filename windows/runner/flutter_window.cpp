@@ -110,6 +110,7 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (backdrop_) backdrop_->HandleWindowMessage(message);
   if (system_media_ && system_media_->HandleWindowMessage(message, lparam)) return 0;
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {

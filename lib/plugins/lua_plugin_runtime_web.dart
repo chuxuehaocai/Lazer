@@ -18,6 +18,7 @@ import 'plugin_event_scheduler.dart';
 import 'plugin_data_access.dart' show pluginFrontendLua;
 import 'plugin_socket_inbox.dart';
 import 'lua_console_evaluator.dart';
+import 'web_plugin_http_proxy.dart';
 import '../diagnostics/app_log.dart';
 import '../utils/system_http.dart';
 
@@ -811,23 +812,12 @@ class _WebPluginHost {
     // Browser fetch cannot set Cookie or read Set-Cookie. The same-origin
     // function forwards the request and returns a JSON-shaped host response.
     final proxy = Uri.base.resolve('/api/plugin-http');
-    final response = await client.post(
-      proxy,
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode(<String, dynamic>{
-        'url': uri.toString(),
-        'method': spec['method'] ?? 'GET',
-        'headers': spec['headers'] ?? const <String, String>{},
-        'body': spec['body'],
-        'domains': manifest.domains,
-      }),
+    return sendWebPluginHttpRequest(
+      client: client,
+      endpoint: proxy,
+      spec: spec,
+      domains: manifest.domains,
     );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw FormatException('HTTP ${response.statusCode}');
-    }
-    final value = jsonDecode(response.body);
-    if (value is! Map) throw const FormatException('Invalid proxy response');
-    return Map<String, dynamic>.from(value);
   }
 
   void _loadStorage() {

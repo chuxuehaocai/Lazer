@@ -24,9 +24,17 @@ function read(file) {
     return '';
   }
 }
+function json(file) {
+  try {
+    return JSON.parse(read(file) || 'null');
+  } catch (error) {
+    fail(`${file}: invalid JSON: ${error.message}`);
+    return null;
+  }
+}
 
 const configFile = path.join(out, 'config.json');
-const config = JSON.parse(read(configFile) || '{}');
+const config = json(configFile) || {};
 if (config.version !== 3) fail(`config.json: expected version 3, got ${config.version}`);
 const routes = Array.isArray(config.routes) ? config.routes : [];
 if (routes.length === 0) fail('config.json: no routes');
@@ -36,6 +44,15 @@ const html = read(path.join(staticDir, 'index.html'));
 const bootstrap = read(path.join(staticDir, 'flutter_bootstrap.js'));
 if (!html) fail('static/index.html is missing');
 if (!bootstrap) fail('static/flutter_bootstrap.js is missing');
+if (!html.includes('_flutter.loader.load(') || /<script[^>]+src=["']flutter_bootstrap\.js/.test(html)) {
+  fail('static/index.html must inline the Flutter loader to avoid a serial network request');
+}
+for (const [name, text] of [['index.html', html], ['flutter_bootstrap.js', bootstrap]]) {
+  if (/__LAZER_(?:CANVASKIT|ASSET|FONT)_BASE__/.test(text)) fail(`${name}: unresolved asset placeholder`);
+  if (!text.includes('initializeEngine(lazerFlutterConfig)')) {
+    fail(`${name}: the engine must receive the same asset configuration as the loader`);
+  }
+}
 
 // The packer renames the entrypoint and points both files at the new name. A
 // stale name here is a blank page, and the error only shows up in a browser.
@@ -44,6 +61,7 @@ if (!entryRoute) {
   fail('config.json: no content-hashed entrypoint route');
 } else {
   const entry = entryRoute.src.slice(1);
+  if (!entryRoute.headers?.['cache-control']?.includes('immutable')) fail('entrypoint is not immutable');
   if (!fs.existsSync(path.join(staticDir, entry))) fail(`static/${entry} is missing`);
   for (const [name, text] of [['index.html', html], ['flutter_bootstrap.js', bootstrap]]) {
     if (!text.includes(entry)) fail(`static/${name} does not reference ${entry}`);
@@ -57,9 +75,56 @@ if (!canvaskitRoute) {
   fail('config.json: no content-hashed canvaskit route');
 } else {
   const directory = canvaskitRoute.src.slice(1).split('/')[0];
+  if (!canvaskitRoute.headers?.['cache-control']?.includes('immutable')) fail('engine is not immutable');
   if (!fs.existsSync(path.join(staticDir, directory, 'canvaskit.wasm'))) {
     fail(`static/${directory}/canvaskit.wasm is missing`);
   }
+}
+
+// Validate the actual URLs Flutter will resolve, including the shared fonts
+// outside the per-release assets directory. A wrong assetBase silently falls
+// back to missing fonts or an HTML response unless caught before deployment.
+const assetRoute = routes.find((route) => /^\/assets-[0-9a-f]{12}\//.test(route.src));
+const fontRoute = routes.find((route) => /^\/fonts-[0-9a-f]{12}\//.test(route.src));
+for (const [name, route] of [['assets', assetRoute], ['fonts', fontRoute]]) {
+  if (!route) {
+    fail(`config.json: no content-hashed ${name} route`);
+    continue;
+  }
+  if (!route.headers?.['cache-control']?.includes('immutable')) fail(`${name} are not immutable`);
+  const directory = route.src.slice(1).split('/')[0];
+  for (const [file, text] of [['index.html', html], ['flutter_bootstrap.js', bootstrap]]) {
+    if (!text.includes(`${directory}/`)) fail(`${file} does not reference ${directory}/`);
+  }
+}
+if (assetRoute && fontRoute) {
+  const assetBase = assetRoute.src.slice(1).split('/')[0];
+  const fontBase = fontRoute.src.slice(1).split('/')[0];
+  const manifest = json(path.join(staticDir, assetBase, 'assets', 'FontManifest.json'));
+  if (!Array.isArray(manifest)) {
+    fail('FontManifest.json: expected an array');
+  } else {
+    for (const family of manifest) {
+      for (const font of family.fonts || []) {
+        const url = new URL(`${assetBase}/assets/${font.asset}`, 'https://packed.invalid/');
+        const file = path.join(staticDir, url.pathname);
+        if (!url.pathname.startsWith(`/${fontBase}/`)) fail(`font is not in the shared immutable directory: ${font.asset}`);
+        if (!fs.existsSync(file)) {
+          fail(`missing font ${url.pathname}`);
+        } else if (family.family === 'MiSans') {
+          if (!url.pathname.endsWith('.woff2') || fs.readFileSync(file).toString('ascii', 0, 4) !== 'wOF2') {
+            fail(`MiSans must use WOFF2: ${url.pathname}`);
+          }
+        }
+        if (!html.includes(`href="${url.pathname.slice(1)}" as="fetch" crossorigin`)) {
+          fail(`font is not preloaded with the engine's fetch mode: ${url.pathname}`);
+        }
+      }
+    }
+  }
+}
+for (const match of html.matchAll(/<link\s+rel="preload"\s+href="([^"]+)"/g)) {
+  if (!fs.existsSync(path.join(staticDir, match[1]))) fail(`preloaded file is missing: ${match[1]}`);
 }
 if (bootstrap.includes('__LAZER_CANVASKIT_BASE__')) {
   fail('flutter_bootstrap.js still has the unresolved engine placeholder');
@@ -69,15 +134,20 @@ if (canvaskitRoute && !bootstrap.includes(canvaskitRoute.src.slice(1).split('/')
 }
 
 // The site is only usable if the same-origin HTTP bridge and its IP table ship.
-for (const file of ['index.js', 'china_ip_ranges.txt']) {
+for (const file of ['index.js', 'china_ip_ranges.txt', 'forwarded-ip.js', 'forwarded-ip-ranges.json']) {
   const packed = path.join(out, 'functions', 'api', 'plugin-http.func', file);
   if (!fs.existsSync(packed)) fail(`functions/api/plugin-http.func/${file} is missing`);
 }
+const functionConfig = json(path.join(out, 'functions', 'api', 'plugin-http.func', '.vc-config.json')) || {};
+if (!functionConfig.regions?.includes('hkg1')) fail('HTTP bridge must deploy in the configured Hong Kong region');
 if (!routes.some((route) => route.src === '/api/plugin-http' && route.dest === '/api/plugin-http')) {
   fail('config.json: /api/plugin-http is not routed to the function');
 }
 if (!routes.some((route) => route.handle === 'filesystem')) {
   fail('config.json: no filesystem handle, so static files would not be served');
+}
+if (!routes.some((route) => route.status === 404 && route.src?.includes('assets-'))) {
+  fail('missing immutable assets must return 404 instead of the HTML shell');
 }
 
 if (problems.length > 0) {

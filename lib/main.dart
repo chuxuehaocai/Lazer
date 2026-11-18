@@ -10,6 +10,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'utils/system_http.dart';
+import 'utils/web_egress_preferences.dart';
 
 import 'audio/audio_engine.dart';
 import 'audio/engine_factory.dart';
@@ -147,6 +148,7 @@ Future<void> main(List<String> args) async {
         final prefs = await prefsFuture;
         await AppStorage.shared.initialize(prefs);
         SystemHttpProxy.initFromPreferences(prefs);
+        WebEgressPreferences.shared.initFromPreferences(prefs);
         LazerAudioLoader.importedLibraryPath = prefs.getString(
           'lazer_native_engine_path',
         );

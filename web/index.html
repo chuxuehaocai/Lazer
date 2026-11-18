@@ -9,8 +9,8 @@
   <title>Lazer</title>
   <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
-  <link rel="preload" href="flutter_bootstrap.js" as="script">
   <link rel="preload" href="main.dart.js" as="script">
+  <!-- LAZER_FONT_PRELOADS -->
   <style>
     html, body {
       margin: 0;
@@ -174,7 +174,7 @@
       }, 220);
 
       function finish() {
-        if (done || failed) return;
+        if (done) return;
         done = true;
         clearInterval(creep);
         window.removeEventListener('error', onResourceError, true);
@@ -223,6 +223,7 @@
       }, 20000);
     })();
   </script>
-  <script src="flutter_bootstrap.js" async></script>
+  <!-- Inline the small loader to save a serial request on high-latency links. -->
+  <script>{{flutter_bootstrap_js}}</script>
 </body>
 </html>

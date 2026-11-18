@@ -29,17 +29,9 @@ class _BackdropHarness {
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       _windowChannel,
       (call) async {
-        expect(call.method, 'setBackgroundColor');
-        final args = call.arguments as Map;
-        windowColors.add(
-          Color.fromARGB(
-            args['backgroundColorA'] as int,
-            args['backgroundColorR'] as int,
-            args['backgroundColorG'] as int,
-            args['backgroundColorB'] as int,
-          ),
-        );
-        return null;
+        // setBackgroundColor does not change Flutter's clear color. On Windows
+        // it installs an accent gradient that competes with the DWM backdrop.
+        fail('Backdrop must not configure window_manager: ${call.method}');
       },
     );
   }
@@ -47,7 +39,6 @@ class _BackdropHarness {
   final WidgetTester tester;
   final AppState state = AppState();
   final List<(bool, bool)> requests = [];
-  final List<Color> windowColors = [];
   Future<bool?> Function((bool, bool)) respond = (options) async => options.$1;
 
   bool get active => tester
@@ -83,6 +74,15 @@ class _BackdropHarness {
       const StandardMethodCodec().encodeMethodCall(
         MethodCall('onEvent', {'eventName': name}),
       ),
+      (_) {},
+    );
+    await flushNativeReplies();
+  }
+
+  Future<void> compositionChanged() async {
+    await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+      _backdropChannel.name,
+      const StandardMethodCodec().encodeMethodCall(const MethodCall('refresh')),
       (_) {},
     );
     await flushNativeReplies();
@@ -141,7 +141,6 @@ void main() {
       harness.state.backgroundMode = AppBackgroundMode.windowsMica;
       await harness.mount();
       expect(harness.requests, isEmpty);
-      expect(harness.windowColors, isEmpty);
       expect(harness.active, isFalse);
       expect(harness.surfaceAlpha, 1);
     },
@@ -157,13 +156,12 @@ void main() {
     harness.state.backgroundMode = AppBackgroundMode.windowsMica;
     await harness.mount();
     expect(harness.requests, [(true, false)]);
-    expect(harness.windowColors, [Colors.transparent]);
     expect(harness.active, isTrue);
     expect(harness.surfaceAlpha, 0);
   });
 
   for (final failure in ['unsupported', 'missing plugin', 'platform error']) {
-    _testBackdrop('$failure restores an opaque native and Flutter surface', (
+    _testBackdrop('$failure keeps the Flutter surface opaque', (
       tester,
       harness,
     ) async {
@@ -178,11 +176,10 @@ void main() {
       await harness.mount();
       expect(harness.active, isFalse);
       expect(harness.surfaceAlpha, 1);
-      expect(harness.windowColors, [Colors.transparent, Colors.white]);
     });
   }
 
-  _testBackdrop('dark theme Mica failure uses a dark native fallback', (
+  _testBackdrop('dark theme Mica failure keeps a themed opaque fallback', (
     tester,
     harness,
   ) async {
@@ -190,8 +187,14 @@ void main() {
     harness.respond = (_) async => false;
     await harness.mount(brightness: Brightness.dark);
     expect(harness.requests, [(true, true)]);
-    expect(harness.windowColors, [Colors.transparent, Colors.black]);
     expect(harness.surfaceAlpha, 1);
+    final surface = tester.widget<ColoredBox>(
+      find.descendant(
+        of: find.byType(MicaSurface),
+        matching: find.byType(ColoredBox),
+      ),
+    );
+    expect(surface.color, ThemeData.dark().colorScheme.surface);
   });
 
   _testBackdrop('player Mica is dark and closing restores light browsing', (
@@ -225,13 +228,11 @@ void main() {
 
     await harness.presentPlayer(true);
     expect(harness.requests.last, (false, true));
-    expect(harness.windowColors.last, Colors.black);
     expect(harness.active, isFalse);
     expect(harness.surfaceAlpha, 1);
 
     await harness.presentPlayer(false);
     expect(harness.requests.last, (true, false));
-    expect(harness.windowColors.last, Colors.transparent);
     expect(harness.active, isTrue);
   });
 
@@ -278,13 +279,37 @@ void main() {
     expect(harness.requests.last, (false, false));
     expect(harness.active, isFalse);
     expect(harness.surfaceAlpha, 1);
-    expect(harness.windowColors.last, Colors.white);
 
     disabled.complete(false);
     await tester.pumpAndSettle();
     expect(harness.active, isFalse);
     expect(harness.surfaceAlpha, 1);
   });
+
+  _testBackdrop(
+    'composition changes retry Mica and restore fallback on failure',
+    (tester, harness) async {
+      harness.state.backgroundMode = AppBackgroundMode.windowsMica;
+      harness.respond = (_) async => false;
+      await harness.mount();
+      expect(harness.active, isFalse);
+
+      harness.respond = (_) async => true;
+      await harness.compositionChanged();
+      expect(harness.active, isTrue);
+      expect(harness.surfaceAlpha, 0);
+
+      harness.respond = (_) async => false;
+      await harness.compositionChanged();
+      expect(harness.active, isFalse);
+      expect(harness.surfaceAlpha, 1);
+      expect(harness.requests, [(true, false), (true, false), (true, false)]);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await harness.compositionChanged();
+      expect(harness.requests, hasLength(3));
+    },
+  );
 
   testWidgets('browsing Mica opacity is independent of content opacity', (
     tester,
