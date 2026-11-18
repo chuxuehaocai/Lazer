@@ -95,7 +95,8 @@ def prepare(
             raise RuntimeError(f"Missing iOS Audio Engine archives in {directory}")
 
     run(
-        [sys.executable, str(repo / "ci" / "verify-ios-audio.py"), "--archive", str(directory)],
+        [sys.executable, str(repo / "ci" / "verify-ios-audio.py"), "--archive", str(directory),
+         "--platform", platform],
         cwd=repo,
         env=environment,
         check=True,

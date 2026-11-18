@@ -285,6 +285,8 @@ class NativeAudioEngine
   bool _shutdownStarted = false;
   bool _completionSent = false;
   double _volume = 1;
+  List<Object?>? _pendingDspSettings;
+  bool get hasPendingDspSettings => _pendingDspSettings != null;
 
   AudioStreamEntry? _activeEntry;
   NativeStreamReader? _activeReader;
@@ -901,13 +903,11 @@ class NativeAudioEngine
         token,
       ]),
     );
-    // A running source applies the selection on its next open. Every other USB
-    // refusal must reach the settings UI instead of retaining a system route.
-    if (AndroidUsbAudio.isUsbDeviceId(settings.deviceToken) &&
-        status != lazerAudioOk &&
-        status != lazerAudioErrorState) {
+    // A running source applies the selection on its next open. Every other
+    // refusal must reach the settings UI instead of looking successfully applied.
+    if (status != lazerAudioOk && status != lazerAudioErrorState) {
       throw StateError(
-        'USB output settings were refused ($status): ${lastError()}',
+        'Output settings were refused ($status): ${lastError()}',
       );
     }
   }
@@ -967,16 +967,22 @@ class NativeAudioEngine
   }) async {
     final int? address = _engineAddressOrNull;
     if (address == null) return;
-    await _callWorker(LazerWorkerOp.setDsp, <Object?>[
-      address,
+    final List<Object?> settings = <Object?>[
       preampDb,
       limiterEnabled ? 1 : 0,
       limiterThresholdDb,
       <Object?>[for (final LazerEqBandSettings band in bands) band.toMessage()],
       crossfeed.toMessage(),
-      // Empty means the engine's default order; see `HifiSettings.dspStageOrder`.
-      stageOrder,
-    ]);
+      List<int>.of(stageOrder),
+    ];
+    _pendingDspSettings = settings;
+    final int status = _status(
+      await _callWorker(LazerWorkerOp.setDsp, <Object?>[address, ...settings]),
+    );
+    if (status != lazerAudioOk) {
+      throw StateError('DSP settings were refused ($status): ${lastError()}');
+    }
+    if (identical(_pendingDspSettings, settings)) _pendingDspSettings = null;
   }
 
   /// Deletes the audio cache; playback stops because its files are gone.
@@ -1431,16 +1437,29 @@ class NativeAudioEngine
       status = await apply();
     }
     if (status != lazerAudioOk) {
-      if (AndroidUsbAudio.isUsbDeviceId(settings.deviceToken)) {
+      throw StateError(
+        'Output settings were refused ($status): ${lastError()}',
+      );
+    }
+    // Leaving a strict track queues a normal output policy, but the old stream
+    // still refuses DSP until it is stopped above. Replay that refused request
+    // here so the next ordinary track restores the user's saved EQ and gain.
+    final List<Object?>? pendingDsp = _pendingDspSettings;
+    if (pendingDsp != null) {
+      final int dspStatus = _status(
+        await _callWorker(LazerWorkerOp.setDsp, <Object?>[
+          address,
+          ...pendingDsp,
+        ]),
+      );
+      if (dspStatus != lazerAudioOk) {
         throw StateError(
-          'USB output settings were refused ($status): ${lastError()}',
+          'DSP settings were refused ($dspStatus): ${lastError()}',
         );
       }
-      // Playback can still proceed with the previous output config, but the
-      // mismatch must be visible in the path log rather than implied.
-      debugPrint(
-        'lazer-audio: output settings were not applied ($status): ${lastError()}',
-      );
+      if (identical(_pendingDspSettings, pendingDsp)) {
+        _pendingDspSettings = null;
+      }
     }
     await _callWorker(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
   }

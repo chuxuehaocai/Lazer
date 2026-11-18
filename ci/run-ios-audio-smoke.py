@@ -30,6 +30,7 @@ class SmokeSession:
         timeouts: dict[str, float] | None = None,
         playback_timeout: float = 90,
         poll_interval: float = 1,
+        process_name: str = "AudioSmoke",
     ):
         self.app, self.out, self.bundle = app, out, bundle
         self.simctl = simctl
@@ -40,6 +41,7 @@ class SmokeSession:
             **(timeouts or {}),
         }
         self.playback_timeout, self.poll_interval = playback_timeout, poll_interval
+        self.process_name = process_name
         self.device: str | None = None
         self.container: Path | None = None
         self.out.mkdir(parents=True, exist_ok=True)
@@ -50,12 +52,15 @@ class SmokeSession:
         with (self.out / "harness.log").open("a", encoding="utf-8") as log:
             log.write(line + "\n")
 
-    def command(self, stage: str, *args: str) -> str:
+    def command(self, stage: str, *args: str,
+                tool: tuple[str, ...] | None = None, cwd: Path | None = None) -> str:
         self.note(f"{stage}: begin")
+        executable = tool or self.simctl
         process = subprocess.Popen(
-            [*self.simctl, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            [*executable, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace",
             start_new_session=os.name != "nt",
+            cwd=cwd,
         )
         timed_out = False
         try:
@@ -80,7 +85,8 @@ class SmokeSession:
         if timed_out:
             raise SmokeFailure(f"{stage}: timed out after {self.timeouts[stage]}s")
         if process.returncode:
-            raise SmokeFailure(f"{stage}: simctl exited {process.returncode}")
+            name = "simctl" if tool is None else Path(tool[0]).name
+            raise SmokeFailure(f"{stage}: {name} exited {process.returncode}")
         self.note(f"{stage}: complete")
         return stdout.strip()
 
@@ -110,11 +116,11 @@ class SmokeSession:
             self.note(f"console unavailable: {error}")
             return ""
 
-    def playback(self) -> None:
+    def boot_simulator(self, name: str) -> None:
         catalog_text = self.command("list", "list", "--json")
         (self.out / "devices.json").write_text(catalog_text, encoding="utf-8")
         kind, runtime = self.select_device(json.loads(catalog_text))
-        created = self.command("create", "create", "Lazer Native Audio Smoke", kind, runtime)
+        created = self.command("create", "create", name, kind, runtime)
         # Do not run cleanup against aliases such as "all" or "booted" if an
         # unexpected tool response is received.
         try:
@@ -124,6 +130,9 @@ class SmokeSession:
         self.device = created
         self.command("boot", "boot", self.device)
         self.command("bootstatus", "bootstatus", self.device, "-b")
+
+    def playback(self) -> None:
+        self.boot_simulator("Lazer Native Audio Smoke")
         self.command("install", "install", self.device, str(self.app))
         self.container = Path(self.command("container", "get_app_container", self.device, self.bundle, "data"))
         if not self.container.is_absolute():
@@ -152,6 +161,9 @@ class SmokeSession:
 
     def run(self) -> None:
         failure: Exception | None = None
+        # Re-running locally must not leave a previous PASS next to a failed
+        # invocation's logs. CI normally starts clean, but callers need not.
+        (self.out / "result.txt").unlink(missing_ok=True)
         try:
             self.playback()
         except Exception as error:
@@ -162,7 +174,7 @@ class SmokeSession:
                 try:
                     # This fixture has no user data; restrict diagnostic logs to
                     # its own process/bundle rather than collecting all logs.
-                    self.command("diagnostics", "spawn", self.device, "log", "show", "--last", "3m", "--style", "compact", "--predicate", f'process == "AudioSmoke" OR eventMessage CONTAINS "{self.bundle}"')
+                    self.command("diagnostics", "spawn", self.device, "log", "show", "--last", "3m", "--style", "compact", "--predicate", f'process == "{self.process_name}" OR eventMessage CONTAINS "{self.bundle}"')
                 except Exception as diagnostic_error:
                     self.note(f"diagnostics unavailable: {diagnostic_error}")
         finally:

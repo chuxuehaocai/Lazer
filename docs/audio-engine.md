@@ -318,17 +318,22 @@ Status of this port:
 | ReplayGain | Supported per source by the ABI; the app does not compute or pass it yet. |
 | Linux/macOS playback | Not run. The code is the master branch's, unchanged, but ALSA/CoreAudio device behaviour is unverified here. |
 | Android | Wired at the build and load layers: CI builds the engine for `arm64-v8a` and `armeabi-v7a`, stages them into `jniLibs` and verifies the APK, and `LazerAudioLoader` resolves `liblazer-audio.so` on `androidArm64`/`androidX64`. See `docs/android-audio.md`. **`armeabi-v7a` is not in the loader's candidate list**, so a 32-bit ARM build ships the engine without ever selecting it; Android has no exclusive/bit-perfect/DSD path (AAudio shared PCM only). |
-| iOS | The Runner's **Prepare Audio Engine** phase builds and caches the static arm64 engine, reader bridge and FFmpeg SDK for local Xcode/Flutter builds. CI supplies its prebuilt archives through `ios/Flutter/LazerAudio.xcconfig`; both paths use the same linker flags and `DynamicLibrary.process()` loader. The backend is RemoteIO (`src/output_remoteio.cpp`), its state machine is covered by `tests/remoteio` on every host, and the iOS job checks the executable's dynamic export trie. iOS is a shared mix: no exclusive mode, no bit-perfect, no direct DSD. **Physical iOS playback is still unverified here** — see `docs/audio-engine-hardware-verification.md` section 11. |
+| iOS | The Runner statically links the arm64 engine, reader bridge and FFmpeg; Dart uses `DynamicLibrary.process()`. RemoteIO supports ordinary PCM, DSD-to-PCM and native DSP. The strict USB implementation adds conditional 16/24-bit lossless PCM and explicitly requested DoP, rejecting incompatible routes, clocks or gain instead of silently downgrading. Hardware exclusive mode and raw Native DSD remain unavailable; a nonmixable session is not Hog Mode. The existing `655e816` IPA passed 5 Simulator tests for ordinary playback, **not the new strict USB path**. The expanded suite adds non-USB strict-mode refusal and explicit PCM recovery; its new IPA and physical DAC validation are pending. See [iOS implementation and validation](ios-audio.md). |
 
 Nothing here is evidence that a DAC received the source bits unaltered: the engine
 reports what the platform endpoint accepted, which is necessary but not sufficient, and
 no digital loopback has been captured for any device. What *is* now checkable is the
 engine's own output: `lazer-audio-engine-bit-perfect` captures the bytes the engine
 hands to its (fake) endpoint and requires them to equal the source PCM exactly, and the
-live `native_path_check --play --bit-perfect` prints the same three conditions
+desktop `native_path_check --play --bit-perfect` prints the same three conditions
 (`exclusive`, `dsp_active`, `format_matches_source`) the UI derives its indicator from.
 An exclusive/bit-perfect session reporting the source format unchanged still means only
 that the endpoint accepted the exact format and the engine reported no processing.
+The iOS strict USB path has a separate verified-session condition; it does not
+turn on the hardware-exclusive flag to satisfy the desktop formula. Its status
+still cannot prove the bytes a DAC receives. NICEHCK NK1's published 384 kHz PCM
+specification is not evidence that it supports DoP; use its PCM path until that
+hardware capability is independently confirmed.
 
 This machine could not build the Flutter app itself when this port was written: `flutter build`
 and `flutter test` need Windows Developer Mode for plugin symlinks, which required administrator
@@ -351,7 +356,7 @@ Ported from Twilight Echo's HiFi settings, in this app's own visual language:
 | 高保真播放 | 引擎状态, 输出设备 (with refresh), 独占输出, Bit-perfect, DSD 输出 (auto/PCM/DoP/native), DSD 倍率策略, 响度归一, 输出缓冲 |
 | 耳机串扰 | crossfeed 开关, 强度, 算法 (custom/Bauer/BS2B/Meier) |
 | 均衡器 | 开关, 预设, 前级, 限幅器, 10 段滑杆, 重置 |
-| 信号路径 | 解码格式, 源, 输出会话, 格式选择, Bit-perfect（独占 / DSP / 格式一致三项条件）, 独占, DSP, 格式与源一致, 输出缓冲（环形缓冲水位 + 欠载计数）, 遥测 |
+| 信号路径 | 解码格式, 源, 输出会话, 格式选择, Bit-perfect（桌面独占或 iOS 严格 USB 会话 / 无 DSP / 格式一致）, 独占, DSP, 格式与源一致, 输出缓冲（环形缓冲水位 + 欠载计数）, 遥测 |
 
 The page enforces the honest combinations rather than letting the engine refuse later:
 bit-perfect greys out the EQ and crossfeed (both are bypassed by that promise), holds the
@@ -371,5 +376,9 @@ labelled as such instead of silently behaving like the fallback.
 3. Feed ReplayGain from the local-library metadata into `LazerOpenSettings`.
 4. Verify on Linux (ALSA `hw:`) and macOS (CoreAudio HAL, Hog Mode).
 5. Run `flutter test integration_test/ios_native_engine_test.dart -d <ios-device>`
-   on macOS to verify factory selection, worker startup, silent PCM playback,
-   pause, seek and stop through the linked iOS engine.
+   on macOS to verify factory selection, worker startup, 24-bit high-rate PCM,
+   DSD64-to-PCM, measured preamp attenuation, EQ/crossfeed, HTTP reader playback,
+   pause, seek and stop through the linked iOS engine. It also checks that strict
+   PCM and explicit DoP fail on non-USB routes, with recovery only after switching
+   back to PCM. CI runs the same target on an isolated Simulator; USB DAC success,
+   exact output bits and background/route behavior still need hardware validation.

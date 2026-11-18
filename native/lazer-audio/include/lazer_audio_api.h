@@ -197,6 +197,11 @@ typedef enum LazerAudioFormatSelection {
     LazerAudioFormatSelectionNativeDsdU16Be = 10,
     LazerAudioFormatSelectionNativeDsdU32Le = 11,
     LazerAudioFormatSelectionNativeDsdU32Be = 12,
+    /* iOS RemoteIO USB route, validated at the source/carrier clock and unity
+     * gain. These do not imply hardware-exclusive access or a DAC bit test.
+     * Enum-only extension: the ABI v29 structure layout is unchanged. */
+    LazerAudioFormatSelectionIosUsbPcm = 13,
+    LazerAudioFormatSelectionIosUsbDoP = 14,
 } LazerAudioFormatSelection;
 
 /* Describes the source and initialized output-session format. PCM/DoP fields describe the format
@@ -254,8 +259,9 @@ typedef struct LazerAudioStreamInfo {
      * `output_format_matches_source` means the carrier or DSD word format carries the source stream
      * exactly, which is what the session cannot open without). `output_format_matches_source` is true
      * only when the initialized output session runs the source's own format with no resampling or
-     * requantization. `bit_perfect_active` is true only when the session is exclusive, the DSP is
-     * not in the path and the format matches the source. */
+     * requantization. `bit_perfect_active` requires an exclusive session or a validated iOS USB
+     * transport (format selection 13/14), no DSP, and an exact source/carrier format. These are
+     * application transport facts, not certification of the physical DAC output. */
     int32_t output_dsp_active;
     int32_t output_format_matches_source;
 } LazerAudioStreamInfo;

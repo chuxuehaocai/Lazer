@@ -84,7 +84,14 @@ class LazerStreamInfo {
     channels: outputChannels,
     engineReportedBitPerfect: bitPerfectActive,
     isDsdPath: isDoPOutput || isNativeDsdOutput,
+    transparentUsb: isStrictIosUsbOutput,
   );
+
+  /// The native route accepted a strict USB client format. This enum is reported
+  /// by the backend; it is never inferred from a DAC's marketing/display name.
+  bool get isStrictIosUsbOutput =>
+      outputFormatSelection == lazerAudioFormatSelectionIosUsbPcm ||
+      outputFormatSelection == lazerAudioFormatSelectionIosUsbDoP;
 
   /// Whether the source is DSD, whether it is output directly or converted.
   bool get hasDsdSource =>
@@ -99,31 +106,31 @@ class LazerStreamInfo {
   /// Reads the negotiated format out of the engine's `LazerAudioStreamInfo`.
   factory LazerStreamInfo.fromNative(LazerAudioStreamInfo info) =>
       LazerStreamInfo(
-    codec: lazerCodecName(info),
-    sourceSampleRate: info.sourceSampleRate,
-    sourceChannels: info.sourceChannels,
-    sourceBitsPerSample: info.sourceBitsPerSample,
-    sourceFormatKind: info.sourceFormatKind,
-    sourceDsdRateMultiplier: info.sourceDsdRateMultiplier,
-    outputSampleRate: info.outputSampleRate,
-    outputChannels: info.outputChannels,
-    outputBitsPerSample: info.outputBitsPerSample,
-    outputContainerBitsPerSample: info.outputContainerBitsPerSample,
-    outputIsFloat: info.outputIsFloat != 0,
-    outputExclusive: info.outputExclusive != 0,
-    outputFormatInitialized: info.outputFormatInitialized != 0,
-    outputFormatSelection: info.outputFormatSelection,
-    outputFormatKind: info.outputFormatKind,
-    outputDsdRateMultiplier: info.outputDsdRateMultiplier,
-    lossless: info.lossless != 0,
-    bitPerfectActive: info.bitPerfectActive != 0,
-    dspActive: info.outputDspActive != 0,
-    formatMatchesSource: info.outputFormatMatchesSource != 0,
-    peakMilliDbfs: info.outputPeakMillidbfs,
-    limiterGainReductionMilliDb: info.limiterGainReductionMillidb,
-    clippedSampleCount: info.outputClippedSampleCount,
-    telemetryValid: info.outputTelemetryValid != 0,
-  );
+        codec: lazerCodecName(info),
+        sourceSampleRate: info.sourceSampleRate,
+        sourceChannels: info.sourceChannels,
+        sourceBitsPerSample: info.sourceBitsPerSample,
+        sourceFormatKind: info.sourceFormatKind,
+        sourceDsdRateMultiplier: info.sourceDsdRateMultiplier,
+        outputSampleRate: info.outputSampleRate,
+        outputChannels: info.outputChannels,
+        outputBitsPerSample: info.outputBitsPerSample,
+        outputContainerBitsPerSample: info.outputContainerBitsPerSample,
+        outputIsFloat: info.outputIsFloat != 0,
+        outputExclusive: info.outputExclusive != 0,
+        outputFormatInitialized: info.outputFormatInitialized != 0,
+        outputFormatSelection: info.outputFormatSelection,
+        outputFormatKind: info.outputFormatKind,
+        outputDsdRateMultiplier: info.outputDsdRateMultiplier,
+        lossless: info.lossless != 0,
+        bitPerfectActive: info.bitPerfectActive != 0,
+        dspActive: info.outputDspActive != 0,
+        formatMatchesSource: info.outputFormatMatchesSource != 0,
+        peakMilliDbfs: info.outputPeakMillidbfs,
+        limiterGainReductionMilliDb: info.limiterGainReductionMillidb,
+        clippedSampleCount: info.outputClippedSampleCount,
+        telemetryValid: info.outputTelemetryValid != 0,
+      );
 
   /// One-line summary for diagnostics: `flac 44100 Hz/16-bit → 44100 Hz/16-bit`.
   String get summary {
@@ -132,7 +139,8 @@ class LazerStreamInfo {
         : '$sourceSampleRate Hz/$sourceBitsPerSample-bit';
     final String output = switch (outputFormatKind) {
       lazerAudioOutputFormatDoP => 'DoP @ $outputSampleRate Hz',
-      lazerAudioOutputFormatNativeDsd => 'Native DSD${outputDsdRateMultiplier}x',
+      lazerAudioOutputFormatNativeDsd =>
+        'Native DSD${outputDsdRateMultiplier}x',
       _ => '$outputSampleRate Hz/$outputBitsPerSample-bit',
     };
     return '$codec $source → $output';

@@ -9,9 +9,8 @@
  * The app already owns the audio session from Dart (`audio_session` in
  * `lib/audio/playback_session.dart`): category, options, interruption and
  * noisy-route handling are configured there and shared with the just_audio
- * path. This shim therefore never overwrites a category the app already set;
- * it only makes sure the session is active, asks for the rate and buffer the
- * caller wants, and reports the facts the OS actually granted.
+ * path. Ordinary playback preserves that configuration. Strict USB playback
+ * requests Playback/default mode without mixing, then verifies the result.
  */
 #ifndef LAZER_AUDIO_IOS_AUDIO_SESSION_H
 #define LAZER_AUDIO_IOS_AUDIO_SESSION_H
@@ -25,6 +24,7 @@ namespace lazer::audio {
 
 /* What the route granted, not what the caller asked for. */
 struct IosSessionInfo {
+    uint64_t revision = 0;
     int32_t sampleRate = 0;
     /* Frames the system asks for per IO callback; 0 when the route does not say. */
     int32_t ioBufferFrames = 0;
@@ -32,6 +32,11 @@ struct IosSessionInfo {
     int32_t outputLatencyFrames = 0;
     /* `AVAudioSessionPortDescription.portType`, e.g. "Speaker", "BluetoothA2DP". */
     std::string route;
+    std::string routeUid;
+    int32_t outputChannels = 0;
+    bool usbOnly = false;
+    bool nonMixablePlayback = false;
+    bool unityVolume = false;
 };
 
 /* A notification snapshot; reading it never calls Objective-C or the audio unit.
@@ -46,6 +51,11 @@ struct IosSessionState {
 
 IosSessionState iosSessionState() noexcept;
 
+/* Atomic notification epoch only: safe on the AudioUnit callback thread. Any
+ * route, interruption, media-service or output-volume change invalidates a
+ * strict USB session before its producer gets a chance to rebuild the unit. */
+uint64_t iosSessionRealtimeRevision() noexcept;
+
 /* An explicit play request may resume after a removed headset or an interruption
  * that did not grant automatic resumption. Recovery must never call this. */
 void iosSessionRequestResume() noexcept;
@@ -54,7 +64,7 @@ void iosSessionRequestResume() noexcept;
  *
  * Returns `LazerAudioOk`, or a `LazerAudioError*` code with `error` filled. */
 int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
-    IosSessionInfo &info, std::string &error);
+    IosSessionInfo &info, std::string &error, bool strictUsb = false);
 
 /* Releases the session and lets other apps resume their audio. */
 void iosSessionDeactivate();

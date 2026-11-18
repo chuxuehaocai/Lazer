@@ -661,9 +661,52 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-deps-ios-simulator-arm64
+          path: build/ios-audio/simulator/stage/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  ios-flutter-integration:
+    name: iOS Flutter native playback and HiFi
+    needs: [check, ios-native]
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - run: dart tool/patch_lua_dardo_plus.dart
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-deps-ios-simulator-arm64
+          path: build/native-deps-ios-simulator
+      - name: Link the Simulator engine and verify its target platform
+        run: |
+          set -euo pipefail
+          python3 ci/verify-ios-audio.py --archive build/native-deps-ios-simulator/lib --platform simulator
+          bash ci/ios-audio-xcconfig.sh build/native-deps-ios-simulator/lib simulator
+      - name: Run the Flutter native audio integration on an isolated Simulator
+        run: python3 ci/run-ios-flutter-audio.py
+      - name: Keep Flutter playback and Simulator diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-flutter-audio-integration
+          path: build/ios-flutter-audio/
+          if-no-files-found: warn
+
   ios:
     name: iOS unsigned IPA (arm64)
-    needs: [check, ios-native]
+    needs: [check, ios-native, ios-flutter-integration]
     runs-on: macos-26
     timeout-minutes: 45
     steps:

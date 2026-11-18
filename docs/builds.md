@@ -54,16 +54,34 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
 - iOS links `liblazer-audio.a`, `liblazer-audio-bridge.a` and the four FFmpeg
   archives into the Runner binary through `ios/Flutter/LazerAudio.xcconfig`,
   which `ci/ios-audio-xcconfig.sh` generates for the archives supplied by CI.
+  Its override is scoped to the selected SDK, so preparing device libraries
+  does not redirect a subsequent Simulator build to incompatible arm64 objects.
   Local Xcode and Flutter builds use `ios/Flutter/LazerAudio.defaults.xcconfig`
   and the Runner's **Prepare Audio Engine** phase instead: it builds the
   engine automatically on the first build, keeps device and simulator archives
   separate, and reuses them until native sources or the Xcode SDK change.
   The first local build requires CMake and network access to the pinned FFmpeg
   sources. An incomplete engine build fails the build instead of producing
-  an IPA that silently selects `just_audio`. The `ios-native` job builds those archives for arm64;
-  the IPA job verifies the built executable's dynamic export trie, then repeats
+  an IPA that silently selects `just_audio`. The `ios-native` job builds both
+  device and Simulator archives for arm64, verifies their Mach-O platform
+  metadata as well as symbols, and plays file/reader fixtures in a UIKit app.
+  The `ios-flutter-integration` job then builds the actual Flutter app against
+  the Simulator archives and runs `integration_test/ios_native_engine_test.dart`.
+  It covers in-process FFI loading, the Dart worker, PCM at 44.1/96/192 kHz,
+  DSD-to-PCM decoding, HiFi DSP and HTTP reader playback/seek. Two additional
+  non-USB route cases require strict PCM and explicit DoP to fail without
+  fallback, then verify recovery after an explicit switch back to PCM. It creates and
+  deletes its own Simulator, bounds setup and execution, and uploads logs and
+  the result as `ios-flutter-audio-integration`. An unsuccessful integration
+  run blocks the IPA job. These Simulator checks do not establish USB DAC
+  negotiation, physical sound quality or bit-perfect delivery on real hardware.
+  Strict USB PCM and explicit DoP use route/format/gain checks rather than a
+  platform-wide iOS disable. Hardware exclusive mode remains unavailable;
+  nonmixable playback must not be reported as a hardware lock. NK1 PCM and DoP
+  compatibility have separate acceptance criteria in [ios-audio.md](ios-audio.md).
+  The IPA job verifies the built executable's dynamic export trie, then repeats
   the check on the executable read from the finished IPA before uploading it.
-  Both gates require the engine's 18 ABI symbols and all ten reader bridge
+  Both gates require the engine's 19 ABI symbols and all eleven reader bridge
   exports. `dyld_info -exports` reads the trie the dynamic loader uses; an empty
   trie or a failed inspection cannot pass through an ordinary symbol-table
   fallback. All four FFmpeg components must be statically linked as well.

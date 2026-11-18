@@ -261,8 +261,9 @@ struct Capture {
 
 class VariableCaptureOutput final : public AudioOutput {
 public:
-    explicit VariableCaptureOutput(std::shared_ptr<Capture> capture, bool paceWrites = false)
-        : capture_(std::move(capture)), paceWrites_(paceWrites) {}
+    explicit VariableCaptureOutput(std::shared_ptr<Capture> capture, bool paceWrites = false,
+        bool transparentUsb = false)
+        : capture_(std::move(capture)), paceWrites_(paceWrites), transparentUsb_(transparentUsb) {}
 
     int32_t open(const AudioOutputRequest &request, const StreamDescription &source,
         AudioOutputSession &session, std::string &, LogProxy *) override {
@@ -279,10 +280,13 @@ public:
         session.formatSelection = request.requireDoP
             ? LazerAudioFormatSelectionDoPCarrier
             : LazerAudioFormatSelectionExclusiveSource;
+        if (transparentUsb_) session.formatSelection = request.requireDoP
+            ? LazerAudioFormatSelectionIosUsbDoP : LazerAudioFormatSelectionIosUsbPcm;
         session.periodFrames = 64;
         session.bufferFrames = 64;
         session.writeMode = OutputWriteMode::Variable;
-        session.exclusive = true;
+        session.exclusive = !transparentUsb_;
+        session.transparentUsb = transparentUsb_;
         session.queueDepthAvailable = true;
         session.doP = request.requireDoP;
         sampleRate_ = session.target.sampleRate;
@@ -363,6 +367,7 @@ private:
     bool initialGrantIssued_ = false;
     bool opened_ = false;
     bool paceWrites_ = false;
+    bool transparentUsb_ = false;
     int32_t sampleRate_ = 0;
     int64_t paceMicros_ = 0;
 };
@@ -439,7 +444,7 @@ int runPcmCase() {
     return 0;
 }
 
-int runDopCase() {
+int runDopCase(bool transparentUsb = false) {
     MemoryReader reader(makeStereoDsf());
     const LazerAudioReader input = asReader(reader);
     Events events;
@@ -452,7 +457,8 @@ int runDopCase() {
     config.device.dsd_output_mode = LazerAudioDsdOutputRequireDoP;
     config.events.on_event = onEvent;
     config.events.context = &events;
-    Engine *engine = Engine::create(config, std::make_unique<VariableCaptureOutput>(capture));
+    Engine *engine = Engine::create(config,
+        std::make_unique<VariableCaptureOutput>(capture, false, transparentUsb));
     if (engine == nullptr) return fail("DoP engine creation failed");
 
     const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 0};
@@ -465,7 +471,8 @@ int runDopCase() {
     engine->streamInfo(info);
     if (info.output_format_kind != LazerAudioOutputFormatDoP ||
         info.output_dsd_rate_multiplier != 64 ||
-        info.output_format_selection != LazerAudioFormatSelectionDoPCarrier) {
+        info.output_format_selection != (transparentUsb
+            ? LazerAudioFormatSelectionIosUsbDoP : LazerAudioFormatSelectionDoPCarrier)) {
         engine->destroy();
         return fail("raw DSD stream did not publish its DoP carrier format and selection metadata");
     }
@@ -473,7 +480,7 @@ int runDopCase() {
      * same three facts as a bit-perfect PCM session — exclusive, no DSP in the path, and the output
      * format matching the source (for DSD that means the carrier contract, which the engine refuses to
      * open without). Before this, DSD paths reported "bit-perfect: no" purely as a placeholder. */
-    if (info.output_exclusive == 0 || info.output_dsp_active != 0 ||
+    if (info.output_exclusive != (transparentUsb ? 0 : 1) || info.output_dsp_active != 0 ||
         info.output_format_matches_source == 0 || info.bit_perfect_active == 0) {
                 std::cerr << "DoP bit-perfect state: exclusive=" << info.output_exclusive << " dsp_active=" << info.output_dsp_active << " format_matches=" << info.output_format_matches_source << " bit_perfect=" << info.bit_perfect_active << std::endl;
         engine->destroy();
@@ -493,7 +500,8 @@ int runDopCase() {
         capture->request.desired.sampleRate != 176'400 ||
         capture->request.desired.channels != kStereo ||
         capture->request.desired.bitsPerSample != 24 ||
-        !capture->request.desired.doP || !capture->session.doP || !capture->session.exclusive) {
+        !capture->request.desired.doP || !capture->session.doP ||
+        !capture->session.hasExactTransport()) {
         return fail("raw DSD did not negotiate the exact exclusive DoP carrier");
     }
     if (capture->invalidWrite || capture->bytes.empty() || capture->bytes.size() % 6 != 0) {
@@ -560,7 +568,7 @@ bool dopPayloadMatchesInOrder(const std::vector<uint8_t> &captured,
     return true;
 }
 
-int runDoPGaplessCase() {
+int runDoPGaplessCase(bool transparentUsb = false) {
     /* Odd DSD-byte counts make each source's final carrier frame leave the next source starting at
      * the opposite marker phase. Different source patterns make a lost, duplicated or swapped
      * payload at the boundary visible in the byte-for-byte capture. The 120 ms endpoint request
@@ -594,7 +602,8 @@ int runDoPGaplessCase() {
     config.events.on_event = onEvent;
     config.events.context = &events;
     /* This case crosses the ring boundary, so pace the fake endpoint at the carrier clock. */
-    Engine *engine = Engine::create(config, std::make_unique<VariableCaptureOutput>(capture, true));
+    Engine *engine = Engine::create(config,
+        std::make_unique<VariableCaptureOutput>(capture, true, transparentUsb));
     if (engine == nullptr) return fail("DoP gapless engine creation failed");
 
     const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 0};
@@ -795,6 +804,8 @@ int main() {
     if (runPcmCase() != 0) return 1;
     if (runDopCase() != 0) return 1;
     if (runDoPGaplessCase() != 0) return 1;
+    if (runDopCase(true) != 0) return 1;
+    if (runDoPGaplessCase(true) != 0) return 1;
     if (runDoPIncompatibleFallbackCase() != 0) return 1;
     if (runDoPIdlePositionCase() != 0) return 1;
     return 0;
