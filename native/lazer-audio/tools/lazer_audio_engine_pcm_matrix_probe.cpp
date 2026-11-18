@@ -102,6 +102,17 @@ struct MemoryReader {
     std::atomic<int> closeCount{0};
 };
 
+struct SeekGatedReader : MemoryReader {
+    explicit SeekGatedReader(std::vector<uint8_t> value, int64_t gatePosition)
+        : MemoryReader(std::move(value)), gatePosition(gatePosition) {}
+    std::mutex mutex;
+    std::condition_variable changed;
+    int64_t gatePosition;
+    bool soughtToGate = false;
+    bool waiting = false;
+    bool released = false;
+};
+
 int32_t readBytes(void *context, uint8_t *destination, int32_t length) {
     auto *reader = static_cast<MemoryReader *>(context);
     if (reader == nullptr || destination == nullptr || length <= 0) return LAZER_AUDIO_READER_IO_ERROR;
@@ -132,6 +143,27 @@ void closeReader(void *context) {
 
 LazerAudioReader asReader(MemoryReader &reader) {
     return LazerAudioReader{readBytes, seekBytes, readerLength, closeReader, &reader};
+}
+
+int32_t readAfterSeekGate(void *context, uint8_t *destination, int32_t length) {
+    auto &reader = *static_cast<SeekGatedReader *>(context);
+    if (reader.soughtToGate && reader.position >= reader.gatePosition &&
+        reader.position < static_cast<int64_t>(reader.bytes.size())) {
+        std::unique_lock guard(reader.mutex);
+        if (!reader.released) {
+            reader.waiting = true;
+            reader.changed.notify_all();
+            if (!reader.changed.wait_for(guard, std::chrono::seconds(5),
+                    [&] { return reader.released; })) return LAZER_AUDIO_READER_IO_ERROR;
+        }
+    }
+    return readBytes(static_cast<MemoryReader *>(&reader), destination, length);
+}
+
+int64_t seekToStartupGate(void *context, int64_t position) {
+    auto &reader = *static_cast<SeekGatedReader *>(context);
+    if (position == reader.gatePosition) reader.soughtToGate = true;
+    return seekBytes(static_cast<MemoryReader *>(&reader), position);
 }
 
 struct Capture;
@@ -196,6 +228,8 @@ struct Capture {
     int gateAfterWrites = 0;
     bool gateWaiting = false;
     bool gateReleased = false;
+    int gateAfterWaits = 0;
+    int waitsAfterStart = 0;
 };
 
 int64_t captureFramesAtCallback(Capture *capture) {
@@ -256,6 +290,15 @@ public:
     int32_t stop(std::string &) override { return LazerAudioOk; }
     int32_t reset(std::string &) override { return LazerAudioOk; }
     OutputWaitResult waitForReady(int32_t, std::string &) override {
+        if (capture_->gateAfterWaits > 0) {
+            std::unique_lock guard(capture_->mutex);
+            if (capture_->startCount > 0 &&
+                ++capture_->waitsAfterStart >= capture_->gateAfterWaits && !capture_->gateReleased) {
+                capture_->gateWaiting = true;
+                capture_->changed.notify_all();
+                capture_->changed.wait(guard, [this] { return capture_->gateReleased; });
+            }
+        }
         if (capture_->gateAfterWrites > 0) {
             std::unique_lock guard(capture_->mutex);
             if (capture_->writeCount >= capture_->gateAfterWrites && !capture_->gateReleased) {
@@ -570,9 +613,80 @@ bool runPcmFormatReopenCase() {
             << " trackChanges/ended=" << trackChanges << "/" << endedEvents
             << " reader closes=" << first.closeCount.load() << "/"
             << incompatible.closeCount.load() << "/" << second.closeCount.load() << "\n";
+        std::lock_guard guard(capture->mutex);
+        std::cerr << "output opens/starts/closes/open-while-open=" << capture->openCount << "/"
+            << capture->startCount << "/" << capture->closeCount << "/"
+            << capture->openWhileAlreadyOpenCount << " sessions=" << capture->sessions.size() << '\n';
+        for (size_t index = 0; index < capture->sessions.size(); ++index) {
+            const auto &session = capture->sessions[index];
+            const auto &expected = index == 0 ? expectedFirst : expectedSecond;
+            const auto difference = std::mismatch(session.bytes.begin(), session.bytes.end(),
+                expected.begin(), expected.end());
+            std::cerr << "session " << index << " target rate/depth/container/request-rate="
+                << session.target.sampleRate << "/" << session.target.bitsPerSample << "/"
+                << session.target.containerBitsPerSample << "/" << session.request.desired.sampleRate
+                << " bytes=" << session.bytes.size() << "/" << expected.size()
+                << " first-difference=" << (difference.first - session.bytes.begin()) << '\n';
+        }
         return false;
     }
     std::cout << "PASS: cross-rate/depth PCM is rejected from gapless queue and reopened with the next exact output tuple\n";
+    return true;
+}
+
+bool runFixedPeriodStartupPrimingCase() {
+    constexpr int32_t sampleRate = 44'100;
+    constexpr int32_t bits = 16;
+    constexpr int64_t seekBytePosition = 44 + sampleRate * kChannels * (bits / 8);
+    SeekGatedReader source(makePcmWave(sampleRate * 2, sampleRate, bits, 5'000), seekBytePosition);
+    LazerAudioReader reader{readAfterSeekGate, seekToStartupGate,
+        [](void *context) { return readerLength(static_cast<MemoryReader *>(
+            static_cast<SeekGatedReader *>(context))); },
+        [](void *context) { closeReader(static_cast<MemoryReader *>(
+            static_cast<SeekGatedReader *>(context))); }, &source};
+    auto capture = std::make_shared<Capture>();
+    capture->gateAfterWaits = 2;
+    ProbeEvents events;
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.events.on_event = onEvent;
+    config.events.context = &events;
+    auto *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return false;
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 1'000, 2'000};
+    const int32_t opened = engine->open(nullptr, &reader, params);
+    bool readerWaiting = false;
+    if (opened == LazerAudioOk) {
+        std::unique_lock guard(source.mutex);
+        readerWaiting = source.changed.wait_for(guard, std::chrono::seconds(3),
+            [&] { return source.waiting; });
+    }
+    const bool playing = readerWaiting && engine->play() == LazerAudioOk;
+    bool startupSilentPacket = false;
+    bool waited = false;
+    if (playing) {
+        std::unique_lock guard(capture->mutex);
+        waited = capture->changed.wait_for(guard, std::chrono::seconds(3),
+            [&] { return capture->gateWaiting; });
+        startupSilentPacket = !capture->bytes.empty();
+    }
+    { std::lock_guard guard(source.mutex); source.released = true; }
+    source.changed.notify_all();
+    { std::lock_guard guard(capture->mutex); capture->gateReleased = true; }
+    capture->changed.notify_all();
+    const bool ended = playing && waitForEventCount(events, LazerAudioEventEnded, 1,
+        std::chrono::seconds(5));
+    engine->destroy();
+    if (!waited || startupSilentPacket || !ended) {
+        std::cerr << "fixed startup: opened=" << opened << " reader-waiting=" << readerWaiting
+            << " endpoint-waiting=" << waited << " submitted-before-source=" << startupSilentPacket
+            << " ended=" << ended << '\n';
+        return false;
+    }
+    std::cout << "PASS: fixed-period startup waits for delayed source PCM before submitting a packet\n";
     return true;
 }
 
@@ -1710,7 +1824,7 @@ int main(int argc, char **argv) {
         return runPresentationBoundaryCase() ? 0 : 1;
     }
     if (argc > 1 && std::string(argv[1]) == "--pcm-format-reopen") {
-        return runPcmFormatReopenCase() ? 0 : 1;
+        return runPcmFormatReopenCase() && runFixedPeriodStartupPrimingCase() ? 0 : 1;
     }
     if (argc > 1 && std::string(argv[1]) == "--replaygain-dsp") {
         return runReplayGainDspCase() ? 0 : 1;

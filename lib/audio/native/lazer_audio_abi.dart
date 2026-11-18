@@ -1,4 +1,4 @@
-// Wire contract for `native/lazer-audio/include/lazer_audio_api.h` (ABI v23).
+// Wire contract for `native/lazer-audio/include/lazer_audio_api.h` (ABI v30).
 //
 // The C header is the source of truth: this file mirrors its enums, structs and
 // constants one-for-one. Struct field order is the ABI — the native engine
@@ -14,9 +14,11 @@ import 'dart:ffi';
 
 /// `LAZER_AUDIO_ABI_VERSION` — `lazer_audio_create` rejects anything else.
 ///
-/// v24 appended the crossfeed fields to [LazerAudioDspConfig]; this mirror and the
-/// vendored engine are updated together (see docs/audio-engine.md).
-const int lazerAudioAbiVersion = 29;
+/// v30 extends the [LazerAudioStreamInfo.bitPerfectActive] contract to validated
+/// non-exclusive iOS USB transport and appends the iOS USB PCM/DoP selections.
+/// This mirror and the vendored engine are updated together (see
+/// docs/audio-engine.md).
+const int lazerAudioAbiVersion = 30;
 
 /// `LAZER_AUDIO_MAX_EQ_BANDS`.
 const int lazerAudioMaxEqBands = 32;
@@ -135,6 +137,10 @@ const int lazerAudioFormatSelectionNativeDsdU16Le = 9;
 const int lazerAudioFormatSelectionNativeDsdU16Be = 10;
 const int lazerAudioFormatSelectionNativeDsdU32Le = 11;
 const int lazerAudioFormatSelectionNativeDsdU32Be = 12;
+
+/// Validated iOS USB application transport; not hardware-exclusive access.
+const int lazerAudioFormatSelectionIosUsbPcm = 13;
+const int lazerAudioFormatSelectionIosUsbDoP = 14;
 
 /// `LazerAudioEqBandKind`.
 const int lazerAudioEqBandPeak = 0;

@@ -54,16 +54,35 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
 - iOS links `liblazer-audio.a`, `liblazer-audio-bridge.a` and the four FFmpeg
   archives into the Runner binary through `ios/Flutter/LazerAudio.xcconfig`,
   which `ci/ios-audio-xcconfig.sh` generates for the archives supplied by CI.
+  Its override is scoped to the selected SDK, so preparing device libraries
+  does not redirect a subsequent Simulator build to incompatible arm64 objects.
   Local Xcode and Flutter builds use `ios/Flutter/LazerAudio.defaults.xcconfig`
   and the Runner's **Prepare Audio Engine** phase instead: it builds the
   engine automatically on the first build, keeps device and simulator archives
   separate, and reuses them until native sources or the Xcode SDK change.
   The first local build requires CMake and network access to the pinned FFmpeg
   sources. An incomplete engine build fails the build instead of producing
-  an IPA that silently selects `just_audio`. The `ios-native` job builds those archives for arm64;
-  the IPA job verifies the built executable's dynamic export trie, then repeats
+  an IPA that silently selects `just_audio`. The `ios-native` job builds both
+  device and Simulator archives for arm64, verifies their Mach-O platform
+  metadata as well as symbols, and plays file/reader fixtures in a UIKit app.
+  The `ios-flutter-integration` job then builds the actual Flutter app against
+  the Simulator archives and runs `integration_test/ios_native_engine_test.dart`.
+  It covers in-process FFI loading, the Dart worker, PCM at 44.1/96/192 kHz,
+  DSD-to-PCM decoding, HiFi DSP and HTTP reader playback/seek. Two additional
+  cases inject legacy `bitPerfect` and `requireDoP` settings, verify that the
+  iOS controller normalizes them to shared output and DSD-to-PCM, and then play
+  through RemoteIO. It creates and
+  deletes its own Simulator, bounds setup and execution, and uploads logs and
+  the result as `ios-flutter-audio-integration`. An unsuccessful integration
+  run blocks the IPA job. These Simulator checks do not establish USB DAC
+  negotiation, physical sound quality or bit-perfect delivery on real hardware.
+  iOS does not expose exclusive output, strict PCM/Bit-perfect or DoP. RemoteIO
+  shared output remains the only product path, and DSD sources are converted to
+  PCM. The dormant native strict USB implementation and ABI values do not create
+  a user-visible capability; see [ios-audio.md](ios-audio.md).
+  The IPA job verifies the built executable's dynamic export trie, then repeats
   the check on the executable read from the finished IPA before uploading it.
-  Both gates require the engine's 18 ABI symbols and all ten reader bridge
+  Both gates require the engine's 19 ABI symbols and all eleven reader bridge
   exports. `dyld_info -exports` reads the trie the dynamic loader uses; an empty
   trie or a failed inspection cannot pass through an ordinary symbol-table
   fallback. All four FFmpeg components must be statically linked as well.
@@ -152,7 +171,7 @@ See [updates.md](updates.md) for the client-side rules.
   a glibc 2.35 baseline. The ARM runner bootstraps the SDK from the official Flutter
   3.47.0 tag and verifies its commit, since the official archive only provides an
   x64 Linux SDK. It does not cross-compile or use a third-party SDK.
-- Android uses `ubuntu-24.04` with Java 21; iOS uses `macos-15`.
+- Android uses `ubuntu-24.04` with Java 21; iOS uses `macos-26`.
 
 Linux packaging pins linuxdeploy and its GTK helper, checks the packaging tool's
 SHA-256, and explicitly bundles libmpv because it is loaded through FFI. Each
@@ -168,3 +187,5 @@ download its workflow artifacts and publish that release.
 Extract the whole Windows ZIP before launching the EXE. Downloaded AppImages need
 `chmod +x`. macOS Apps are ad-hoc signed, not Developer ID signed/notarized. The
 unsigned IPA needs your own signing before installation.
+For per-target provisioning profiles and Windows/macOS signing commands, see
+[iOS signing and installation](ios-audio.md#重签名与安装).

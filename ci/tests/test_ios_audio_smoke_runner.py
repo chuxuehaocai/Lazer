@@ -67,7 +67,9 @@ class IosAudioSmokeRunnerTest(unittest.TestCase):
         return RUNNER.SmokeSession(
             self.root / "AudioSmoke.app", self.out, "dev.naominet.lazer.audiosmoke",
             simctl=(sys.executable, str(self.fake), str(self.root)),
-            timeouts={"launch": 1, "terminate": 0.15, "shutdown": 0.15, "delete": 0.15},
+            # Normal cleanup must allow Python startup on a busy runner. The
+            # dedicated hang case below supplies deliberately short deadlines.
+            timeouts={"launch": 1, "terminate": 1, "shutdown": 1, "delete": 1},
             playback_timeout=0.12, poll_interval=0.01,
         )
 
@@ -111,7 +113,7 @@ class IosAudioSmokeRunnerTest(unittest.TestCase):
 
     def test_launch_and_cleanup_hangs_are_bounded_without_losing_launch_error(self):
         session = self.session(launch_delay=10, cleanup_hang=True)
-        session.timeouts["launch"] = 0.15
+        session.timeouts.update({stage: 0.15 for stage in ("launch", "terminate", "shutdown", "delete")})
         started = time.monotonic()
         with self.assertRaisesRegex(RUNNER.SmokeFailure, "launch: timed out"):
             self.run_session(session)

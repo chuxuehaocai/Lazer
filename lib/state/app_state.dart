@@ -377,7 +377,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Persists the HiFi settings; a single writer so a value the engine refused is
   /// not stored as if it had taken effect.
   Future<void> setHifiSettings(HifiSettings next) async {
-    if (next == hifiSettings) return;
+    next = hifi?.normalizeSettings(next) ?? next;
+    if (next == hifiSettings) {
+      if (hifi?.lastApplyError != null) await hifi?.apply();
+      return;
+    }
     hifiSettings = next;
     notifyListeners();
     // Keep the controller's copy in sync and push live DSP settings to the
@@ -2432,6 +2436,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         'hifi_output_name': prefs.getString('hifi_output_name'),
         'hifi_exclusive': prefs.getBool('hifi_exclusive'),
         'hifi_bit_perfect': prefs.getBool('hifi_bit_perfect'),
+        'hifi_dsp_order': prefs.getString('hifi_dsp_order'),
         'hifi_dsd_mode': prefs.getString('hifi_dsd_mode'),
         'hifi_dsd_rate_policy': prefs.getString('hifi_dsd_rate_policy'),
         'hifi_volume_normalization': prefs.getString(
@@ -2441,7 +2446,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         'hifi_buffer_millis': prefs.getInt('hifi_buffer_millis'),
         'hifi_equalizer': prefs.getString('hifi_equalizer'),
       });
-      unawaited(hifi?.apply() ?? Future<void>.value());
+      hifiSettings = hifi?.normalizeSettings(hifiSettings) ?? hifiSettings;
+      final HifiController? hifiController = hifi;
+      if (hifiController != null) {
+        // A controller may already exist before preferences finish loading.
+        // Restore its requested policy and DSP as well as the settings UI.
+        await hifiController.update(hifiSettings, forceApply: true);
+      }
       downloadQuality = AudioQualityInfo.parse(
         prefs.getString('lazer_download_quality'),
       );
@@ -4581,6 +4592,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             'engine': engine.runtimeType.toString(),
             'error': error.toString(),
           });
+          if (error is AudioOutputRefused) rethrow;
           // The platform refused a queue (or cannot build one): keep playing
           // through the single-source path rather than failing the track.
           queueId = null;
@@ -4613,6 +4625,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         'retrying': retrying,
         'error': error.toString(),
       });
+      if (error is AudioOutputRefused) {
+        if (generation == _generation) {
+          _failPlayback('音频输出设置未能应用，请检查输出设备后重新打开歌曲。');
+        }
+        return;
+      }
       final bool retryable =
           _retryableStreamResolve(error) || error is StateError;
       if (generation == _generation && !retrying && retryable) {

@@ -5,7 +5,7 @@ from pathlib import Path
 import plistlib
 import tempfile
 import unittest
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -234,6 +234,57 @@ class IosBundleMetadataTest(unittest.TestCase):
             info_path.write_bytes(plistlib.dumps(info))
             with self.assertRaisesRegex(ValueError, "does not match"):
                 VERIFY.verify_app(app)
+
+    def test_extension_identifier_must_be_inside_the_app_identifier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(Path(directory))
+            info_path = app / "PlugIns/PlayCount.appex/Info.plist"
+            info = plistlib.loads(info_path.read_bytes())
+            for identifier in ("dev.other.widget", "dev.naominet.lazer", "dev.naominet.lazer-other.widget"):
+                info["CFBundleIdentifier"] = identifier
+                info_path.write_bytes(plistlib.dumps(info))
+                with self.subTest(identifier=identifier), self.assertRaisesRegex(ValueError, "identifier must start"):
+                    VERIFY.verify_app(app)
+
+    def package_app(self, directory):
+        app = self.make_app(directory)
+        ipa = directory / "fixture.ipa"
+        with ZipFile(ipa, "w") as package:
+            for path in app.rglob("*"):
+                if path.is_file():
+                    package.write(path, "Payload/Runner.app/" + path.relative_to(app).as_posix())
+        return ipa
+
+    def test_ipa_rejects_an_extension_that_lost_its_info_plist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ipa = self.package_app(Path(directory))
+            with ZipFile(ipa, "a") as package:
+                package.writestr("Payload/Runner.app/PlugIns/Broken.appex/Broken", b"binary")
+            with self.assertRaisesRegex(ValueError, "invalid IPA"):
+                VERIFY.verify_ipa(ipa)
+
+    def test_ipa_rejects_signing_secrets_and_ambiguous_zip_paths(self):
+        for entry in ("p12-password.txt", "Payload/../p12-password.txt", "Payload/Runner.app/../../secret", "Payload/Runner.app/PlugIns\\Widget.appex/Info.plist", "Payload//Runner.app/secret", "Payload/Runner.app/./secret"):
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as directory:
+                ipa = self.package_app(Path(directory))
+                with ZipFile(ipa, "a") as package:
+                    # ZipInfo's Windows constructor normalizes backslashes;
+                    # retain the archive spelling we intend to reject.
+                    info = ZipInfo(entry)
+                    info.filename = entry
+                    package.writestr(info, b"secret")
+                with self.assertRaisesRegex(ValueError, "outside Payload|unsafe ZIP"):
+                    VERIFY.verify_ipa(ipa)
+
+    def test_ipa_rejects_duplicate_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ipa = self.package_app(Path(directory))
+            import warnings
+            with warnings.catch_warnings(), ZipFile(ipa, "a") as package:
+                warnings.simplefilter("ignore", UserWarning)
+                package.writestr("Payload/Runner.app/Runner", b"ambiguous binary")
+            with self.assertRaisesRegex(ValueError, "duplicate ZIP"):
+                VERIFY.verify_ipa(ipa)
 
     def test_ipa_checks_extension_metadata_after_packaging(self):
         with tempfile.TemporaryDirectory() as directory:

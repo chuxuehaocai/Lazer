@@ -41,6 +41,30 @@ public:
         writeFrame_.store(0, std::memory_order_relaxed);
     }
 
+    /* Grow only while the callback is stopped and the producer is serialized.
+     * RemoteIO can increase its maximum slice after a route change. Keep queued
+     * source frames in order, including a queue whose contents wrap around. */
+    bool reservePreservingFrames(size_t capacityFrames) {
+        if (capacityFrames <= capacityFrames_) return true;
+        if (frameBytes_ == 0 ||
+            capacityFrames > std::numeric_limits<size_t>::max() / frameBytes_) return false;
+        const size_t queued = queuedFrames();
+        std::vector<uint8_t> replacement;
+        try {
+            replacement.resize(capacityFrames * frameBytes_);
+        } catch (...) {
+            return false; // The existing queue and its PCM remain valid.
+        }
+        const uint64_t read = readFrame_.load(std::memory_order_relaxed);
+        if (queued > 0) copyOut(static_cast<size_t>(read % capacityFrames_),
+            replacement.data(), queued);
+        bytes_.swap(replacement);
+        capacityFrames_ = capacityFrames;
+        readFrame_.store(0, std::memory_order_relaxed);
+        writeFrame_.store(queued, std::memory_order_relaxed);
+        return true;
+    }
+
     [[nodiscard]] size_t capacityFrames() const noexcept { return capacityFrames_; }
     [[nodiscard]] size_t frameBytes() const noexcept { return frameBytes_; }
 

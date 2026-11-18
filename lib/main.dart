@@ -175,6 +175,7 @@ Future<void> main(List<String> args) async {
             'hifi_output_name': prefs.getString('hifi_output_name'),
             'hifi_exclusive': prefs.getBool('hifi_exclusive'),
             'hifi_bit_perfect': prefs.getBool('hifi_bit_perfect'),
+            'hifi_dsp_order': prefs.getString('hifi_dsp_order'),
             'hifi_dsd_mode': prefs.getString('hifi_dsd_mode'),
             'hifi_dsd_rate_policy': prefs.getString('hifi_dsd_rate_policy'),
             'hifi_volume_normalization': prefs.getString(

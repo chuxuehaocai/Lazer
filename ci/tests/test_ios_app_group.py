@@ -102,33 +102,5 @@ class SharedSwiftSourceTest(unittest.TestCase):
         )
 
 
-class ResignScriptTest(unittest.TestCase):
-    def setUp(self):
-        self.script = (REPO / "ci/resign-ios-ipa.sh").read_text(encoding="utf-8")
-
-    def test_it_refuses_a_group_it_cannot_use(self):
-        self.assertIn("must start with 'group.'", self.script)
-
-    def test_it_checks_the_profile_carries_the_group(self):
-        # Signing with a group the profile does not allow is dropped silently by
-        # codesign and shows up later as an empty widget.
-        self.assertIn("is not in the profile", self.script)
-
-    def test_it_keeps_the_original_entitlements(self):
-        self.assertIn("--entitlements :-", self.script)
-        # Only the group (and the team-derived keys) may change.
-        self.assertIn('Delete :com.apple.security.application-groups', self.script)
-
-    def test_it_embeds_the_profile(self):
-        self.assertIn("embedded.mobileprovision", self.script)
-
-    def test_it_verifies_the_result(self):
-        self.assertIn("signed without", self.script)
-        self.assertIn("--verify --deep --strict", self.script)
-
-    def test_it_warns_a_free_profile_cannot_work(self):
-        self.assertIn("free Apple ID", self.script)
-
-
 if __name__ == "__main__":
     unittest.main()

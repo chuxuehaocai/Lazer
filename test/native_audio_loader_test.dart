@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lazer_nextgen/audio/native/lazer_audio_abi.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_library.dart';
 
 /// The iOS engine is a static archive force-loaded into Runner and reached
@@ -16,12 +17,19 @@ void main() {
       expect(
         header,
         contains(symbol),
-        reason: '$symbol is required by the loader but is not in the ABI header',
+        reason:
+            '$symbol is required by the loader but is not in the ABI header',
       );
     }
-    // ABI v29 is the version this Dart mirror was generated against; the loader
+    // The header and Dart mirror must move together; the loader
     // refuses any other number rather than reading a misaligned struct.
-    expect(header, contains('#define LAZER_AUDIO_ABI_VERSION 29u'));
+    final RegExpMatch? versionMatch = RegExp(
+      r'^#define LAZER_AUDIO_ABI_VERSION ([0-9]+)u$',
+      multiLine: true,
+    ).firstMatch(header);
+    expect(versionMatch, isNotNull);
+    expect(int.parse(versionMatch!.group(1)!), lazerAudioAbiVersion);
+    expect(lazerAudioAbiVersion, 30);
   });
 
   test('the required ABI list does not gate additive entry points', () {

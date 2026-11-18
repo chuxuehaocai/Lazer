@@ -6,6 +6,10 @@
 现状一句话：**默认路径、逐 bit 判定、实时线程、DSP 链都已落地并有离线证据；缺的是"某台真实设备
 上这些结论是否成立"，包括 DSP 与 DSD 的物理层。**
 
+第 1–10 节主要针对桌面原生端点；其中的硬件独占条件和 DSD 自动策略不适用于 iOS。
+iOS 不提供应用层独占、严格 PCM/Bit-perfect 或 DoP，只使用系统共享 RemoteIO 并把
+DSD 转为 PCM；iOS 与 NICEHCK NK1 的共享输出检查请使用第 11 节。
+
 ---
 
 ## 0. 先决条件
@@ -14,7 +18,7 @@
 | --- | --- |
 | 分支 | `nextgen`（已合入 iOS RemoteIO、卷积和会话修复） |
 | 构建 | 必须能找到 DSD-capable FFmpeg：设置 `LAZER_FFMPEG_ROOT`，或把 SDK 放在 `third_party/ffmpeg` |
-| 引擎版本 | 源码与 Dart 镜像同为 **ABI 29**。构建会同时重编引擎；**不要**直接跑旧的 `build/` 产物 |
+| 引擎版本 | 源码与 Dart 镜像同为 **ABI 30**。构建会同时重编引擎；**不要**直接跑旧的 `build/` 产物 |
 | 平台 | Windows 已验证构建；Linux / macOS 的构建链路在 CI 里，但播放行为未验证 |
 
 构建（PowerShell）：
@@ -39,7 +43,7 @@ cd $env:TEMP
 
 **预期**：`decision=native`，两行 `ok`，退出码 0。
 
-**判读**：如果出现 `library unavailable` 且原因是 `reports ABI 25; this build expects 29`，那是旧产物，
+**判读**：如果出现 `library unavailable` 且原因是 `reports ABI 29; this build expects 30`，那是旧产物，
 重新构建即可；如果是 `not found`，是引擎没被打进包。
 
 ---
@@ -216,22 +220,48 @@ audio.path event=format codec=dsd_lsbf_planar source=DSD64x output=DoP @ 176400 
 
 ---
 
-## 11. iOS（新增，全部待在真机上验证）
+## 11. iOS（模拟器已有基础播放证据，真机待验证）
 
 iOS 的引擎是**静态链接**进 `Runner` 二进制的（`liblazer-audio.a` + reader bridge + 四个 FFmpeg 静态库），
 后端是新写的 RemoteIO（`native/lazer-audio/src/output_remoteio.cpp`），会话由 `AVAudioSession` 承担。
-CI 能证明的只有：两套契约（AAudio / RemoteIO）在假实现上通过、arm64 静态库导出 18 个 ABI 符号、
-`Runner` 的可执行文件导出表里有这些符号且没有多余动态库依赖。**以下每一项都还没有在设备上跑过。**
+2026-11-18 的[既有 CI](https://github.com/chuxuehaocai/Lazer/actions/runs/44229836575)
+在提交 `ce0c24a` 上通过了 Xcode 26.6 的真机/模拟器归档构建、原生模拟器播放
+（`PASS file=341ms reader=352ms ABI=29`）与 IPA 导出检查。
+这证明旧版本的真实 FFmpeg/reader/RemoteIO 链路能在模拟器推进播放时钟，
+不代表本轮修改或下表真机检查已经通过。本轮修复和验证范围见 [iOS 音频记录](ios-audio.md)。
 
 装机前提：未签名 IPA 需自行签名（Sideloadly / AltStore / 自有证书）。装好后先看
 设置 → 高保真播放 → 播放引擎，以及诊断日志：应当显示原生引擎。
 若走系统引擎，日志会保留原因（符号找不到 / ABI 不符 / 会话启动失败）。
 
-CI 已经替你证明、不必重复的部分（`ios-native` + `ios` 两个任务，macos-15）：
-六个 arm64 静态归档同一次构建产出；`Runner` 可执行文件的**动态导出表**里有引擎的 18 个
-ABI 符号与 reader bridge 的全部 10 个导出（`dyld_info -exports`，读的是动态加载器真正用的导出
-trie，不是被 strip 的符号表），包内没有 FFmpeg 动态库。也就是说 `DynamicLibrary.process()`
-在设备上**应当**能解析到引擎；剩下要验证的是解析到之后，声音有没有正确地送出去。
+现有 CI 的通过记录包含六个 arm64 静态归档；`Runner` 的**动态导出表**具有引擎的
+19 个符号与 reader bridge 的 11 个导出，包内没有额外 FFmpeg 动态库。
+本轮进一步增加 Mach-O 真机/模拟器平台检查，以及 `ios-flutter-integration` 任务，
+直接运行 Dart FFI、worker、HiFi 控制器和实际音频输出测试；后者成为 IPA 的依赖任务。
+新增任务已在提交 `655e816` 的 [CI 44236700237](https://github.com/chuxuehaocai/Lazer/actions/runs/44236700237)
+通过全部 5 项真实 iOS 模拟器基础播放检查；该次原生播放记录为
+`PASS file=330ms reader=365ms ABI=29`。这仍不能代替下表的物理设备验收。
+历史严格 USB 分支版本为 `2.0.301+301`，提交
+`59ee5b2aa31f706c161d5960b889bf739d0a4a8f` 的
+[CI 44243421544](https://github.com/chuxuehaocai/Lazer/actions/runs/44243421544)
+在 `macos-26` 已通过真机/模拟器原生构建与原生播放，记录为
+`PASS file=330ms reader=330ms ABI=29`；全部 7 项 iOS 模拟器集成测试通过，
+日志以 `+7: All tests passed!` 结束，没有跳过项。这些结果只证明当时的分支实现过
+RemoteIO 条件路径，不证明当前 iOS 产品支持独占、严格 PCM 或 DoP。后续产品决定已把
+这些入口移除。
+整个 CI 已成功完成，新的未签名 IPA 已生成并下载；本地确认版本 `2.0.301+301`、
+ZIP CRC、应用/Widget 元数据、包内容及 SHA-256 与 CI 一致。构建与校验值作为历史证据
+记录到 [iOS 音频记录](ios-audio.md#历史严格-usb-分支构建记录产品层未启用)。
+
+本轮最终本地检查通过 Flutter 727 项（另 2 项缺少外部插件 checkout 而跳过）、
+静态分析、本地化检查、Python CI 测试 106 项和约 6.2 秒的 RemoteIO 假 AudioUnit
+契约。历史严格路径的条件失效、退出后恢复保存的 DSP，以及会话激活失败清理也已验证。
+本轮 CI 检查同样通过 Flutter 727 项（另 2 项跳过）、Chrome 4 项、
+Python 106 项、静态分析、本地化与 AAudio/RemoteIO 契约；全量 Flutter 的跳过项不属于
+上述 7 项 iOS 集成测试。日志在 `build/ios-usb-validation/check.log`、
+`build/ios-usb-validation/native/` 和 `build/ios-usb-validation/flutter/`。
+尚未进行 USB DAC 或 NK1 物理设备测试；这些模拟器与契约结果也不改变当前“不支持”的
+产品定位。
 
 | 检查项 | 怎么做 | 预期 |
 | --- | --- | --- |
@@ -241,11 +271,33 @@ trie，不是被 strip 的符号表），包内没有 FFmpeg 动态库。也就�
 | 中断 | 来电、Siri、闹钟、其它 App 抢占 | 暂停并上报；回来后**不自动从错误位置续播** |
 | 后台与锁屏 | 锁屏、切后台、控制中心操作 | 继续播放，控制中心的进度/歌词跟随 |
 | 无缝切歌与拖动 | 连续切歌、长按进度条拖动、暂停/恢复 | 无卡顿爆音；无欠载累积 |
-| 能力文案 | 设置里看独占 / 位完美 / DSD | 必须显示**不可用**（iOS 没有独占与直通 DSD） |
+| 能力文案 | 设置里看独占 / 严格 PCM / DoP | 只显示“不支持”；不存在独占、严格 PCM 或 DoP 开关 |
+| DSD 文件 | 播放 DSD64/128 夹具 | 转为 PCM 后通过共享 RemoteIO 播放，不显示 DoP/Native DSD |
 | 长时稳定性 | 连续播放 ≥ 1 小时，观察发热与欠载 | 无逐渐恶化的爆音；内存不增长 |
 
-已知限制（不是缺陷，是平台事实）：iOS 声音始终经过系统混音；`preferredSampleRate` 只是请求，
-路由可以拒绝；蓝牙/AirPlay 会引入额外延迟与重编码。
+当前实现经系统管理的 RemoteIO 共享路由输出。iOS 不允许应用稳定取得并兑现独占或
+严格直通承诺；原生 dormant 严格后端存在也不构成用户能力。
+`preferredSampleRate` 只是请求，路由可以拒绝；输出格式描述客户端会话，不是 DAC 位流读回。
+蓝牙/AirPlay 的延迟和编码由系统路由决定。
+
+### NICEHCK 原道 NK1 共享输出检查
+
+先记录 iPhone/iPad 型号、iOS 版本、USB-C/Lightning 转接方式、NK1 批次及当前路由名称。
+[NICEHCK 官方 NK1 页面](https://www.nicehck.cn/en/store/nk1) 发布了 Type-C、CX31993
+与 32Bit/384kHz 规格，但没有明确的 DSD/DoP 支持承诺；规格卡同时存在 CX31993AU/CB1200AU
+标注。因此不以芯片名或 384 kHz 推导 DoP 兼容性，也不把厂家规格写成应用层独占、
+严格 PCM 或物理位流能力。
+
+| 检查项 | 怎么做 | 合格标准 / 记录 |
+| --- | --- | --- |
+| NK1 共享输出 | 先以较低听音音量播放 16/24-bit 无损源 | 确认 USB 路由、音高和声道正常，记录源与系统实际授予的输出格式；不推导独占或严格直通 |
+| DSD 转 PCM | 播放 DSD64/128 夹具 | 正常出声，信号路径只显示 PCM 转换，不显示 DoP/Native DSD 成功 |
+| 不支持项 | 打开 iOS 播放设置 | 只显示“独占 / 严格 PCM / DoP：不支持”；没有对应开关或 DSD 直通选择器 |
+| 路由变化 | 播放中拔掉 NK1，或切换蓝牙/扬声器 | 由 iOS 处理共享路由变化；速度、音高和声道正常，不宣称保持原 DAC 路径 |
+| 长时稳定性 | 使用静音夹具后再播放普通曲目 | 无爆音、变调或持续欠载；保留路由和控制中心行为验证结果 |
+
+NK1 的 DoP/Native DSD 状态与当前产品无关：iOS 不提供这两条输出路径，应用也不发送
+DoP 载波或要求 Native DSD。
 
 ### 自动验证与真机边界
 
@@ -256,7 +308,8 @@ Windows 原生输出播放、reader bridge 的完整导出门禁，以及 Remote
 不做会话恢复。Dart 层另验证输出打开前的会话配置、重复中断和替换歌曲后不误恢复。
 Objective-C 会话观察器仍需要 macOS/iOS 构建与设备运行验证。
 这些结果不能代替上表中的 iPhone 听音、物理路由切换、来电/Siri、后台锁屏和一小时热稳定性。
-当前没有可访问的 Mac/iPhone，以上真机项目继续保持未验证；不能据此宣称其已经通过。
+当前尚未完成连接 USB DAC 的 iPhone/iPad 验收，以上真机项目继续保持未验证；
+远程 macOS CI 和模拟器结果不能据此替代。
 
 ### BGA 真实曲库验证
 

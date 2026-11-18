@@ -8,6 +8,24 @@
 #include <atomic>
 #include <mutex>
 
+namespace lazer::audio { void iosSessionObservedVolumeChanged() noexcept; }
+
+/* outputVolume is KVO-observable. Keep the observer for the lifetime of the
+ * shared session; it never captures an AudioOutput or touches its queue. */
+@interface LazerIosAudioVolumeObserver : NSObject
+@end
+@implementation LazerIosAudioVolumeObserver
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
+    change:(NSDictionary<NSKeyValueChangeKey, id> *)change context:(void *)context {
+    (void)object;
+    (void)change;
+    (void)context;
+    if ([keyPath isEqualToString:@"outputVolume"]) {
+        lazer::audio::iosSessionObservedVolumeChanged();
+    }
+}
+@end
+
 namespace lazer::audio {
 namespace {
 
@@ -22,17 +40,23 @@ constexpr uint64_t kMayResume = 4;
 constexpr uint64_t kRemovedHeadphones = 8;
 constexpr uint64_t kRevisionStep = 16;
 std::atomic<uint64_t> lifecycle{kServicesAvailable | kMayResume};
+std::atomic<uint64_t> realtimeEpoch{0};
 
 void changed(uint64_t set, uint64_t clear) {
     uint64_t previous = lifecycle.load(std::memory_order_relaxed);
     while (!lifecycle.compare_exchange_weak(previous,
         ((previous + kRevisionStep) | set) & ~clear,
         std::memory_order_release, std::memory_order_relaxed)) {}
+    realtimeEpoch.fetch_add(1, std::memory_order_release);
 }
 
 void observeSession() {
     static std::once_flag once;
     std::call_once(once, [] {
+        static LazerIosAudioVolumeObserver *volumeObserver =
+            [[LazerIosAudioVolumeObserver alloc] init];
+        [[AVAudioSession sharedInstance] addObserver:volumeObserver
+            forKeyPath:@"outputVolume" options:0 context:nil];
         NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
         [center addObserverForName:AVAudioSessionRouteChangeNotification object:nil queue:nil
             usingBlock:^(NSNotification *notification) {
@@ -82,6 +106,14 @@ bool categoryCanPlay(NSString *category) {
 
 }  // namespace
 
+void iosSessionObservedVolumeChanged() noexcept {
+    realtimeEpoch.fetch_add(1, std::memory_order_release);
+}
+
+uint64_t iosSessionRealtimeRevision() noexcept {
+    return realtimeEpoch.load(std::memory_order_acquire);
+}
+
 IosSessionState iosSessionState() noexcept {
     const auto value = lifecycle.load(std::memory_order_acquire);
     return {value / kRevisionStep, (value & kInterrupted) != 0,
@@ -97,7 +129,7 @@ void iosSessionRequestResume() noexcept {
 }
 
 int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
-    IosSessionInfo &info, std::string &error) {
+    IosSessionInfo &info, std::string &error, bool strictUsb) {
     @autoreleasepool {
         info = IosSessionInfo{};
         error.clear();
@@ -109,7 +141,9 @@ int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
         }
 
         NSError *failure = nil;
-        if (!categoryCanPlay(session.category)) {
+        const bool exactCategory = [session.category isEqualToString:AVAudioSessionCategoryPlayback] &&
+            [session.mode isEqualToString:AVAudioSessionModeDefault] && session.categoryOptions == 0;
+        if ((strictUsb && !exactCategory) || !categoryCanPlay(session.category)) {
             if (![session setCategory:AVAudioSessionCategoryPlayback
                                  mode:AVAudioSessionModeDefault
                               options:0
@@ -120,10 +154,12 @@ int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
             }
         }
 
-        // Both of these are requests: the route decides. Reading them back below is
-        // what the engine is allowed to call a fact.
+        // Compare preferences to preferences: the current route can already run
+        // at the requested rate while a stale preference still names the previous
+        // track's clock. That stale value could take effect on the next USB route.
+        // Both requests are hints; only the activated route values below are facts.
         if (preferredSampleRate > 0 &&
-            std::fabs(session.sampleRate - static_cast<double>(preferredSampleRate)) > 0.5) {
+            std::fabs(session.preferredSampleRate - static_cast<double>(preferredSampleRate)) > 0.5) {
             [session setPreferredSampleRate:static_cast<double>(preferredSampleRate) error:nil];
         }
         if (bufferMillis > 0 && std::fabs(session.preferredIOBufferDuration -
@@ -138,6 +174,7 @@ int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
             return LazerAudioErrorDevice;
         }
 
+        info.revision = iosSessionRealtimeRevision();
         const double rate = session.sampleRate;
         if (!(rate > 0.0)) {
             error = "iOS reported no output sample clock";
@@ -160,6 +197,23 @@ int32_t iosSessionActivate(int32_t preferredSampleRate, int32_t bufferMillis,
             info.route = output.portType.UTF8String;
         } else {
             info.route = "unknown";
+        }
+        info.outputChannels = static_cast<int32_t>(session.outputNumberOfChannels);
+        info.usbOnly = session.currentRoute.outputs.count == 1 &&
+            [output.portType isEqualToString:AVAudioSessionPortUSBAudio];
+        if (output.UID != nil) info.routeUid = output.UID.UTF8String;
+        info.nonMixablePlayback =
+            [session.category isEqualToString:AVAudioSessionCategoryPlayback] &&
+            [session.mode isEqualToString:AVAudioSessionModeDefault] && session.categoryOptions == 0;
+        // Never raise system volume. A user may change it, in which case the
+        // KVO epoch immediately silences strict output until revalidation.
+        info.unityVolume = session.outputVolume == 1.0f;
+        if (strictUsb && info.revision != iosSessionRealtimeRevision()) {
+            error = "iOS USB output changed during session validation; retry playback";
+            [session setActive:NO
+                   withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+                         error:nil];
+            return LazerAudioErrorDevice;
         }
         return LazerAudioOk;
     }

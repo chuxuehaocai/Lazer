@@ -49,8 +49,10 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   double? get endpointVolume => null;
   Object? get lastApplyError => null;
   bool get nativeAvailable => false;
+  bool get usesIosSystemRoute => false;
   bool get supportsDevices => false;
   bool get supportsExclusiveMode => false;
+  bool get supportsBitPerfect => false;
   bool get supportsDoP => false;
   bool get supportsNativeDsd => false;
   bool get supportsDsdRatePolicy => false;
@@ -66,7 +68,9 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   void attach() {}
 
-  Future<void> update(HifiSettings next) async {
+  HifiSettings normalizeSettings(HifiSettings settings) => settings;
+
+  Future<void> update(HifiSettings next, {bool forceApply = false}) async {
     _settings = next;
     notifyListeners();
     await persist(next);
