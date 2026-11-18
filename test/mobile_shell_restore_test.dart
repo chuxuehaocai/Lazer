@@ -93,7 +93,7 @@ void main() {
           final cover = find.byKey(const ValueKey('bottom-track-cover'));
           expect(
             AppleSemanticColors.of(tester.element(navigation)).accent,
-            AppleColors.musicRed,
+            AppleSemanticColors.light.accent,
           );
           final ring = find.descendant(
             of: cover,
@@ -101,7 +101,7 @@ void main() {
           );
           expect(
             tester.widget<CircularProgressIndicator>(ring).color,
-            AppleColors.musicRed,
+            AppleSemanticColors.light.accent,
           );
           expect(tester.getSize(cover), const Size.square(48));
           expect(tester.getSize(navigation).height, 56);
@@ -123,7 +123,7 @@ void main() {
     }
   }
 
-  testWidgets('shell palette follows the effective phone breakpoint', (
+  testWidgets('shell palette is the same on both sides of the phone breakpoint', (
     tester,
   ) async {
     tester.view
@@ -138,7 +138,7 @@ void main() {
       AppleSemanticColors.of(
         tester.element(find.byType(CapsuleNavigationBar)),
       ).accent,
-      AppleColors.musicRed,
+      AppleSemanticColors.light.accent,
     );
     tester.view.physicalSize = const Size(1280, 850);
     await tester.pumpAndSettle();

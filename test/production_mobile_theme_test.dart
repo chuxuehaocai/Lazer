@@ -29,7 +29,7 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets(
-    'production shell, pushed routes and dialogs share the phone theme',
+    'production shell, pushed routes and dialogs share one theme everywhere',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -51,7 +51,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       final navContext = tester.element(find.byType(CapsuleNavigationBar));
-      expect(AppleSemanticColors.of(navContext).accent, AppleColors.musicRed);
+      expect(AppleSemanticColors.of(navContext).accent, AppleColors.lazerBlue);
       final canvas = find
           .descendant(
             of: find.byType(SharedBrowseBackground),
@@ -60,7 +60,7 @@ void main() {
           .first;
       expect(
         tester.widget<ColoredBox>(canvas).color,
-        AppleColors.mobileDarkCanvas,
+        AppleColors.darkCanvas,
       );
 
       final navigator = Navigator.of(navContext);
@@ -74,7 +74,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(routeTheme!.colorScheme.primary, AppleColors.musicRed);
+      expect(routeTheme!.colorScheme.primary, AppleColors.lazerBlue);
       ThemeData? dialogTheme;
       showDialog<void>(
         context: tester.element(find.text('Pushed route')),
@@ -84,7 +84,7 @@ void main() {
         },
       );
       await tester.pumpAndSettle();
-      expect(dialogTheme!.colorScheme.primary, AppleColors.musicRed);
+      expect(dialogTheme!.colorScheme.primary, AppleColors.lazerBlue);
       navigator.pop();
       await tester.pumpAndSettle();
 
@@ -93,7 +93,7 @@ void main() {
       expect(routeTheme!.colorScheme.primary, AppleColors.lazerBlue);
       await state.setLayoutStyle(AppLayoutStyle.phone);
       await tester.pumpAndSettle();
-      expect(routeTheme!.colorScheme.primary, AppleColors.musicRed);
+      expect(routeTheme!.colorScheme.primary, AppleColors.lazerBlue);
       expect(routeTheme!.extension<AppThemePresentation>()!.compact, isTrue);
       navigator.pop();
       await tester.pumpAndSettle();

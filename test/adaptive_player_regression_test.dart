@@ -244,6 +244,21 @@ void main() {
       tester.widget<DesktopNowPlaying>(find.byType(DesktopNowPlaying)).pane,
       DesktopNowPlayingPane.lyrics,
     );
+    // The same key folds the reading pane away and, pressed again mid-flight,
+    // reverses that fold instead of queueing a second animation.
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    expect(
+      tester.widget<DesktopNowPlaying>(find.byType(DesktopNowPlaying)).pane,
+      DesktopNowPlayingPane.none,
+    );
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<DesktopNowPlaying>(find.byType(DesktopNowPlaying)).pane,
+      DesktopNowPlayingPane.lyrics,
+    );
     tester.view.physicalSize = const Size(400, 800);
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.keyL);

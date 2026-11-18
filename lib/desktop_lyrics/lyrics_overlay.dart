@@ -292,7 +292,14 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _lifecycleVisible = state == AppLifecycleState.resumed;
+    // Windows reports `inactive` as soon as another window takes focus. A
+    // desktop lyric panel exists to stay readable while the listener works in
+    // some other app, so losing focus must not stop its clock — that is what
+    // made the overlay redraw only when a position message happened to arrive.
+    // A paused or hidden engine still stops it.
+    _lifecycleVisible =
+        state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
     _ensureTicker();
   }
 

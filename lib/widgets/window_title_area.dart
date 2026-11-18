@@ -7,8 +7,9 @@ import 'package:window_manager/window_manager.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
+import '../theme/apple_design.dart';
 import 'app_system_tray.dart';
-import 'window_chrome_surface.dart';
+import 'window_chrome.dart';
 
 /// Window title shown in the title area — also pushed to the native window so
 /// the taskbar and Alt+Tab agree with the bar.
@@ -68,6 +69,24 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
   bool _focused = true;
   bool _closePromptOpen = false;
 
+  /// Serialized capsule paint settings. The frame must repaint the capsule when
+  /// the listener changes its tint, opacity or blur, but rebuilding it on every
+  /// unrelated state notification would re-run the backdrop filter for nothing.
+  late String _paintKey = _currentPaintKey();
+
+  String _currentPaintKey() {
+    final AppState? state = widget.state;
+    if (state == null) return '';
+    return <Object?>[
+      state.windowChromeBlurEnabled,
+      state.windowChromeBlur,
+      state.windowChromeOpacity,
+      state.windowChromeColor?.toARGB32(),
+      state.accentColor?.toARGB32(),
+      state.paletteMode.name,
+    ].join('|');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -100,11 +119,17 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
     if (widget.state != oldWidget.state) {
       oldWidget.state?.removeListener(_onStateChanged);
       widget.state?.addListener(_onStateChanged);
+      _paintKey = _currentPaintKey();
       _syncPreventClose();
     }
   }
 
-  void _onStateChanged() => _syncPreventClose();
+  void _onStateChanged() {
+    _syncPreventClose();
+    final String key = _currentPaintKey();
+    if (key == _paintKey || !mounted) return;
+    setState(() => _paintKey = key);
+  }
 
   void _syncPreventClose() {
     try {
@@ -279,6 +304,83 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
     }
   }
 
+  List<Widget> _captions(BuildContext context, String middleLabel) => <Widget>[
+    _CaptionButton(
+      key: const ValueKey<String>('window-title-minimize'),
+      glyph: _CaptionGlyph.minimize,
+      label: context.tr('最小化'),
+      onPressed: _minimize,
+    ),
+    _CaptionButton(
+      key: const ValueKey<String>('window-title-fullscreen'),
+      glyph: _expanded ? _CaptionGlyph.restore : _CaptionGlyph.maximize,
+      label: middleLabel,
+      onPressed: _toggleWindowSize,
+    ),
+    _CaptionButton(
+      key: const ValueKey<String>('window-title-close'),
+      glyph: _CaptionGlyph.close,
+      label: context.tr('关闭窗口'),
+      onPressed: _requestClose,
+      destructive: true,
+    ),
+  ];
+
+  /// Inline chrome has no strip of its own: the caption cluster is a capsule
+  /// floating on top of the page, so it takes its intrinsic width and leaves the
+  /// rest of the row to the page beneath it. The whole capsule — grab area and
+  /// buttons — is the window's title bar: a drag anywhere on it moves the
+  /// window, a click still presses the button underneath.
+  /// The material follows the listener's settings: tint colour, tint opacity and
+  /// whether (and how strongly) the capsule filters the page behind it.
+  Widget _floatingCapsule(BuildContext context, String middleLabel) {
+    final AppState? state = widget.state;
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    return WindowDragArea(
+      child: SizedBox(
+        height: kWindowTitleAreaHeight,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            // The capsule is the drag handle as a whole, so this is only the
+            // capsule's leading pad — but it still shows the move cursor, which
+            // is how a listener finds out the window can be grabbed here.
+            MouseRegion(
+              cursor: SystemMouseCursors.move,
+              child: const SizedBox(
+                key: ValueKey<String>('window-chrome-grip'),
+                width: kWindowChromeGripWidth,
+                height: kWindowChromeHeight,
+              ),
+            ),
+            WindowChromeSurface(
+              inline: true,
+              tint: windowChromeTint(
+                apple,
+                custom: state?.windowChromeColor,
+                opacity:
+                    state?.windowChromeOpacity ?? kWindowChromeOpacityDefault,
+              ),
+              blurEnabled: state?.windowChromeBlurEnabled ?? true,
+              blurSigma: state?.windowChromeBlur ?? kWindowChromeBlurDefault,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  SizedBox(
+                    key: const ValueKey('window-chrome-extension'),
+                    width: widget.leadingWidth,
+                    height: kWindowChromeHeight,
+                  ),
+                  ..._captions(context, middleLabel),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!widget.visible) return const SizedBox.shrink();
@@ -294,18 +396,17 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
           decoration: TextDecoration.none,
         );
     final String middleLabel = context.tr(_expanded ? '还原窗口' : '全屏');
+    if (widget.inline) return _floatingCapsule(context, middleLabel);
 
     return SizedBox(
       height: kWindowTitleAreaHeight,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: widget.inline ? Colors.transparent : scheme.surface,
+          color: scheme.surface,
           // A hairline closes the chrome off from the page; never a shadow.
-          border: widget.inline
-              ? null
-              : Border(
-                  bottom: BorderSide(color: scheme.outlineVariant, width: .5),
-                ),
+          border: Border(
+            bottom: BorderSide(color: scheme.outlineVariant, width: .5),
+          ),
         ),
         child: Stack(
           fit: StackFit.expand,
@@ -313,68 +414,39 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
             // The strip is chrome: drag from anywhere, double-click to
             // maximize. Buttons above it take their own taps first.
             const DragToMoveArea(child: SizedBox.expand()),
-            if (!widget.inline)
-              IgnorePointer(
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Padding(
-                    padding: EdgeInsetsDirectional.only(
-                      start: _titleInset,
-                      // Keep the label clear of the caption cluster.
-                      end: usesNativeWindowButtons
-                          ? 16
-                          : kWindowCaptionButtonWidth * 3 + 12,
-                    ),
-                    child: AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 140),
-                      style: titleStyle,
-                      child: Text(
-                        kWindowTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+            IgnorePointer(
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Padding(
+                  padding: EdgeInsetsDirectional.only(
+                    start: _titleInset,
+                    // Keep the label clear of the caption cluster.
+                    end: usesNativeWindowButtons
+                        ? 16
+                        : kWindowCaptionButtonWidth * 3 + 12,
+                  ),
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 140),
+                    style: titleStyle,
+                    child: Text(
+                      kWindowTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),
               ),
+            ),
             if (!usesNativeWindowButtons)
               PositionedDirectional(
                 top: 0,
                 end: 0,
                 bottom: 0,
                 child: WindowChromeSurface(
-                  inline: widget.inline,
+                  inline: false,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      if (widget.inline)
-                        SizedBox(
-                          key: const ValueKey('window-chrome-extension'),
-                          width: widget.leadingWidth,
-                          height: kWindowChromeHeight,
-                        ),
-                      _CaptionButton(
-                        key: const ValueKey<String>('window-title-minimize'),
-                        glyph: _CaptionGlyph.minimize,
-                        label: context.tr('最小化'),
-                        onPressed: _minimize,
-                      ),
-                      _CaptionButton(
-                        key: const ValueKey<String>('window-title-fullscreen'),
-                        glyph: _expanded
-                            ? _CaptionGlyph.restore
-                            : _CaptionGlyph.maximize,
-                        label: middleLabel,
-                        onPressed: _toggleWindowSize,
-                      ),
-                      _CaptionButton(
-                        key: const ValueKey<String>('window-title-close'),
-                        glyph: _CaptionGlyph.close,
-                        label: context.tr('关闭窗口'),
-                        onPressed: _requestClose,
-                        destructive: true,
-                      ),
-                    ],
+                    children: _captions(context, middleLabel),
                   ),
                 ),
               ),

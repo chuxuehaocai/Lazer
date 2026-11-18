@@ -31,7 +31,9 @@ class AlbumFlowConfiguration {
 }
 
 /// One clock preserves the flow phase when switching between browsing and the
-/// player. Hidden, static and paused surfaces detach and consume no frames.
+/// player. Hidden and static surfaces detach and consume no frames; a paused
+/// player keeps flowing, because the ambient canvas belongs to the song rather
+/// than to the transport.
 final albumFlowClock = _AlbumFlowClock();
 
 class _AlbumFlowClock extends ChangeNotifier with BuildSafeNotifier {

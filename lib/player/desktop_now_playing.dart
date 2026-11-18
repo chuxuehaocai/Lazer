@@ -27,9 +27,14 @@ import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/volume_control.dart';
 import '../widgets/window_chrome.dart';
 import 'osu_search.dart';
+import 'desktop_artwork_layout.dart';
 import '../theme/font_preferences.dart';
 
-enum DesktopNowPlayingPane { lyrics, comments, queue }
+/// Which surface fills the desktop player's reading column.
+///
+/// [none] folds that column away: the artwork takes the middle of the canvas
+/// instead of sharing it with lyrics, comments or the queue.
+enum DesktopNowPlayingPane { lyrics, comments, queue, none }
 
 bool _usesWindowCapsule(BuildContext context) =>
     WindowChromeScope.maybeLayoutOf(context)?.inline == true &&
@@ -37,7 +42,7 @@ bool _usesWindowCapsule(BuildContext context) =>
 
 /// Desktop listening workspace with an unscrolled, collapsible transport dock.
 class DesktopNowPlaying extends StatelessWidget {
-  static const double artworkMaxWidth = 520;
+  static const double artworkMaxWidth = DesktopArtworkLayout.artworkMaxWidth;
 
   const DesktopNowPlaying({
     super.key,
@@ -75,176 +80,188 @@ class DesktopNowPlaying extends StatelessWidget {
     final bool inlineChrome = _usesWindowCapsule(context);
     final bool inlineFrame =
         WindowChromeScope.maybeLayoutOf(context)?.inline == true;
-    final double headerInset = inlineFrame
-        ? MediaQuery.paddingOf(context).top
-        : 0;
-    // Lyrics can extend behind the floating header. Lists and their controls
-    // need to begin below it; this must not shift the artwork's center.
-    final double paneTopInset = headerInset + (inlineChrome ? 0 : 64);
-    return Focus(
-      // A remote needs the first focusable control, not an empty root node;
-      // the shell's TvFocusRegion claims focus on a television.
-      autofocus: !tv,
-      canRequestFocus: !tv,
-      onKeyEvent: (node, event) {
-        if (tv && (event is KeyDownEvent || event is KeyRepeatEvent)) {
-          onActivity();
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (event) {
-          onPointerStart?.call(event.pointer);
-          onActivity();
+    // The listening canvas starts below the floating capsule: the page keeps
+    // the same band of space every browse page keeps, instead of the artwork
+    // running up against the window's top edge.
+    final double chromeInset = inlineFrame ? kInlineChromeInset : 0;
+    // Lists and their controls sit inside the canvas, which already carries the
+    // band; only the classic strip needs room for its own collapse row.
+    final double paneTopInset = inlineChrome ? 0 : 64;
+    // The top band behaves like every browse page's header: dragging there
+    // moves the window, double-clicking it restores or maximizes. Desktop only —
+    // this widget *is* the desktop layout, and the band is inert everywhere
+    // else, so a phone or tablet gesture area is untouched.
+    return WindowDragArea(
+      bandHeight: kInlineChromeInset,
+      child: Focus(
+        // A remote needs the first focusable control, not an empty root node;
+        // the shell's TvFocusRegion claims focus on a television.
+        autofocus: !tv,
+        canRequestFocus: !tv,
+        onKeyEvent: (node, event) {
+          if (tv && (event is KeyDownEvent || event is KeyRepeatEvent)) {
+            onActivity();
+          }
+          return KeyEventResult.ignored;
         },
-        onPointerUp: (event) => onPointerEnd?.call(event.pointer),
-        onPointerCancel: (event) => onPointerEnd?.call(event.pointer),
-        child: SafeArea(
-          top: WindowChromeScope.maybeLayoutOf(context)?.inline != true,
-          minimum: tvSafeInsets(context),
-          child: Stack(
-            children: [
-              // The floating header must not shift the artwork and metadata
-              // below the center of the listening canvas.
-              Positioned.fill(
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: LayoutBuilder(
-                        builder: (context, box) {
-                          final double sidePadding = (box.maxWidth * .04).clamp(
-                            28.0,
-                            80.0,
-                          );
-                          return Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: sidePadding,
-                              vertical: 8,
-                            ),
-                            child: LayoutBuilder(
-                              builder: (context, content) {
-                                // Keep the two panes equally wide and center
-                                // them as one bounded group. Smaller containers
-                                // shrink both panes instead of enlarging artwork.
-                                final double paneGap = (content.maxWidth * .075)
-                                    .clamp(24.0, 110.0);
-                                final double paneWidth = math.min(
-                                  artworkMaxWidth,
-                                  math.max(0, (content.maxWidth - paneGap) / 2),
-                                );
-                                return Center(
-                                  child: SizedBox(
-                                    width: paneWidth * 2 + paneGap,
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        Expanded(
-                                          child: _Presentation(
-                                            track: track,
-                                            state: state,
-                                            artwork: artwork,
-                                            onSaveArtwork: onSaveArtwork,
-                                          ),
-                                        ),
-                                        SizedBox(width: paneGap),
-                                        Expanded(
-                                          child: Padding(
-                                            padding: EdgeInsets.only(
-                                              top:
-                                                  pane ==
-                                                      DesktopNowPlayingPane
-                                                          .lyrics
-                                                  ? 0
-                                                  : paneTopInset,
-                                            ),
-                                            child: RepaintBoundary(
-                                              // Share page transitions so transparent
-                                              // panes never overlap and outgoing TV
-                                              // controls leave traversal immediately.
-                                              child: ViewTransitionSwitcher(
-                                                child: KeyedSubtree(
-                                                  key: ValueKey(pane),
-                                                  child: switch (pane) {
-                                                    DesktopNowPlayingPane
-                                                        .lyrics =>
-                                                      lyrics,
-                                                    DesktopNowPlayingPane
-                                                        .comments =>
-                                                      comments,
-                                                    DesktopNowPlayingPane
-                                                        .queue =>
-                                                      queue,
-                                                  },
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    _DesktopDock(
-                      state: state,
-                      playPauseFocus: playPauseFocus,
-                      visible: controlsVisible,
-                      pane: pane,
-                      onPaneChanged: onPaneChanged,
-                      onFullscreen: onFullscreen,
-                    ),
-                  ],
-                ),
-              ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: WindowChromeHeader(
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (event) {
+            onPointerStart?.call(event.pointer);
+            onActivity();
+          },
+          onPointerUp: (event) => onPointerEnd?.call(event.pointer),
+          onPointerCancel: (event) => onPointerEnd?.call(event.pointer),
+          child: SafeArea(
+            top: WindowChromeScope.maybeLayoutOf(context)?.inline != true,
+            minimum: tvSafeInsets(context),
+            child: Stack(
+              children: [
+                // The floating header must not shift the artwork and metadata
+                // below the center of the listening canvas.
+                Positioned.fill(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 20, 4),
-                    child: Row(
+                    padding: EdgeInsets.only(top: chromeInset),
+                    child: Column(
                       children: [
-                        WindowChromeCollapse(
-                          child: AccessibleIconButton(
-                            key: const ValueKey('desktop-close'),
-                            tooltip: '返回',
-                            onPressed: onBack,
-                            icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, box) {
+                              final double sidePadding = (box.maxWidth * .04)
+                                  .clamp(28.0, 80.0);
+                              return Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: sidePadding,
+                                  vertical: 8,
+                                ),
+                                child: LayoutBuilder(
+                                  builder: (context, content) {
+                                    // A folded reading pane keeps the lyrics in
+                                    // the tree: the same viewport comes back
+                                    // without losing the current line, while the
+                                    // artwork owns the canvas in the meantime.
+                                    final DesktopNowPlayingPane shown =
+                                        pane == DesktopNowPlayingPane.none
+                                        ? DesktopNowPlayingPane.lyrics
+                                        : pane;
+                                    final double scale =
+                                        MediaQuery.textScalerOf(
+                                          context,
+                                        ).scale(1);
+                                    return DesktopArtworkLayout(
+                                      paneVisible:
+                                          pane != DesktopNowPlayingPane.none,
+                                      paneTopInset:
+                                          shown == DesktopNowPlayingPane.lyrics
+                                          ? 0
+                                          : paneTopInset,
+                                      artwork: _Presentation(
+                                        track: track,
+                                        state: state,
+                                        artwork: artwork,
+                                        onSaveArtwork: onSaveArtwork,
+                                        // Both branches only depend on the
+                                        // canvas height, so deciding them here
+                                        // keeps the per-frame fold from
+                                        // rebuilding the artwork subtree.
+                                        compact:
+                                            content.maxHeight < 320 * scale,
+                                        tight: content.maxHeight < 560,
+                                        folded:
+                                            pane == DesktopNowPlayingPane.none,
+                                      ),
+                                      pane: RepaintBoundary(
+                                        // Share page transitions so transparent
+                                        // panes never overlap and outgoing TV
+                                        // controls leave traversal immediately.
+                                        child: ViewTransitionSwitcher(
+                                          child: KeyedSubtree(
+                                            key: ValueKey(shown),
+                                            child: switch (shown) {
+                                              DesktopNowPlayingPane.lyrics =>
+                                                lyrics,
+                                              DesktopNowPlayingPane.comments =>
+                                                comments,
+                                              DesktopNowPlayingPane.queue ||
+                                              DesktopNowPlayingPane.none =>
+                                                queue,
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
+                            },
                           ),
                         ),
-                        const Spacer(),
-                        WindowChromeActions(
-                          children: [
-                            AccessibleIconButton(
-                              key: const ValueKey('desktop-search-osu'),
-                              tooltip: '在 osu! 中搜索',
-                              onPressed: osuBeatmapSearchUri(track) == null
-                                  ? null
-                                  : () =>
-                                        unawaited(searchInOsu(context, track)),
-                              color: inlineChrome
-                                  ? null
-                                  : context.colors.onPlayer,
-                              icon: const Icon(Icons.search_rounded),
-                            ),
-                            _AddToPlaylistButton(state: state, track: track),
-                            _DownloadButton(state: state, track: track),
-                          ],
+                        _DesktopDock(
+                          state: state,
+                          playPauseFocus: playPauseFocus,
+                          visible: controlsVisible,
+                          pane: pane,
+                          onPaneChanged: onPaneChanged,
+                          onFullscreen: onFullscreen,
                         ),
                       ],
                     ),
                   ),
                 ),
-              ),
-            ],
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: WindowChromeHeader(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 20, 4),
+                      child: Row(
+                        children: [
+                          WindowChromeCollapse(
+                            // A tooltip inside the capsule would nest a second
+                            // overlay under the one that paints these buttons;
+                            // the label stays in semantics while the capsule is
+                            // in charge.
+                            child: AccessibleIconButton(
+                              key: const ValueKey('desktop-close'),
+                              tooltip: inlineChrome ? null : '返回',
+                              semanticLabel: inlineChrome ? '返回' : null,
+                              onPressed: onBack,
+                              icon: const Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          WindowChromeActions(
+                            children: [
+                              AccessibleIconButton(
+                                key: const ValueKey('desktop-search-osu'),
+                                tooltip: inlineChrome ? null : '在 osu! 中搜索',
+                                semanticLabel: inlineChrome
+                                    ? '在 osu! 中搜索'
+                                    : null,
+                                onPressed: osuBeatmapSearchUri(track) == null
+                                    ? null
+                                    : () => unawaited(
+                                        searchInOsu(context, track),
+                                      ),
+                                color: inlineChrome
+                                    ? null
+                                    : context.colors.onPlayer,
+                                icon: const Icon(Icons.search_rounded),
+                              ),
+                              _AddToPlaylistButton(state: state, track: track),
+                              _DownloadButton(state: state, track: track),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -262,14 +279,19 @@ class _AddToPlaylistButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool cloud = track.isServiceTrack && track.localPath == null;
+    final bool inlineChrome = _usesWindowCapsule(context);
     return AccessibleIconButton(
       key: const ValueKey('desktop-add-to-playlist'),
-      tooltip: cloud ? '添加到歌单' : '本地歌曲无法添加到云端歌单',
+      // See the capsule's close button: a tooltip would nest a second overlay
+      // under the portal that paints these actions. Each sink spells the label
+      // out because the i18n gate reads literals at the call site.
+      tooltip: inlineChrome ? null : (cloud ? '添加到歌单' : '本地歌曲无法添加到云端歌单'),
+      semanticLabel: inlineChrome ? (cloud ? '添加到歌单' : '本地歌曲无法添加到云端歌单') : null,
       onPressed: cloud
           ? () =>
                 unawaited(showAddToPlaylistDialog(context, state, track: track))
           : null,
-      color: _usesWindowCapsule(context) ? null : context.colors.onPlayer,
+      color: inlineChrome ? null : context.colors.onPlayer,
       icon: const Icon(Icons.playlist_add_rounded),
     );
   }
@@ -292,7 +314,8 @@ class _DownloadButton extends StatelessWidget {
     if (!track.isServiceTrack || track.localPath != null) {
       return AccessibleIconButton(
         key: const ValueKey('desktop-download'),
-        tooltip: '本地歌曲无需下载',
+        tooltip: inlineChrome ? null : '本地歌曲无需下载',
+        semanticLabel: inlineChrome ? '本地歌曲无需下载' : null,
         onPressed: null,
         color: inlineChrome ? null : context.colors.cloudDark,
         icon: const Icon(Icons.download_rounded),
@@ -313,7 +336,8 @@ class _DownloadButton extends StatelessWidget {
         final bool queued = active || done;
         return AccessibleIconButton(
           key: const ValueKey('desktop-download'),
-          tooltip: queued ? '下载任务' : '下载歌曲',
+          tooltip: inlineChrome ? null : (queued ? '下载任务' : '下载歌曲'),
+          semanticLabel: inlineChrome ? (queued ? '下载任务' : '下载歌曲') : null,
           onPressed: () => unawaited(
             queued
                 ? showDownloadQueueSheet(context, state)
@@ -410,11 +434,25 @@ class _Presentation extends StatelessWidget {
     required this.state,
     required this.artwork,
     required this.onSaveArtwork,
+    required this.compact,
+    required this.tight,
+    this.folded = false,
   });
   final Track track;
   final AppState state;
   final Widget artwork;
   final VoidCallback onSaveArtwork;
+
+  /// A short canvas puts the cover beside the metadata instead of above it.
+  final bool compact;
+
+  /// A short-ish canvas keeps the metadata set at a tighter size.
+  final bool tight;
+
+  /// The reading pane is gone, so the artwork owns the canvas and centres
+  /// itself in it — including the short canvas, which would otherwise leave the
+  /// cover at the left edge of a centred row.
+  final bool folded;
 
   /// The cover is the download affordance now: right-clicking it offers the
   /// save action instead of a toolbar button.
@@ -545,29 +583,50 @@ class _Presentation extends StatelessWidget {
   );
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, box) {
-      if (box.maxHeight < 320 * MediaQuery.textScalerOf(context).scale(1)) {
-        return SingleChildScrollView(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox.square(
-                dimension: 72,
-                child: RepaintBoundary(child: _cover(context)),
-              ),
-              const SizedBox(width: 16),
-              Expanded(child: _metadata(context, compact: true)),
-            ],
+  Widget build(BuildContext context) {
+    if (compact) {
+      // A short canvas keeps the cover beside the metadata while the lyrics are
+      // up. Folded, the reading pane is gone, so the cover takes the middle of
+      // the canvas on its own and the metadata reads underneath it.
+      if (folded) {
+        return Center(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox.square(
+                  dimension: 72,
+                  child: RepaintBoundary(child: _cover(context)),
+                ),
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: _metadata(context, compact: true),
+                ),
+              ],
+            ),
           ),
         );
       }
-      return _ArtworkAndMetadata(
-        artwork: RepaintBoundary(child: _cover(context)),
-        metadata: _metadata(context, tight: box.maxHeight < 560),
+      return SingleChildScrollView(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox.square(
+              dimension: 72,
+              child: RepaintBoundary(child: _cover(context)),
+            ),
+            const SizedBox(width: 16),
+            Expanded(child: _metadata(context, compact: true)),
+          ],
+        ),
       );
-    },
-  );
+    }
+    return _ArtworkAndMetadata(
+      artwork: RepaintBoundary(child: _cover(context)),
+      metadata: _metadata(context, tight: tight),
+    );
+  }
 }
 
 /// Keeps the metadata as wide as the height-constrained square artwork.
@@ -836,7 +895,11 @@ class _DesktopDock extends StatelessWidget {
                           children: [
                             _PaneTab(
                               key: const ValueKey('desktop-lyrics'),
-                              label: '歌词',
+                              // The tab both shows and folds the reading pane,
+                              // so its label states what the tap will do.
+                              label: pane == DesktopNowPlayingPane.lyrics
+                                  ? '收起歌词'
+                                  : '显示歌词',
                               icon: Icons.lyrics_outlined,
                               active: pane == DesktopNowPlayingPane.lyrics,
                               onPressed: () =>

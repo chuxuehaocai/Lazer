@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -10,7 +11,9 @@ import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/tv/tv_mode.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
 import 'package:lazer_nextgen/updates/open_external.dart';
+import 'package:lazer_nextgen/widgets/apple_ui.dart';
 import 'package:lazer_nextgen/widgets/window_chrome.dart';
 import 'package:lazer_nextgen/widgets/window_frame.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -60,6 +63,7 @@ class _PlayerFrameHarness {
     this.reduceMotion = false,
     this.pageOffset = Offset.zero,
     this.television = false,
+    this.windowDrag,
   }) {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -67,6 +71,10 @@ class _PlayerFrameHarness {
       _windowChannel,
       (call) async {
         windowCalls.add(call.method);
+        // A window drag keeps the platform's modal move loop — and its channel
+        // reply — open until the button comes up, exactly like the Windows
+        // implementation, so the release never reaches the Flutter view.
+        if (call.method == 'startDragging') await windowDrag?.future;
         return switch (call.method) {
           'isMaximized' || 'isFullScreen' => false,
           'isFocused' => true,
@@ -80,6 +88,10 @@ class _PlayerFrameHarness {
   final bool reduceMotion;
   final Offset pageOffset;
   final bool television;
+
+  /// When set, `startDragging` stays pending until the test releases the
+  /// button the way the OS move loop would.
+  final Completer<void>? windowDrag;
   final state = _LyricsState();
   final open = ValueNotifier(true);
   final presentationActive = ValueNotifier(true);
@@ -209,25 +221,27 @@ void _expectSingleSurface(WidgetTester tester, {double actionWidth = 138}) {
   expect(surfaceRect.width, closeTo(138 + actionWidth, .05));
   expect(surfaceRect.height, 40);
   for (final element in surfaces.evaluate()) {
-    final decoration =
-        tester
-                .widget<DecoratedBox>(
-                  find
-                      .descendant(
-                        of: find.byWidget(element.widget),
-                        matching: find.byType(DecoratedBox),
-                      )
-                      .first,
-                )
-                .decoration
-            as BoxDecoration;
-    final onSurface = Theme.of(element).colorScheme.onSurface;
-    expect(decoration.color, onSurface.withValues(alpha: .045));
-    expect(decoration.borderRadius, BorderRadius.circular(20));
-    expect(
-      decoration.border,
-      Border.all(color: onSurface.withValues(alpha: .08), width: .5),
+    // Inline chrome paints the same material as the phone's navigation capsule:
+    // a theme-accent tint at the configured opacity over a backdrop blur, with
+    // no hairline of its own.
+    final glass = tester.widget<AppleGlass>(
+      find
+          .descendant(
+            of: find.byWidget(element.widget),
+            matching: find.byType(AppleGlass),
+          )
+          .first,
     );
+    expect(
+      glass.color,
+      windowChromeTint(
+        AppleSemanticColors.of(element),
+        opacity: kWindowChromeOpacityDefault,
+      ),
+    );
+    expect(glass.blurSigma, kWindowChromeBlurDefault);
+    expect(glass.borderRadius, BorderRadius.circular(20));
+    expect(glass.border, isNull);
   }
 }
 
@@ -301,8 +315,10 @@ void main() {
           12,
         );
         expect(
+          // The frame no longer fabricates a top inset for Inline chrome: the
+          // player clears the floating capsule with its own header band.
           MediaQuery.paddingOf(tester.element(find.byType(NowPlayingPage))).top,
-          56,
+          0,
         );
 
         await tester.pump(const Duration(milliseconds: 120));
@@ -766,6 +782,72 @@ void main() {
         expect(find.byType(NowPlayingPage), findsNothing);
         _expectCaptionAtRest(tester);
         expect(tester.takeException(), isNull);
+      } finally {
+        await harness.dispose();
+      }
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
+    'the idle countdown restarts after an inactive presentation consumes it',
+    (tester) async {
+      final harness = _PlayerFrameHarness(tester);
+      try {
+        await harness.mount();
+        expect(_controlsVisible(tester), isTrue);
+        // A page that is not presented may not hide its dock. The pending
+        // countdown expires in that window instead of hiding, which used to be
+        // the end of it: nothing started another one, so the dock stayed on
+        // screen for the rest of the session.
+        harness.presentationActive.value = false;
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        expect(_controlsVisible(tester), isTrue);
+        harness.presentationActive.value = true;
+        await tester.pump();
+        expect(_controlsVisible(tester), isTrue);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 1));
+        expect(_controlsVisible(tester), isFalse);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await harness.dispose();
+      }
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
+    'the press that starts a window drag stops holding the dock awake',
+    (tester) async {
+      final drag = Completer<void>();
+      final harness = _PlayerFrameHarness(tester, windowDrag: drag);
+      try {
+        await harness.mount();
+        expect(_controlsVisible(tester), isTrue);
+        // Grab the page's own title band and move past the drag slop. From
+        // here the platform move loop owns the pointer, so the release of this
+        // press is consumed by the window instead of the view.
+        final press = await tester.startGesture(const Offset(320, 20));
+        await press.moveBy(const Offset(36, 10));
+        await tester.pump();
+        expect(
+          harness.windowCalls.where((call) => call == 'startDragging'),
+          hasLength(1),
+        );
+        await tester.pump(const Duration(seconds: 3));
+        expect(_controlsVisible(tester), isTrue);
+
+        // The button comes up inside the OS move loop: the channel reply is
+        // the only signal this view ever gets for that release.
+        drag.complete();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 1));
+        expect(_controlsVisible(tester), isFalse);
+        expect(tester.takeException(), isNull);
+        await press.up();
       } finally {
         await harness.dispose();
       }

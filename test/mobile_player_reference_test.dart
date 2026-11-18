@@ -149,15 +149,15 @@ void main() {
   });
 
   testWidgets(
-    'player theme follows phone and desktop presentations on resize',
+    'player keeps one palette across phone and desktop presentations',
     (tester) async {
       final state = _MobileState()..layoutStyle = AppLayoutStyle.auto;
       await _mount(tester, state, const Size(390, 844));
       AppleSemanticColors colors() => AppleSemanticColors.of(
         tester.element(find.byKey(const ValueKey('now-playing-cover'))),
       );
-      expect(colors().background, AppleSemanticColors.mobileDark.background);
-      expect(colors().accent, AppleColors.musicRed);
+      expect(colors().background, AppleSemanticColors.dark.background);
+      expect(colors().accent, AppleColors.lazerBlue);
 
       tester.view.physicalSize = const Size(1280, 800);
       await tester.pumpAndSettle();
@@ -166,8 +166,8 @@ void main() {
 
       tester.view.physicalSize = const Size(390, 844);
       await tester.pumpAndSettle();
-      expect(colors().background, AppleSemanticColors.mobileDark.background);
-      expect(colors().accent, AppleColors.musicRed);
+      expect(colors().background, AppleSemanticColors.dark.background);
+      expect(colors().accent, AppleColors.lazerBlue);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },

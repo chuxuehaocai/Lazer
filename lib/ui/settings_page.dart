@@ -501,6 +501,127 @@ class _SettingsOverview extends StatelessWidget {
                               },
                             ),
                           ),
+                        if (!kIsWeb &&
+                            (defaultTargetPlatform == TargetPlatform.windows ||
+                                defaultTargetPlatform == TargetPlatform.linux))
+                          ...<Widget>[
+                            const _AppSectionLabel('内联窗口胶囊'),
+                            _AppSwitchRow(
+                              key: const ValueKey('window-chrome-blur-switch'),
+                              label: '窗口胶囊模糊',
+                              subtitle: '让胶囊与后方的页面融合，只作用于 Inline 标题栏',
+                              value: state.windowChromeBlurEnabled,
+                              onChanged: (bool value) => unawaited(
+                                state.setWindowChromeBlurEnabled(value),
+                              ),
+                            ),
+                            _AppSliderRow(
+                              key: const ValueKey('window-chrome-blur-slider'),
+                              label: '窗口胶囊模糊强度',
+                              valueText:
+                                  '${state.windowChromeBlur.round()} px',
+                              subtitle: '数值越大，胶囊后方的背景越柔和',
+                              value: state.windowChromeBlur,
+                              min: kWindowChromeBlurMin,
+                              max: kWindowChromeBlurMax,
+                              divisions:
+                                  ((kWindowChromeBlurMax - kWindowChromeBlurMin) /
+                                          2)
+                                      .round(),
+                              onChanged: state.windowChromeBlurEnabled
+                                  ? (double value) =>
+                                        unawaited(state.setWindowChromeBlur(value))
+                                  : null,
+                              action: SpringTextButton(
+                                key: const ValueKey('window-chrome-blur-reset'),
+                                onPressed: state.windowChromeBlurEnabled
+                                    ? () => unawaited(
+                                        state.setWindowChromeBlur(
+                                          kWindowChromeBlurDefault,
+                                        ),
+                                      )
+                                    : null,
+                                child: const TrText('恢复默认'),
+                              ),
+                            ),
+                            _AppSliderRow(
+                              key: const ValueKey('window-chrome-opacity-slider'),
+                              label: '窗口胶囊背景不透明度',
+                              valueText:
+                                  '${(state.windowChromeOpacity * 100).round()}%',
+                              subtitle: '只调整胶囊底色，不影响按钮与图标',
+                              value: state.windowChromeOpacity,
+                              min: kWindowChromeOpacityMin,
+                              max: kWindowChromeOpacityMax,
+                              divisions:
+                                  ((kWindowChromeOpacityMax -
+                                              kWindowChromeOpacityMin) /
+                                          .05)
+                                      .round(),
+                              onChanged: (double value) => unawaited(
+                                state.setWindowChromeOpacity(value),
+                              ),
+                              action: SpringTextButton(
+                                key: const ValueKey(
+                                  'window-chrome-opacity-reset',
+                                ),
+                                onPressed: () => unawaited(
+                                  state.setWindowChromeOpacity(
+                                    kWindowChromeOpacityDefault,
+                                  ),
+                                ),
+                                child: const TrText('恢复默认'),
+                              ),
+                            ),
+                            _AppSwitchRow(
+                              key: const ValueKey('window-chrome-color-switch'),
+                              label: '自定义背景颜色',
+                              subtitle: state.windowChromeColor == null
+                                  ? '关闭时胶囊底色跟随界面背景色（暗色为深蓝 #191C23，亮色为白）'
+                                  : '关闭后回到界面背景色',
+                              value: state.windowChromeColor != null,
+                              onChanged: (bool value) => unawaited(
+                                state.setWindowChromeColor(
+                                  // Seed the palette with the colour it is
+                                  // already showing, so switching the option on
+                                  // does not repaint the capsule.
+                                  value
+                                      ? AppleSemanticColors.of(
+                                          context,
+                                        ).background
+                                      : null,
+                                ),
+                              ),
+                            ),
+                            if (state.windowChromeColor case final Color tint)
+                              _AppSettingRow(
+                                key: const ValueKey(
+                                  'window-chrome-color-setting',
+                                ),
+                                label: '窗口胶囊背景颜色',
+                                subtitle: _accentHex(tint),
+                                trailing: _AppAccentSwatch(
+                                  key: const ValueKey(
+                                    'window-chrome-color-swatch',
+                                  ),
+                                  color: tint,
+                                  onTap: () async {
+                                    final Color? chosen =
+                                        await showAppleDialog<Color>(
+                                          context: context,
+                                          builder: (_) => _AppAccentDialog(
+                                            initial: tint,
+                                          ),
+                                        );
+                                    if (chosen != null) {
+                                      await state.setWindowChromeColor(
+                                        chosen,
+                                      );
+                                    }
+                                  },
+                                ),
+                              ),
+                          ],
                         const LanRemoteSettings(),
                         _AppSliderRow(
                           key: const ValueKey('dpi-scale-slider'),

@@ -8,6 +8,7 @@ import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
+import 'package:lazer_nextgen/ui/background.dart';
 
 const _track = Track(
   id: 'transport-visibility',
@@ -83,13 +84,24 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets(
-    'paused lyrics retain a usable transport after the idle timeout',
+    'an idle player hides its transport whether or not it is playing',
     (tester) async {
       final state = _PlaybackState();
       await _mount(tester, state);
       final play = find.byKey(const ValueKey('desktop-play-pause'));
+      final cover = find.byKey(const ValueKey('now-playing-cover'));
 
+      // A paused player is still an idle one: the transport leaves the canvas
+      // instead of pinning itself there until the user resumes.
       await _idle(tester);
+      expect(play.hitTestable(), findsNothing);
+
+      // A click on the canvas brings it straight back, so playback stays one
+      // press away without a permanently visible dock.
+      await tester.tapAt(tester.getCenter(cover));
+      await tester.pump();
+      // The reveal is a real spring: the dock has no height until it opens.
+      await tester.pump(const Duration(milliseconds: 700));
       expect(play.hitTestable(), findsOneWidget);
       await tester.tap(play);
       await tester.pump();
@@ -100,10 +112,15 @@ void main() {
       await _idle(tester);
       expect(play.hitTestable(), findsNothing);
 
-      // Pausing from a system media key or another control reveals it again.
+      // A pause from a system media key does not reveal it either; the same
+      // click restores it afterwards.
       state.report(playing: false);
       await tester.pump();
       await _idle(tester);
+      expect(play.hitTestable(), findsNothing);
+      await tester.tapAt(tester.getCenter(cover));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 700));
       expect(play.hitTestable(), findsOneWidget);
       await tester.tap(play);
       await tester.pump();
@@ -140,6 +157,25 @@ void main() {
     expect(state.playing, isTrue);
     await _idle(tester);
     expect(play.hitTestable(), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a paused player keeps its ambient canvas flowing', (
+    tester,
+  ) async {
+    final state = _PlaybackState()
+      ..playerBackground = AppBackgroundMode.nowPlayingDynamic;
+    await _mount(tester, state);
+
+    // Paused: the transport may leave the canvas, but the album flow must not.
+    // It used to detach with playback, which froze the whole page visually.
+    await tester.pump(const Duration(milliseconds: 200));
+    final int ticking = albumFlowClock.debugTicks;
+    expect(state.playing, isFalse);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(albumFlowClock.debugTicks, greaterThan(ticking));
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

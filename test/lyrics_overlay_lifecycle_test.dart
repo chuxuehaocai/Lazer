@@ -212,6 +212,33 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('an unfocused overlay keeps its word repaint running', (
+    tester,
+  ) async {
+    final bridge = await mount(tester);
+    await payload(bridge, words: true);
+    await bridge.handler!(
+      const MethodCall('position', {'position': 90000, 'playing': true}),
+    );
+    await tester.pump();
+    expect(tester.binding.transientCallbackCount, greaterThan(0));
+
+    // Windows reports `inactive` as soon as another window takes focus. A
+    // desktop lyric panel exists to keep scrolling then, so losing focus must
+    // not release the ticker or snap the lines into place.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(tester.binding.transientCallbackCount, greaterThan(0));
+
+    // A hidden engine still releases it.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump();
+    expect(tester.binding.transientCallbackCount, 0);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('locking clears native and Flutter lyric drag targets', (
     tester,
   ) async {

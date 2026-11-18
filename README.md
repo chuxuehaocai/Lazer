@@ -119,6 +119,7 @@ vercel project protection disable lazer_demo --sso --yes
 说明：
 
 - 静态产物来自本仓库的 `build/web`，函数代码以 `ci/vercel-web/api/` 为准。本地和 CI 都用本仓库的打包脚本，避免壳工程副本不同步。脚本给 CanvasKit、入口 JS、字体和其他资源分别生成内容哈希并设置一年 `immutable` 缓存；HTML 保持重验证，启动脚本内联，字体与入口并行加载。仅更新翻译或图片时不会使字体和引擎缓存失效。
+- 引擎的加载顺序被重排过：`canvaskit.js` 只有约 25 KB，紧随其后的 `canvaskit.wasm`（Chromium 变体 5.4 MB）才是真正的下载量，而 Flutter 要等入口脚本执行完才会去取它。打包脚本把每个变体的 `canvaskit.js` 换成一层包装模块，并把真正的胶水层改名为 `canvaskit.glue.js`；`index.html` 里内联的预取脚本在 HTML 解析阶段就开始按 4 段 Range 并行下载 wasm（每段独立重试，先探测一次确认源站对未压缩表示做 Range），拼装后按 SHA-256 校验，再以 `blob:` URL 交给胶水层。任何一步失败——没有预取、变体不符、校验失败、源站不支持 Range——都退回 Flutter 原本的单次请求。`--mirror https://cdn.example.com/lazer`（或 `LAZER_ENGINE_MIRRORS`）可以再加同构镜像：预取会在主站卡住 4 秒后同时向镜像发同一段请求，先到的获胜。
 - Web 使用 `web/assets/assets/fonts/` 里的 MiSans 子集（覆盖 GB2312、Big5 一级、JIS 一级和界面字符串），Vercel 打包进一步使用 WOFF2，四个字重合计约 5.25 MB，原 TTF 合计约 9.79 MB。安装 `fonttools`、`brotli` 后运行 `python tool/subset_web_fonts.py` 可同时重建 TTF/WOFF2；原生构建继续使用完整字体。资源来自站点自身，无需访问 Google 字体/引擎 CDN。
 - `/api/plugin-http` 固定部署在香港 `hkg1`，避免默认美国区域到大陆音乐服务的往返。代理限制请求时长与响应大小，响应不缓存。大陆实际访问速度仍受跨境线路影响，Vercel 不提供大陆计算节点。
 - Web 的“设置 → 网络代理 → Web 出口 IP”独立保存客户端 IP 国家/地区，默认中国大陆，另提供 Vercel 全部 19 个计算区域覆盖的 15 个国家/地区，切换后下一次插件请求立即生效。它选择 `X-Real-IP` / `X-Forwarded-For` 的地址，仅对信任这类请求头的上游有效，**不改变真实网络出口或分配独享 IP**。大陆保留原 api-enhanced 网段；其余使用有来源记录的 RIR 注册地快照，注册地与上游 GeoIP 判定可能不同。Vercel 的真实出口为动态地址，并无公开固定网段；真实大陆出口需要另行提供大陆代理。[Vercel 地区列表](https://vercel.com/docs/regions) · [出口 IP](https://vercel.com/docs/networking/static-ips)

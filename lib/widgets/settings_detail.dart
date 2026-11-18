@@ -9,6 +9,7 @@ import '../theme/apple_design.dart';
 import '../ui/widgets.dart' show compactBrowsePresentation;
 
 import 'accessible_controls.dart';
+import 'window_chrome.dart';
 
 /// Keeps desktop settings inside the shell, including its navigation and player.
 class SettingsDetailHost extends StatefulWidget {
@@ -456,6 +457,31 @@ class SettingsDetailScaffold extends StatelessWidget {
     final Widget? trailing = actions.isEmpty
         ? null
         : Wrap(spacing: 8, children: actions);
+    final bool floating =
+        WindowChromeScope.maybeLayoutOf(context)?.inline == true;
+    // A page command belongs in the capsule, not under it: the floating chrome
+    // paints over the header's right end, so the actions move into the capsule's
+    // extension — text first, a hairline, then the window buttons.
+    final bool capsuleActions = floating && actions.isNotEmpty;
+    final Widget? inlineTrailing = capsuleActions ? null : trailing;
+    final Widget? capsuleLeading = capsuleActions
+        ? FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                for (var i = 0; i < actions.length; i++) ...<Widget>[
+                  if (i > 0) const SizedBox(width: 8),
+                  actions[i],
+                ],
+              ],
+            ),
+          )
+        : null;
+    // The floating capsule is centred on the band, so the back button has to be
+    // too: a 48 dp control sits 8 dp down and lines up with the capsule's row.
+    final double headerTop = floating ? 8 : 0;
+    final double headerGap = floating ? 0 : 8;
     if (close == null) {
       final bool canPop = Navigator.of(context).canPop();
       final bool hasTopBar = canPop || trailing != null || headerTitle;
@@ -465,7 +491,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             children: <Widget>[
               if (hasTopBar)
                 Positioned(
-                  top: compactBrowsePresentation(context) ? 8 : 0,
+                  top: headerTop + (compactBrowsePresentation(context) ? 8 : 0),
                   left: 8,
                   right: 8,
                   child: Row(
@@ -497,7 +523,7 @@ class SettingsDetailScaffold extends StatelessWidget {
                         )
                       else
                         const Spacer(),
-                      ?trailing,
+                      ?inlineTrailing,
                     ],
                   ),
                 ),
@@ -530,7 +556,7 @@ class SettingsDetailScaffold extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: EdgeInsets.fromLTRB(inset - 12, 0, inset, 0),
+                padding: EdgeInsets.fromLTRB(inset - 12, headerTop, inset, 0),
                 child: Row(
                   children: [
                     AccessibleIconButton(
@@ -557,13 +583,21 @@ class SettingsDetailScaffold extends StatelessWidget {
                       )
                     else
                       const Spacer(),
-                    ?trailing,
+                    ?inlineTrailing,
                   ],
                 ),
               ),
+              if (capsuleLeading != null)
+                WindowChromeActions(
+                  key: const ValueKey('settings-capsule-actions'),
+                  playerDriven: false,
+                  leading: capsuleLeading,
+                  leadingWidth: kWindowChromeTextActionWidth * actions.length,
+                  children: const <Widget>[],
+                ),
               // Page content owns its heading; the shared chrome only keeps
               // navigation and actions above it.
-              const SizedBox(height: 8),
+              SizedBox(height: headerGap),
               Expanded(child: child),
             ],
           );

@@ -34,10 +34,15 @@ class NetworkSourcesCard extends StatelessWidget {
     super.key,
     required this.state,
     required this.onOpen,
+    this.asTile = false,
   });
 
   final AppState state;
   final VoidCallback onOpen;
+
+  /// Returns the bare row instead of wrapping it in its own card, so a caller
+  /// that groups several shortcuts into one surface can keep the row rhythm.
+  final bool asTile;
 
   @override
   Widget build(BuildContext context) {
@@ -59,20 +64,16 @@ class NetworkSourcesCard extends StatelessWidget {
             if (podcasts > 0) context.tr('$podcasts 个播客'),
           ].join(' · ');
         }
-        return AppleGroupedCard(
-          margin: EdgeInsets.zero,
-          child: AppleListTile(
-            key: const ValueKey<String>('open-network-sources'),
-            title: context.tr('网络源'),
-            subtitle: subtitle,
-            leading: AppleIconTile(
-              icon: Icons.lan_rounded,
-              color: apple.accent,
-            ),
-            showChevron: true,
-            onTap: onOpen,
-          ),
+        final Widget tile = AppleListTile(
+          key: const ValueKey<String>('open-network-sources'),
+          title: context.tr('网络源'),
+          subtitle: subtitle,
+          leading: AppleIconTile(icon: Icons.lan_rounded, color: apple.accent),
+          showChevron: true,
+          onTap: onOpen,
         );
+        if (asTile) return tile;
+        return AppleGroupedCard(margin: EdgeInsets.zero, child: tile);
       },
     );
   }

@@ -12,6 +12,7 @@ import '../theme/adaptive_contrast.dart';
 import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
 import 'interaction_feedback.dart';
+import 'window_chrome.dart';
 
 /// A translucent Apple material: blur plus a semantic glass tint and hairline.
 ///
@@ -102,44 +103,46 @@ class ApplePageTitle extends StatelessWidget {
         color: apple.label,
       ),
     );
-    return Padding(
-      padding: padding,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: <Widget>[
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Semantics(
-                  header: true,
-                  child: Text(
-                    context.tr(title),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: style,
-                  ),
-                ),
-                if (subtitle != null && subtitle!.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 5),
-                  Text(
-                    context.tr(subtitle!),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: apple.secondaryLabel,
+    return WindowDragArea(
+      child: Padding(
+        padding: padding,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Semantics(
+                    header: true,
+                    child: Text(
+                      context.tr(title),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: style,
                     ),
                   ),
+                  if (subtitle != null && subtitle!.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 5),
+                    Text(
+                      context.tr(subtitle!),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: apple.secondaryLabel,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          if (trailing != null) ...<Widget>[
-            const SizedBox(width: 16),
-            trailing!,
+            if (trailing != null) ...<Widget>[
+              const SizedBox(width: 16),
+              trailing!,
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

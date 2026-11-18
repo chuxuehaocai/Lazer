@@ -37,8 +37,39 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
   bool _focused = false;
   bool _hovered = false;
 
+  /// Whether the accent ring belongs on screen right now.
+  ///
+  /// [MenuAnchor] hands focus back to the trigger when the menu closes, so a
+  /// plain focus flag would leave an accent ring on a control the listener
+  /// already picked a value from — every mouse click left one behind, and it
+  /// stayed there while the page scrolled under the window capsule. Desktop
+  /// keeps [FocusHighlightMode.traditional] even for mouse input, so the mode
+  /// alone cannot tell the two apart: the last *kind* of interaction does.
+  bool _keyboardFocus = false;
+
+  /// Set by a pointer press; cleared by the next hardware key. A focus request
+  /// that arrives while this is set came from the listener clicking, not from
+  /// Tab or a remote, so it must not raise the ring.
+  bool _pointerDriven = false;
+
   bool get _enabled =>
       widget.onChanged != null && widget.items.any((item) => item.enabled);
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  bool _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    if (!_pointerDriven) return false;
+    _pointerDriven = false;
+    if (_focused && !_keyboardFocus && mounted) {
+      setState(() => _keyboardFocus = true);
+    }
+    return false;
+  }
 
   @override
   void didUpdateWidget(covariant SettingsChoice<T> oldWidget) {
@@ -54,6 +85,7 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
     _buttonFocus.dispose();
     super.dispose();
   }
@@ -162,8 +194,11 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
                       child: InkWell(
                         focusNode: _buttonFocus,
                         onTap: _enabled ? _toggle : null,
-                        onFocusChange: (value) =>
-                            setState(() => _focused = value),
+                        onTapDown: (_) => _pointerDriven = true,
+                        onFocusChange: (value) => setState(() {
+                          _focused = value;
+                          _keyboardFocus = value && !_pointerDriven;
+                        }),
                         onHover: (value) => setState(() => _hovered = value),
                         borderRadius: BorderRadius.circular(10),
                         child: DecoratedBox(
@@ -171,10 +206,12 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
                             color: _hovered ? apple.secondaryFill : apple.fill,
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                              color: _focused || controller.isOpen
+                              color: _keyboardFocus || controller.isOpen
                                   ? apple.accent
                                   : apple.separator,
-                              width: _focused || controller.isOpen ? 1.5 : .5,
+                              width: _keyboardFocus || controller.isOpen
+                                  ? 1.5
+                                  : .5,
                             ),
                           ),
                           child: Padding(

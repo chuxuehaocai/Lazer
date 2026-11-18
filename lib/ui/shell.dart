@@ -44,6 +44,7 @@ import '../widgets/listen_together_dialog.dart';
 import '../widgets/retained_content_switcher.dart';
 import '../widgets/song_comments_view.dart';
 import '../widgets/settings_detail.dart';
+import '../widgets/window_chrome.dart';
 import 'background.dart';
 import 'login.dart';
 import '../navigation/pull_down_to_close.dart';
@@ -1323,9 +1324,17 @@ class _AppShellState extends State<AppShell>
                         // safe insets.
                         minimum: () {
                           final EdgeInsets overscan = tvSafeInsets(context);
+                          // A ten-foot header still keeps clear of the floating
+                          // caption capsule; desktop pages deliberately start
+                          // underneath it instead.
+                          final bool floatingChrome = largeScreen &&
+                              WindowChromeScope.maybeLayoutOf(context)?.inline ==
+                                  true;
                           return EdgeInsets.fromLTRB(
                             overscan.left,
-                            largeScreen ? 0 : overscan.top,
+                            largeScreen
+                                ? (floatingChrome ? kInlineChromeInset : 0)
+                                : overscan.top,
                             overscan.right,
                             overscan.bottom,
                           );
@@ -1457,11 +1466,18 @@ class _AppShellState extends State<AppShell>
   }
 
   Widget _desktopLayout(AppleSemanticColors apple) {
-    final double contentTopInset =
-        (_desktopToolbarHeight - MediaQuery.paddingOf(context).top).clamp(
-          0.0,
-          _desktopToolbarHeight,
-        );
+    // The Inline capsule floats over the page, so the page paints from the
+    // window's top edge; it keeps the capsule's band as page space rather than
+    // as a header, so the spacing scrolls away with the content. The classic
+    // strip consumes a real MediaQuery inset instead.
+    final bool floatingChrome =
+        WindowChromeScope.maybeLayoutOf(context)?.inline == true;
+    final double contentTopInset = floatingChrome
+        ? kInlineChromeInset
+        : (_desktopToolbarHeight - MediaQuery.paddingOf(context).top).clamp(
+            0.0,
+            _desktopToolbarHeight,
+          );
     return Column(
       children: <Widget>[
         Expanded(
@@ -1480,9 +1496,17 @@ class _AppShellState extends State<AppShell>
                       if (_hasOpenDetail && _playlist == null)
                         _desktopToolbar(),
                       Expanded(
-                        child: RepaintBoundary(
-                          child: _content(
-                            topInset: _hasOpenDetail ? 0 : contentTopInset,
+                        // The strip the floating capsule sits in doubles as the
+                        // window's title bar: pressing it and dragging moves the
+                        // window, while anything below it still belongs to the
+                        // page (a card dragged there scrolls, it does not grab
+                        // the window).
+                        child: WindowDragArea(
+                          bandHeight: kInlineChromeInset,
+                          child: RepaintBoundary(
+                            child: _content(
+                              topInset: _hasOpenDetail ? 0 : contentTopInset,
+                            ),
                           ),
                         ),
                       ),
@@ -1813,15 +1837,19 @@ class _AppShellState extends State<AppShell>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(22, 22, 18, 22),
-              child: Text(
-                'Lazer',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: apple.label,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 24,
-                  letterSpacing: -.5,
+            // The wordmark band is the rail's title bar: draggable in Inline
+            // mode, where the page owns the top of the window.
+            WindowDragArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(22, 22, 18, 22),
+                child: Text(
+                  'Lazer',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: apple.label,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 24,
+                    letterSpacing: -.5,
+                  ),
                 ),
               ),
             ),
@@ -1881,20 +1909,6 @@ class _AppShellState extends State<AppShell>
                                 !_comments,
                             onTap: () => _select(_AppSection.likes),
                           ),
-                        if (state.supportsMusic(
-                          MusicCapability.listenTogether,
-                        )) ...<Widget>[
-                          const SizedBox(height: 2),
-                          AppRailItem(
-                            key: const ValueKey('rail-listen-together'),
-                            icon: Icons.group_rounded,
-                            label: '一起听',
-                            selected: false,
-                            onTap: () => unawaited(
-                              showListenTogetherDialog(context, state),
-                            ),
-                          ),
-                        ],
                         const SizedBox(height: 22),
                         SizedBox(
                           height: 33,

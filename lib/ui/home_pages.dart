@@ -22,6 +22,7 @@ import '../widgets/interaction_feedback.dart';
 import '../tv/tv_mode.dart';
 import '../tv/large_screen_widgets.dart';
 import '../widgets/ui_scaling.dart';
+import '../widgets/window_chrome.dart';
 import 'widgets.dart';
 
 import 'page_utils.dart';
@@ -212,6 +213,9 @@ class _AppHomePageState extends State<AppHomePage>
               ),
               sliver: SliverList(
                 delegate: SliverChildListDelegate(<Widget>[
+                  // The discovery feed has no page title, so this thin band is
+                  // the window's grab handle in Inline chrome mode.
+                  const WindowDragBand(),
                   if (showPluginHome) ...<Widget>[
                     HomeActionShelf(
                       compact: phone,

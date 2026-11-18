@@ -314,6 +314,153 @@ void main() {
       semantics.dispose();
     },
   );
+  testWidgets(
+    'a page command leaves the capsule before the player actions arrive',
+    (tester) async {
+      final pageOpen = ValueNotifier<bool>(true);
+      final playerOpen = ValueNotifier<bool>(false);
+      addTearDown(pageOpen.dispose);
+      addTearDown(playerOpen.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: _CapsuleHandoverHost(
+            pageOpen: pageOpen,
+            playerOpen: playerOpen,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // The page command owns the extension on its own.
+      expect(_resetOpacity(tester), closeTo(1, .001));
+      expect(find.byKey(_playerActionKey), findsNothing);
+
+      // Opening the player hands the extension over: the command walks out
+      // first, and the player's buttons only start arriving once it is gone.
+      playerOpen.value = true;
+      await tester.pump();
+      await tester.pump();
+      expect(
+        _resetOpacity(tester),
+        closeTo(1, .001),
+        reason: 'the page command is the only set painting at the switch',
+      );
+      expect(
+        _playerActionSettledOpacity(tester),
+        lessThan(.02),
+        reason: 'the arriving set may not paint over the command that is out',
+      );
+
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(
+        _resetOpacity(tester),
+        inExclusiveRange(.2, 1),
+        reason: 'the command is on its way out',
+      );
+      expect(
+        _playerActionSettledOpacity(tester),
+        lessThan(.02),
+        reason: 'the entrance may not start while the exit is still running',
+      );
+
+      await tester.pump(WindowChromeController.handoverOut);
+      expect(
+        _resetOpacity(tester),
+        lessThan(.02),
+        reason: 'the exit finishes before anything else may arrive',
+      );
+      expect(
+        _playerActionSettledOpacity(tester),
+        lessThan(1),
+        reason: 'the entrance is still under way at the handover boundary',
+      );
+
+      await tester.pump(WindowChromeController.handoverIn);
+      expect(_resetOpacity(tester), 0);
+      expect(_playerActionSettledOpacity(tester), closeTo(1, .001));
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+}
+
+/// Two action sets claiming one capsule, exactly as the font settings page and
+/// the desktop player do when the player opens over the settings subview.
+class _CapsuleHandoverHost extends StatefulWidget {
+  const _CapsuleHandoverHost({
+    required this.pageOpen,
+    required this.playerOpen,
+  });
+
+  final ValueNotifier<bool> pageOpen;
+  final ValueNotifier<bool> playerOpen;
+
+  @override
+  State<_CapsuleHandoverHost> createState() => _CapsuleHandoverHostState();
+}
+
+class _CapsuleHandoverHostState extends State<_CapsuleHandoverHost>
+    with TickerProviderStateMixin {
+  late final WindowChromeController _controller = WindowChromeController(
+    vsync: this,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => WindowChromeScope(
+    controller: _controller,
+    inline: true,
+    reveal: const AlwaysStoppedAnimation<double>(0),
+    chromeTheme: Theme.of(context),
+    child: Stack(
+      children: [
+        ValueListenableBuilder<bool>(
+          valueListenable: widget.pageOpen,
+          builder: (context, open, _) => open
+              ? WindowChromeActions(
+                  playerDriven: false,
+                  leading: const Text('恢复默认', key: _resetKey),
+                  children: const <Widget>[],
+                )
+              : const SizedBox.shrink(),
+        ),
+        ValueListenableBuilder<bool>(
+          valueListenable: widget.playerOpen,
+          builder: (context, open, _) => open
+              ? const WindowChromeActions(
+                  children: <Widget>[
+                    Icon(Icons.search_rounded, key: _playerActionKey),
+                  ],
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    ),
+  );
+}
+
+const _resetKey = ValueKey('handover-reset');
+const _playerActionKey = ValueKey('handover-player-action');
+
+double _paintedOpacity(WidgetTester tester, Key key) {
+  final wrapper = find
+      .ancestor(of: find.byKey(key), matching: find.byType(Opacity))
+      .first;
+  return tester.widget<Opacity>(wrapper).opacity;
+}
+
+double _resetOpacity(WidgetTester tester) => _paintedOpacity(tester, _resetKey);
+
+/// The player action's painted opacity, or 0 while its set is off the capsule.
+double _playerActionSettledOpacity(WidgetTester tester) {
+  final action = find.byKey(_playerActionKey, skipOffstage: false);
+  if (action.evaluate().isEmpty) return 0;
+  return _paintedOpacity(tester, _playerActionKey);
 }
 
 class _TestSource extends ValueNotifier<bool> {

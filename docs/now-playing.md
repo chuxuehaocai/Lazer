@@ -40,7 +40,22 @@ On desktop, clicking reveals the auto-hidden transport dock. Mouse movement,
 window re-entry and scrolling do not reveal it or extend its idle timer.
 Keyboard input does not wake the dock; media shortcuts still work while it is
 hidden. Holding a pointer during a seek keeps the controls visible until release.
-Television remotes retain their key-driven wake behavior.
+Pausing is idle too: the dock hides on the same countdown, and a click restores
+it, so a paused player never pins a transport to the canvas. A playback error
+does restore it, because retry lives there. The compact presentation keeps its
+transport while paused: on touch the small summary is the only way back, and a
+paused phone player with no controls reads as a dead screen. Television remotes
+retain their key-driven wake behavior.
+
+The idle countdown is reconciled against the page's live state rather than
+armed once per transition: a countdown that expires while hiding is not allowed
+— a lyric reload, an open sheet, a presentation that is briefly inactive, or a
+pointer the platform still owns — is restarted as soon as hiding becomes
+possible again, instead of leaving the dock on screen until the next gesture.
+Playback ticks keep costing nothing because a pending timer is left untouched. A
+window drag runs inside the platform's modal move loop, which consumes the
+release of the press that started it; the window chrome retires that hold when
+the move loop returns, so the drag cannot keep the dock awake.
 
 Opening the player reads an already decoded artwork palette synchronously for
 its first frame. If extraction is still running, its result invalidates the
@@ -208,7 +223,9 @@ The player has independent dynamic, static, solid-colour and custom-image
 settings. Browsing defaults to 30 fps; player flow follows the display refresh
 rate unless a manual limit is chosen. Mesh precision changes density separately
 from frame cadence. Static and hidden backgrounds do not keep continuous tickers
-running. Custom images are copied into app storage so the selected file can move.
+running, and a visible player keeps flowing while paused — pausing the song
+never freezes the canvas under it. Custom images are copied into app storage so
+the selected file can move.
 
 Album colours are extracted from a small analysis image, with generations that
 prevent an older request overwriting the current track's palette. Displayed

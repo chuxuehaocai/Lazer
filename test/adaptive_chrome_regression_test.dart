@@ -256,13 +256,15 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(state.current, isNull);
+          // The desktop source list carries no room entry any more; the TV
+          // chrome still surfaces one when the active plugin supports rooms.
           expect(
             find.byKey(
               ValueKey(
                 tv ? 'large-screen-listen-together' : 'rail-listen-together',
               ),
             ),
-            supportsRooms ? findsOneWidget : findsNothing,
+            tv && supportsRooms ? findsOneWidget : findsNothing,
           );
           if (tv) {
             final account = find.byKey(const ValueKey('header-account'));

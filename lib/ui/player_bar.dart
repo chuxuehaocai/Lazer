@@ -312,11 +312,15 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                 ),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    // Biases the transport and the timeline down as one block:
+                    // a dead-centre cluster reads as floating between the
+                    // artwork and the seek row instead of belonging to it.
+                    padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Row(
+                          key: const ValueKey('player-transport'),
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             _CompactIcon(
@@ -361,7 +365,10 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                           ],
                         ),
                         const SizedBox(height: 2),
-                        _SeekRow(state: state),
+                        _SeekRow(
+                          key: const ValueKey('player-seek'),
+                          state: state,
+                        ),
                       ],
                     ),
                   ),
@@ -622,7 +629,7 @@ class _PlayButton extends StatelessWidget {
 
 /// Elapsed time, thin seek bar, total time — the second row of the centre.
 class _SeekRow extends StatelessWidget {
-  const _SeekRow({required this.state});
+  const _SeekRow({super.key, required this.state});
 
   final AppState state;
 

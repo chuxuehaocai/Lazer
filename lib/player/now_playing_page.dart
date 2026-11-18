@@ -234,14 +234,14 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   final FocusNode _playPauseFocus = FocusNode(debugLabel: 'player-play-pause');
   late SongCommentsController _commentsController;
   Timer? _hideTimer;
-
-  /// Whether the auto-hide countdown is currently running.
-  ///
-  /// Kept next to [_hideTimer] because the state listener fires on every
-  /// playback tick and must be able to tell "already armed" from "now
-  /// allowed to hide" without re-creating the timer each time.
-  bool _autoHideArmed = false;
   final Set<int> _activeControlPointers = {};
+
+  /// Whether the idle countdown is currently waiting to hide the controls.
+  ///
+  /// Read from the live timer instead of a remembered flag: the flag used to
+  /// disagree with the timer whenever a pending hide was consumed while hiding
+  /// was not allowed, and nothing re-armed the countdown afterwards.
+  bool get _hidePending => _hideTimer?.isActive ?? false;
 
   void _beginControlPointer(int pointer) {
     _activeControlPointers.add(pointer);
@@ -251,6 +251,16 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   void _endControlPointer(int pointer) {
     if (!_activeControlPointers.remove(pointer)) return;
     _armHide();
+  }
+
+  /// Retires holds whose pointer-up was consumed outside this view.
+  ///
+  /// An OS window drag ends inside the platform's move loop, so a press that
+  /// started one never reports its release here. Clearing the hold lets the
+  /// countdown start again instead of keeping the dock awake indefinitely.
+  void _releaseControlPointers() {
+    _activeControlPointers.clear();
+    if (_controlsVisible) _armHide();
   }
 
   Color? _themeSeed;
@@ -297,11 +307,22 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     });
   }
 
+  /// Whether the idle countdown may hide the transport right now.
+  ///
+  /// A paused desktop player is still an idle one: the dock leaves the canvas
+  /// and a click on the canvas restores it, exactly as it does during playback.
+  /// The compact presentation keeps its transport while paused, because a
+  /// touch player has no free "click anywhere" wake — the small summary is its
+  /// only way back, and losing the transport there reads as a dead screen. A
+  /// playback error is the exception on both: retry and output selection live
+  /// in the transport, so it stays reachable until the error clears.
+  bool get _idleAllowsHide => _desktopLayout == true || widget.state.playing;
+
   bool get _canAutoHide =>
       _foreground &&
       (widget.presentationActive?.value ?? true) &&
       !TvScope.isActive(context) &&
-      widget.state.playing &&
+      _idleAllowsHide &&
       widget.state.playbackError == null &&
       _activeControlPointers.isEmpty &&
       !_selectionOpen &&
@@ -335,7 +356,12 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       onActivity: _controlsActivity,
       onPointerStart: _beginControlPointer,
       onPointerEnd: _endControlPointer,
+      onPointerRelease: _releaseControlPointers,
     );
+    // Re-attaching follows a presentation that was briefly inactive. The
+    // countdown that ran while it was inactive may already be gone, and
+    // nothing else would start another one.
+    _armHideIfIdle();
   }
 
   void _preferencesChanged() {
@@ -357,25 +383,43 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     // from here used to cancel and allocate a Timer for each of those
     // notifications — tens per second for as long as the player was open — and
     // it also restarted the countdown, so the controls never hid during
-    // playback. Only a change in whether the page *may* auto-hide is a reason
-    // to touch the timer; a user gesture arms it through _controlsActivity.
-    final bool autoHide = _canAutoHide;
-    if (autoHide != _autoHideArmed) {
-      _autoHideArmed = autoHide;
-      if (autoHide) {
-        _armHide();
-      } else {
-        _hideTimer?.cancel();
+    // playback. Touching the timer only when its state is actually wrong keeps
+    // that cost away and still recovers every countdown that was consumed.
+    _reconcileCountdown();
+  }
+
+  /// Keeps the idle countdown consistent with the page's current state.
+  ///
+  /// The previous version only reacted to the "may hide" transition, so a
+  /// countdown that expired while hiding was not allowed — a lyric reload, an
+  /// open sheet, a pointer the platform still owned after a window drag, or a
+  /// briefly inactive presentation — was simply gone and never started again,
+  /// which left the dock on screen until the next gesture re-armed it. Reading
+  /// the live timer makes each of those paths heal on the next notification.
+  void _reconcileCountdown() {
+    if (!_canAutoHide) {
+      if (_hidePending) {
+        _hideTimer!.cancel();
         _hideTimer = null;
       }
+      if (!_controlsVisible) _wakeControls();
+      return;
     }
-    if (!autoHide && !_controlsVisible) _wakeControls();
+    _armHideIfIdle();
+  }
+
+  /// Starts the countdown when the controls are visible and nothing is
+  /// counting down. Allocation-free while the timer is already pending, so the
+  /// playback ticks stay cheap.
+  void _armHideIfIdle() {
+    if (!_controlsVisible || _hidePending) return;
+    _armHide();
   }
 
   void _armHide() {
     _hideTimer?.cancel();
+    _hideTimer = null;
     if (!_canAutoHide) return;
-    _autoHideArmed = true;
     _hideTimer = Timer(
       Duration(
         milliseconds: (widget.state.lyricControlsSeconds * 1000).round(),
@@ -602,9 +646,18 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   void _selectDesktopPane(DesktopNowPlayingPane pane) {
-    if (pane == DesktopNowPlayingPane.comments &&
-        !widget.state.supportsCurrentMusic(MusicCapability.comments)) {
-      pane = DesktopNowPlayingPane.lyrics;
+    final bool unavailable =
+        pane == DesktopNowPlayingPane.comments &&
+        !widget.state.supportsCurrentMusic(MusicCapability.comments);
+    if (unavailable) pane = DesktopNowPlayingPane.lyrics;
+    // The reading pane's own tab folds it away: the artwork takes the middle of
+    // the canvas, and the same tab (or L) brings the lyrics back. Nothing else
+    // in the dock needs a second control for it, and a platform without comments
+    // must not fold the lyrics just because it fell back to them.
+    if (!unavailable &&
+        pane == DesktopNowPlayingPane.lyrics &&
+        _desktopPane == DesktopNowPlayingPane.lyrics) {
+      pane = DesktopNowPlayingPane.none;
     }
     if (_desktopPane == pane) {
       _controlsActivity();
@@ -1132,11 +1185,21 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   Widget? _pullDownLayer(BoxConstraints box) {
     final PlayerPullDown? pullDown = widget.pullDown;
     if (pullDown == null) return null;
+    // On the desktop layout the top band belongs to the window: pressing there
+    // moves the window, as it does on every browse page, so pull-down starts
+    // underneath it. A phone or tablet keeps the whole upper half for the
+    // gesture — nothing there answers to a floating capsule.
+    final bool floating =
+        _desktopLayout == true &&
+        WindowChromeScope.maybeLayoutOf(context)?.inline == true;
+    final double band = floating ? kInlineChromeInset : 0;
+    final double height = box.maxHeight * .5 - band;
+    if (height <= 0) return null;
     return Positioned(
       left: 0,
       right: 0,
-      top: 0,
-      height: box.maxHeight * .5,
+      top: band,
+      height: height,
       child: PlayerPullDownRegion(
         pullDown: pullDown,
         travel: box.maxHeight,
@@ -1841,7 +1904,6 @@ class _PlayerBackdropHostState extends State<_PlayerBackdropHost> {
     state.playerBackgroundBlurEnabled,
     state.playerBackgroundBlur,
     state.backgroundDarkEdgeEnabled,
-    state.playing,
     state.playerBackgroundQuality,
     state.playerBackgroundOpacity,
   );
@@ -1917,7 +1979,10 @@ class _PlayerBackdropHostState extends State<_PlayerBackdropHost> {
             : 0,
         darkEdge: state.backgroundDarkEdgeEnabled,
         pageColor: Colors.black,
-        animationsEnabled: settled && state.playing,
+        // The ambient canvas belongs to the song, not to the transport. Pausing
+        // used to freeze it, which read as the whole page stopping; it now keeps
+        // flowing at the configured cadence and only the entrance gate holds it.
+        animationsEnabled: settled,
         quality: state.playerBackgroundQuality,
         // The background belongs to the visible player at every point in its
         // spring. Replacing it with the entrance-only placeholder made the
@@ -1943,7 +2008,6 @@ typedef _BackdropSignature = (
   Object?, // picture blur enabled
   Object?, // picture blur sigma
   Object?, // dark edge
-  Object?, // playing
   Object?, // render quality
   Object?, // background opacity
 );

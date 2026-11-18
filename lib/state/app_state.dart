@@ -1104,6 +1104,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// Whether the compact/tablet floating capsule navigation filters the page.
   bool bottomBarBlurEnabled = true;
   double bottomBarBlur = kBottomBarBlurDefault;
+
+  /// Inline window-capsule paint. The capsule floats over the page, so its
+  /// backdrop blur, the tint opacity behind it and an optional custom tint are
+  /// all listener choices; [windowChromeColor] null means "follow the theme
+  /// accent".
+  bool windowChromeBlurEnabled = true;
+  double windowChromeBlur = kWindowChromeBlurDefault;
+  double windowChromeOpacity = kWindowChromeOpacityDefault;
+  Color? windowChromeColor;
+
   // Zero follows display VSync, without an application-imposed frame cap.
   double browseBackgroundFps = 0;
   double playerBackgroundFps = 0;
@@ -1349,6 +1359,52 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       'lazer_bottom_bar_blur',
       bottomBarBlur,
     );
+  }
+
+  Future<void> setWindowChromeBlurEnabled(bool value) async {
+    if (windowChromeBlurEnabled == value) return;
+    windowChromeBlurEnabled = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      'lazer_window_chrome_blur_enabled',
+      value,
+    );
+  }
+
+  Future<void> setWindowChromeBlur(double value) async {
+    if (!value.isFinite) return;
+    windowChromeBlur = value.clamp(kWindowChromeBlurMin, kWindowChromeBlurMax);
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_window_chrome_blur',
+      windowChromeBlur,
+    );
+  }
+
+  Future<void> setWindowChromeOpacity(double value) async {
+    if (!value.isFinite) return;
+    windowChromeOpacity = value.clamp(
+      kWindowChromeOpacityMin,
+      kWindowChromeOpacityMax,
+    );
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_window_chrome_opacity',
+      windowChromeOpacity,
+    );
+  }
+
+  /// Null restores the theme-accent tint.
+  Future<void> setWindowChromeColor(Color? color) async {
+    if (windowChromeColor == color) return;
+    windowChromeColor = color;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (color == null) {
+      await prefs.remove('lazer_window_chrome_color');
+    } else {
+      await prefs.setInt('lazer_window_chrome_color', color.toARGB32());
+    }
   }
 
   /// Keyboard combinations that control playback. A null value disables the
@@ -2370,6 +2426,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       bottomBarBlur =
           (prefs.getDouble('lazer_bottom_bar_blur') ?? kBottomBarBlurDefault)
               .clamp(kBottomBarBlurMin, kBottomBarBlurMax);
+      windowChromeBlurEnabled =
+          prefs.getBool('lazer_window_chrome_blur_enabled') ?? true;
+      windowChromeBlur =
+          (prefs.getDouble('lazer_window_chrome_blur') ??
+                  kWindowChromeBlurDefault)
+              .clamp(kWindowChromeBlurMin, kWindowChromeBlurMax);
+      windowChromeOpacity =
+          (prefs.getDouble('lazer_window_chrome_opacity') ??
+                  kWindowChromeOpacityDefault)
+              .clamp(kWindowChromeOpacityMin, kWindowChromeOpacityMax);
+      final int? chromeColor = prefs.getInt('lazer_window_chrome_color');
+      windowChromeColor = chromeColor == null ? null : Color(chromeColor);
       dynamicBackgroundQuality = normalizeDynamicBackgroundQuality(
         prefs.getDouble('lazer_dynamic_background_quality') ??
             kDynamicBackgroundQualityDefault,

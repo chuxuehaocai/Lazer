@@ -302,11 +302,23 @@ class AccessibleIconButton extends IconButton {
     super.focusNode,
     super.autofocus,
     super.enableFeedback,
+    this.semanticLabel,
   });
+
+  /// Label for screen readers when this button cannot carry a [tooltip].
+  ///
+  /// A Tooltip hosts its bubble through an OverlayPortal that computes a paint
+  /// transform during layout. Inside another overlay portal's deferred subtree
+  /// — the floating window capsule paints its buttons that way — that nesting
+  /// trips the overlay theater's depth assertion, so those buttons keep the
+  /// label here instead.
+  final String? semanticLabel;
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
       container: true,
+      label: semanticLabel == null ? null : context.tr(semanticLabel!),
       child: TvFocusHighlight(
         child: SpringPress(
           builder: (context, states) => IconButton(

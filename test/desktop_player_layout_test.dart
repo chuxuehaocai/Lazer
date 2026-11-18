@@ -283,7 +283,9 @@ void main() {
         final metadata = tester.getRect(
           find.byKey(const ValueKey('desktop-player-metadata')),
         );
-        final availableTop = sample.inline ? 0.0 : 46.0;
+        // Inline chrome floats over the page, so the listening canvas starts
+        // below the capsule's band; the classic strip owns a real strip.
+        final availableTop = sample.inline ? kInlineChromeInset : 46.0;
         final availableBottom = controls
             ? tester
                   .getRect(find.byKey(const ValueKey('desktop-dock-content')))

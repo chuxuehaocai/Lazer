@@ -86,13 +86,15 @@ class WindowFrame extends StatefulWidget {
 }
 
 class _WindowFrameState extends State<WindowFrame>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const _spring = AppleSpring(
     duration: Duration(milliseconds: 500),
     bounce: .08,
   );
 
-  final WindowChromeController _chrome = WindowChromeController();
+  late final WindowChromeController _chrome = WindowChromeController(
+    vsync: this,
+  );
   late final _reveal = AnimationController.unbounded(vsync: this, value: 1);
   bool _revealTarget = true;
   double _extensionWidth = 0;
@@ -101,9 +103,7 @@ class _WindowFrameState extends State<WindowFrame>
       widget.state?.titleBarStyle == DesktopTitleBarStyle.inline &&
       !usesNativeWindowButtons;
 
-  bool get _revealVisible => _inline
-      ? !(_chrome.playerPresented && _chrome.actionsActive)
-      : _chrome.value;
+  bool get _revealVisible => _inline ? !_chrome.actionsExpanded : _chrome.value;
 
   bool get _captionVisible => _inline || _chrome.value;
 
@@ -126,11 +126,23 @@ class _WindowFrameState extends State<WindowFrame>
   void initState() {
     super.initState();
     _chrome.addListener(_chromeChanged);
+    // The pill's leading extension travels with the handover: it narrows
+    // behind the command that is leaving and only grows again once the next
+    // set starts arriving, so the surface never promises buttons it is not
+    // painting.
+    _chrome.handover?.addListener(_chromeChanged);
+    _reveal.addListener(_revealChanged);
+    _revealChanged();
   }
+
+  /// Keeps the controller informed of how far the capsule is unfolded, so it
+  /// can tell a real handover on screen from one hidden inside a collapse.
+  void _revealChanged() => _chrome.syncRevealed(math.max(0, 1 - _reveal.value));
 
   void _chromeChanged() {
     if (!mounted) return;
-    if (_chrome.actionsWidth > 0) _extensionWidth = _chrome.actionsWidth;
+    final double painted = _chrome.paintedActionsWidth;
+    if (painted > 0) _extensionWidth = painted;
     _retarget();
     setState(() {});
   }
@@ -156,6 +168,7 @@ class _WindowFrameState extends State<WindowFrame>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _chrome.syncReduceMotion(MediaQuery.disableAnimationsOf(context));
     if (MediaQuery.disableAnimationsOf(context)) {
       _revealTarget = _revealVisible;
       _reveal.value = _revealTarget ? 1 : 0;
@@ -165,6 +178,8 @@ class _WindowFrameState extends State<WindowFrame>
   @override
   void dispose() {
     _chrome.removeListener(_chromeChanged);
+    _chrome.handover?.removeListener(_chromeChanged);
+    _reveal.removeListener(_revealChanged);
     _chrome.dispose();
     _reveal.dispose();
     super.dispose();
@@ -195,7 +210,6 @@ class _WindowFrameState extends State<WindowFrame>
     // title strip must keep its space even when the page uses a phone layout.
     final bool showChrome = usesNativeWindowButtons || !_phoneLayout(context);
     final bool captionVisible = showChrome && _captionVisible;
-    final MediaQueryData media = MediaQuery.of(context);
     final Widget title = inline
         ? AnimatedBuilder(
             animation: _reveal,
@@ -218,25 +232,13 @@ class _WindowFrameState extends State<WindowFrame>
               ? Stack(
                   fit: StackFit.expand,
                   children: [
-                    ClipRect(
-                      child: MediaQuery(
-                        // Keep page geometry steady while the caption capsule
-                        // extends. The player header consumes this inset itself.
-                        data: showChrome
-                            ? media.copyWith(
-                                padding: media.padding.copyWith(top: 56),
-                                viewPadding: media.viewPadding.copyWith(
-                                  top: 56,
-                                ),
-                              )
-                            : media,
-                        child: widget.child,
-                      ),
-                    ),
-                    Positioned(
-                      top: 12,
-                      left: 0,
-                      right: 20,
+                    // The page owns the whole window: it paints and scrolls
+                    // underneath the capsule instead of starting below a
+                    // reserved header band.
+                    ClipRect(child: widget.child),
+                    PositionedDirectional(
+                      top: kWindowChromeTop,
+                      end: kWindowChromeEnd,
                       child: ExcludeFocus(
                         excluding: !captionVisible,
                         child: ExcludeSemantics(

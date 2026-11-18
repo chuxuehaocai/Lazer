@@ -1,35 +1,102 @@
 import 'package:flutter/material.dart';
 
+import '../state/ui_preferences.dart';
+import '../theme/apple_design.dart';
+import 'apple_ui.dart';
+
 const double kWindowChromeHeight = 40.0;
 const double kWindowChromeButtonWidth = 46.0;
 
-/// The shared surface for floating caption and player-action capsules.
+/// Offset of the floating Inline capsule from the window's top edge.
+const double kWindowChromeTop = 12.0;
+
+/// Trailing inset of the floating Inline capsule.
+const double kWindowChromeEnd = 20.0;
+
+/// Grab area left of the capsule. Inline chrome floats over the page instead of
+/// owning a header strip, so this invisible strip is the window's drag and
+/// double-click-to-maximize handle; it sits outside the capsule so the capsule's
+/// own geometry stays exactly the button cluster.
+const double kWindowChromeGripWidth = 16.0;
+
+/// Height of the band the floating capsule occupies (top offset + capsule + a
+/// small gap). Pages keep this much space at their top edge so their first row
+/// never lands under the capsule; the space is page padding, not a header, so it
+/// scrolls away with the content.
+const double kInlineChromeInset = kWindowChromeTop + kWindowChromeHeight + 4;
+
+/// Width reserved for a text command that opens the capsule's extension, and the
+/// hairline that separates it from the icon cluster and the caption buttons.
+/// The widest label is the Japanese "既定値に戻す" (seven characters), which needs
+/// a little over 100 dp at the capsule's type size.
+const double kWindowChromeTextActionWidth = 116.0;
+const double kWindowChromeActionDivider = 17.0;
+
+/// The colour the capsule paints behind its buttons.
+///
+/// A listener-picked [custom] colour wins; otherwise the capsule takes the
+/// theme's own background colour — the deep blue `#191C23` in dark mode, white
+/// in light mode — so the chrome reads as part of the window rather than as an
+/// accent-tinted panel. [opacity] scales that tint's alpha, independent of the
+/// blur, which is what lets the page show through it.
+Color windowChromeTint(
+  AppleSemanticColors apple, {
+  Color? custom,
+  required double opacity,
+}) {
+  final double alpha = opacity.isFinite
+      ? opacity.clamp(kWindowChromeOpacityMin, kWindowChromeOpacityMax)
+      : kWindowChromeOpacityDefault;
+  return (custom ?? apple.background).withValues(alpha: alpha);
+}
+
+/// The shared surface for floating caption and player-action capsules. Inline
+/// mode paints the same translucent material as the phone's navigation capsule —
+/// glass tint plus a backdrop blur — with the tint, the blur and the blur
+/// strength coming from the listener's settings.
 class WindowChromeSurface extends StatelessWidget {
   const WindowChromeSurface({
     super.key,
     required this.child,
     this.inline = true,
+    this.tint,
+    this.blurEnabled = true,
+    this.blurSigma = kWindowChromeBlurDefault,
   });
 
   final Widget child;
   final bool inline;
 
+  /// Null falls back to the theme's glass tint.
+  final Color? tint;
+  final bool blurEnabled;
+  final double blurSigma;
+
   @override
   Widget build(BuildContext context) {
     if (!inline) return child;
-    final ColorScheme scheme = Theme.of(context).colorScheme;
     final BorderRadius radius = BorderRadius.circular(kWindowChromeHeight / 2);
-    return ClipRRect(
-      borderRadius: radius,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: scheme.onSurface.withValues(alpha: .045),
+    final Color color = tint ?? AppleSemanticColors.of(context).glass;
+    // Blur off: paint the tint on its own. AppleGlass would still run its
+    // backdrop filter, and a near-opaque tint would make that work invisible.
+    if (!blurEnabled) {
+      return RepaintBoundary(
+        child: ClipRRect(
           borderRadius: radius,
-          border: Border.all(
-            color: scheme.onSurface.withValues(alpha: .08),
-            width: .5,
+          child: DecoratedBox(
+            decoration: BoxDecoration(color: color, borderRadius: radius),
+            child: child,
           ),
         ),
+      );
+    }
+    // Same composition as the phone's navigation capsule: the blur gets its own
+    // layer so page repaints never re-run the backdrop filter.
+    return RepaintBoundary(
+      child: AppleGlass(
+        borderRadius: radius,
+        color: color,
+        blurSigma: blurSigma.clamp(kWindowChromeBlurMin, kWindowChromeBlurMax),
         child: child,
       ),
     );

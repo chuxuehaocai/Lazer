@@ -73,6 +73,44 @@ void main() {
     },
   );
 
+  test('inline capsule paint settings persist, clamp and reset', () async {
+    AppState create() => AppState(
+      queueStore: PlaybackQueueStore(
+        read: () async => null,
+        write: (_) async {},
+      ),
+      artworkSeedLoader: (_) async => null,
+    );
+    final first = create();
+    await first.bootstrap();
+    expect(first.windowChromeBlurEnabled, isTrue);
+    expect(first.windowChromeBlur, kWindowChromeBlurDefault);
+    expect(first.windowChromeOpacity, kWindowChromeOpacityDefault);
+    expect(first.windowChromeColor, isNull);
+
+    await first.setWindowChromeBlurEnabled(false);
+    await first.setWindowChromeBlur(22);
+    await first.setWindowChromeOpacity(.4);
+    await first.setWindowChromeColor(const Color(0xFF3366FF));
+    first.dispose();
+
+    final restored = create();
+    addTearDown(restored.dispose);
+    await restored.bootstrap();
+    expect(restored.windowChromeBlurEnabled, isFalse);
+    expect(restored.windowChromeBlur, 22);
+    expect(restored.windowChromeOpacity, .4);
+    expect(restored.windowChromeColor, const Color(0xFF3366FF));
+
+    // Sliders clamp instead of persisting nonsense; null returns to the accent.
+    await restored.setWindowChromeBlur(double.nan);
+    await restored.setWindowChromeOpacity(9);
+    expect(restored.windowChromeBlur, 22);
+    expect(restored.windowChromeOpacity, kWindowChromeOpacityMax);
+    await restored.setWindowChromeColor(null);
+    expect(restored.windowChromeColor, isNull);
+  });
+
   testWidgets(
     'root immediately applies layout and retains remote input on a TV',
     (tester) async {

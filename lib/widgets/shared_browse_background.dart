@@ -116,12 +116,11 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
         final playerMica =
             state.playerPresented.value &&
             state.playerBackground == AppBackgroundMode.windowsMica;
+        // One canvas for every endpoint: the phone layout no longer paints a
+        // second, darker background behind the same shell.
         final canvas =
             !painted && Theme.of(context).brightness == Brightness.dark
-            ? ((Theme.of(context).extension<AppThemePresentation>()?.compact ??
-                      false)
-                  ? AppleColors.mobileDarkCanvas
-                  : AppleColors.darkCanvas)
+            ? AppleColors.darkCanvas
             : apple.background;
         return Stack(
           fit: StackFit.expand,

@@ -104,6 +104,10 @@ class AppLibraryPage extends StatelessWidget {
               gap,
               fill: arranged,
             );
+            // A desktop window has the width for two columns of entry cards.
+            // Stacking them in one column left half the pane empty and made the
+            // library read like a phone page blown up.
+            final bool wide = width >= 940;
             return CustomScrollView(
               slivers: <Widget>[
                 SliverPadding(
@@ -118,67 +122,7 @@ class AppLibraryPage extends StatelessWidget {
                         trailing: _playlistArrangementButton(context, state),
                         padding: const EdgeInsets.fromLTRB(0, 12, 0, 18),
                       ),
-                      LocalMusicCard(
-                        state: state,
-                        onOpen: onOpenLocalMusic,
-                        importer: localImporter,
-                      ),
-                      const SizedBox(height: 12),
-                      NetworkSourcesCard(
-                        state: state,
-                        onOpen:
-                            onOpenNetworkSources ??
-                            () => unawaited(
-                              openNetworkSourcesPage(context, state),
-                            ),
-                      ),
-                      if (state.supportsMusic(MusicCapability.savedAlbums)) ...[
-                        const SizedBox(height: 12),
-                        AppleGroupedCard(
-                          margin: EdgeInsets.zero,
-                          child: AppleListTile(
-                            key: const ValueKey<String>('open-saved-albums'),
-                            title: context.tr('收藏的专辑'),
-                            subtitle: state.isGuest
-                                ? context.tr('登录后同步收藏的专辑')
-                                : context.tr('按专辑浏览你的收藏'),
-                            leading: AppleIconTile(
-                              icon: Icons.album_rounded,
-                              color: apple.accent,
-                            ),
-                            showChevron: true,
-                            onTap: onOpenSavedAlbums,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      AppleGroupedCard(
-                        margin: EdgeInsets.zero,
-                        child: AppleListTile(
-                          key: const ValueKey('open-listening-statistics'),
-                          title: context.tr('听歌统计'),
-                          subtitle: context.tr('听歌时长、习惯与切歌记录'),
-                          leading: AppleIconTile(
-                            icon: Icons.insights_rounded,
-                            color: AppleSemanticColors.of(context).accent,
-                          ),
-                          showChevron: true,
-                          onTap:
-                              onOpenListeningStatistics ??
-                              () => unawaited(
-                                Navigator.of(context).push<void>(
-                                  ApplePageRoute<void>(
-                                    settings: const RouteSettings(
-                                      name: '/listening-statistics',
-                                    ),
-                                    builder: (_) => AppListeningStatisticsPage(
-                                      statistics: state.listeningStatistics,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                        ),
-                      ),
+                      _householdEntries(context, apple, wide: wide),
                       if (mine.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 30),
                         AppSectionHeader(
@@ -290,6 +234,99 @@ class AppLibraryPage extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+  /// The library's own doors: local files, sources, saved albums, statistics.
+  ///
+  /// A desktop pane has room for two columns — files on the left, sources and
+  /// shortcuts on the right — which is what a player's library page looks like;
+  /// one column of full-width rows left half the window empty. The right side is
+  /// a single grouped surface rather than three separate cards: one row per
+  /// shortcut matches the rows on the left, so both columns end on the same line
+  /// instead of leaving a ragged bottom edge.
+  Widget _householdEntries(
+    BuildContext context,
+    AppleSemanticColors apple, {
+    required bool wide,
+  }) {
+    final Widget local = LocalMusicCard(
+      state: state,
+      onOpen: onOpenLocalMusic,
+      importer: localImporter,
+    );
+    final List<Widget> shortcuts = <Widget>[
+      NetworkSourcesCard(
+        state: state,
+        asTile: true,
+        onOpen:
+            onOpenNetworkSources ??
+            () => unawaited(openNetworkSourcesPage(context, state)),
+      ),
+      if (state.supportsMusic(MusicCapability.savedAlbums))
+        AppleListTile(
+          key: const ValueKey<String>('open-saved-albums'),
+          title: context.tr('收藏的专辑'),
+          subtitle: state.isGuest
+              ? context.tr('登录后同步收藏的专辑')
+              : context.tr('按专辑浏览你的收藏'),
+          leading: AppleIconTile(
+            icon: Icons.album_rounded,
+            color: apple.accent,
+          ),
+          showChevron: true,
+          onTap: onOpenSavedAlbums,
+        ),
+      AppleListTile(
+        key: const ValueKey('open-listening-statistics'),
+        title: context.tr('听歌统计'),
+        subtitle: context.tr('听歌时长、习惯与切歌记录'),
+        leading: AppleIconTile(
+          icon: Icons.insights_rounded,
+          color: apple.accent,
+        ),
+        showChevron: true,
+        onTap:
+            onOpenListeningStatistics ??
+            () => unawaited(
+              Navigator.of(context).push<void>(
+                ApplePageRoute<void>(
+                  settings: const RouteSettings(name: '/listening-statistics'),
+                  builder: (_) => AppListeningStatisticsPage(
+                    statistics: state.listeningStatistics,
+                  ),
+                ),
+              ),
+            ),
+      ),
+    ];
+    final Widget shortcutsCard = AppleGroupedCard(
+      margin: EdgeInsets.zero,
+      child: Column(
+        children: <Widget>[
+          for (int index = 0; index < shortcuts.length; index++) ...<Widget>[
+            if (index > 0) Container(height: .5, color: apple.separator),
+            shortcuts[index],
+          ],
+        ],
+      ),
+    );
+    if (!wide) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          local,
+          const SizedBox(height: 12),
+          shortcutsCard,
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Expanded(flex: 3, child: local),
+        const SizedBox(width: 18),
+        Expanded(flex: 2, child: shortcutsCard),
+      ],
     );
   }
 }

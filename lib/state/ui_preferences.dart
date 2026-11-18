@@ -33,6 +33,19 @@ const double kBottomBarBlurMin = 0;
 const double kBottomBarBlurMax = 32;
 const double kBottomBarBlurDefault = 14;
 
+/// Inline window-capsule paint: the backdrop blur it may run, the tint
+/// opacity that blur sits behind, and the optional custom tint colour.
+///
+/// The default opacity follows the page header's (72%): opaque enough that the
+/// caption glyphs always read, transparent enough that the blur underneath is
+/// actually visible.
+const double kWindowChromeBlurMin = 0;
+const double kWindowChromeBlurMax = 32;
+const double kWindowChromeBlurDefault = 14;
+const double kWindowChromeOpacityMin = 0.2;
+const double kWindowChromeOpacityMax = 1;
+const double kWindowChromeOpacityDefault = 0.72;
+
 /// How many cards the library lays its playlists out in per row.
 ///
 /// `0` asks the grid to follow the window width — the density the library

@@ -13,8 +13,10 @@ import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/tv/large_screen_chrome.dart';
 import 'package:lazer_nextgen/ui/pages.dart';
 import 'package:lazer_nextgen/ui/widgets.dart';
+import 'package:lazer_nextgen/widgets/apple_ui.dart';
 import 'package:lazer_nextgen/widgets/capsule_navigation_bar.dart';
 import 'package:lazer_nextgen/widgets/settings_detail.dart';
+import 'package:lazer_nextgen/widgets/window_chrome.dart';
 
 class _RootState extends AppState {
   _RootState() {
@@ -80,12 +82,96 @@ void main() {
       final rail = find.byKey(const ValueKey('desktop-sidebar'));
       final home = find.byType(AppHomePage);
       expect(tester.getTopLeft(rail).dy, 0);
-      expect(tester.getTopLeft(home).dy, 56);
-      expect(tester.widget<AppHomePage>(home).topInset, 0);
+      // The capsule floats over the page instead of owning a header band: the
+      // page starts at the window edge and keeps the capsule's band as page
+      // space, which scrolls away with the content.
+      expect(tester.getTopLeft(home).dy, 0);
+      expect(tester.widget<AppHomePage>(home).topInset, kInlineChromeInset);
       expect(tester.getTopLeft(find.text('Lazer').first).dy, lessThan(40));
+      final capsule = tester.getRect(
+        find.byKey(const ValueKey('window-title-minimize')),
+      );
+      expect(capsule.top, kWindowChromeTop);
 
-      // The title's hit area stays above page controls, including embedded
-      // settings details which do not have their own route/AppBar safe area.
+      // Inline chrome leaves the top of the window to the page, so the page's
+      // own header is the drag handle: the wordmark band wraps, and pages that
+      // open with a large title wrap that title.
+      expect(
+        find.ancestor(
+          of: find.text('Lazer').first,
+          matching: find.byType(WindowDragArea),
+        ),
+        findsOneWidget,
+      );
+      calls.clear();
+      await tester.drag(find.text('Lazer').first, const Offset(0, 48));
+      await tester.pump();
+      expect(calls, contains('startDragging'));
+      calls.clear();
+
+      // The capsule itself is the title bar: dragging over a caption button
+      // moves the window, while a plain click still presses that button.
+      await tester.drag(
+        find.byKey(const ValueKey('window-title-minimize')),
+        const Offset(0, 40),
+      );
+      await tester.pumpAndSettle();
+      expect(calls, contains('startDragging'));
+      expect(calls, isNot(contains('minimize')));
+      calls.clear();
+
+      // A page title lives inside the page's own scroll view, whose vertical
+      // drag recognizer would otherwise win the arena: dragging the title has
+      // to move the window, not the page.
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) => widget is AppRailItem && widget.label == '音乐库',
+        ),
+      );
+      await tester.pumpAndSettle();
+      final title = find.descendant(
+        of: find.byType(AppLibraryPage),
+        matching: find.byType(ApplePageTitle),
+      );
+      final before = tester.getRect(title).top;
+      calls.clear();
+      await tester.drag(title, const Offset(0, 60));
+      await tester.pumpAndSettle();
+      expect(calls, contains('startDragging'));
+      expect(
+        tester.getRect(title).top,
+        closeTo(before, .01),
+        reason: 'the page must not scroll while the window is dragged',
+      );
+      calls.clear();
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) => widget is AppRailItem && widget.label == '设置',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The strip above the page title is the title bar too: a press on empty
+      // chrome at the very top of the window drags it, while the same drag
+      // lower down belongs to the page.
+      final pane = tester.getRect(
+        find.byKey(const ValueKey('desktop-content-safe-area')),
+      );
+      calls.clear();
+      await tester.dragFrom(Offset(pane.center.dx, 20), const Offset(0, 50));
+      await tester.pumpAndSettle();
+      expect(calls, contains('startDragging'));
+      calls.clear();
+      await tester.dragFrom(
+        Offset(pane.center.dx, pane.center.dy),
+        const Offset(0, 50),
+      );
+      await tester.pumpAndSettle();
+      expect(calls, isNot(contains('startDragging')));
+      calls.clear();
+
+      // Floating chrome must never sit on a page control, including embedded
+      // settings details that carry their own back affordance.
       await tester.tap(
         find.byWidgetPredicate(
           (widget) => widget is AppRailItem && widget.label == '设置',
@@ -94,14 +180,46 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Interface & layout'));
       await tester.pumpAndSettle();
+
+      // The capsule's material is a setting, not a constant: blur on/off, blur
+      // strength, tint opacity, and a custom tint that only unlocks the palette
+      // after it is switched on.
+      for (final String key in <String>[
+        'window-chrome-blur-switch',
+        'window-chrome-blur-slider',
+        'window-chrome-opacity-slider',
+        'window-chrome-color-switch',
+      ]) {
+        expect(find.byKey(ValueKey<String>(key)), findsOneWidget, reason: key);
+      }
+      expect(
+        find.byKey(const ValueKey('window-chrome-color-setting')),
+        findsNothing,
+      );
+      expect(state.windowChromeColor, isNull);
+      final colorSwitch = find.byKey(
+        const ValueKey('window-chrome-color-switch'),
+      );
+      await tester.ensureVisible(colorSwitch);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(of: colorSwitch, matching: find.byType(Switch)),
+      );
+      await tester.pumpAndSettle();
+      expect(state.windowChromeColor, isNotNull);
+      expect(
+        find.byKey(const ValueKey('window-chrome-color-swatch')),
+        findsOneWidget,
+      );
+
       final back = find.byKey(const ValueKey('settings-detail-back'));
-      expect(tester.getTopLeft(back).dy, greaterThanOrEqualTo(56));
       expect(back.hitTestable(), findsOneWidget);
+      expect(tester.getRect(back).right, lessThan(capsule.left));
       await tester.tap(back);
       await tester.pumpAndSettle();
       expect(calls.where((call) => call == 'startDragging'), isEmpty);
 
-      // A pushed settings page consumes the same inset once, while dialogs
+      // A pushed settings page keeps the same relationship while dialogs
       // remain below the caption cluster and can still receive pointer input.
       final context = tester.element(rail);
       final navigator = Navigator.of(context);
@@ -115,8 +233,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(tester.getTopLeft(back).dy, greaterThanOrEqualTo(56));
       expect(back.hitTestable(), findsOneWidget);
+      expect(tester.getRect(back).right, lessThan(capsule.left));
       await tester.tap(back);
       await tester.pumpAndSettle();
 

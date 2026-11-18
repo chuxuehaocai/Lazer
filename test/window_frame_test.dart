@@ -9,6 +9,8 @@ import 'package:window_manager/window_manager.dart';
 
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
+import 'package:lazer_nextgen/theme/apple_design.dart';
+import 'package:lazer_nextgen/widgets/apple_ui.dart';
 import 'package:lazer_nextgen/widgets/window_chrome.dart';
 import 'package:lazer_nextgen/widgets/window_frame.dart';
 
@@ -185,10 +187,22 @@ void main() {
       try {
         await harness.mount(style);
         final inline = style == DesktopTitleBarStyle.inline;
+        // Inline chrome floats: the page starts at the window's top edge and
+        // keeps no reserved band, so no MediaQuery inset is fabricated either.
         expect(tester.getTopLeft(find.byKey(_bodyKey)).dy, inline ? 0 : 40);
-        expect(tester.getTopLeft(find.byKey(_contentKey)).dy, inline ? 56 : 40);
-        expect(harness.bodyMedia!.padding.top, inline ? 56 : 0);
-        expect(harness.bodyMedia!.viewPadding.top, inline ? 56 : 0);
+        expect(tester.getTopLeft(find.byKey(_contentKey)).dy, inline ? 0 : 40);
+        expect(harness.bodyMedia!.padding.top, 0);
+        expect(harness.bodyMedia!.viewPadding.top, 0);
+        if (inline) {
+          expect(
+            tester.getTopLeft(find.byKey(_minimizeKey)).dy,
+            kWindowChromeTop,
+          );
+          expect(
+            tester.getTopRight(find.byKey(_minimizeKey)).dx,
+            lessThanOrEqualTo(1280 - kWindowChromeEnd),
+          );
+        }
         // The same overflowing page paint must extend under Inline chrome,
         // while the classic strip remains entirely outside its paint bounds.
         expect(
@@ -241,7 +255,7 @@ void main() {
         expect(find.byKey(_minimizeKey).hitTestable(), findsOneWidget);
         expect(
           tester.getTopLeft(find.byKey(_contentKey)).dy,
-          style == DesktopTitleBarStyle.inline ? 56 : 40,
+          style == DesktopTitleBarStyle.inline ? 0 : 40,
         );
         expect(tester.takeException(), isNull);
       } finally {
@@ -278,7 +292,7 @@ void main() {
       tester.view.physicalSize = const Size(720, 900);
       await tester.pumpAndSettle();
       expect(find.byKey(_minimizeKey).hitTestable(), findsOneWidget);
-      expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 56);
+      expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 0);
       expect(tester.takeException(), isNull);
     } finally {
       await harness.dispose();
@@ -295,7 +309,8 @@ void main() {
       await harness.state.setTitleBarStyle(DesktopTitleBarStyle.inline);
       await tester.pump();
       expect(tester.getTopLeft(find.byKey(_bodyKey)).dy, 0);
-      expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 56);
+      // Inline releases the strip entirely: the page already fills the top.
+      expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 0);
       expect(
         tester.widget<WindowTitleArea>(find.byType(WindowTitleArea)).inline,
         true,
@@ -309,6 +324,61 @@ void main() {
         false,
       );
       await tester.pumpAndSettle();
+    } finally {
+      await harness.dispose();
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('the floating capsule paints the settings it is given', (
+    tester,
+  ) async {
+    const Color custom = Color(0xFF3366FF);
+    final harness = _FrameHarness(tester);
+    Finder capsuleGlass() => find.descendant(
+      of: find.byType(WindowChromeSurface),
+      matching: find.byType(AppleGlass),
+    );
+    try {
+      await harness.mount(DesktopTitleBarStyle.inline);
+
+      // Default: the theme accent washed into the glass, blurred at the
+      // default strength, no custom colour.
+      final AppleSemanticColors apple = AppleSemanticColors.of(
+        tester.element(find.byType(WindowChromeSurface)),
+      );
+      expect(
+        tester.widget<AppleGlass>(capsuleGlass()).color,
+        windowChromeTint(apple, opacity: kWindowChromeOpacityDefault),
+      );
+      expect(
+        tester.widget<AppleGlass>(capsuleGlass()).blurSigma,
+        kWindowChromeBlurDefault,
+      );
+
+      await harness.state.setWindowChromeColor(custom);
+      await harness.state.setWindowChromeOpacity(.5);
+      await harness.state.setWindowChromeBlur(24);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AppleGlass>(capsuleGlass()).color,
+        custom.withValues(alpha: .5),
+      );
+      expect(tester.widget<AppleGlass>(capsuleGlass()).blurSigma, 24);
+
+      // Blur off paints the same tint without a backdrop filter at all.
+      await harness.state.setWindowChromeBlurEnabled(false);
+      await tester.pumpAndSettle();
+      expect(capsuleGlass(), findsNothing);
+      final DecoratedBox box = tester.widget<DecoratedBox>(
+        find
+            .descendant(
+              of: find.byType(WindowChromeSurface),
+              matching: find.byType(DecoratedBox),
+            )
+            .first,
+      );
+      expect((box.decoration as BoxDecoration).color, custom.withValues(alpha: .5));
+      expect(tester.takeException(), isNull);
     } finally {
       await harness.dispose();
     }

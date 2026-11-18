@@ -12,7 +12,7 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   for (final brightness in Brightness.values) {
-    testWidgets('phone palette follows scaled layout in $brightness', (
+    testWidgets('phone layout keeps the shared palette in $brightness', (
       tester,
     ) async {
       tester.view.devicePixelRatio = 1;
@@ -46,10 +46,8 @@ void main() {
       for (final width in [719.0, 390.0, 720.0, 1280.0]) {
         tester.view.physicalSize = Size(width * 1.5, 900);
         await tester.pumpAndSettle();
-        expect(
-          resolved!.colorScheme.primary,
-          width < 720 ? AppleColors.musicRed : desktopPrimary,
-        );
+        // The phone layout changes spacing, not colours.
+        expect(resolved!.colorScheme.primary, desktopPrimary);
         expect(tester.state(find.byType(TextField)), same(fieldState));
         expect(find.text('keep edit'), findsOneWidget);
         expect(tester.takeException(), isNull);
@@ -88,10 +86,7 @@ void main() {
         ),
       ),
     );
-    final expected = buildAppleTheme(
-      compact: true,
-      seedAccent: state.accentSeed,
-    );
+    final expected = buildAppleTheme(seedAccent: state.accentSeed);
     expect(resolved!.colorScheme, expected.colorScheme);
     expect(
       resolved!.textTheme.bodyLarge!.fontFamily,
