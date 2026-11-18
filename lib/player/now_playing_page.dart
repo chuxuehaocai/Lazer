@@ -675,12 +675,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     return _EntranceTickerGate(settled: settled, child: child);
   }
 
-  Widget _cover(Track track) {
-    final compact = useCompactLayout(
-      widget.state.uiMode,
-      MediaQuery.sizeOf(context).width,
-      layoutStyle: widget.state.layoutStyle,
-    );
+  Widget _cover(Track track, {bool compact = false}) {
     return Semantics(
       label: context.tr('歌曲封面，长按保存'),
       child: GestureDetector(
@@ -907,15 +902,32 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                       opacity: widget.state.uiAlpha,
                       child: LayoutBuilder(
                         builder: (context, box) {
+                          // Reuse the phone player once the window is only
+                          // slightly wider than the desktop artwork.
+                          final bool windowPlayer =
+                              WindowChromeScope.maybeOf(context) != null &&
+                              !TvScope.isActive(context) &&
+                              widget.state.layoutStyle != AppLayoutStyle.tv;
+                          final bool automaticWindow =
+                              windowPlayer &&
+                              widget.state.layoutStyle == AppLayoutStyle.auto &&
+                              widget.state.uiMode == AppUiMode.auto;
                           final bool compact =
                               !largeScreenModeOf(context) &&
-                              useCompactLayout(
-                                widget.state.uiMode,
-                                box.maxWidth,
-                                layoutStyle: widget.state.layoutStyle,
-                              );
+                              ((windowPlayer &&
+                                      box.maxWidth <=
+                                          DesktopNowPlaying
+                                              .compactBreakpoint) ||
+                                  (!automaticWindow &&
+                                      useCompactLayout(
+                                        widget.state.uiMode,
+                                        box.maxWidth,
+                                        layoutStyle: widget.state.layoutStyle,
+                                      )));
                           if (_desktopLayout != !compact) {
+                            if (compact) _lyricsMode = false;
                             _desktopLayout = !compact;
+                            _selectionOpen = false;
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               if (mounted) {
                                 _wakeControls();
@@ -1090,7 +1102,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         onTap: _controlsActivity,
       ),
     ),
-    artwork: _cover(track),
+    artwork: _cover(track, compact: true),
     lyrics: _mobileLyrics(),
     details: SingleChildScrollView(
       child: _ArtworkTrackDetails(track: track, state: widget.state),

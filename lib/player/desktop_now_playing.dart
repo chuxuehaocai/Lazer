@@ -37,6 +37,9 @@ bool _usesWindowCapsule(BuildContext context) =>
 
 /// Desktop listening workspace with an unscrolled, collapsible transport dock.
 class DesktopNowPlaying extends StatelessWidget {
+  static const double artworkMaxWidth = 520;
+  static const double compactBreakpoint = artworkMaxWidth * 1.2;
+
   const DesktopNowPlaying({
     super.key,
     required this.state,
@@ -120,46 +123,34 @@ class DesktopNowPlaying extends StatelessWidget {
                               horizontal: sidePadding,
                               vertical: 8,
                             ),
-                            child: Center(
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 1480,
-                                ),
-                                child: LayoutBuilder(
-                                  builder: (context, content) {
-                                    // Give the cover a stable left column and lyrics
-                                    // the wider reading lane used by the desktop
-                                    // design, without wasting scarce vertical space.
-                                    final double paneGap =
-                                        (content.maxWidth * .075).clamp(
-                                          24.0,
-                                          110.0,
-                                        );
-                                    return Row(
+                            child: LayoutBuilder(
+                              builder: (context, content) {
+                                // Keep the two panes equally wide and center
+                                // them as one bounded group. Smaller containers
+                                // shrink both panes instead of enlarging artwork.
+                                final double paneGap = (content.maxWidth * .075)
+                                    .clamp(24.0, 110.0);
+                                final double paneWidth = math.min(
+                                  artworkMaxWidth,
+                                  math.max(0, (content.maxWidth - paneGap) / 2),
+                                );
+                                return Center(
+                                  child: SizedBox(
+                                    width: paneWidth * 2 + paneGap,
+                                    child: Row(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
                                       children: [
                                         Expanded(
-                                          flex: 42,
-                                          child: Align(
-                                            alignment: Alignment.center,
-                                            child: ConstrainedBox(
-                                              constraints: BoxConstraints(
-                                                maxWidth: (box.maxWidth * .35)
-                                                    .clamp(280.0, 520.0),
-                                              ),
-                                              child: _Presentation(
-                                                track: track,
-                                                state: state,
-                                                artwork: artwork,
-                                                onSaveArtwork: onSaveArtwork,
-                                              ),
-                                            ),
+                                          child: _Presentation(
+                                            track: track,
+                                            state: state,
+                                            artwork: artwork,
+                                            onSaveArtwork: onSaveArtwork,
                                           ),
                                         ),
                                         SizedBox(width: paneGap),
                                         Expanded(
-                                          flex: 58,
                                           child: Padding(
                                             padding: EdgeInsets.only(
                                               top:
@@ -193,10 +184,10 @@ class DesktopNowPlaying extends StatelessWidget {
                                           ),
                                         ),
                                       ],
-                                    );
-                                  },
-                                ),
-                              ),
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           );
                         },

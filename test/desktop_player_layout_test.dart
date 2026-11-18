@@ -358,7 +358,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       final art = tester.getRect(find.byKey(const ValueKey('layout-art')));
-      expect(art.width, greaterThanOrEqualTo(72));
+      // Fractional centering offsets can lose precision in global rect widths.
+      expect(
+        tester.getSize(find.byKey(const ValueKey('layout-art'))).width,
+        greaterThanOrEqualTo(72),
+      );
       expect(art.width, closeTo(art.height, .1));
       expect(
         find.byKey(const ValueKey('desktop-play-pause')).hitTestable(),
