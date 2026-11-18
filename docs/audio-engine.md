@@ -70,6 +70,12 @@ engine now publishes the three facts it derives that flag from — whether the s
 exclusive, whether the float DSP/volume chain is on the signal path, and whether the
 output runs the source's own rate/channels/depth — and `lib/audio/native/output_path_state.dart`
 derives the verdict from them, so a stale flag cannot light the indicator in the UI.
+The explicit DSP order took the contract to **27**, the DSD bit-perfect definition
+to **28**, and caller-supplied convolution to **29**. This iOS transport work takes
+it to **30** because `bit_perfect_active` now also covers a validated
+non-exclusive iOS USB session and because the format-selection enum gains iOS USB
+PCM and DoP values. Those two implementations both called themselves ABI 29, so
+the loader could accept a native library with different semantics.
 
 Everything else in the tree is the master branch's, including its probes.
 
@@ -77,7 +83,7 @@ Everything else in the tree is the master branch's, including its probes.
 
 | Path | What it is |
 | --- | --- |
-| `native/lazer-audio/` | The engine from `master` plus the crossfeed stage above: `include/lazer_audio_api.h` (**ABI v24**), FFmpeg decode, WASAPI/ALSA/CoreAudio output, DSD/DoP, DSP chain, offline probes. |
+| `native/lazer-audio/` | The engine from `master` plus the changes above: `include/lazer_audio_api.h` (**ABI v30**), FFmpeg decode, WASAPI/ALSA/CoreAudio output, DSD/DoP, DSP chain, offline probes. |
 | `native/lazer-audio-bridge/` | Growing-file reader over a cache file, plus the ABI layout probe. |
 | `native/CMakeLists.txt` | Builds both for the host when an FFmpeg prefix is available. |
 | `lib/audio/native/lazer_audio_abi.dart` | Dart mirror of the C ABI (structs, enums, constants). |

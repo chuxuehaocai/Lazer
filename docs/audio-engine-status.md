@@ -284,7 +284,7 @@ abstract interface class FailureReportingAudioEngine {
 
 ## 5. 原生桥接层暴露给 Dart 的接口清单
 
-### 5.1 `lazer-audio`（引擎，ABI v24，`LAZER_AUDIO_ABI_VERSION`=`lazer_audio_api.h:33`）
+### 5.1 `lazer-audio`（引擎，ABI v30，`LAZER_AUDIO_ABI_VERSION`=`lazer_audio_api.h`）
 
 核心导出（`native/lazer-audio/src/api.cpp`）：
 

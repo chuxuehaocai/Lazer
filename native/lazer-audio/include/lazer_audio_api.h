@@ -30,7 +30,9 @@
 #define LAZER_AUDIO_CALL
 #endif
 
-#define LAZER_AUDIO_ABI_VERSION 29u
+/* ABI 30 changes the meaning of bit_perfect_active for validated iOS USB sessions and appends
+ * the iOS USB PCM/DoP format selections. */
+#define LAZER_AUDIO_ABI_VERSION 30u
 
 #define LAZER_AUDIO_MAX_EQ_BANDS 32u
 /* Upper bound on the explicit DSP chain length; see LazerAudioDspStage. */
@@ -199,7 +201,7 @@ typedef enum LazerAudioFormatSelection {
     LazerAudioFormatSelectionNativeDsdU32Be = 12,
     /* iOS RemoteIO USB route, validated at the source/carrier clock and unity
      * gain. These do not imply hardware-exclusive access or a DAC bit test.
-     * Enum-only extension: the ABI v29 structure layout is unchanged. */
+     * Semantic change in ABI v30: the structure layout is unchanged. */
     LazerAudioFormatSelectionIosUsbPcm = 13,
     LazerAudioFormatSelectionIosUsbDoP = 14,
 } LazerAudioFormatSelection;

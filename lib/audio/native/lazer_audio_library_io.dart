@@ -1,6 +1,6 @@
 // Loading and binding of the native `lazer-audio` engine and its reader bridge.
 //
-// The engine is a single C ABI shared library (`lazer_audio_api.h`, ABI v29);
+// The engine is a single C ABI shared library (`lazer_audio_api.h`, ABI v30);
 // the bridge is a tiny companion that implements the engine's reader callbacks
 // over a growing cache file, because Dart cannot service a blocking native
 // callback from an engine thread (see `lazer_audio_reader.dart`).

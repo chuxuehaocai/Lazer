@@ -17,7 +17,7 @@ iOS 的严格 USB PCM/DoP 与 NICEHCK NK1 验收请使用第 11 节。
 | --- | --- |
 | 分支 | `nextgen`（已合入 iOS RemoteIO、卷积和会话修复） |
 | 构建 | 必须能找到 DSD-capable FFmpeg：设置 `LAZER_FFMPEG_ROOT`，或把 SDK 放在 `third_party/ffmpeg` |
-| 引擎版本 | 源码与 Dart 镜像同为 **ABI 29**。构建会同时重编引擎；**不要**直接跑旧的 `build/` 产物 |
+| 引擎版本 | 源码与 Dart 镜像同为 **ABI 30**。构建会同时重编引擎；**不要**直接跑旧的 `build/` 产物 |
 | 平台 | Windows 已验证构建；Linux / macOS 的构建链路在 CI 里，但播放行为未验证 |
 
 构建（PowerShell）：
@@ -42,7 +42,7 @@ cd $env:TEMP
 
 **预期**：`decision=native`，两行 `ok`，退出码 0。
 
-**判读**：如果出现 `library unavailable` 且原因是 `reports ABI 25; this build expects 29`，那是旧产物，
+**判读**：如果出现 `library unavailable` 且原因是 `reports ABI 29; this build expects 30`，那是旧产物，
 重新构建即可；如果是 `not found`，是引擎没被打进包。
 
 ---
