@@ -697,7 +697,6 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _layout(Size size, TextScaler scaler) {
-    final firstLayout = _ys.isEmpty;
     final replaced =
         _layoutTrackId != widget.state.current?.id ||
         !identical(_sourceLines, widget.state.lyrics) ||
@@ -746,13 +745,7 @@ class _LyricViewportState extends State<LyricViewport>
       _rowCache.clear();
     }
     if (replaced) {
-      _ys = [
-        // The first reveal used to start two screens below the viewport; the
-        // whole sheet then travelled that distance on the soft edge spring.
-        // A shorter runway keeps the opening frame cheap and still reads as a
-        // reveal.
-        for (var i = 0; i < _lines.length; i++) LyricSpring(size.height * .7),
-      ];
+      _ys = [for (var i = 0; i < _lines.length; i++) LyricSpring(_prefix[i])];
       _scales = [
         for (var i = 0; i < _lines.length; i++)
           LyricSpring(
@@ -778,9 +771,10 @@ class _LyricViewportState extends State<LyricViewport>
       _setOffset(_offset);
     } else {
       _targets(stagger: false);
-      if (firstLayout) {
-        // The page already animates in. Start the sheet at its actual focus
-        // instead of holding overlapping rows below it until tickers resume.
+      if (replaced) {
+        // Cache-to-network refreshes replace an already mounted document too.
+        // Every new sheet must be readable before the next ticker frame, even
+        // when hidden or backgrounded; only playback moves existing rows.
         for (final spring in _ys) {
           spring.setPosition(spring.target);
         }
