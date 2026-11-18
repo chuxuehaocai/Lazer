@@ -53,37 +53,76 @@ class PlayerPullDownRegion extends StatefulWidget {
   State<PlayerPullDownRegion> createState() => _PlayerPullDownRegionState();
 }
 
-class _PlayerPullDownRegionState extends State<PlayerPullDownRegion> {
-  bool _pulling = false;
+class _PlayerPullDownRegionState extends State<PlayerPullDownRegion>
+    with WidgetsBindingObserver {
+  PlayerPullDown? _activePull;
   double _origin = 0;
+  double _travel = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didUpdateWidget(PlayerPullDownRegion oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.enabled ||
+        widget.pullDown != oldWidget.pullDown ||
+        widget.travel != oldWidget.travel) {
+      _end(0, cancel: true);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _end(0, cancel: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _end(0, cancel: true);
+    super.dispose();
+  }
 
   bool get _canStart =>
-      widget.enabled && widget.travel > 0 && widget.pullDown.canStart;
+      _activePull == null &&
+      widget.enabled &&
+      widget.travel.isFinite &&
+      widget.travel > 0 &&
+      widget.pullDown.canStart;
 
   void _start(DragStartDetails details) {
-    _pulling = true;
+    // The host may have opened a sheet since this pointer entered the arena.
+    if (!_canStart) return;
+    _activePull = widget.pullDown;
     _origin = details.globalPosition.dy;
-    widget.pullDown.startPull();
+    _travel = widget.travel;
+    _activePull!.startPull();
   }
 
   void _update(DragUpdateDetails details) {
-    if (!_pulling) return;
+    final pull = _activePull;
+    if (pull == null) return;
     // Global coordinates: the page slides under the finger while the pull
     // runs, so a local delta would cancel the movement out.
     final double pulled = (details.globalPosition.dy - _origin).clamp(
-      -widget.travel,
-      widget.travel,
+      -_travel,
+      _travel,
     );
-    widget.pullDown.updatePull(pulled / widget.travel);
+    pull.updatePull(pulled / _travel);
   }
 
   void _end(double velocity, {bool cancel = false}) {
-    if (!_pulling) return;
-    _pulling = false;
+    final pull = _activePull;
+    if (pull == null) return;
+    _activePull = null;
     if (cancel) {
-      widget.pullDown.cancelPull();
+      pull.cancelPull();
     } else {
-      widget.pullDown.endPull(velocity);
+      pull.endPull(velocity);
     }
   }
 
@@ -97,6 +136,7 @@ class _PlayerPullDownRegionState extends State<PlayerPullDownRegion> {
             () => _PullDownDragRecognizer(debugOwner: this),
             (_PullDownDragRecognizer recognizer) {
               recognizer.dragStartBehavior = DragStartBehavior.down;
+              recognizer.onlyAcceptDragOnThreshold = true;
               recognizer.canStart = () => _canStart;
               recognizer.onStart = _start;
               recognizer.onUpdate = _update;
@@ -117,6 +157,32 @@ class _PullDownDragRecognizer extends VerticalDragGestureRecognizer {
 
   bool Function()? canStart;
   VoidCallback? onPointerCancelled;
+  int? _pointer;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    _pointer = event.pointer;
+    super.addAllowedPointer(event);
+  }
+
+  @override
+  void addAllowedPointerPanZoom(PointerPanZoomStartEvent event) {
+    _pointer = event.pointer;
+    super.addAllowedPointerPanZoom(event);
+  }
+
+  @override
+  void handleNonAllowedPointer(PointerDownEvent event) {
+    // OneSequenceGestureRecognizer rejects every pending arena entry by
+    // default. An extra finger must not reject the original finger's pull.
+    if (_pointer == null) super.handleNonAllowedPointer(event);
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {
+    _pointer = null;
+    super.didStopTrackingLastPointer(pointer);
+  }
 
   @override
   void handleEvent(PointerEvent event) {
@@ -126,7 +192,15 @@ class _PullDownDragRecognizer extends VerticalDragGestureRecognizer {
 
   @override
   bool isPointerAllowed(PointerEvent event) =>
-      (canStart?.call() ?? false) && super.isPointerAllowed(event);
+      _pointer == null &&
+      (canStart?.call() ?? false) &&
+      super.isPointerAllowed(event);
+
+  @override
+  bool isPointerPanZoomAllowed(PointerPanZoomStartEvent event) =>
+      _pointer == null &&
+      (canStart?.call() ?? false) &&
+      super.isPointerPanZoomAllowed(event);
 
   /// Only a downward drag belongs to the player. Returning false keeps this
   /// recognizer in the arena without accepting, which leaves taps, and the

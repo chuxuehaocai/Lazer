@@ -174,7 +174,7 @@ class _AppShellState extends State<AppShell>
 
   /// Hosts the player's pull-down gesture on the same motion that opens it, so
   /// the page follows the finger and settles from wherever it was left.
-  late final PlayerPullDown _playerPull = _PlayerPull(this);
+  late _PlayerPull _playerPull = _PlayerPull(this);
 
   /// Drives the shell's own rebuilds. Playback reports ten times a second;
   /// rebuilding the whole page for every tick while a switch is animating is
@@ -528,6 +528,7 @@ class _AppShellState extends State<AppShell>
       _playerSettled.value = true;
     } else if (status == AnimationStatus.dismissed && _nowPlayingOpen) {
       // The next opening builds a fresh page with fresh state.
+      _playerPull.retire();
       _playerChromeActive.value = false;
       setState(() {
         _nowPlayingOpen = false;
@@ -586,8 +587,10 @@ class _AppShellState extends State<AppShell>
       _networkSourceId = null;
       _networkSourcePath = null;
       _networkPodcastId = null;
+      _playerPull.retire();
       _nowPlayingOpen = false;
       _playerChromeActive.value = false;
+      _nowPlayingMotion.animateBack(0, duration: Duration.zero);
       oldWidget.state.removeListener(_onAppStateChanged);
       widget.state.addListener(_onAppStateChanged);
       _playerPage = null;
@@ -596,6 +599,7 @@ class _AppShellState extends State<AppShell>
 
   @override
   void dispose() {
+    _playerPull.retire();
     cancelCoverTransitions();
     _updateTimer?.cancel();
     state.removeListener(_onAppStateChanged);
@@ -927,6 +931,10 @@ class _AppShellState extends State<AppShell>
       return;
     }
     setState(() {
+      if (_playerPull.retired) {
+        _playerPull = _PlayerPull(this);
+        _playerPage = null;
+      }
       _nowPlayingOpen = true;
       _playerChromeActive.value = true;
       _playerSettled.value = false;
@@ -945,6 +953,7 @@ class _AppShellState extends State<AppShell>
 
   void _closeNowPlaying() {
     if (!_nowPlayingOpen) return;
+    _playerPull.retire();
     _playerChromeActive.value = false;
     setState(() {
       _playerSettled.value = false;
@@ -989,6 +998,7 @@ class _AppShellState extends State<AppShell>
       );
       return;
     }
+    _playerPull.retire();
     _playerChromeActive.value = false;
     unawaited(state.feedback());
     setState(() {
@@ -1144,6 +1154,7 @@ class _AppShellState extends State<AppShell>
     }
     _backCommitted = true;
     if (_backPlayer) {
+      _playerPull.retire();
       _playerChromeActive.value = false;
       // The gesture already moved the player completely offscreen. Retire it
       // at that endpoint instead of starting another close spring at .001.
@@ -2695,15 +2706,33 @@ class _PlayerPull implements PlayerPullDown {
   final _AppShellState _shell;
   double _initialOpen = 1;
   bool _dragging = false;
+  bool _retired = false;
+
+  bool get retired => _retired;
+
+  bool get _presentationActive =>
+      !retired &&
+      _shell.mounted &&
+      _shell._nowPlayingOpen &&
+      _shell._playerChromeActive.value &&
+      _shell._backProgress.value == null;
+
+  void retire() {
+    // A pointer can finish after dismissal, disposal or a new opening. Its
+    // callbacks belong to this presentation and must never drive the next one.
+    _retired = true;
+    _dragging = false;
+  }
 
   @override
   bool get canStart =>
-      _shell._nowPlayingOpen &&
+      _presentationActive &&
       !_dragging &&
       _shell._nowPlayingMotion.value > .001;
 
   @override
   void startPull() {
+    if (!canStart) return;
     _dragging = true;
     _initialOpen = _shell._nowPlayingMotion.value;
     _shell._nowPlayingMotion.stop();
@@ -2712,6 +2741,7 @@ class _PlayerPull implements PlayerPullDown {
 
   @override
   void updatePull(double progress) {
+    if (!_dragging || !_presentationActive) return;
     // Stay off the lower bound: the controller reports a dismissal as soon as
     // it reaches zero, and the pull is not committed until the finger lifts.
     _shell._nowPlayingMotion.value = (_initialOpen - progress).clamp(
@@ -2722,12 +2752,14 @@ class _PlayerPull implements PlayerPullDown {
 
   @override
   void endPull(double velocity) {
+    if (!_dragging || !_presentationActive) return;
     _dragging = false;
     _shell._settlePlayerPull(velocity);
   }
 
   @override
   void cancelPull() {
+    if (!_dragging || !_presentationActive) return;
     _dragging = false;
     _shell._settlePlayerPull(0, cancel: true);
   }

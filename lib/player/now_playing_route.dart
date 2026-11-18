@@ -27,6 +27,11 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   final AppState state;
   final ValueNotifier<bool> _settled = BuildSafeValueNotifier(false);
   NavigatorState? _systemGestureNavigator;
+  AnimationStatusListener? _systemGestureRelease;
+  bool _systemGestureSettling = false;
+  bool _leaving = false;
+  bool _disposed = false;
+  AppLifecycleListener? _lifecycle;
 
   @override
   AnimationController createAnimationController() =>
@@ -47,14 +52,25 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   void install() {
     super.install();
     animation!.addStatusListener(_onStatus);
+    _lifecycle = AppLifecycleListener(onStateChange: _onLifecycleChanged);
   }
 
   void _onStatus(AnimationStatus status) {
     _settled.value = status == AnimationStatus.completed;
   }
 
+  void _onLifecycleChanged(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) return;
+    cancelPull();
+    handleCancelBackGesture();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
+    _dragging = false;
+    _lifecycle?.dispose();
+    _clearSystemGestureRelease();
     final nav = _systemGestureNavigator;
     if (nav != null) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -108,10 +124,20 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
 
   @override
   bool get canStart =>
-      isCurrent && !_dragging && (controller?.value ?? 0) > .001;
+      !_disposed &&
+      !_leaving &&
+      !_dragging &&
+      isCurrent &&
+      isActive &&
+      !isFirst &&
+      !willHandlePopInternally &&
+      popDisposition == RoutePopDisposition.pop &&
+      !(navigator?.userGestureInProgress ?? true) &&
+      (controller?.value ?? 0) > .001;
 
   @override
   void startPull() {
+    if (!canStart) return;
     _dragging = true;
     _initialOpen = controller!.value;
     _settled.value = false;
@@ -120,6 +146,11 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
 
   @override
   void updatePull(double progress) {
+    if (!_dragging || _disposed || _leaving || !progress.isFinite) return;
+    if (!isCurrent) {
+      cancelPull();
+      return;
+    }
     // Stay off the lower bound: popping, not dragging, finishes the dismissal.
     controller?.value = (_initialOpen - progress).clamp(
       .001,
@@ -129,13 +160,19 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
 
   @override
   void endPull(double velocity) {
+    if (!_dragging || _disposed || _leaving) return;
     _dragging = false;
+    if (!isActive) return;
+    if (!velocity.isFinite) velocity = 0;
     final double open = controller?.value ?? 1;
     final double pulled = 1 - open;
     final bool dismiss = velocity < -900
         ? false
         : (velocity > 900 && pulled > .02) || pulled >= .22;
-    if (dismiss) {
+    if (dismiss &&
+        isCurrent &&
+        !willHandlePopInternally &&
+        popDisposition == RoutePopDisposition.pop) {
       _releaseVelocity =
           -velocity / MediaQuery.sizeOf(navigator!.context).height;
       navigator?.pop();
@@ -153,7 +190,9 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
 
   @override
   void cancelPull() {
+    if (!_dragging || _disposed || _leaving) return;
     _dragging = false;
+    if (!isActive) return;
     PlayerPageMotion.animate(
       controller!,
       1,
@@ -165,15 +204,52 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   }
 
   @override
+  bool didPop(void result) {
+    final popped = super.didPop(result);
+    if (popped) {
+      // A close button or system back can win while a finger is still down.
+      // Its later update/cancel must not stop or reverse the exit animation.
+      _leaving = true;
+      _dragging = false;
+    }
+    return popped;
+  }
+
+  @override
+  void didChangeNext(Route<dynamic>? nextRoute) {
+    super.didChangeNext(nextRoute);
+    if (nextRoute != null) cancelPull();
+  }
+
+  @override
+  bool get popGestureEnabled =>
+      !_disposed && !_leaving && !_dragging && super.popGestureEnabled;
+
+  @override
   void handleStartBackGesture({double progress = 0}) {
+    if (_disposed ||
+        _leaving ||
+        !isCurrent ||
+        _systemGestureNavigator != null) {
+      return;
+    }
+    cancelPull();
     _systemGestureNavigator = navigator;
+    _systemGestureSettling = false;
     super.handleStartBackGesture(progress: progress);
   }
 
   @override
   void handleCommitBackGesture() {
-    final nav = navigator!;
-    if (isCurrent) nav.pop();
+    final nav = _systemGestureNavigator;
+    if (_disposed || nav == null || _systemGestureSettling) return;
+    _systemGestureSettling = true;
+    if (isCurrent) {
+      nav.pop();
+    }
+    if (!_leaving && isActive) {
+      controller!.animateWith(createSimulation(forward: true));
+    }
     // TransitionRoute's default commit restarts at upperBound. This player's
     // physical spring is unbounded, so its upperBound is infinity. Continue
     // from the finite finger position instead.
@@ -181,32 +257,56 @@ class NowPlayingRoute extends PageRoute<void> implements PlayerPullDown {
   }
 
   @override
+  void handleUpdateBackGestureProgress({required double progress}) {
+    if (_disposed ||
+        _leaving ||
+        _systemGestureNavigator == null ||
+        _systemGestureSettling ||
+        !progress.isFinite) {
+      return;
+    }
+    super.handleUpdateBackGestureProgress(progress: progress.clamp(0.0, 1.0));
+  }
+
+  @override
   void handleCancelBackGesture() {
-    final nav = navigator!;
-    if (isCurrent) controller!.animateWith(createSimulation(forward: true));
+    final nav = _systemGestureNavigator;
+    if (_disposed || nav == null || _systemGestureSettling) return;
+    _systemGestureSettling = true;
+    if (!_leaving && isActive) {
+      controller!.animateWith(createSimulation(forward: true));
+    }
     _releaseSystemGestureWhenSettled(nav);
   }
 
   void _releaseSystemGestureWhenSettled(NavigatorState nav) {
+    _clearSystemGestureRelease();
     if (controller!.isAnimating) {
-      late AnimationStatusListener release;
-      release = (status) {
+      _systemGestureRelease = (status) {
         if (status != AnimationStatus.completed &&
             status != AnimationStatus.dismissed) {
           return;
         }
-        controller?.removeStatusListener(release);
+        _clearSystemGestureRelease();
         _releaseSystemGesture(nav);
       };
-      controller!.addStatusListener(release);
+      controller!.addStatusListener(_systemGestureRelease!);
     } else {
       _releaseSystemGesture(nav);
     }
   }
 
+  void _clearSystemGestureRelease() {
+    final release = _systemGestureRelease;
+    if (release == null) return;
+    controller?.removeStatusListener(release);
+    _systemGestureRelease = null;
+  }
+
   void _releaseSystemGesture(NavigatorState nav) {
     if (_systemGestureNavigator != nav) return;
     _systemGestureNavigator = null;
+    _systemGestureSettling = false;
     if (nav.mounted && nav.userGestureInProgress) nav.didStopUserGesture();
   }
 

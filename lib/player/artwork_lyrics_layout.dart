@@ -21,11 +21,15 @@ class ArtworkLyricsLayout extends StatefulWidget {
     required this.transport,
     required this.header,
     required this.summary,
+    this.onControlsHiddenChanged,
   });
 
   final bool lyricsVisible, controlsVisible;
   final Widget artwork, lyrics, details, transport;
   final Widget header, summary;
+
+  /// Reports when the controls actually reach or leave the hidden endpoint.
+  final ValueChanged<bool>? onControlsHiddenChanged;
 
   @override
   State<ArtworkLyricsLayout> createState() => _ArtworkLyricsLayoutState();
@@ -53,6 +57,16 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
     value: widget.controlsVisible ? 1 : 0,
   );
   late final Animation<double> _summary = ReverseAnimation(_chrome);
+  bool? _reportedControlsHidden;
+
+  void _reportControlsHidden() {
+    final hidden = !widget.controlsVisible && _chrome.isDismissed;
+    if (_reportedControlsHidden == hidden) return;
+    _reportedControlsHidden = hidden;
+    widget.onControlsHiddenChanged?.call(hidden);
+  }
+
+  void _onChromeStatus(AnimationStatus _) => _reportControlsHidden();
 
   @override
   void initState() {
@@ -60,6 +74,8 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
     _mode;
     _modeOpacity;
     _chrome;
+    _chrome.addStatusListener(_onChromeStatus);
+    _reportControlsHidden();
   }
 
   @override
@@ -80,6 +96,7 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
         reduceMotion: reduced,
       );
     }
+    _reportControlsHidden();
   }
 
   @override
@@ -89,6 +106,7 @@ class _ArtworkLyricsLayoutState extends State<ArtworkLyricsLayout>
       _mode.value = widget.lyricsVisible ? 1 : 0;
       _chrome.value = widget.controlsVisible ? 1 : 0;
     }
+    _reportControlsHidden();
   }
 
   @override
