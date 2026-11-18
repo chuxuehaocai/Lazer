@@ -210,7 +210,7 @@ class NowPlayingPage extends StatefulWidget {
 }
 
 class _NowPlayingPageState extends State<NowPlayingPage>
-    with BuildSafeState<NowPlayingPage> {
+    with WidgetsBindingObserver, BuildSafeState<NowPlayingPage> {
   bool _lyricsMode = false;
   final ValueNotifier<bool> _controlsVisibility = ValueNotifier(true);
   bool get _controlsVisible => _controlsVisibility.value;
@@ -221,6 +221,8 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   bool _saving = false;
   bool _artworkActionOpen = false;
   bool _selectionOpen = false;
+  String? _selectionTrackId;
+  bool _foreground = true;
   bool _commentsOpen = false;
   bool _queueOpen = false;
   bool _moreOpen = false;
@@ -245,7 +247,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   void _endControlPointer(int pointer) {
-    _activeControlPointers.remove(pointer);
+    if (!_activeControlPointers.remove(pointer)) return;
     _armHide();
   }
 
@@ -280,6 +282,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.state.playerPresentationChanged(true);
     _commentsController = SongCommentsController(
       widget.state.catalog.connections,
@@ -292,6 +295,8 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   bool get _canAutoHide =>
+      _foreground &&
+      (widget.presentationActive?.value ?? true) &&
       !TvScope.isActive(context) &&
       widget.state.playing &&
       widget.state.playbackError == null &&
@@ -331,6 +336,14 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   void _preferencesChanged() {
+    // A new song replaces the keyed viewport. Its disposed selection must
+    // never keep the new song's background taps and pull-down locked.
+    if (_selectionOpen && _selectionTrackId != widget.state.current?.id) {
+      setState(() {
+        _selectionOpen = false;
+        _selectionTrackId = null;
+      });
+    }
     if (_themeSeed != widget.state.accentSeed ||
         _themeFonts != widget.state.fontPreferences) {
       _themeSeed = widget.state.accentSeed;
@@ -368,8 +381,13 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     );
   }
 
-  void _selectionChanged(bool active) {
-    _selectionOpen = active;
+  void _selectionChanged(String? trackId, bool active) {
+    if (!mounted || trackId != widget.state.current?.id) return;
+    if (_selectionOpen == active) return;
+    setState(() {
+      _selectionOpen = active;
+      _selectionTrackId = active ? trackId : null;
+    });
     if (active) {
       _hideTimer?.cancel();
     } else {
@@ -407,7 +425,20 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   // Record the starting mode without waking the controls for lyric or drag
   // gestures. Only a completed background tap changes the presentation.
   void _onTouchDown() {
-    _controlsHiddenAtTouchDown = !_controlsVisible;
+    if (_activeControlPointers.isEmpty) {
+      _controlsHiddenAtTouchDown = !_controlsVisible;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    // An interrupted touch is not guaranteed to deliver its final pointer
+    // event. Retire those holds so the next interaction can hide normally.
+    _activeControlPointers.clear();
+    _controlsHiddenAtTouchDown = true;
+    _wakeControls();
+    _armHide();
   }
 
   /// Return one step only after a completed tap outside the lyric text.
@@ -423,6 +454,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.presentationActive?.removeListener(_syncWindowChromePresentation);
     _windowChrome?.detach(_controlsVisibility);
     _controlsVisibility.dispose();
@@ -437,7 +469,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   void _toggleLyrics() {
     setState(() {
       _lyricsMode = !_lyricsMode;
-      if (!_lyricsMode) _selectionOpen = false;
+      if (!_lyricsMode) {
+        _selectionOpen = false;
+        _selectionTrackId = null;
+      }
       _controlsVisibility.value = true;
     });
     _armHide();
@@ -592,36 +627,40 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   /// 移动端整屏歌词：标题固定，正文占满剩余高度。
-  Widget _mobileLyrics() => LayoutBuilder(
-    key: const ValueKey('mobile-lyrics'),
-    builder: (context, box) => Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: 4,
-        vertical: box.maxHeight < 240 ? 4 : 12,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (box.maxHeight >= 240) ...[
-            const InlineLabel('歌词'),
-            const SizedBox(height: 12),
-          ],
-          Expanded(
-            child: _settledGate(
-              LyricViewport(
-                key: ValueKey<String>(
-                  'mobile-lyrics-${widget.state.current?.id ?? ''}',
+  Widget _mobileLyrics() {
+    final trackId = widget.state.current?.id;
+    return LayoutBuilder(
+      key: const ValueKey('mobile-lyrics'),
+      builder: (context, box) => Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: 4,
+          vertical: box.maxHeight < 240 ? 4 : 12,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (box.maxHeight >= 240) ...[
+              const InlineLabel('歌词'),
+              const SizedBox(height: 12),
+            ],
+            Expanded(
+              child: _settledGate(
+                LyricViewport(
+                  key: ValueKey<String>(
+                    'mobile-lyrics-${trackId ?? ''}',
+                  ),
+                  state: widget.state,
+                  backdropKey: _backdropKey,
+                  onSelectionChanged: (active) =>
+                      _selectionChanged(trackId, active),
                 ),
-                state: widget.state,
-                backdropKey: _backdropKey,
-                onSelectionChanged: _selectionChanged,
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   Future<void> _saveArtwork(Track track) async {
     if (_artworkActionOpen) return;
@@ -948,7 +987,8 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                                         ),
                                         state: widget.state,
                                         backdropKey: _backdropKey,
-                                        onSelectionChanged: _selectionChanged,
+                                        onSelectionChanged: (active) =>
+                                            _selectionChanged(track.id, active),
                                       ),
                                     ),
                                     comments: SongCommentsView(

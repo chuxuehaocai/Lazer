@@ -64,6 +64,7 @@ class _LyricViewportState extends State<LyricViewport>
   final Stopwatch _wall = Stopwatch()..start();
   List<LyricLine> _lines = [];
   List<LyricLine>? _sourceLines;
+  String? _layoutTrackId;
   Duration? _timelineDuration;
   List<double> _baseHeights = [];
   List<double> _interludePresence = [];
@@ -105,10 +106,12 @@ class _LyricViewportState extends State<LyricViewport>
   double _dragCarry = 0;
   LyricSelection _selection = const LyricSelection();
   bool _copied = false;
+  bool _creatingImage = false;
   Timer? _copiedTimer;
   int _selectionRevision = 0;
   String? _trackId;
   int _dragArmedAt = -1000;
+  int _gestureRevision = 0;
   bool _extendingSelection = false;
   final GlobalKey _viewportKey = GlobalKey();
   late double _blurTarget = widget.state.lyricBlurEnabled ? 1 : 0;
@@ -126,19 +129,41 @@ class _LyricViewportState extends State<LyricViewport>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _lifecycleVisible = state == AppLifecycleState.resumed;
     if (!_lifecycleVisible) {
-      _ticker?.stop();
-      _resume?.cancel();
+      _suspendLyrics();
       return;
     }
     if (_visible) _resumeVisibleLyrics();
   }
 
-  void _resumeVisibleLyrics() {
-    _resume?.cancel();
+  void _resetGesture() {
+    _gestureRevision++;
     _dragging = false;
     _middlePointer = null;
+    _extendingSelection = false;
+    _dragArmedAt = -1000;
+    _dragCarry = 0;
     _velocity = 0;
     _coast = null;
+    _coastTime = 0;
+  }
+
+  void _suspendLyrics() {
+    _ticker?.stop();
+    _resume?.cancel();
+    _resetGesture();
+    // Hidden panes keep their State. Release selection and the parent's gesture
+    // lock now instead of reviving an unfinished long press when shown again.
+    if (_selection.active) {
+      _changeSelection(const LyricSelection(), resume: false);
+    } else {
+      setState(() {});
+    }
+    _manual = false;
+  }
+
+  void _resumeVisibleLyrics() {
+    _resume?.cancel();
+    _resetGesture();
     _lastMedia = null;
     _manual = _selection.active;
     _onLane();
@@ -166,8 +191,7 @@ class _LyricViewportState extends State<LyricViewport>
     if (_visible != visible) {
       _visible = visible;
       if (!visible) {
-        _ticker?.stop();
-        _resume?.cancel();
+        _suspendLyrics();
       } else if (_lifecycleVisible) {
         _resumeVisibleLyrics();
       }
@@ -243,14 +267,16 @@ class _LyricViewportState extends State<LyricViewport>
     final active = widget.state.playing && !seeking && candidate < _active
         ? _active
         : candidate;
+    final trackChanged = _trackId != widget.state.current?.id;
     final changed =
+        trackChanged ||
         !identical(_sourceLines, widget.state.lyrics) ||
         _timelineDuration != widget.state.current?.duration;
     final typographyChanged =
         _fontSize != widget.state.lyricFontSize ||
         _fontWeight != widget.state.lyricFontWeight ||
         _showRomanization != widget.state.showLyricRomanization;
-    if (_trackId != widget.state.current?.id) {
+    if (trackChanged) {
       _trackId = widget.state.current?.id;
       if (_selection.active) {
         _changeSelection(const LyricSelection(), resume: false);
@@ -258,6 +284,7 @@ class _LyricViewportState extends State<LyricViewport>
     }
     if (changed) {
       _resume?.cancel();
+      _resetGesture();
       if (_selection.active) {
         final available = {
           for (final line in widget.state.lyrics) ?lyricSelectionKey(line),
@@ -276,7 +303,6 @@ class _LyricViewportState extends State<LyricViewport>
         );
       }
       _manual = _selection.active;
-      _velocity = 0;
     }
     if (changed || typographyChanged || active != _active) {
       setState(() {
@@ -670,6 +696,7 @@ class _LyricViewportState extends State<LyricViewport>
   void _layout(Size size, TextScaler scaler) {
     final firstLayout = _ys.isEmpty;
     final replaced =
+        _layoutTrackId != widget.state.current?.id ||
         !identical(_sourceLines, widget.state.lyrics) ||
         _timelineDuration != widget.state.current?.duration;
     final typography = (_originalStyle, _translationStyle);
@@ -696,6 +723,7 @@ class _LyricViewportState extends State<LyricViewport>
     _typography = typography;
     _showRomanization = widget.state.showLyricRomanization;
     if (replaced) {
+      _layoutTrackId = widget.state.current?.id;
       _sourceLines = widget.state.lyrics;
       _timelineDuration = widget.state.current?.duration;
       _lines = lyricsWithInterludes(
@@ -789,11 +817,11 @@ class _LyricViewportState extends State<LyricViewport>
 
   void _scheduleResume() {
     _resume?.cancel();
-    if (_selection.active) return;
+    if (_selection.active || !_canInteract) return;
     _resume = Timer(
       Duration(milliseconds: (widget.state.lyricResumeSeconds * 1000).round()),
       () {
-        if (!mounted || _dragging) return;
+        if (!_canInteract || _dragging) return;
         _manual = _selection.active;
         _velocity = 0;
         _targets(seeking: true);
@@ -821,6 +849,7 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _seek(int index) {
+    if (!_canInteractWithLine(index)) return;
     final duration = widget.state.current?.duration.inMilliseconds ?? 0;
     if (duration <= 0) return;
     _resume?.cancel();
@@ -832,6 +861,7 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _tapLine(int index) {
+    if (!_canInteractWithLine(index)) return;
     unawaited(widget.state.feedback());
     _seek(index);
   }
@@ -844,12 +874,17 @@ class _LyricViewportState extends State<LyricViewport>
       _copied = false;
       _rowCache.clear();
     });
+    if (!next.active) {
+      _extendingSelection = false;
+      _dragArmedAt = -1000;
+    }
     _copiedTimer?.cancel();
     if (changed) widget.onSelectionChanged?.call(next.active);
     if (!next.active && resume) _scheduleResume();
   }
 
   void _selectLyrics(int index) {
+    if (!_canInteractWithLine(index)) return;
     if (lyricSelectionKey(_lines[index]) == null) return;
     unawaited(widget.state.feedback());
     _beginManual();
@@ -867,6 +902,9 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   void _extendSelection(Offset globalPosition) {
+    // A second finger, track change or lifecycle transition can close the
+    // selection while the original recognizer still has queued move events.
+    if (!_canInteract || !_selection.active) return;
     final box = _viewportKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || _lines.isEmpty) return;
     final y = box.globalToLocal(globalPosition).dy;
@@ -884,6 +922,7 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   Future<void> _copyLyrics() async {
+    if (!_canInteract || !_selection.active) return;
     final revision = _selectionRevision;
     await Clipboard.setData(
       ClipboardData(
@@ -902,6 +941,7 @@ class _LyricViewportState extends State<LyricViewport>
   }
 
   Future<void> _createImage() async {
+    if (_creatingImage || !_canInteract || !_selection.active) return;
     final track = widget.state.current;
     if (track == null) return;
     final selected = [
@@ -909,18 +949,48 @@ class _LyricViewportState extends State<LyricViewport>
         if (_selection.keys.contains(lyricSelectionKey(line))) line,
     ];
     if (selected.isEmpty) return;
-    final backdrop = await captureLyricBackdrop(widget.backdropKey);
-    if (!mounted) {
-      backdrop?.dispose();
-      return;
+    _creatingImage = true;
+    final revision = _selectionRevision;
+    final showRomanization = widget.state.showLyricRomanization;
+    try {
+      final backdrop = await captureLyricBackdrop(widget.backdropKey);
+      if (!mounted ||
+          !_canInteract ||
+          revision != _selectionRevision ||
+          widget.state.current?.id != track.id) {
+        backdrop?.dispose();
+        return;
+      }
+      await showLyricImageDialog(
+        context,
+        track: track,
+        lines: selected,
+        showRomanization: showRomanization,
+        background: backdrop,
+      );
+    } finally {
+      _creatingImage = false;
     }
-    await showLyricImageDialog(
-      context,
-      track: track,
-      lines: selected,
-      showRomanization: widget.state.showLyricRomanization,
-      background: backdrop,
-    );
+  }
+
+  bool get _canInteract =>
+      mounted &&
+      _visible &&
+      _lifecycleVisible &&
+      !widget.state.lyricsLoading &&
+      _layoutTrackId == widget.state.current?.id &&
+      identical(_sourceLines, widget.state.lyrics);
+
+  bool _canInteractWithLine(int index) =>
+      _canInteract && index >= 0 && index < _lines.length;
+
+  void _activateLine(int index) {
+    if (!_canInteractWithLine(index)) return;
+    if (_selection.active) {
+      _changeSelection(_selection.toggle(_lines, index));
+    } else {
+      _tapLine(index);
+    }
   }
 
   Widget _interactiveText(
@@ -932,10 +1002,11 @@ class _LyricViewportState extends State<LyricViewport>
     text: text,
     style: style,
     child: GestureDetector(
+      // Cancel recognizers belonging to the old sheet, including a held finger
+      // whose row index has been reused by a shorter replacement document.
+      key: ValueKey((_sourceLines, _trackId, _gestureRevision)),
       behavior: HitTestBehavior.opaque,
-      onTap: () => _selection.active
-          ? _changeSelection(_selection.toggle(_lines, index))
-          : _tapLine(index),
+      onTap: () => _activateLine(index),
       onLongPress: () => _selectLyrics(index),
       onLongPressMoveUpdate: (event) => _extendSelection(event.globalPosition),
       onLongPressEnd: (_) => _dragArmedAt = _wall.elapsedMilliseconds,
@@ -961,9 +1032,7 @@ class _LyricViewportState extends State<LyricViewport>
           ),
     onTap: _lines[index].text.trim().isEmpty
         ? null
-        : () => _selection.active
-              ? _changeSelection(_selection.toggle(_lines, index))
-              : _tapLine(index),
+        : () => _activateLine(index),
     onLongPress: _lines[index].text.trim().isEmpty
         ? null
         : () => _selectLyrics(index),
@@ -1230,6 +1299,7 @@ class _LyricViewportState extends State<LyricViewport>
                   }
                 },
                 child: GestureDetector(
+                  key: ValueKey((_sourceLines, _trackId, _gestureRevision)),
                   behavior: HitTestBehavior.opaque,
                   onVerticalDragStart: (_) {
                     _extendingSelection =
@@ -1281,47 +1351,51 @@ class _LyricViewportState extends State<LyricViewport>
                   ),
                 ),
               ),
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: 12,
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 480),
-                    child: AnimatedSwitcher(
-                      duration: MediaQuery.disableAnimationsOf(context)
-                          ? Duration.zero
-                          : AppleSpring.responsive.duration,
-                      switchInCurve: const AppleSpringCurve(),
-                      switchOutCurve: const AppleSpringCurve(),
-                      transitionBuilder: (child, animation) => FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position: Tween(
-                            begin: const Offset(0, .35),
-                            end: Offset.zero,
-                          ).animate(animation),
-                          child: child,
+              if (_visible && _lifecycleVisible)
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  bottom: 12,
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      child: AnimatedSwitcher(
+                        duration: MediaQuery.disableAnimationsOf(context)
+                            ? Duration.zero
+                            : AppleSpring.responsive.duration,
+                        switchInCurve: const AppleSpringCurve(),
+                        switchOutCurve: const AppleSpringCurve(),
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween(
+                              begin: const Offset(0, .35),
+                              end: Offset.zero,
+                            ).animate(animation),
+                            child: child,
+                          ),
                         ),
+                        child: _selection.active
+                            ? LyricSelectionToolbar(
+                                key: const ValueKey('lyric-selection-toolbar'),
+                                count: _selection.keys.length,
+                                copied: _copied,
+                                onSelectAll: () {
+                                  if (_canInteract && _selection.active) {
+                                    _changeSelection(_selection.all(_lines));
+                                  }
+                                },
+                                onCopy: () => unawaited(_copyLyrics()),
+                                onCreateImage: () => unawaited(_createImage()),
+                                onClose: () =>
+                                    _changeSelection(const LyricSelection()),
+                              )
+                            : const SizedBox.shrink(),
                       ),
-                      child: _selection.active
-                          ? LyricSelectionToolbar(
-                              key: const ValueKey('lyric-selection-toolbar'),
-                              count: _selection.keys.length,
-                              copied: _copied,
-                              onSelectAll: () =>
-                                  _changeSelection(_selection.all(_lines)),
-                              onCopy: () => unawaited(_copyLyrics()),
-                              onCreateImage: () => unawaited(_createImage()),
-                              onClose: () =>
-                                  _changeSelection(const LyricSelection()),
-                            )
-                          : const SizedBox.shrink(),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
         );
