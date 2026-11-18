@@ -245,8 +245,24 @@ Float32 桥接、DoP marker/idle、条件变化后回调静音与状态失效，
 
 本地验证日志位于 `build/ios-integrated-audit/`：Flutter 790 项通过，另 2 项因缺少
 外部插件 checkout 跳过；静态分析、本地化与 Python 98 项检查通过。RemoteIO 使用
-Clang 23、`-Wall -Wextra -Werror` 构建并通过契约检查；原生 probe 全量及本轮 Apple CI
-结果另行记录。Windows Chrome 检查因 Flutter 3.47 的测试资源路径在本机返回
+Clang 23、`-Wall -Wextra -Werror` 构建并通过契约检查；统一重编后的原生 probe
+24 项全部通过（309.18 秒），MSVC 的完整 engine/bridge DLL 构建通过。
+提交 `04a422c` 的 [CI 44299255732](https://github.com/chuxuehaocai/Lazer/actions/runs/44299255732)
+已通过 Linux 检查：Flutter 790 项（2 项外部插件缺失跳过）、Chrome 4 项、Python
+98 项、静态分析、本地化及 AAudio/RemoteIO 契约。Apple 构建与集成也全部通过：
+iOS 原生 audio job 的设备/模拟器 smoke 均为 `PASS file=320ms reader=330ms ABI=29`；
+Flutter iOS 集成 7 项实际执行且无跳过，覆盖 Native engine 选择、factory 与 worker、
+高解析 PCM/DSD RemoteIO、HiFi DSP、HTTP growing reader、严格 USB PCM 拒绝和非 USB
+DoP 强制请求拒绝。
+
+最终 artifact [14428681263](https://github.com/chuxuehaocai/Lazer/actions/runs/44299255732/artifacts/14428681263)
+为 `Lazer-iOS-aarch64.ipa`，大小 51,943,175 字节，SHA-256 为
+`cd9efaa6e0b7e8ba836844c1263b71553779bc1a49d2a8d8d1538476432a1170`，与随包 sidecar
+一致。下载后复验了 ZIP 全部 147 个成员的 CRC、app 与 PlayCount Widget 的
+`2.0.302 (302)` 版本、各自 bundle identifier、共同的
+`group.dev.naominet.lazer` App Group，以及最终 IPA 中的 arm64 Runner、19 个引擎 ABI、
+11 个 reader bridge 导出、无 FFmpeg 动态库和打包排除项。
+Windows Chrome 检查因 Flutter 3.47 的测试资源路径在本机返回
 CanvasKit 404 而未执行，浏览器边界改由 Linux CI 验证；未修改系统 Flutter SDK。
 
 上述软件审计没有增加 USB DAC、NK1、真实 Apple 证书安装或物理位流的验收证据。
