@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -10,6 +11,7 @@ import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/diagnostics/app_log.dart';
 import 'package:lazer_nextgen/gateway/gateway.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
+import 'package:lazer_nextgen/state/hifi_settings.dart';
 
 const Track _track = Track(
   id: 'resume-fixture',
@@ -42,6 +44,7 @@ class _Catalog extends Catalog {
 class _Engine implements AudioEngine {
   Object? openFailure;
   Object? playFailure;
+  int openCalls = 0;
   final StreamController<void> completions = StreamController<void>.broadcast();
   final List<Duration> seekRequests = <Duration>[];
   @override
@@ -54,6 +57,7 @@ class _Engine implements AudioEngine {
   Stream<void> get completed => completions.stream;
   @override
   Future<void> setUrl(String url) async {
+    openCalls++;
     if (openFailure != null) throw openFailure!;
     active = true;
   }
@@ -77,6 +81,40 @@ class _Engine implements AudioEngine {
   Future<void> stop() async => active = false;
   @override
   void dispose() {}
+}
+
+class _QueueEngine extends _Engine implements QueueAudioEngine {
+  int queueCalls = 0;
+
+  @override
+  Future<int> setQueue(List<String> urls, {int startIndex = 0}) async {
+    queueCalls++;
+    if (openFailure case final error?) throw error;
+    active = true;
+    return queueCalls;
+  }
+
+  @override
+  Stream<int> get indexStream => const Stream<int>.empty();
+  @override
+  Future<bool> appendToQueue(int queueId, String url) async => false;
+  @override
+  Future<bool> clearQueued(int queueId) async => true;
+  @override
+  Future<bool> playQueuedNext() async => false;
+}
+
+class _DeviceEngine extends _Engine implements FailureReportingAudioEngine {
+  final reports = StreamController<AudioFailure>.broadcast();
+  @override
+  Stream<AudioFailure> get failures => reports.stream;
+  @override
+  AudioFailure? get pendingFailure => null;
+
+  void loseOutput() {
+    active = false;
+    reports.add(const AudioFailure('USB output lost', AudioFailureKind.device));
+  }
 }
 
 Future<void> _until(bool Function() condition) async {
@@ -175,6 +213,112 @@ void main() {
       },
     );
   }
+
+  for (final queue in [false, true]) {
+    for (final strict in [false, true]) {
+      test(
+        'output refusal is actionable without CDN retry (queue: $queue, strict: $strict)',
+        () async {
+          debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+          addTearDown(() => debugDefaultTargetPlatformOverride = null);
+          AppLog.shared.clear();
+          final catalog = _Catalog();
+          final engine = queue ? _QueueEngine() : _Engine();
+          engine.openFailure = AudioOutputRefused(
+            'USB OSStatus -666 https://cdn.example/audio?signature=private-secret',
+          );
+          final state = AppState(
+            catalog: catalog,
+            audioEngine: engine,
+            hifiSettings: HifiSettings(bitPerfect: strict),
+          );
+          addTearDown(state.dispose);
+          state.playQueue([_track]);
+          await _until(() => state.playbackError != null);
+          expect(catalog.resolveCalls, 1);
+          if (engine is _QueueEngine) {
+            expect(engine.queueCalls, 1);
+            expect(
+              engine.openCalls,
+              0,
+              reason: 'a refused queue policy must not retry via setUrl',
+            );
+          } else {
+            expect(engine.openCalls, 1);
+          }
+          expect(
+            state.playbackError,
+            contains(strict ? 'USB 严格输出条件未满足' : '音频输出设置未能应用'),
+          );
+          expect(state.playbackError, isNot(contains('OSStatus')));
+          expect(state.playbackError, isNot(contains('private-secret')));
+          expect(AppLog.shared.snapshot(), contains('OSStatus -666'));
+        },
+      );
+    }
+  }
+
+  test('ordinary source StateErrors retain their single CDN retry', () async {
+    final catalog = _Catalog();
+    final engine = _Engine()
+      ..openFailure = StateError('decoder temporarily unavailable');
+    final state = AppState(catalog: catalog, audioEngine: engine);
+    addTearDown(state.dispose);
+    state.playQueue([_track]);
+    await _until(() => state.playbackError != null);
+    expect(catalog.resolveCalls, 2);
+    expect(engine.openCalls, 2);
+    expect(state.playbackError, '音频加载失败，请重试。');
+  });
+
+  test(
+    'strict USB device recovery stops at the existing retry limit',
+    () async {
+      final catalog = _Catalog();
+      final engine = _DeviceEngine();
+      final state = AppState(
+        catalog: catalog,
+        audioEngine: engine,
+        hifiSettings: const HifiSettings(bitPerfect: true),
+      );
+      addTearDown(engine.reports.close);
+      addTearDown(state.dispose);
+      state.playQueue([_track]);
+      await _until(() => state.audioReady);
+      for (var attempt = 0; attempt < AppState.maxDeviceRetries; attempt++) {
+        engine.loseOutput();
+        await _until(() => engine.openCalls == attempt + 2 && state.audioReady);
+      }
+      engine.loseOutput();
+      await _until(() => state.playbackError != null);
+      expect(engine.openCalls, AppState.maxDeviceRetries + 1);
+      expect(catalog.resolveCalls, AppState.maxDeviceRetries + 1);
+      expect(state.playing, isFalse);
+    },
+  );
+
+  test('strict USB recovery refusal does not re-resolve or loop', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final catalog = _Catalog();
+    final engine = _DeviceEngine();
+    final state = AppState(
+      catalog: catalog,
+      audioEngine: engine,
+      hifiSettings: const HifiSettings(bitPerfect: true),
+    );
+    addTearDown(engine.reports.close);
+    addTearDown(state.dispose);
+    state.playQueue([_track]);
+    await _until(() => state.audioReady);
+    engine.openFailure = AudioOutputRefused('USB route no longer available');
+    engine.loseOutput();
+    await _until(() => state.playbackError != null);
+    expect(engine.openCalls, 2);
+    expect(catalog.resolveCalls, 2);
+    expect(state.playbackError, contains('USB 严格输出条件未满足'));
+    expect(state.playing, isFalse);
+  });
 
   for (final String action in <String>['play', 'toggle', 'retry', 'queue']) {
     test(

@@ -129,7 +129,10 @@ private:
     LogProxy log_;
 
     /* Guards the control-facing fields: state, error text and the descriptors published to the UI. */
-    mutable std::mutex apiMutex_;
+    /* Event callbacks can reenter a control API on the opening thread. Recursive
+     * ownership makes try_lock defined in that case; controls still reject
+     * Preparing so the selected strict-output policy cannot change mid-open. */
+    mutable std::recursive_mutex apiMutex_;
     /* Serializes open/stop/teardown while allowing worker errors to take apiMutex_ during joins. */
     std::mutex lifecycleMutex_;
     /* Protects the active and queued source slots while control/snapshot calls read metadata. */

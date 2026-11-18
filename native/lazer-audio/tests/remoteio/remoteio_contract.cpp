@@ -996,6 +996,29 @@ void testBackgroundSourceReplacementPreservesSession() {
     check(!g_session.active, "explicit stop returns audio focus");
 }
 
+void testRefusedReplacementReleasesSession() {
+    for (int variant = 0; variant < 3; ++variant) {
+        g_session = FakeSession{};
+        auto output = createPlatformAudioOutput();
+        AudioOutputSession session{};
+        std::string error;
+        openDefault(*output, session, error);
+        checkEqual(output->start(error), LazerAudioOk, "starts the outgoing source");
+        output->closeForReplacement();
+        check(g_session.active, "retains the session while preparing a replacement");
+
+        auto refused = request();
+        refused.requireNativeDsd = variant == 0;
+        refused.bitPerfect = variant == 1;
+        refused.requireDoP = variant == 2;
+        checkEqual(output->open(refused, source(), session, error, nullptr),
+            LazerAudioErrorUnsupported, "refuses the unsupported replacement");
+        check(!g_session.active, "a refused replacement returns retained audio focus");
+        checkEqual(g_session.deactivateCalls, 1, "releases the retained session exactly once");
+        check(!output->isOpen(), "a refused replacement has no initialized transport");
+    }
+}
+
 void resetUsbFixture(int32_t rate = 44100) {
     g_session = FakeSession{};
     g_session.sampleRate = rate;
@@ -1363,6 +1386,7 @@ int main() {
     testExplicitPlayReportsRecoveryFailure();
     testPersistentRecoveryFailureIsBounded();
     testBackgroundSourceReplacementPreservesSession();
+    testRefusedReplacementReleasesSession();
     testUsbPcmPreservesIntegerSamples();
     testUsbSourceAndRouteRefusals();
     testUsbHardwareFormatReadback();
@@ -1370,6 +1394,8 @@ int main() {
     testUsbDoPPayloadAndUnderrunClock();
     testUsbDoPRejectsInvalidCarrierContracts();
     testUsbMalformedCallbacksFailClosed();
+    checkEqual(g_instancesDisposed, g_instancesCreated,
+        "all AudioUnit instances are disposed after completed and failed sessions");
     if (failures != 0) {
         std::printf("%d RemoteIO contract check(s) failed\n", failures);
         return 1;

@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -139,6 +140,13 @@ struct Capture {
     TargetFormat target;
     int32_t formatSelection = LazerAudioFormatSelectionUnknown;
     int openCount = 0;
+    bool sessionActive = false;
+    bool failNextOpen = false;
+    bool holdOpen = false;
+    bool openEntered = false;
+    bool releaseOpen = false;
+    Engine *reentrantEngine = nullptr;
+    int32_t readyControlResult = LazerAudioOk;
     std::vector<int32_t> events;
 };
 
@@ -148,6 +156,9 @@ void onEvent(void *context, int32_t event, int32_t, int64_t) {
     {
         std::lock_guard guard(capture->mutex);
         capture->events.push_back(event);
+    }
+    if (event == LazerAudioEventReady && capture->reentrantEngine != nullptr) {
+        capture->readyControlResult = capture->reentrantEngine->setVolume(0.5);
     }
     capture->changed.notify_all();
 }
@@ -162,9 +173,19 @@ public:
           transparentUsb_(transparentUsb), hardwareExclusive_(hardwareExclusive) {}
 
     int32_t open(const AudioOutputRequest &request, const StreamDescription &source,
-        AudioOutputSession &session, std::string &, LogProxy *) override {
-        std::lock_guard guard(capture_->mutex);
+        AudioOutputSession &session, std::string &error, LogProxy *) override {
+        std::unique_lock guard(capture_->mutex);
         ++capture_->openCount;
+        if (capture_->holdOpen) {
+            capture_->openEntered = true;
+            capture_->changed.notify_all();
+            capture_->changed.wait(guard, [this] { return capture_->releaseOpen; });
+        }
+        if (capture_->failNextOpen) {
+            capture_->failNextOpen = false;
+            error = "fake replacement device failure";
+            return LazerAudioErrorDevice;
+        }
         const int32_t rate = forcedSampleRate_ > 0 ? forcedSampleRate_ : source.sampleRate;
         session.target.sampleRate = rate;
         session.target.channels = source.channels;
@@ -186,10 +207,17 @@ public:
         capture_->target = session.target;
         capture_->formatSelection = session.formatSelection;
         open_ = true;
+        capture_->sessionActive = true;
         return LazerAudioOk;
     }
 
     void close() override {
+        std::lock_guard guard(capture_->mutex);
+        open_ = false;
+        capture_->sessionActive = false;
+    }
+
+    void closeForReplacement() override {
         std::lock_guard guard(capture_->mutex);
         open_ = false;
     }
@@ -295,6 +323,14 @@ bool runSession(int32_t forcedSampleRate, bool bitPerfect, double dspPreampDb,
         failure = "strict USB accepted AutoMix while active";
         engine->destroy();
         return false;
+    }
+    for (const double invalid : {std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()}) {
+        if (engine->setVolume(invalid) != LazerAudioErrorInvalidArgument) {
+            failure = "accepted a non-finite software volume";
+            engine->destroy();
+            return false;
+        }
     }
 
     engine->streamInfo(out.info);
@@ -485,6 +521,106 @@ bool runUnvalidatedSharedRefusalCase(bool autoMix = false) {
     return refused;
 }
 
+bool runFailedReplacementReleasesSessionCase() {
+    for (int variant = 0; variant < 4; ++variant) {
+        MemoryReader first(makePcmWave(kSourceFrames, 44'100, 16));
+        auto firstReader = asReader(first);
+        MemoryReader replacement(variant == 1 ? std::vector<uint8_t>{}
+            : makePcmWave(kSourceFrames, 44'100, 16));
+        auto replacementReader = asReader(replacement);
+        auto capture = std::make_shared<Capture>();
+        LazerAudioEngineConfig config{};
+        config.abi_version = LAZER_AUDIO_ABI_VERSION;
+        config.struct_size = sizeof(config);
+        config.device.bit_perfect = 1;
+        auto *engine = Engine::create(config,
+            std::make_unique<CaptureOutput>(capture, 0, true, false));
+        if (engine == nullptr) return false;
+        LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 0, 0, 0};
+        if (engine->open(nullptr, &firstReader, params) != LazerAudioOk) {
+            engine->destroy();
+            return false;
+        }
+        if (variant == 0) params.replay_gain_db = std::numeric_limits<double>::quiet_NaN();
+        if (variant == 2) params.replay_gain_db = -6.0;
+        if (variant == 3) capture->failNextOpen = true;
+        const int32_t result = engine->open(nullptr, &replacementReader, params);
+        LazerAudioStreamInfo info{};
+        engine->streamInfo(info);
+        const bool released = result != LazerAudioOk && !capture->sessionActive &&
+            info.output_format_initialized == 0 && info.bit_perfect_active == 0;
+        engine->destroy();
+        if (!released) {
+            std::cerr << "FAIL: failed replacement retained its background session, case "
+                << variant << '\n';
+            return false;
+        }
+    }
+    std::cout << "PASS: invalid parameters, sources, policies and device opens release retained "
+        "background sessions\n";
+    return true;
+}
+
+bool runControlsDuringStrictOpenCase() {
+    MemoryReader source(makePcmWave(kSourceFrames, 44'100, 16));
+    auto reader = asReader(source);
+    auto capture = std::make_shared<Capture>();
+    capture->holdOpen = true;
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.bit_perfect = 1;
+    config.events.on_event = onEvent;
+    config.events.context = capture.get();
+    auto *engine = Engine::create(config,
+        std::make_unique<CaptureOutput>(capture, 0, true, false));
+    if (engine == nullptr) return false;
+    capture->reentrantEngine = engine;
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 0, 0, 0};
+    int32_t openResult = LazerAudioErrorState;
+    std::thread opening([&] { openResult = engine->open(nullptr, &reader, params); });
+    bool entered = false;
+    {
+        std::unique_lock guard(capture->mutex);
+        entered = capture->changed.wait_for(guard, std::chrono::seconds(5),
+            [&] { return capture->openEntered; });
+    }
+    bool refused = entered;
+    if (entered) {
+        const int32_t volumeResult = engine->setVolume(0.5);
+        const int32_t mixResult = engine->setAutoMix(5000);
+        refused = volumeResult == LazerAudioErrorState && mixResult == LazerAudioErrorState;
+        const LazerAudioEqBand band{LazerAudioEqBandPeak, 1000.0, 3.0, 0.7, 1};
+        const float impulse[] = {1.0f, 1.0f};
+        for (int variant = 0; variant < 5; ++variant) {
+            LazerAudioDspConfig dsp{};
+            if (variant == 0) dsp.preamp_db = -6.0;
+            if (variant == 1) { dsp.band_count = 1; dsp.bands = &band; }
+            if (variant == 2) dsp.crossfeed_enabled = 1;
+            if (variant == 3) dsp.limiter_enabled = 1;
+            if (variant == 4) {
+                dsp.impulse_response = impulse;
+                dsp.impulse_response_frames = 1;
+                dsp.impulse_response_channels = 2;
+            }
+            refused = engine->setDsp(dsp) == LazerAudioErrorState && refused;
+        }
+    }
+    {
+        std::lock_guard guard(capture->mutex);
+        capture->releaseOpen = true;
+    }
+    capture->changed.notify_all();
+    opening.join();
+    const bool ok = refused && openResult == LazerAudioOk &&
+        capture->readyControlResult == LazerAudioErrorUnsupported;
+    engine->destroy();
+    if (!ok) std::cerr << "FAIL: controls raced strict-open policy or reentrant callback deadlocked\n";
+    else std::cout << "PASS: strict-open policy is atomic against volume, AutoMix and DSP controls; "
+        "reentrant Ready controls obey the initialized strict policy\n";
+    return ok;
+}
+
 }  // namespace
 
 namespace lazer::audio {
@@ -494,6 +630,7 @@ std::unique_ptr<AudioOutput> createPlatformAudioOutput() { return nullptr; }
 int main() {
     const bool ok = runBitExactCase() && runDspInvalidatesCase() && runFormatMismatchCase() &&
         runBitPerfectRefusesDspCase() && runTransparentUsbCase() && runUnvalidatedSharedRefusalCase() &&
-        runUnvalidatedSharedRefusalCase(true);
+        runUnvalidatedSharedRefusalCase(true) && runFailedReplacementReleasesSessionCase() &&
+        runControlsDuringStrictOpenCase();
     return ok ? 0 : 1;
 }

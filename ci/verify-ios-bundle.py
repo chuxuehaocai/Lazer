@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import plistlib
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
 
@@ -50,6 +50,7 @@ def _validate_extension(
     info: object,
     label: str,
     app_version: tuple[str, str],
+    app_identifier: str,
 ) -> str:
     executable, short_version, build_version = _validate_bundle(
         info, label, "XPC!"
@@ -59,6 +60,8 @@ def _validate_extension(
             f"{label} version {short_version} ({build_version}) does not match "
             f"the app version {app_version[0]} ({app_version[1]})"
         )
+    if not info["CFBundleIdentifier"].startswith(app_identifier + "."):
+        raise ValueError(f"{label} identifier must start with {app_identifier}.")
     return executable
 
 
@@ -222,7 +225,8 @@ def verify_app(path: Path) -> None:
     for extension in extensions:
         info = _load_plist(extension / "Info.plist")
         executable = _validate_extension(
-            info, str(extension), (short_version, build_version)
+            info, str(extension), (short_version, build_version),
+            app_info["CFBundleIdentifier"],
         )
         verify_widget_extension_point(info, str(extension))
         binary = extension / executable
@@ -237,6 +241,19 @@ def verify_ipa(path: Path) -> None:
     app_root = "Payload/Runner.app/"
     try:
         with ZipFile(path) as package:
+            # ZipInfo normalizes backslashes and truncates NULs on Windows;
+            # validate the original central-directory spellings first.
+            names = [item.orig_filename for item in package.infolist()]
+            if len(names) != len(set(names)):
+                raise ValueError(f"{path.name} contains duplicate ZIP entries")
+            if any(not name.startswith("Payload/") for name in names):
+                raise ValueError(f"{path.name} contains files outside Payload/")
+            if any("\\" in name or re.search(r"[\x00-\x1f]", name)
+                   or PurePosixPath(name).is_absolute()
+                   or ".." in PurePosixPath(name).parts
+                   or PurePosixPath(name).as_posix() != name.rstrip("/")
+                   for name in names):
+                raise ValueError(f"{path.name} contains unsafe ZIP paths")
             app_info = plistlib.loads(package.read(app_root + "Info.plist"))
             app_executable, short_version, build_version = _validate_bundle(
                 app_info, path.name, "APPL"
@@ -245,13 +262,15 @@ def verify_ipa(path: Path) -> None:
             if app_binary.file_size == 0:
                 raise ValueError(f"{path.name} has an empty app executable")
 
-            extension_infos = sorted(
-                name
-                for name in package.namelist()
-                if re.fullmatch(
-                    re.escape(app_root) + r"PlugIns/[^/]+\.appex/Info\.plist", name
-                )
-            )
+            # Discover extension roots from every entry, including an appex
+            # whose Info.plist was lost during packaging.
+            extension_roots = sorted({
+                match.group(1) for name in names
+                if (match := re.match(
+                    re.escape(app_root) + r"(PlugIns/[^/]+\.appex)(?:/|$)", name
+                ))
+            })
+            extension_infos = [app_root + root + "/Info.plist" for root in extension_roots]
             if not extension_infos:
                 raise ValueError(
                     f"{path.name} does not contain any PlugIns/*.appex bundles"
@@ -263,6 +282,7 @@ def verify_ipa(path: Path) -> None:
                     info,
                     info_name,
                     (short_version, build_version),
+                    app_info["CFBundleIdentifier"],
                 )
                 verify_widget_extension_point(info, info_name)
                 extension_binary = package.getinfo(extension_root + executable)

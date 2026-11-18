@@ -315,7 +315,7 @@ class NativeAudioEngine
   Pointer<LazerAudioStreamInfo>? _streamInfoBuffer;
 
   /// The initialized output session of the current source, or null when idle.
-  LazerStreamInfo? get streamInfo => _streamInfo;
+  LazerStreamInfo? get streamInfo => _sourceLoaded ? _streamInfo : null;
 
   /// Emits the negotiated format whenever a source is opened or closed.
   Stream<LazerStreamInfo?> get streamInfoStream => _streamInfos.stream;
@@ -531,6 +531,7 @@ class NativeAudioEngine
 
   /// Re-reads the negotiated format; also refreshes [streamInfo].
   LazerStreamInfo? readStreamInfo() {
+    if (!_sourceLoaded) return null;
     final int? address = _engineAddressOrNull;
     if (address == null) return _streamInfo;
     final Pointer<LazerAudioStreamInfo> info = _streamInfoBuffer ??=
@@ -572,6 +573,7 @@ class NativeAudioEngine
     final int generation = ++_generation;
     _interruptPendingReads();
     _sourceLoaded = false;
+    _publishStreamInfo(null);
     _mixPresented = false;
     _completionSent = false;
     _pendingUrls = <String>[];
@@ -593,6 +595,7 @@ class NativeAudioEngine
     final int generation = ++_generation;
     _interruptPendingReads();
     _sourceLoaded = false;
+    _publishStreamInfo(null);
     _mixPresented = false;
     _completionSent = false;
     if (urls.isEmpty) {
@@ -730,6 +733,8 @@ class NativeAudioEngine
     final String? next = _queuedUrl ?? _pendingUrls.firstOrNull;
     if (next == null) return false;
     final int generation = ++_generation;
+    _sourceLoaded = false;
+    _publishStreamInfo(null);
     _interruptPendingReads();
     return _serialize(() async {
       await _clearQueued();
@@ -820,6 +825,9 @@ class NativeAudioEngine
 
   @override
   Future<void> setVolume(double volume) async {
+    if (!volume.isFinite) {
+      throw ArgumentError.value(volume, 'volume', 'must be finite');
+    }
     final double requested = volume.clamp(0, 1);
     final int? address = _engineAddressOrNull;
     if (address == null) {
@@ -1318,9 +1326,19 @@ class NativeAudioEngine
             });
           }
         }
-        throw StateError(
-          'lazer-audio could not open source ($status): $detail',
-        );
+        final String message =
+            'lazer-audio could not open source ($status): $detail';
+        final bool directOutput =
+            _deviceSettings.bitPerfect ||
+            (_deviceSettings.dsdAttempts.length == 1 &&
+                _deviceSettings.dsdOutputMode !=
+                    lazerAudioDsdOutputConvertToPcm);
+        if (directOutput &&
+            (status == lazerAudioErrorUnsupported ||
+                status == lazerAudioErrorDevice)) {
+          throw AudioOutputRefused(message);
+        }
+        throw StateError(message);
       }
       // The engine just accepted this source, so whatever was active before is
       // gone and its reader can be freed now.
@@ -1345,7 +1363,12 @@ class NativeAudioEngine
     } catch (error) {
       if (reader != null) _retireOrHold(reader);
       entry?.cancelIfUnleased();
-      if (generation == _generation) _sourceLoaded = false;
+      if (generation == _generation) {
+        _sourceLoaded = false;
+        // The failed replacement has no negotiated output. A cached strict
+        // USB verdict belongs to the previous source, never to this refusal.
+        _publishStreamInfo(null);
+      }
       rethrow;
     } finally {
       lease?.release();
@@ -1433,11 +1456,18 @@ class NativeAudioEngine
       // while idle/stopped. Without this stop the previous session's format,
       // buffer, exclusive mode and DSD policy stayed in force for the rest of
       // the launch: every settings change after the first track was ignored.
-      await _callWorker(LazerWorkerOp.stop, <Object?>[address]);
+      final int stopStatus = _status(
+        await _callWorker(LazerWorkerOp.stop, <Object?>[address]),
+      );
+      if (stopStatus != lazerAudioOk) {
+        throw AudioOutputRefused(
+          'Could not stop the previous output ($stopStatus): ${lastError()}',
+        );
+      }
       status = await apply();
     }
     if (status != lazerAudioOk) {
-      throw StateError(
+      throw AudioOutputRefused(
         'Output settings were refused ($status): ${lastError()}',
       );
     }
@@ -1453,7 +1483,7 @@ class NativeAudioEngine
         ]),
       );
       if (dspStatus != lazerAudioOk) {
-        throw StateError(
+        throw AudioOutputRefused(
           'DSP settings were refused ($dspStatus): ${lastError()}',
         );
       }
@@ -1461,7 +1491,14 @@ class NativeAudioEngine
         _pendingDspSettings = null;
       }
     }
-    await _callWorker(LazerWorkerOp.setVolume, <Object?>[address, _volume]);
+    final int volumeStatus = _status(
+      await _callWorker(LazerWorkerOp.setVolume, <Object?>[address, _volume]),
+    );
+    if (volumeStatus != lazerAudioOk) {
+      throw AudioOutputRefused(
+        'Volume settings were refused ($volumeStatus): ${lastError()}',
+      );
+    }
   }
 
   /// Prepares [url] as the successor inside the running output session.
@@ -1808,9 +1845,32 @@ class NativeAudioEngine
     // during that window used to be dropped, leaving the app "playing" with no
     // output until the next event.
     final bool terminal =
-        event == lazerAudioEventFailed || event == lazerAudioEventDeviceLost;
+        event == lazerAudioEventEnded ||
+        event == lazerAudioEventFailed ||
+        event == lazerAudioEventDeviceLost;
     if (!terminal && !_sourceLoaded) return;
-    if (terminal && _engineAddressOrNull == null) return;
+    if (terminal) {
+      if (event == lazerAudioEventEnded && !_sourceLoaded) return;
+      final int? address = _engineAddressOrNull;
+      if (address == null) return;
+      final Pointer<LazerAudioSnapshot> snapshot = _snapshotBuffer ??=
+          calloc<LazerAudioSnapshot>();
+      final int expectedState = event == lazerAudioEventEnded
+          ? lazerAudioStateStopped
+          : lazerAudioStateFailed;
+      // NativeCallable.listener delivers callbacks asynchronously. A previous
+      // source (or a refused DSD-auto attempt) can report after a new open has
+      // already succeeded. Only the current native terminal record may retire
+      // that source; use its detail rather than a delayed callback's payload.
+      if (_api.snapshot(Pointer<Void>.fromAddress(address), snapshot) !=
+              lazerAudioOk ||
+          snapshot.ref.state != expectedState ||
+          snapshot.ref.terminalEvent != event) {
+        return;
+      }
+      detail = snapshot.ref.terminalDetail;
+      positionMillis = snapshot.ref.terminalPositionMillis;
+    }
     switch (event) {
       case lazerAudioEventEnded:
         _finishSource();
@@ -1852,6 +1912,11 @@ class NativeAudioEngine
   void _reportFailure(String message, AudioFailureKind kind) {
     if (_completionSent) return;
     _completionSent = true;
+    _sourceLoaded = false;
+    // The callback may arrive while a paused/preloaded source has no AppState
+    // playback to stop. Retire its path here as soon as native reports failure.
+    // Readers remain owned until stop or destruction confirms their release.
+    _publishStreamInfo(null);
     if (!_failures.isClosed) _failures.add(AudioFailure(message, kind));
   }
 

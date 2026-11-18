@@ -252,18 +252,20 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   /// Slider movement can produce many updates per second. Those updates should
   /// touch the DSP once, not also resend the output-device policy and query the
   /// endpoint volume on every detent. Preference writes are coalesced separately.
-  Future<void> update(HifiSettings next) async {
+  /// [forceApply] restores the complete request at startup, even if this
+  /// controller was constructed with the same saved settings before attaching.
+  Future<void> update(HifiSettings next, {bool forceApply = false}) async {
     next = normalizeSettings(next);
     if (_disposed) return;
     if (next == _settings) {
-      if (_lastApplyError != null) await apply();
+      if (forceApply || _lastApplyError != null) await apply();
       return;
     }
     final HifiSettings previous = _settings;
     // A previous partial apply may have changed output but refused DSP (or the
     // reverse). Retry both before clearing its error, even when this edit only
     // changes a buffer size or another unrelated preference.
-    final bool retry = _lastApplyError != null;
+    final bool retry = forceApply || _lastApplyError != null;
     final bool outputChanged = retry || !_sameOutputSettings(previous, next);
     final bool endpointChanged = previous.outputToken != next.outputToken;
     final bool dspChanged = retry || !_sameDspSettings(previous, next);

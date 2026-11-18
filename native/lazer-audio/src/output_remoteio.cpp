@@ -138,10 +138,16 @@ public:
 
         if (request.requireNativeDsd) {
             error = "iOS RemoteIO has no raw Native DSD transport; use explicit DoP with a compatible USB DAC";
+            close();
             return LazerAudioErrorUnsupported;
         }
         strictUsb_ = request.bitPerfect || request.requireDoP;
-        if (strictUsb_ && !validStrictSource(request, source, error)) return LazerAudioErrorUnsupported;
+        if (strictUsb_ && !validStrictSource(request, source, error)) {
+            // A previous track may have retained its active background session
+            // for this replacement. An unsuccessful replacement must release it.
+            close();
+            return LazerAudioErrorUnsupported;
+        }
 
         const int32_t channels = std::clamp(
             source.channels > 0 ? source.channels : 2, 1, kMaximumChannels);

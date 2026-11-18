@@ -2447,7 +2447,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         'hifi_equalizer': prefs.getString('hifi_equalizer'),
       });
       hifiSettings = hifi?.normalizeSettings(hifiSettings) ?? hifiSettings;
-      unawaited(hifi?.apply() ?? Future<void>.value());
+      final HifiController? hifiController = hifi;
+      if (hifiController != null) {
+        // A controller may already exist before preferences finish loading.
+        // Restore its requested policy and DSP as well as the settings UI.
+        await hifiController.update(hifiSettings, forceApply: true);
+      }
       downloadQuality = AudioQualityInfo.parse(
         prefs.getString('lazer_download_quality'),
       );
@@ -4587,6 +4592,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             'engine': engine.runtimeType.toString(),
             'error': error.toString(),
           });
+          if (error is AudioOutputRefused) rethrow;
           // The platform refused a queue (or cannot build one): keep playing
           // through the single-source path rather than failing the track.
           queueId = null;
@@ -4619,6 +4625,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         'retrying': retrying,
         'error': error.toString(),
       });
+      if (error is AudioOutputRefused) {
+        if (generation == _generation) {
+          _failPlayback(
+            defaultTargetPlatform == TargetPlatform.iOS &&
+                    hifiSettings.directOutputRequested
+                ? 'USB 严格输出条件未满足。请先调低 DAC 或耳放音量，再确认 USB DAC、100% 应用及系统音量，并关闭混音；DoP 还要求 DAC 明确支持。请检查后重新打开歌曲。'
+                : '音频输出设置未能应用，请检查输出设备后重新打开歌曲。',
+          );
+        }
+        return;
+      }
       final bool retryable =
           _retryableStreamResolve(error) || error is StateError;
       if (generation == _generation && !retrying && retryable) {

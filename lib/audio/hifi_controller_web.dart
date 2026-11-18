@@ -70,7 +70,7 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   HifiSettings normalizeSettings(HifiSettings settings) => settings;
 
-  Future<void> update(HifiSettings next) async {
+  Future<void> update(HifiSettings next, {bool forceApply = false}) async {
     _settings = next;
     notifyListeners();
     await persist(next);

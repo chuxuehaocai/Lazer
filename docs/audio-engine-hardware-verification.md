@@ -240,9 +240,26 @@ iOS 的引擎是**静态链接**进 `Runner` 二进制的（`liblazer-audio.a` +
 新增任务已在提交 `655e816` 的 [CI 44236700237](https://github.com/chuxuehaocai/Lazer/actions/runs/44236700237)
 通过全部 5 项真实 iOS 模拟器基础播放检查；该次原生播放记录为
 `PASS file=330ms reader=365ms ABI=29`。这仍不能代替下表的物理设备验收。
-本轮严格 USB PCM/DoP 修改尚未生成新 IPA；新增的两个非 USB 拒绝/恢复测试也需重新在
-模拟器运行。旧 `655e816` 包不包含这些新增功能；新提交、CI 和校验值统一记录到
-[iOS 音频记录](ios-audio.md#严格-usb-版本构建记录待生成)。
+本轮严格 USB PCM/DoP 版本为 `2.0.301+301`，提交
+`59ee5b2aa31f706c161d5960b889bf739d0a4a8f` 的
+[CI 44243421544](https://github.com/chuxuehaocai/Lazer/actions/runs/44243421544)
+在 `macos-26` 已通过真机/模拟器原生构建与原生播放，记录为
+`PASS file=330ms reader=330ms ABI=29`；全部 7 项 iOS 模拟器集成测试通过，
+日志以 `+7: All tests passed!` 结束，没有跳过项。新增两个用例确认严格 USB PCM 和
+强制 DoP 在非 USB 路由上拒绝打开、不自动回退，并在显式关闭严格输出后恢复普通 PCM。
+整个 CI 已成功完成，新的未签名 IPA 已生成并下载；本地确认版本 `2.0.301+301`、
+ZIP CRC、应用/Widget 元数据、包内容及 SHA-256 与 CI 一致。旧 `655e816` 包不包含这些新增功能；
+构建与校验值统一记录到 [iOS 音频记录](ios-audio.md#严格-usb-版本构建记录)。
+
+本轮最终本地检查通过 Flutter 727 项（另 2 项缺少外部插件 checkout 而跳过）、
+静态分析、本地化检查、Python CI 测试 106 项和约 6.2 秒的 RemoteIO 假 AudioUnit
+契约。严格路径失效后状态同步失效、退出严格输出后恢复保存的 DSP，以及会话激活失败
+清理也已修复。本轮 CI 检查同样通过 Flutter 727 项（另 2 项跳过）、Chrome 4 项、
+Python 106 项、静态分析、本地化与 AAudio/RemoteIO 契约；全量 Flutter 的跳过项不属于
+上述 7 项 iOS 集成测试。日志在 `build/ios-usb-validation/check.log`、
+`build/ios-usb-validation/native/` 和 `build/ios-usb-validation/flutter/`。
+尚未进行 USB DAC 或 NK1 物理设备测试；这些模拟器与契约结果不代表 DoP 或实际 USB
+位流已经验收。
 
 | 检查项 | 怎么做 | 预期 |
 | --- | --- | --- |
@@ -291,7 +308,8 @@ Windows 原生输出播放、reader bridge 的完整导出门禁，以及 Remote
 不做会话恢复。Dart 层另验证输出打开前的会话配置、重复中断和替换歌曲后不误恢复。
 Objective-C 会话观察器仍需要 macOS/iOS 构建与设备运行验证。
 这些结果不能代替上表中的 iPhone 听音、物理路由切换、来电/Siri、后台锁屏和一小时热稳定性。
-当前没有可访问的 Mac/iPhone，以上真机项目继续保持未验证；不能据此宣称其已经通过。
+当前尚未完成连接 USB DAC 的 iPhone/iPad 验收，以上真机项目继续保持未验证；
+远程 macOS CI 和模拟器结果不能据此替代。
 
 ### BGA 真实曲库验证
 

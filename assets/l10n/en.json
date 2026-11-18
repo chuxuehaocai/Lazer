@@ -136,6 +136,8 @@
   "这首歌暂时无法播放，请换一首。": "This song is unavailable. Try another song.",
   "当前设备没有可用的音频播放器。": "No audio player is available on this device.",
   "音频加载失败，请重试。": "Could not load audio. Please retry.",
+  "音频输出设置未能应用，请检查输出设备后重新打开歌曲。": "Could not apply audio output settings. Check the output device, then reopen the track.",
+  "USB 严格输出条件未满足。请先调低 DAC 或耳放音量，再确认 USB DAC、100% 应用及系统音量，并关闭混音；DoP 还要求 DAC 明确支持。请检查后重新打开歌曲。": "Strict USB output requirements were not met. First lower your DAC or headphone amp volume, then check that a USB DAC is connected, app and system volume are at 100%, and mixing is off. DoP also requires explicit DAC support. Check these settings, then reopen the track.",
   "播放中断，请重试。": "Playback interrupted. Please retry.",
   "收藏失败，请稍后重试。": "Could not save. Try again later.",
   "登录后查看喜欢的音乐。": "Sign in to see your liked songs.",

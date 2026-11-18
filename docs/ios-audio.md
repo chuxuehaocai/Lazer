@@ -113,6 +113,42 @@ flutter test --no-pub integration_test/ios_native_engine_test.dart -d <device-id
 
 生成真机包采用 [构建说明](builds.md)；真机与模拟器的 arm64 静态库不能互换。
 
+## 重签名与安装
+
+CI 交付未签名 IPA。签名需要自己的证书与有效 provisioning profile；应用和
+Widget 使用显式 App ID 时，分别提供覆盖各自 bundle identifier 的 profile。
+两者必须属于同一签名团队。App Group 只有在所有目标的 profile 都授权同一个组时才启用；
+未授权时 Widget 显示未启用共享容器。
+
+Windows 使用 Python 3 和 `apple-codesign` 的 `rcodesign` 0.29 或更新版本：
+
+```powershell
+pwsh ci/resign-ios-ipa.ps1 -Ipa dist/Lazer-iOS-aarch64.ipa `
+  -P12 dev-cert.p12 -P12Password (Read-Host -AsSecureString) `
+  -Profile app.mobileprovision `
+  -ExtensionProfiles @{ 'dev.naominet.lazer.PlayCountWidget' = 'widget.mobileprovision' } `
+  -AppGroup group.com.example.lazer -Out dist/Lazer-signed.ipa
+```
+
+macOS 使用 Xcode command-line tools：
+
+```sh
+bash ci/resign-ios-ipa.sh --ipa dist/Lazer-iOS-aarch64.ipa \
+  --profile app.mobileprovision --identity 'Apple Development: ...' \
+  --extension-profile dev.naominet.lazer.PlayCountWidget=widget.mobileprovision \
+  --app-group group.com.example.lazer --out dist/Lazer-signed.ipa
+```
+
+如果一个 wildcard profile 确实覆盖全部目标，可以省略 extension profile；
+App Group 可省略。脚本按目标展开 application-identifier 和 keychain 通配符，
+嵌入各自 profile，先签内部代码再签应用，并从最终 Mach-O 读回 entitlements。
+密码只存于独立临时目录，最终 IPA 只打包 `Payload/`。签名、权限读回或包校验失败
+均不替换已有输出文件。
+
+自动回归使用可执行签名器替身生成 Mach-O 签名夹具，覆盖逐目标权限、二进制 plist、
+profile 嵌入和密码文件清理。这不能证明真实开发者证书或物理设备安装已经验收；
+`rcodesign verify` 也不能替代 Apple 的安装验证。
+
 ## 证据与待验收项
 
 既有提交 `ce0c24a` 的 [CI 44229836575](https://github.com/chuxuehaocai/Lazer/actions/runs/44229836575)
@@ -142,12 +178,75 @@ DSD64 转 96 kHz PCM、−12 dB 前级效果、EQ/串扰及 HTTP reader 播放�
 ZIP CRC、应用/Widget 元数据与包内容检查均通过；安装需要用户签名。
 这个历史 IPA 不包含本轮严格 USB PCM/DoP 改动，不能用它验收新增功能。
 
-### 严格 USB 版本构建记录（待生成）
+### 严格 USB 版本构建记录
 
-- 提交、CI 运行和新 IPA：待完成本轮实现及构建验证后记录。
-- 新 IPA SHA-256：待生成；不复用上面的基础播放包校验值。
-- 7 项 iOS 模拟器集成结果：待本轮 CI 执行；静态分析或 Windows 契约通过不代表它已运行。
+2026-11-18，版本 `2.0.301+301` 的构建提交为
+`59ee5b2aa31f706c161d5960b889bf739d0a4a8f`，
+[CI 44243421544](https://github.com/chuxuehaocai/Lazer/actions/runs/44243421544)
+使用 `macos-26` 执行 iOS 原生、Flutter 集成和 IPA 任务。真机/模拟器原生构建与
+模拟器播放已通过，原生播放记录为 `PASS file=330ms reader=330ms ABI=29`。
+Flutter iOS 集成日志以 `+7: All tests passed!` 结束，全部 7 项执行通过，无跳过项。
+其中两个新增用例确认严格 USB PCM 和强制 DoP 在非 USB 路由上明确拒绝打开、不自动回退，
+并在显式关闭严格输出后恢复普通 PCM 播放。整个 CI 已成功完成，真机 IPA 构建、
+引擎动态导出、应用/Widget 元数据及最终包内容检查均通过。
+
+本轮最终本地检查已通过：Flutter 全量测试 727 项（另 2 项因缺少外部插件 checkout
+跳过）、Flutter 静态分析、本地化检查、Python CI 测试 106 项，以及 RemoteIO 假
+AudioUnit 契约（约 6.2 秒）。本轮验证包括严格 USB 条件拒绝、16/24-bit 样本的精确
+Float32 桥接、DoP marker/idle、条件变化后回调静音与状态失效，以及退出严格输出后在
+下一次打开前恢复保存的 DSP。会话激活后验证失败会释放会话。这些检查不能替代真机输出验证。
+
+后续界面补充明确了应用/系统音量条件、手动应用音量滑块、实际混音设置路径及重开提示；
+相关 21 项 iOS 设置/输出路径测试、定向静态分析和本地化检查通过。
+
+本地日志：`build/ios-usb-final-flutter-tests.log`、`build/ios-usb-final-analyze.log`、
+`build/ios-usb-ci-tests.log`、
+`build/ios-usb-remoteio-contract/Testing/Temporary/LastTest.log`。
+
+本轮 CI 的检查任务也已通过：Flutter 727 项（另 2 项跳过）、Chrome 4 项、Python
+106 项、静态分析、本地化检查，以及 AAudio/RemoteIO 契约；CI 中 RemoteIO 契约耗时
+6.12 秒。已下载的证据在 `build/ios-usb-validation/check.log`、
+`build/ios-usb-validation/native/` 和 `build/ios-usb-validation/flutter/`。
+全量 Flutter 测试中的 2 项跳过不属于上述 7 项 iOS 集成测试。
+
+- 新 IPA：`dist/ios-usb-direct-59ee5b2/Lazer-iOS-aarch64.ipa`，
+  51,942,200 字节，版本 `2.0.301+301`；
+  [CI artifact 14400824937](https://github.com/chuxuehaocai/Lazer/actions/runs/44243421544/artifacts/14400824937)。
+- SHA-256：`3ab253c6c7b18431e0fe37d6eb68669120ee0c853fa6165d7fb86a4f7bbecd86`，
+  与 CI sidecar 一致。本地复核通过 ZIP CRC、应用和 Widget 元数据、包内容检查，
+  并确认新严格 USB 原生代码及本地化资源存在；记录在 `build/ios-usb-validation/delivery.json`。
+  IPA 未签名，安装仍需用户自行签名。
 - NK1 实机 PCM、兼容 DAC 的 DoP、USB 位流验证：待实机验收。
 
-尚未验证真机 USB DAC、锁屏、来电/Siri、物理路由插拔或长时播放。操作步骤见
+尚未进行 USB DAC 或 NK1 物理设备测试，也未验证锁屏、来电/Siri、物理路由插拔或长时播放。
+模拟器拒绝路径通过不代表 USB 严格输出或 DAC 的 DoP 已经验收。操作步骤见
 [真机验收第 11 节](audio-engine-hardware-verification.md#11-ios模拟器已有基础播放证据真机待验证)。
+
+## 2.0.302 整合审计（2026-11-18）
+
+本轮以 `b18ad0c` 的 `nextgen` 为基础，合入 `59ee5b2` 的 USB 分支；后者完整包含
+`655e816` 的 Native HiFi 分支。最新歌词修复也在这次整合的代码中。
+版本更新为 `2.0.302+302`，以区分此前生成的 `2.0.301+301` IPA。
+
+审计修复：
+
+- 原生替换播放失败时释放保留的输出和 AVAudioSession；非法源、ReplayGain、
+  设备打开失败与不支持的 Native DSD/严格 PCM 请求均有回归。
+- 严格输出的打开决策与音量、AutoMix、DSP、设备控制串行；拒绝正在打开时改变策略，
+  通过可控并发 gate 和 Ready 回调重入验证。Dart 和 C++ 都在 clamp 前拒绝非有限音量。
+- 固定 period 输出也进行有界启动预填等待，避免解码首帧尚未到达就先写整包静音；
+  使用真实 reader 和 endpoint 双 gate 复现并验证，保留原有精确字节断言。
+- Dart 检查 stop、DSP 和音量返回码；失败或新一代 source 请求清除旧信号路径。
+  异步终端回调须匹配当前 native snapshot，防止旧失败误清新源。
+- 启动时强制同步已保存设置、controller 与 DSP；输出条件拒绝不再触发 queue fallback
+  或 CDN 重试，提供四语恢复提示，普通源/解码错误的既有重试行为保持覆盖。
+- IPA 元数据门禁覆盖 extension identifier、缺失扩展文件、重复或歧义 ZIP 路径。
+  重签名修复密码入包、profile 缺失及目标权限错误，新增实际执行包装器与签名器替身的回归。
+
+本地验证日志位于 `build/ios-integrated-audit/`：Flutter 790 项通过，另 2 项因缺少
+外部插件 checkout 跳过；静态分析、本地化与 Python 98 项检查通过。RemoteIO 使用
+Clang 23、`-Wall -Wextra -Werror` 构建并通过契约检查；原生 probe 全量及本轮 Apple CI
+结果另行记录。Windows Chrome 检查因 Flutter 3.47 的测试资源路径在本机返回
+CanvasKit 404 而未执行，浏览器边界改由 Linux CI 验证；未修改系统 Flutter SDK。
+
+上述软件审计没有增加 USB DAC、NK1、真实 Apple 证书安装或物理位流的验收证据。

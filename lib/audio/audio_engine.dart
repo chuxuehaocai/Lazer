@@ -197,6 +197,14 @@ class AudioFailure {
   String toString() => message;
 }
 
+/// Output policy or device configuration refused before a source could play.
+///
+/// Retrying a CDN URL cannot change this condition. Keep the native diagnostic
+/// in [message] for logs; the UI supplies a translated recovery instruction.
+class AudioOutputRefused extends StateError {
+  AudioOutputRefused(super.message);
+}
+
 /// Optional engine capability: failures that happen *after* a source was loaded.
 ///
 /// `just_audio` surfaces those through its own player streams, but an engine

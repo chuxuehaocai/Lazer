@@ -170,7 +170,7 @@ See [updates.md](updates.md) for the client-side rules.
   a glibc 2.35 baseline. The ARM runner bootstraps the SDK from the official Flutter
   3.47.0 tag and verifies its commit, since the official archive only provides an
   x64 Linux SDK. It does not cross-compile or use a third-party SDK.
-- Android uses `ubuntu-24.04` with Java 21; iOS uses `macos-15`.
+- Android uses `ubuntu-24.04` with Java 21; iOS uses `macos-26`.
 
 Linux packaging pins linuxdeploy and its GTK helper, checks the packaging tool's
 SHA-256, and explicitly bundles libmpv because it is loaded through FFI. Each
@@ -186,3 +186,5 @@ download its workflow artifacts and publish that release.
 Extract the whole Windows ZIP before launching the EXE. Downloaded AppImages need
 `chmod +x`. macOS Apps are ad-hoc signed, not Developer ID signed/notarized. The
 unsigned IPA needs your own signing before installation.
+For per-target provisioning profiles and Windows/macOS signing commands, see
+[iOS signing and installation](ios-audio.md#重签名与安装).

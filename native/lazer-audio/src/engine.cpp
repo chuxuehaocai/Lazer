@@ -464,13 +464,21 @@ int32_t Engine::open(
     dopActive_.store(false, std::memory_order_release);
     nativeDsdActive_.store(false, std::memory_order_release);
     resetDopMarker();
+    const auto failOpen = [this](int32_t failure) {
+        // A replacement keeps the previous iOS background session alive while
+        // probing its source. Every failure owned by this generation must hand
+        // that session back, even if the new output never reached open().
+        if (output_ != nullptr) output_->close();
+        currentSource().close();
+        publishTerminal(LazerAudioEventFailed, failure, 0);
+        return failure;
+    };
     const LazerAudioOpenParams safeParams = params;
     if (!std::isfinite(safeParams.replay_gain_db) || safeParams.replay_gain_db < -60.0 ||
         safeParams.replay_gain_db > 24.0) {
         setErrorLocked("ReplayGain must be finite and within -60..24 dB",
             LazerAudioErrorInvalidArgument);
-        publishTerminal(LazerAudioEventFailed, LazerAudioErrorInvalidArgument, 0);
-        return LazerAudioErrorInvalidArgument;
+        return failOpen(LazerAudioErrorInvalidArgument);
     }
     int32_t result = LazerAudioOk;
     std::shared_ptr<SourceSlot> openingSource;
@@ -528,8 +536,7 @@ int32_t Engine::open(
     }
     if (result != LazerAudioOk) {
         setErrorLocked(currentSource().lastError(), result);
-        publishTerminal(LazerAudioEventFailed, result, 0);
-        return result;
+        return failOpen(result);
     }
 
     const bool autoMix = autoMixMillis_.load(std::memory_order_acquire) > 0;
@@ -539,9 +546,7 @@ int32_t Engine::open(
             nativeDsdOutputApplies(device_.dsd_output_mode, currentSource().description()))) {
         setErrorLocked("turn AutoMix off before requesting strict USB PCM or DoP output",
             LazerAudioErrorUnsupported);
-        currentSource().close();
-        publishTerminal(LazerAudioEventFailed, LazerAudioErrorUnsupported, 0);
-        return LazerAudioErrorUnsupported;
+        return failOpen(LazerAudioErrorUnsupported);
     }
     const bool requireDoP = !autoMix && doPOutputApplies(
         device_.dsd_output_mode, currentSource().description());
@@ -551,39 +556,29 @@ int32_t Engine::open(
         ((!autoMix && device_.bit_perfect != 0) || requireDoP || requireNativeDsd)) {
         setErrorLocked("ReplayGain changes samples and is unavailable in bit-perfect or direct DSD mode",
             LazerAudioErrorUnsupported);
-        currentSource().close();
-        publishTerminal(LazerAudioEventFailed, LazerAudioErrorUnsupported, 0);
-        return LazerAudioErrorUnsupported;
+        return failOpen(LazerAudioErrorUnsupported);
     }
     if ((requireDoP || requireNativeDsd) && device_.bit_perfect != 0) {
         setErrorLocked("direct DSD output and bit-perfect PCM output are separate modes",
             LazerAudioErrorInvalidArgument);
-        currentSource().close();
-        publishTerminal(LazerAudioEventFailed, LazerAudioErrorInvalidArgument, 0);
-        return LazerAudioErrorInvalidArgument;
+        return failOpen(LazerAudioErrorInvalidArgument);
     }
     if (((!autoMix && device_.bit_perfect != 0) || requireDoP || requireNativeDsd) &&
         volume_.load(std::memory_order_acquire) < 0.999999) {
         setErrorLocked("set software volume to 100% and use the DAC volume for direct output",
             LazerAudioErrorUnsupported);
-        currentSource().close();
-        publishTerminal(LazerAudioEventFailed, LazerAudioErrorUnsupported, 0);
-        return LazerAudioErrorUnsupported;
+        return failOpen(LazerAudioErrorUnsupported);
     }
 
     if (output_ == nullptr) {
         setErrorLocked("no local audio output backend is available", LazerAudioErrorUnsupported);
-        currentSource().close();
-        publishTerminal(LazerAudioEventFailed, LazerAudioErrorUnsupported, 0);
-        return LazerAudioErrorUnsupported;
+        return failOpen(LazerAudioErrorUnsupported);
     }
 
     AudioOutputRequest request;
     if (!wideStringToUtf8(device_.device_id, request.deviceId)) {
         setErrorLocked("the selected output device ID is not valid Unicode", LazerAudioErrorInvalidArgument);
-        currentSource().close();
-        publishTerminal(LazerAudioEventFailed, LazerAudioErrorInvalidArgument, 0);
-        return LazerAudioErrorInvalidArgument;
+        return failOpen(LazerAudioErrorInvalidArgument);
     }
     request.exclusive = device_.exclusive != 0 || requireDoP || requireNativeDsd;
     request.bufferMillis = normalizedBufferMillis(device_.buffer_millis);
@@ -605,18 +600,13 @@ int32_t Engine::open(
     result = output_->open(request, currentSource().description(), outputSession_, deviceError, &log_);
     if (result != LazerAudioOk) {
         setErrorLocked(deviceError, result);
-        currentSource().close();
-        publishTerminal(LazerAudioEventFailed, result, 0);
-        return result;
+        return failOpen(result);
     }
 
     result = configurePipeline();
     if (result != LazerAudioOk) {
         setErrorLocked(lastError_, result);
-        output_->close();
-        currentSource().close();
-        publishTerminal(LazerAudioEventFailed, result, 0);
-        return result;
+        return failOpen(result);
     }
 
     pumpThread_ = std::thread([this] { pumpLoop(); });
@@ -1340,11 +1330,18 @@ int32_t Engine::seek(int64_t positionMillis) {
 }
 
 int32_t Engine::setVolume(double volume) {
+    if (!std::isfinite(volume)) return LazerAudioErrorInvalidArgument;
+    // Keep the policy check and update indivisible with open/configurePipeline.
+    // Event callbacks may reenter while open owns this recursive mutex; the
+    // Preparing state still rejects a late strict-path change on that thread.
+    std::unique_lock apiGuard(apiMutex_, std::try_to_lock);
+    if (!apiGuard.owns_lock() || state_.load(std::memory_order_acquire) == LazerAudioStatePreparing)
+        return LazerAudioErrorState;
     const double clamped = std::clamp(volume, 0.0, 1.0);
     if ((bitPerfectActive_.load(std::memory_order_acquire) ||
         dopActive_.load(std::memory_order_acquire) ||
         nativeDsdActive_.load(std::memory_order_acquire)) && clamped < 0.999999) {
-        setError("software volume is unavailable while direct output is active; use the DAC volume",
+        setErrorLocked("software volume is unavailable while direct output is active; use the DAC volume",
             LazerAudioErrorUnsupported);
         return LazerAudioErrorUnsupported;
     }
@@ -1355,10 +1352,13 @@ int32_t Engine::setVolume(double volume) {
 
 int32_t Engine::setAutoMix(int32_t durationMillis) {
     if (durationMillis < 0 || durationMillis > 30'000) return LazerAudioErrorInvalidArgument;
+    std::unique_lock apiGuard(apiMutex_, std::try_to_lock);
+    if (!apiGuard.owns_lock() || state_.load(std::memory_order_acquire) == LazerAudioStatePreparing)
+        return LazerAudioErrorState;
     if (durationMillis > 0 && output_ != nullptr && output_->strictDirectOutputRequests() &&
         (bitPerfectActive_.load(std::memory_order_acquire) ||
             dopActive_.load(std::memory_order_acquire))) {
-        setError("turn strict USB PCM or DoP off before enabling AutoMix",
+        setErrorLocked("turn strict USB PCM or DoP off before enabling AutoMix",
             LazerAudioErrorUnsupported);
         return LazerAudioErrorUnsupported;
     }
@@ -1368,13 +1368,16 @@ int32_t Engine::setAutoMix(int32_t durationMillis) {
 
 int32_t Engine::setDsp(const LazerAudioDspConfig &dsp) {
     if (dsp.band_count > LAZER_AUDIO_MAX_EQ_BANDS) return LazerAudioErrorInvalidArgument;
+    std::unique_lock apiGuard(apiMutex_, std::try_to_lock);
+    if (!apiGuard.owns_lock() || state_.load(std::memory_order_acquire) == LazerAudioStatePreparing)
+        return LazerAudioErrorState;
     /* A module that would alter the samples. Bypassed stages (a disabled band, a limiter that is
      * off) do not count: sending them is how the settings layer keeps its state in one piece. */
     const bool wantsProcessing = dsp.preamp_db != 0.0 || dsp.band_count > 0 ||
         dsp.limiter_enabled != 0 || dsp.crossfeed_enabled != 0 || dsp.impulse_response_frames > 0;
     if (wantsProcessing && (dopActive_.load(std::memory_order_acquire) ||
             nativeDsdActive_.load(std::memory_order_acquire))) {
-        setError("EQ and limiter are unavailable while direct DSD output is active",
+        setErrorLocked("EQ and limiter are unavailable while direct DSD output is active",
             LazerAudioErrorUnsupported);
         return LazerAudioErrorUnsupported;
     }
@@ -1382,7 +1385,7 @@ int32_t Engine::setDsp(const LazerAudioDspConfig &dsp) {
      * request cannot be honoured. Saying so beats accepting the request and silently dropping it:
      * the caller would otherwise believe the EQ is applied while the state reports no DSP. */
     if (wantsProcessing && bitPerfectActive_.load(std::memory_order_acquire)) {
-        setError("EQ, limiter and crossfeed are unavailable while bit-perfect output is active; "
+        setErrorLocked("EQ, limiter and crossfeed are unavailable while bit-perfect output is active; "
             "turn bit-perfect off first", LazerAudioErrorUnsupported);
         return LazerAudioErrorUnsupported;
     }
@@ -1391,7 +1394,8 @@ int32_t Engine::setDsp(const LazerAudioDspConfig &dsp) {
 }
 
 int32_t Engine::setDevice(const LazerAudioDeviceConfig &device) {
-    std::lock_guard guard(apiMutex_);
+    std::unique_lock apiGuard(apiMutex_, std::try_to_lock);
+    if (!apiGuard.owns_lock()) return LazerAudioErrorState;
     if (device.dsd_output_mode != LazerAudioDsdOutputConvertToPcm &&
         device.dsd_output_mode != LazerAudioDsdOutputRequireDoP &&
         device.dsd_output_mode != LazerAudioDsdOutputRequireNative) {
@@ -2771,10 +2775,12 @@ void Engine::renderLoop() {
         }
 
         const bool fixedPeriod = outputSession_.writeMode == OutputWriteMode::FixedPeriod;
-        if (!primedForSession && !fixedPeriod) {
-            /* Wait for the producer to fill one period before the session's first submission. */
-            const int32_t ready = std::max<int32_t>(
-                static_cast<int32_t>(kRenderBlockFrames), 0);
+        if (!primedForSession) {
+            /* Fixed-period endpoints need the same startup grace as variable
+             * outputs. Scheduling the render thread ahead of a new decoder
+             * must not prepend a silent packet to otherwise exact PCM. */
+            const int32_t ready = fixedPeriod ? std::max(outputSession_.periodFrames, 1)
+                : static_cast<int32_t>(kRenderBlockFrames);
             if (ring_.readableFrames() >= ready ||
                 pumpFinished_.load(std::memory_order_acquire) || sourceEndedNow() ||
                 primingWaits >= kPrimingWaitLimit) {
