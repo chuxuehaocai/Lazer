@@ -26,9 +26,14 @@ try {
   assert.equal(fonts.filter((font) => font.family === 'MiSans').length, 4, 'Expected all four MiSans weights.');
   for (const variant of ['', 'chromium']) {
     const engineDir = path.join(staticDir, engineBase, variant);
-    // .mjs also works on CI's Node versions without implicit ESM detection.
-    const moduleFile = path.join(temporary, `${variant || 'full'}.mjs`);
-    fs.copyFileSync(path.join(engineDir, 'canvaskit.js'), moduleFile);
+    // The packer replaces `canvaskit.js` with a wrapper that imports the glue by a
+    // relative specifier, so the decoded copy has to keep the packed directory
+    // layout. A `package.json` marks those `.js` files as modules instead of
+    // relying on a `.mjs` suffix the wrapper cannot carry into its own imports.
+    const moduleDir = path.join(temporary, variant || 'full');
+    fs.cpSync(engineDir, moduleDir, { recursive: true });
+    fs.writeFileSync(path.join(moduleDir, 'package.json'), '{"type":"module"}\n');
+    const moduleFile = path.join(moduleDir, 'canvaskit.js');
     const { default: initialize } = await import(pathToFileURL(moduleFile).href);
     const wasm = await WebAssembly.compile(fs.readFileSync(path.join(engineDir, 'canvaskit.wasm')));
     const kit = await initialize({
