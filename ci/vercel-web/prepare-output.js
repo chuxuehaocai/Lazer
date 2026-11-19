@@ -75,6 +75,9 @@ function filesIn(directory, relative = '') {
 function contentHash(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 12);
 }
+function fileDigest(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
 function directoryHash(directory) {
   const hash = crypto.createHash('sha256');
   for (const relative of filesIn(directory)) {
@@ -82,17 +85,74 @@ function directoryHash(directory) {
   }
   return hash.digest('hex').slice(0, 12);
 }
+
+// Mainland connections pay for every serial transfer, and the engine wasm is by
+// far the largest one the site has. Flutter imports `<variant>/canvaskit.js` as
+// an ES module and only then fetches the wasm beside it, so the packed site
+// replaces that module with a wrapper that accepts bytes already downloaded by
+// index.html's prefetch. The real glue keeps its name with a suffix so the
+// wrapper can import it unchanged.
+const loaderTemplate = fs.readFileSync(path.join(__dirname, 'canvaskit-module.js'), 'utf8');
+const prefetchTemplate = fs.readFileSync(path.join(__dirname, 'canvaskit-prefetch.js'), 'utf8');
+
+// Optional same-layout mirror origins (`--mirror https://cdn.example.com/lazer`).
+// The prefetch hedges against them when the primary stalls, which is the only
+// thing that helps when the deployed origin itself is hard to reach.
+const mirrors = [];
+for (let index = 0; index < process.argv.length; index++) {
+  if (process.argv[index] === '--mirror' && process.argv[index + 1]) {
+    mirrors.push(process.argv[index + 1].replace(/\/?$/, '/'));
+  }
+}
+for (const value of (process.env.LAZER_ENGINE_MIRRORS || '').split(',')) {
+  const trimmed = value.trim();
+  if (trimmed) mirrors.push(trimmed.replace(/\/?$/, '/'));
+}
+
 for (const marker of ['__LAZER_CANVASKIT_BASE__', '__LAZER_ASSET_BASE__', '__LAZER_FONT_BASE__']) {
   if (!fs.readFileSync(bootstrapFile, 'utf8').includes(marker)) {
     throw new Error(`Missing ${marker}; rebuild the web bundle before packing.`);
   }
 }
+
+const variants = [];
+function wrapVariants(directory, prefix) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    wrapVariants(path.join(directory, entry.name), `${prefix}/${entry.name}`);
+  }
+  const glue = path.join(directory, 'canvaskit.js');
+  const wasm = path.join(directory, 'canvaskit.wasm');
+  if (!fs.existsSync(glue) || !fs.existsSync(wasm)) return;
+  // Files directly in the engine directory are the default CanvasKit variant
+  // that Safari and Firefox load; named subdirectories carry their own name.
+  const variant = prefix === '' ? 'full' : path.posix.basename(prefix);
+  fs.renameSync(glue, path.join(directory, 'canvaskit.glue.js'));
+  fs.writeFileSync(
+    glue,
+    loaderTemplate
+      .replace('__LAZER_CANVASKIT_GLUE__', './canvaskit.glue.js')
+      .replace('__LAZER_CANVASKIT_VARIANT__', variant),
+  );
+  variants.push({
+    variant,
+    relative: `${prefix}/canvaskit.wasm`,
+    bytes: fs.statSync(wasm).size,
+    digest: fileDigest(wasm),
+    parts: 4,
+    retries: 2,
+    hedgeMs: 4000,
+    mirrors,
+  });
+}
+
 let canvaskitBase = 'canvaskit';
 if (fs.existsSync(canvaskitDir)) {
   if (!fs.existsSync(bootstrapFile)) {
     console.error('The build has no flutter_bootstrap.js to point at the engine');
     process.exit(1);
   }
+  wrapVariants(canvaskitDir, '');
   const digest = directoryHash(canvaskitDir);
   const bootstrap = fs.readFileSync(bootstrapFile, 'utf8');
   if (bootstrap.includes('__LAZER_CANVASKIT_BASE__')) {
@@ -100,6 +160,26 @@ if (fs.existsSync(canvaskitDir)) {
     fs.renameSync(canvaskitDir, path.join(staticDir, canvaskitBase));
     rewriteBoot('__LAZER_CANVASKIT_BASE__', canvaskitBase);
   }
+}
+// The prefetch only ever runs on the packed site; a local `flutter build web`
+// keeps the untouched engine and this comment.
+const plans = variants.map((plan) => ({
+  variant: plan.variant,
+  path: `${canvaskitBase}${plan.relative}`,
+  bytes: plan.bytes,
+  digest: plan.digest,
+  parts: plan.parts,
+  retries: plan.retries,
+  hedgeMs: plan.hedgeMs,
+  mirrors: plan.mirrors,
+}));
+const prefetch = plans.length === 0
+  ? ''
+  : `<script>${prefetchTemplate.replace('__LAZER_ENGINE_PLANS__', JSON.stringify(plans))}</script>`;
+for (const file of [htmlFile, bootstrapFile]) {
+  const text = fs.readFileSync(file, 'utf8');
+  if (!text.includes('<!-- LAZER_ENGINE_PREFETCH -->')) continue;
+  fs.writeFileSync(file, text.replace('<!-- LAZER_ENGINE_PREFETCH -->', prefetch));
 }
 
 // CanvasKit fetches all declared fonts before the first frame. WOFF2 preserves

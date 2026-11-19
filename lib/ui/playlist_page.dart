@@ -18,6 +18,7 @@ import '../widgets/catalog_links.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/cover_transition.dart';
 import '../widgets/track_batch_bar.dart';
+import '../widgets/window_chrome.dart';
 import 'login.dart';
 import 'widgets.dart';
 
@@ -429,6 +430,13 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
     final List<Track>? tracks = _tracks;
     final double inset = pageInset(context);
     final bool compact = MediaQuery.sizeOf(context).width < 680;
+    // Floating chrome paints its capsule over this band, so the scroll-away
+    // back button shares the capsule's centre line instead of starting at the
+    // page's own top padding.
+    final double headerTop =
+        WindowChromeScope.maybeLayoutOf(context)?.inline == true
+        ? windowChromeControlTop(kPageBackControlSize)
+        : 12;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1100),
@@ -441,7 +449,7 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(
                     inset,
-                    12 + widget.topInset,
+                    headerTop + widget.topInset,
                     inset,
                     0,
                   ),

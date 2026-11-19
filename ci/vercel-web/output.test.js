@@ -30,6 +30,7 @@ function fixture(t) {
   write('web/main.dart.js', 'console.log("fixture");');
   write('web/canvaskit/canvaskit.js', '/* engine fixture */');
   write('web/canvaskit/canvaskit.wasm', 'engine fixture');
+  write('web/canvaskit/chromium/canvaskit.js', '/* chromium engine fixture */');
   write('web/canvaskit/chromium/canvaskit.wasm', 'chromium engine fixture');
   write('web/canvaskit/skwasm.wasm', 'another engine variant');
   write('web/assets/AssetManifest.bin', 'asset manifest');
@@ -121,6 +122,48 @@ test('missing fonts and stale startup references fail deployment verification', 
   result = f.verify();
   assert.equal(result.status, 1);
   assert.match(result.stderr, /same asset configuration/);
+});
+
+test('the packed engine is prefetched in ranges and handed to Flutter as a blob', (t) => {
+  const f = fixture(t);
+  f.pack();
+  assert.equal(f.verify().status, 0);
+  const engine = f.route('canvaskit').slice(1).split('/')[0];
+  const html = fs.readFileSync(path.join(f.out, 'static/index.html'), 'utf8');
+  const plans = JSON.parse(/var plans = (\[[\s\S]*?\]);/.exec(html)[1]);
+  // One plan per variant that ships both a glue and a wasm: root ("full") and
+  // "chromium". The prefetch picks between them the same way Flutter does.
+  assert.deepEqual(plans.map((plan) => plan.variant).sort(), ['chromium', 'full']);
+  for (const plan of plans) {
+    assert.ok(plan.path.startsWith(`${engine}/`), plan.path);
+    const wasm = path.join(f.out, 'static', plan.path);
+    assert.equal(plan.bytes, fs.statSync(wasm).size);
+    assert.match(plan.digest, /^[0-9a-f]{64}$/);
+    // The wrapper replaces canvaskit.js and imports the untouched glue.
+    const wrapper = fs.readFileSync(wasm.replace(/canvaskit\.wasm$/, 'canvaskit.js'), 'utf8');
+    assert.match(wrapper, /import init from '\.\/canvaskit\.glue\.js';/);
+    assert.match(wrapper, new RegExp(`var variant = '${plan.variant}';`));
+    assert.ok(fs.existsSync(wasm.replace(/canvaskit\.wasm$/, 'canvaskit.glue.js')));
+    // An unreachable origin must not leave the page without an engine.
+    assert.match(wrapper, /if \(!wasmUrl\) return init\(options\);/);
+  }
+  assert.ok(html.includes('window.__lazerEngineWasm'));
+  assert.ok(!html.includes('__LAZER_ENGINE_PLANS__'));
+  // Nothing regresses for the entrypoint: it is still preloaded, just hashed.
+  assert.match(html, /<link rel="preload" href="main\.[0-9a-f]{12}\.js" as="script">/);
+});
+
+test('a prefetch plan that disagrees with the shipped engine fails verification', (t) => {
+  const f = fixture(t);
+  f.pack();
+  const html = path.join(f.out, 'static/index.html');
+  fs.writeFileSync(
+    html,
+    fs.readFileSync(html, 'utf8').replace(/"bytes":\d+/, '"bytes":1'),
+  );
+  const result = f.verify();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /prefetch size does not match the file/);
 });
 
 test('an old build cannot silently ship with an unversioned assetBase', (t) => {

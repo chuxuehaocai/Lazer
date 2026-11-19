@@ -479,9 +479,18 @@ class SettingsDetailScaffold extends StatelessWidget {
           )
         : null;
     // The floating capsule is centred on the band, so the back button has to be
-    // too: a 48 dp control sits 8 dp down and lines up with the capsule's row.
-    final double headerTop = floating ? 8 : 0;
+    // too: the control is placed on the capsule's own centre line instead of the
+    // scaffold's top edge, which left it reading high beside the pill.
+    final double headerTop = floating
+        ? windowChromeControlTop(kPageBackControlSize)
+        : 0;
     final double headerGap = floating ? 0 : 8;
+    // Where the page below the route's own top bar starts. The floating variant
+    // derives it from the control it just placed on the capsule's row, so the
+    // two never drift apart; the compact route keeps the inset it always had.
+    final double headerBottom = floating
+        ? headerTop + kPageBackControlSize
+        : 56;
     if (close == null) {
       final bool canPop = Navigator.of(context).canPop();
       final bool hasTopBar = canPop || trailing != null || headerTitle;
@@ -529,7 +538,7 @@ class SettingsDetailScaffold extends StatelessWidget {
                 ),
               Positioned.fill(
                 child: Padding(
-                  padding: EdgeInsets.only(top: hasTopBar ? 56 : 0),
+                  padding: EdgeInsets.only(top: hasTopBar ? headerBottom : 0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[Expanded(child: child)],
