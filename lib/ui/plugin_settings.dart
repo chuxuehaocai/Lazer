@@ -180,7 +180,12 @@ class LuaPluginPageView extends StatelessWidget {
         title: context.tr(page.title),
         child: LayoutBuilder(
           builder: (context, constraints) => ListView(
-            padding: EdgeInsets.fromLTRB(layout.inset, 8, layout.inset, 32),
+            padding: EdgeInsets.fromLTRB(
+              layout.inset,
+              8 + SettingsDetailScaffold.topInsetOf(context),
+              layout.inset,
+              32,
+            ),
             children: <Widget>[
               if (layout.header && page.subtitle.isNotEmpty)
                 ApplePageTitle(

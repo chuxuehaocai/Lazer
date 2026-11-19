@@ -46,7 +46,6 @@ import '../utils/background_image.dart';
 import '../utils/byte_format.dart';
 import '../widgets/ui_scaling.dart';
 import '../widgets/windows_backdrop.dart';
-import '../widgets/window_chrome.dart';
 import 'login.dart';
 import 'widgets.dart';
 import 'lyrics_cache_settings.dart';
@@ -105,26 +104,19 @@ class AppSettingsPage extends StatelessWidget {
       MediaQuery.sizeOf(context).width,
       layoutStyle: state.layoutStyle,
     ),
-    child: WindowChromeBand(
-      // The overview is ordinary scrolling content, so the capsule's band is a
-      // layout inset: the categories stop at the band instead of sliding under
-      // the capsule. Subviews keep their own band handling, which is why this
-      // wraps the overview and not the host.
-      inset: topInset,
-      child: categorized
-          ? _SettingsCategoryHome(
-              state: state,
-              topInset: 0,
-              onOpenLocalMusic: onOpenLocalMusic,
-              backgroundImagePicker: backgroundImagePicker,
-            )
-          : _SettingsOverview(
-              state: state,
-              topInset: 0,
-              onOpenLocalMusic: onOpenLocalMusic,
-              backgroundImagePicker: backgroundImagePicker,
-            ),
-    ),
+    child: categorized
+        ? _SettingsCategoryHome(
+            state: state,
+            topInset: topInset,
+            onOpenLocalMusic: onOpenLocalMusic,
+            backgroundImagePicker: backgroundImagePicker,
+          )
+        : _SettingsOverview(
+            state: state,
+            topInset: topInset,
+            onOpenLocalMusic: onOpenLocalMusic,
+            backgroundImagePicker: backgroundImagePicker,
+          ),
   );
 }
 
@@ -229,7 +221,7 @@ class _SettingsCategoryHome extends StatelessWidget {
         child: ListView(
           padding: EdgeInsets.fromLTRB(
             inset,
-            8 + topInset,
+            8 + topInset + SettingsDetailScaffold.topInsetOf(context),
             inset,
             36 + MediaQuery.paddingOf(context).bottom,
           ),
@@ -378,7 +370,7 @@ class _SettingsOverview extends StatelessWidget {
           key: const PageStorageKey('settings-overview-scroll'),
           padding: EdgeInsets.fromLTRB(
             inset,
-            8 + topInset,
+            8 + topInset + SettingsDetailScaffold.topInsetOf(context),
             inset,
             36 + MediaQuery.paddingOf(context).bottom,
           ),

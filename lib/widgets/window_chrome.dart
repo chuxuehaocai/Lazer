@@ -566,30 +566,6 @@ class WindowChromeHeader extends StatelessWidget {
   }
 }
 
-/// Keeps a browse page's scrolling content out of the floating capsule's band.
-///
-/// The band is the strip the window capsule floats in. Passing its height to a
-/// page as *scroll padding* puts the first row in the right place, but the
-/// viewport still spans the whole page: as soon as the list scrolls, everything
-/// above the first row travels up under the capsule and the capsule paints over
-/// it. As a layout inset the resting position is unchanged while the band stays
-/// clear, because the scroll viewport itself now ends where the band does.
-class WindowChromeBand extends StatelessWidget {
-  const WindowChromeBand({super.key, required this.inset, required this.child});
-
-  final double inset;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    if (inset <= 0) return child;
-    return Padding(
-      padding: EdgeInsets.only(top: inset),
-      child: ClipRect(child: child),
-    );
-  }
-}
-
 /// Gives a page's own header back the title-bar behaviour: drag it to move the
 /// window, double-click it to maximize.
 ///
@@ -775,11 +751,36 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
   late final _portal = OverlayPortalController()..show();
   WindowChromeController? _chrome;
 
+  /// Measures the page's own command row so the capsule extends by what the
+  /// command actually needs instead of a fixed slot per action. Two short rows
+  /// ("插件市场" and "导入 ZIP") were reserving twice the width they painted in.
+  final GlobalKey _leadingKey = GlobalKey();
+  double? _leadingExtent;
+
+  /// The command's own width: what it measured, capped by what the page asked
+  /// for. Null until the first layout, when the declared width stands in.
+  double get _leadingWidth {
+    if (widget.leading == null) return 0;
+    final double? measured = _leadingExtent;
+    if (measured == null) return widget.leadingWidth;
+    return math.min(measured, widget.leadingWidth);
+  }
+
   double get _width =>
       kWindowChromeButtonWidth * widget.children.length +
       (widget.leading == null
           ? 0
-          : widget.leadingWidth + kWindowChromeActionDivider);
+          : _leadingWidth + kWindowChromeActionDivider);
+
+  void _measureLeading() {
+    if (widget.leading == null || !mounted) return;
+    final box = _leadingKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final double extent = box.size.width;
+    if (extent <= 0) return;
+    if (_leadingExtent != null && (_leadingExtent! - extent).abs() < 1) return;
+    setState(() => _leadingExtent = extent);
+  }
 
   void _register(WindowChromeController? chrome, double width, bool active) {
     if (_chrome != chrome) {
@@ -792,6 +793,16 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
       active: active,
       playerDriven: widget.playerDriven,
     );
+  }
+
+  @override
+  void didUpdateWidget(covariant WindowChromeActions oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A different command, or a different cap, invalidates the measurement.
+    if (!identical(oldWidget.leading, widget.leading) ||
+        oldWidget.leadingWidth != widget.leadingWidth) {
+      _leadingExtent = null;
+    }
   }
 
   @override
@@ -840,6 +851,12 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
       width,
       routeCurrent && (widget.active ?? true),
     );
+    if (widget.leading != null && _leadingExtent == null) {
+      // Read back what the command needs, once. Re-measuring on every frame
+      // would feed the pill's width back into the constraints the command is
+      // measured under, and that loop never settles.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _measureLeading());
+    }
     final WindowChromeController chrome = layout.controller;
     // Repaints for the capsule's own unfold, for a handover's frames, and
     // whenever the set that owns the extension changes.
@@ -924,9 +941,12 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
                                           children: [
                                             if (widget.leading != null) ...[
                                               SizedBox(
-                                                width: widget.leadingWidth,
+                                                width: _leadingWidth,
                                                 child: Center(
-                                                  child: widget.leading,
+                                                  child: KeyedSubtree(
+                                                    key: _leadingKey,
+                                                    child: widget.leading!,
+                                                  ),
                                                 ),
                                               ),
                                               const _WindowChromeActionDivider(),

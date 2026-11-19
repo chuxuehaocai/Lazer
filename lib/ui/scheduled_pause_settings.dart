@@ -24,7 +24,12 @@ class ScheduledPauseSettingsPage extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
           child: ListView(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20 + SettingsDetailScaffold.topInsetOf(context),
+              20,
+              20,
+            ),
             children: [
               AppleGroupedCard(
                 child: AppleListTile(
