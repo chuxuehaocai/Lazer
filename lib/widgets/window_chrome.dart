@@ -1115,41 +1115,68 @@ class _WindowChromeButtonTheme extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return IconButtonTheme(
-      data: IconButtonThemeData(
+    // One hover language for everything the capsule paints: icon buttons on the
+    // player's top bar and the text commands a settings page puts beside them
+    // share the same fill, the same square corners and the same 40 dp band.
+    WidgetStateProperty<Color?> fill(Color Function(double alpha) tint) =>
+        WidgetStateProperty.resolveWith(
+          (states) => tint(
+            states.contains(WidgetState.pressed)
+                ? .13
+                : states.contains(WidgetState.hovered)
+                ? .07
+                : 0,
+          ),
+        );
+    final foreground = WidgetStateProperty.resolveWith(
+      (states) => scheme.onSurfaceVariant.withValues(
+        alpha: states.contains(WidgetState.disabled) ? .4 : 1,
+      ),
+    );
+    return TextButtonTheme(
+      data: TextButtonThemeData(
         style: ButtonStyle(
-          fixedSize: const WidgetStatePropertyAll(
-            Size(kWindowChromeButtonWidth, kWindowChromeHeight),
+          minimumSize: const WidgetStatePropertyAll(
+            Size(0, kWindowChromeHeight),
           ),
-          minimumSize: const WidgetStatePropertyAll(Size.zero),
-          maximumSize: const WidgetStatePropertyAll(
-            Size(kWindowChromeButtonWidth, kWindowChromeHeight),
-          ),
-          iconSize: const WidgetStatePropertyAll(18),
-          padding: const WidgetStatePropertyAll(EdgeInsets.zero),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          visualDensity: VisualDensity.standard,
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 12),
+          ),
           shape: const WidgetStatePropertyAll(
             RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           ),
-          foregroundColor: WidgetStateProperty.resolveWith(
-            (states) => scheme.onSurfaceVariant.withValues(
-              alpha: states.contains(WidgetState.disabled) ? .4 : 1,
-            ),
-          ),
-          backgroundColor: WidgetStateProperty.resolveWith(
-            (states) => scheme.onSurface.withValues(
-              alpha: states.contains(WidgetState.pressed)
-                  ? .13
-                  : states.contains(WidgetState.hovered)
-                  ? .07
-                  : 0,
-            ),
-          ),
+          foregroundColor: foreground,
+          backgroundColor: fill((alpha) => scheme.onSurface.withValues(alpha: alpha)),
           overlayColor: const WidgetStatePropertyAll(Colors.transparent),
         ),
       ),
-      child: child,
+      child: IconButtonTheme(
+        data: IconButtonThemeData(
+          style: ButtonStyle(
+            fixedSize: const WidgetStatePropertyAll(
+              Size(kWindowChromeButtonWidth, kWindowChromeHeight),
+            ),
+            minimumSize: const WidgetStatePropertyAll(Size.zero),
+            maximumSize: const WidgetStatePropertyAll(
+              Size(kWindowChromeButtonWidth, kWindowChromeHeight),
+            ),
+            iconSize: const WidgetStatePropertyAll(18),
+            padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.standard,
+            shape: const WidgetStatePropertyAll(
+              RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            ),
+            foregroundColor: foreground,
+            backgroundColor: fill(
+              (alpha) => scheme.onSurface.withValues(alpha: alpha),
+            ),
+            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+          ),
+        ),
+        child: child,
+      ),
     );
   }
 }

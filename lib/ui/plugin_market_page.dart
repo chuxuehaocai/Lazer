@@ -9,9 +9,11 @@ import '../state/app_state.dart';
 import '../updates/release_version.dart';
 import '../diagnostics/build_info.dart';
 import '../widgets/apple_ui.dart';
+import '../widgets/accessible_controls.dart';
 import '../widgets/build_safe_state.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/spring_buttons.dart';
+import '../widgets/window_chrome.dart';
 
 String _errorText(Object error) =>
     error is FormatException ? error.message : '$error';
@@ -115,16 +117,24 @@ class _PluginMarketViewState extends State<PluginMarketView>
                     .contains(_query.toLowerCase()),
           )
           .toList();
+      // The capsule paints its command row through its own overlay portal, and a
+      // Tooltip opens a second portal inside that one: hovering used to trip the
+      // overlay theater's depth assertion. Only the capsule needs the label on
+      // the Semantics node instead; a route or compact header keeps the bubble.
+      final bool capsule =
+          WindowChromeScope.maybeLayoutOf(context)?.inline == true;
       return SettingsDetailScaffold(
         title: context.tr('插件市场'),
         actions: [
-          IconButton(
-            tooltip: context.tr('插件源'),
+          AccessibleIconButton(
+            tooltip: capsule ? null : '插件源',
+            semanticLabel: capsule ? '插件源' : null,
             onPressed: _editSource,
             icon: const Icon(Icons.dns_outlined),
           ),
-          IconButton(
-            tooltip: context.tr('刷新'),
+          AccessibleIconButton(
+            tooltip: capsule ? null : '刷新',
+            semanticLabel: capsule ? '刷新' : null,
             onPressed: market.loading ? null : market.refresh,
             icon: const Icon(Icons.refresh_rounded),
           ),
