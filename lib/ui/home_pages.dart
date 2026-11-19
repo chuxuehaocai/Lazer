@@ -733,53 +733,157 @@ class _ShelfArrow extends StatelessWidget {
   );
 }
 
-/// A stable six-cover collage. Artwork only changes with the feed, so the
-/// landing page never runs a timer just to slide repeated covers under labels.
-class _CoverMosaic extends StatelessWidget {
-  const _CoverMosaic({required this.covers, this.rows = 2});
+/// A collage of the feed's artwork that drifts under the card's labels.
+///
+/// Thirty frames a second from a timer rather than an [AnimationController]: a
+/// controller wakes the UI isolate on every display vsync (165+ times a second
+/// on a high-refresh screen) even when the phase only publishes every 33 ms.
+/// The drift stops by itself when the platform asks for less motion, when the
+/// tree mutes tickers (a retained page that is not on screen), and while the app
+/// is in the background: a card left behind a route must not keep a timer alive.
+class _MovingCoverMosaic extends StatefulWidget {
+  const _MovingCoverMosaic({required this.covers, this.rows = 2});
+
   final List<String?> covers;
+
+  /// Square rows the collage fills. The tile edge follows from the card's height.
   final int rows;
-  static const int columns = 3;
 
   @override
-  Widget build(BuildContext context) {
-    final artwork = covers
-        .whereType<String>()
-        .where((url) => url.isNotEmpty)
-        .toSet()
-        .take(rows * columns)
-        .toList(growable: false);
-    if (artwork.isEmpty) return const SizedBox.expand();
-    return RepaintBoundary(
-      child: LayoutBuilder(
-        builder: (context, box) => Column(
-          children: [
-            for (var row = 0; row < rows; row++)
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var column = 0; column < columns; column++)
-                      Expanded(
-                        child: AppCover(
-                          url:
-                              artwork[(row * columns + column) %
-                                  artwork.length],
-                          size: math.max(
-                            box.maxWidth / columns,
-                            box.maxHeight / rows,
-                          ),
-                          radius: 0,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
+  State<_MovingCoverMosaic> createState() => _MovingCoverMosaicState();
+}
+
+class _MovingCoverMosaicState extends State<_MovingCoverMosaic>
+    with WidgetsBindingObserver {
+  static const Duration _driftDuration = Duration(seconds: 18);
+  static const Duration _frameInterval = Duration(milliseconds: 33);
+
+  final ValueNotifier<double> _phase = ValueNotifier<double>(0);
+  final Stopwatch _clock = Stopwatch();
+  Timer? _timer;
+  Duration _lastAdvance = Duration.zero;
+  double _phaseValue = 0;
+  bool _reduceMotion = false;
+  bool _tickerAllowed = true;
+  bool _appActive = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _syncPlayback();
   }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final bool active = state == AppLifecycleState.resumed;
+    if (active == _appActive) return;
+    _appActive = active;
+    _syncPlayback();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final bool reduce = MediaQuery.disableAnimationsOf(context);
+    final bool allowed = TickerMode.valuesOf(context).enabled;
+    if (reduce != _reduceMotion || allowed != _tickerAllowed) {
+      _reduceMotion = reduce;
+      _tickerAllowed = allowed;
+      _syncPlayback();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _MovingCoverMosaic oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncPlayback();
+  }
+
+  bool get _hasCovers => widget.covers.any((url) => url?.isNotEmpty ?? false);
+
+  bool get _runs => _hasCovers && !_reduceMotion && _tickerAllowed && _appActive;
+
+  void _syncPlayback() {
+    if (_runs) {
+      if (_timer != null) return;
+      _clock
+        ..reset()
+        ..start();
+      _lastAdvance = Duration.zero;
+      _timer = Timer.periodic(_frameInterval, (_) => _advance());
+    } else {
+      _timer?.cancel();
+      _timer = null;
+      _clock.stop();
+      _lastAdvance = Duration.zero;
+    }
+  }
+
+  void _advance() {
+    if (!mounted) return;
+    final Duration elapsed = _clock.elapsed;
+    final double delta =
+        (elapsed - _lastAdvance).inMicroseconds / _driftDuration.inMicroseconds;
+    _lastAdvance = elapsed;
+    if (delta <= 0) return;
+    _phaseValue = (_phaseValue + delta) % 1;
+    _phase.value = _phaseValue;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _clock.stop();
+    _phase.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final artwork = widget.covers
+          .whereType<String>()
+          .where((url) => url.isNotEmpty)
+          .toSet()
+          .take(8)
+          .toList(growable: false);
+      if (artwork.isEmpty) return const SizedBox.expand();
+      final double tile = math.max(box.maxHeight / widget.rows, 1);
+      final repeated = List<String?>.generate(
+        math.max(24, widget.rows * 12),
+        (index) => artwork[index % artwork.length],
+      );
+      final double travel = tile * artwork.length;
+      return ClipRect(
+        child: AnimatedBuilder(
+          animation: _phase,
+          builder: (context, child) => Transform.translate(
+            key: const ValueKey<String>('cover-mosaic-drift'),
+            offset: Offset(-_phase.value * travel, 0),
+            child: child,
+          ),
+          child: OverflowBox(
+            alignment: Alignment.topLeft,
+            minWidth: 0,
+            maxWidth: double.infinity,
+            child: SizedBox(
+              width: repeated.length * tile / widget.rows,
+              height: tile * widget.rows,
+              child: Wrap(
+                direction: Axis.vertical,
+                children: <Widget>[
+                  for (final url in repeated)
+                    AppCover(url: url, size: tile, radius: 0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 /// The phone keeps the original square artwork tiles without continuously
@@ -1215,7 +1319,7 @@ class ChartShelf extends StatelessWidget {
                                       tile: 82,
                                     ),
                                   )
-                                : _CoverMosaic(
+                                : _MovingCoverMosaic(
                                     covers: chart.entries
                                         .map(chartEntryCover)
                                         .toList(growable: false),
@@ -1589,7 +1693,7 @@ class FilledCoverCard extends StatelessWidget {
                         : (phone ? .58 : .82),
                     child: phone
                         ? _PhoneCoverMosaic(covers: covers)
-                        : _CoverMosaic(covers: covers),
+                        : _MovingCoverMosaic(covers: covers),
                   ),
                 ),
                 DecoratedBox(
