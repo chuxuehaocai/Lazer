@@ -16,6 +16,20 @@ import '../widgets/spring_buttons.dart';
 String _errorText(Object error) =>
     error is FormatException ? error.message : '$error';
 
+/// Whether the market offers a newer build than the one installed.
+///
+/// Both sides come from plugin manifests, which are user-supplied: a version that
+/// is not semver must report "no update" rather than take the page down. The row
+/// used to force-unwrap both parses, so one odd version string anywhere in the
+/// installed set blanked the whole market.
+@visibleForTesting
+bool pluginUpdateAvailable({required String candidate, required String current}) {
+  final released = ReleaseVersion.parse(candidate);
+  final present = ReleaseVersion.parse(current);
+  if (released == null || present == null) return false;
+  return released.compareTo(present) > 0;
+}
+
 class PluginMarketPage extends StatelessWidget {
   const PluginMarketPage({super.key, required this.state});
   final AppState state;
@@ -168,10 +182,10 @@ class _PluginMarketViewState extends State<PluginMarketView>
     );
     final update =
         installed != null &&
-        ReleaseVersion.parse(
-              plugin.version,
-            )!.compareTo(ReleaseVersion.parse(installed.manifest.version)!) >
-            0;
+        pluginUpdateAvailable(
+          candidate: plugin.version,
+          current: installed.manifest.version,
+        );
     final downloading = market.installing == plugin.id;
     final busy = market.installing != null || widget.state.pluginManager.busy;
     return AppleGroupedCard(
