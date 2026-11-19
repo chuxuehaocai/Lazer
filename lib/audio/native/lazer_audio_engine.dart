@@ -276,6 +276,8 @@ class NativeAudioEngine
   int _transportRequest = 0;
   int _queueId = 0;
   int _queueGeneration = 0;
+  int _successorRequestGeneration = 0;
+  int _confirmedSourceGeneration = 0;
   int _queueIndex = 0;
   List<String> _pendingUrls = <String>[];
   bool _sourceLoaded = false;
@@ -292,9 +294,14 @@ class NativeAudioEngine
   NativeStreamReader? _activeReader;
   NativeStreamReader? _openingReader;
   final Set<NativeStreamReader> _preparingReaders = {};
-  AudioStreamEntry? _queuedEntry;
-  NativeStreamReader? _queuedReader;
-  String? _queuedUrl;
+
+  /// The successor the engine currently holds, bound to the generations that
+  /// produced it. Keeping the reader, its cache entry, the URL and both
+  /// generations in one immutable record means a clear can only ever name the
+  /// exact target this isolate prepared, instead of a set of fields that could
+  /// drift apart.
+  _SuccessorBinding? _queued;
+  final List<_SuccessorBinding> _deferredReaderRetirements = [];
   LazerStreamInfo? _streamInfo;
   Duration _position = Duration.zero;
   Duration? _duration;
@@ -606,7 +613,7 @@ class NativeAudioEngine
       await _serialize(
         () async {
           if (generation != _generation || _disposed) return;
-          await _stopSource();
+          await _stopSource(generation);
         },
         key: 'source',
         onSuperseded: () {},
@@ -645,7 +652,7 @@ class NativeAudioEngine
     // asking for a second fails and clears the queued reader instead — which
     // would leave the app waiting for a hand-off the engine can no longer make.
     // Drop the old one first, then prepare the new one.
-    if (_queuedReader != null || _queuedUrl != null) {
+    if (_queued != null) {
       await _clearQueued();
       if (queueId != _queueId || !_sourceLoaded || _disposed) return false;
     }
@@ -700,11 +707,10 @@ class NativeAudioEngine
           throw StateError('Could not clear the successor ($result)');
         }
         _pendingUrls = <String>[];
-        _queuedUrl = null;
-        _queuedReader?.release();
-        _queuedReader = null;
-        _queuedEntry?.cancelIfUnleased();
-        _queuedEntry = null;
+        final _SuccessorBinding? queued = _queued;
+        _queued = null;
+        queued?.reader.release();
+        queued?.entry?.cancelIfUnleased();
         return true;
       }),
       key: 'clear',
@@ -720,7 +726,7 @@ class NativeAudioEngine
   /// the engine crosses, which is what makes "the mixed-in song is the one the
   /// queue scripted" checkable.
   @override
-  String? get queuedSourceUrl => _queuedUrl;
+  String? get queuedSourceUrl => _queued?.url;
 
   /// Whether the successor is already audible inside an overlap.
   @override
@@ -728,9 +734,9 @@ class NativeAudioEngine
 
   @override
   Future<bool> playQueuedNext() async {
-    final bool fromPending = _queuedUrl == null;
+    final bool fromPending = _queued == null;
     final pending = _pendingUrls;
-    final String? next = _queuedUrl ?? _pendingUrls.firstOrNull;
+    final String? next = _queued?.url ?? _pendingUrls.firstOrNull;
     if (next == null) return false;
     final int generation = ++_generation;
     _sourceLoaded = false;
@@ -1001,7 +1007,7 @@ class NativeAudioEngine
 
   @override
   Future<void> stop() {
-    ++_generation;
+    final int generation = ++_generation;
     _interruptPendingReads();
     _sourceLoaded = false;
     _mixPresented = false;
@@ -1011,14 +1017,14 @@ class NativeAudioEngine
     _pendingSeek = null;
     _duration = null;
     return _serialize(
-      _stopSource,
+      () => _stopSource(generation),
       key: 'source',
       onSuperseded: () {},
       essential: true,
     );
   }
 
-  Future<void> _stopSource() async {
+  Future<void> _stopSource(int generation) async {
     final int? address = _engineAddressOrNull;
     if (address != null) {
       try {
@@ -1037,7 +1043,13 @@ class NativeAudioEngine
       }
     }
     if ((_ownershipFaulted || _shutdownStarted) && !_nativeDestroyed) return;
-    await _clearQueued();
+    // A stop retires every source of the generation it names, so a reader that
+    // was deferred for lack of proof can be dropped now; an install only
+    // retires the generations before it.
+    _confirmSourceTransition(generation, retiresGeneration: true);
+    // Issuing a second clear here reports ErrorState (there is nothing queued)
+    // and used to fault the worker before Dart released either reader.
+    _releaseQueued();
     if ((_ownershipFaulted || _shutdownStarted) && !_nativeDestroyed) return;
     _releaseActive();
     _publishStreamInfo(null);
@@ -1067,9 +1079,10 @@ class NativeAudioEngine
   void _cancelOwnedReaders() {
     final readers = <NativeStreamReader>{
       ?_activeReader,
-      ?_queuedReader,
+      ?_queued?.reader,
       ?_openingReader,
       ..._preparingReaders,
+      ..._deferredReaderRetirements.map((retirement) => retirement.reader),
       ..._unconfirmedReaders,
     };
     for (final reader in readers) {
@@ -1187,10 +1200,11 @@ class NativeAudioEngine
     }
     // Readers are only freed once the engine has joined its threads.
     _releaseActive();
-    _queuedReader?.release();
-    _queuedReader = null;
-    _queuedEntry?.cancelIfUnleased();
-    _queuedEntry = null;
+    final _SuccessorBinding? queued = _queued;
+    _queued = null;
+    queued?.reader.release();
+    queued?.entry?.cancelIfUnleased();
+    _releaseDeferredReaders();
     for (final reader in _unconfirmedReaders) {
       reader.release();
     }
@@ -1342,6 +1356,7 @@ class NativeAudioEngine
       }
       // The engine just accepted this source, so whatever was active before is
       // gone and its reader can be freed now.
+      _confirmSourceTransition(generation);
       _releaseActive(keepEntry: entry);
       _activeEntry = entry;
       _activeReader = reader;
@@ -1508,32 +1523,41 @@ class NativeAudioEngine
   /// queue was replaced, the source stopped, or the app moved on — frees its own
   /// reader only after a later serialised call has made the engine drop it.
   Future<bool> _prepareSuccessor(String url) {
-    final int generation = _generation;
+    final int sourceGeneration = _generation;
+    final int requestGeneration = ++_successorRequestGeneration;
     return _preparationQueue.run(
       () async {
-        if (generation != _generation || _disposed) return false;
-        await _prepareSuccessorImpl(url);
-        return generation == _generation &&
-            !_disposed &&
-            (_queuedUrl == url || _pendingUrls.firstOrNull == url);
+        if (sourceGeneration != _generation ||
+            requestGeneration != _successorRequestGeneration ||
+            _disposed) {
+          return false;
+        }
+        return _prepareSuccessorImpl(url, sourceGeneration, requestGeneration);
       },
       key: 'successor',
       onSuperseded: () => false,
     );
   }
 
-  Future<void> _prepareSuccessorImpl(String url) async {
+  Future<bool> _prepareSuccessorImpl(
+    String url,
+    int sourceGeneration,
+    int requestGeneration,
+  ) async {
     final LazerAudioBridgeApi? bridge = _bridge;
     final int? address = _engineAddressOrNull;
     if (bridge == null || address == null || !_sourceLoaded || _disposed) {
-      return;
+      return false;
     }
-    final int generation = ++_queueGeneration;
     _preparationsInFlight++;
     AudioStreamEntry? entry;
     AudioStreamLease? lease;
     NativeStreamReader? reader;
     NativeStreamReader? preparingReader;
+    // The generation this reader is queued under, kept outside the block that
+    // declares it so a lost reply can still name the resource to clear.
+    int queuedGeneration = 0;
+    bool submitted = false;
     try {
       lease = await _cacheLeaseFor(url);
       entry = lease?.entry;
@@ -1544,7 +1568,25 @@ class NativeAudioEngine
           // the announced size costs nothing the mix needs.
           : await entry.expectedLengthWithin(successorLengthWait) ??
                 entry.expectedBytes;
-      if (generation != _queueGeneration || !_sourceLoaded || _disposed) return;
+      if (requestGeneration != _successorRequestGeneration ||
+          sourceGeneration != _generation ||
+          !_sourceLoaded ||
+          _disposed) {
+        return false;
+      }
+      // A reader whose exact clear answered `ErrorState` still occupies the
+      // engine's successor slot: the refusal means the engine did not act, not
+      // that the slot is free. Free it before asking for another successor or
+      // the engine refuses this request as a second one.
+      if (_successorSlotUnconfirmed) {
+        await _clearQueued();
+        if (requestGeneration != _successorRequestGeneration ||
+            sourceGeneration != _generation ||
+            !_sourceLoaded ||
+            _disposed) {
+          return false;
+        }
+      }
       // Keep repeat-one and adjacent copies of the audible URL pending, as in
       // ordinary repeat playback. Reopen after completion (or manual skip)
       // instead of asking the native engine to prepare the same source twice.
@@ -1552,7 +1594,7 @@ class NativeAudioEngine
         // A different successor may already be prepared (for example before
         // repeat-one was selected). Drop it while keeping this pending repeat.
         await _clearQueued();
-        return;
+        return false;
       }
       reader = NativeStreamReader.create(
         bridge,
@@ -1560,17 +1602,19 @@ class NativeAudioEngine
         expectedBytes: expectedBytes,
         onReleased: lease?.release,
       );
-      if (reader == null) return;
+      if (reader == null) return false;
       preparingReader = reader;
       _preparingReaders.add(reader);
-      // The cache download can finish after this local is transferred to
-      // `_queuedReader` and set to null below. Capture the reader itself so the
+      // The cache download can finish after this local is transferred into
+      // `_queued` and set to null below. Capture the reader itself so the
       // completion callback still signals the bridge instead of throwing from
       // the cache's unawaited download future.
       final NativeStreamReader queuedReader = reader;
       if (lease != null) _connectEntry(lease, queuedReader);
       lease = null;
       if (entry == null) queuedReader.finish();
+      final int generation = queuedGeneration = ++_queueGeneration;
+      submitted = true;
       final int status = _status(
         await _callWorker(LazerWorkerOp.queueReader, <Object?>[
           address,
@@ -1580,25 +1624,53 @@ class NativeAudioEngine
         ]),
       );
       if (status != lazerAudioOk ||
+          requestGeneration != _successorRequestGeneration ||
           generation != _queueGeneration ||
+          sourceGeneration != _generation ||
           !_sourceLoaded ||
           _disposed) {
         if (status < 0) {
           // An explicit queue rejection never installed this reader. A lost RPC
           // reply is handled by the catch path and has unknown ownership.
           _retireOrHold(reader);
+        } else if (sourceGeneration != _generation) {
+          // queue_reader completed before the newer source operation reached
+          // the worker (the worker serialises calls). Keep the installed reader
+          // alive until that stop/open confirms it retired the old session.
+          _deferSupersededReader(
+            reader,
+            entry,
+            url,
+            sourceGeneration,
+            generation,
+          );
         } else {
-          await _settleSupersededReader(address, reader, entry);
+          await _settleSupersededReader(
+            address,
+            reader,
+            entry,
+            url,
+            sourceGeneration,
+            generation,
+          );
         }
         reader = null;
         entry = null;
-        return;
+        return false;
       }
-      _queuedReader?.release();
-      _queuedEntry?.cancelIfUnleased();
-      _queuedReader = reader;
-      _queuedEntry = entry;
-      _queuedUrl = url;
+      _queued?.reader.release();
+      _queued?.entry?.cancelIfUnleased();
+      // The binding a later exact clear has to name: which source generation
+      // this successor belongs to, and the queue generation it was installed
+      // with. Without them a clear can only say "drop the queue", which frees a
+      // different reader than the one this call owns.
+      _queued = _SuccessorBinding(
+        reader,
+        entry,
+        url,
+        sourceGeneration,
+        generation,
+      );
       // appendToQueue keeps the URL available while preparation is pending so
       // a manual skip can still open it. Once prepared, the reader owns it;
       // leaving it pending would prepare the same song again at its boundary,
@@ -1608,15 +1680,29 @@ class NativeAudioEngine
       }
       reader = null;
       entry = null;
+      return true;
     } catch (error) {
       debugPrint('lazer-audio: preparing $url failed: $error');
       if (reader != null) {
         if (error is LazerWorkerNotSubmitted) {
           _retireOrHold(reader);
+        } else if (submitted) {
+          // The call reached the worker but its reply was lost, so the engine may
+          // have installed this reader. Name it explicitly instead of releasing a
+          // reader the engine might still be decoding from.
+          await _settleSupersededReader(
+            address,
+            reader,
+            entry,
+            url,
+            sourceGeneration,
+            queuedGeneration,
+          );
         } else {
-          await _settleSupersededReader(address, reader, entry);
+          _retireOrHold(reader);
         }
       }
+      return false;
     } finally {
       lease?.release();
       _preparingReaders.remove(preparingReader);
@@ -1633,29 +1719,38 @@ class NativeAudioEngine
   /// Resolves a successor preparation that lost its race.
   ///
   /// The engine may still be reading [reader], so the only safe way to free it is
-  /// a *serialised* `clear_queued_reader`: it runs on the same worker isolate as
-  /// the `queue_reader` that installed the successor, so when it returns the
-  /// engine has either dropped the successor (`Ok`) or promoted it across the
-  /// audible boundary (`QueueAlreadyActive`). In the second case the reader is the
-  /// active source now, so it is adopted here and the track change is reported —
-  /// the asynchronous `TrackChanged` event may already have been delivered (and
-  /// found nothing queued) or may arrive later and find nothing either.
+  /// an *exact* clear that names the queue generation it was installed under: it
+  /// runs on the same worker isolate as the `queue_reader` that installed it, so
+  /// an `Ok` proves the engine is no longer calling that reader. The older
+  /// `clear_queued_reader` cannot stand in here — it drops whatever the queue
+  /// holds now, which may be a different, newer successor.
+  ///
+  /// `QueueAlreadyActive` means the successor crossed the audible boundary and is
+  /// adopted here; `QueueAlreadyAudible` means it is still queued and is retained
+  /// with a fresh binding; `ErrorState` means the request was stale and the
+  /// engine may still own the reader, so it stays deferred until a source
+  /// transition confirms the engine moved on.
   Future<void> _settleSupersededReader(
     int address,
     NativeStreamReader reader,
     AudioStreamEntry? entry,
+    String url,
+    int sourceGeneration,
+    int targetQueueGeneration,
   ) async {
     if (_ownershipFaulted || _shutdownStarted) {
       _retireOrHold(reader);
       return;
     }
-    final int generation = ++_queueGeneration;
+    final int requestGeneration = ++_queueGeneration;
     int result = lazerAudioErrorState;
     try {
       result = _status(
-        await _callWorker(LazerWorkerOp.clearQueuedReader, <Object?>[
+        await _callWorker(LazerWorkerOp.clearQueuedReaderEx, <Object?>[
           address,
-          generation,
+          targetQueueGeneration,
+          requestGeneration,
+          false,
         ]),
       );
     } catch (error) {
@@ -1663,46 +1758,155 @@ class NativeAudioEngine
       _retireOrHold(reader);
       return;
     }
-    if (result < 0) {
+    if (result < 0 && result != lazerAudioErrorState) {
       _faultWorker();
       _retireOrHold(reader);
       return;
     }
+    if (_generation != sourceGeneration) {
+      // A source transition followed this clear on the worker lane. If the
+      // clear found the reader active or audible, the transition will retire
+      // it; until the transition is acknowledged it must stay alive.
+      if (result == lazerAudioQueueAlreadyActive ||
+          result == lazerAudioQueueAlreadyAudible ||
+          result == lazerAudioErrorState) {
+        _deferSupersededReader(
+          reader,
+          entry,
+          url,
+          sourceGeneration,
+          requestGeneration,
+        );
+      } else {
+        _retireOrHold(reader);
+        entry?.cancelIfUnleased();
+      }
+      return;
+    }
     if (result == lazerAudioQueueAlreadyActive) {
-      _activeReader?.release();
-      _activeEntry?.cancelIfUnleased();
-      _activeReader = reader;
-      _activeEntry = entry;
-      _queuedReader = null;
-      _queuedEntry = null;
-      _queuedUrl = null;
-      _sourceLoaded = !_disposed;
-      _completionSent = false;
-      _queueIndex++;
-      _emitBufferChange();
-      _publishStreamInfo(readStreamInfo());
-      if (!_disposed && !_advanced.isClosed) _advanced.add(_queueIndex);
+      _adoptActiveReader(reader, entry);
+      return;
+    }
+    if (result == lazerAudioQueueAlreadyAudible) {
+      _retainQueuedReader(
+        reader,
+        entry,
+        url,
+        sourceGeneration,
+        requestGeneration,
+      );
+      return;
+    }
+    if (result == lazerAudioErrorState) {
+      // Stale request: the engine did not act, so it may still be calling this
+      // reader. Free it only once a transition proves the old session is gone.
+      _deferSupersededReader(
+        reader,
+        entry,
+        url,
+        sourceGeneration,
+        requestGeneration,
+      );
       return;
     }
     reader.release();
     entry?.cancelIfUnleased();
   }
 
+  void _adoptActiveReader(NativeStreamReader reader, AudioStreamEntry? entry) {
+    final NativeStreamReader? previousReader = _activeReader;
+    final AudioStreamEntry? previousEntry = _activeEntry;
+    _activeReader = reader;
+    _activeEntry = entry;
+    if (_queued != null && identical(_queued!.reader, reader)) {
+      _queued = null;
+    }
+    _sourceLoaded = !_disposed;
+    _completionSent = false;
+    _mixPresented = false;
+    _pendingSeek = null;
+    _queueIndex++;
+    if (!identical(previousReader, reader)) {
+      previousReader?.release();
+      previousEntry?.cancelIfUnleased();
+    }
+    _emitBufferChange();
+    _publishStreamInfo(readStreamInfo());
+    if (!_disposed && !_advanced.isClosed) _advanced.add(_queueIndex);
+  }
+
+  void _retainQueuedReader(
+    NativeStreamReader reader,
+    AudioStreamEntry? entry,
+    String url,
+    int sourceGeneration,
+    int queueGeneration,
+  ) {
+    final _SuccessorBinding? previous = _queued;
+    _queued = _SuccessorBinding(
+      reader,
+      entry,
+      url,
+      sourceGeneration,
+      queueGeneration,
+    );
+    if (previous != null && !identical(previous.reader, reader)) {
+      // Native allows only one installed successor. Retaining the previous
+      // reference until the next source transition is conservative if an older
+      // library reports a contradictory audible result.
+      _deferSupersededReader(
+        previous.reader,
+        previous.entry,
+        previous.url,
+        sourceGeneration,
+        queueGeneration,
+      );
+    }
+  }
+
   /// Drops the prepared successor and its cache entry.
+  ///
+  /// Unlike the exact clear in [_settleSupersededReader] this one names no
+  /// target: it asks the engine to drop whatever the queue holds now, which is
+  /// what cancelling a prefetch means. It is sent even when no reader is
+  /// installed yet — a preparation may still be inside the worker, and the
+  /// bumped request generation makes that later `queue_reader` stale.
   Future<void> _clearQueued() async {
     if ((_ownershipFaulted || _shutdownStarted) && !_nativeDestroyed) return;
     final int? address = _engineAddressOrNull;
-    final int hadQueued = _queuedReader == null ? 0 : 1;
     final int generation = ++_queueGeneration;
-    if (address != null && hadQueued == 1) {
+    // Nothing installed and nothing in flight: there is no request to cancel, so
+    // an RPC here would only churn the engine's generation bookkeeping.
+    final bool canCancel =
+        _queued != null ||
+        _preparationsInFlight > 0 ||
+        _pendingUrls.isNotEmpty ||
+        _successorSlotUnconfirmed;
+    if (address != null && canCancel) {
+      // With a live binding the exact clear can name the successor this isolate
+      // owns, so a newer successor queued behind it is not dropped by mistake.
+      // Without one (nothing installed yet, or the session changed) the unnamed
+      // clear is correct: it drops whatever the queue holds and makes an
+      // in-flight `queue_reader` stale.
+      final int targetQueueGeneration = _queued?.queueGeneration ?? 0;
+      final bool targeted =
+          targetQueueGeneration != 0 &&
+          _queued?.sourceGeneration == _generation;
       try {
         final int result = _status(
-          await _callWorker(LazerWorkerOp.clearQueuedReader, <Object?>[
-            address,
-            generation,
-          ]),
+          await _callWorker(
+            targeted
+                ? LazerWorkerOp.clearQueuedReaderEx
+                : LazerWorkerOp.clearQueuedReader,
+            <Object?>[
+              address,
+              if (targeted) targetQueueGeneration,
+              generation,
+              if (targeted) false,
+            ],
+          ),
         );
-        if (result < 0) {
+        if (result < 0 && result != lazerAudioErrorState) {
           _faultWorker();
           return;
         }
@@ -1715,16 +1919,86 @@ class NativeAudioEngine
           _crossIntoSuccessor(position.inMilliseconds, announce: !announced);
           return;
         }
+        if (result == lazerAudioErrorState) {
+          // Stale request: the engine acted on nothing, so an installed reader
+          // is still being called. Leave it for a transition to confirm away.
+          return;
+        }
       } catch (error) {
         debugPrint('lazer-audio: clearing the queued source failed: $error');
         return;
       }
     }
-    _queuedUrl = null;
-    _queuedReader?.release();
-    _queuedReader = null;
-    _queuedEntry?.cancelIfUnleased();
-    _queuedEntry = null;
+    _releaseQueued();
+  }
+
+  void _releaseQueued() {
+    final _SuccessorBinding? queued = _queued;
+    _queued = null;
+    queued?.reader.release();
+    queued?.entry?.cancelIfUnleased();
+  }
+
+  void _confirmSourceTransition(
+    int generation, {
+    bool retiresGeneration = false,
+  }) {
+    if (generation > _confirmedSourceGeneration) {
+      _confirmedSourceGeneration = generation;
+    }
+    _releaseDeferredReaders(
+      beforeSourceGeneration: retiresGeneration ? generation + 1 : generation,
+    );
+  }
+
+  /// Whether the engine may still be holding a successor whose retirement this
+  /// isolate could not prove. A deferred reader keeps the queue slot occupied
+  /// until a source transition confirms the engine moved on.
+  bool get _successorSlotUnconfirmed => _deferredReaderRetirements.any(
+    (retirement) => retirement.sourceGeneration == _generation,
+  );
+
+  void _deferSupersededReader(
+    NativeStreamReader reader,
+    AudioStreamEntry? entry,
+    String url,
+    int sourceGeneration,
+    int queueGeneration,
+  ) {
+    if (sourceGeneration < _confirmedSourceGeneration) {
+      _retireOrHold(reader);
+      entry?.cancelIfUnleased();
+      return;
+    }
+    if (_deferredReaderRetirements.any(
+      (retirement) => identical(retirement.reader, reader),
+    )) {
+      return;
+    }
+    _deferredReaderRetirements.add(
+      _SuccessorBinding(reader, entry, url, sourceGeneration, queueGeneration),
+    );
+  }
+
+  /// Releases readers whose successful queue_reader was followed by a stop.
+  ///
+  /// They are only freed after stop or destruction is acknowledged: until then
+  /// the native decode path may still hold their callbacks.
+  void _releaseDeferredReaders({int? beforeSourceGeneration}) {
+    if (_deferredReaderRetirements.isEmpty) return;
+    for (
+      int index = _deferredReaderRetirements.length - 1;
+      index >= 0;
+      index--
+    ) {
+      final retirement = _deferredReaderRetirements[index];
+      if (beforeSourceGeneration == null ||
+          retirement.sourceGeneration < beforeSourceGeneration) {
+        _deferredReaderRetirements.removeAt(index);
+        retirement.reader.release();
+        retirement.entry?.cancelIfUnleased();
+      }
+    }
   }
 
   /// Connects a cache entry to the reader the engine reads it through.
@@ -1934,7 +2208,7 @@ class NativeAudioEngine
 
   /// The engine crossed into the queued successor inside the same output session.
   void _crossIntoSuccessor(int positionMillis, {bool announce = true}) {
-    final NativeStreamReader? successor = _queuedReader;
+    final _SuccessorBinding? successor = _queued;
     if (successor == null) {
       // The boundary was crossed for a successor this isolate did not track (the
       // preparation lost its race and `_settleSupersededReader` already reported
@@ -1944,11 +2218,9 @@ class NativeAudioEngine
     }
     final NativeStreamReader? previousReader = _activeReader;
     final AudioStreamEntry? previousEntry = _activeEntry;
-    _activeReader = successor;
-    _activeEntry = _queuedEntry;
-    _queuedReader = null;
-    _queuedEntry = null;
-    _queuedUrl = null;
+    _activeReader = successor.reader;
+    _activeEntry = successor.entry;
+    _queued = null;
     if (announce) _queueIndex++;
     _position = Duration(milliseconds: positionMillis);
     _pendingSeek = null;
@@ -1969,7 +2241,7 @@ class NativeAudioEngine
   }
 
   void _announceMix(int outgoingPositionMillis) {
-    if (_mixPresented || _queuedReader == null) return;
+    if (_mixPresented || _queued == null) return;
     _mixPresented = true;
     _mixStartOutgoingMillis = outgoingPositionMillis;
     _position = Duration.zero;
@@ -1990,4 +2262,20 @@ class NativeAudioEngine
   };
 
   int _status(Object? value) => value is int ? value : lazerAudioErrorState;
+}
+
+class _SuccessorBinding {
+  const _SuccessorBinding(
+    this.reader,
+    this.entry,
+    this.url,
+    this.sourceGeneration,
+    this.queueGeneration,
+  );
+
+  final NativeStreamReader reader;
+  final AudioStreamEntry? entry;
+  final String url;
+  final int sourceGeneration;
+  final int queueGeneration;
 }
