@@ -98,7 +98,10 @@ class _PluginManagerViewState extends State<PluginManagerView>
             ),
             child: const TrText('插件市场'),
           ),
-          SpringFilledButton(
+          // Both capsule commands read as text links: the capsule is the window's
+          // own chrome, so a filled button would put a second surface inside it
+          // next to the caption cluster.
+          SpringTextButton(
             onPressed: manager.busy || _picking ? null : _import,
             child: TrText(_picking || manager.busy ? '正在导入…' : '导入 ZIP'),
           ),

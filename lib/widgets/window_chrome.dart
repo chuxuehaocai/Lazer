@@ -798,11 +798,13 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
   @override
   void didUpdateWidget(covariant WindowChromeActions oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // A different command, or a different cap, invalidates the measurement.
-    if (!identical(oldWidget.leading, widget.leading) ||
-        oldWidget.leadingWidth != widget.leadingWidth) {
-      _leadingExtent = null;
-    }
+    // Only a different cap invalidates the measurement. Comparing the leading
+    // widget by identity looked right and was not: a page rebuilds its command
+    // row into a new instance every time it builds, so every rebuild cleared the
+    // measurement, the post-frame read put it back, and that setState scheduled
+    // the next rebuild — a page listening to the app state fed itself frames
+    // until the window stopped answering.
+    if (oldWidget.leadingWidth != widget.leadingWidth) _leadingExtent = null;
   }
 
   @override
@@ -851,10 +853,11 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
       width,
       routeCurrent && (widget.active ?? true),
     );
-    if (widget.leading != null && _leadingExtent == null) {
-      // Read back what the command needs, once. Re-measuring on every frame
-      // would feed the pill's width back into the constraints the command is
-      // measured under, and that loop never settles.
+    if (widget.leading != null) {
+      // Read back what the command needs, so a command that changes its own
+      // label ("导入 ZIP" → "正在导入…") follows. The reading is taken against
+      // the declared width, so it cannot depend on the row it produces, and it
+      // only rebuilds when the answer actually changed.
       WidgetsBinding.instance.addPostFrameCallback((_) => _measureLeading());
     }
     final WindowChromeController chrome = layout.controller;
@@ -943,9 +946,21 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
                                               SizedBox(
                                                 width: _leadingWidth,
                                                 child: Center(
-                                                  child: KeyedSubtree(
-                                                    key: _leadingKey,
-                                                    child: widget.leading!,
+                                                  // Measured against the width
+                                                  // the page declared, never
+                                                  // against the row it happens
+                                                  // to sit in: measuring inside
+                                                  // the row would let the row's
+                                                  // width decide the reading that
+                                                  // decides the row.
+                                                  child: OverflowBox(
+                                                    maxWidth:
+                                                        widget.leadingWidth,
+                                                    alignment: Alignment.center,
+                                                    child: KeyedSubtree(
+                                                      key: _leadingKey,
+                                                      child: widget.leading!,
+                                                    ),
                                                   ),
                                                 ),
                                               ),

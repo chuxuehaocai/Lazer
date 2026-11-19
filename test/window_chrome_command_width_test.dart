@@ -4,9 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/widgets/window_chrome.dart';
 
 class _Host extends StatefulWidget {
-  const _Host({required this.commandWidth, required this.declared});
+  const _Host({required this.commandWidth, required this.declared, this.ticks});
   final double commandWidth;
   final double declared;
+
+  /// When set, the host rebuilds on every tick the way a settings page does
+  /// while the app state publishes playback or plugin updates.
+  final ValueNotifier<int>? ticks;
   @override
   State<_Host> createState() => _HostState();
 }
@@ -17,7 +21,16 @@ class _HostState extends State<_Host> with TickerProviderStateMixin {
   );
 
   @override
+  void initState() {
+    super.initState();
+    widget.ticks?.addListener(_rebuild);
+  }
+
+  void _rebuild() => setState(() {});
+
+  @override
   void dispose() {
+    widget.ticks?.removeListener(_rebuild);
     _chrome.dispose();
     super.dispose();
   }
@@ -30,6 +43,8 @@ class _HostState extends State<_Host> with TickerProviderStateMixin {
     chromeTheme: Theme.of(context),
     child: WindowChromeActions(
       playerDriven: false,
+      // A fresh instance on every build, exactly like `SettingsDetailScaffold`
+      // handing its actions row to the capsule.
       leading: SizedBox(
         key: const ValueKey('command'),
         width: widget.commandWidth,
@@ -84,6 +99,38 @@ void main() {
       _rowWidth(tester),
       closeTo(kWindowChromeTextActionWidth + kWindowChromeActionDivider, 1.5),
       reason: 'the declared width stays the cap',
+    );
+  });
+
+  // The plugin pages rebuild whenever the app state publishes (plugin loads,
+  // playback position) and hand the capsule a fresh command row each time. A
+  // measurement that reset on every build put itself back with a setState, and
+  // that setState scheduled the next build: the window stopped answering.
+  testWidgets('a page that keeps rebuilding settles instead of spinning', (
+    tester,
+  ) async {
+    final ticks = ValueNotifier<int>(0);
+    addTearDown(ticks.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: _Host(
+          commandWidth: 90,
+          declared: kWindowChromeTextActionWidth,
+          ticks: ticks,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (var i = 0; i < 5; i++) {
+      ticks.value++;
+      await tester.pumpAndSettle();
+    }
+
+    expect(
+      _rowWidth(tester),
+      closeTo(90 + kWindowChromeActionDivider, 1.5),
+      reason: 'the width settles on the command and does not oscillate',
     );
   });
 }
