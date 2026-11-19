@@ -706,7 +706,12 @@ class EqualizerSettingsView extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20 + SettingsDetailScaffold.topInsetOf(context),
+              20,
+              20,
+            ),
             child: _EqualizerControls(state: state),
           ),
         ),

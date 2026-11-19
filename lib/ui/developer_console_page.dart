@@ -154,7 +154,15 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(padding: EdgeInsets.all(inset), child: heading),
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    inset,
+                    inset + SettingsDetailScaffold.topInsetOf(context),
+                    inset,
+                    inset,
+                  ),
+                  child: heading,
+                ),
                 Expanded(
                   child: Center(child: Text(context.tr('开发者控制台已关闭。请在设置中启用。'))),
                 ),
@@ -163,7 +171,12 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
           : SafeArea(
               top: false,
               child: Padding(
-                padding: EdgeInsets.all(inset),
+                padding: EdgeInsets.fromLTRB(
+                  inset,
+                  inset + SettingsDetailScaffold.topInsetOf(context),
+                  inset,
+                  inset,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
