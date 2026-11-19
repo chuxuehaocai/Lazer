@@ -129,6 +129,11 @@ void main() {
     );
     expect(style.minimumSize!.resolve(<WidgetState>{})!.height, 40);
     expect(
+      style.textStyle!.resolve(<WidgetState>{})!.fontWeight,
+      FontWeight.w600,
+      reason: 'the capsule commands carry more weight than page buttons',
+    );
+    expect(
       style.overlayColor!.resolve(<WidgetState>{WidgetState.hovered}),
       Colors.transparent,
       reason: 'one fill, not a fill plus a ripple',

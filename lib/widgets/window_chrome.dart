@@ -1146,6 +1146,13 @@ class _WindowChromeButtonTheme extends StatelessWidget {
           shape: const WidgetStatePropertyAll(
             RoundedRectangleBorder(borderRadius: BorderRadius.zero),
           ),
+          // Heavier than a page's text button: these commands sit on the window's
+          // own chrome next to 18 dp window glyphs, and the regular label weight
+          // read thin against them on a translucent band.
+          textStyle: WidgetStatePropertyAll(
+            (Theme.of(context).textTheme.labelLarge ?? const TextStyle())
+                .copyWith(fontWeight: FontWeight.w600),
+          ),
           foregroundColor: foreground,
           backgroundColor: fill((alpha) => scheme.onSurface.withValues(alpha: alpha)),
           overlayColor: const WidgetStatePropertyAll(Colors.transparent),

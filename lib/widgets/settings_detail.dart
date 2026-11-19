@@ -487,20 +487,24 @@ class SettingsDetailScaffold extends StatelessWidget {
   static double topInsetOf(BuildContext context) {
     final bool inline =
         WindowChromeScope.maybeLayoutOf(context)?.inline == true;
-    if (SettingsDetailHost.isEmbedded(context)) {
-      return inline ? _floatingInset : 0;
-    }
+    final double inset = inline ? _floatingInset : _classicInset;
+    if (SettingsDetailHost.isEmbedded(context)) return inset;
     if (!Navigator.of(context).canPop()) return 0;
-    return inline ? _floatingInset : _routeInset(context);
+    // A route subview on a phone keeps the extra band the compact header adds.
+    return inline || !compactBrowsePresentation(context)
+        ? inset
+        : inset + 8;
   }
 
   /// The capsule's own row: the back control sits on the pill's centre line.
   static double get _floatingInset =>
       windowChromeControlTop(kPageBackControlSize) + kPageBackControlSize;
 
-  /// A route subview below a classic title bar keeps its top strip.
-  static double _routeInset(BuildContext context) =>
-      56 + (compactBrowsePresentation(context) ? 8 : 0);
+  /// A classic title bar already owns the strip above the page, so the control
+  /// starts at the page's top edge: clearing it takes the control's own height
+  /// and nothing more, which leaves the same gap under it that the floating
+  /// capsule's row leaves under itself.
+  static double get _classicInset => kPageBackControlSize;
 
   /// Paints [title] in the header row instead of only naming the page on the
   /// overview. Off by default: category pages already show a large page title
