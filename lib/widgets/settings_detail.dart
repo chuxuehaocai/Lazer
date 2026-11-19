@@ -436,7 +436,13 @@ class _SettingsDetailScope extends InheritedWidget {
   /// it hand the screen back: the host keeps the page mounted for the whole
   /// exit, and only this flag says the exit has started. The capsule uses it to
   /// play the page command's walk-out instead of losing it in one frame.
-  final bool active;
+  ///
+  /// Nullable on purpose: the field was added after this widget shipped, and a
+  /// hot reload leaves the instances already in the tree with a null field of
+  /// their own. Reading it as non-null would turn a reload into a crash, so an
+  /// absent value simply means "still on screen" — the behaviour from before it
+  /// existed.
+  final bool? active;
 
   @override
   bool updateShouldNotify(_SettingsDetailScope oldWidget) =>
@@ -465,14 +471,10 @@ class SettingsDetailScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final close = context
-        .dependOnInheritedWidgetOfExactType<_SettingsDetailScope>()
-        ?.close;
-    final bool subviewActive =
-        context
-            .dependOnInheritedWidgetOfExactType<_SettingsDetailScope>()
-            ?.active ??
-        true;
+    final _SettingsDetailScope? scope = context
+        .dependOnInheritedWidgetOfExactType<_SettingsDetailScope>();
+    final close = scope?.close;
+    final bool subviewActive = scope?.active ?? true;
     final Widget? trailing = actions.isEmpty
         ? null
         : Wrap(spacing: 8, children: actions);
