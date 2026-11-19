@@ -581,58 +581,74 @@ class SettingsDetailScaffold extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final inset = constraints.maxWidth < 600 ? 20.0 : 32.0;
-          return Column(
+          return Stack(
             key: const ValueKey('settings-detail-subview'),
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: EdgeInsets.fromLTRB(inset - 12, headerTop, inset, 0),
-                child: Row(
-                  children: [
-                    AccessibleIconButton(
-                      key: const ValueKey('settings-detail-back'),
-                      tooltip: '返回',
-                      onPressed: close,
-                      icon: const Icon(Icons.chevron_left_rounded),
-                    ),
-                    if (headerTitle)
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: Text(
-                            context.tr(title),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(
-                                  color: AppleSemanticColors.of(context).label,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
+            children: <Widget>[
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(inset - 12, headerTop, inset, 0),
+                    child: Row(
+                      children: [
+                        AccessibleIconButton(
+                          key: const ValueKey('settings-detail-back'),
+                          tooltip: '返回',
+                          onPressed: close,
+                          icon: const Icon(Icons.chevron_left_rounded),
                         ),
-                      )
-                    else
-                      const Spacer(),
-                    ?inlineTrailing,
-                  ],
-                ),
+                        if (headerTitle)
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
+                              child: Text(
+                                context.tr(title),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(
+                                      color: AppleSemanticColors.of(
+                                        context,
+                                      ).label,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ),
+                          )
+                        else
+                          const Spacer(),
+                        ?inlineTrailing,
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: headerGap),
+                  // Page content owns its heading; the shared chrome only keeps
+                  // navigation and actions above it.
+                  Expanded(child: child),
+                ],
               ),
+              // The command is painted by the capsule's root overlay, so it is
+              // placed over the header instead of inside the column: it reserves
+              // no height there, and the page content starts directly under the
+              // capsule instead of a command's worth of empty space below it.
               if (capsuleLeading != null)
-                WindowChromeActions(
-                  key: const ValueKey('settings-capsule-actions'),
-                  playerDriven: false,
-                  // The subview is not a route: without this flag the capsule
-                  // would keep the command "current" until the page is torn
-                  // down, and the command would vanish without an exit.
-                  active: subviewActive,
-                  leading: capsuleLeading,
-                  leadingWidth: kWindowChromeTextActionWidth * actions.length,
-                  children: const <Widget>[],
+                Positioned(
+                  top: headerTop,
+                  right: inset,
+                  child: WindowChromeActions(
+                    key: const ValueKey('settings-capsule-actions'),
+                    playerDriven: false,
+                    // The subview is not a route: without this flag the capsule
+                    // would keep the command "current" until the page is torn
+                    // down, and the command would vanish without an exit.
+                    active: subviewActive,
+                    leading: capsuleLeading,
+                    leadingWidth: kWindowChromeTextActionWidth * actions.length,
+                    children: const <Widget>[],
+                  ),
                 ),
-              // Page content owns its heading; the shared chrome only keeps
-              // navigation and actions above it.
-              SizedBox(height: headerGap),
-              Expanded(child: child),
             ],
           );
         },

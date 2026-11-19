@@ -174,4 +174,44 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('a subview keeps its content under the capsule, not below it', (
+    tester,
+  ) async {
+    await mountSettings(tester);
+    await tester.tap(find.text('Font customization'));
+    await tester.pumpAndSettle();
+
+    final back = find.byKey(const ValueKey('settings-detail-back'));
+    expectOnCapsuleRow(tester, back);
+    // The command is painted by the capsule's root overlay and reserves no
+    // height in the page, so the subview starts right under the pill instead of
+    // a command's worth of empty space below it.
+    final title = find.text('Font customization').hitTestable().last;
+    expect(
+      tester.getRect(title).top,
+      closeTo(tester.getRect(back).bottom + 8, 12),
+      reason: 'the subview content follows its header row directly',
+    );
+  });
+
+  testWidgets('a browse page stops at the capsule band instead of under it', (
+    tester,
+  ) async {
+    await mountSettingsRoot(tester);
+    // The overview is ordinary scrolling content, so the band is layout: its
+    // viewport ends where the capsule's strip ends, which is what keeps a
+    // scrolled list from painting behind the capsule.
+    final viewport = find
+        .descendant(
+          of: find.byType(WindowChromeBand),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    expect(tester.getRect(viewport).top, kInlineChromeInset);
+    expect(
+      tester.widget<WindowChromeBand>(find.byType(WindowChromeBand)).inset,
+      kInlineChromeInset,
+    );
+  });
 }

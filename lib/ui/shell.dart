@@ -2389,14 +2389,25 @@ class _AppShellState extends State<AppShell>
       );
     }
     return switch (_section) {
-      _AppSection.home => AppHomePage(
-        state: state,
-        topInset: topInset,
-        onOpenPlaylist: _openPlaylist,
-        onOpenChart: _openChart,
-        onPlayTrack: (List<Track> tracks, int index) =>
-            state.playQueue(tracks, startIndex: index),
+      // Bands a page whose top is ordinary scrolling content: the capsule's
+      // strip becomes layout the scroll viewport cannot enter, so a scrolled
+      // list stops at the band instead of painting under the capsule. Pages
+      // that put their own control on the capsule's line keep the scroll
+      // padding form, because that control has to stay in the band.
+      _AppSection.home => WindowChromeBand(
+        inset: topInset,
+        child: AppHomePage(
+          state: state,
+          topInset: 0,
+          onOpenPlaylist: _openPlaylist,
+          onOpenChart: _openChart,
+          onPlayTrack: (List<Track> tracks, int index) =>
+              state.playQueue(tracks, startIndex: index),
+        ),
       ),
+      // Search keeps its own collapsing header: it owns a primary scroll
+      // position that has to survive reparenting, so the band stays scroll
+      // padding there instead of a clip.
       _AppSection.search => AppSearchPage(
         state: state,
         topInset: topInset,
@@ -2409,26 +2420,32 @@ class _AppShellState extends State<AppShell>
           layoutStyle: state.layoutStyle,
         ),
         child: Builder(
-          builder: (detailContext) => AppLibraryPage(
-            state: state,
-            topInset: topInset,
-            onOpenPlaylist: _openPlaylist,
-            onOpenLocalMusic: _openLocalMusic,
-            onOpenSavedAlbums: _openSavedAlbums,
-            onOpenNetworkSources: _openNetworkSources,
-            onOpenListeningStatistics: () => SettingsDetailHost.open(
-              detailContext,
-              page: (_) => AppListeningStatisticsPage(
-                statistics: state.listeningStatistics,
-              ),
-              view: (_) => AppListeningStatisticsPage(
-                statistics: state.listeningStatistics,
+          builder: (detailContext) => WindowChromeBand(
+            inset: topInset,
+            child: AppLibraryPage(
+              state: state,
+              topInset: 0,
+              onOpenPlaylist: _openPlaylist,
+              onOpenLocalMusic: _openLocalMusic,
+              onOpenSavedAlbums: _openSavedAlbums,
+              onOpenNetworkSources: _openNetworkSources,
+              onOpenListeningStatistics: () => SettingsDetailHost.open(
+                detailContext,
+                page: (_) => AppListeningStatisticsPage(
+                  statistics: state.listeningStatistics,
+                ),
+                view: (_) => AppListeningStatisticsPage(
+                  statistics: state.listeningStatistics,
+                ),
               ),
             ),
           ),
         ),
       ),
-      _AppSection.likes => AppLikesPage(state: state, topInset: topInset),
+      _AppSection.likes => WindowChromeBand(
+        inset: topInset,
+        child: AppLikesPage(state: state, topInset: 0),
+      ),
       _AppSection.settings => AppSettingsPage(
         state: state,
         topInset: topInset,
