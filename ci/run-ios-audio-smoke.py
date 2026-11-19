@@ -35,7 +35,7 @@ class SmokeSession:
         self.app, self.out, self.bundle = app, out, bundle
         self.simctl = simctl
         self.timeouts = {
-            "list": 30, "create": 30, "boot": 60, "bootstatus": 300,
+            "list": 60, "create": 30, "boot": 60, "bootstatus": 300,
             "install": 120, "container": 30, "launch": 120,
             "diagnostics": 20, "terminate": 10, "shutdown": 10, "delete": 10,
             **(timeouts or {}),
@@ -53,7 +53,23 @@ class SmokeSession:
             log.write(line + "\n")
 
     def command(self, stage: str, *args: str,
-                tool: tuple[str, ...] | None = None, cwd: Path | None = None) -> str:
+                tool: tuple[str, ...] | None = None, cwd: Path | None = None,
+                attempts: int = 1) -> str:
+        # A cold CoreSimulator service can stall `simctl` for tens of seconds on a
+        # freshly booted runner; one retry keeps a cold cache from looking like a
+        # broken build.
+        for attempt in range(1, attempts + 1):
+            if attempt > 1:
+                self.note(f"{stage}: retry {attempt - 1}/{attempts - 1}")
+            try:
+                return self._command_once(stage, args, tool, cwd)
+            except SmokeFailure:
+                if attempt == attempts:
+                    raise
+        raise AssertionError("retry loop returned without a result")
+
+    def _command_once(self, stage: str, args: tuple[str, ...],
+                      tool: tuple[str, ...] | None, cwd: Path | None) -> str:
         self.note(f"{stage}: begin")
         executable = tool or self.simctl
         process = subprocess.Popen(
@@ -117,7 +133,7 @@ class SmokeSession:
             return ""
 
     def boot_simulator(self, name: str) -> None:
-        catalog_text = self.command("list", "list", "--json")
+        catalog_text = self.command("list", "list", "--json", attempts=3)
         (self.out / "devices.json").write_text(catalog_text, encoding="utf-8")
         kind, runtime = self.select_device(json.loads(catalog_text))
         created = self.command("create", "create", name, kind, runtime)
