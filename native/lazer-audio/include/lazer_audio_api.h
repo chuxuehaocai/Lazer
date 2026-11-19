@@ -32,7 +32,7 @@
 
 /* ABI 30 changes the meaning of bit_perfect_active for validated iOS USB sessions and appends
  * the iOS USB PCM/DoP format selections. */
-#define LAZER_AUDIO_ABI_VERSION 30u
+#define LAZER_AUDIO_ABI_VERSION 31u
 
 #define LAZER_AUDIO_MAX_EQ_BANDS 32u
 /* Upper bound on the explicit DSP chain length; see LazerAudioDspStage. */
@@ -661,6 +661,27 @@ LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_read_log(
  * overlap completes when disabled so neither track suffers a discontinuous gain change. */
 LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_set_automix(
     LazerAudioEngine engine, int32_t duration_millis);
+
+/* ABI 31 (additive export; older libraries may omit it). Clears exactly the queued/preparing
+ * reader that carries target_queue_generation, and uses request_queue_generation to invalidate
+ * older requests. The engine never touches a successor with any other generation:
+ *  - request_queue_generation <= the last accepted request returns ErrorState and changes nothing;
+ *    the newer request owns the slot, so a superseded request must not move the generation.
+ *  - the target is still preparing: its probe is interrupted, awaited and closed before the call
+ *    returns Ok, so no reader callback can run after Ok.
+ *  - the target is installed and the request does not preserve audible audio: it is faded out,
+ *    retired and closed, then Ok.
+ *  - the target is installed, preserving audible audio, and already crossed the output boundary:
+ *    it stays installed and the call returns QueueAlreadyAudible. The caller keeps its binding.
+ *  - the target is installed and audible without preservation: it is not cleared; the call returns
+ *    QueueAlreadyActive after the outgoing reader has been closed, so the caller may release it.
+ *  - the target is no longer held by the engine: Ok, so a late caller may still release its reader.
+ * A successful (non-negative) result advances the request generation; ErrorState does not. The
+ * previous lazer_audio_clear_queued_reader() keeps its own meaning and is not defined in terms of
+ * this call. */
+LAZER_AUDIO_API int32_t LAZER_AUDIO_CALL lazer_audio_clear_queued_reader_ex(
+    LazerAudioEngine engine, uint64_t target_queue_generation,
+    uint64_t request_queue_generation, int32_t preserve_audible);
 
 #ifdef __cplusplus
 }

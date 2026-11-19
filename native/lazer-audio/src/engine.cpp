@@ -114,6 +114,15 @@ struct Engine::SourceSlot final : SourceConsumer {
     ~SourceSlot() {
         cancel();
         joinPrefetch();
+        closeSource();
+    }
+
+    /* Idempotent and safe from any control thread: the first caller runs AudioSource::close(), the
+     * rest return immediately. A retired slot can be closed by the reaper while a queued-clear
+     * caller also drops its reference. */
+    void closeSource() {
+        bool expected = false;
+        if (!sourceClosed.compare_exchange_strong(expected, true)) return;
         source.close();
     }
 
@@ -175,6 +184,52 @@ struct Engine::SourceSlot final : SourceConsumer {
         if (prefetchThread.joinable() && prefetchThread.get_id() != std::this_thread::get_id()) {
             prefetchThread.join();
         }
+    }
+
+    /* The preparation barrier. `openReader()` may block for seconds on a growing HTTP cache, so the
+     * slot marks when that call starts and when it has finished touching the reader. A control call
+     * that takes the slot away sets `preparationCancelRequested`, interrupts the blocked read, and
+     * waits for `preparationInFlight` to clear.
+     *
+     * The preparing thread never closes the source: it only clears the flag and notifies, so a
+     * waiter that wakes up knows the probe has returned and no new reader callback can start. The
+     * waiter closes the source afterwards; `closeSource()` is guarded by a compare-and-swap so the
+     * slot destructor and a concurrent waiter cannot close it twice. Acquiring
+     * `lifecycleMutex_`/`sourceMutex_` inside `waitForPreparation()` is forbidden: the preparing
+     * thread takes them to publish or abandon the slot. */
+    void beginPreparation() {
+        std::lock_guard guard(preparationMutex);
+        preparationInFlight = true;
+        preparationCancelRequested = false;
+    }
+
+    [[nodiscard]] bool preparationCancelled() const {
+        std::lock_guard guard(preparationMutex);
+        return preparationCancelRequested;
+    }
+
+    [[nodiscard]] bool preparationInFlightNow() const {
+        std::lock_guard guard(preparationMutex);
+        return preparationInFlight;
+    }
+
+    void requestPreparationCancel() {
+        std::lock_guard guard(preparationMutex);
+        preparationCancelRequested = true;
+    }
+
+    void finishPreparation() {
+        {
+            std::lock_guard guard(preparationMutex);
+            preparationInFlight = false;
+        }
+        preparationChanged.notify_all();
+    }
+
+    /* Waits without any engine mutex held. */
+    void waitForPreparation() {
+        std::unique_lock guard(preparationMutex);
+        preparationChanged.wait(guard, [this] { return !preparationInFlight; });
     }
 
     void requestSeek(int64_t positionMillis) {
@@ -260,6 +315,13 @@ struct Engine::SourceSlot final : SourceConsumer {
     std::atomic<bool> cancelled{false};
     std::atomic<bool> prefetchRunning{false};
     bool prefetchStarted = false;
+
+    /* Preparation barrier state; see beginPreparation()/waitForPreparation() above. */
+    mutable std::mutex preparationMutex;
+    std::condition_variable preparationChanged;
+    bool preparationInFlight = false;
+    bool preparationCancelRequested = false;
+    std::atomic<bool> sourceClosed{false};
 };
 
 Engine::Engine(LazerAudioEngineConfig config)
@@ -326,7 +388,12 @@ void Engine::cancelCurrentSources() {
         queued->cancel();
         queued->joinPrefetch();
     }
-    if (preparing != nullptr) preparing->cancel();
+    if (preparing != nullptr) {
+        /* The probe may be blocked inside openReader(); mark it abandoned before the cancel
+         * callback wakes the read, so the preparing thread cannot publish behind the clear. */
+        preparing->requestPreparationCancel();
+        preparing->cancel();
+    }
 }
 
 void Engine::retireCurrentSources() {
@@ -349,9 +416,15 @@ void Engine::retireCurrentSources() {
         /* Clear the render thread's mirror too: it must not keep describing a retired source. */
         activePresentation_.publish(StreamDescription{}, 0);
         pendingPresentation_.publish(StreamDescription{}, 0);
+        /* Hand every retired slot to reapRetiredSources(). The reader of a slot that is still
+         * probing must not be closed here: the probe owns it until its preparation ends. */
+        for (const auto &slot : {active, queued, preparing}) {
+            if (slot != nullptr) retiredSources_.push_back(slot);
+        }
     }
     for (const auto &slot : {active, queued, preparing}) {
         if (slot != nullptr) {
+            slot->requestPreparationCancel();
             slot->cancel();
             slot->joinPrefetch();
         }
@@ -361,8 +434,27 @@ void Engine::retireCurrentSources() {
     preparing.reset();
 }
 
+void Engine::reapRetiredSources() {
+    for (;;) {
+        std::vector<std::shared_ptr<SourceSlot>> retiring;
+        {
+            std::lock_guard sourceGuard(sourceMutex_);
+            retiring.swap(retiredSources_);
+        }
+        if (retiring.empty()) return;
+        for (const auto &slot : retiring) {
+            slot->requestPreparationCancel();
+            slot->cancel();
+            slot->waitForPreparation();
+            slot->joinPrefetch();
+            slot->closeSource();
+        }
+        retiring.clear();
+    }
+}
+
 void Engine::teardown() {
-    std::lock_guard lifecycleGuard(lifecycleMutex_);
+    std::unique_lock lifecycleGuard(lifecycleMutex_);
     cancelled_.store(true, std::memory_order_release);
     paused_.store(true, std::memory_order_release);
     dopActive_.store(false, std::memory_order_release);
@@ -373,7 +465,12 @@ void Engine::teardown() {
     if (output_ != nullptr) output_->close();
     outputSession_ = AudioOutputSession{};
     retireCurrentSources();
+    queueRequestGeneration_.store(0, std::memory_order_release);
+    queueInstalledGeneration_.store(0, std::memory_order_release);
     state_.store(LazerAudioStateIdle, std::memory_order_release);
+    /* Destruction must not complete while a probe still holds a caller reader. */
+    lifecycleGuard.unlock();
+    reapRetiredSources();
 }
 
 void Engine::releasePipelineBuffers() {
@@ -394,6 +491,17 @@ int32_t Engine::open(
      * or render thread can never write into the new pipeline. */
     if (path == nullptr && reader == nullptr) return LazerAudioErrorInvalidArgument;
     std::unique_lock lifecycleGuard(lifecycleMutex_);
+    /* Every return below may have retired a slot whose probe is still running. The reaper runs
+     * after the api/lifecycle locks are released and waits for that probe before the caller is
+     * allowed to free the reader it handed to the previous session. */
+    struct RetireReaper {
+        Engine *engine;
+        std::unique_lock<std::mutex> *guard;
+        ~RetireReaper() {
+            if (guard->owns_lock()) guard->unlock();
+            engine->reapRetiredSources();
+        }
+    } retireReaper{this, &lifecycleGuard};
     const uint64_t generation = sessionGeneration_.fetch_add(1, std::memory_order_acq_rel) + 1;
     cancelled_.store(true, std::memory_order_release);
     paused_.store(true, std::memory_order_release);
@@ -403,6 +511,8 @@ int32_t Engine::open(
     if (output_ != nullptr) output_->closeForReplacement();
     outputSession_ = AudioOutputSession{};
     retireCurrentSources();
+    queueRequestGeneration_.store(0, std::memory_order_release);
+    queueInstalledGeneration_.store(0, std::memory_order_release);
     state_.store(LazerAudioStatePreparing, std::memory_order_release);
     terminalClaimed_.store(false, std::memory_order_release);
     terminalDetail_.store(0, std::memory_order_relaxed);
@@ -496,6 +606,9 @@ int32_t Engine::open(
         result = openingSource->source.prepareReader(openingSource->reader);
         if (result == LazerAudioOk) {
             std::lock_guard sourceGuard(sourceMutex_);
+            /* The barrier opens before the slot is published: a concurrent stop that retires this
+             * slot must wait for our probe instead of closing the reader under it. */
+            openingSource->beginPreparation();
             preparingSource_ = openingSource;
         }
     }
@@ -504,6 +617,9 @@ int32_t Engine::open(
          * replacement can interrupt it, then release engine locks while FFmpeg probes the stream. */
         apiGuard.unlock();
         lifecycleGuard.unlock();
+        /* The previous session's probes must be gone before this call returns, both because the
+         * caller frees their readers and because two probes must not run at the same time. */
+        reapRetiredSources();
         result = openingSource->source.openReader(openingSource->reader, safeParams);
         lifecycleGuard.lock();
 
@@ -513,10 +629,13 @@ int32_t Engine::open(
             stillCurrent = source_ == openingSource;
             if (preparingSource_ == openingSource) preparingSource_.reset();
         }
-        if (sessionGeneration_.load(std::memory_order_acquire) != generation ||
-            cancelled_.load(std::memory_order_acquire) || !stillCurrent) {
+        const bool replaced =
+            sessionGeneration_.load(std::memory_order_acquire) != generation ||
+            cancelled_.load(std::memory_order_acquire) || !stillCurrent;
+        /* The probe is over: it no longer touches the reader, so a waiting stop may close it. */
+        openingSource->finishPreparation();
+        if (replaced) {
             lifecycleGuard.unlock();
-            openingSource->source.close();
             return LazerAudioErrorState;
         }
         apiGuard.lock();
@@ -817,6 +936,12 @@ int32_t Engine::queueReader(
     prepared->queueGeneration = queueGeneration;
     prepared->replayGainLinear = replayGainLinear(params.replay_gain_db);
     prepared->reader = reader;
+    /* Closes the preparation barrier on every exit path. It runs before `prepared` is released, so
+     * a waiter that woke up on the notification still finds a live slot to close. */
+    struct PreparationEnd {
+        SourceSlot *slot;
+        ~PreparationEnd() { slot->finishPreparation(); }
+    } preparationEnd{prepared.get()};
     uint64_t generation = 0;
     TargetFormat target{};
     StreamDescription activeDescription;
@@ -832,7 +957,8 @@ int32_t Engine::queueReader(
         if (pumpFinished_.load(std::memory_order_acquire)) {
             return LazerAudioErrorState;
         }
-        const uint64_t currentQueueGeneration = queueGeneration_.load(std::memory_order_acquire);
+        const uint64_t currentQueueGeneration =
+            queueRequestGeneration_.load(std::memory_order_acquire);
         if (queueGeneration <= currentQueueGeneration) return LazerAudioErrorState;
         generation = sessionGeneration_.load(std::memory_order_acquire);
         dsdOutputMode = autoMixMillis_.load(std::memory_order_acquire) > 0
@@ -854,8 +980,11 @@ int32_t Engine::queueReader(
         }
         const int32_t preparedReader = prepared->source.prepareReader(prepared->reader);
         if (preparedReader != LazerAudioOk) return preparedReader;
-        queueGeneration_.store(queueGeneration, std::memory_order_release);
+        queueRequestGeneration_.store(queueGeneration, std::memory_order_release);
         std::lock_guard sourceGuard(sourceMutex_);
+        /* Publish and open the barrier together: a clear that retires this slot must see the probe
+         * as in flight, so it waits instead of closing the reader under it. */
+        prepared->beginPreparation();
         preparingSource_ = prepared;
     }
 
@@ -868,6 +997,12 @@ int32_t Engine::queueReader(
      * the render thread and without holding either engine mutex. The pending slot is published first
      * so clear/stop can invoke its reader interruption callback if the probe blocks. */
     const int32_t opened = prepared->source.openReader(prepared->reader, params);
+    if (prepared->preparationCancelled()) {
+        /* An exact clear (or a session replacement) took this slot while the probe was blocked.
+         * Report the abandonment; the waiting owner closes the reader after this returns. */
+        abandonPreparation();
+        return LazerAudioErrorCancelled;
+    }
     if (opened != LazerAudioOk) {
         abandonPreparation();
         return opened;
@@ -974,15 +1109,20 @@ int32_t Engine::queueReader(
         std::lock_guard lifecycleGuard(lifecycleMutex_);
         const int32_t currentState = state_.load(std::memory_order_acquire);
         if (sessionGeneration_.load(std::memory_order_acquire) != generation ||
-            queueGeneration_.load(std::memory_order_acquire) != queueGeneration ||
+            queueRequestGeneration_.load(std::memory_order_acquire) != queueGeneration ||
             pumpFinished_.load(std::memory_order_acquire) ||
             (currentState != LazerAudioStateReady && currentState != LazerAudioStatePlaying &&
                 currentState != LazerAudioStatePaused)) {
             abandonPreparation();
             return LazerAudioErrorState;
         }
+        if (prepared->preparationCancelled()) {
+            abandonPreparation();
+            return LazerAudioErrorCancelled;
+        }
         std::lock_guard sourceGuard(sourceMutex_);
         if (preparingSource_ != prepared || nextSource_ != nullptr) {
+            if (preparingSource_ == prepared) preparingSource_.reset();
             return LazerAudioErrorState;
         }
         const int32_t overlapFrames = static_cast<int32_t>(
@@ -998,6 +1138,7 @@ int32_t Engine::queueReader(
         }
         nextSource_ = prepared;
         preparingSource_.reset();
+        queueInstalledGeneration_.store(queueGeneration, std::memory_order_release);
     }
     log_.write(LazerAudioLogDebug, requireNativeDsd
         ? "started bounded raw Native DSD byte prefetch for one compatible successor source"
@@ -1006,19 +1147,23 @@ int32_t Engine::queueReader(
 }
 
 int32_t Engine::clearQueuedReader(uint64_t queueGeneration, bool preserveAudible) {
+    /* The legacy request: "drop whatever the queue holds as of now". It keeps its own semantics and
+     * its own generation bookkeeping; it must never be rewritten in terms of the exact clear, and
+     * it must never clear a successor newer than the one it names. */
     std::shared_ptr<SourceSlot> retired;
     int32_t result = LazerAudioErrorState;
     {
         std::lock_guard lifecycleGuard(lifecycleMutex_);
-        const uint64_t currentQueueGeneration = queueGeneration_.load(std::memory_order_acquire);
+        const uint64_t currentQueueGeneration =
+            queueRequestGeneration_.load(std::memory_order_acquire);
         if (queueGeneration <= currentQueueGeneration) return LazerAudioErrorState;
         std::lock_guard sourceGuard(sourceMutex_);
-        // A mode change edits future audio, including before its audible event reaches Dart.
+        /* A mode change edits future audio, including before its audible event reaches Dart. */
         if (preserveAudible && nextSource_ != nullptr &&
             nextSource_->overlapStarted.load(std::memory_order_acquire)) {
             return LazerAudioQueueAlreadyAudible;
         }
-        queueGeneration_.store(queueGeneration, std::memory_order_release);
+        queueRequestGeneration_.store(queueGeneration, std::memory_order_release);
         if (nextSource_ != nullptr) {
             if (nextSource_->overlapStarted.load(std::memory_order_acquire)) {
                 const double progress = std::clamp(
@@ -1044,16 +1189,94 @@ int32_t Engine::clearQueuedReader(uint64_t queueGeneration, bool preserveAudible
     }
     /* Interruption, worker join and close callbacks can reenter the owner; do them lock-free. */
     if (retired != nullptr) {
+        retired->requestPreparationCancel();
         retired->cancel();
+        /* An in-flight probe still owns this reader. Waiting here does not change the legacy result
+         * codes, but it does stop the close callback from firing under a running openReader(). */
+        retired->waitForPreparation();
         retired->joinPrefetch();
-        /* A pump may still retain the slot while abandoning a boundary wait. Close installed
-         * readers synchronously before returning: their caller is now free to release context. */
-        if (retired->prefetchStarted) retired->source.close();
+        retired->closeSource();
     }
     retired.reset();
     if (result == LazerAudioQueueAlreadyActive) {
         /* Publication of the new slot precedes destruction of the old one so reader callbacks
          * never run under sourceMutex_. Its caller may free that old context after AlreadyActive. */
+        std::unique_lock retirementGuard(sourceRetirementMutex_);
+        sourceRetirementChanged_.wait(retirementGuard, [this] {
+            return !sourceRetirementPending_.load(std::memory_order_acquire);
+        });
+    }
+    return result;
+}
+
+int32_t Engine::clearQueuedReaderEx(uint64_t targetQueueGeneration,
+    uint64_t requestGeneration, bool preserveAudible) {
+    /* The exact clear: the caller names the one queue resource it is about to release, so the
+     * engine may only touch that generation. Every branch below either proves the target is gone
+     * before it returns Ok (the caller may then free the reader), hands the target back as
+     * AlreadyActive/AlreadyAudible, or refuses outright with ErrorState. */
+    std::shared_ptr<SourceSlot> retired;
+    int32_t result = LazerAudioQueueCleared;
+    bool waitForRetirement = false;
+    {
+        std::lock_guard lifecycleGuard(lifecycleMutex_);
+        if (requestGeneration <= queueRequestGeneration_.load(std::memory_order_acquire)) {
+            /* A superseded request must not move the generation: the newer request owns it. */
+            return LazerAudioErrorState;
+        }
+        std::lock_guard sourceGuard(sourceMutex_);
+        const bool matchesQueued = targetQueueGeneration != 0 && nextSource_ != nullptr &&
+            nextSource_->queueGeneration == targetQueueGeneration;
+        const bool matchesPreparing = targetQueueGeneration != 0 && preparingSource_ != nullptr &&
+            preparingSource_->queueGeneration == targetQueueGeneration;
+        const bool matchesActive = targetQueueGeneration != 0 && source_ != nullptr &&
+            source_->queueGeneration == targetQueueGeneration;
+        if (matchesQueued) {
+            if (preserveAudible && nextSource_->overlapStarted.load(std::memory_order_acquire)) {
+                result = LazerAudioQueueAlreadyAudible;
+            } else {
+                if (nextSource_->overlapStarted.load(std::memory_order_acquire)) {
+                    const double progress = std::clamp(
+                        static_cast<double>(
+                            nextSource_->overlapFrames.load(std::memory_order_acquire)) /
+                        static_cast<double>(
+                            std::max<int64_t>(nextSource_->overlapLengthFrames - 1, 1)),
+                        0.0, 1.0);
+                    cancelledOverlapGain_.store(std::cos(progress * 1.57079632679489661923),
+                        std::memory_order_release);
+                }
+                retired = std::move(nextSource_);
+                result = LazerAudioQueueCleared;
+            }
+        } else if (matchesPreparing) {
+            /* Unpublish first: the probe's publish step checks this field under the same mutex, so
+             * it cannot install the slot behind the clear. The cancel below only stops the read. */
+            retired = std::move(preparingSource_);
+            result = LazerAudioQueueCleared;
+        } else if (matchesActive) {
+            result = LazerAudioQueueAlreadyActive;
+            waitForRetirement = true;
+        }
+        /* Target absent: the request is still valid and the generation still advances, so a later
+         * preparation with an older number cannot publish. Ok tells the caller it may release. */
+        queueRequestGeneration_.store(requestGeneration, std::memory_order_release);
+        if (retired != nullptr && !pendingPresentationReady_.load(std::memory_order_acquire)) {
+            pendingTrackChangedFrame_.store(-1, std::memory_order_release);
+        }
+    }
+    /* Nothing below holds lifecycleMutex_ or sourceMutex_: an abandoned probe needs both to finish,
+     * and its close callback may reenter this engine. */
+    if (retired != nullptr) {
+        retired->requestPreparationCancel();
+        retired->cancel();
+        retired->waitForPreparation();
+        retired->joinPrefetch();
+        retired->closeSource();
+    }
+    retired.reset();
+    if (waitForRetirement) {
+        /* The pump publishes the new source before destroying the old one; wait for its close so
+         * the caller may free the outgoing context as soon as AlreadyActive comes back. */
         std::unique_lock retirementGuard(sourceRetirementMutex_);
         sourceRetirementChanged_.wait(retirementGuard, [this] {
             return !sourceRetirementPending_.load(std::memory_order_acquire);
@@ -1164,9 +1387,11 @@ int32_t Engine::tryStartQueuedSource(bool &started, std::string &error) {
     }
     /* pumpLoop still owns an outgoing-slot reference until this call returns. Close it explicitly;
      * waiting for the final shared_ptr destructor would let TrackChanged outlive its reader. */
+    retired->requestPreparationCancel();
     retired->cancel();
+    retired->waitForPreparation();
     retired->joinPrefetch();
-    retired->source.close();
+    retired->closeSource();
     retired.reset();
     {
         std::lock_guard retirementGuard(sourceRetirementMutex_);
@@ -1264,7 +1489,7 @@ int32_t Engine::pause() {
 }
 
 int32_t Engine::stop() {
-    std::lock_guard lifecycleGuard(lifecycleMutex_);
+    std::unique_lock<std::mutex> lifecycleGuard(lifecycleMutex_);
     if (state_.load(std::memory_order_acquire) == LazerAudioStateIdle) return LazerAudioOk;
     sessionGeneration_.fetch_add(1, std::memory_order_acq_rel);
     cancelled_.store(true, std::memory_order_release);
@@ -1275,6 +1500,8 @@ int32_t Engine::stop() {
     releasePipelineBuffers();
     if (output_ != nullptr) output_->close();
     retireCurrentSources();
+    queueRequestGeneration_.store(0, std::memory_order_release);
+    queueInstalledGeneration_.store(0, std::memory_order_release);
     {
         std::lock_guard sourceGuard(sourceMutex_);
         source_ = std::make_shared<SourceSlot>(this, config_.log);
@@ -1284,6 +1511,10 @@ int32_t Engine::stop() {
     dopActive_.store(false, std::memory_order_release);
     nativeDsdActive_.store(false, std::memory_order_release);
     state_.store(LazerAudioStateStopped, std::memory_order_release);
+    /* A probe can still sit inside openReader() and needs this mutex to abandon and report. Wait
+     * for it to leave before the engine reports that the reader callbacks have all been cleared. */
+    lifecycleGuard.unlock();
+    reapRetiredSources();
     return LazerAudioOk;
 }
 

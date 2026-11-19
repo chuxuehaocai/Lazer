@@ -1426,5 +1426,6 @@
   "直通输出已启用，crossfeed 暂不可用": "Direct output is enabled; crossfeed is unavailable",
   "直通输出已启用，均衡器暂不可用": "Direct output is enabled; equalizer is unavailable",
   "均衡器和限幅器参与 DSP": "Equalizer and limiter are part of DSP",
-  "{name}（当前不可用）": "{name} (currently unavailable)"
+  "{name}（当前不可用）": "{name} (currently unavailable)",
+  "DSP 设置已排队，将在下一次打开输出时生效": "DSP settings are queued and apply the next time the output opens"
 }

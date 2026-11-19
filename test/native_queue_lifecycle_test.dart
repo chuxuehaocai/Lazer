@@ -35,6 +35,9 @@ class _Api implements LazerAudioApi {
   int Function(Pointer<Void>, Pointer<LazerAudioStreamInfo>) get streamInfo =>
       (_, _) => lazerAudioErrorState;
   @override
+  int Function(Pointer<Void>, Pointer<LazerAudioSnapshot>) get snapshot =>
+      (_, _) => lazerAudioErrorState;
+  @override
   String Function(Pointer<Void>) get lastError =>
       (_) => 'fixture rejected';
   @override
@@ -90,19 +93,50 @@ class _Worker implements LazerAudioWorker {
       loseDestroyReply = false,
       cannotConfirmExit = false;
   int? queuedContext;
+  int? activeContext;
+  int? queuedGeneration;
+  int queueGeneration = 0;
+  final queuedContexts = <int>[];
+  final clearResultsByReader = <int, int>{};
   Completer<void>? deviceGate;
+  Completer<void>? stopGate;
   final deviceStarted = Completer<void>();
+  final stopStarted = Completer<void>();
   int deviceCalls = 0, volumeCalls = 0;
   final firstQueue = Completer<void>();
   final gate = Completer<void>();
   final closed = Completer<void>();
   final order = <String>[];
   int queued = 0;
+  int clearCalls = 0;
   int clearResult = lazerAudioOk;
+
+  /// Answer for the targeted clear only, so a fixture can model an engine that
+  /// refuses to name a reader while still honouring a queue-wide clear.
+  int? exactClearResult;
   int openResult = lazerAudioOk;
   final overlaps = <int>[];
+
+  /// The real worker is one isolate: a call runs only after every earlier one
+  /// has returned. Serialising here is what makes call ordering assertions mean
+  /// anything, and it is also what lets a clear cancel a preparation that is
+  /// still inside `queue_reader`.
+  Future<void> _lane = Future<void>.value();
+
   @override
-  Future<Object?> call(int op, List<Object?> params) async {
+  Future<Object?> call(int op, List<Object?> params) {
+    final Completer<Object?> reply = Completer<Object?>();
+    _lane = _lane.then((_) async {
+      try {
+        reply.complete(await _execute(op, params));
+      } catch (error, stack) {
+        reply.completeError(error, stack);
+      }
+    });
+    return reply.future;
+  }
+
+  Future<Object?> _execute(int op, List<Object?> params) async {
     if (op == LazerWorkerOp.setDevice) {
       deviceCalls++;
       final waiting = deviceGate;
@@ -113,34 +147,105 @@ class _Worker implements LazerAudioWorker {
       }
     }
     if (op == LazerWorkerOp.setVolume) volumeCalls++;
-    if (op == LazerWorkerOp.openReader) return openResult;
+    if (op == LazerWorkerOp.openReader) {
+      if (openResult == lazerAudioOk) {
+        queuedContext = null;
+        activeContext = null;
+        queuedGeneration = null;
+        bridge.heldByNative.clear();
+      }
+      return openResult;
+    }
     if (op == LazerWorkerOp.queueReader) {
+      final int generation = params[1] as int;
+      if (generation <= queueGeneration || queuedContext != null) {
+        return lazerAudioErrorState;
+      }
+      queueGeneration = generation;
       queuedContext = Pointer<LazerAudioReader>.fromAddress(
         params[2] as int,
       ).ref.context.address;
+      queuedContexts.add(queuedContext!);
+      queuedGeneration = generation;
       bridge.heldByNative.add(queuedContext!);
       order.add('queue-${++queued}');
       if (queued == 1) {
         firstQueue.complete();
         await gate.future;
       }
-    } else if (op == LazerWorkerOp.clearQueuedReader) {
+    } else if (op == LazerWorkerOp.clearQueuedReaderEx) {
+      clearCalls++;
       if (failClear) throw StateError('clear reply lost');
-      if (clearResult == lazerAudioOk) {
-        bridge.heldByNative.remove(queuedContext);
+      final int target = params[1] as int;
+      final int request = params[2] as int;
+      // A stale request keeps the engine's bookkeeping: the newer request owns it.
+      if (request <= queueGeneration) {
+        return lazerAudioErrorState;
       }
+      queueGeneration = request;
+      order.add('clear-ex');
+      if (target == 0 || target != queuedGeneration) {
+        // The named resource is not installed: nothing to drop, so the caller may
+        // free it. This is the case the legacy clear cannot describe.
+        return lazerAudioOk;
+      }
+      return _applyClear(
+        clearResultsByReader[queuedContext!] ?? exactClearResult ?? clearResult,
+      );
+    } else if (op == LazerWorkerOp.clearQueuedReader) {
+      clearCalls++;
+      if (failClear) throw StateError('clear reply lost');
+      final int generation = params[1] as int;
+      if (generation <= queueGeneration) {
+        return lazerAudioErrorState;
+      }
+      queueGeneration = generation;
       order.add('clear');
-      return clearResult;
+      if (queuedContext == null) {
+        return clearResult == lazerAudioQueueAlreadyActive ||
+                clearResult == lazerAudioQueueAlreadyAudible
+            ? lazerAudioErrorState
+            : clearResult;
+      }
+      return _applyClear(clearResultsByReader[queuedContext!] ?? clearResult);
     } else if (op == LazerWorkerOp.setAutoMix) {
       overlaps.add(params[1] as int);
     } else if (op == LazerWorkerOp.stop) {
       if (failStop) throw StateError('stop reply lost');
+      if (!stopStarted.isCompleted) stopStarted.complete();
+      final waiting = stopGate;
+      if (waiting != null) await waiting.future;
       bridge.heldByNative.clear();
+      queuedContext = null;
+      activeContext = null;
+      queuedGeneration = null;
+      order.add('stop');
     } else if (op == LazerWorkerOp.destroy) {
       api.destroy(Pointer<Void>.fromAddress(params[0] as int));
       if (loseDestroyReply) throw StateError('destroy executed, reply lost');
     }
     return lazerAudioOk;
+  }
+
+  /// Applies [clearResult] to the installed successor, as the engine does.
+  ///
+  /// `ErrorState` is a refusal: the engine did not drop the reader, so it stays
+  /// installed and stays held. Treating it as "the caller may free it" is the
+  /// very mistake this fixture exists to catch.
+  int _applyClear(int result) {
+    final int? context = queuedContext;
+    if (result == lazerAudioOk) {
+      bridge.heldByNative.remove(context);
+      queuedContext = null;
+      queuedGeneration = null;
+    } else if (result == lazerAudioQueueAlreadyActive) {
+      activeContext = context;
+      queuedContext = null;
+      queuedGeneration = null;
+    } else if (result == lazerAudioQueueAlreadyAudible) {
+      // The guarded clear leaves the audible successor installed.
+    }
+    return result;
   }
 
   @override
@@ -302,12 +407,98 @@ void main() {
     final clear = engine.clearQueued(id);
     final following = engine.appendToQueue(id, urls[2]);
     worker.gate.complete();
-    expect(await first, isTrue);
+    expect(await first, isFalse);
     expect(await clear, isTrue);
     expect(await following, isTrue);
-    expect(worker.order, ['queue-1', 'clear', 'queue-2']);
+    // The superseded preparation settles its own accepted reader first; the
+    // explicit clear then runs on the same lane and observes no successor.
+    expect(worker.order, ['queue-1', 'clear-ex', 'clear', 'queue-2']);
     expect(engine.queuedSourceUrl, urls[2]);
   });
+
+  test(
+    'stop releases an accepted successor without a second native clear',
+    () async {
+      final id = await engine.setQueue([urls[0]]);
+      final appending = engine.appendToQueue(id, urls[1]);
+      await worker.firstQueue.future;
+      worker.gate.complete();
+      expect(await appending, isTrue);
+      expect(engine.queuedSourceUrl, urls[1]);
+
+      await engine.stop();
+
+      expect(engine.queuedSourceUrl, isNull);
+      expect(worker.clearCalls, 0);
+      expect(worker.order.last, 'stop');
+      expect(bridge.heldByNative, isEmpty);
+      expect(bridge.destroyed, hasLength(1));
+    },
+  );
+
+  test('stop retires a preparation that finishes after the request', () async {
+    final id = await engine.setQueue([urls[0]]);
+    final appending = engine.appendToQueue(id, urls[1]);
+    await worker.firstQueue.future;
+
+    final stopping = engine.stop();
+    worker.gate.complete();
+
+    expect(await appending, isFalse);
+    await stopping;
+    expect(engine.queuedSourceUrl, isNull);
+    // The preparation is cancelled by the stop itself, so nothing has to be
+    // dropped by a clear and the accepted reader is released exactly once.
+    expect(worker.clearCalls, 0);
+    expect(worker.order, ['queue-1', 'stop']);
+    expect(bridge.heldByNative, isEmpty);
+    expect(bridge.destroyed, hasLength(1));
+  });
+
+  test('a deferred successor stays owned until stop is acknowledged', () async {
+    final id = await engine.setQueue([urls[0]]);
+    final appending = engine.appendToQueue(id, urls[1]);
+    await worker.firstQueue.future;
+    final gate = worker.stopGate = Completer<void>();
+
+    final stopping = engine.stop();
+    worker.gate.complete();
+
+    expect(await appending, isFalse);
+    await worker.stopStarted.future;
+    expect(bridge.heldByNative, hasLength(1));
+    expect(bridge.destroyed, isEmpty);
+
+    gate.complete();
+    await stopping;
+    expect(bridge.heldByNative, isEmpty);
+    expect(bridge.destroyed, hasLength(1));
+  });
+
+  test(
+    'a newer queue supersedes stop and drops the preparation it replaced',
+    () async {
+      final id = await engine.setQueue([urls[0]]);
+      final appending = engine.appendToQueue(id, urls[1]);
+      await worker.firstQueue.future;
+
+      final stopping = engine.stop();
+      final replacing = engine.setQueue([urls[2]]);
+      worker.gate.complete();
+
+      await stopping;
+      expect(await replacing, isNot(0));
+      expect(await appending, isFalse);
+      // The replaced preparation was never installed under a name of its own, so
+      // only a queue-wide clear can cancel it; the stop it replaced never runs.
+      expect(worker.order, ['queue-1', 'clear']);
+      expect(worker.clearCalls, 1);
+      expect(worker.order.where((entry) => entry == 'stop'), isEmpty);
+      expect(engine.workerFailure, isNull);
+      expect(engine.queuedSourceUrl, isNull);
+      expect(bridge.destroyed, contains(worker.queuedContexts.single));
+    },
+  );
 
   test(
     'native active and queued readers pin their cache files until release',
@@ -384,12 +575,102 @@ void main() {
       final latest = engine.appendToQueue(id, urls[3]);
       expect(await superseded, isFalse);
       worker.gate.complete();
-      expect(await first, isTrue);
+      expect(await first, isFalse);
       expect(await latest, isTrue);
-      expect(worker.order, ['queue-1', 'queue-2']);
+      expect(worker.order, ['queue-1', 'clear-ex', 'queue-2']);
       expect(engine.queuedSourceUrl, urls[3]);
     },
   );
+
+  test(
+    'State keeps a superseded reader until a transition confirms it',
+    () async {
+      final id = await engine.setQueue([urls[0]]);
+      final first = engine.appendToQueue(id, urls[1]);
+      await worker.firstQueue.future;
+      final superseded = engine.appendToQueue(id, urls[2]);
+      final latest = engine.appendToQueue(id, urls[3]);
+      // The engine answers the targeted clear with `ErrorState` (stale request)
+      // but still honours a queue-wide clear, which is what it does when the
+      // request generation it already moved past is named again.
+      worker.exactClearResult = lazerAudioErrorState;
+
+      worker.gate.complete();
+
+      expect(await first, isFalse);
+      expect(await superseded, isFalse);
+      expect(await latest, isTrue);
+      expect(engine.workerFailure, isNull);
+      expect(engine.queuedSourceUrl, urls[3]);
+      // ErrorState is a refusal, not a promise: the engine declined to say the
+      // reader had retired, so it may still call into it. Releasing here would
+      // let a later callback touch freed memory.
+      expect(bridge.destroyed, isNot(contains(worker.queuedContexts.first)));
+      expect(bridge.heldByNative, contains(worker.queuedContexts.last));
+      expect(bridge.freedWhileHeld, isFalse);
+
+      await engine.stop();
+      expect(bridge.destroyed, contains(worker.queuedContexts.first));
+      expect(bridge.heldByNative, isEmpty);
+    },
+  );
+
+  test('AlreadyActive adopts the superseded reader as the source', () async {
+    final id = await engine.setQueue([urls[0]]);
+    final first = engine.appendToQueue(id, urls[1]);
+    await worker.firstQueue.future;
+    final superseded = engine.appendToQueue(id, urls[2]);
+    final latest = engine.appendToQueue(id, urls[3]);
+    worker.clearResult = lazerAudioQueueAlreadyActive;
+
+    worker.gate.complete();
+
+    expect(await first, isFalse);
+    expect(await superseded, isFalse);
+    expect(await latest, isTrue);
+    expect(engine.workerFailure, isNull);
+    expect(engine.queuedSourceUrl, urls[3]);
+    expect(worker.activeContext, worker.queuedContexts.first);
+    expect(bridge.destroyed, isNot(contains(worker.queuedContexts.first)));
+    expect(bridge.heldByNative, containsAll(worker.queuedContexts));
+  });
+
+  test('AlreadyAudible retains the superseded successor', () async {
+    final id = await engine.setQueue([urls[0]]);
+    final first = engine.appendToQueue(id, urls[1]);
+    await worker.firstQueue.future;
+    final superseded = engine.appendToQueue(id, urls[2]);
+    final latest = engine.appendToQueue(id, urls[3]);
+    worker.clearResult = lazerAudioQueueAlreadyAudible;
+
+    worker.gate.complete();
+
+    expect(await first, isFalse);
+    expect(await superseded, isFalse);
+    expect(await latest, isFalse);
+    expect(engine.workerFailure, isNull);
+    expect(engine.queuedSourceUrl, urls[1]);
+    expect(bridge.heldByNative, contains(worker.queuedContexts.first));
+    expect(bridge.destroyed, isNot(contains(worker.queuedContexts.first)));
+  });
+
+  test('guarded AlreadyActive promotes the prepared successor', () async {
+    final id = await engine.setQueue([urls[0]]);
+    final appending = engine.appendToQueue(id, urls[1]);
+    await worker.firstQueue.future;
+    worker.gate.complete();
+    expect(await appending, isTrue);
+    worker.clearResult = lazerAudioQueueAlreadyActive;
+
+    expect(await engine.clearQueued(id), isFalse);
+
+    expect(engine.workerFailure, isNull);
+    expect(engine.queuedSourceUrl, isNull);
+    expect(worker.activeContext, worker.queuedContexts.single);
+    expect(bridge.destroyed, isNot(contains(worker.queuedContexts.single)));
+    expect(bridge.heldByNative, contains(worker.queuedContexts.single));
+  });
+
   test(
     'native guarded clear preserves a successor already audible before its Dart event',
     () async {

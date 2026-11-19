@@ -90,6 +90,7 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
   StreamSubscription<LazerStreamInfo?>? _streamSubscription;
   Object? _lastApplyError;
   Object? _lastDspApplyError;
+  bool _dspDeferredUntilNextStream = false;
   Timer? _persistTimer;
   HifiSettings? _pendingPersist;
   Future<void> _persistQueue = Future<void>.value();
@@ -103,6 +104,10 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   /// Why the last apply failed, for an inline error row.
   Object? get lastApplyError => _lastApplyError;
+
+  /// DSP was queued for the next output session because the running strict
+  /// stream cannot accept processing. This is not an apply failure.
+  bool get dspDeferredUntilNextStream => _dspDeferredUntilNextStream;
 
   bool get nativeAvailable => engine != null;
   bool get usesIosSystemRoute => defaultTargetPlatform == TargetPlatform.iOS;
@@ -138,8 +143,8 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
 
   /// The selected device, or null for the system default.
   LazerOutputDevice? get selectedDevice {
-    final String? token = _settings.outputToken;
-    if (token == null) return null;
+    if (!_settings.hasOutputSelection) return null;
+    final String token = _settings.outputToken!;
     for (final LazerOutputDevice device in _devices) {
       if (device.token == token) return device;
     }
@@ -219,6 +224,11 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
       LazerStreamInfo? info,
     ) {
       _streamInfo = info;
+      if (info != null &&
+          _dspDeferredUntilNextStream &&
+          !native.hasPendingDspSettings) {
+        _dspDeferredUntilNextStream = false;
+      }
       // A strict output can refuse DSP until the next source is opened. The
       // engine replays that saved request before opening, so a new snapshot
       // with no pending DSP confirms recovery without resending settings here.
@@ -272,6 +282,7 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
     _schedulePersistence(next);
     notifyListeners();
     bool applyingDsp = false;
+    bool deferredDsp = false;
     try {
       if (outputChanged) {
         final NativeAudioEngine? native = engine;
@@ -282,15 +293,17 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
       }
       if (dspChanged) {
         applyingDsp = true;
-        await _applyDspSettings();
+        deferredDsp = await _applyDspSettings();
       }
       if (_disposed || !identical(_settings, next)) return;
       _lastApplyError = null;
       _lastDspApplyError = null;
+      _dspDeferredUntilNextStream = deferredDsp;
     } catch (error) {
       if (_disposed || !identical(_settings, next)) return;
       _lastApplyError = error;
       _lastDspApplyError = applyingDsp ? error : null;
+      _dspDeferredUntilNextStream = false;
       debugPrint('hifi: applying settings failed: $error');
     }
     notifyListeners();
@@ -301,17 +314,20 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
     if (_disposed) return;
     final HifiSettings snapshot = _settings;
     bool applyingDsp = false;
+    bool deferredDsp = false;
     try {
       await _applyOutputSettings(refreshVolume: true);
       applyingDsp = true;
-      await _applyDspSettings();
+      deferredDsp = await _applyDspSettings();
       if (_disposed || !identical(_settings, snapshot)) return;
       _lastApplyError = null;
       _lastDspApplyError = null;
+      _dspDeferredUntilNextStream = deferredDsp;
     } catch (error) {
       if (_disposed || !identical(_settings, snapshot)) return;
       _lastApplyError = error;
       _lastDspApplyError = applyingDsp ? error : null;
+      _dspDeferredUntilNextStream = false;
       debugPrint('hifi: applying settings failed: $error');
     }
     notifyListeners();
@@ -324,33 +340,49 @@ class HifiController extends ChangeNotifier with BuildSafeNotifier {
     if (refreshVolume) await refreshEndpointVolume();
   }
 
-  Future<void> _applyDspSettings() async {
+  Future<bool> _applyDspSettings() async {
     final NativeAudioEngine? native = engine;
-    if (native == null) return;
+    if (native == null) return false;
     final LazerDspRequest dsp = _settings.toDspRequest();
-    await native.setEqualizer(
-      preampDb: dsp.preampDb,
-      limiterEnabled: dsp.limiterEnabled,
-      limiterThresholdDb: dsp.limiterThresholdDb,
-      bands: <LazerEqBandSettings>[
-        for (final HifiEqBandMessage band in dsp.bands)
-          LazerEqBandSettings(
-            kind: band.kind,
-            frequencyHz: band.frequencyHz,
-            gainDb: band.gainDb,
-            q: band.q,
-            enabled: band.enabled != 0,
-          ),
-      ],
-      stageOrder: dsp.stageOrder,
-      crossfeed: LazerCrossfeedSettings(
-        enabled: dsp.crossfeedEnabled,
-        strength: dsp.crossfeedStrength,
-        algorithm: dsp.crossfeedAlgorithm,
-        delayMs: dsp.crossfeedDelayMs,
-        cutoffHz: dsp.crossfeedCutoffHz,
-      ),
-    );
+    try {
+      await native.setEqualizer(
+        preampDb: dsp.preampDb,
+        limiterEnabled: dsp.limiterEnabled,
+        limiterThresholdDb: dsp.limiterThresholdDb,
+        bands: <LazerEqBandSettings>[
+          for (final HifiEqBandMessage band in dsp.bands)
+            LazerEqBandSettings(
+              kind: band.kind,
+              frequencyHz: band.frequencyHz,
+              gainDb: band.gainDb,
+              q: band.q,
+              enabled: band.enabled != 0,
+            ),
+        ],
+        stageOrder: dsp.stageOrder,
+        crossfeed: LazerCrossfeedSettings(
+          enabled: dsp.crossfeedEnabled,
+          strength: dsp.crossfeedStrength,
+          algorithm: dsp.crossfeedAlgorithm,
+          delayMs: dsp.crossfeedDelayMs,
+          cutoffHz: dsp.crossfeedCutoffHz,
+        ),
+      );
+      return false;
+    } catch (_) {
+      final OutputPathState? path = native.streamInfo?.outputPath;
+      // The output policy is reopened on the next source. Asking the running
+      // strict stream to install processing now is expected to be refused; the
+      // engine has already retained the request and replays it at that boundary.
+      if (!_settings.directOutputRequested &&
+          path != null &&
+          path.live &&
+          (path.bitPerfect || path.isDsdPath) &&
+          native.hasPendingDspSettings) {
+        return true;
+      }
+      rethrow;
+    }
   }
 
   bool _sameOutputSettings(HifiSettings first, HifiSettings second) {

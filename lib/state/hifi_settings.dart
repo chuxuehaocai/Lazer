@@ -591,6 +591,11 @@ class HifiSettings {
   /// before the catalog is re-read.
   final String? outputName;
 
+  /// Empty strings were persisted by an older settings path. Treat them as the
+  /// absence of a selection everywhere, not as a device whose token is "".
+  bool get hasOutputSelection =>
+      outputToken != null && outputToken!.trim().isNotEmpty;
+
   final bool exclusiveMode;
   final bool bitPerfect;
 
@@ -613,7 +618,7 @@ class HifiSettings {
   /// iOS owns the route, so the app uses ordinary shared output and converts
   /// DSD sources to PCM. Exclusive output, strict PCM and DoP stay unavailable.
   HifiSettings forIosOutput() {
-    if (outputToken == null &&
+    if (!hasOutputSelection &&
         outputName == null &&
         !exclusiveMode &&
         !bitPerfect &&
@@ -701,8 +706,8 @@ class HifiSettings {
 
   static HifiSettings fromMap(Map<String, Object?> map) => HifiSettings(
     preferNativeEngine: map['hifi_native_engine'] as bool? ?? true,
-    outputToken: map['hifi_output_token'] as String?,
-    outputName: map['hifi_output_name'] as String?,
+    outputToken: _nonEmpty(map['hifi_output_token'] as String?),
+    outputName: _nonEmpty(map['hifi_output_name'] as String?),
     exclusiveMode: map['hifi_exclusive'] as bool? ?? false,
     bitPerfect: map['hifi_bit_perfect'] as bool? ?? false,
     dspStageOrder: decodeDspStageOrder(map['hifi_dsp_order'] as String?),
@@ -723,12 +728,15 @@ class HifiSettings {
   /// Bit-perfect and DoP are mutually exclusive policies and DSD modes are only
   /// meaningful for DSD sources; the engine validates the rest.
   LazerOutputRequest toOutputRequest() => LazerOutputRequest(
-    token: outputToken,
+    token: hasOutputSelection ? outputToken : null,
     exclusive: exclusiveMode,
     bitPerfect: bitPerfect,
     dsdOutputMode: dsdOutputMode,
     bufferMillis: buffer.millis,
   );
+
+  static String? _nonEmpty(String? value) =>
+      value == null || value.trim().isEmpty ? null : value;
 
   /// The DSP chain request for the engine.
   ///

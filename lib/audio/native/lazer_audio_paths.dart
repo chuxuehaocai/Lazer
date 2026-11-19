@@ -56,29 +56,35 @@ class NativeAudioLibraryPaths {
   ).firstOrNull;
 
   /// Automatic discovery tries every existing artifact, so an obsolete local
-  /// build cannot hide a compatible engine later in the search. Explicit user
-  /// choices are authoritative, including missing or incompatible files.
+  /// build cannot hide a compatible engine later in the search.
+  ///
+  /// An explicit choice — a library the user imported, or a per-process
+  /// `LAZER_AUDIO_LIBRARY` override — is tried first, but it is not the only
+  /// candidate. It used to short-circuit discovery, which made a stale import
+  /// from an older build fatal: once the ABI moved on, or the copied file was
+  /// deleted, the engine reported itself unavailable even though the app ships
+  /// a working one, and the app silently fell back to the system engine until
+  /// the user found the "use the bundled engine" row and restarted. Loading an
+  /// explicit path that turns out to be unusable now just means the next
+  /// candidate runs; the loader keeps the failure in its reason so the settings
+  /// page can still say why the import was ignored.
   Iterable<Uri> candidates({
     required List<String> fileNames,
     String? explicitPath,
     String? environmentOverride,
     String? siblingDirectory,
   }) sync* {
-    if (explicitPath != null) {
-      final file = File(explicitPath);
-      if (file.existsSync()) yield file.absolute.uri;
-      return;
-    }
-    if (environmentOverride != null && environmentOverride.trim().isNotEmpty) {
-      final file = File(environmentOverride.trim());
-      if (file.existsSync()) yield file.absolute.uri;
-      return;
+    final seen = <Uri>{};
+    for (final path in <String?>[explicitPath, environmentOverride?.trim()]) {
+      if (path == null || path.isEmpty) continue;
+      final file = File(path);
+      final uri = file.absolute.uri;
+      if (file.existsSync() && seen.add(uri)) yield uri;
     }
     if (android) {
       yield Uri.file(fileNames.first);
       return;
     }
-    final seen = <Uri>{};
     for (final directory in [
       if (siblingDirectory != null) Directory(siblingDirectory),
       ...directories,

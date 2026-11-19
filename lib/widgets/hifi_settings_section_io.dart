@@ -140,6 +140,8 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
                 ),
               if (native && hifi.lastApplyError != null)
                 _WarningRow('音频设置未应用：${hifi.lastApplyError}'),
+              if (native && hifi.dspDeferredUntilNextStream)
+                _WarningRow('DSP 设置已排队，将在下一次打开输出时生效'),
               if (native && hifi.usesIosSystemRoute) ...<Widget>[
                 const _SettingRow(
                   label: '输出设备',
@@ -455,21 +457,20 @@ class _HifiSettingsSectionState extends State<HifiSettingsSection>
 
   String _deviceSubtitle(HifiController hifi, HifiSettings settings) {
     if (hifi.usesAndroidUsbDevices) {
-      if (settings.outputToken == null) {
+      if (!settings.hasOutputSelection) {
         return '系统音频输出；选择 USB DAC 可绕过系统混音与重采样';
       }
       return hifi.selectedDevice == null
           ? 'USB DAC 未连接；连接后可使用直通输出'
           : 'USB DAC 直通；首次使用需要授权';
     }
-    if (settings.outputToken == null) return '系统默认输出设备';
+    if (!settings.hasOutputSelection) return '系统默认输出设备';
     final LazerOutputDevice? device = hifi.selectedDevice;
     if (device == null) {
-      return settings.outputName == null
+      final String? name = settings.outputName;
+      return name == null || name.trim().isEmpty
           ? '已保存的设备当前不可用'
-          : context
-                .tr('{name}（当前不可用）')
-                .replaceAll('{name}', settings.outputName!);
+          : context.tr('{name}（当前不可用）').replaceAll('{name}', name);
     }
     final StringBuffer buffer = StringBuffer(device.displayName);
     if (!device.isActive) buffer.write(context.tr('（未激活）'));
@@ -593,7 +594,9 @@ class _DevicePicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<LazerOutputDevice> devices = hifi.devices;
-    final String? selected = settings.outputToken;
+    final String? selected = settings.hasOutputSelection
+        ? settings.outputToken
+        : null;
     final bool selectionKnown =
         selected == null ||
         devices.any((LazerOutputDevice device) => device.token == selected);

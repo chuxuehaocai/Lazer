@@ -868,6 +868,186 @@ bool runBlockedOpenCancellationCase() {
     return true;
 }
 
+/* The exact clear names one queue generation, so it may only return Ok after that reader is no
+ * longer callable and every other generation is untouched. Each case below states which promise
+ * the caller relies on when it frees its context right after the call. */
+bool runExactClearCancelsPreparationCase() {
+    MemoryReader first(makePcm16Wave(44'101, 5'000));
+    GatedReader next(makePcm16Wave(100'000, -4'000), 128 * 1024);
+    const LazerAudioReader firstReader = asReader(first);
+
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.device.buffer_millis = 120;
+    config.log.on_log = onLog;
+    auto capture = std::make_shared<Capture>();
+    Engine *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return false;
+
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 1'000};
+    if (engine->open(nullptr, &firstReader, params) != LazerAudioOk) {
+        engine->destroy();
+        std::cerr << "FAIL: exact clear case could not open the first source\n";
+        return false;
+    }
+    QueueCall queue;
+    std::thread queueThread;
+    if (!startBlockedPreparation(*engine, next, 7, queue, queueThread)) {
+        engine->destroy();
+        std::cerr << "FAIL: exact clear case never blocked in the preparation\n";
+        return false;
+    }
+
+    OperationCall clear;
+    const auto started = std::chrono::steady_clock::now();
+    std::thread clearThread([&] {
+        const int32_t result = engine->clearQueuedReaderEx(7, 8, false);
+        {
+            std::lock_guard guard(clear.mutex);
+            clear.result = result;
+            clear.done = true;
+        }
+        clear.changed.notify_all();
+    });
+    bool cleared = false;
+    {
+        std::unique_lock guard(clear.mutex);
+        cleared =
+            clear.changed.wait_for(guard, std::chrono::seconds(2), [&] { return clear.done; });
+    }
+    bool forcedRelease = false;
+    if (!cleared) {
+        /* A missing preparation barrier must fail this probe rather than hang it. */
+        forcedRelease = true;
+        releaseGate(next);
+        std::unique_lock guard(clear.mutex);
+        cleared =
+            clear.changed.wait_for(guard, std::chrono::seconds(3), [&] { return clear.done; });
+    }
+    clearThread.join();
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    bool queueReturned = false;
+    {
+        std::unique_lock guard(queue.mutex);
+        queueReturned =
+            queue.changed.wait_for(guard, std::chrono::seconds(3), [&] { return queue.done; });
+    }
+    if (!queueReturned) {
+        releaseGate(next);
+        std::unique_lock guard(queue.mutex);
+        queueReturned =
+            queue.changed.wait_for(guard, std::chrono::seconds(3), [&] { return queue.done; });
+    }
+    if (queueThread.joinable()) queueThread.join();
+    engine->destroy();
+
+    const int cancels = next.cancelCount.load(std::memory_order_acquire);
+    const int closes = next.closeCount.load(std::memory_order_acquire);
+    if (!cleared || forcedRelease || elapsed > std::chrono::seconds(2) ||
+        clear.result != LazerAudioQueueCleared || !queueReturned ||
+        queue.result != LazerAudioErrorCancelled || cancels != 1 || closes != 1) {
+        std::cerr << "FAIL: exact clear of a blocked preparation completion=" << cleared
+                  << " forcedRelease=" << forcedRelease << " result=" << clear.result
+                  << " elapsed-ms="
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+                  << " queue-returned=" << queueReturned << " queue-result=" << queue.result
+                  << " cancel/close=" << cancels << "/" << closes << '\n';
+        return false;
+    }
+    std::cout << "PASS: exact clear cancelled a blocked preparation and closed it exactly once\n";
+    return true;
+}
+
+bool runExactClearGenerationCase() {
+    MemoryReader first(makePcm16Wave(44'101, 5'000));
+    GatedReader stale(makePcm16Wave(100'000, -4'000), int64_t{1} << 40);
+    const LazerAudioReader firstReader = asReader(first);
+    const LazerAudioReader staleReader = asReader(stale);
+
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.device.buffer_millis = 120;
+    config.log.on_log = onLog;
+    auto capture = std::make_shared<Capture>();
+    Engine *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return false;
+
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 1'000};
+    if (engine->open(nullptr, &firstReader, params) != LazerAudioOk) {
+        engine->destroy();
+        std::cerr << "FAIL: exact clear generation case could not open the first source\n";
+        return false;
+    }
+    /* Nothing is queued yet: the request is still valid and Ok acknowledges the advance, so the
+     * caller may free a reader the engine has already finished with. */
+    const int32_t absent = engine->clearQueuedReaderEx(95, 4, false);
+    const int32_t repeated = engine->clearQueuedReaderEx(95, 4, false);
+    const int32_t older = engine->clearQueuedReaderEx(95, 3, false);
+    /* A preparation numbered at an acknowledged generation must be refused outright. */
+    const int32_t staleQueued = engine->queueReader(4, staleReader, params);
+    engine->destroy();
+
+    if (absent != LazerAudioQueueCleared || repeated != LazerAudioErrorState ||
+        older != LazerAudioErrorState || staleQueued != LazerAudioErrorState) {
+        std::cerr << "FAIL: exact clear generation absent=" << absent << " repeated=" << repeated
+                  << " older=" << older << " stale-queue=" << staleQueued << '\n';
+        return false;
+    }
+    std::cout << "PASS: exact clear advanced its request generation once and refused older ones\n";
+    return true;
+}
+
+bool runExactClearInstalledCase() {
+    MemoryReader first(makePcm16Wave(44'101, 5'000));
+    GatedReader next(makePcm16Wave(100'000, -4'000), int64_t{1} << 40);
+    const LazerAudioReader firstReader = asReader(first);
+    const LazerAudioReader nextReader = asReader(next);
+
+    LazerAudioEngineConfig config{};
+    config.abi_version = LAZER_AUDIO_ABI_VERSION;
+    config.struct_size = sizeof(config);
+    config.device.exclusive = 1;
+    config.device.bit_perfect = 1;
+    config.device.buffer_millis = 120;
+    config.log.on_log = onLog;
+    auto capture = std::make_shared<Capture>();
+    Engine *engine = Engine::create(config, std::make_unique<CaptureOutput>(capture));
+    if (engine == nullptr) return false;
+
+    const LazerAudioOpenParams params{sizeof(LazerAudioOpenParams), 0, 1'000};
+    if (engine->open(nullptr, &firstReader, params) != LazerAudioOk) {
+        engine->destroy();
+        std::cerr << "FAIL: exact clear installed case could not open the first source\n";
+        return false;
+    }
+    const LazerAudioOpenParams nextParams{sizeof(LazerAudioOpenParams), 0, 2};
+    const int32_t queued = engine->queueReader(7, nextReader, nextParams);
+    /* preserve_audible only protects a successor that already overlaps; this one never started. */
+    const int32_t cleared = engine->clearQueuedReaderEx(7, 8, true);
+    const int cancels = next.cancelCount.load(std::memory_order_acquire);
+    const int closes = next.closeCount.load(std::memory_order_acquire);
+    /* The target is gone now, and the request still advances: Ok, not a refusal. */
+    const int32_t again = engine->clearQueuedReaderEx(7, 9, false);
+    engine->destroy();
+
+    if (queued != LazerAudioOk || cleared != LazerAudioQueueCleared || again != LazerAudioQueueCleared ||
+        cancels != 1 || closes != 1) {
+        std::cerr << "FAIL: exact clear of an installed successor queued=" << queued
+                  << " cleared=" << cleared << " again=" << again << " cancel/close=" << cancels
+                  << "/" << closes << '\n';
+        return false;
+    }
+    std::cout << "PASS: exact clear retired an unheard successor and closed it before returning\n";
+    return true;
+}
+
 }  // namespace
 
 namespace lazer::audio {
@@ -2080,5 +2260,8 @@ int main(int argc, char **argv) {
     if (!runGatedCancellationCase(false)) return 1;
     if (!runGatedCancellationCase(true)) return 1;
     if (!runBlockedOpenCancellationCase()) return 1;
+    if (!runExactClearCancelsPreparationCase()) return 1;
+    if (!runExactClearGenerationCase()) return 1;
+    if (!runExactClearInstalledCase()) return 1;
     return 0;
 }
