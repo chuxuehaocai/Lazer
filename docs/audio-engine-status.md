@@ -41,7 +41,7 @@
 | 开关 | 默认 | 定义位置 | 作用 |
 | --- | --- | --- | --- |
 | `LAZER_AUDIO_NATIVE_ENGINE` | `ON` | `native/CMakeLists.txt:27` | 是否构建 `lazer-audio` 引擎 |
-| `LAZER_AUDIO_NATIVE_PROBES` | `OFF` | `native/CMakeLists.txt:29` | 是否构建 17 个离线 CTest 探针 |
+| `LAZER_AUDIO_NATIVE_PROBES` | `OFF` | `native/CMakeLists.txt:29` | 是否构建 24 个离线 CTest 探针 |
 | `LAZER_FFMPEG_ROOT` | 未设置 | `native/CMakeLists.txt:36-71` | DSD-capable FFmpeg 前缀 |
 
 `LAZER_FFMPEG_ROOT` 的解析顺序（`native/CMakeLists.txt:36-71`）：
@@ -85,10 +85,11 @@ native/CMakeLists.txt:78-81
 | `android` | 是 | `build.yml:392` `ci/build-android-audio.sh`；`:429` APK 校验 | 否 |
 | `ios` | 不适用 | `build.yml:465-500` | 否 |
 
-**关键缺口：整个 CI 没有任何 job 打开 `LAZER_AUDIO_NATIVE_PROBES`，也没有 job 运行引擎的
-17 个 CTest 探针。** `LAZER_AUDIO_NATIVE_PROBES` 只出现在 `docs/`、本机脚本与 `native/` 内部
-（`grep -rn NATIVE_PROBES .github/ ci/` 无结果）。这意味着逐 bit 的 PCM 矩阵探针
-（阶段 2 的核心证据来源）目前**不在任何自动化门禁内**。
+**覆盖现状：Windows job 会打开 `LAZER_AUDIO_NATIVE_PROBES` 并运行 24 个 CTest 探针**
+（`.github/workflows/build.yml:171-176`）。Linux 侧的 `check` job 只有 `aaudio-contract` 与
+`remoteio-contract` 两个平台输出契约测试（`build.yml:76-83`），macOS 与 Android job 不构建
+引擎探针。逐 bit 的 PCM 矩阵探针（阶段 2 的核心证据来源）因此只在 Windows 这一条链路上
+受门禁保护。
 
 ---
 
@@ -403,7 +404,7 @@ abstract interface class FailureReportingAudioEngine {
 * **物理层**：所有"独占/格式"结论都只到"端点接受了这个格式"，**没有任何数字回环**
   （`docs/audio-engine.md:246-250`）。
 * **移动端**：Android 有引擎与 AAudio 后端（`docs/android-audio.md`），但 32 位 ARM 不被 Dart 侧选用（差异 #4）。
-* **自动化**：17 个引擎探针不在 CI；`armeabi-v7a` 打包与选用逻辑不一致处无测试覆盖。
+* **自动化**：引擎探针只在 Windows job 里跑（`build.yml:171-176`），Linux/macOS/Android 没有同类门禁；`armeabi-v7a` 打包与选用逻辑不一致处无测试覆盖。
 
 ---
 
