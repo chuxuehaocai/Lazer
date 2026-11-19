@@ -329,6 +329,38 @@ void main() {
     }
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
+  testWidgets('a presented player cannot fold the classic strip away', (
+    tester,
+  ) async {
+    final harness = _FrameHarness(tester);
+    final controls = ValueNotifier<bool>(true);
+    addTearDown(controls.dispose);
+    try {
+      await harness.mount(DesktopTitleBarStyle.classic);
+      final controller = tester
+          .widget<WindowChromeScope>(find.byType(WindowChromeScope))
+          .controller;
+      addTearDown(() => controller.detach(controls));
+      // Stand-in for the now-playing page: its idle countdown hides the player
+      // controls through the same controller the frame exposes.
+      controller.attach(controls);
+      controls.value = false;
+      await tester.pumpAndSettle();
+
+      expect(controller.value, isFalse);
+      // The strip is window chrome with a real band. Hiding the page's own
+      // controls may not take the strip — or the page's top edge — away.
+      expect(tester.getSize(find.byType(WindowTitleArea)).height, 40);
+      expect(tester.getTopLeft(find.byKey(_bodyKey)).dy, 40);
+      expect(tester.getTopLeft(find.byKey(_contentKey)).dy, 40);
+      expect(await harness.pixel(300, 10), _titleColor);
+      await harness.expectCaptionsAccessible();
+      expect(tester.takeException(), isNull);
+    } finally {
+      await harness.dispose();
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
   testWidgets('the floating capsule paints the settings it is given', (
     tester,
   ) async {

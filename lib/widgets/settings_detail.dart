@@ -464,20 +464,14 @@ class SettingsDetailScaffold extends StatelessWidget {
   final Widget child;
   final List<Widget> actions;
 
-  /// The height the floating chrome occupies above a subview.
-  ///
-  /// Nothing is reserved for it in layout: the page paints from the window's top
-  /// edge and the back button, the page title and the capsule's command float
-  /// over it. A scrolling body adds this as its own top padding so its first row
-  /// starts below those controls while everything above it can still scroll
-  /// underneath them.
   /// The height the header controls occupy above a subview's body.
   ///
-  /// Nothing is reserved for them in layout on either platform: the page paints
-  /// from the top edge and the back button, the page title and any command float
-  /// over it. A scrolling body adds this as its own top padding so its first row
-  /// starts below those controls while everything above it can still scroll
-  /// underneath them — the same rule the desktop capsule follows.
+  /// On a phone the header is a real strip, so it reserves its own height and
+  /// this answers zero: a page that padded itself as well would clear the same
+  /// band twice. On desktop nothing is reserved — the page paints from the top
+  /// edge and the capsule's back button, page title and command float over it —
+  /// so a scrolling body adds this as its own top padding and its first row
+  /// starts below those controls while everything above can scroll underneath.
   ///
   /// Answered from the surroundings rather than from a value published further
   /// down the tree: a page builds its own scroll view and hands it to the
@@ -485,15 +479,15 @@ class SettingsDetailScaffold extends StatelessWidget {
   /// read something the scaffold published. Every settings page measured that
   /// way and lost its gap.
   static double topInsetOf(BuildContext context) {
+    // A phone keeps a real header strip, so its pages must not pad the same
+    // band again.
+    if (compactBrowsePresentation(context)) return 0;
     final bool inline =
         WindowChromeScope.maybeLayoutOf(context)?.inline == true;
     final double inset = inline ? _floatingInset : _classicInset;
     if (SettingsDetailHost.isEmbedded(context)) return inset;
     if (!Navigator.of(context).canPop()) return 0;
-    // A route subview on a phone keeps the extra band the compact header adds.
-    return inline || !compactBrowsePresentation(context)
-        ? inset
-        : inset + 8;
+    return inset;
   }
 
   /// The capsule's own row: the back control sits on the pill's centre line.
@@ -550,56 +544,71 @@ class SettingsDetailScaffold extends StatelessWidget {
     if (close == null) {
       final bool canPop = Navigator.of(context).canPop();
       final bool hasTopBar = canPop || trailing != null || headerTitle;
-      return _DetailRouteSurface(
-        child: SafeArea(
-          child: Stack(
-            children: <Widget>[
-              // The body owns the whole page on both platforms: no top bar
-              // reserves its height here, so the route keeps the same floating
-              // header the desktop capsule has and the page scrolls underneath.
-              // It is painted first so the controls below stay on top of it and
-              // keep their taps.
-              Positioned.fill(child: child),
-              if (hasTopBar)
-                Positioned(
-                  top: headerTop + (compactBrowsePresentation(context) ? 8 : 0),
-                  left: 8,
-                  right: 8,
-                  child: Row(
-                    children: <Widget>[
-                      if (canPop)
-                        AccessibleIconButton(
-                          key: const ValueKey('settings-detail-back'),
-                          tooltip: '返回',
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(Icons.chevron_left_rounded),
-                        ),
-                      if (headerTitle)
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            child: Text(
-                              context.tr(title),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleLarge
-                                  ?.copyWith(
-                                    color: AppleSemanticColors.of(
-                                      context,
-                                    ).label,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ),
-                        )
-                      else
-                        const Spacer(),
-                      ?inlineTrailing,
-                    ],
+      // A phone keeps the header as a real strip: the controls own a band above
+      // the body, and the page below starts under it. Only the desktop capsule
+      // has no strip to give — it floats over the page, and the body pads itself
+      // with [topInsetOf] instead.
+      final bool fixedHeader = compactBrowsePresentation(context);
+      final Widget headerRow = Row(
+        children: <Widget>[
+          if (canPop)
+            AccessibleIconButton(
+              key: const ValueKey('settings-detail-back'),
+              tooltip: '返回',
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: const Icon(Icons.chevron_left_rounded),
+            ),
+          if (headerTitle)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Text(
+                  context.tr(title),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: AppleSemanticColors.of(context).label,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-            ],
-          ),
+              ),
+            )
+          else
+            const Spacer(),
+          ?inlineTrailing,
+        ],
+      );
+      return _DetailRouteSurface(
+        child: SafeArea(
+          child: fixedHeader
+              ? Column(
+                  key: const ValueKey('settings-detail-fixed-header'),
+                  children: <Widget>[
+                    if (hasTopBar)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                        child: headerRow,
+                      ),
+                    Expanded(child: child),
+                  ],
+                )
+              : Stack(
+                  children: <Widget>[
+                    // The body owns the whole page: no top bar reserves its
+                    // height here, so the route keeps the same floating header
+                    // the desktop capsule has and the page scrolls underneath.
+                    // It is painted first so the controls below stay on top of
+                    // it and keep their taps.
+                    Positioned.fill(child: child),
+                    if (hasTopBar)
+                      Positioned(
+                        top: headerTop,
+                        left: 8,
+                        right: 8,
+                        child: headerRow,
+                      ),
+                  ],
+                ),
         ),
       );
     }

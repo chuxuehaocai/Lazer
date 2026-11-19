@@ -45,7 +45,10 @@ it, so a paused player never pins a transport to the canvas. A playback error
 does restore it, because retry lives there. The compact presentation keeps its
 transport while paused: on touch the small summary is the only way back, and a
 paused phone player with no controls reads as a dead screen. Television remotes
-retain their key-driven wake behavior.
+retain their key-driven wake behavior. Hiding the dock only hides the page's own
+controls: a classic title bar is window furniture with a real band, so it keeps
+its strip and the page keeps its top edge, while Inline chrome hands its
+floating capsule back to the page.
 
 The idle countdown is reconciled against the page's live state rather than
 armed once per transition: a countdown that expires while hiding is not allowed

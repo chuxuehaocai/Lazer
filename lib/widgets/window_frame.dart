@@ -258,14 +258,13 @@ class _WindowFrameState extends State<WindowFrame>
                 )
               : Column(
                   children: <Widget>[
-                    // Native traffic lights stay outside Flutter's animation.
-                    if (usesNativeWindowButtons)
-                      title
-                    else
-                      WindowChromeTransition(
-                        visible: _chrome.value,
-                        child: title,
-                      ),
+                    // Classic chrome is a strip of the window, not part of the
+                    // page: it keeps its band while a presented player hides
+                    // its own controls, exactly as it does around the native
+                    // traffic lights. The player only owns the capsule in
+                    // Inline chrome, where the strip is an overlay and has no
+                    // height to give back.
+                    title,
                     Expanded(child: ClipRect(child: widget.child)),
                   ],
                 ),

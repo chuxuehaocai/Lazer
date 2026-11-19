@@ -64,7 +64,9 @@ class _PlayerFrameHarness {
     this.pageOffset = Offset.zero,
     this.television = false,
     this.windowDrag,
+    this.chromeStyle = DesktopTitleBarStyle.inline,
   }) {
+    state.titleBarStyle = chromeStyle;
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -88,6 +90,7 @@ class _PlayerFrameHarness {
   final bool reduceMotion;
   final Offset pageOffset;
   final bool television;
+  final DesktopTitleBarStyle chromeStyle;
 
   /// When set, `startDragging` stays pending until the test releases the
   /// button the way the OS move loop would.
@@ -196,6 +199,21 @@ void _expectCaptionAtRest(WidgetTester tester) {
   expect(minimize.size, const Size(46, 40));
   expect(minimize.left, 1122);
   expect(tester.getTopRight(find.byType(WindowTitleArea)).dx, 1260);
+  expect(find.byKey(_minimizeKey).hitTestable(), findsOneWidget);
+}
+
+/// The classic strip is a fixed band of window chrome: it keeps that band, and
+/// its caption cluster, whatever the presented page decides to hide.
+void _expectClassicCaption(WidgetTester tester) {
+  final strip = tester.getRect(find.byType(WindowTitleArea));
+  expect(strip.top, 0);
+  expect(strip.height, kWindowTitleAreaHeight);
+  // The cluster stays flush to the strip's trailing edge, three buttons wide.
+  final close = tester.getRect(
+    find.byKey(const ValueKey('window-title-close')),
+  );
+  expect(close.right, strip.right);
+  expect(close.height, kWindowTitleAreaHeight);
   expect(find.byKey(_minimizeKey).hitTestable(), findsOneWidget);
 }
 
@@ -374,6 +392,42 @@ void main() {
         expect(tester.takeException(), isNull);
       } finally {
         startExternalProcess = previousStart;
+        await harness.dispose();
+      }
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
+
+  testWidgets(
+    'a classic title bar keeps its band while the player idles out',
+    (tester) async {
+      final harness = _PlayerFrameHarness(
+        tester,
+        chromeStyle: DesktopTitleBarStyle.classic,
+      );
+      try {
+        await harness.mount();
+        await tester.pump();
+        final player = find.byType(NowPlayingPage);
+        // The strip owns a real band: the page starts below it.
+        expect(tester.getTopLeft(player).dy, kWindowTitleAreaHeight);
+        expect(_controlsVisible(tester), isTrue);
+        _expectClassicCaption(tester);
+
+        // The idle countdown folds the dock away. It may not take the window's
+        // own strip with it, nor move the page up into the strip's band.
+        await tester.pump(const Duration(seconds: 2));
+        expect(_controlsVisible(tester), isFalse);
+        expect(tester.getTopLeft(player).dy, kWindowTitleAreaHeight);
+        _expectClassicCaption(tester);
+        await tester.tap(find.byKey(_minimizeKey));
+        await tester.pump();
+        expect(
+          harness.windowCalls.where((call) => call == 'minimize'),
+          hasLength(1),
+        );
+        expect(tester.takeException(), isNull);
+      } finally {
         await harness.dispose();
       }
     },
