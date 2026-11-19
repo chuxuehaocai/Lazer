@@ -82,11 +82,12 @@ void main() {
       final rail = find.byKey(const ValueKey('desktop-sidebar'));
       final home = find.byType(AppHomePage);
       expect(tester.getTopLeft(rail).dy, 0);
-      // The capsule floats over the page instead of owning a header band: the
-      // page starts at the window edge and keeps the capsule's band as page
-      // space, which scrolls away with the content.
-      expect(tester.getTopLeft(home).dy, 0);
-      expect(tester.widget<AppHomePage>(home).topInset, kInlineChromeInset);
+      // The capsule floats over the page, and its band is reserved as layout:
+      // the page starts below the band so a scrolled list stops there instead of
+      // painting under the capsule, and the page is not given the band a second
+      // time as scroll padding.
+      expect(tester.getTopLeft(home).dy, kInlineChromeInset);
+      expect(tester.widget<AppHomePage>(home).topInset, 0);
       expect(tester.getTopLeft(find.text('Lazer').first).dy, lessThan(40));
       final capsule = tester.getRect(
         find.byKey(const ValueKey('window-title-minimize')),
