@@ -56,14 +56,18 @@ class _ReplayEngine implements NativeAudioEngine {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-LazerStreamInfo _openedStream() {
+LazerStreamInfo _openedStream({bool bitPerfect = false}) {
   final native = calloc<LazerAudioStreamInfo>();
   try {
     native.ref
       ..outputFormatInitialized = 1
       ..outputSampleRate = 48000
       ..outputBitsPerSample = 24
-      ..outputChannels = 2;
+      ..outputChannels = 2
+      ..outputFormatMatchesSource = 1
+      ..outputExclusive = bitPerfect ? 1 : 0
+      ..outputDspActive = bitPerfect ? 0 : 1
+      ..bitPerfectActive = bitPerfect ? 1 : 0;
     return LazerStreamInfo.fromNative(native.ref);
   } finally {
     calloc.free(native);
@@ -142,4 +146,29 @@ void main() {
       expect(hifi.lastApplyError, same(outputFailure));
     });
   }
+
+  test('leaving a strict stream defers DSP until the next open', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    const strict = HifiSettings(
+      exclusiveMode: true,
+      bitPerfect: true,
+      equalizer: HifiEqualizerState(enabled: true, preampDb: -3),
+    );
+    await hifi.update(strict);
+    expect(hifi.lastApplyError, isNull);
+
+    engine.publish(_openedStream(bitPerfect: true));
+    engine.dspFailure = StateError(
+      'DSP is unavailable while the strict stream is active',
+    );
+    await hifi.update(strict.copyWith(exclusiveMode: false, bitPerfect: false));
+
+    expect(hifi.lastApplyError, isNull);
+    expect(hifi.dspDeferredUntilNextStream, isTrue);
+    expect(engine.hasPendingDspSettings, isTrue);
+
+    engine.hasPendingDspSettings = false;
+    engine.publish(_openedStream());
+    expect(hifi.dspDeferredUntilNextStream, isFalse);
+  });
 }

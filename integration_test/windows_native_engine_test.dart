@@ -23,8 +23,10 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/audio/native/audio_stream_cache.dart';
+import 'package:lazer_nextgen/audio/native/lazer_audio_abi.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_engine.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_library.dart';
+import 'package:lazer_nextgen/audio/native/lazer_audio_worker.dart';
 
 /// A 2-channel 16-bit PCM WAV of [millis] of silence.
 Uint8List _wav(int millis, {int sampleRate = 44100, int channels = 2}) {
@@ -63,12 +65,13 @@ Uint8List _uint32(int value) => Uint8List.fromList(<int>[
 class _WaitingCache extends AudioStreamCache {
   _WaitingCache(Directory root, this.entry) : super(() async => root);
   final AudioStreamEntry entry;
+
   @override
-  Future<AudioStreamEntry> open(
+  Future<AudioStreamLease> acquire(
     String url, {
     int? expectedBytes,
     bool force = false,
-  }) async => entry;
+  }) async => entry.retain();
 }
 
 void main() {
@@ -103,12 +106,16 @@ void main() {
           reason: NativeAudioEngine.lastStartupFailure,
         );
         final engine = created!;
-        addTearDown(engine.dispose);
+        addTearDown(() async {
+          engine.dispose();
+          await engine.shutdownSettled;
+        });
         var settled = false;
         Future<Object?> opening = Future.value();
+        Future<bool>? appending;
         if (successor) {
           final queue = await engine.setQueue([replacement.uri.toString()]);
-          expect(await engine.appendToQueue(queue, entry.url), isTrue);
+          appending = engine.appendToQueue(queue, entry.url);
         } else {
           opening = engine
               .setQueue([entry.url])
@@ -123,24 +130,25 @@ void main() {
                 },
               );
         }
-        for (
-          var attempt = 0;
-          attempt < 100 && entry.onAppended == null;
-          attempt++
-        ) {
+        for (var attempt = 0; attempt < 100 && !entry.leased; attempt++) {
           await Future<void>.delayed(const Duration(milliseconds: 10));
         }
-        expect(entry.onAppended, isNotNull);
+        expect(entry.leased, isTrue);
         await Future<void>.delayed(const Duration(milliseconds: 100));
         expect(
           settled,
           isFalse,
           reason: 'FFmpeg must still be waiting for the old header',
         );
-        if (successor) expect(engine.queuedSourceUrl, isNull);
+        if (successor) {
+          expect(engine.queuedSourceUrl, isNull);
+        }
         await engine
             .setQueue([replacement.uri.toString()])
             .timeout(const Duration(seconds: 3));
+        if (successor) {
+          expect(await appending!.timeout(const Duration(seconds: 3)), isFalse);
+        }
         await opening;
         expect(engine.active, isTrue);
         expect(engine.streamInfo?.sourceSampleRate, 44100);
@@ -527,5 +535,73 @@ void main() {
 
     await engine.stop();
     expect(engine.queuedSourceUrl, isNull);
+  }, skip: !Platform.isWindows);
+
+  // Exclusive output is not only for bit-perfect playback. With DSP enabled the
+  // engine must keep the endpoint exclusive while negotiating a processed PCM
+  // format, and the settings layer must be able to add processing to the next
+  // source without silently downgrading to shared mode.
+  test('the built Windows engine opens exclusive output with DSP', () async {
+    final LazerAudioAvailability availability = LazerAudioLoader.load(
+      reload: true,
+    );
+    expect(availability.reason, isNull);
+
+    final Directory root = await Directory.systemTemp.createTemp(
+      'lazer-native-exclusive-dsp-test',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final File fixture = await File(
+      '${root.path}/exclusive-dsp.wav',
+    ).writeAsBytes(_wav(2000));
+    final AudioStreamCache cache = AudioStreamCache(() async => root);
+    addTearDown(cache.close);
+
+    final NativeAudioEngine? created = await NativeAudioEngine.create(
+      cache: cache,
+    );
+    expect(created, isNotNull, reason: NativeAudioEngine.lastStartupFailure);
+    final NativeAudioEngine engine = created!;
+    addTearDown(() async {
+      engine.dispose();
+      await engine.shutdownSettled;
+    });
+
+    await engine.setDeviceSettings(
+      const LazerDeviceSettings(exclusive: true),
+    );
+    await engine.setEqualizer(
+      preampDb: -3,
+      crossfeed: const LazerCrossfeedSettings(
+        enabled: true,
+        strength: 0.3,
+        algorithm: LazerAudioCrossfeedAlgorithm.bauer,
+      ),
+    );
+    await engine.setQueue(<String>[fixture.uri.toString()]);
+
+    final LazerStreamInfo? info = engine.streamInfo;
+    expect(info, isNotNull, reason: 'the engine accepted the source');
+    expect(info!.outputExclusive, isTrue);
+    expect(info.dspActive, isTrue);
+    expect(info.bitPerfectActive, isFalse);
+    expect(info.outputSampleRate, greaterThan(0));
+    expect(info.outputBitsPerSample, greaterThan(0));
+
+    await engine.play();
+    for (
+      int attempt = 0;
+      attempt < 100 &&
+          engine.position < const Duration(milliseconds: 80);
+      attempt++
+    ) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(
+      engine.position,
+      greaterThanOrEqualTo(const Duration(milliseconds: 80)),
+    );
+
+    await engine.stop();
   }, skip: !Platform.isWindows);
 }

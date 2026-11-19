@@ -29,7 +29,7 @@ void main() {
     ).firstMatch(header);
     expect(versionMatch, isNotNull);
     expect(int.parse(versionMatch!.group(1)!), lazerAudioAbiVersion);
-    expect(lazerAudioAbiVersion, 30);
+    expect(lazerAudioAbiVersion, 31);
   });
 
   test('the required ABI list does not gate additive entry points', () {

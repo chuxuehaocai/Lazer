@@ -1,7 +1,10 @@
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lazer_nextgen/audio/native/lazer_audio_library.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_paths.dart';
+import 'package:lazer_nextgen/state/hifi_settings.dart';
 
 /// A user import or a `LAZER_AUDIO_LIBRARY` override is a *preference*, not the
 /// only candidate: a library copied out of an older build keeps its path in the
@@ -114,5 +117,56 @@ void main() {
     );
 
     expect(found, <String>['liblazer-audio.so']);
+  });
+
+  test('a stale ABI import falls through and keeps its failure reason', () {
+    final Uri imported = Uri.file(
+      '${root.path}${Platform.pathSeparator}old-import${Platform.pathSeparator}lazer-audio.dll',
+    );
+    final Uri bundled = Uri.file(at(executable, 'lazer-audio.dll'));
+    final LazerAudioApi bundledApi = LazerAudioApi(DynamicLibrary.process());
+    final List<String> probed = <String>[];
+
+    final LazerAudioAvailability result = LazerAudioLoader.selectFirstUsable(
+      <Uri>[imported, bundled],
+      (Uri candidate) {
+        probed.add(candidate.toFilePath());
+        if (candidate == imported) {
+          return const LazerAudioAvailability.unavailable(
+            'old/lazer-audio.dll reports ABI 29; this build expects 30',
+          );
+        }
+        return LazerAudioAvailability.available(
+          bundledApi,
+          null,
+          source: LazerAudioEngineSource.bundled,
+          sourceLabel: 'lazer-audio.dll',
+        );
+      },
+      unavailableReason: 'no candidates',
+    );
+
+    expect(probed, <String>[imported.toFilePath(), bundled.toFilePath()]);
+    expect(result.isAvailable, isTrue);
+    expect(result.api, same(bundledApi));
+    expect(result.reason, isNull);
+    expect(
+      result.rejectedCandidates,
+      hasLength(1),
+      reason: 'the ignored import must remain visible in diagnostics',
+    );
+    expect(result.rejectedCandidates.single, contains('ABI 29'));
+  });
+
+  test('empty persisted output fields mean the system default', () {
+    final HifiSettings settings = HifiSettings.fromMap(<String, Object?>{
+      'hifi_output_token': '',
+      'hifi_output_name': '',
+    });
+
+    expect(settings.outputToken, isNull);
+    expect(settings.outputName, isNull);
+    expect(settings.hasOutputSelection, isFalse);
+    expect(settings.toOutputRequest().token, isNull);
   });
 }
