@@ -20,21 +20,13 @@ export 'window_chrome_surface.dart';
 class WindowChromeController extends ValueNotifier<bool>
     with BuildSafeNotifier {
   WindowChromeController({TickerProvider? vsync}) : super(true) {
-    final TickerProvider? provider = vsync;
-    if (provider != null) {
-      _handover = AnimationController(
-        vsync: provider,
-        value: 1,
-        duration: _handoverSpan,
-        debugLabel: 'window-chrome-handover',
-      )..addStatusListener(_handoverStatus);
-    }
+    _vsync = vsync;
   }
 
-  /// How long the set that is leaving keeps the capsule's extension.
+  /// How long a set that is leaving keeps the capsule's extension.
   static const int _handoverOutMs = 160;
 
-  /// How long the incoming set takes to arrive once the extension is free.
+  /// How long a set that is arriving takes to claim it.
   static const int _handoverInMs = 260;
 
   /// The outgoing half of a capsule handover: a page command on its way out.
@@ -43,35 +35,47 @@ class WindowChromeController extends ValueNotifier<bool>
   /// The incoming half of a capsule handover: the set taking over.
   static const Duration handoverIn = Duration(milliseconds: _handoverInMs);
 
-  /// One whole handover, exit and entrance included.
-  static const Duration _handoverSpan = Duration(
-    milliseconds: _handoverOutMs + _handoverInMs,
+  static const AppleSpring _outSpring = AppleSpring(
+    duration: handoverOut,
   );
+  static const AppleSpring _inSpring = AppleSpring(duration: handoverIn);
 
-  /// Share of the handover that belongs to the outgoing set.
-  static const double _outShare =
-      _handoverOutMs / (_handoverOutMs + _handoverInMs);
+  /// Presence this close to zero counts as gone: the next set may arrive.
+  static const double _gone = .002;
 
   final List<_WindowChromeSource> _sources = [];
   final List<_ChromeActionSet> _actions = [];
 
-  /// Hands the capsule's extension from one action set to the next. Null in a
-  /// pure unit test with no ticker provider: handovers then land at once.
-  AnimationController? _handover;
+  /// Ticker source for the per-set presence timelines. Null in a pure unit test
+  /// with no provider: presences then jump straight to their target.
+  TickerProvider? _vsync;
+
+  /// How much of the capsule's extension each action set may paint, keyed by the
+  /// set's owner.
+  ///
+  /// One timeline per set rather than one shared handover: a set that is
+  /// interrupted halfway out keeps its own position and velocity, so reversing a
+  /// handover resumes where it actually was instead of restarting from an
+  /// endpoint. A set is dropped here only once its widget has left the tree.
+  final Map<Object, AnimationController> _presence = {};
+
+  /// The presence each timeline was last pointed at, so a tick does not restart
+  /// a spring that is already on its way.
+  final Map<Object, double> _commanded = {};
+
+  /// Every set that currently has a presence timeline, or — without a ticker —
+  /// every set that is registered at all.
+  final Set<Object> _tracked = <Object>{};
+
+  /// The last width each set asked for, so a set that unregisters mid-exit can
+  /// still hold the pill open for its own walk out.
+  final Map<Object, double> _lastWidth = {};
+
+  /// Ticks every presence frame so the portals and the pill repaint.
+  final _PresenceTicks _presenceTicks = _PresenceTicks();
 
   /// The action set that owns the extension right now.
   Object? _owner;
-
-  /// The set that is walking out of the extension ahead of [_owner].
-  Object? _retiring;
-
-  /// Presence the retiring set had when the handover started, so an interrupted
-  /// exit continues from where it was instead of jumping back to full.
-  double _retiringPresence = 1;
-
-  /// Presence the incoming set already had when the handover started. Zero for
-  /// a fresh handover, non-zero only when a running one is reversed.
-  double _arrivingFrom = 0;
 
   bool _reduceMotion = false;
   bool _ownerSyncScheduled = false;
@@ -79,30 +83,33 @@ class WindowChromeController extends ValueNotifier<bool>
 
   /// How far the chrome's own unfold has travelled, reported by the frame.
   ///
-  /// A handover only plays while the extension is actually on screen: when the
-  /// capsule is folding shut anyway (the player being dismissed), the collapse
-  /// already carries the outgoing set away and a second, invisible handover
-  /// would only delay the page command that is coming back.
+  /// A handover is only staged while the extension is actually on screen: when
+  /// the capsule is folding shut anyway the collapse already carries the
+  /// outgoing set away, and waiting for it would only delay the next one.
   double _revealed = 1;
-
-  static const AppleSpringCurve _ease = AppleSpringCurve();
 
   bool get playerPresented => _sources.isNotEmpty;
 
   /// The action set that currently owns the capsule's extension.
   Object? get actionOwner => _owner;
 
-  /// Ticks while the extension travels between two action sets. Every widget
-  /// that paints [presenceOf] has to listen to it.
-  Listenable? get handover => _handover;
+  /// Ticks while any set's presence changes. Every widget that paints
+  /// [presenceOf] has to listen to it.
+  Listenable? get handover => _presenceTicks;
 
-  /// Lands handovers at once when the platform asks for less motion.
+  /// Lands every handover at once when the platform asks for less motion.
   void syncReduceMotion(bool value) {
     if (_reduceMotion == value) return;
     _reduceMotion = value;
-    if (!value) return;
-    _retiring = null;
-    _settleHandover();
+    if (value) {
+      for (final entry in _presence.entries) {
+        entry.value
+          ..stop()
+          ..value = _targetFor(entry.key);
+        _commanded[entry.key] = entry.value.value;
+      }
+      _dropSettledPresence();
+    }
     notifyListeners();
   }
 
@@ -110,128 +117,158 @@ class WindowChromeController extends ValueNotifier<bool>
   void syncRevealed(double progress) {
     if (!progress.isFinite) return;
     _revealed = progress.clamp(0.0, 1.0);
+    // A collapsing capsule frees the extension without staging an arrival
+    // nobody can see.
+    if (_revealed < .05) _retargetPresence();
   }
 
   /// How much of the capsule's extension [owner] may paint right now.
   ///
-  /// 1 for the set that owns it, 0 for every other set. A handover runs in two
-  /// halves: the outgoing set leaves over [handoverOut], and only once it is
-  /// gone does the incoming set arrive over [handoverIn]. A page command and a
-  /// presented player's buttons therefore never paint over each other.
+  /// 1 while the set owns the capsule, 0 once it has walked out. The arriving
+  /// set is held at 0 until the outgoing one is actually gone, so a page command
+  /// and a presented player's buttons never paint over each other.
   double presenceOf(Object owner) {
-    final bool mine = identical(owner, _owner);
-    if (!mine && !identical(owner, _retiring)) return 0;
-    if (_reduceMotion) return mine ? 1 : 0;
-    final AnimationController? handover = _handover;
-    if (handover == null) return mine ? 1 : 0;
-    final double elapsed = handover.value;
-    if (!mine) {
-      // A set leaving the capsule holds its place and then accelerates away:
-      // the mirror of the arriving curve, so the exit reads as an exit.
-      final double leave = (elapsed / _outShare).clamp(0.0, 1.0);
-      return (_retiringPresence * _ease.transform(1 - leave)).clamp(0.0, 1.0);
+    if (!_animates || _reduceMotion) {
+      return _tracked.contains(owner) ? _targetFor(owner) : 0;
     }
-    if (_retiring == null) return 1;
-    final double arrive = ((elapsed - _outShare) / (1 - _outShare)).clamp(
-      0.0,
-      1.0,
-    );
-    return (_arrivingFrom + (1 - _arrivingFrom) * _ease.transform(arrive))
-        .clamp(0.0, 1.0);
+    final controller = _presence[owner];
+    if (controller == null) return 0;
+    return controller.value.clamp(0.0, 1.0);
   }
 
-  /// The action set that owns the capsule's extension. A player's song actions
-  /// always outrank a page's own actions, so opening the player never loses its
-  /// buttons to a settings page that is still mounted underneath.
+  /// What [owner]'s presence is heading towards.
+  double _targetFor(Object owner) {
+    if (_disposed || !identical(owner, _owner)) return 0;
+    // While the capsule is on screen the owner yields to any set that is still
+    // further out than it is. A set only a few frames into its own exit yields
+    // in turn, so an owner that is reversing back in resumes from wherever it
+    // got to instead of queueing behind a set that has barely appeared.
+    if (_revealed >= .05) {
+      final double mine = _valueOf(owner);
+      for (final other in _tracked) {
+        if (identical(other, owner)) continue;
+        final double theirs = _valueOf(other);
+        if (theirs > _gone && theirs >= mine) return 0;
+      }
+    }
+    return 1;
+  }
+
+  double _valueOf(Object owner) =>
+      _animates && !_reduceMotion ? (_presence[owner]?.value ?? 0) : 0;
+
+  /// Creates the presence timeline for [owner].
+  ///
+  /// Every set is tracked, whether or not a ticker can drive it: the tracked
+  /// list is what tells an arriving set that another one is still on the
+  /// capsule, so it is not merely bookkeeping.
+  void _ensurePresence(Object owner) {
+    _tracked.add(owner);
+    if (!_animates) return;
+    _presence.putIfAbsent(
+      owner,
+      () => AnimationController(
+        vsync: _vsync!,
+        // A capsule that was empty has nothing to hand over from: the first set
+        // claims it outright and the chrome's own unfold plays its entrance.
+        value: _presence.isEmpty ? 1 : 0,
+      )..addListener(_presenceTick),
+    );
+  }
+
+  /// Whether this controller drives real presence timelines.
+  bool get _animates => _vsync != null;
+
+  void _presenceTick() {
+    if (_disposed) return;
+    _retargetPresence();
+    _presenceTicks.tick();
+  }
+
+  /// Points every set's timeline at its current target, resuming from wherever
+  /// that set happens to be.
+  void _retargetPresence() {
+    if (_disposed) return;
+    if (!_animates) {
+      // No ticker: presence is read straight from the targets, so there is
+      // nothing to drive. The set list is still reconciled.
+      _dropSettledPresence();
+      return;
+    }
+    for (final entry in List<MapEntry<Object, AnimationController>>.of(
+      _presence.entries,
+    )) {
+      final double target = _targetFor(entry.key);
+      if (_commanded[entry.key] == target) continue;
+      _commanded[entry.key] = target;
+      final bool arriving = target > entry.value.value;
+      entry.value.springTo(
+        target,
+        spring: arriving ? _inSpring : _outSpring,
+        reduceMotion: _reduceMotion,
+      );
+    }
+    _dropSettledPresence();
+  }
+
+  /// Forgets the sets whose widget has left the tree and finished walking out.
+  void _dropSettledPresence() {
+    if (_tracked.isEmpty && _presence.isEmpty) return;
+    final List<Object> settled = <Object>[
+      for (final owner in _tracked)
+        if (!_hasActions(owner) && _valueOf(owner) <= _gone) owner,
+      for (final entry in _presence.entries)
+        if (!_hasActions(entry.key) &&
+            entry.value.value <= _gone &&
+            !entry.value.isAnimating)
+          entry.key,
+    ];
+    for (final owner in settled.toSet()) {
+      _tracked.remove(owner);
+      _presence.remove(owner)?.dispose();
+      _commanded.remove(owner);
+      _lastWidth.remove(owner);
+    }
+  }
+
+  /// The action set that owns the capsule's extension, or null when no set is
+  /// current any more.
+  ///
+  /// A player's song actions always outrank a page's own actions, so opening the
+  /// player never loses its buttons to a settings page still mounted underneath.
+  /// A set whose route has ended stops winning at once — that is what starts its
+  /// exit.
   _ChromeActionSet? get _activeActions {
     // Snapshot: a sibling page can register or drop its set from inside its own
     // build, and iterating the live list would then throw while another widget
     // is asking for its geometry.
-    for (final entry in List<_ChromeActionSet>.of(_actions).reversed) {
-      if (entry.playerDriven) return entry;
+    final List<_ChromeActionSet> sets = List<_ChromeActionSet>.of(_actions);
+    for (final entry in sets.reversed) {
+      if (entry.playerDriven && entry.active) return entry;
     }
-    return _actions.lastOrNull;
+    for (final entry in sets.reversed) {
+      if (entry.active) return entry;
+    }
+    return null;
   }
 
   bool _hasActions(Object owner) =>
       _actions.any((entry) => identical(entry.owner, owner));
 
-  _ChromeActionSet? _actionsOf(Object owner) {
-    for (final entry in _actions) {
-      if (identical(entry.owner, owner)) return entry;
-    }
-    return null;
-  }
-
-  void _handoverStatus(AnimationStatus status) {
-    if (status == AnimationStatus.completed) _retiring = null;
-  }
-
-  /// Moves the extension to whichever set won it, staging the exit of the set
-  /// that has to give it up.
+  /// Hands the extension to whichever set won it.
   ///
-  /// Everything that touches [_handover] runs from here rather than from the
-  /// caller: sets register and retire from inside their own build, and the two
-  /// of them paint from the root overlay, so marking either dirty there would
-  /// ask Flutter to rebuild a subtree it is not currently building.
+  /// Everything that touches the presence timelines runs from here rather than
+  /// from the caller: sets register and retire from inside their own build, and
+  /// they paint from the root overlay, so marking them dirty there would ask
+  /// Flutter to rebuild a subtree it is not currently building.
   void _syncOwner() {
     if (_disposed) return;
-    final Object? retiring = _retiring;
-    if (retiring != null && !_hasActions(retiring)) {
-      // The set that was walking out has left the tree: there is no exit left
-      // to play, so the incoming set takes the extension straight away.
-      _retiring = null;
-      _settleHandover();
-      notifyListeners();
-    }
     final Object? next = _activeActions?.owner;
-    if (identical(next, _owner)) return;
-    final Object? previous = _owner;
-    final double carried = previous == null ? 0 : presenceOf(previous);
-    final double arriving = next == null ? 0 : presenceOf(next);
-    // A set that is already sliding out (its route stopped being current, or
-    // the player it speaks for was dismissed) has nothing left to give up.
-    final bool previousPaints =
-        previous != null && (_actionsOf(previous)?.active ?? false);
-    _owner = next;
-    if (next == null) {
-      // Nothing claims the extension: it folds away with the chrome's own
-      // spring, so the set that just gave it up simply stops painting.
-      _retiring = null;
-      _settleHandover();
+    if (!identical(next, _owner)) {
+      _owner = next;
       notifyListeners();
-      return;
     }
-    final AnimationController? handover = _handover;
-    final bool handOff =
-        previous != null &&
-        carried > 0 &&
-        previousPaints &&
-        _hasActions(previous) &&
-        handover != null &&
-        _revealed * carried > .04;
-    if (!handOff) {
-      _retiring = null;
-      _settleHandover();
-      notifyListeners();
-      return;
-    }
-    _retiring = previous;
-    _retiringPresence = carried;
-    _arrivingFrom = arriving;
-    handover
-      ..stop()
-      ..value = 0
-      ..animateTo(1, duration: MotionTiming.scale(_handoverSpan));
-    notifyListeners();
-  }
-
-  void _settleHandover() {
-    final AnimationController? handover = _handover;
-    if (handover == null || handover.value == 1) return;
-    handover
-      ..stop()
-      ..value = 1;
+    _retargetPresence();
   }
 
   /// Runs [_syncOwner] once the frame is no longer building.
@@ -264,16 +301,23 @@ class WindowChromeController extends ValueNotifier<bool>
 
   /// How wide the capsule's extension needs to be painted right now.
   ///
-  /// While two sets are on the capsule the surface keeps the wider of the two,
-  /// so the pill never pinches between the command that is leaving and the
-  /// buttons that are arriving.
+  /// The pill is exactly as wide as the set painting it: a set that is walking
+  /// out shrinks with its own presence, and one that has not arrived yet holds
+  /// nothing open, so the surface never promises buttons it is not showing.
   double get paintedActionsWidth {
     double extent = 0;
     for (final entry in List<_ChromeActionSet>.of(_actions)) {
-      final bool onCapsule =
-          identical(entry.owner, _owner) || identical(entry.owner, _retiring);
-      if (!onCapsule) continue;
-      extent = math.max(extent, entry.width);
+      final double presence = presenceOf(entry.owner);
+      if (presence <= _gone) continue;
+      extent = math.max(extent, entry.width * presence);
+    }
+    // A set its page has already unregistered still paints while it walks out,
+    // at the width it last asked for.
+    for (final owner in _tracked) {
+      if (_hasActions(owner)) continue;
+      final double presence = presenceOf(owner);
+      if (presence <= _gone) continue;
+      extent = math.max(extent, (_lastWidth[owner] ?? 0) * presence);
     }
     return extent;
   }
@@ -313,6 +357,8 @@ class WindowChromeController extends ValueNotifier<bool>
     } else {
       _actions.add(entry);
     }
+    _lastWidth[owner] = width;
+    _ensurePresence(owner);
     _scheduleOwnerSync();
     if (oldWidth != actionsWidth ||
         oldActive != actionsActive ||
@@ -327,6 +373,10 @@ class WindowChromeController extends ValueNotifier<bool>
     final bool oldActive = actionsActive;
     final Object? oldOwner = _owner;
     _actions.removeWhere((entry) => identical(entry.owner, owner));
+    // The timeline stays: a page that hands the capsule back keeps its row
+    // mounted for the length of its own exit, and dropping the presence here
+    // would cut that exit off on its first frame. `_dropSettledPresence`
+    // retires it once it has actually finished walking out.
     _scheduleOwnerSync();
     if (oldWidth != actionsWidth ||
         oldActive != actionsActive ||
@@ -416,11 +466,21 @@ class WindowChromeController extends ValueNotifier<bool>
     }
     _sources.clear();
     _actions.clear();
-    _handover?.removeStatusListener(_handoverStatus);
-    _handover?.dispose();
-    _handover = null;
+    for (final controller in _presence.values) {
+      controller
+        ..removeListener(_presenceTick)
+        ..dispose();
+    }
+    _presence.clear();
+    _commanded.clear();
+    _lastWidth.clear();
     super.dispose();
   }
+}
+
+/// Broadcasts one tick per presence frame to whoever paints the capsule.
+class _PresenceTicks extends ChangeNotifier {
+  void tick() => notifyListeners();
 }
 
 class _WindowChromeSource {
@@ -660,6 +720,7 @@ class WindowChromeActions extends StatefulWidget {
     this.leading,
     this.leadingWidth = kWindowChromeTextActionWidth,
     this.playerDriven = true,
+    this.active,
   });
 
   final List<Widget> children;
@@ -674,6 +735,13 @@ class WindowChromeActions extends StatefulWidget {
   /// Whether this set speaks for a presented player (song actions) or for a
   /// page. The player's set always wins while both are mounted.
   final bool playerDriven;
+
+  /// Whether this set still speaks for what is on screen.
+  ///
+  /// Null derives it from the route. A page hosted inside another page's
+  /// subtree is not a route, so it has to say so itself: the host keeps it
+  /// mounted for the length of its exit, and only this flag starts that exit.
+  final bool? active;
 
   @override
   State<WindowChromeActions> createState() => _WindowChromeActionsState();
@@ -743,7 +811,11 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
       );
     }
     final bool routeCurrent = ModalRoute.isCurrentOf(context) ?? true;
-    _register(layout!.controller, width, routeCurrent);
+    _register(
+      layout!.controller,
+      width,
+      routeCurrent && (widget.active ?? true),
+    );
     final WindowChromeController chrome = layout.controller;
     // Repaints for the capsule's own unfold, for a handover's frames, and
     // whenever the set that owns the extension changes.
@@ -758,6 +830,10 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
       overlayChildBuilder: (context) => Positioned(
         top: kWindowChromeTop,
         right: kWindowChromeEnd + kWindowChromeButtonWidth * 3,
+        // A routed set that is no longer current must be gone at once: a dialog
+        // over the player hides its buttons, it does not play them out. A set
+        // whose own page is leaving (an embedded subview) is still current here,
+        // so its exit does play.
         child: Offstage(
           offstage: !routeCurrent,
           child: Theme(
@@ -777,18 +853,19 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
                   // arrives, so two sets never share this slot.
                   final double presence = chrome.presenceOf(this);
                   final double progress = (1 - reveal.value) * presence;
-                  final bool active =
+                  final bool interactive =
                       (widget.playerDriven
                           ? layout.controller.playerPresented
                           : true) &&
                       progress >= .95 &&
-                      routeCurrent;
+                      routeCurrent &&
+                      (widget.active ?? true);
                   return ExcludeFocus(
-                    excluding: !active,
+                    excluding: !interactive,
                     child: ExcludeSemantics(
-                      excluding: !active,
+                      excluding: !interactive,
                       child: IgnorePointer(
-                        ignoring: !active,
+                        ignoring: !interactive,
                         child: SizedBox(
                           key: const ValueKey('desktop-player-actions'),
                           width: width * math.max(0, progress),

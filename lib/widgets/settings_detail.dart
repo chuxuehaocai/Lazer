@@ -345,6 +345,9 @@ class _SettingsDetailHostState extends State<SettingsDetailHost>
                     key: ValueKey<int>(page.id),
                     open: _open,
                     close: _close,
+                    // A page that is being replaced or handed back is no longer
+                    // the one on screen, and says so for the whole exit.
+                    active: active && !leaving && page == detail,
                     child: Focus(
                       autofocus: active,
                       child: Builder(builder: page.builder),
@@ -421,14 +424,25 @@ class _SettingsDetailScope extends InheritedWidget {
     super.key,
     required this.open,
     required this.close,
+    this.active = true,
     required super.child,
   });
   final ValueChanged<WidgetBuilder>? open;
   final VoidCallback? close;
 
+  /// Whether this subview is still the one on screen.
+  ///
+  /// An embedded subview is not a route, so `ModalRoute.isCurrentOf` cannot see
+  /// it hand the screen back: the host keeps the page mounted for the whole
+  /// exit, and only this flag says the exit has started. The capsule uses it to
+  /// play the page command's walk-out instead of losing it in one frame.
+  final bool active;
+
   @override
   bool updateShouldNotify(_SettingsDetailScope oldWidget) =>
-      open != oldWidget.open || close != oldWidget.close;
+      open != oldWidget.open ||
+      close != oldWidget.close ||
+      active != oldWidget.active;
 }
 
 /// The controls are shared; only mobile needs a route-sized scaffold.
@@ -454,6 +468,11 @@ class SettingsDetailScaffold extends StatelessWidget {
     final close = context
         .dependOnInheritedWidgetOfExactType<_SettingsDetailScope>()
         ?.close;
+    final bool subviewActive =
+        context
+            .dependOnInheritedWidgetOfExactType<_SettingsDetailScope>()
+            ?.active ??
+        true;
     final Widget? trailing = actions.isEmpty
         ? null
         : Wrap(spacing: 8, children: actions);
@@ -600,6 +619,10 @@ class SettingsDetailScaffold extends StatelessWidget {
                 WindowChromeActions(
                   key: const ValueKey('settings-capsule-actions'),
                   playerDriven: false,
+                  // The subview is not a route: without this flag the capsule
+                  // would keep the command "current" until the page is torn
+                  // down, and the command would vanish without an exit.
+                  active: subviewActive,
                   leading: capsuleLeading,
                   leadingWidth: kWindowChromeTextActionWidth * actions.length,
                   children: const <Widget>[],

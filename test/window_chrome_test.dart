@@ -136,17 +136,23 @@ void main() {
       addTearDown(controller.dispose);
       controller.updateActions(previousPage, width: 138, active: true);
       controller.updateActions(currentPage, width: 184, active: true);
+      // Without a ticker nothing can animate, so the newest set owns the
+      // extension at once and the older one contributes nothing.
+      expect(controller.actionsWidth, 184);
+      expect(controller.actionsActive, isTrue);
+      expect(controller.paintedActionsWidth, 184);
       controller.removeActions(previousPage);
       expect(controller.actionsWidth, 184);
       expect(controller.actionsActive, isTrue);
 
-      // Modal coverage retains the width until the spring has folded it away.
+      // A set whose route stopped being current keeps its width until it is
+      // actually retired; on this controller that is immediate.
       controller.updateActions(currentPage, width: 184, active: false);
-      expect(controller.actionsWidth, 184);
       expect(controller.actionsActive, isFalse);
       controller.removeActions(currentPage);
       expect(controller.actionsWidth, 0);
       expect(controller.actionsActive, isFalse);
+      expect(controller.paintedActionsWidth, 0);
     });
   });
 
@@ -354,7 +360,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 80));
       expect(
         _resetOpacity(tester),
-        inExclusiveRange(.2, 1),
+        inExclusiveRange(.02, 1),
         reason: 'the command is on its way out',
       );
       expect(
@@ -363,21 +369,23 @@ void main() {
         reason: 'the entrance may not start while the exit is still running',
       );
 
-      await tester.pump(WindowChromeController.handoverOut);
-      expect(
-        _resetOpacity(tester),
-        lessThan(.02),
-        reason: 'the exit finishes before anything else may arrive',
-      );
-      expect(
-        _playerActionSettledOpacity(tester),
-        lessThan(1),
-        reason: 'the entrance is still under way at the handover boundary',
-      );
+      // The exit is a spring, so the handover happens when it lands rather than
+      // at a fixed boundary. Every frame of the exit keeps the arrival dark.
+      for (var frame = 0; frame < 10; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        if (_resetOpacity(tester) > .02) {
+          expect(
+            _playerActionSettledOpacity(tester),
+            lessThan(.02),
+            reason: 'the entrance follows the exit instead of overlapping it',
+          );
+        }
+      }
 
-      await tester.pump(WindowChromeController.handoverIn);
-      expect(_resetOpacity(tester), 0);
-      expect(_playerActionSettledOpacity(tester), closeTo(1, .001));
+      // Once the command is gone the player's buttons arrive on their own.
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(_resetOpacity(tester), lessThan(.02));
+      expect(_playerActionSettledOpacity(tester), closeTo(1, .02));
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
