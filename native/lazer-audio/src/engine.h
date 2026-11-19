@@ -40,6 +40,8 @@ public:
     int32_t queueReader(uint64_t queueGeneration, const LazerAudioReader &reader,
         const LazerAudioOpenParams &params);
     int32_t clearQueuedReader(uint64_t queueGeneration, bool preserveAudible = false);
+    int32_t clearQueuedReaderEx(uint64_t targetQueueGeneration, uint64_t requestGeneration,
+        bool preserveAudible = false);
     int32_t play();
     int32_t pause();
     int32_t stop();
@@ -119,7 +121,14 @@ private:
     void resetTimelineForSeek();
     int32_t tryStartQueuedSource(bool &started, std::string &error);
     void cancelCurrentSources();
+    /* Moves the live slots out of the engine state and cancels their workers. The returned slots
+     * keep waiting for their preparation on `retiredSources_` until reapRetiredSources() runs. */
     void retireCurrentSources();
+    /* Waits — outside every engine mutex — until each retired slot has finished its preparation,
+     * joined its worker and closed its reader, then drops them. Must not be called with
+     * lifecycleMutex_ or sourceMutex_ held: the preparation thread takes both to publish or
+     * abandon its slot, so waiting under either one would deadlock. */
+    void reapRetiredSources();
     int64_t currentPositionMillis() const;
     int64_t currentPositionMillisLocked() const;
     uint64_t convertToOutput(const float *source, int32_t frames, uint8_t *destination);
@@ -145,7 +154,11 @@ private:
     std::atomic<bool> cancelled_{false};
     std::atomic<bool> stopping_{false};
     std::atomic<uint64_t> sessionGeneration_{0};
-    std::atomic<uint64_t> queueGeneration_{0};
+    /* Queue requests and installed successors use separate generations. A request advances as
+     * soon as it is accepted so an older in-flight preparation cannot publish; the installed
+     * generation changes only when nextSource_ is actually published. */
+    std::atomic<uint64_t> queueRequestGeneration_{0};
+    std::atomic<uint64_t> queueInstalledGeneration_{0};
     std::string lastError_;
     std::atomic<int32_t> lastErrorCode_{LazerAudioOk};
     /* The first terminal writer publishes one coherent immutable event record before publishing
@@ -158,6 +171,9 @@ private:
     std::shared_ptr<SourceSlot> source_;
     std::shared_ptr<SourceSlot> nextSource_;
     std::shared_ptr<SourceSlot> preparingSource_;
+    /* Slots retired from the live fields, waiting to be reaped. Guarded by `sourceMutex_`; the
+     * waiter must hold no engine mutex while it waits on them. */
+    std::vector<std::shared_ptr<SourceSlot>> retiredSources_;
     /* During a queued transition, source_ is already decoding the successor while the ring still
      * contains frames from the audible track. Keep the last audible metadata until its frame seam.
      *

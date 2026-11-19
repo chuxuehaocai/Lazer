@@ -84,7 +84,7 @@ Everything else in the tree is the master branch's, including its probes.
 
 | Path | What it is |
 | --- | --- |
-| `native/lazer-audio/` | The engine from `master` plus the changes above: `include/lazer_audio_api.h` (**ABI v30**), FFmpeg decode, WASAPI/ALSA/CoreAudio output, DSD/DoP, DSP chain, offline probes. |
+| `native/lazer-audio/` | The engine from `master` plus the changes above: `include/lazer_audio_api.h` (**ABI v31**), FFmpeg decode, WASAPI/ALSA/CoreAudio output, DSD/DoP, DSP chain, offline probes. |
 | `native/lazer-audio-bridge/` | Growing-file reader over a cache file, plus the ABI layout probe. |
 | `native/CMakeLists.txt` | Builds both for the host when an FFmpeg prefix is available. |
 | `lib/audio/native/lazer_audio_abi.dart` | Dart mirror of the C ABI (structs, enums, constants). |
