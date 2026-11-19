@@ -43,7 +43,11 @@ class ShortcutSettingsView extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
             child: ListView(
-              padding: EdgeInsets.all(
+              padding: EdgeInsets.fromLTRB(
+                SettingsDetailHost.isEmbedded(context) ? 32 : 20,
+                (SettingsDetailHost.isEmbedded(context) ? 32 : 20) +
+                    SettingsDetailScaffold.topInsetOf(context),
+                SettingsDetailHost.isEmbedded(context) ? 32 : 20,
                 SettingsDetailHost.isEmbedded(context) ? 32 : 20,
               ),
               children: [

@@ -566,30 +566,6 @@ class WindowChromeHeader extends StatelessWidget {
   }
 }
 
-/// Keeps a browse page's scrolling content out of the floating capsule's band.
-///
-/// The band is the strip the window capsule floats in. Passing its height to a
-/// page as *scroll padding* puts the first row in the right place, but the
-/// viewport still spans the whole page: as soon as the list scrolls, everything
-/// above the first row travels up under the capsule and the capsule paints over
-/// it. As a layout inset the resting position is unchanged while the band stays
-/// clear, because the scroll viewport itself now ends where the band does.
-class WindowChromeBand extends StatelessWidget {
-  const WindowChromeBand({super.key, required this.inset, required this.child});
-
-  final double inset;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    if (inset <= 0) return child;
-    return Padding(
-      padding: EdgeInsets.only(top: inset),
-      child: ClipRect(child: child),
-    );
-  }
-}
-
 /// Gives a page's own header back the title-bar behaviour: drag it to move the
 /// window, double-click it to maximize.
 ///

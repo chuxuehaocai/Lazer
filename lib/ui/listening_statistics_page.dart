@@ -43,7 +43,12 @@ class _AppListeningStatisticsPageState extends State<AppListeningStatisticsPage>
             ),
             child: ListView(
               key: const PageStorageKey('listening-statistics-scroll'),
-              padding: EdgeInsets.fromLTRB(inset, 8, inset, 32),
+              padding: EdgeInsets.fromLTRB(
+                inset,
+                8 + SettingsDetailScaffold.topInsetOf(context),
+                inset,
+                32,
+              ),
               children: <Widget>[
                 ApplePageTitle(
                   title: '你的音乐足迹',

@@ -104,7 +104,12 @@ class _PluginManagerViewState extends State<PluginManagerView>
           ),
         ],
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+          padding: EdgeInsets.fromLTRB(
+            20,
+            8 + SettingsDetailScaffold.topInsetOf(context),
+            20,
+            32,
+          ),
           children: [
             ApplePageTitle(
               title: '插件管理',

@@ -464,6 +464,24 @@ class SettingsDetailScaffold extends StatelessWidget {
   final Widget child;
   final List<Widget> actions;
 
+  /// The height the floating chrome occupies above a subview.
+  ///
+  /// Nothing is reserved for it in layout: the page paints from the window's top
+  /// edge and the back button, the page title and the capsule's command float
+  /// over it. A scrolling body adds this as its own top padding so its first row
+  /// starts below those controls while everything above it can still scroll
+  /// underneath them.
+  static double topInsetOf(BuildContext context) {
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<_SettingsDetailScope>();
+    if (scope?.close == null) return 0;
+    // Only a floating capsule has to be cleared; the classic title bar already
+    // owns its own strip.
+    if (WindowChromeScope.maybeLayoutOf(context)?.inline != true) return 0;
+    return windowChromeControlTop(kPageBackControlSize) +
+        kPageBackControlSize;
+  }
+
   /// Paints [title] in the header row instead of only naming the page on the
   /// overview. Off by default: category pages already show a large page title
   /// inside their scroll view.
@@ -505,7 +523,6 @@ class SettingsDetailScaffold extends StatelessWidget {
     final double headerTop = floating
         ? windowChromeControlTop(kPageBackControlSize)
         : 0;
-    final double headerGap = floating ? 0 : 8;
     // Where the page below the route's own top bar starts. The floating variant
     // derives it from the control it just placed on the capsule's row, so the
     // two never drift apart; the compact route keeps the inset it always had.
@@ -581,58 +598,47 @@ class SettingsDetailScaffold extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final inset = constraints.maxWidth < 600 ? 20.0 : 32.0;
+          // No header row and no reserved strip: the page paints from the
+          // window's top edge and the controls float over it. A reserved strip
+          // cut the content short instead of letting it pass underneath.
           return Stack(
             key: const ValueKey('settings-detail-subview'),
             children: <Widget>[
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(inset - 12, headerTop, inset, 0),
-                    child: Row(
-                      children: [
-                        AccessibleIconButton(
-                          key: const ValueKey('settings-detail-back'),
-                          tooltip: '返回',
-                          onPressed: close,
-                          icon: const Icon(Icons.chevron_left_rounded),
-                        ),
-                        if (headerTitle)
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                              ),
-                              child: Text(
-                                context.tr(title),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleLarge
-                                    ?.copyWith(
-                                      color: AppleSemanticColors.of(
-                                        context,
-                                      ).label,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                              ),
-                            ),
-                          )
-                        else
-                          const Spacer(),
-                        ?inlineTrailing,
-                      ],
+              Positioned.fill(child: child),
+              Positioned(
+                top: headerTop,
+                left: inset - 12,
+                child: AccessibleIconButton(
+                  key: const ValueKey('settings-detail-back'),
+                  tooltip: '返回',
+                  onPressed: close,
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+              ),
+              if (headerTitle)
+                Positioned(
+                  top: headerTop + 8,
+                  left: inset + 36,
+                  right: inset + 36,
+                  child: Text(
+                    context.tr(title),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AppleSemanticColors.of(context).label,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  SizedBox(height: headerGap),
-                  // Page content owns its heading; the shared chrome only keeps
-                  // navigation and actions above it.
-                  Expanded(child: child),
-                ],
-              ),
+                ),
+              if (inlineTrailing != null)
+                Positioned(
+                  top: headerTop + 8,
+                  right: inset,
+                  child: inlineTrailing,
+                ),
               // The command is painted by the capsule's root overlay, so it is
-              // placed over the header instead of inside the column: it reserves
-              // no height there, and the page content starts directly under the
-              // capsule instead of a command's worth of empty space below it.
+              // placed over the page instead of inside a column: it reserves no
+              // height and floats above whatever the page is showing.
               if (capsuleLeading != null)
                 Positioned(
                   top: headerTop,

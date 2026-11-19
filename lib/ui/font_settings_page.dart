@@ -131,7 +131,12 @@ class FontSettingsView extends StatelessWidget {
                     child: SizedBox(
                       width: width,
                       child: ListView(
-                        padding: EdgeInsets.fromLTRB(inset, 8, inset, 28),
+                        padding: EdgeInsets.fromLTRB(
+                          inset,
+                          8 + SettingsDetailScaffold.topInsetOf(context),
+                          inset,
+                          28,
+                        ),
                         children: [
                           const ApplePageTitle(
                             title: '字体自定义',

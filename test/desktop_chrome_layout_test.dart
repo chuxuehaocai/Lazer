@@ -175,43 +175,28 @@ void main() {
     );
   });
 
-  testWidgets('a subview keeps its content under the capsule, not below it', (
-    tester,
-  ) async {
+  testWidgets('a subview floats its controls over the page', (tester) async {
     await mountSettings(tester);
     await tester.tap(find.text('Font customization'));
     await tester.pumpAndSettle();
 
     final back = find.byKey(const ValueKey('settings-detail-back'));
     expectOnCapsuleRow(tester, back);
-    // The command is painted by the capsule's root overlay and reserves no
-    // height in the page, so the subview starts right under the pill instead of
-    // a command's worth of empty space below it.
-    final title = find.text('Font customization').hitTestable().last;
-    expect(
-      tester.getRect(title).top,
-      closeTo(tester.getRect(back).bottom + 8, 12),
-      reason: 'the subview content follows its header row directly',
-    );
-  });
-
-  testWidgets('a browse page stops at the capsule band instead of under it', (
-    tester,
-  ) async {
-    await mountSettingsRoot(tester);
-    // The overview is ordinary scrolling content, so the band is layout: its
-    // viewport ends where the capsule's strip ends, which is what keeps a
-    // scrolled list from painting behind the capsule.
-    final viewport = find
-        .descendant(
-          of: find.byType(WindowChromeBand),
-          matching: find.byType(Scrollable),
+    // No header strip reserves the top of the page: the body owns the whole
+    // height, and the back button, the page title and the capsule's command
+    // float above it so the page scrolls underneath them.
+    final body = find
+        .ancestor(
+          of: find.text('Font customization').last,
+          matching: find.byType(ListView),
         )
         .first;
-    expect(tester.getRect(viewport).top, kInlineChromeInset);
+    expect(tester.getRect(body).top, 0);
+    final padding = tester.widget<ListView>(body).padding! as EdgeInsets;
     expect(
-      tester.widget<WindowChromeBand>(find.byType(WindowChromeBand)).inset,
-      kInlineChromeInset,
+      padding.top,
+      greaterThanOrEqualTo(kInlineChromeInset),
+      reason: 'the first row still clears the floating controls',
     );
   });
 }
