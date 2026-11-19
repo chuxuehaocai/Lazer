@@ -288,7 +288,7 @@ abstract interface class FailureReportingAudioEngine {
 
 ## 5. 原生桥接层暴露给 Dart 的接口清单
 
-### 5.1 `lazer-audio`（引擎，ABI v30，`LAZER_AUDIO_ABI_VERSION`=`lazer_audio_api.h`）
+### 5.1 `lazer-audio`（引擎，ABI v31，`LAZER_AUDIO_ABI_VERSION`=`lazer_audio_api.h`）
 
 核心导出（`native/lazer-audio/src/api.cpp`）：
 
@@ -302,6 +302,7 @@ abstract interface class FailureReportingAudioEngine {
 | `lazer_audio_open_reader` | `api.cpp:88` | `:97-114` | 是 |
 | `lazer_audio_queue_reader` | `api.cpp:100` | `:116-136` | 是 |
 | `lazer_audio_clear_queued_reader` | `api.cpp:111` | `:138-142` | 是 |
+| `lazer_audio_clear_queued_reader_ex` | `api.cpp:119`（ABI 31 追加） | `:205-216`（**必需**：没有它就无法证明引擎已停止调用具名 reader） | 是 |
 | `lazer_audio_play` | `api.cpp:116` | `:144-148` | 否 |
 | `lazer_audio_pause` | `api.cpp:121` | `:150-154` | 否 |
 | `lazer_audio_stop` | `api.cpp:126` | `:156-160` | 是 |
@@ -332,7 +333,7 @@ abstract interface class FailureReportingAudioEngine {
 | `lazer_audio_endpoint_volume_set` | `:153` | Windows | `:487-512` |
 
 加载与校验流程（`lazer_audio_library.dart:632-742`）：解析路径 → Windows 先预载 FFmpeg
-依赖（`:750-788`）→ `DynamicLibrary.open` → 校验 ABI 版本（`:692-697`）→ 校验 17 个必需符号
+依赖（`:750-788`）→ `DynamicLibrary.open` → 校验 ABI 版本（`:692-697`）→ 校验 19 个必需符号
 （`:698-722`）→ 桥接库**可选**（`:726-740`）。
 
 ### 5.2 `lazer-audio-bridge`（`native/lazer-audio-bridge/src/growing_reader.cpp`）
