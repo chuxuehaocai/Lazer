@@ -451,23 +451,6 @@ class _SettingsDetailScope extends InheritedWidget {
       active != oldWidget.active;
 }
 
-/// Publishes the height a subview's body has to keep clear for the floating
-/// header controls.
-///
-/// The scaffold owns the number because it is the widget that places those
-/// controls; a body only asks how much room they need. Reading it through an
-/// inherited widget keeps the answer correct on both layouts — the desktop
-/// capsule's line and the compact route's own top bar are different heights.
-class _SettingsDetailInset extends InheritedWidget {
-  const _SettingsDetailInset({required this.top, required super.child});
-
-  final double top;
-
-  @override
-  bool updateShouldNotify(_SettingsDetailInset oldWidget) =>
-      top != oldWidget.top;
-}
-
 /// The controls are shared; only mobile needs a route-sized scaffold.
 class SettingsDetailScaffold extends StatelessWidget {
   const SettingsDetailScaffold({
@@ -495,11 +478,29 @@ class SettingsDetailScaffold extends StatelessWidget {
   /// over it. A scrolling body adds this as its own top padding so its first row
   /// starts below those controls while everything above it can still scroll
   /// underneath them — the same rule the desktop capsule follows.
-  static double topInsetOf(BuildContext context) =>
-      context
-          .dependOnInheritedWidgetOfExactType<_SettingsDetailInset>()
-          ?.top ??
-      0;
+  ///
+  /// Answered from the surroundings rather than from a value published further
+  /// down the tree: a page builds its own scroll view and hands it to the
+  /// scaffold, so the page's context sits *above* the scaffold and could never
+  /// read something the scaffold published. Every settings page measured that
+  /// way and lost its gap.
+  static double topInsetOf(BuildContext context) {
+    final bool inline =
+        WindowChromeScope.maybeLayoutOf(context)?.inline == true;
+    if (SettingsDetailHost.isEmbedded(context)) {
+      return inline ? _floatingInset : 0;
+    }
+    if (!Navigator.of(context).canPop()) return 0;
+    return inline ? _floatingInset : _routeInset(context);
+  }
+
+  /// The capsule's own row: the back control sits on the pill's centre line.
+  static double get _floatingInset =>
+      windowChromeControlTop(kPageBackControlSize) + kPageBackControlSize;
+
+  /// A route subview below a classic title bar keeps its top strip.
+  static double _routeInset(BuildContext context) =>
+      56 + (compactBrowsePresentation(context) ? 8 : 0);
 
   /// Paints [title] in the header row instead of only naming the page on the
   /// overview. Off by default: category pages already show a large page title
@@ -542,12 +543,6 @@ class SettingsDetailScaffold extends StatelessWidget {
     final double headerTop = floating
         ? windowChromeControlTop(kPageBackControlSize)
         : 0;
-    // Where the page below the route's own top bar starts. The floating variant
-    // derives it from the control it just placed on the capsule's row, so the
-    // two never drift apart; the compact route keeps the inset it always had.
-    final double headerBottom = floating
-        ? headerTop + kPageBackControlSize
-        : 56 + (compactBrowsePresentation(context) ? 8 : 0);
     if (close == null) {
       final bool canPop = Navigator.of(context).canPop();
       final bool hasTopBar = canPop || trailing != null || headerTitle;
@@ -560,12 +555,7 @@ class SettingsDetailScaffold extends StatelessWidget {
               // header the desktop capsule has and the page scrolls underneath.
               // It is painted first so the controls below stay on top of it and
               // keep their taps.
-              Positioned.fill(
-                child: _SettingsDetailInset(
-                  top: hasTopBar ? headerBottom : 0,
-                  child: child,
-                ),
-              ),
+              Positioned.fill(child: child),
               if (hasTopBar)
                 Positioned(
                   top: headerTop + (compactBrowsePresentation(context) ? 8 : 0),
@@ -625,12 +615,7 @@ class SettingsDetailScaffold extends StatelessWidget {
           return Stack(
             key: const ValueKey('settings-detail-subview'),
             children: <Widget>[
-              Positioned.fill(
-                child: _SettingsDetailInset(
-                  top: floating ? headerBottom : 0,
-                  child: child,
-                ),
-              ),
+              Positioned.fill(child: child),
               Positioned(
                 top: headerTop,
                 left: inset - 12,

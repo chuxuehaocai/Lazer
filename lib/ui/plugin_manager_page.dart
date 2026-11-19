@@ -114,12 +114,14 @@ class _PluginManagerViewState extends State<PluginManagerView>
             32,
           ),
           children: [
+            // The same air above the title as every settings category page:
+            // 8 from the list plus 12 from the title itself.
             ApplePageTitle(
               title: '插件管理',
               subtitle: manager.plugins.isEmpty
                   ? '导入一个插件开始使用'
                   : '${manager.plugins.length} 个插件已安装',
-              padding: const EdgeInsets.fromLTRB(0, 4, 0, 18),
+              padding: const EdgeInsets.fromLTRB(0, 12, 0, 18),
             ),
             AppleGroupedCard(
               margin: EdgeInsets.zero,

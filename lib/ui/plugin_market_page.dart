@@ -147,12 +147,14 @@ class _PluginMarketViewState extends State<PluginMarketView>
             32,
           ),
           children: [
+            // The same air above the title as every settings category page:
+            // 8 from the list plus 12 from the title itself.
             ApplePageTitle(
               title: '插件市场',
               subtitle: market.plugins.isEmpty
                   ? '从插件源安装新的音乐平台'
                   : '${market.plugins.length} 个可用插件',
-              padding: const EdgeInsets.fromLTRB(0, 4, 0, 16),
+              padding: const EdgeInsets.fromLTRB(0, 12, 0, 16),
             ),
             TextField(
               decoration: InputDecoration(
