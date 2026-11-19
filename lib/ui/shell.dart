@@ -90,6 +90,9 @@ enum _AppSection { home, search, library, likes, settings }
 
 const double _desktopToolbarHeight = 50;
 
+/// Side of the round back button the desktop content pane draws.
+const double _desktopToolbarButtonSize = 34;
+
 class _BrowseLocation {
   const _BrowseLocation({
     required this.key,
@@ -1533,19 +1536,27 @@ class _AppShellState extends State<AppShell>
   /// The browse root stays chrome-free, while an open artist, playlist or
   /// network pane never leaves keyboard and mouse users without a way back.
   Widget _desktopToolbar() {
+    final bool floating =
+        WindowChromeScope.maybeLayoutOf(context)?.inline == true;
+    // Floating chrome paints its capsule over this band, so the button shares
+    // the capsule's centre line instead of centring in a strip of its own; the
+    // strip keeps the capsule's height so the page below starts where every
+    // other page does.
+    final double buttonTop = floating
+        ? windowChromeControlTop(_desktopToolbarButtonSize)
+        : (_desktopToolbarHeight - _desktopToolbarButtonSize) / 2;
     return SizedBox(
-      height: _desktopToolbarHeight,
+      height: floating ? kInlineChromeInset : _desktopToolbarHeight,
       // Share the page canvas without adding a separate header tint.
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        child: Row(
-          children: <Widget>[
-            _ToolbarButton(
-              tooltip: '返回',
-              icon: Icons.chevron_left_rounded,
-              onPressed: _backToRoot,
-            ),
-          ],
+        padding: EdgeInsets.fromLTRB(18, buttonTop, 18, 0),
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: _ToolbarButton(
+            tooltip: '返回',
+            icon: Icons.chevron_left_rounded,
+            onPressed: _backToRoot,
+          ),
         ),
       ),
     );

@@ -25,6 +25,28 @@ const double kWindowChromeGripWidth = 16.0;
 /// scrolls away with the content.
 const double kInlineChromeInset = kWindowChromeTop + kWindowChromeHeight + 4;
 
+/// Vertical centre of the floating capsule's row.
+const double kWindowChromeCenterY = kWindowChromeTop + kWindowChromeHeight / 2;
+
+/// How far below the capsule's centre a page's own control sits.
+///
+/// The two rows read level a couple of points lower than a strict centre match:
+/// the capsule draws 18 dp caption glyphs inside a 40 dp pill, while a page back
+/// chevron is 24 dp inside a 48 dp target. Pinning both centres to one line
+/// therefore leaves the page control looking a hair high next to the capsule.
+const double kWindowChromeControlNudge = 2;
+
+/// Top offset that centres a [height]-tall page control on the capsule's row,
+/// [kWindowChromeControlNudge] below the capsule's own centre line.
+double windowChromeControlTop(double height) =>
+    kWindowChromeCenterY + kWindowChromeControlNudge - height / 2;
+
+/// Height of the square back affordance a page puts on the capsule's row.
+///
+/// This is the Material tap target an [IconButton] takes by default, so a page
+/// that hands the scaffold its normal back button needs no size of its own.
+const double kPageBackControlSize = 48.0;
+
 /// Width reserved for a text command that opens the capsule's extension, and the
 /// hairline that separates it from the icon cluster and the caption buttons.
 /// The widest label is the Japanese "既定値に戻す" (seven characters), which needs

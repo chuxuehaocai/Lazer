@@ -46,7 +46,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  Future<void> mountSettings(WidgetTester tester) async {
+  Future<void> mountSettingsRoot(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -74,21 +74,66 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  Future<void> mountSettings(WidgetTester tester) async {
+    await mountSettingsRoot(tester);
     await tester.tap(find.text('Interface & layout'));
     await tester.pumpAndSettle();
+  }
+
+  /// Every desktop back button sits on the window capsule's row, dropped by the
+  /// optical nudge so the two read level instead of merely sharing a centre.
+  void expectOnCapsuleRow(WidgetTester tester, Finder back) {
+    final capsule = tester.getRect(
+      find.byKey(const ValueKey('window-title-minimize')),
+    );
+    expect(
+      tester.getRect(back).center.dy,
+      closeTo(capsule.center.dy + kWindowChromeControlNudge, .5),
+    );
   }
 
   testWidgets('a settings back button lines up with the capsule', (
     tester,
   ) async {
     await mountSettings(tester);
-    final back = tester.getRect(
-      find.byKey(const ValueKey('settings-detail-back')),
+    expectOnCapsuleRow(tester, find.byKey(const ValueKey('settings-detail-back')));
+  });
+
+  testWidgets('every settings category shares that capsule row', (
+    tester,
+  ) async {
+    await mountSettingsRoot(tester);
+    for (final category in ['Network Proxy', 'About Lazer']) {
+      final entry = find.text(category);
+      expect(entry, findsOneWidget, reason: category);
+      await tester.tap(entry);
+      await tester.pumpAndSettle();
+      expectOnCapsuleRow(
+        tester,
+        find.byKey(const ValueKey('settings-detail-back')),
+      );
+      await tester.tap(find.byKey(const ValueKey('settings-detail-back')));
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets('the desktop detail toolbar back button shares that row', (
+    tester,
+  ) async {
+    await mountSettingsRoot(tester);
+    await tester.tap(
+      find.byWidgetPredicate(
+        (widget) => widget is AppRailItem && widget.label == '音乐库',
+      ),
     );
-    final caption = tester.getRect(
-      find.byKey(const ValueKey('window-title-minimize')),
-    );
-    expect(back.center.dy, closeTo(caption.center.dy, .5));
+    await tester.pumpAndSettle();
+    final entry = find.byKey(const ValueKey('open-local-music'));
+    expect(entry, findsOneWidget);
+    await tester.tap(entry.first);
+    await tester.pumpAndSettle();
+    expectOnCapsuleRow(tester, find.byTooltip('Back').first);
   });
 
   testWidgets('a page command moves into the capsule, not under it', (

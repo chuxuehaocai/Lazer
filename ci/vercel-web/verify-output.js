@@ -4,6 +4,7 @@
 // be served from this origin, and the HTTP bridge must have shipped.
 //
 //   node ci/vercel-web/verify-output.js [--out .vercel/output]
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -78,6 +79,40 @@ if (!canvaskitRoute) {
   if (!canvaskitRoute.headers?.['cache-control']?.includes('immutable')) fail('engine is not immutable');
   if (!fs.existsSync(path.join(staticDir, directory, 'canvaskit.wasm'))) {
     fail(`static/${directory}/canvaskit.wasm is missing`);
+  }
+  // Every variant's canvaskit.js is a wrapper the prefetch feeds; its glue has
+  // to sit beside it, and the plan in index.html has to describe the real files
+  // or the prefetch would stitch the wrong bytes into a blob.
+  const planMatch = /var plans = (\[[\s\S]*?\]);/.exec(html);
+  const declared = planMatch ? JSON.parse(planMatch[1]) : [];
+  if (declared.length === 0) fail('index.html: the engine prefetch plan is missing');
+  for (const plan of declared) {
+    if (!plan.variant || !plan.path || !plan.bytes || !plan.digest) {
+      fail('index.html: an engine plan entry is incomplete');
+      continue;
+    }
+    const file = path.join(staticDir, plan.path);
+    if (!fs.existsSync(file)) {
+      fail(`prefetched engine is missing: ${plan.path}`);
+      continue;
+    }
+    const bytes = fs.readFileSync(file);
+    if (bytes.length !== plan.bytes) fail(`${plan.path}: prefetch size does not match the file`);
+    const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+    if (digest !== plan.digest) fail(`${plan.path}: prefetch digest does not match the file`);
+    const glue = file.replace(/canvaskit\.wasm$/, 'canvaskit.glue.js');
+    const wrapper = file.replace(/canvaskit\.wasm$/, 'canvaskit.js');
+    if (!fs.existsSync(glue)) fail(`${plan.path}: the original engine glue is missing`);
+    const wrapperText = read(wrapper);
+    if (!wrapperText.includes('__lazerEngineWasm')) {
+      fail(`${plan.path}: the variant wrapper does not consume the prefetch`);
+    }
+    if (!/export default function CanvasKitInit/.test(wrapperText)) {
+      fail(`${plan.path}: the variant wrapper has no default export for Flutter`);
+    }
+    for (const marker of ['__LAZER_CANVASKIT_GLUE__', '__LAZER_CANVASKIT_VARIANT__']) {
+      if (wrapperText.includes(marker)) fail(`${plan.path}: unresolved ${marker}`);
+    }
   }
 }
 
