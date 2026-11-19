@@ -33,6 +33,7 @@ ABI_SYMBOLS = [
     "lazer_audio_open_reader",
     "lazer_audio_queue_reader",
     "lazer_audio_clear_queued_reader",
+    "lazer_audio_clear_queued_reader_ex",
     "lazer_audio_play",
     "lazer_audio_pause",
     "lazer_audio_stop",

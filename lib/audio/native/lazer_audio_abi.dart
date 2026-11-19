@@ -16,9 +16,11 @@ import 'dart:ffi';
 ///
 /// v30 extends the [LazerAudioStreamInfo.bitPerfectActive] contract to validated
 /// non-exclusive iOS USB transport and appends the iOS USB PCM/DoP selections.
+/// v31 adds `lazer_audio_clear_queued_reader_ex`, the target-addressed clear that
+/// proves a named reader is no longer called before the caller releases it.
 /// This mirror and the vendored engine are updated together (see
 /// docs/audio-engine.md).
-const int lazerAudioAbiVersion = 30;
+const int lazerAudioAbiVersion = 31;
 
 /// `LAZER_AUDIO_MAX_EQ_BANDS`.
 const int lazerAudioMaxEqBands = 32;

@@ -118,6 +118,14 @@ int32_t lazer_audio_clear_unheard_queued_reader(LazerAudioEngine engine, uint64_
     return handle(engine)->clearQueuedReader(queue_generation, true);
 }
 
+int32_t lazer_audio_clear_queued_reader_ex(
+    LazerAudioEngine engine, uint64_t target_queue_generation,
+    uint64_t request_queue_generation, int32_t preserve_audible) {
+    if (engine == nullptr) return LazerAudioErrorInvalidArgument;
+    return handle(engine)->clearQueuedReaderEx(
+        target_queue_generation, request_queue_generation, preserve_audible != 0);
+}
+
 int32_t lazer_audio_play(LazerAudioEngine engine) {
     if (engine == nullptr) return LazerAudioErrorInvalidArgument;
     return handle(engine)->play();

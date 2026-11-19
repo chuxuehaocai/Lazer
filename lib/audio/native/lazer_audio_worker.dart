@@ -181,6 +181,9 @@ abstract final class LazerWorkerOp {
   static const int seek = 12;
   static const int setAutoMix = 13;
 
+  /// ABI 31: `(engine, targetQueueGeneration, requestQueueGeneration, preserveAudible)`.
+  static const int clearQueuedReaderEx = 14;
+
   static String describe(int op) => switch (op) {
     create => 'create',
     destroy => 'destroy',
@@ -196,6 +199,7 @@ abstract final class LazerWorkerOp {
     pause => 'pause',
     seek => 'seek',
     setAutoMix => 'set_automix',
+    clearQueuedReaderEx => 'clear_queued_reader_ex',
     _ => 'unknown',
   };
 }
@@ -460,6 +464,14 @@ Object? _execute(LazerAudioApi api, int op, List<Object?> params) {
       return clear(
         Pointer<Void>.fromAddress(params[0] as int),
         params[1] as int,
+      );
+    case LazerWorkerOp.clearQueuedReaderEx:
+      // Only returns once that named reader is provably no longer called.
+      return api.clearQueuedReaderEx(
+        Pointer<Void>.fromAddress(params[0] as int),
+        params[1] as int,
+        params[2] as int,
+        params[3] == true ? 1 : 0,
       );
     case LazerWorkerOp.stop:
       return api.stop(Pointer<Void>.fromAddress(params[0] as int));

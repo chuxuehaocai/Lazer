@@ -16,6 +16,26 @@ import 'dart:io';
 import 'lazer_audio_abi.dart';
 import 'lazer_audio_paths.dart';
 
+/// Where the engine image actually came from for this launch.
+enum LazerAudioEngineSource {
+  /// A library the user chose in settings and that survived validation.
+  imported('imported'),
+
+  /// The explicit `LAZER_AUDIO_LIBRARY` process override.
+  environment('environment'),
+
+  /// The image shipped with the app or staged by the development build.
+  bundled('bundled'),
+
+  /// The image linked into the executable (iOS).
+  linked('linked');
+
+  const LazerAudioEngineSource(this.label);
+
+  /// A stable, non-localized identifier for logs and diagnostics.
+  final String label;
+}
+
 /// Result of trying to load the engine.
 ///
 /// [api] is non-null only when both the library and the ABI version matched, so
@@ -24,15 +44,33 @@ import 'lazer_audio_paths.dart';
 /// Deliberately free of Flutter imports: the loader is exercised by plain-Dart
 /// checks (`tool/`), where the Flutter SDK is not available.
 class LazerAudioAvailability {
-  const LazerAudioAvailability._({this.api, this.bridge, this.reason});
+  const LazerAudioAvailability._({
+    this.api,
+    this.bridge,
+    this.reason,
+    this.source,
+    this.sourceLabel,
+    this.rejectedCandidates = const <String>[],
+  });
 
-  const LazerAudioAvailability.unavailable(String reason)
-    : this._(reason: reason);
+  const LazerAudioAvailability.unavailable(
+    String reason, {
+    List<String> rejectedCandidates = const <String>[],
+  }) : this._(reason: reason, rejectedCandidates: rejectedCandidates);
 
   const LazerAudioAvailability.available(
     LazerAudioApi api,
-    LazerAudioBridgeApi? bridge,
-  ) : this._(api: api, bridge: bridge);
+    LazerAudioBridgeApi? bridge, {
+    required LazerAudioEngineSource source,
+    required String sourceLabel,
+    List<String> rejectedCandidates = const <String>[],
+  }) : this._(
+         api: api,
+         bridge: bridge,
+         source: source,
+         sourceLabel: sourceLabel,
+         rejectedCandidates: rejectedCandidates,
+       );
 
   final LazerAudioApi? api;
   final LazerAudioBridgeApi? bridge;
@@ -40,11 +78,40 @@ class LazerAudioAvailability {
   /// Why the engine cannot be used; null when it can.
   final String? reason;
 
+  /// The actual image that was loaded, not merely the user's preference.
+  final LazerAudioEngineSource? source;
+
+  /// The selected image's basename, safe to show in settings and diagnostics.
+  final String? sourceLabel;
+
+  /// Candidate-specific failures that were skipped before [api] loaded.
+  ///
+  /// A stale user import is the common case: the app correctly continues to a
+  /// bundled engine, but the settings page still needs to explain why the
+  /// imported file was ignored.
+  final List<String> rejectedCandidates;
+
   bool get isAvailable => api != null;
+
+  /// `imported: lazer-audio.dll`, or null before an image is selected.
+  String? get sourceDescription =>
+      source == null ? null : '${source!.label}: $sourceLabel';
 
   /// True when network sources can be played: the engine reads them through the
   /// bridge's growing-file reader.
   bool get supportsStreaming => api != null && bridge != null;
+
+  LazerAudioAvailability _withRejectedCandidates(List<String> rejected) =>
+      rejected.isEmpty
+      ? this
+      : LazerAudioAvailability._(
+          api: api,
+          bridge: bridge,
+          reason: reason,
+          source: source,
+          sourceLabel: sourceLabel,
+          rejectedCandidates: List<String>.unmodifiable(rejected),
+        );
 }
 
 /// Typed bindings for `lazer-audio`.
@@ -140,6 +207,15 @@ class LazerAudioApi {
         Int32 Function(Pointer<Void>, Uint64),
         int Function(Pointer<Void>, int)
       >('lazer_audio_clear_queued_reader');
+
+  /// ABI 31: clears exactly one named queue resource. The legacy call above is a
+  /// different request — "drop whatever the queue holds now" — and is never
+  /// implemented in terms of this one.
+  late final int Function(Pointer<Void>, int, int, int) clearQueuedReaderEx =
+      _library.lookupFunction<
+        Int32 Function(Pointer<Void>, Uint64, Uint64, Int32),
+        int Function(Pointer<Void>, int, int, int)
+      >('lazer_audio_clear_queued_reader_ex');
 
   late final int Function()? _androidUsbBackendVersion = () {
     try {
@@ -678,6 +754,9 @@ const List<String> requiredEngineSymbols = <String>[
   'lazer_audio_open_reader',
   'lazer_audio_queue_reader',
   'lazer_audio_clear_queued_reader',
+  // ABI 31: the reader release path. Without it a caller cannot prove that the
+  // engine has stopped calling its reader, so the path is not offered at all.
+  'lazer_audio_clear_queued_reader_ex',
   'lazer_audio_play',
   'lazer_audio_pause',
   'lazer_audio_stop',
@@ -701,8 +780,17 @@ abstract final class LazerAudioLoader {
   static LazerAudioAvailability? _cached;
   static String? importedLibraryPath;
 
-  static LazerAudioAvailability inspect(String path) =>
-      _load(engineOverride: path);
+  /// Validates one explicitly supplied image without falling back.
+  ///
+  /// Importing must reject a stale ABI even when the bundled engine could keep
+  /// playback alive; otherwise the settings page stores an import that was
+  /// never the image actually loaded.
+  static LazerAudioAvailability inspect(String path) => _loadCandidate(
+    File(path).absolute.uri,
+    _bridgeFileNames,
+    source: LazerAudioEngineSource.imported,
+    sourceLabel: _basename(path),
+  );
 
   /// Whether the host platform has an engine backend at all.
   ///
@@ -755,7 +843,7 @@ abstract final class LazerAudioLoader {
     return result;
   }
 
-  static LazerAudioAvailability _load({String? engineOverride}) {
+  static LazerAudioAvailability _load() {
     final bool inProcess = _isInProcess;
     if (!inProcess &&
         !Platform.isWindows &&
@@ -774,27 +862,111 @@ abstract final class LazerAudioLoader {
       );
     }
     if (inProcess) {
-      return _loadCandidate(null, bridgeFileNames, inProcess: true);
+      return _loadCandidate(
+        null,
+        bridgeFileNames,
+        inProcess: true,
+        source: LazerAudioEngineSource.linked,
+        sourceLabel: 'lazer-audio',
+      );
     }
+    final String? explicitPath = importedLibraryPath?.trim();
+    final String? environmentOverride = Platform
+        .environment[libraryOverrideVariable]
+        ?.trim();
+    final List<String> missingPreferences = <String>[
+      for (final ({String? path, LazerAudioEngineSource source}) preference
+          in <({String? path, LazerAudioEngineSource source})>[
+            (path: explicitPath, source: LazerAudioEngineSource.imported),
+            (
+              path: environmentOverride,
+              source: LazerAudioEngineSource.environment,
+            ),
+          ])
+        if (preference.path != null &&
+            preference.path!.isNotEmpty &&
+            !File(preference.path!).existsSync())
+          '${preference.source.label} engine '
+              '${_basename(preference.path!)} was not found; it was ignored',
+    ];
     final enginePaths = _paths.candidates(
       fileNames: engineFileNames,
-      environmentOverride: Platform.environment[libraryOverrideVariable],
-      explicitPath: engineOverride ?? importedLibraryPath,
+      environmentOverride: environmentOverride,
+      explicitPath: explicitPath,
     );
-    final failures = <String>[];
-    for (final enginePath in enginePaths) {
-      final availability = _loadCandidate(enginePath, bridgeFileNames);
-      if (availability.isAvailable) return availability;
+    return selectFirstUsable(
+      enginePaths,
+      (Uri path) => _loadCandidate(
+        path,
+        bridgeFileNames,
+        source: _preferredSource(path, explicitPath, environmentOverride),
+        sourceLabel: _basename(path.toFilePath()),
+      ),
+      unavailableReason:
+          '${engineFileNames.first} was not found in the app bundle, '
+          'configured override, or development checkout',
+      initialRejections: missingPreferences,
+      onRejected: (String reason) => developer.log(reason, name: 'lazer-audio'),
+    );
+  }
+
+  static LazerAudioEngineSource _preferredSource(
+    Uri candidate,
+    String? explicitPath,
+    String? environmentOverride,
+  ) {
+    if (explicitPath != null &&
+        explicitPath.isNotEmpty &&
+        File(explicitPath).absolute.uri == candidate) {
+      return LazerAudioEngineSource.imported;
+    }
+    if (environmentOverride != null &&
+        environmentOverride.isNotEmpty &&
+        File(environmentOverride).absolute.uri == candidate) {
+      return LazerAudioEngineSource.environment;
+    }
+    return LazerAudioEngineSource.bundled;
+  }
+
+  static String _basename(String path) {
+    final String normalized = path.replaceAll('\\', '/');
+    final int slash = normalized.lastIndexOf('/');
+    final String name = slash < 0
+        ? normalized
+        : normalized.substring(slash + 1);
+    return name.isEmpty ? 'lazer-audio' : name;
+  }
+
+  /// Tries every candidate in order and keeps the failed ones as diagnostics.
+  ///
+  /// Exposed for tests: the fallback itself is plain orchestration, so it can
+  /// be proven without corrupting a real shared library or depending on a
+  /// developer build tree.
+  static LazerAudioAvailability selectFirstUsable(
+    Iterable<Uri> candidates,
+    LazerAudioAvailability Function(Uri candidate) probe, {
+    required String unavailableReason,
+    Iterable<String> initialRejections = const <String>[],
+    void Function(String reason)? onRejected,
+  }) {
+    final failures = <String>[...initialRejections];
+    for (final String reason in initialRejections) {
+      onRejected?.call(reason);
+    }
+    for (final Uri candidate in candidates) {
+      final availability = probe(candidate);
+      if (availability.isAvailable) {
+        return availability._withRejectedCandidates(failures);
+      }
       final reason = availability.reason!;
       failures.add(reason);
-      developer.log(reason, name: 'lazer-audio');
+      onRejected?.call(reason);
     }
     return LazerAudioAvailability.unavailable(
-      failures.isEmpty
-          ? '${engineOverride ?? importedLibraryPath ?? Platform.environment[libraryOverrideVariable] ?? engineFileNames.first} '
-                'was not found in the app bundle, configured override, or '
-                'development checkout'
-          : failures.join('\n'),
+      failures.isEmpty ? unavailableReason : failures.join('\n'),
+      rejectedCandidates: failures.isEmpty
+          ? const <String>[]
+          : List<String>.unmodifiable(failures),
     );
   }
 
@@ -802,10 +974,10 @@ abstract final class LazerAudioLoader {
     Uri? enginePath,
     List<String> bridgeFileNames, {
     bool inProcess = false,
+    required LazerAudioEngineSource source,
+    required String sourceLabel,
   }) {
-    final String engineFileName = inProcess
-        ? 'the linked lazer-audio image'
-        : enginePath!.toFilePath();
+    final String engineFileName = '${source.label} engine $sourceLabel';
     // Windows resolves a native library's own dependencies through the *process*
     // search path, not the directory the library was opened from, so a build tree
     // that keeps FFmpeg's DLLs beside the engine still fails with "module could
@@ -821,7 +993,8 @@ abstract final class LazerAudioLoader {
           : DynamicLibrary.open(enginePath!.toFilePath());
     } catch (error) {
       return LazerAudioAvailability.unavailable(
-        'loading $engineFileName failed: $error',
+        'loading $engineFileName failed: '
+        '${_safeError(error, enginePath, sourceLabel)}',
       );
     }
     final LazerAudioApi api = LazerAudioApi(library);
@@ -830,7 +1003,8 @@ abstract final class LazerAudioLoader {
       version = api.abiVersion();
     } catch (error) {
       return LazerAudioAvailability.unavailable(
-        '$engineFileName does not export the lazer-audio ABI: $error',
+        '$engineFileName does not export the lazer-audio ABI: '
+        '${_safeError(error, enginePath, sourceLabel)}',
       );
     }
     if (version != lazerAudioAbiVersion) {
@@ -871,7 +1045,7 @@ abstract final class LazerAudioLoader {
         // local-only engine.
         developer.log(
           'the linked reader bridge is not usable, network sources will not '
-          'play: $error',
+          'play: ${_safeError(error, null, sourceLabel)}',
           name: 'lazer-audio',
         );
       }
@@ -887,11 +1061,31 @@ abstract final class LazerAudioLoader {
             DynamicLibrary.open(bridgePath.toFilePath()),
           );
         } catch (error) {
-          developer.log('bridge load failed: $error', name: 'lazer-audio');
+          developer.log(
+            'reader bridge for $engineFileName could not be loaded: '
+            '${_safeError(error, bridgePath, _basename(bridgePath.toFilePath()))}',
+            name: 'lazer-audio',
+          );
         }
       }
     }
-    return LazerAudioAvailability.available(api, bridge);
+    return LazerAudioAvailability.available(
+      api,
+      bridge,
+      source: source,
+      sourceLabel: sourceLabel,
+    );
+  }
+
+  /// Replaces the selected image's absolute path before text reaches a log or
+  /// the settings page. Error messages from the platform loader otherwise carry
+  /// the user's full local path.
+  static String _safeError(Object error, Uri? path, String label) {
+    String text = '$error';
+    if (path != null) {
+      text = text.replaceAll(path.toFilePath(), label);
+    }
+    return text;
   }
 
   /// Kept alive for the process lifetime: dropping these would unload the modules
@@ -918,7 +1112,11 @@ abstract final class LazerAudioLoader {
           ),
         );
       } catch (error) {
-        developer.log('listing $directory failed: $error', name: 'lazer-audio');
+        developer.log(
+          'listing an audio dependency directory failed: '
+          '${_safeError(error, null, '')}',
+          name: 'lazer-audio',
+        );
       }
     }
     for (final String library in order) {
@@ -931,8 +1129,10 @@ abstract final class LazerAudioLoader {
           _preloadedDependencies.add(DynamicLibrary.open(file.path));
           break;
         } catch (error) {
+          final String name = _basename(file.path);
           developer.log(
-            'preloading ${file.path} failed: $error',
+            'preloading $name failed: '
+            '${_safeError(error, file.uri, name)}',
             name: 'lazer-audio',
           );
         }
