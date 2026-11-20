@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
-import 'package:lazer_nextgen/widgets/windows_backdrop.dart';
+import 'package:lazer_nextgen/widgets/wallpaper_tint.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -131,14 +131,13 @@ void main() {
     expect(state.backgroundOpacity, 1);
   });
 
-  test('the veil carries the wallpaper tint', () {
-    const surface = Color(0xFF191C23);
-    const wallpaper = Color(0xFFC8DAEF);
-    expect(MicaSurface.veilFor(surface, null), surface);
-    final veil = MicaSurface.veilFor(surface, wallpaper);
-    expect(veil, isNot(surface));
-    // Between the two inputs, pulled towards the wallpaper.
-    expect(veil.r, greaterThan(surface.r));
-    expect(veil.b, greaterThan(surface.b));
+  test('the material is the wallpaper field, not a film of its average', () {
+    // The reported bug: a flat veil over the whole window. The filter has to
+    // leave light and shade in the field, so two very different points of one
+    // wallpaper stay different after it.
+    final dark = materialWallpaperMatrix(dark: true);
+    final sky = applyMaterialMatrix(dark, const Color(0xFFC8DAEF));
+    final corner = applyMaterialMatrix(dark, const Color(0xFF2A2028));
+    expect(sky.r * 255, greaterThan(corner.r * 255 + 20));
   });
 }
