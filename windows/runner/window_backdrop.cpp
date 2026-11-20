@@ -9,6 +9,16 @@ WindowBackdrop::WindowBackdrop(flutter::BinaryMessenger* messenger, HWND window)
       &flutter::StandardMethodCodec::GetInstance());
   channel_->SetMethodCallHandler(
       [window](const auto& call, auto result) {
+        if (call.method_name() == "refreshMaterial") {
+          // Re-installs the material so DWM rebuilds it from the current
+          // desktop wallpaper. DWM samples that wallpaper once and keeps the
+          // result; a listener who changed the picture while the window was
+          // already open would otherwise keep looking at the old sample, which
+          // reads as "Mica ignored my new wallpaper".
+          result->Success(flutter::EncodableValue(
+              window_backdrop::RefreshMaterial(window)));
+          return;
+        }
         if (call.method_name() != "setMica") {
           result->NotImplemented();
           return;

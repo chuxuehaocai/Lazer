@@ -1151,11 +1151,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final bool wasMaterial = playerBackground == AppBackgroundMode.windowsMica;
     final bool isMaterial = mode == AppBackgroundMode.windowsMica;
     playerBackground = mode;
-    // Same defaulting as the browsing background: the material needs a veil to
-    // look like a material, and the canvas needs a full one to look like a
-    // canvas. Only a listener who moved the slider keeps their own value.
+    // The material paints nothing itself; a canvas needs full strength. Only a
+    // listener who moved the slider keeps their own value.
     if (!playerBackgroundOpacityChosen && wasMaterial != isMaterial) {
-      playerBackgroundOpacity = isMaterial ? kMaterialBackgroundOpacity : 1;
+      playerBackgroundOpacity = isMaterial ? 0 : 1;
     }
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
@@ -1201,13 +1200,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final bool wasMaterial = backgroundMode == AppBackgroundMode.windowsMica;
     final bool isMaterial = value == AppBackgroundMode.windowsMica;
     backgroundMode = value;
-    // Entering the material mode without ever having touched the slider starts
-    // layered instead of bare: a bare veil would hand the window to whatever
-    // DWM composites, which on a desktop with no wallpaper tint is a flat
-    // neutral sheet. Leaving it returns the canvas to full strength so the
-    // material's default never leaks into the canvas modes.
+    // The material mode paints no backdrop of its own: DWM owns those pixels,
+    // and a veil over them is what made the surface read as a flat sheet.
+    // Leaving the mode returns the canvas to full strength.
     if (!backgroundOpacityChosen && wasMaterial != isMaterial) {
-      backgroundOpacity = isMaterial ? kMaterialBackgroundOpacity : 1;
+      backgroundOpacity = isMaterial ? 0 : 1;
     }
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
@@ -2436,14 +2433,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         );
       }
       uiAlpha = (prefs.getDouble('lazer_content_opacity') ?? 1).clamp(0.4, 1.0);
-      // The material veil used to read this preference backwards: the stored
-      // value was the *material's* share, so the 1.0 every listener has on disk
-      // meant "no veil at all". Kept as-is, that hands the whole window to DWM,
-      // which paints a flat neutral sheet on a desktop it never sampled — the
-      // reported "Mica turned the app into a grey rectangle". The stored number
-      // is still the same intent, so the first read after this build maps it the
-      // old way and writes the value back in the direction every other
-      // background mode uses.
+      // The material mode paints no backdrop of its own: DWM composites the
+      // material into the window and a veil on top of it is what made the
+      // surface look like a grey sheet. So the veil starts at zero there, and a
+      // listener who wants the window tinted towards the theme can still move
+      // the slider.
+      //
+      // Old builds stored this preference backwards: the number was the
+      // *material's* share, so the 1.0 on disk meant "no veil at all". Because
+      // the direction is now the same one every other background mode uses, the
+      // stored value is mapped once and written back.
       final double? storedBrowseOpacity = prefs.getDouble(
         'lazer_background_opacity',
       );
@@ -2454,16 +2453,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
           prefs.getBool('lazer_background_opacity_direction') != false;
       double readOpacity(double? stored, AppBackgroundMode mode) {
         final bool material = mode == AppBackgroundMode.windowsMica;
-        final double fallback = material ? kMaterialBackgroundOpacity : 1;
-        if (stored == null) return fallback;
+        if (stored == null) return material ? 0 : 1;
         final double veil = invertedOpacity ? 1 - stored : stored;
-        // A material window has no useful end: a full veil is the opaque theme
-        // surface with the material invisible, and none is the flat sheet DWM
-        // paints without a wallpaper tint. Both read as "Mica does nothing", so
-        // the value is kept inside the band where the material is visible.
-        return material
-            ? veil.clamp(kMaterialVeilMin, kMaterialVeilMax)
-            : veil.clamp(0.0, 1.0);
+        return veil.clamp(0.0, 1.0);
       }
 
       backgroundOpacity = readOpacity(storedBrowseOpacity, backgroundMode);

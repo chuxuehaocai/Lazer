@@ -33,18 +33,6 @@ const double kBottomBarBlurMin = 0;
 const double kBottomBarBlurMax = 32;
 const double kBottomBarBlurDefault = 14;
 
-/// Veil a desktop material background starts with before anybody moves the
-/// slider: enough theme surface for the window to keep reading as this app,
-/// enough material for it to read as translucent.
-const double kMaterialBackgroundOpacity = .6;
-
-/// Where a material veil may sit. The material is composited beneath the veil,
-/// so neither end is useful: a full veil is the opaque theme surface with the
-/// material invisible, and none is the flat sheet DWM paints on a desktop whose
-/// wallpaper it never sampled. Both read as "Mica does nothing".
-const double kMaterialVeilMin = .45;
-const double kMaterialVeilMax = .9;
-
 /// Inline window-capsule paint: the backdrop blur it may run, the tint
 /// opacity that blur sits behind, and the optional custom tint colour.
 ///

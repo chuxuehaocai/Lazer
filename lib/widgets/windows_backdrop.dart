@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +7,6 @@ import 'package:window_manager/window_manager.dart';
 
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
-import 'wallpaper_tint.dart';
 
 bool get supportsWindowsMica =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -25,7 +23,8 @@ class WindowsBackdrop extends StatefulWidget {
   State<WindowsBackdrop> createState() => _WindowsBackdropState();
 }
 
-class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
+class _WindowsBackdropState extends State<WindowsBackdrop>
+    with WindowListener, WidgetsBindingObserver {
   static const _channel = MethodChannel('dev.naominet.lazer/window_backdrop');
   (bool, bool)? _requested;
   Future<void> _pending = Future.value();
@@ -38,6 +37,7 @@ class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
     widget.state.playerPresented.addListener(_sync);
     if (supportsWindowsMica) {
       windowManager.addListener(this);
+      WidgetsBinding.instance.addObserver(this);
       _channel.setMethodCallHandler((call) async {
         if (call.method == 'refresh') _refreshFrame();
       });
@@ -104,7 +104,33 @@ class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
   void _refreshFrame() {
     _requested = null;
     _sync();
+    // DWM samples the wallpaper when it installs the material and keeps that
+    // sample, so a window that was already open never notices a new picture.
+    // Rebuild the material whenever the window comes back to the foreground:
+    // that is exactly when somebody returns from 个性化 after picking one.
+    if (_active) unawaited(_refreshMaterial());
   }
+
+  /// Asks the runner to drop and reinstall the material, which makes DWM take a
+  /// fresh wallpaper sample. Silent on failures: an unusable sample is a
+  /// cosmetic problem, not a reason to disturb the route.
+  Future<void> _refreshMaterial() async {
+    try {
+      await _channel.invokeMethod<bool>('refreshMaterial');
+    } on MissingPluginException {
+      // Older runner, or a platform without the channel.
+    } on PlatformException {
+      // Composition unavailable; the material is already gone.
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshFrame();
+  }
+
+  @override
+  void onWindowFocus() => _refreshFrame();
 
   @override
   void onWindowEnterFullScreen() => _refreshFrame();
@@ -117,6 +143,7 @@ class _WindowsBackdropState extends State<WindowsBackdrop> with WindowListener {
     widget.state.playerPresented.removeListener(_sync);
     if (supportsWindowsMica) {
       windowManager.removeListener(this);
+      WidgetsBinding.instance.removeObserver(this);
       _channel.setMethodCallHandler(null);
     }
     super.dispose();
@@ -144,133 +171,28 @@ class WindowsBackdropScope extends InheritedWidget {
       oldWidget.active != active;
 }
 
-/// The system material, plus the wallpaper it was supposed to be made of.
+/// Mica itself is system controlled. DWM composites it into the window, and the
+/// only thing this surface may do is get out of the way.
 ///
-/// [opacity] is the veil, in the same direction as every other background
-/// mode: 1 covers the material completely with the theme surface, 0 hands the
-/// window over to the material alone.
+/// [opacity] is an optional theme veil over the material. It defaults to fully
+/// transparent: painting anything opaque here replaces the material with a flat
+/// colour, which is exactly what made Mica look like a grey sheet instead of a
+/// material. The veil exists only for listeners who want the window tinted
+/// towards the theme, and for the fallback below.
 ///
-/// DWM composites the material, but it can only build it from a wallpaper the
-/// shell owns. On a desktop painted by a third-party animated wallpaper the
-/// material degrades to one flat neutral colour, which is what "Mica looks
-/// broken" was. So the same wallpaper is drawn here, heavily blurred and
-/// drained of colour, *under* the material and *above* it via the veil: the
-/// surface then carries the wallpaper's soft light and shade instead of a flat
-/// film of its average colour.
+/// When the native material is not active — another platform, an older Windows,
+/// a remote session whose composition is unavailable — nothing composites
+/// underneath, so the surface has to be opaque or the window would show holes.
 class MicaSurface extends StatelessWidget {
-  const MicaSurface({super.key, this.opacity = 1});
-
-  /// Where a veil may sit in a material mode. The material is composited
-  /// beneath it, so neither end may take the whole window: a full veil hides
-  /// the material, and none leaves the flat sheet DWM paints without a tint.
-  static const double minMaterialVeil = kMaterialVeilMin;
-  static const double maxMaterialVeil = kMaterialVeilMax;
-
+  const MicaSurface({super.key, this.opacity = 0});
   final double opacity;
-
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final bool active = WindowsBackdropScope.activeOf(context);
-    return _MaterialField(
-      surface: theme.colorScheme.surface,
-      dark: theme.brightness == Brightness.dark,
-      opacity: active ? opacity.clamp(minMaterialVeil, maxMaterialVeil) : 1,
+    final surface = Theme.of(context).colorScheme.surface;
+    return ColoredBox(
+      color: surface.withValues(
+        alpha: WindowsBackdropScope.activeOf(context) ? opacity.clamp(0, 1) : 1,
+      ),
     );
   }
-}
-
-/// Draws the wallpaper, then the theme surface over it.
-///
-/// The wallpaper arrives a frame after start-up, which is invisible beside the
-/// window's own entrance and keeps the first frame free of file IO.
-class _MaterialField extends StatefulWidget {
-  const _MaterialField({
-    required this.surface,
-    required this.dark,
-    required this.opacity,
-  });
-
-  final Color surface;
-  final bool dark;
-  final double opacity;
-
-  @override
-  State<_MaterialField> createState() => _MaterialFieldState();
-}
-
-class _MaterialFieldState extends State<_MaterialField> {
-  /// How much of the wallpaper field sits over the system material. It stays
-  /// short of opaque on purpose: where DWM does have a wallpaper to sample,
-  /// its material is the better half and must keep showing through. Where it
-  /// does not, this field is what gives the window any light and shade at all.
-  static const double _fieldAlpha = .62;
-
-  ImageProvider? _wallpaper;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_resolve());
-  }
-
-  Future<void> _resolve() async {
-    final ui.Image? image = await desktopWallpaperImage();
-    if (!mounted || image == null) return;
-    setState(() => _wallpaper = _WallpaperImage(image));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final Widget veil = ColoredBox(
-      color: widget.surface.withValues(alpha: widget.opacity),
-    );
-    if (_wallpaper == null) return veil;
-    return Stack(
-      fit: StackFit.expand,
-      children: <Widget>[
-        // Blur comes for free: the source is a 96 px strip scaled up to the
-        // window, which is exactly the soft field a system material shows.
-        Opacity(
-          opacity: _fieldAlpha,
-          child: ColorFiltered(
-            colorFilter: materialWallpaperFilter(dark: widget.dark),
-            child: Image(
-              image: _wallpaper!,
-              fit: BoxFit.cover,
-              filterQuality: FilterQuality.low,
-              gaplessPlayback: true,
-              excludeFromSemantics: true,
-            ),
-          ),
-        ),
-        veil,
-      ],
-    );
-  }
-}
-
-/// Hands a decoded [ui.Image] to the widget layer without re-decoding it.
-class _WallpaperImage extends ImageProvider<_WallpaperImage> {
-  const _WallpaperImage(this.image);
-  final ui.Image image;
-
-  @override
-  Future<_WallpaperImage> obtainKey(ImageConfiguration configuration) =>
-      SynchronousFuture<_WallpaperImage>(this);
-
-  @override
-  ImageStreamCompleter loadImage(
-    _WallpaperImage key,
-    ImageDecoderCallback decode,
-  ) => OneFrameImageStreamCompleter(
-    SynchronousFuture<ImageInfo>(ImageInfo(image: image.clone())),
-  );
-
-  @override
-  bool operator ==(Object other) =>
-      other is _WallpaperImage && other.image == image;
-
-  @override
-  int get hashCode => image.hashCode;
 }

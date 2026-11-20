@@ -56,6 +56,37 @@ inline bool ApplyMica(HWND window, bool enabled, bool dark,
   return true;
 }
 
+/// Rebuilds the material from the wallpaper that is set right now.
+///
+/// DWM samples the desktop wallpaper when the material is installed and keeps
+/// that sample. A window that is already open therefore keeps the picture it
+/// started with, so a listener who switched wallpapers sees no change: the
+/// material is still composited from the old one. Dropping the backdrop to none
+/// and installing it again is what makes DWM take a fresh sample, which is the
+/// same order the Personalization page goes through.
+inline bool RefreshMaterial(HWND window, const DwmApi& api = {}) {
+  if (!IsWindow(window) ||
+      (GetWindowLongPtrW(window, GWL_STYLE) & WS_CHILD) != 0) {
+    return false;
+  }
+  // Hand the client area back to DWM without a material, then install it once
+  // more: the second install is the one that samples the wallpaper again.
+  const MARGINS bare{0, 0, 1, 0};
+  api.set_attribute(window, kSystemBackdropType, &kBackdropNone,
+                    sizeof(kBackdropNone));
+  api.extend_frame(window, &bare);
+
+  const BOOL use_dark = TRUE;
+  api.set_attribute(window, kImmersiveDarkMode, &use_dark, sizeof(use_dark));
+  const DWMNCRENDERINGPOLICY policy = DWMNCRP_ENABLED;
+  const MARGINS glass{-1, -1, -1, -1};
+  api.set_attribute(window, DWMWA_NCRENDERING_POLICY, &policy, sizeof(policy));
+  api.extend_frame(window, &glass);
+  const int mica = kBackdropMica;
+  return SUCCEEDED(api.set_attribute(window, kSystemBackdropType, &mica,
+                                     sizeof(mica)));
+}
+
 }  // namespace window_backdrop
 
 #endif  // RUNNER_WINDOW_BACKDROP_NATIVE_H_

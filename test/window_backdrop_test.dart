@@ -19,6 +19,10 @@ class _BackdropHarness {
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       _backdropChannel,
       (call) async {
+        if (call.method == 'refreshMaterial') {
+          materialRefreshes++;
+          return true;
+        }
         expect(call.method, 'setMica');
         final args = call.arguments as Map;
         final options = (args['enabled'] as bool, args['dark'] as bool);
@@ -39,6 +43,7 @@ class _BackdropHarness {
   final WidgetTester tester;
   final AppState state = AppState();
   final List<(bool, bool)> requests = [];
+  int materialRefreshes = 0;
   Future<bool?> Function((bool, bool)) respond = (options) async => options.$1;
 
   bool get active => tester
@@ -57,7 +62,7 @@ class _BackdropHarness {
 
   Future<void> mount({
     Brightness brightness = Brightness.light,
-    double materialOpacity = kMaterialBackgroundOpacity,
+    double materialOpacity = 0,
   }) async {
     await tester.pumpWidget(
       Theme(
@@ -163,24 +168,41 @@ void main() {
     await harness.mount();
     expect(harness.requests, [(true, false)]);
     expect(harness.active, isTrue);
-    // The veil keeps the app's own surface: the material is a layer under it,
-    // not a replacement for it.
-    expect(harness.surfaceAlpha, kMaterialBackgroundOpacity);
+    // Nothing is painted over the material: DWM owns those pixels, and a veil
+    // on top of them is what made the surface look like a flat grey sheet.
+    expect(harness.surfaceAlpha, 0);
   });
 
-  _testBackdrop('a material veil never reaches either useless end', (
+  _testBackdrop('a veil the listener asks for still reaches the material', (
     tester,
     harness,
   ) async {
     harness.state.backgroundMode = AppBackgroundMode.windowsMica;
-    // Zero hands the whole window to DWM, which paints a flat sheet on a
-    // desktop whose wallpaper it never sampled; one hides the material
-    // completely behind the theme surface. Both read as "Mica does nothing".
-    await harness.mount(materialOpacity: 0);
+    await harness.mount(materialOpacity: .25);
     expect(harness.active, isTrue);
-    expect(harness.surfaceAlpha, kMaterialVeilMin);
+    expect(harness.surfaceAlpha, .25);
     await harness.mount(materialOpacity: 1);
-    expect(harness.surfaceAlpha, kMaterialVeilMax);
+    expect(harness.surfaceAlpha, 1);
+  });
+
+  _testBackdrop('coming back to the foreground resamples the wallpaper', (
+    tester,
+    harness,
+  ) async {
+    // DWM samples the desktop wallpaper when it installs the material and keeps
+    // that sample, so a window that stayed open never notices a new picture.
+    // Returning from 个性化 has to rebuild the material.
+    harness.state.backgroundMode = AppBackgroundMode.windowsMica;
+    await harness.mount();
+    expect(harness.active, isTrue);
+    expect(harness.materialRefreshes, 0);
+
+    await harness.windowEvent('focus');
+    expect(
+      harness.materialRefreshes,
+      greaterThan(0),
+      reason: 'the material must be reinstalled from the current wallpaper',
+    );
   });
 
   for (final failure in ['unsupported', 'missing plugin', 'platform error']) {
@@ -320,7 +342,7 @@ void main() {
       harness.respond = (_) async => true;
       await harness.compositionChanged();
       expect(harness.active, isTrue);
-      expect(harness.surfaceAlpha, kMaterialBackgroundOpacity);
+      expect(harness.surfaceAlpha, 0);
 
       harness.respond = (_) async => false;
       await harness.compositionChanged();
@@ -334,12 +356,12 @@ void main() {
     },
   );
 
-  testWidgets('browsing Mica opacity is independent of content opacity', (
+  testWidgets('a material veil the listener set is independent of content', (
     tester,
   ) async {
     final state = AppState()
       ..backgroundMode = AppBackgroundMode.windowsMica
-      ..backgroundOpacity = .6;
+      ..backgroundOpacity = .25;
     final navigation = BrowseNavigationObserver();
     try {
       await tester.pumpWidget(
@@ -367,10 +389,10 @@ void main() {
           )
           .color
           .a;
-      expect(surfaceAlpha(), closeTo(.6, .001));
+      expect(surfaceAlpha(), closeTo(.25, .001));
       await state.setAppUiAlpha(.4);
       await tester.pumpAndSettle();
-      expect(surfaceAlpha(), closeTo(.6, .001));
+      expect(surfaceAlpha(), closeTo(.25, .001));
       expect(
         tester
             .widget<Opacity>(
