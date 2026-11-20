@@ -10,6 +10,7 @@ import '../downloads/download_dialog.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/detail_requests.dart';
+import '../state/search_history_store.dart';
 import '../theme/apple_design.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/catalog_links.dart';
@@ -51,12 +52,15 @@ class _AppSearchPageState extends State<AppSearchPage>
   int _generation = 0;
   late String _sourceKey;
   (String?, bool)? _playback;
+  final SearchHistoryStore _historyStore = SearchHistoryStore();
+  List<String> _history = const <String>[];
 
   @override
   void initState() {
     super.initState();
     _sourceKey = widget.state.activeContentKey;
     widget.state.addListener(_stateChanged);
+    unawaited(_loadHistory());
   }
 
   void _stateChanged() {
@@ -120,7 +124,48 @@ class _AppSearchPageState extends State<AppSearchPage>
     });
   }
 
-  void _submit(String value) => unawaited(_run(value.trim()));
+  void _submit(String value) {
+    final String query = value.trim();
+    unawaited(_run(query));
+    unawaited(_remember(query));
+  }
+
+  /// Reads the recently searched queries the empty page offers as chips.
+  Future<void> _loadHistory() async {
+    final List<String> history = await _historyStore.load();
+    if (!mounted) return;
+    setState(() {
+      _history = history;
+    });
+  }
+
+  /// Saves [query] once a search is actually committed — submitted, or opened
+  /// from one of its results — never on every keystroke.
+  Future<void> _remember(String query) async {
+    final String trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+    await _historyStore.record(trimmed);
+    await _loadHistory();
+  }
+
+  /// Repeats a saved chip: fills the field, searches, and moves it up.
+  void _useHistory(String query) {
+    _search.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+    );
+    unawaited(_run(query));
+    unawaited(_remember(query));
+  }
+
+  /// Forgets the saved queries after the trailing action is tapped.
+  Future<void> _clearHistory() async {
+    await _historyStore.clear();
+    if (!mounted) return;
+    setState(() {
+      _history = const <String>[];
+    });
+  }
 
   void _clear() {
     _search.clear();
@@ -267,6 +312,13 @@ class _AppSearchPageState extends State<AppSearchPage>
       return AppNotice(
         message: widget.state.isLocalPlayback ? '搜索本地歌曲、歌手或专辑。' : '搜索歌曲、歌手或歌单。',
         icon: Icons.search_rounded,
+        action: _history.isEmpty
+            ? null
+            : _SearchHistoryBlock(
+                queries: _history,
+                onSelected: _useHistory,
+                onClear: () => unawaited(_clearHistory()),
+              ),
       );
     }
     if (results == null || results.hits == 0) {
@@ -331,10 +383,13 @@ class _AppSearchPageState extends State<AppSearchPage>
                             index: i,
                             current: widget.state.current?.id == track.id,
                             playing: widget.state.playing,
-                            onTap: () => widget.state.playQueue(
-                              results.tracks,
-                              startIndex: i,
-                            ),
+                            onTap: () {
+                              unawaited(_remember(_query));
+                              widget.state.playQueue(
+                                results.tracks,
+                                startIndex: i,
+                              );
+                            },
                             onMenuRequested: (Offset position) =>
                                 showTrackActions(
                                   context,
@@ -366,9 +421,12 @@ class _AppSearchPageState extends State<AppSearchPage>
                               size: 44,
                               radius: 6,
                             ),
-                            onTap: () => unawaited(
-                              openAlbumDetails(context, widget.state, album),
-                            ),
+                            onTap: () {
+                              unawaited(_remember(_query));
+                              unawaited(
+                                openAlbumDetails(context, widget.state, album),
+                              );
+                            },
                           );
                         },
                       ),
@@ -395,7 +453,10 @@ class _AppSearchPageState extends State<AppSearchPage>
                                 radius: 22,
                               ),
                             ),
-                            onTap: () => artistDetailRequest.value = artist,
+                            onTap: () {
+                              unawaited(_remember(_query));
+                              artistDetailRequest.value = artist;
+                            },
                           );
                         },
                       ),
@@ -421,7 +482,10 @@ class _AppSearchPageState extends State<AppSearchPage>
                                 sliver: AppPlaylistRowsSliver(
                                   playlists: results.playlists,
                                   layout: grid,
-                                  onOpen: widget.onOpenPlaylist,
+                                  onOpen: (Playlist playlist) {
+                                    unawaited(_remember(_query));
+                                    widget.onOpenPlaylist(playlist);
+                                  },
                                 ),
                               ),
                             ],
@@ -474,6 +538,63 @@ class _SearchTabButton extends StatelessWidget {
             fontWeight: active ? FontWeight.w600 : FontWeight.w500,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The 「最近搜索」 chips offered by the empty search page.
+///
+/// One chip per recently committed query: tapping it repeats the search. The
+/// trailing action forgets the whole list, so the block disappears with it.
+class _SearchHistoryBlock extends StatelessWidget {
+  const _SearchHistoryBlock({
+    required this.queries,
+    required this.onSelected,
+    required this.onClear,
+  });
+
+  final List<String> queries;
+  final ValueChanged<String> onSelected;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 480),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          AppSectionHeader(
+            title: '最近搜索',
+            trailing: SpringTextButton(
+              onPressed: onClear,
+              child: const TrText('清除'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final String query in queries)
+                ActionChip(
+                  avatar: Icon(
+                    Icons.history_rounded,
+                    size: 16,
+                    color: apple.secondaryLabel,
+                  ),
+                  label: Text(
+                    query,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: () => onSelected(query),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
