@@ -693,7 +693,14 @@ class _AppShellState extends State<AppShell>
   /// 音乐库 → 收藏的专辑. Same shape as 本地音乐: the library stays the current
   /// section and the content pane becomes the album page.
   void _openSavedAlbums() {
-    _browseHistory.clear();
+    // Remember the library page instead of discarding it. The back gesture
+    // needs it as a preview destination, and the switcher only keeps pages
+    // that the retention set names: with an empty history the shelf was
+    // evicted on entry, so the swipe painted nothing under the album page and
+    // the commit rebuilt the library from scratch — the scroll offset was
+    // gone and the area the page had never repainted read as a dark mask over
+    // the lower half of the screen.
+    _rememberBrowseLocation();
     cancelCoverTransitions();
     setState(() {
       _section = _AppSection.library;
@@ -716,7 +723,9 @@ class _AppShellState extends State<AppShell>
   /// 音乐库 → 网络源. Same shape as 收藏的专辑: the library stays the current
   /// section and the content pane becomes the hub; drills stay inside it.
   void _openNetworkSources() {
-    _browseHistory.clear();
+    // Same reason as 收藏的专辑: keep the library as the page a back gesture
+    // returns to, so the preview has a live destination to reveal.
+    _rememberBrowseLocation();
     cancelCoverTransitions();
     setState(() {
       _section = _AppSection.library;
