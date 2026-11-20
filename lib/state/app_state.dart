@@ -1341,10 +1341,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       backgroundOpacityChosen = true;
     }
     notifyListeners();
-    await (await SharedPreferences.getInstance()).setDouble(
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(
       player ? 'lazer_player_background_opacity' : 'lazer_background_opacity',
       next,
     );
+    // Anything this build writes is already in the shared direction, so the
+    // bootstrap migration must never invert it again.
+    await prefs.setBool('lazer_background_opacity_direction', false);
   }
 
   Future<void> setHeaderOpacity(double value) async {
@@ -2432,29 +2436,63 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         );
       }
       uiAlpha = (prefs.getDouble('lazer_content_opacity') ?? 1).clamp(0.4, 1.0);
-      // Mica is a system material, not a canvas. A fully transparent veil
-      // hands the whole window to whatever DWM composites — and on a desktop
-      // whose wallpaper the shell has no tint for, that is a flat neutral
-      // sheet with no material in it at all, which read as "Mica changed the
-      // app to a grey rectangle". A listener who never picked an opacity starts
-      // layered so the window keeps its own surface; the slider still reaches
-      // both ends.
-      backgroundOpacity =
-          (prefs.getDouble('lazer_background_opacity') ??
-                  (backgroundMode == AppBackgroundMode.windowsMica
-                      ? kMaterialBackgroundOpacity
-                      : 1))
-              .clamp(0.0, 1.0);
-      playerBackgroundOpacity =
-          (prefs.getDouble('lazer_player_background_opacity') ??
-                  (playerBackground == AppBackgroundMode.windowsMica
-                      ? kMaterialBackgroundOpacity
-                      : 1))
-              .clamp(0.0, 1.0);
-      backgroundOpacityChosen = prefs.containsKey('lazer_background_opacity');
-      playerBackgroundOpacityChosen = prefs.containsKey(
+      // The material veil used to read this preference backwards: the stored
+      // value was the *material's* share, so the 1.0 every listener has on disk
+      // meant "no veil at all". Kept as-is, that hands the whole window to DWM,
+      // which paints a flat neutral sheet on a desktop it never sampled — the
+      // reported "Mica turned the app into a grey rectangle". The stored number
+      // is still the same intent, so the first read after this build maps it the
+      // old way and writes the value back in the direction every other
+      // background mode uses.
+      final double? storedBrowseOpacity = prefs.getDouble(
+        'lazer_background_opacity',
+      );
+      final double? storedPlayerOpacity = prefs.getDouble(
         'lazer_player_background_opacity',
       );
+      final bool invertedOpacity =
+          prefs.getBool('lazer_background_opacity_direction') != false;
+      double readOpacity(double? stored, AppBackgroundMode mode) {
+        final bool material = mode == AppBackgroundMode.windowsMica;
+        final double fallback = material ? kMaterialBackgroundOpacity : 1;
+        if (stored == null) return fallback;
+        final double veil = invertedOpacity ? 1 - stored : stored;
+        // A material window has no useful end: a full veil is the opaque theme
+        // surface with the material invisible, and none is the flat sheet DWM
+        // paints without a wallpaper tint. Both read as "Mica does nothing", so
+        // the value is kept inside the band where the material is visible.
+        return material
+            ? veil.clamp(kMaterialVeilMin, kMaterialVeilMax)
+            : veil.clamp(0.0, 1.0);
+      }
+
+      backgroundOpacity = readOpacity(storedBrowseOpacity, backgroundMode);
+      playerBackgroundOpacity = readOpacity(
+        storedPlayerOpacity,
+        playerBackground,
+      );
+      backgroundOpacityChosen = storedBrowseOpacity != null;
+      playerBackgroundOpacityChosen = storedPlayerOpacity != null;
+      if (invertedOpacity &&
+          (storedBrowseOpacity != null || storedPlayerOpacity != null)) {
+        // One rewrite, then the flag says the stored values already read the
+        // way every other background mode does. Only keys that existed are
+        // written, so a mode that never had a value keeps falling back to its
+        // own default instead of looking like a listener's choice.
+        if (storedBrowseOpacity != null) {
+          await prefs.setDouble(
+            'lazer_background_opacity',
+            backgroundOpacity,
+          );
+        }
+        if (storedPlayerOpacity != null) {
+          await prefs.setDouble(
+            'lazer_player_background_opacity',
+            playerBackgroundOpacity,
+          );
+        }
+        await prefs.setBool('lazer_background_opacity_direction', false);
+      }
       titleBarStyle = DesktopTitleBarStyleLabels.parse(
         prefs.getString('lazer_title_bar_style'),
       );

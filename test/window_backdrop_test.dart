@@ -168,16 +168,19 @@ void main() {
     expect(harness.surfaceAlpha, kMaterialBackgroundOpacity);
   });
 
-  _testBackdrop('an explicit opacity reaches the material untouched', (
+  _testBackdrop('a material veil never reaches either useless end', (
     tester,
     harness,
   ) async {
     harness.state.backgroundMode = AppBackgroundMode.windowsMica;
+    // Zero hands the whole window to DWM, which paints a flat sheet on a
+    // desktop whose wallpaper it never sampled; one hides the material
+    // completely behind the theme surface. Both read as "Mica does nothing".
     await harness.mount(materialOpacity: 0);
     expect(harness.active, isTrue);
-    expect(harness.surfaceAlpha, 0);
+    expect(harness.surfaceAlpha, kMaterialVeilMin);
     await harness.mount(materialOpacity: 1);
-    expect(harness.surfaceAlpha, 1);
+    expect(harness.surfaceAlpha, kMaterialVeilMax);
   });
 
   for (final failure in ['unsupported', 'missing plugin', 'platform error']) {
@@ -336,7 +339,7 @@ void main() {
   ) async {
     final state = AppState()
       ..backgroundMode = AppBackgroundMode.windowsMica
-      ..backgroundOpacity = .35;
+      ..backgroundOpacity = .6;
     final navigation = BrowseNavigationObserver();
     try {
       await tester.pumpWidget(
@@ -364,10 +367,10 @@ void main() {
           )
           .color
           .a;
-      expect(surfaceAlpha(), closeTo(.35, .001));
+      expect(surfaceAlpha(), closeTo(.6, .001));
       await state.setAppUiAlpha(.4);
       await tester.pumpAndSettle();
-      expect(surfaceAlpha(), closeTo(.35, .001));
+      expect(surfaceAlpha(), closeTo(.6, .001));
       expect(
         tester
             .widget<Opacity>(
