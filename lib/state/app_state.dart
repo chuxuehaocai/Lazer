@@ -1097,6 +1097,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double backgroundOpacity = 1;
   double playerBackgroundOpacity = 1;
 
+  /// Whether the listener ever moved a background-opacity slider. The material
+  /// modes start from their own default until they do, because a bare material
+  /// hand-over and a canvas read completely differently.
+  bool backgroundOpacityChosen = false;
+  bool playerBackgroundOpacityChosen = false;
+
   /// Opacity and backdrop blur used by the compact/tablet page header.
   double headerOpacity = kHeaderOpacityDefault;
   double headerBlur = kHeaderBlurDefault;
@@ -1142,7 +1148,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> setPlayerBackground(AppBackgroundMode mode) async {
+    final bool wasMaterial = playerBackground == AppBackgroundMode.windowsMica;
+    final bool isMaterial = mode == AppBackgroundMode.windowsMica;
     playerBackground = mode;
+    // Same defaulting as the browsing background: the material needs a veil to
+    // look like a material, and the canvas needs a full one to look like a
+    // canvas. Only a listener who moved the slider keeps their own value.
+    if (!playerBackgroundOpacityChosen && wasMaterial != isMaterial) {
+      playerBackgroundOpacity = isMaterial ? kMaterialBackgroundOpacity : 1;
+    }
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
       'lazer_player_background',
@@ -1184,7 +1198,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> setAppBackground(AppBackgroundMode value) async {
     if (backgroundMode == value) return;
+    final bool wasMaterial = backgroundMode == AppBackgroundMode.windowsMica;
+    final bool isMaterial = value == AppBackgroundMode.windowsMica;
     backgroundMode = value;
+    // Entering the material mode without ever having touched the slider starts
+    // layered instead of bare: a bare veil would hand the window to whatever
+    // DWM composites, which on a desktop with no wallpaper tint is a flat
+    // neutral sheet. Leaving it returns the canvas to full strength so the
+    // material's default never leaks into the canvas modes.
+    if (!backgroundOpacityChosen && wasMaterial != isMaterial) {
+      backgroundOpacity = isMaterial ? kMaterialBackgroundOpacity : 1;
+    }
     notifyListeners();
     await (await SharedPreferences.getInstance()).setString(
       'lazer_legacy_background',
@@ -1311,8 +1335,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final next = value.clamp(0.0, 1.0);
     if (player) {
       playerBackgroundOpacity = next;
+      playerBackgroundOpacityChosen = true;
     } else {
       backgroundOpacity = next;
+      backgroundOpacityChosen = true;
     }
     notifyListeners();
     await (await SharedPreferences.getInstance()).setDouble(
@@ -2406,13 +2432,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         );
       }
       uiAlpha = (prefs.getDouble('lazer_content_opacity') ?? 1).clamp(0.4, 1.0);
-      backgroundOpacity = (prefs.getDouble('lazer_background_opacity') ?? 1)
-          .clamp(0.0, 1.0);
+      // Mica is a system material, not a canvas. A fully transparent veil
+      // hands the whole window to whatever DWM composites — and on a desktop
+      // whose wallpaper the shell has no tint for, that is a flat neutral
+      // sheet with no material in it at all, which read as "Mica changed the
+      // app to a grey rectangle". A listener who never picked an opacity starts
+      // layered so the window keeps its own surface; the slider still reaches
+      // both ends.
+      backgroundOpacity =
+          (prefs.getDouble('lazer_background_opacity') ??
+                  (backgroundMode == AppBackgroundMode.windowsMica
+                      ? kMaterialBackgroundOpacity
+                      : 1))
+              .clamp(0.0, 1.0);
       playerBackgroundOpacity =
-          (prefs.getDouble('lazer_player_background_opacity') ?? 1).clamp(
-            0.0,
-            1.0,
-          );
+          (prefs.getDouble('lazer_player_background_opacity') ??
+                  (playerBackground == AppBackgroundMode.windowsMica
+                      ? kMaterialBackgroundOpacity
+                      : 1))
+              .clamp(0.0, 1.0);
+      backgroundOpacityChosen = prefs.containsKey('lazer_background_opacity');
+      playerBackgroundOpacityChosen = prefs.containsKey(
+        'lazer_player_background_opacity',
+      );
       titleBarStyle = DesktopTitleBarStyleLabels.parse(
         prefs.getString('lazer_title_bar_style'),
       );

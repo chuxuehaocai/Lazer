@@ -33,6 +33,11 @@ const double kBottomBarBlurMin = 0;
 const double kBottomBarBlurMax = 32;
 const double kBottomBarBlurDefault = 14;
 
+/// Veil a desktop material background starts with before anybody moves the
+/// slider: enough theme surface for the window to keep reading as this app,
+/// enough material for it to read as translucent.
+const double kMaterialBackgroundOpacity = 0.35;
+
 /// Inline window-capsule paint: the backdrop blur it may run, the tint
 /// opacity that blur sits behind, and the optional custom tint colour.
 ///

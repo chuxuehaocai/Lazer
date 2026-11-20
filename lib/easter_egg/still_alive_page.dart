@@ -4,7 +4,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../animation/view_transitions.dart';
+import '../widgets/window_chrome.dart';
 
 import '../state/app_state.dart';
 import '../l10n/app_localizations.dart';
@@ -275,225 +277,257 @@ class _StillAlivePageState extends State<StillAlivePage>
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) {
-          _freezeSequence();
-          _musicStartTimer?.cancel();
-          unawaited(_audio.pause());
-          _syncPolling();
-        }
+    // Escape is the one exit every keyboard has, and it works while the credits
+    // keep playing. The close button is the visible one.
+    void close() => Navigator.of(context).maybePop();
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): close,
       },
-      child: Theme(
-        data: ThemeData(
-          brightness: Brightness.dark,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: _amber,
-            brightness: Brightness.dark,
-          ),
-          scaffoldBackgroundColor: _background,
-          fontFamily: _monoFamily,
-          fontFamilyFallback: _monoFallback,
-          iconButtonTheme: IconButtonThemeData(
-            style: IconButton.styleFrom(foregroundColor: _amber),
-          ),
-        ),
-        child: Scaffold(
-          backgroundColor: _background,
-          body: SafeArea(
-            child: LayoutBuilder(
-              builder: (context, box) {
-                final landscape = box.maxWidth > box.maxHeight * 1.15;
-                final small = box.maxWidth < 300 || box.maxHeight < 300;
-                final inset = small ? 6.0 : 16.0;
-                final report = _TerminalPanel(
-                  key: const ValueKey('still-alive-report'),
-                  label: 'TEST ASSESSMENT REPORT',
-                  text:
-                      '${_frame.text}${_frame.cursorVisible && !_frame.finished && !_ended ? '_' : ' '}',
-                  columns: _score.maxTextColumns + 1,
-                  rows: _score.maxTextRows + 1,
-                  amber: _amber,
-                );
-                final art = _TerminalPanel(
-                  key: const ValueKey('still-alive-art'),
-                  label: 'APERTURE SCIENCE',
-                  text: _frame.asciiArt,
-                  columns: _score.maxArtColumns,
-                  rows: _score.maxArtRows,
-                  amber: _amber,
-                  centered: true,
-                );
-                final credits = _TerminalPanel(
-                  key: const ValueKey('still-alive-credits'),
-                  label: 'LIST PERSONNEL',
-                  text: _frame.creditsText,
-                  columns: _score.maxCreditsColumns,
-                  rows: small ? 2 : 6,
-                  amber: _amber,
-                  rolling: true,
-                  showLabel: !small,
-                  padding: small ? 3 : 8,
-                );
-                return Padding(
-                  padding: EdgeInsets.all(inset),
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: small ? 38 : 48,
-                        child: Row(
+      child: Focus(
+        autofocus: true,
+        child: PopScope(
+          onPopInvokedWithResult: (didPop, result) {
+            if (didPop) {
+              _freezeSequence();
+              _musicStartTimer?.cancel();
+              unawaited(_audio.pause());
+              _syncPolling();
+            }
+          },
+          child: Theme(
+            data: ThemeData(
+              brightness: Brightness.dark,
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: _amber,
+                brightness: Brightness.dark,
+              ),
+              scaffoldBackgroundColor: _background,
+              fontFamily: _monoFamily,
+              fontFamilyFallback: _monoFallback,
+              iconButtonTheme: IconButtonThemeData(
+                style: IconButton.styleFrom(foregroundColor: _amber),
+              ),
+            ),
+            child: Scaffold(
+              backgroundColor: _background,
+              body: SafeArea(
+                // A desktop window draws its caption capsule over the page, in
+                // the top-right corner — exactly where this page's close button
+                // sits. Reserve the band so the credits stay below the window
+                // controls instead of being swallowed by them.
+                child: WindowChromeHeader(
+                  child: LayoutBuilder(
+                    builder: (context, box) {
+                      final landscape = box.maxWidth > box.maxHeight * 1.15;
+                      final small = box.maxWidth < 300 || box.maxHeight < 300;
+                      final inset = small ? 6.0 : 16.0;
+                      final report = _TerminalPanel(
+                        key: const ValueKey('still-alive-report'),
+                        label: 'TEST ASSESSMENT REPORT',
+                        text:
+                            '${_frame.text}${_frame.cursorVisible && !_frame.finished && !_ended ? '_' : ' '}',
+                        columns: _score.maxTextColumns + 1,
+                        rows: _score.maxTextRows + 1,
+                        amber: _amber,
+                      );
+                      final art = _TerminalPanel(
+                        key: const ValueKey('still-alive-art'),
+                        label: 'APERTURE SCIENCE',
+                        text: _frame.asciiArt,
+                        columns: _score.maxArtColumns,
+                        rows: _score.maxArtRows,
+                        amber: _amber,
+                        centered: true,
+                      );
+                      final credits = _TerminalPanel(
+                        key: const ValueKey('still-alive-credits'),
+                        label: 'LIST PERSONNEL',
+                        text: _frame.creditsText,
+                        columns: _score.maxCreditsColumns,
+                        rows: small ? 2 : 6,
+                        amber: _amber,
+                        rolling: true,
+                        showLabel: !small,
+                        padding: small ? 3 : 8,
+                      );
+                      return Padding(
+                        padding: EdgeInsets.all(inset),
+                        child: Column(
                           children: [
-                            Expanded(
-                              child: Text(
-                                small
-                                    ? 'STILL ALIVE'
-                                    : 'APERTURE\nENRICHMENT CENTER',
-                                maxLines: 2,
-                                style: TextStyle(
-                                  color: _amber,
-                                  fontSize: small ? 10 : 13,
-                                  height: 1.1,
-                                  letterSpacing: 1.2,
-                                ),
+                            SizedBox(
+                              height: small ? 38 : 48,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      small
+                                          ? 'STILL ALIVE'
+                                          : 'APERTURE\nENRICHMENT CENTER',
+                                      maxLines: 2,
+                                      style: TextStyle(
+                                        color: _amber,
+                                        fontSize: small ? 10 : 13,
+                                        height: 1.1,
+                                        letterSpacing: 1.2,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    key: const ValueKey('still-alive-close'),
+                                    tooltip: context.tr('返回'),
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(),
+                                    icon: const Icon(Icons.close_rounded),
+                                  ),
+                                ],
                               ),
                             ),
-                            IconButton(
-                              key: const ValueKey('still-alive-close'),
-                              tooltip: context.tr('返回'),
-                              onPressed: () => Navigator.of(context).pop(),
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: landscape
-                            ? Row(
-                                key: const ValueKey('still-alive-landscape'),
-                                children: [
-                                  Expanded(flex: 6, child: report),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    flex: 5,
-                                    child: Column(
+                            Expanded(
+                              child: landscape
+                                  ? Row(
+                                      key: const ValueKey(
+                                        'still-alive-landscape',
+                                      ),
                                       children: [
-                                        Expanded(flex: 4, child: credits),
+                                        Expanded(flex: 6, child: report),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          flex: 5,
+                                          child: Column(
+                                            children: [
+                                              Expanded(flex: 4, child: credits),
+                                              const SizedBox(height: 10),
+                                              Expanded(flex: 7, child: art),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Column(
+                                      key: const ValueKey(
+                                        'still-alive-portrait',
+                                      ),
+                                      children: [
+                                        Expanded(flex: 6, child: report),
                                         const SizedBox(height: 10),
-                                        Expanded(flex: 7, child: art),
+                                        Expanded(flex: 2, child: credits),
+                                        const SizedBox(height: 10),
+                                        Expanded(flex: 4, child: art),
+                                      ],
+                                    ),
+                            ),
+                            const SizedBox(height: 8),
+                            if (_audio.error != null && !_demo)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Wrap(
+                                  alignment: WrapAlignment.center,
+                                  spacing: 8,
+                                  children: [
+                                    Text(
+                                      context.tr('音频暂时无法播放'),
+                                      style: TextStyle(
+                                        color: _amber,
+                                        fontSize: small ? 10 : 12,
+                                      ),
+                                    ),
+                                    SpringTextButton(
+                                      onPressed: _starting ? null : _start,
+                                      child: const TrText('重试'),
+                                    ),
+                                    SpringTextButton(
+                                      onPressed: _startDemo,
+                                      child: const TrText('静音演示'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            SizedBox(
+                              height: small ? 38 : 46,
+                              child: Row(
+                                children: [
+                                  if (!_ended)
+                                    IconButton(
+                                      key: const ValueKey('still-alive-play'),
+                                      tooltip: context.tr(
+                                        _playing ? '暂停' : '播放',
+                                      ),
+                                      onPressed:
+                                          _starting || (!_demo && !_audio.ready)
+                                          ? null
+                                          : _toggle,
+                                      icon: Icon(
+                                        _playing
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                      ),
+                                    ),
+                                  if (_ended)
+                                    SpringTextButton.icon(
+                                      key: const ValueKey(
+                                        'still-alive-restart',
+                                      ),
+                                      onPressed: _restart,
+                                      icon: const Icon(Icons.replay_rounded),
+                                      label: const TrText('重新播放'),
+                                    )
+                                  else
+                                    IconButton(
+                                      key: const ValueKey(
+                                        'still-alive-restart',
+                                      ),
+                                      tooltip: context.tr('重新播放'),
+                                      onPressed:
+                                          _starting || (!_demo && !_audio.ready)
+                                          ? null
+                                          : _restart,
+                                      icon: const Icon(Icons.replay_rounded),
+                                    ),
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          _starting
+                                              ? 'LOADING AUDIO…'
+                                              : '${_time(_position)} / ${_time(_displayDuration)}',
+                                          maxLines: 1,
+                                          style: TextStyle(
+                                            color: _amber,
+                                            fontSize: small ? 9 : 12,
+                                          ),
+                                        ),
+                                        if (_demo || _frame.finished || _ended)
+                                          Text(
+                                            _demo
+                                                ? context.tr('静音演示')
+                                                : 'THANK YOU FOR PARTICIPATING',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: _amber.withValues(
+                                                alpha: .65,
+                                              ),
+                                              fontSize: small ? 8 : 10,
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ),
                                 ],
-                              )
-                            : Column(
-                                key: const ValueKey('still-alive-portrait'),
-                                children: [
-                                  Expanded(flex: 6, child: report),
-                                  const SizedBox(height: 10),
-                                  Expanded(flex: 2, child: credits),
-                                  const SizedBox(height: 10),
-                                  Expanded(flex: 4, child: art),
-                                ],
-                              ),
-                      ),
-                      const SizedBox(height: 8),
-                      if (_audio.error != null && !_demo)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Wrap(
-                            alignment: WrapAlignment.center,
-                            spacing: 8,
-                            children: [
-                              Text(
-                                context.tr('音频暂时无法播放'),
-                                style: TextStyle(
-                                  color: _amber,
-                                  fontSize: small ? 10 : 12,
-                                ),
-                              ),
-                              SpringTextButton(
-                                onPressed: _starting ? null : _start,
-                                child: const TrText('重试'),
-                              ),
-                              SpringTextButton(
-                                onPressed: _startDemo,
-                                child: const TrText('静音演示'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      SizedBox(
-                        height: small ? 38 : 46,
-                        child: Row(
-                          children: [
-                            if (!_ended)
-                              IconButton(
-                                key: const ValueKey('still-alive-play'),
-                                tooltip: context.tr(_playing ? '暂停' : '播放'),
-                                onPressed:
-                                    _starting || (!_demo && !_audio.ready)
-                                    ? null
-                                    : _toggle,
-                                icon: Icon(
-                                  _playing
-                                      ? Icons.pause_rounded
-                                      : Icons.play_arrow_rounded,
-                                ),
-                              ),
-                            if (_ended)
-                              SpringTextButton.icon(
-                                key: const ValueKey('still-alive-restart'),
-                                onPressed: _restart,
-                                icon: const Icon(Icons.replay_rounded),
-                                label: const TrText('重新播放'),
-                              )
-                            else
-                              IconButton(
-                                key: const ValueKey('still-alive-restart'),
-                                tooltip: context.tr('重新播放'),
-                                onPressed:
-                                    _starting || (!_demo && !_audio.ready)
-                                    ? null
-                                    : _restart,
-                                icon: const Icon(Icons.replay_rounded),
-                              ),
-                            Expanded(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    _starting
-                                        ? 'LOADING AUDIO…'
-                                        : '${_time(_position)} / ${_time(_displayDuration)}',
-                                    maxLines: 1,
-                                    style: TextStyle(
-                                      color: _amber,
-                                      fontSize: small ? 9 : 12,
-                                    ),
-                                  ),
-                                  if (_demo || _frame.finished || _ended)
-                                    Text(
-                                      _demo
-                                          ? context.tr('静音演示')
-                                          : 'THANK YOU FOR PARTICIPATING',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: _amber.withValues(alpha: .65),
-                                        fontSize: small ? 8 : 10,
-                                      ),
-                                    ),
-                                ],
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ),
             ),
           ),
         ),

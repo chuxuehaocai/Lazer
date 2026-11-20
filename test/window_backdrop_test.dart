@@ -55,13 +55,19 @@ class _BackdropHarness {
       .color
       .a;
 
-  Future<void> mount({Brightness brightness = Brightness.light}) async {
+  Future<void> mount({
+    Brightness brightness = Brightness.light,
+    double materialOpacity = kMaterialBackgroundOpacity,
+  }) async {
     await tester.pumpWidget(
       Theme(
         data: ThemeData(brightness: brightness),
         child: Directionality(
           textDirection: TextDirection.ltr,
-          child: WindowsBackdrop(state: state, child: const MicaSurface()),
+          child: WindowsBackdrop(
+            state: state,
+            child: MicaSurface(opacity: materialOpacity),
+          ),
         ),
       ),
     );
@@ -157,7 +163,21 @@ void main() {
     await harness.mount();
     expect(harness.requests, [(true, false)]);
     expect(harness.active, isTrue);
+    // The veil keeps the app's own surface: the material is a layer under it,
+    // not a replacement for it.
+    expect(harness.surfaceAlpha, kMaterialBackgroundOpacity);
+  });
+
+  _testBackdrop('an explicit opacity reaches the material untouched', (
+    tester,
+    harness,
+  ) async {
+    harness.state.backgroundMode = AppBackgroundMode.windowsMica;
+    await harness.mount(materialOpacity: 0);
+    expect(harness.active, isTrue);
     expect(harness.surfaceAlpha, 0);
+    await harness.mount(materialOpacity: 1);
+    expect(harness.surfaceAlpha, 1);
   });
 
   for (final failure in ['unsupported', 'missing plugin', 'platform error']) {
@@ -297,7 +317,7 @@ void main() {
       harness.respond = (_) async => true;
       await harness.compositionChanged();
       expect(harness.active, isTrue);
-      expect(harness.surfaceAlpha, 0);
+      expect(harness.surfaceAlpha, kMaterialBackgroundOpacity);
 
       harness.respond = (_) async => false;
       await harness.compositionChanged();
@@ -344,10 +364,10 @@ void main() {
           )
           .color
           .a;
-      expect(surfaceAlpha(), closeTo(.65, .001));
+      expect(surfaceAlpha(), closeTo(.35, .001));
       await state.setAppUiAlpha(.4);
       await tester.pumpAndSettle();
-      expect(surfaceAlpha(), closeTo(.65, .001));
+      expect(surfaceAlpha(), closeTo(.35, .001));
       expect(
         tester
             .widget<Opacity>(
@@ -358,7 +378,7 @@ void main() {
       );
       await state.setBackgroundOpacity(.8);
       await tester.pumpAndSettle();
-      expect(surfaceAlpha(), closeTo(.2, .001));
+      expect(surfaceAlpha(), closeTo(.8, .001));
       expect(state.uiAlpha, .4);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());

@@ -144,6 +144,12 @@ class WindowsBackdropScope extends InheritedWidget {
 
 /// Mica itself is system controlled. This slider changes its visible amount
 /// using a theme-colored veil; content opacity remains independent.
+///
+/// [opacity] is the veil, in the same direction as every other background
+/// mode: 1 covers the material completely with the theme surface, 0 hands the
+/// window over to the material alone. Mica on a desktop whose wallpaper the
+/// shell has no tint for renders a flat neutral sheet, so a veil is what keeps
+/// the window readable as this app instead of a grey rectangle.
 class MicaSurface extends StatelessWidget {
   const MicaSurface({super.key, this.opacity = 1});
   final double opacity;
@@ -152,9 +158,7 @@ class MicaSurface extends StatelessWidget {
     final surface = Theme.of(context).colorScheme.surface;
     return ColoredBox(
       color: surface.withValues(
-        alpha: WindowsBackdropScope.activeOf(context)
-            ? 1 - opacity.clamp(0, 1)
-            : 1,
+        alpha: WindowsBackdropScope.activeOf(context) ? opacity.clamp(0, 1) : 1,
       ),
     );
   }
