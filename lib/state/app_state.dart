@@ -66,6 +66,87 @@ part 'plugin_frontend_state.dart';
 part 'app_state_station.dart';
 part 'plugin_native_state.dart';
 
+/// Parses a large lyric payload away from the UI isolate. The isolate boundary
+/// uses only maps and lists so this remains available on every Flutter target.
+List<Map<String, Object?>> _parseLyricsInIsolate(Map<String, Object?> payload) {
+  final parsed = parseLyrics(
+    GatewayLyrics(
+      lrc: payload['lrc'] as String?,
+      yrc: payload['yrc'] as String?,
+      tlyric: payload['tlyric'] as String?,
+      ytlrc: payload['ytlrc'] as String?,
+      rlyric: payload['rlyric'] as String?,
+      yromalrc: payload['yromalrc'] as String?,
+      ttml: payload['ttml'] as String?,
+      pureMusic: payload['pureMusic'] == true,
+    ),
+  );
+  return <Map<String, Object?>>[
+    for (final line in parsed)
+      <String, Object?>{
+        'time': line.time.inMicroseconds,
+        'text': line.text,
+        'translation': line.translation,
+        'romanization': line.romanization,
+        'end': line.end?.inMicroseconds,
+        'words': <List<Object?>>[
+          for (final word in line.words)
+            <Object?>[
+              word.start.inMicroseconds,
+              word.duration.inMicroseconds,
+              word.text,
+            ],
+        ],
+      },
+  ];
+}
+
+List<LyricLine> _decodeParsedLyrics(List<Map<String, Object?>> values) => [
+  for (final value in values)
+    LyricLine(
+      Duration(microseconds: value['time']! as int),
+      value['text']! as String,
+      translation: value['translation'] as String?,
+      romanization: value['romanization'] as String?,
+      end: value['end'] == null
+          ? null
+          : Duration(microseconds: value['end']! as int),
+      words: [
+        for (final word in (value['words']! as List).cast<List>())
+          LyricWord(
+            Duration(microseconds: word[0] as int),
+            Duration(microseconds: word[1] as int),
+            word[2] as String,
+          ),
+      ],
+    ),
+];
+
+Future<List<LyricLine>> _parseLyricsForPresentation(GatewayLyrics payload) {
+  final sourceSize = [
+    payload.lrc,
+    payload.yrc,
+    payload.tlyric,
+    payload.ytlrc,
+    payload.rlyric,
+    payload.yromalrc,
+    payload.ttml,
+  ].fold<int>(0, (sum, value) => sum + (value?.length ?? 0));
+  if (kIsWeb || sourceSize < 32768) {
+    return Future<List<LyricLine>>.value(parseLyrics(payload));
+  }
+  return compute(_parseLyricsInIsolate, <String, Object?>{
+    'lrc': payload.lrc,
+    'yrc': payload.yrc,
+    'tlyric': payload.tlyric,
+    'ytlrc': payload.ytlrc,
+    'rlyric': payload.rlyric,
+    'yromalrc': payload.yromalrc,
+    'ttml': payload.ttml,
+    'pureMusic': payload.pureMusic,
+  }, debugLabel: 'lyrics-parse').then(_decodeParsedLyrics);
+}
+
 /// How the session was authenticated.
 enum AuthMethod { qrcode, sms, password, cookie }
 
@@ -1686,6 +1767,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   );
   int _playerPresentations = 0;
   bool _presentationDisposed = false;
+  bool _pluginLyricsBroadcastPending = false;
 
   void playerPresentationChanged(bool entered) {
     if (_presentationDisposed) return;
@@ -3477,27 +3559,37 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void _broadcastPluginLyrics() {
     if (_presentationDisposed) return;
-    pluginManager.broadcastPlayerEvent('lyric', {
-      'lyric': [
-        for (var i = 0; i < lyrics.length; i++)
-          {
-            'time': lyrics[i].time.inMilliseconds,
-            'startTime': lyrics[i].time.inMilliseconds,
-            'endTime': (i + 1 < lyrics.length)
-                ? lyrics[i + 1].time.inMilliseconds
-                : (lyrics[i].time + const Duration(seconds: 4)).inMilliseconds,
-            'text': lyrics[i].text,
-            if (lyrics[i].translation != null) ...{
-              'tlyric': lyrics[i].translation,
-              'translatedLyric': lyrics[i].translation,
+    if (_pluginLyricsBroadcastPending) return;
+    _pluginLyricsBroadcastPending = true;
+    // Serialising a long lyric sheet creates one map per line and can invoke
+    // every enabled Lua plugin. Let the current frame present the new song
+    // first, then coalesce cache/import/network updates into one event.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pluginLyricsBroadcastPending = false;
+      if (_presentationDisposed) return;
+      pluginManager.broadcastPlayerEvent('lyric', {
+        'lyric': [
+          for (var i = 0; i < lyrics.length; i++)
+            {
+              'time': lyrics[i].time.inMilliseconds,
+              'startTime': lyrics[i].time.inMilliseconds,
+              'endTime': (i + 1 < lyrics.length)
+                  ? lyrics[i + 1].time.inMilliseconds
+                  : (lyrics[i].time + const Duration(seconds: 4))
+                        .inMilliseconds,
+              'text': lyrics[i].text,
+              if (lyrics[i].translation != null) ...{
+                'tlyric': lyrics[i].translation,
+                'translatedLyric': lyrics[i].translation,
+              },
+              if (lyrics[i].romanization != null) ...{
+                'rlyric': lyrics[i].romanization,
+                'romanLyric': lyrics[i].romanization,
+              },
             },
-            if (lyrics[i].romanization != null) ...{
-              'rlyric': lyrics[i].romanization,
-              'romanLyric': lyrics[i].romanization,
-            },
-          },
-      ],
-      'pureMusic': lyricsPureMusic,
+        ],
+        'pureMusic': lyricsPureMusic,
+      });
     });
   }
 
@@ -5616,12 +5708,19 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     final localOnly = track.localPath != null || track.id.startsWith('local:');
     bool currentRequest() =>
         !_presentationDisposed && generation == _lyricGeneration;
-    void publish(GatewayLyrics payload) {
+    Future<void> publish(GatewayLyrics payload) async {
       if (!currentRequest()) return;
       if (!lyricsImported) {
-        lyrics = List.unmodifiable(parseLyrics(payload));
+        // Large TTML/YRC responses can contain thousands of timed words and
+        // translation candidates. Keep that parse off the frame that reveals
+        // the next song. Small responses stay on the fast path to avoid
+        // isolate setup overhead for ordinary LRC files.
+        final parsed = await _parseLyricsForPresentation(payload);
+        if (!currentRequest() || lyricsImported) return;
+        lyrics = List.unmodifiable(parsed);
         lyricsPureMusic = payload.pureMusic;
       }
+      if (!currentRequest()) return;
       cacheable = true;
       lyricsError = null;
       lyricsLoading = false;
@@ -5644,7 +5743,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     if (remote == null) {
       final payload = await stored;
       if (!currentRequest()) return;
-      if (payload != null) publish(payload);
+      if (payload != null) await publish(payload);
     } else {
       // Whichever usable copy arrives first can paint. Disk I/O and cache
       // writes must never delay a ready lyric response or its animation.
@@ -5654,13 +5753,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       ]);
       if (!currentRequest()) return;
       if (!first.$1 && first.$2 != null) {
-        publish(first.$2!);
+        await publish(first.$2!);
         unawaited(
-          remote.then((value) {
+          remote.then((value) async {
             final payload = value.$1;
             if (payload == null || _presentationDisposed) return;
             unawaited(catalog.lyricsCache.save(track, payload));
-            publish(payload);
+            await publish(payload);
           }),
         );
         return;
@@ -5670,14 +5769,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         failure = first.$3;
         if (payload != null) {
           unawaited(catalog.lyricsCache.save(track, payload));
-          publish(payload);
+          await publish(payload);
         } else {
           // A cache lookup may be blocked on the platform storage channel.
           // Do not keep the lyric sheet in a spinner after the provider has
           // already answered; adopt a late cache hit when it arrives.
           unawaited(
-            stored.then((cached) {
-              if (cached != null && currentRequest()) publish(cached);
+            stored.then((cached) async {
+              if (cached != null && currentRequest()) await publish(cached);
             }),
           );
         }
@@ -5688,7 +5787,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         failure = result.$2;
         if (payload != null) {
           unawaited(catalog.lyricsCache.save(track, payload));
-          publish(payload);
+          await publish(payload);
         }
       }
     }

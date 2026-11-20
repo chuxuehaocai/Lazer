@@ -39,6 +39,9 @@ class _AppTextInputDialogState extends State<AppTextInputDialog> {
   void _close([String? value]) {
     if (_closing || ModalRoute.of(context)?.isCurrent != true) return;
     _closing = true;
+    FocusManager.instance.primaryFocus?.unfocus(
+      disposition: UnfocusDisposition.scope,
+    );
     Navigator.of(context).pop(value);
   }
 

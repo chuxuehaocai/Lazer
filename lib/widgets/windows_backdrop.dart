@@ -102,21 +102,30 @@ class _WindowsBackdropState extends State<WindowsBackdrop>
   }
 
   void _refreshFrame() {
+    final state = widget.state;
+    final mode = state.playerPresented.value
+        ? state.playerBackground
+        : state.backgroundMode;
+    final dark =
+        state.playerPresented.value ||
+        Theme.of(context).brightness == Brightness.dark;
     _requested = null;
     _sync();
     // DWM samples the wallpaper when it installs the material and keeps that
     // sample, so a window that was already open never notices a new picture.
     // Rebuild the material whenever the window comes back to the foreground:
     // that is exactly when somebody returns from 个性化 after picking one.
-    if (_active) unawaited(_refreshMaterial());
+    if (_active && mode == AppBackgroundMode.windowsMica) {
+      unawaited(_refreshMaterial(dark));
+    }
   }
 
   /// Asks the runner to drop and reinstall the material, which makes DWM take a
   /// fresh wallpaper sample. Silent on failures: an unusable sample is a
   /// cosmetic problem, not a reason to disturb the route.
-  Future<void> _refreshMaterial() async {
+  Future<void> _refreshMaterial(bool dark) async {
     try {
-      await _channel.invokeMethod<bool>('refreshMaterial');
+      await _channel.invokeMethod<bool>('refreshMaterial', {'dark': dark});
     } on MissingPluginException {
       // Older runner, or a platform without the channel.
     } on PlatformException {

@@ -301,13 +301,32 @@ Map<int, String> _matchTranslations(
   List<LyricLine> translations,
 ) {
   final pairs = <({int source, int translation, int distance})>[];
+  // Both tracks are time sorted. The previous cartesian scan compared every
+  // source row with every translated row before sorting the candidates. Long
+  // TTML/YRC sheets with dense timestamps therefore did quadratic work during
+  // a track switch. A binary search plus a small neighbourhood keeps the same
+  // nearest-row behaviour for normal sparse lyric tracks while bounding the
+  // candidate list for malformed or duplicated timestamps.
+  int lowerBound(Duration time) {
+    var low = 0;
+    var high = translations.length;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      if (translations[middle].time < time) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low;
+  }
+
   for (final source in sourceIndexes) {
     final sourceTime = original[source].time.inMilliseconds;
-    for (
-      var translation = 0;
-      translation < translations.length;
-      translation++
-    ) {
+    final pivot = lowerBound(original[source].time);
+    for (var offset = -4; offset <= 4; offset++) {
+      final translation = pivot + offset;
+      if (translation < 0 || translation >= translations.length) continue;
       final distance =
           (translations[translation].time.inMilliseconds - sourceTime).abs();
       if (distance <= _translationWindow.inMilliseconds) {

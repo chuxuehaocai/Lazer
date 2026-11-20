@@ -15,8 +15,16 @@ WindowBackdrop::WindowBackdrop(flutter::BinaryMessenger* messenger, HWND window)
           // result; a listener who changed the picture while the window was
           // already open would otherwise keep looking at the old sample, which
           // reads as "Mica ignored my new wallpaper".
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          bool dark = true;
+          if (args != nullptr) {
+            auto entry = args->find(flutter::EncodableValue("dark"));
+            dark = entry != args->end() &&
+                   std::holds_alternative<bool>(entry->second) &&
+                   std::get<bool>(entry->second);
+          }
           result->Success(flutter::EncodableValue(
-              window_backdrop::RefreshMaterial(window)));
+              window_backdrop::RefreshMaterial(window, dark)));
           return;
         }
         if (call.method_name() != "setMica") {

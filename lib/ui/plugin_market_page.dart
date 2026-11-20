@@ -82,15 +82,31 @@ class _PluginMarketViewState extends State<PluginMarketView>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              FocusManager.instance.primaryFocus?.unfocus(
+                disposition: UnfocusDisposition.scope,
+              );
+              Navigator.pop(context);
+            },
             child: Text(context.tr('取消')),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, source),
+            onPressed: () {
+              FocusManager.instance.primaryFocus?.unfocus(
+                disposition: UnfocusDisposition.scope,
+              );
+              Navigator.pop(context, source);
+            },
             child: Text(context.tr('保存')),
           ),
         ],
       ),
+    );
+    // On Android the dialog can finish its route transition before the text
+    // input connection receives the focus loss. Unfocus again on the caller's
+    // route so saving a plugin source never leaves the IME on screen.
+    FocusManager.instance.primaryFocus?.unfocus(
+      disposition: UnfocusDisposition.scope,
     );
     if (value == null || !mounted || owner != market) return;
     try {

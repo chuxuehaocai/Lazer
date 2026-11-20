@@ -37,6 +37,7 @@ import '../widgets/settings_detail.dart';
 import '../widgets/settings_choice.dart';
 import '../widgets/settings_row.dart';
 import '../widgets/text_input_dialog.dart';
+import '../widgets/window_chrome.dart';
 import '../tv/tv_mode.dart';
 import '../tv/lan_remote.dart';
 import '../updates/open_external.dart';
@@ -65,6 +66,19 @@ AppBackgroundMode _availableBackgroundMode(AppBackgroundMode mode) =>
     mode == AppBackgroundMode.windowsMica && !supportsWindowsMica
     ? AppBackgroundMode.off
     : mode;
+
+double _settingsTopInset(BuildContext context, double topInset) {
+  if (topInset <= 0 ||
+      WindowChromeScope.maybeLayoutOf(context)?.inline != true ||
+      SettingsDetailHost.isEmbedded(context)) {
+    return topInset;
+  }
+  // The settings overview has no back control. Its shell inset used to carry
+  // the detail-page back region as well, leaving an oversized empty header in
+  // Inline mode. Keep only the capsule's own band for the overview.
+  final reduced = topInset - kPageBackControlSize;
+  return reduced > 0 ? reduced : 0;
+}
 
 /// A single-column, inset-grouped Settings page, following the iOS Settings
 /// information architecture rather than a desktop form grid.
@@ -215,13 +229,14 @@ class _SettingsCategoryHome extends StatelessWidget {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final double inset = pageInset(context);
     final bool compact = compactBrowsePresentation(context);
+    final double bodyTopInset = _settingsTopInset(context, topInset);
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: compact ? 760 : 980),
         child: ListView(
           padding: EdgeInsets.fromLTRB(
             inset,
-            8 + topInset + SettingsDetailScaffold.topInsetOf(context),
+            8 + bodyTopInset + SettingsDetailScaffold.topInsetOf(context),
             inset,
             36 + MediaQuery.paddingOf(context).bottom,
           ),
@@ -360,6 +375,7 @@ class _SettingsOverview extends StatelessWidget {
         1000 /
         (displayRefresh.isFinite && displayRefresh > 0 ? displayRefresh : 60);
     final double inset = pageInset(context);
+    final double bodyTopInset = _settingsTopInset(context, topInset);
     bool show(_SettingsCategory value) => category == null || category == value;
     final String pageTitle = category?.label ?? '设置';
     final String pageSubtitle = category?.detail ?? '外观、界面和账户。'; // i18n:key
@@ -370,7 +386,7 @@ class _SettingsOverview extends StatelessWidget {
           key: const PageStorageKey('settings-overview-scroll'),
           padding: EdgeInsets.fromLTRB(
             inset,
-            8 + topInset + SettingsDetailScaffold.topInsetOf(context),
+            8 + bodyTopInset + SettingsDetailScaffold.topInsetOf(context),
             inset,
             36 + MediaQuery.paddingOf(context).bottom,
           ),

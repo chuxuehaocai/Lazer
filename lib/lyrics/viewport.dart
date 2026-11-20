@@ -73,6 +73,7 @@ class _LyricViewportState extends State<LyricViewport>
   String? _layoutTrackId;
   Duration? _timelineDuration;
   List<double> _baseHeights = [];
+  List<bool> _heightMeasured = const <bool>[];
   List<double> _interludePresence = [];
   List<Duration?> _retainedInterludePositions = [];
   bool _hasWordTimings = false;
@@ -124,6 +125,8 @@ class _LyricViewportState extends State<LyricViewport>
   final GlobalKey _viewportKey = GlobalKey();
   late double _blurTarget = widget.state.lyricBlurEnabled ? 1 : 0;
   late double _blurIntensity = widget.state.lyricBlurIntensity.clamp(0.0, 1.0);
+  int _heightGeneration = 0;
+  int? _heightPassGeneration;
 
   @override
   void initState() {
@@ -637,7 +640,6 @@ class _LyricViewportState extends State<LyricViewport>
       decay: _theme.lyricStaggerDecay,
     );
     for (var i = 0; i < _ys.length; i++) {
-      _ys[i].setParameters(params);
       // Rows that are nowhere near the viewport do not need a spring or a
       // stagger delay: put them at their new position immediately. This is
       // what keeps the opening and closing seconds of a long lyric sheet from
@@ -647,6 +649,7 @@ class _LyricViewportState extends State<LyricViewport>
           target + _heights[i] >= -_size.height * 0.5 &&
           target <= _size.height * 1.5;
       if (nearViewport) {
+        _ys[i].setParameters(params);
         _ys[i].setTarget(target, delay: delays[i]);
       } else {
         _ys[i].setPosition(target);
@@ -670,7 +673,45 @@ class _LyricViewportState extends State<LyricViewport>
     theme: _theme,
     translation: true,
   );
-  List<double> _measureHeights(TextScaler scaler) {
+  double _estimatedHeight(LyricLine line) {
+    if (line.text.trim().isEmpty) return 72;
+    final double mainSize = widget.state.lyricFontSize * _theme.lyricFontScale;
+    final double mainLine = mainSize * _theme.lyricLineHeight;
+    int linesFor(String? text, double size) {
+      if (text == null || text.trim().isEmpty) return 0;
+      final count = text.characters.length;
+      return math.max(
+        1,
+        (count / math.max(1.0, _textWidth / (size * .72))).ceil(),
+      );
+    }
+
+    final int mainLines = linesFor(line.text, mainSize);
+    var height = math.max(1, mainLines) * mainLine;
+    final double secondarySize =
+        (widget.state.lyricFontSize * _theme.lyricTranslationScale).clamp(
+          12,
+          30,
+        );
+    final double secondaryLine =
+        secondarySize * _theme.lyricTranslationLineHeight;
+    if (widget.state.showLyricRomanization && line.romanization != null) {
+      height +=
+          _theme.lyricTranslationGap +
+          linesFor(line.romanization, secondarySize) * secondaryLine;
+    }
+    if (line.translation != null) {
+      height +=
+          _theme.lyricTranslationGap +
+          linesFor(line.translation, secondarySize) * secondaryLine;
+    }
+    // A conservative estimate keeps an unmeasured long line from colliding
+    // with the next row. Visible rows are measured on the first frame and the
+    // estimate is replaced in small post-frame batches for the rest.
+    return math.max(height + widget.state.lyricLineSpacing, mainLine * 1.2);
+  }
+
+  Map<int, double> _measureHeights(TextScaler scaler, {Set<int>? indices}) {
     final originalStyle = _originalStyle;
     final translationStyle = _translationStyle;
     final originalHeights = <String, double>{};
@@ -689,35 +730,70 @@ class _LyricViewportState extends State<LyricViewport>
           return painter.height;
         });
     try {
-      // Repeated choruses share heights for this width and typography. Keep
-      // only scalar results during measurement; no paragraphs are retained.
-      return [
-        for (final line in _lines)
-          line.text.trim().isEmpty
-              ? 72
-              : measure(line.text, originalStyle, originalHeights) +
-                    (widget.state.showLyricRomanization &&
-                            line.romanization != null
-                        ? _theme.lyricTranslationGap +
-                              measure(
-                                line.romanization!,
-                                translationStyle,
-                                translationHeights,
-                              )
-                        : 0) +
-                    (line.translation == null
-                        ? 0
-                        : _theme.lyricTranslationGap +
-                              measure(
-                                line.translation!,
-                                translationStyle,
-                                translationHeights,
-                              )) +
-                    widget.state.lyricLineSpacing,
-      ];
+      return <int, double>{
+        for (var i = 0; i < _lines.length; i++)
+          if (indices == null || indices.contains(i))
+            i: _lines[i].text.trim().isEmpty
+                ? 72.0
+                : measure(_lines[i].text, originalStyle, originalHeights) +
+                      (widget.state.showLyricRomanization &&
+                              _lines[i].romanization != null
+                          ? _theme.lyricTranslationGap +
+                                measure(
+                                  _lines[i].romanization!,
+                                  translationStyle,
+                                  translationHeights,
+                                )
+                          : 0) +
+                      (_lines[i].translation == null
+                          ? 0
+                          : _theme.lyricTranslationGap +
+                                measure(
+                                  _lines[i].translation!,
+                                  translationStyle,
+                                  translationHeights,
+                                )) +
+                      widget.state.lyricLineSpacing,
+      };
     } finally {
       painter.dispose();
     }
+  }
+
+  void _scheduleHeightPass() {
+    if (_heightPassGeneration == _heightGeneration ||
+        _heightMeasured.every((value) => value)) {
+      return;
+    }
+    final generation = _heightGeneration;
+    _heightPassGeneration = generation;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _heightGeneration) return;
+      _heightPassGeneration = null;
+      final pending = <int>[];
+      for (var i = 0; i < _heightMeasured.length; i++) {
+        if (!_heightMeasured[i]) {
+          pending.add(i);
+          if (pending.length == 24) break;
+        }
+      }
+      if (pending.isEmpty || _textScaler == null) return;
+      final measured = _measureHeights(_textScaler!, indices: pending.toSet());
+      for (final index in pending) {
+        final height = measured[index];
+        if (height == null) continue;
+        _baseHeights[index] = height;
+        _heightMeasured[index] = true;
+      }
+      _rebuildPrefixes();
+      if (_manual) {
+        _setOffset(_offset);
+      } else {
+        _targets(stagger: false);
+      }
+      _frames.value++;
+      _scheduleHeightPass();
+    });
   }
 
   void _layout(Size size, TextScaler scaler) {
@@ -764,9 +840,28 @@ class _LyricViewportState extends State<LyricViewport>
     _paintPosition = widget.state.precisePosition;
     _active = _activeAt(_paintPosition);
     if (needsMeasure) {
-      _baseHeights = _measureHeights(scaler);
+      _heightGeneration++;
+      final measuredIndices = <int>{};
+      if (_lines.length <= 96) {
+        measuredIndices.addAll(List<int>.generate(_lines.length, (i) => i));
+      } else {
+        final focus = _active.clamp(0, _lines.length - 1);
+        final start = math.max(0, focus - 48);
+        final end = math.min(_lines.length, focus + 49);
+        measuredIndices.addAll(
+          List<int>.generate(end - start, (i) => start + i),
+        );
+      }
+      _heightMeasured = List<bool>.filled(_lines.length, false);
+      _baseHeights = [for (final line in _lines) _estimatedHeight(line)];
+      final measured = _measureHeights(scaler, indices: measuredIndices);
+      for (final entry in measured.entries) {
+        _baseHeights[entry.key] = entry.value;
+        _heightMeasured[entry.key] = true;
+      }
       _rebuildPrefixes();
       _rowCache.clear();
+      _scheduleHeightPass();
     }
     if (replaced) {
       _ys = [for (var i = 0; i < _lines.length; i++) LyricSpring(_prefix[i])];
