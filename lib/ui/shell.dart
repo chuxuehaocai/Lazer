@@ -1339,8 +1339,11 @@ class _AppShellState extends State<AppShell>
                           // A ten-foot header still keeps clear of the floating
                           // caption capsule; desktop pages deliberately start
                           // underneath it instead.
-                          final bool floatingChrome = largeScreen &&
-                              WindowChromeScope.maybeLayoutOf(context)?.inline ==
+                          final bool floatingChrome =
+                              largeScreen &&
+                              WindowChromeScope.maybeLayoutOf(
+                                    context,
+                                  )?.inline ==
                                   true;
                           return EdgeInsets.fromLTRB(
                             overscan.left,
@@ -1590,29 +1593,9 @@ class _AppShellState extends State<AppShell>
           child: Column(
             children: <Widget>[
               _largeScreenHeader(apple),
-              // The page owns the whole area under the capsule; the transport
-              // strip is painted over it, with no panel of its own. Pages end
-              // their scroll content with `floatingBarInset` so the last row
-              // can still be brought above the strip.
-              Expanded(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: <Widget>[
-                    RepaintBoundary(child: _content()),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 10,
-                      child: RepaintBoundary(
-                        child: LargeScreenTransport(
-                          state: state,
-                          onOpen: _openNowPlaying,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              // The page owns the whole area under the capsule. TV has no
+              // persistent bottom player, so content uses the full height.
+              Expanded(child: RepaintBoundary(child: _content())),
             ],
           ),
         );
@@ -1694,7 +1677,7 @@ class _AppShellState extends State<AppShell>
     if (_networkPodcastId != null) {
       return LargeScreenReusedPage(
         maxWidth: 1180,
-        bottomInset: LargeScreenMetrics.floatingBarInset,
+        bottomInset: LargeScreenMetrics.pageBottomInset,
         child: PodcastEpisodesPage(
           state: state,
           controller: state.networkSources,
@@ -1706,7 +1689,7 @@ class _AppShellState extends State<AppShell>
     if (_networkSourceId != null) {
       return LargeScreenReusedPage(
         maxWidth: 1180,
-        bottomInset: LargeScreenMetrics.floatingBarInset,
+        bottomInset: LargeScreenMetrics.pageBottomInset,
         child: NetworkBrowsePage(
           state: state,
           controller: state.networkSources,
@@ -1719,7 +1702,7 @@ class _AppShellState extends State<AppShell>
     if (_networkSources) {
       return LargeScreenReusedPage(
         maxWidth: 1180,
-        bottomInset: LargeScreenMetrics.floatingBarInset,
+        bottomInset: LargeScreenMetrics.pageBottomInset,
         child: NetworkSourcesPage(
           state: state,
           embedded: true,

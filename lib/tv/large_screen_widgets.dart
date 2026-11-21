@@ -3,8 +3,8 @@
 ///
 /// The composition follows Apple Music on a television: a floating capsule of
 /// destinations, shelves of large artwork whose captions sit on a dark plate,
-/// a library rail beside an artwork grid, and a slim transport under the
-/// content. Everything here is sized for a sofa, not a desk — the metrics below
+/// a library rail beside an artwork grid. Everything here is sized for a sofa,
+/// not a desk — the metrics below
 /// are the single place where those sizes are decided.
 library;
 
@@ -45,9 +45,8 @@ abstract final class LargeScreenMetrics {
   /// Height of the floating transport strip.
   static const double transportHeight = 88;
 
-  /// Bottom room a page reserves for the floating transport strip, so its last
-  /// card can be scrolled clear of the overlay.
-  static const double floatingBarInset = 124;
+  /// Small bottom breathing room after the TV transport was removed.
+  static const double pageBottomInset = 24;
 
   /// Gap between two captioned cards in a shelf.
   static const double cardGap = 26;

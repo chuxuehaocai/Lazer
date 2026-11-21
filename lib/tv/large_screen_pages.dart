@@ -540,7 +540,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
       key: const PageStorageKey<String>('large-screen-home'),
       padding: const EdgeInsets.only(
         top: 18,
-        bottom: LargeScreenMetrics.floatingBarInset,
+        bottom: LargeScreenMetrics.pageBottomInset,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -755,7 +755,7 @@ class _LibraryRail extends StatelessWidget {
         inset,
         20,
         18,
-        LargeScreenMetrics.floatingBarInset,
+        LargeScreenMetrics.pageBottomInset,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -971,7 +971,7 @@ class _LibraryPane extends StatelessWidget {
             10,
             0,
             24,
-            LargeScreenMetrics.floatingBarInset,
+            LargeScreenMetrics.pageBottomInset,
           ),
           itemCount: songs.length,
           scrollCacheExtent: const ScrollCacheExtent.pixels(1400),
@@ -1069,7 +1069,7 @@ class _ArtworkGrid extends StatelessWidget {
             14,
             0,
             rightInset,
-            LargeScreenMetrics.floatingBarInset,
+            LargeScreenMetrics.pageBottomInset,
           ),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
@@ -1394,7 +1394,7 @@ class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage>
                 ),
               ),
             const SliverToBoxAdapter(
-              child: SizedBox(height: LargeScreenMetrics.floatingBarInset),
+              child: SizedBox(height: LargeScreenMetrics.pageBottomInset),
             ),
           ],
         ),
@@ -1402,12 +1402,8 @@ class _LargeScreenCollectionPageState extends State<LargeScreenCollectionPage>
           Positioned(
             left: 12,
             right: 12,
-            // The page paints below the shell's floating transport. At 18 dp
-            // the batch bar sat entirely under that card: its buttons were
-            // invisible and competed with the transport for the remote's focus.
             bottom:
-                LargeScreenMetrics.transportHeight +
-                24 +
+                LargeScreenMetrics.pageBottomInset +
                 MediaQuery.paddingOf(context).bottom,
             child: TrackBatchBar(
               selectedCount: _selected.length,
@@ -1597,7 +1593,7 @@ class _LargeScreenArtistPageState extends State<LargeScreenArtistPage>
         inset,
         22,
         inset,
-        LargeScreenMetrics.floatingBarInset,
+        LargeScreenMetrics.pageBottomInset,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1904,7 +1900,7 @@ class _LargeScreenChartPageState extends State<LargeScreenChartPage>
               ),
             ),
             const SliverToBoxAdapter(
-              child: SizedBox(height: LargeScreenMetrics.floatingBarInset),
+              child: SizedBox(height: LargeScreenMetrics.pageBottomInset),
             ),
           ],
         ),
@@ -1912,12 +1908,8 @@ class _LargeScreenChartPageState extends State<LargeScreenChartPage>
           Positioned(
             left: 12,
             right: 12,
-            // The page paints below the shell's floating transport. At 18 dp
-            // the batch bar sat entirely under that card: its buttons were
-            // invisible and competed with the transport for the remote's focus.
             bottom:
-                LargeScreenMetrics.transportHeight +
-                24 +
+                LargeScreenMetrics.pageBottomInset +
                 MediaQuery.paddingOf(context).bottom,
             child: TrackBatchBar(
               selectedCount: _selected.length,
@@ -2201,7 +2193,7 @@ class _LargeScreenSearchPageState extends State<LargeScreenSearchPage>
             inset - 8,
             0,
             inset,
-            LargeScreenMetrics.floatingBarInset,
+            LargeScreenMetrics.pageBottomInset,
           ),
           itemCount: _results.tracks.length,
           scrollCacheExtent: const ScrollCacheExtent.pixels(1400),
@@ -2314,7 +2306,7 @@ class _SearchGrid extends StatelessWidget {
             inset,
             0,
             inset,
-            LargeScreenMetrics.floatingBarInset,
+            LargeScreenMetrics.pageBottomInset,
           ),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
@@ -2352,7 +2344,7 @@ class LargeScreenReusedPage extends StatelessWidget {
   final double maxWidth;
   final double textScale;
 
-  /// Room kept clear for the floating transport strip.
+  /// Small breathing room after the last content row.
   final double bottomInset;
 
   @override
@@ -2393,7 +2385,7 @@ class LargeScreenSettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LargeScreenReusedPage(
     maxWidth: 980,
-    bottomInset: LargeScreenMetrics.floatingBarInset,
+    bottomInset: LargeScreenMetrics.pageBottomInset,
     child: AppSettingsPage(
       state: state,
       categorized: categorized,
@@ -2411,7 +2403,7 @@ class LargeScreenLocalMusicPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LargeScreenReusedPage(
     maxWidth: 1240,
-    bottomInset: LargeScreenMetrics.floatingBarInset,
+    bottomInset: LargeScreenMetrics.pageBottomInset,
     child: LocalMusicPage(state: state),
   );
 }
@@ -2426,7 +2418,7 @@ class LargeScreenSavedAlbumsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LargeScreenReusedPage(
     maxWidth: 1240,
-    bottomInset: LargeScreenMetrics.floatingBarInset,
+    bottomInset: LargeScreenMetrics.pageBottomInset,
     child: AppSavedAlbumsPage(state: state),
   );
 }
@@ -2459,7 +2451,7 @@ class LargeScreenCommentsPage extends StatelessWidget {
           child: LargeScreenReusedPage(
             maxWidth: 1180,
             textScale: 1.12,
-            bottomInset: LargeScreenMetrics.floatingBarInset,
+            bottomInset: LargeScreenMetrics.pageBottomInset,
             child: SongCommentsView(
               state: state,
               track: track,

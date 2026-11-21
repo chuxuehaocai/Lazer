@@ -273,6 +273,7 @@ void main() {
       await tester.pump();
       expect(rail, findsNothing);
       expect(find.byType(LargeScreenNavBar), findsOneWidget);
+      expect(find.byType(LargeScreenTransport), findsNothing);
       expect(
         tester.getTopLeft(find.byType(LargeScreenNavBar)).dy,
         greaterThanOrEqualTo(56 * kLargeScreenComponentScale),

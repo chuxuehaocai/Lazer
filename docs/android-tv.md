@@ -80,12 +80,9 @@ The large-screen mode is its own composition, not the desktop shell stretched:
   the fifth peeks in to advertise the horizontal scroll;
 - a **library rail** (播放列表 / 歌手 / 歌曲, then 本地音乐 and 我喜欢的音乐)
   beside a centred artwork grid;
-- a floating **transport card**: a rounded glass panel lifted off the bottom
-  edge by a shadow, with the playing metadata on the left (opens the player),
-  the previous / play / next controls centred, and like / queue / expand on
-  the right. The page scrolls underneath it, so pages reserve
-  `floatingBarInset` at the bottom. The seek rail lives in the immersive
-  player rather than here;
+- the destination capsule and artwork shelves. The persistent bottom transport
+  card has been removed from the TV shell. Playback controls remain available
+  in the immersive player, where the seek rail lives;
 - detail pages with a 256 dp hero and 64 dp track rows. Settings, local music
   and comments reuse their existing controls at a larger reading measure;
 - the library's **歌曲** pane syncs the account's all-time play record: each
@@ -116,7 +113,7 @@ Large-screen motion uses the same Apple-style springs as the other layouts:
 - Playback position ticks no longer rebuild the browse page: `AppShell`
   filters state reports through a structural signature (track, playing, queue,
   collections, play record, charts, surface) while a shelf page is visible. The
-  transport and player own their own `AppState` listeners.
+  player surfaces own their own `AppState` listeners.
 - `HomeActionShelf` and the 电台 strip share `FilledCoverCard`; the large-screen
   variant only changes metrics (480 dp max width, 216 dp tall, 104 dp mosaic
   tiles), not the renderer.
@@ -188,11 +185,11 @@ Other remote behaviour:
   the app.
 - **Seek rail** — inside the immersive player, left/right step the playhead by
   2% (`AppThinSeekBar`); up/down leave the rail. The rail commits the value
-  as it steps. The bottom dock deliberately has no progress rail.
+  as it steps.
 - **Search** — the magnifier chip opens the search page. Its `SearchBar` is a
   normal focus stop; Select enters text and raises the system IME.
-- **Queue** — Select on the transport's queue glyph opens the floating queue
-  card; its rows and close button are focus stops.
+- **Queue** — Select on the queue action inside the player opens the floating
+  queue card; its rows and close button are focus stops.
 - **Settings** — every dropdown, switch, slider and swatch remains a focus
   stop. The row around the focused control lights up with the TV wash and ring
   (`TvFocusHighlight`), because Material's own focus tint disappears at ten
@@ -204,7 +201,7 @@ Other remote behaviour:
 
 - the rename (`大屏幕模式`), and the television default with and without a stored
   surface choice;
-- the capsule, shelves, transport, library rail and search page rendering,
+- the capsule, shelves, library rail and search page rendering,
   including the library rail without 最近添加 / 专辑;
 - Select on the page's first focused card, and Up/Down crossing between content
   and the capsule;
