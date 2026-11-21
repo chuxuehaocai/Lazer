@@ -115,6 +115,14 @@ flutter:
     - assets/antiresell.png
     - assets/chart_logos/
     - assets/easter_eggs/still_alive/
+    - assets/easter_eggs/frums_credits/
+    - assets/easter_eggs/frums_credits/data/
+    - assets/easter_eggs/frums_credits/data/circle/
+    - assets/easter_eggs/frums_credits/data/op/
+    - assets/easter_eggs/frums_credits/data/sabi/
+    - assets/easter_eggs/frums_credits/data/sabi2/
+    - assets/easter_eggs/frums_credits/data/semicircle/
+    - assets/easter_eggs/frums_credits/scores/
 
   fonts:
     - family: MiSans

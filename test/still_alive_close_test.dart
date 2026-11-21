@@ -88,6 +88,11 @@ Future<void> _pushEgg(WidgetTester tester, AppState state) async {
     findsOneWidget,
     reason: 'the credits page should be open',
   );
+  expect(
+    find.byKey(const ValueKey('frums-credits-animation')),
+    findsOneWidget,
+    reason: 'the Frums ASCII animation should be mounted',
+  );
 }
 
 void main() {
