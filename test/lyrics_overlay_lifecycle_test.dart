@@ -142,6 +142,19 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('overlay lyric text keeps one compact shadow', (tester) async {
+    final bridge = await mount(tester);
+    await payload(bridge);
+    await tester.pump();
+
+    final text = tester.widget<Text>(find.text('Line 0').first);
+    final shadows = text.style?.shadows ?? const <Shadow>[];
+    expect(shadows, hasLength(1));
+    expect(shadows.single.blurRadius, lessThanOrEqualTo(2));
+    expect(shadows.single.offset, const Offset(0, 1));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('word repaint preserves its tail then releases the ticker', (
     tester,
   ) async {

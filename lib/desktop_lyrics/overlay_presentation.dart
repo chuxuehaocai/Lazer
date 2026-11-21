@@ -19,13 +19,10 @@ extension _OverlayPresentation on _LyricsOverlayAppState {
         color: Colors.white,
         letterSpacing: 0,
         decoration: TextDecoration.none,
+        // Keep one tight edge shadow. A pair of wide shadows is especially
+        // noticeable on the dimmed word layer and reads as a duplicate line.
         shadows: const <Shadow>[
-          Shadow(
-            color: Color(0x38000000),
-            blurRadius: 10,
-            offset: Offset(0, 2),
-          ),
-          Shadow(color: Color(0x20000000), blurRadius: 3),
+          Shadow(color: Color(0x66000000), blurRadius: 2, offset: Offset(0, 1)),
         ],
       ),
       _settings.fontSize * scale,
