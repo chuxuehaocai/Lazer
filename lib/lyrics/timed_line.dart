@@ -67,6 +67,21 @@ class TimedLyricText extends StatefulWidget {
 class _TimedLyricTextState extends State<TimedLyricText> {
   _WordLayout? _layout;
   Object? _layoutKey;
+  _WordLayout? _scheduledPreparation;
+
+  void _scheduleWordPreparation(_WordLayout layout) {
+    if (layout.wordsPrepared) return;
+    if (identical(_scheduledPreparation, layout)) return;
+    _scheduledPreparation = layout;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (identical(_scheduledPreparation, layout)) {
+        _scheduledPreparation = null;
+      }
+      if (!mounted || !identical(_layout, layout)) return;
+      layout.prepareWords();
+    });
+  }
+
   @override
   void dispose() {
     _layout?.dispose();
@@ -101,6 +116,7 @@ class _TimedLyricTextState extends State<TimedLyricText> {
           );
           _layoutKey = key;
         }
+        _scheduleWordPreparation(_layout!);
         return Semantics(
           label: widget.line.text,
           child: ExcludeSemantics(
@@ -189,6 +205,8 @@ class _WordLayout {
 
   // Off-focus rows need one paragraph, not a dim paragraph and a selection
   // box for every grapheme. Materialize those only when word effects paint.
+  bool get wordsPrepared => _dim != null;
+
   void prepareWords() {
     if (_dim != null) return;
     _dim = TextPainter(
@@ -372,6 +390,13 @@ class _WordPainter extends CustomPainter {
       // Fully unfocused rows are painted by the parent's colour filter; the
       // old code still pushed an opaque saveLayer here for every visible
       // word-timed line on every frame of the song.
+      layout.bright.paint(canvas, Offset.zero);
+      return;
+    }
+    // A row normally gets prepared while it is still off focus. If it enters
+    // the focus band before the post-frame warm-up runs, keep this critical
+    // frame cheap and let the next frame pick up the word masks.
+    if (!layout.wordsPrepared && focus < .15) {
       layout.bright.paint(canvas, Offset.zero);
       return;
     }
