@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lazer_nextgen/data/models.dart';
 import 'package:lazer_nextgen/lyrics/lyric_document.dart';
+import 'package:lazer_nextgen/lyrics/timed_line.dart';
 import 'package:lazer_nextgen/lyrics/viewport.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
@@ -179,4 +180,39 @@ void main() {
     expect(tester.binding.transientCallbackCount, greaterThan(0));
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'resume re-syncs the active line when the audio position moved back',
+    (tester) async {
+      final state = _PlaybackState()..playhead = const Duration(seconds: 6);
+      addTearDown(state.dispose);
+      await _show(tester, state);
+      await tester.pump();
+      expect(
+        tester
+            .widgetList<TimedLyricText>(find.byType(TimedLyricText))
+            .where((line) => line.active)
+            .single
+            .line
+            .text,
+        'Second',
+      );
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      state.playhead = Duration.zero;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+
+      expect(
+        tester
+            .widgetList<TimedLyricText>(find.byType(TimedLyricText))
+            .where((line) => line.active)
+            .single
+            .line
+            .text,
+        'First',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 }

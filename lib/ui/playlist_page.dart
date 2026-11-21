@@ -253,7 +253,14 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
       }
     } catch (_) {
       if (!mounted || serial != _requestSerial) return;
-      setState(() => _error = '歌单读取失败，请重试。'); // i18n:key
+      // A paged request can fail after one or more pages have already painted.
+      // Keep the usable rows on screen instead of replacing them with an error
+      // notice that claims the whole playlist failed.
+      if (_tracks == null || _tracks!.isEmpty) {
+        setState(() => _error = '歌单读取失败，请重试。'); // i18n:key
+      } else {
+        setState(() => _error = null);
+      }
     }
   }
 

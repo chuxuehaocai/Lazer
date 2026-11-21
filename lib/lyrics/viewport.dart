@@ -182,6 +182,11 @@ class _LyricViewportState extends State<LyricViewport>
     // scheduling a layout frame while idle lyrics are suspended.
     setState(() {});
     _lastMedia = null;
+    _lastLanePosition = null;
+    // The audio backend may resume from a position earlier than the last
+    // rendered line after it was recreated while the app was backgrounded.
+    // Do not let the forward-only playback guard keep that stale line active.
+    _active = -1;
     _manual = _selection.active;
     _onLane();
     if (!identical(_sourceLines, widget.state.lyrics) || _lines.isEmpty) return;

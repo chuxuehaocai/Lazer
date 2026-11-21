@@ -36,6 +36,9 @@ import '../theme/font_preferences.dart';
 /// instead of sharing it with lyrics, comments or the queue.
 enum DesktopNowPlayingPane { lyrics, comments, queue, none }
 
+/// Breathing room below the cover and metadata group on the desktop canvas.
+const double kDesktopArtworkBottomInset = 24;
+
 bool _usesWindowCapsule(BuildContext context) =>
     WindowChromeScope.maybeLayoutOf(context)?.inline == true &&
     !TvScope.isActive(context);
@@ -649,6 +652,7 @@ class _RenderArtworkAndMetadata extends RenderBox
           _ArtworkAndMetadataParentData
         > {
   static const double _gap = 16;
+  static const double _bottomInset = kDesktopArtworkBottomInset;
 
   @override
   void setupParentData(RenderBox child) {
@@ -662,13 +666,17 @@ class _RenderArtworkAndMetadata extends RenderBox
     size = constraints.biggest;
     final RenderBox artwork = firstChild!;
     final RenderBox metadata = childAfter(artwork)!;
+    // Keep the artwork group clear of the lower window edge. The desktop dock
+    // owns the transport below this render box, but the cover should still
+    // have a visible breathing space when the dock is hidden.
+    final double availableHeight = math.max(0, size.height - _bottomInset);
 
     // First measure the metadata at full width, then match it to the artwork.
     // Narrower text may wrap, so recompute the available artwork size once.
     metadata.layout(BoxConstraints(maxWidth: size.width), parentUsesSize: true);
     double artworkSize = math.min(
       size.width,
-      math.max(0, size.height - _gap - metadata.size.height),
+      math.max(0, availableHeight - _gap - metadata.size.height),
     );
     if (artworkSize < size.width && artworkSize >= 96) {
       metadata.layout(
@@ -677,7 +685,7 @@ class _RenderArtworkAndMetadata extends RenderBox
       );
       final double available = math.max(
         0,
-        size.height - _gap - metadata.size.height,
+        availableHeight - _gap - metadata.size.height,
       );
       if (artworkSize > available) {
         artworkSize = available;
@@ -693,7 +701,7 @@ class _RenderArtworkAndMetadata extends RenderBox
     );
     final double top = math.max(
       0,
-      (size.height - artworkSize - _gap - metadata.size.height) / 2,
+      (availableHeight - artworkSize - _gap - metadata.size.height) / 2,
     );
     final double left = (size.width - artworkSize) / 2;
     (artwork.parentData! as _ArtworkAndMetadataParentData).offset = Offset(

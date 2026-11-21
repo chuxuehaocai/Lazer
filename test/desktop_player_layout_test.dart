@@ -293,10 +293,14 @@ void main() {
             : sample.size.height;
         expect(
           art.top - availableTop,
-          closeTo(availableBottom - metadata.bottom, .5),
+          closeTo(
+            availableBottom - metadata.bottom - kDesktopArtworkBottomInset,
+            .5,
+          ),
           reason:
-              'The cover and its metadata should be centered together '
-              'while controls are ${controls ? 'visible' : 'hidden'}.',
+              'The cover and its metadata should be centered with the '
+              'desktop bottom inset while controls are '
+              '${controls ? 'visible' : 'hidden'}.',
         );
         expect(art.width, closeTo(art.height, .1));
         expect(metadata.bottom, lessThanOrEqualTo(availableBottom));

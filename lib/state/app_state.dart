@@ -3564,7 +3564,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // Serialising a long lyric sheet creates one map per line and can invoke
     // every enabled Lua plugin. Let the current frame present the new song
     // first, then coalesce cache/import/network updates into one event.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    void publish() {
       _pluginLyricsBroadcastPending = false;
       if (_presentationDisposed) return;
       pluginManager.broadcastPlayerEvent('lyric', {
@@ -3590,7 +3590,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         ],
         'pureMusic': lyricsPureMusic,
       });
-    });
+    }
+    try {
+      WidgetsBinding.instance.addPostFrameCallback((_) => publish());
+    } on FlutterError {
+      // AppState also has pure-Dart callers that do not initialize a Flutter
+      // binding. Keep their plugin event synchronous instead of making a
+      // structural playback operation depend on a widget test binding.
+      publish();
+    }
   }
 
   void _updateSystemWidget() {
