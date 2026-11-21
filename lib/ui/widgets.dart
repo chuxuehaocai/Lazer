@@ -384,6 +384,12 @@ class _AppTrackRowState extends State<AppTrackRow>
           child: InkWell(
             onTap: feedbackAction(context, widget.onTap),
             onFocusChange: (value) => setState(() => _focused = value),
+            // The row container owns hover/current backgrounds. The default
+            // InkWell overlay spans the full hit target and is wider than
+            // the inset current-track surface.
+            overlayColor: const WidgetStatePropertyAll<Color?>(
+              Colors.transparent,
+            ),
             borderRadius: radius,
             onSecondaryTapDown: widget.onMenuRequested == null
                 ? null
