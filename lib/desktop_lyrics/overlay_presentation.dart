@@ -183,7 +183,7 @@ extension _OverlayPresentation on _LyricsOverlayAppState {
             active: active,
             position: () =>
                 Duration(microseconds: (_currentPositionMs * 1000).round()),
-            repaint: _frames,
+            repaint: _wordFrame(index),
             emphasis: emphasis,
             maxLines: 1,
           ),

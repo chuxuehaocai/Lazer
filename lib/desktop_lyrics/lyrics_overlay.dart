@@ -222,6 +222,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   final Stopwatch _clock = Stopwatch()..start();
   final OverlayMotionBuffer _motions = OverlayMotionBuffer();
   final Map<int, ui.ImageFilter> _blurFilters = <int, ui.ImageFilter>{};
+  final Map<int, ValueNotifier<int>> _wordFrames = <int, ValueNotifier<int>>{};
   final ValueNotifier<int> _frames = ValueNotifier<int>(0);
 
   late LyricsOverlayMode _mode;
@@ -310,9 +311,16 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     _clock.stop();
     _pendingSize = null;
     _ticker?.dispose();
+    for (final notifier in _wordFrames.values) {
+      notifier.dispose();
+    }
+    _wordFrames.clear();
     _frames.dispose();
     super.dispose();
   }
+
+  ValueNotifier<int> _wordFrame(int index) =>
+      _wordFrames[index] ??= ValueNotifier<int>(0);
 
   double get _currentPositionMs {
     final value = _playing
@@ -434,6 +442,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     _seekPending = false;
     if (_visible && _lifecycleVisible && (!_playing || _reducedMotion)) {
       _frames.value++;
+      _wordFrame(_focus).value++;
     }
     _ensureTicker();
   }
@@ -549,6 +558,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     // Paint the final settled frame too; otherwise a stopped ticker can leave
     // the text a fraction of a pixel away from its final position.
     _frames.value++;
+    if (_continuousFrames) _wordFrame(_focus).value++;
     _ensureTicker();
   }
 

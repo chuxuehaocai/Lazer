@@ -126,6 +126,7 @@ class _TimedLyricTextState extends State<TimedLyricText> {
                 layout: _layout!,
                 position: widget.position,
                 emphasis: widget.emphasis ?? () => widget.active ? 1.0 : 0.0,
+                animateWords: widget.active,
                 repaint: widget.repaint,
               ),
             ),
@@ -378,25 +379,27 @@ class _WordPainter extends CustomPainter {
     required this.layout,
     required this.position,
     required this.emphasis,
+    required this.animateWords,
     required Listenable repaint,
   }) : super(repaint: repaint);
   final _WordLayout layout;
   final Duration Function() position;
   final double Function() emphasis;
+  final bool animateWords;
   @override
   void paint(Canvas canvas, Size size) {
     final focus = emphasis().clamp(0.0, 1.0);
-    if (focus <= 0) {
+    if (!animateWords || focus <= 0) {
       // Fully unfocused rows are painted by the parent's colour filter; the
       // old code still pushed an opaque saveLayer here for every visible
       // word-timed line on every frame of the song.
       layout.bright.paint(canvas, Offset.zero);
       return;
     }
-    // A row normally gets prepared while it is still off focus. If it enters
-    // the focus band before the post-frame warm-up runs, keep this critical
-    // frame cheap and let the next frame pick up the word masks.
-    if (!layout.wordsPrepared && focus < .15) {
+    // A row normally gets prepared while it is still off focus. If a new
+    // document makes an active row before that warm-up runs, never build its
+    // glyph masks synchronously in the first visible frame.
+    if (!layout.wordsPrepared || focus < .2) {
       layout.bright.paint(canvas, Offset.zero);
       return;
     }
@@ -550,5 +553,6 @@ class _WordPainter extends CustomPainter {
   bool shouldRepaint(covariant _WordPainter oldDelegate) =>
       oldDelegate.layout != layout ||
       oldDelegate.position != position ||
-      oldDelegate.emphasis != emphasis;
+      oldDelegate.emphasis != emphasis ||
+      oldDelegate.animateWords != animateWords;
 }

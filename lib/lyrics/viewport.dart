@@ -577,12 +577,13 @@ class _LyricViewportState extends State<LyricViewport>
       emphasisChanged = emphasisChanged || scale != _scales[i].value;
       moving = moving || !_ys[i].arrived || !_scales[i].arrived;
     }
-    // Only the active word row needs a paint every frame; a row whose scale
-    // is still easing needs one for its colour fade. Everything else stays
-    // behind its RepaintBoundary even though the outer stack keeps moving.
+    // Only the active word row needs a paint every frame. The scale spring of
+    // an outgoing row is carried by its ColorFiltered parent, while its word
+    // painter is already static, so waking that row's boundary only adds a
+    // second lyric raster during every line handoff.
     final bool wordFrame = widget.state.playing && _hasWordTimings;
     for (var i = 0; i < _rowFrames.length && i < _scales.length; i++) {
-      if (wordFrame && i == _active || !_scales[i].arrived) {
+      if (i == _active && (wordFrame || !_scales[i].arrived)) {
         _rowFrames[i].value++;
       }
     }
