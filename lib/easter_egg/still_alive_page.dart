@@ -7,14 +7,9 @@ import 'package:flutter/services.dart';
 import '../animation/view_transitions.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
-import '../updates/open_external.dart';
-import '../widgets/spring_buttons.dart';
 import '../widgets/window_chrome.dart';
 import 'frums_credits.dart';
 import 'still_alive_audio.dart';
-
-const String frumsCreditsRepository =
-    'https://github.com/sititou70/frums-credits-cli-nosound';
 
 Future<void> openStillAlive(BuildContext context, AppState state) {
   state.pause();
@@ -23,7 +18,7 @@ Future<void> openStillAlive(BuildContext context, AppState state) {
   );
 }
 
-/// The centered, silent Frums credits easter egg.
+/// The centered Frums credits easter egg.
 class StillAlivePage extends StatefulWidget {
   const StillAlivePage({super.key, this.playback, this.clock, this.appState});
 
@@ -39,7 +34,7 @@ class StillAlivePage extends StatefulWidget {
 
 class _StillAlivePageState extends State<StillAlivePage>
     with SingleTickerProviderStateMixin {
-  static const Color _amber = Color(0xffffbc63);
+  static const Color _foreground = Colors.white;
   static const Color _background = Colors.black;
 
   late final StillAlivePlayback _audio =
@@ -53,6 +48,18 @@ class _StillAlivePageState extends State<StillAlivePage>
   void initState() {
     super.initState();
     unawaited(_loadCredits());
+    unawaited(_startAudio());
+  }
+
+  Future<void> _startAudio() async {
+    try {
+      await _audio.load();
+      if (!mounted) return;
+      await _audio.play();
+    } catch (_) {
+      // The animation remains usable when a platform decoder cannot open the
+      // bundled soundtrack.
+    }
   }
 
   Future<void> _loadCredits() async {
@@ -102,7 +109,7 @@ class _StillAlivePageState extends State<StillAlivePage>
             data: ThemeData(
               brightness: Brightness.dark,
               colorScheme: ColorScheme.fromSeed(
-                seedColor: _amber,
+                seedColor: _foreground,
                 brightness: Brightness.dark,
               ),
               scaffoldBackgroundColor: _background,
@@ -114,7 +121,7 @@ class _StillAlivePageState extends State<StillAlivePage>
                 'monospace',
               ],
               iconButtonTheme: IconButtonThemeData(
-                style: IconButton.styleFrom(foregroundColor: _amber),
+                style: IconButton.styleFrom(foregroundColor: _foreground),
               ),
             ),
             child: Scaffold(
@@ -145,62 +152,34 @@ class _StillAlivePageState extends State<StillAlivePage>
                             child: SizedBox(
                               width: double.infinity,
                               height: double.infinity,
-                              child: DecoratedBox(
+                              child: Padding(
                                 key: const ValueKey('still-alive-report'),
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: _amber.withValues(alpha: .65),
-                                  ),
-                                  borderRadius: BorderRadius.circular(12),
-                                  color: _amber.withValues(alpha: .04),
+                                padding: const EdgeInsets.fromLTRB(
+                                  28,
+                                  24,
+                                  28,
+                                  16,
                                 ),
-                                child: Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    28,
-                                    24,
-                                    28,
-                                    16,
-                                  ),
-                                  child: Column(
-                                    children: <Widget>[
-                                      const Text(
-                                        'FRUMS CREDITS',
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: _amber,
-                                          fontSize: 28,
-                                          fontWeight: FontWeight.w700,
-                                          letterSpacing: 2.4,
-                                        ),
+                                child: Column(
+                                  children: <Widget>[
+                                    const Text(
+                                      'FRUMS CREDITS',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: _foreground,
+                                        fontSize: 28,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 2.4,
                                       ),
-                                      const SizedBox(height: 8),
-                                      Expanded(
-                                        child: _FrumsCreditsViewport(
-                                          frame: _frame,
-                                          error: _loadError,
-                                        ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Expanded(
+                                      child: _FrumsCreditsViewport(
+                                        frame: _frame,
+                                        error: _loadError,
                                       ),
-                                      const SizedBox(height: 8),
-                                      SelectableText(
-                                        frumsCreditsRepository,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                          color: _amber.withValues(alpha: .72),
-                                          fontSize: 11,
-                                          height: 1.25,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      SpringTextButton(
-                                        onPressed: () => unawaited(
-                                          openExternalUrl(
-                                            frumsCreditsRepository,
-                                          ),
-                                        ),
-                                        child: const TrText('打开仓库'),
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -230,10 +209,10 @@ class _FrumsCreditsViewport extends StatelessWidget {
     if (error != null) {
       return Center(
         child: Text(
-          'FRUMS CREDITS\n$frumsCreditsRepository',
+          'FRUMS CREDITS',
           key: const ValueKey('frums-credits-animation'),
           textAlign: TextAlign.center,
-          style: const TextStyle(color: Color(0xffffbc63), fontSize: 12),
+          style: const TextStyle(color: Colors.white, fontSize: 12),
         ),
       );
     }
@@ -241,7 +220,7 @@ class _FrumsCreditsViewport extends StatelessWidget {
       return const Center(
         child: CircularProgressIndicator(
           key: ValueKey('frums-credits-animation'),
-          color: Color(0xffffbc63),
+          color: Colors.white,
           strokeWidth: 2,
         ),
       );
@@ -255,7 +234,7 @@ class _FrumsCreditsViewport extends StatelessWidget {
           softWrap: false,
           textScaler: TextScaler.noScaling,
           style: const TextStyle(
-            color: Color(0xffffbc63),
+            color: Colors.white,
             fontFamily: 'LazerMono',
             fontFeatures: [FontFeature.disable('liga')],
             fontSize: 20,

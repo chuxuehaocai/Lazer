@@ -132,7 +132,7 @@ class StillAliveScore {
         .fold<int>(0, (width, row) => math.max(width, row.length));
   }
 
-  static const audioAsset = 'assets/easter_eggs/still_alive/sa1.mp3';
+  static const audioAsset = 'assets/easter_eggs/frums_credits/credits.mp3';
   static final original = StillAliveScore(
     events: stillAliveOriginalEvents,
     artwork: stillAliveOriginalArtwork,

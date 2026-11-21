@@ -10,7 +10,7 @@ import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 // ignore: depend_on_referenced_packages
 import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
 
-const stillAliveAudioAsset = 'assets/easter_eggs/still_alive/sa1.mp3';
+const stillAliveAudioAsset = 'assets/easter_eggs/frums_credits/credits.mp3';
 
 /// Playback used by the terminal page. It owns no system media metadata.
 abstract interface class StillAlivePlayback implements Listenable {
