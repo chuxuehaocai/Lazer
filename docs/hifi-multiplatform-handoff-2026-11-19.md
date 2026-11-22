@@ -289,7 +289,6 @@ Dart 必须分别跟踪：
 - `native/lazer-audio/src/engine.cpp`
 - `native/lazer-audio/src/exports_android.map`
 - Android 打包/导出检查脚本
-- `ci/verify-ios-audio.py` 的 `ABI_SYMBOLS`（即使 iOS 不在功能验收范围，导出镜像仍需保持契约一致）
 - `ci/verify-android-audio.py`
 
 ### Dart

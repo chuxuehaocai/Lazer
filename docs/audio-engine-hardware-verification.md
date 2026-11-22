@@ -7,8 +7,7 @@
 上这些结论是否成立"，包括 DSP 与 DSD 的物理层。**
 
 第 1–10 节主要针对桌面原生端点；其中的硬件独占条件和 DSD 自动策略不适用于 iOS。
-iOS 不提供应用层独占、严格 PCM/Bit-perfect 或 DoP，只使用系统共享 RemoteIO 并把
-DSD 转为 PCM；iOS 与 NICEHCK NK1 的共享输出检查请使用第 11 节。
+iOS 使用 Flutter 平台音频插件，不提供原生 HiFi、独占、Bit-perfect 或 DoP 能力。
 
 ---
 
@@ -16,7 +15,7 @@ DSD 转为 PCM；iOS 与 NICEHCK NK1 的共享输出检查请使用第 11 节。
 
 | 项目 | 要求 |
 | --- | --- |
-| 分支 | `nextgen`（已合入 iOS RemoteIO、卷积和会话修复） |
+| 分支 | `nextgen` |
 | 构建 | 必须能找到 DSD-capable FFmpeg：设置 `LAZER_FFMPEG_ROOT`，或把 SDK 放在 `third_party/ffmpeg` |
 | 引擎版本 | 源码与 Dart 镜像同为 **ABI 31**。构建会同时重编引擎；**不要**直接跑旧的 `build/` 产物 |
 | 平台 | Windows 已验证构建；Linux / macOS 的构建链路在 CI 里，但播放行为未验证 |
@@ -228,7 +227,7 @@ iOS 的引擎是**静态链接**进 `Runner` 二进制的（`liblazer-audio.a` +
 在提交 `ce0c24a` 上通过了 Xcode 26.6 的真机/模拟器归档构建、原生模拟器播放
 （`PASS file=341ms reader=352ms ABI=29`）与 IPA 导出检查。
 这证明旧版本的真实 FFmpeg/reader/RemoteIO 链路能在模拟器推进播放时钟，
-不代表本轮修改或下表真机检查已经通过。本轮修复和验证范围见 [iOS 音频记录](ios-audio.md)。
+不代表本轮修改或下表真机检查已经通过。本轮 iOS 播放使用 Flutter 平台音频插件。
 
 装机前提：未签名 IPA 需自行签名（Sideloadly / AltStore / 自有证书）。装好后先看
 设置 → 高保真播放 → 播放引擎，以及诊断日志：应当显示原生引擎。
@@ -238,7 +237,7 @@ iOS 的引擎是**静态链接**进 `Runner` 二进制的（`liblazer-audio.a` +
 19 个符号与 reader bridge 的 11 个导出，包内没有额外 FFmpeg 动态库。
 本轮进一步增加 Mach-O 真机/模拟器平台检查，以及 `ios-flutter-integration` 任务，
 直接运行 Dart FFI、worker、HiFi 控制器和实际音频输出测试；后者当时是 IPA 的依赖任务。
-该集成任务此后已从 CI 移除，`ci/run-ios-flutter-audio.py` 只作为本地运行器保留，
+该集成任务已从 CI 和本地工具中移除，
 IPA 现在仅依赖 `check`。
 新增任务已在提交 `655e816` 的 [CI 44236700237](https://github.com/chuxuehaocai/Lazer/actions/runs/44236700237)
 通过全部 5 项真实 iOS 模拟器基础播放检查；该次原生播放记录为
@@ -253,7 +252,7 @@ RemoteIO 条件路径，不证明当前 iOS 产品支持独占、严格 PCM 或 
 这些入口移除。
 整个 CI 已成功完成，新的未签名 IPA 已生成并下载；本地确认版本 `2.0.301+301`、
 ZIP CRC、应用/Widget 元数据、包内容及 SHA-256 与 CI 一致。构建与校验值作为历史证据
-记录到 [iOS 音频记录](ios-audio.md#历史严格-usb-分支构建记录产品层未启用)。
+iOS 原生音频链路已移除，当前不执行该硬件验证。
 
 本轮最终本地检查通过 Flutter 727 项（另 2 项缺少外部插件 checkout 而跳过）、
 静态分析、本地化检查、Python CI 测试 106 项和约 6.2 秒的 RemoteIO 假 AudioUnit

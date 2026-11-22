@@ -106,7 +106,6 @@ codesign -d --entitlements :- "$app" | plutil -p -
 
 **能不能在 Windows 签名：能。能不能在 Windows 构建 IPA：不能。**
 
-构建需要 macOS 与 Xcode（`ci/build-ios-audio.sh` 会编 iOS 静态库），CI 在
 `macos-26` 上产出**未签名** IPA。你下载它，然后在 Windows 上签名——签名本身不需要
 Mac，`rcodesign`（`apple-codesign`，纯 Rust）就能跑。
 

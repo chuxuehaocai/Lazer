@@ -121,7 +121,10 @@ jobs:
           # it so the job does not depend on the flaky GitHub release asset
           # download during action setup.
           release: false
-          update: true
+          # The hosted runner already carries a usable MSYS2 installation.
+          # Avoid a full rolling-release upgrade here because a transient
+          # mirror timeout would prevent the Windows build from starting.
+          update: false
           path-type: inherit
           install: make nasm diffutils git perl
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
@@ -628,10 +631,6 @@ jobs:
       - run: xcodebuild -version
       - run: flutter pub get --enforce-lockfile
       - run: dart tool/patch_lua_dardo_plus.dart
-      - name: Build and link the device engine
-        env:
-          FFMPEG_BUILD_JOBS: '4'
-        run: bash ci/build-ios-audio.sh device
       - name: Build the unsigned iOS app
         shell: bash
         run: |
@@ -641,14 +640,6 @@ jobs:
           flutter build ios --release --no-codesign --no-pub --build-name="$build_name" \
             --dart-define=LAZER_COMMIT=${{ github.sha }} \
             --dart-define=LAZER_VERSION=${{ env.LAZER_VERSION }}
-      - name: Verify the app exports the native engine ABI
-        run: |
-          set -euo pipefail
-          xcodebuild -project ios/Runner.xcodeproj -scheme Runner \
-            -configuration Release -sdk iphoneos -showBuildSettings -json \
-            > build/ios/audio-build-settings.json
-          python3 ci/verify-ios-audio.py --build-settings build/ios/audio-build-settings.json
-          python3 ci/verify-ios-audio.py --app build/ios/iphoneos/Runner.app --expect-native
       - name: Verify app and extension bundle metadata
         run: python3 ci/verify-ios-bundle.py --app build/ios/iphoneos/Runner.app
       - name: Create unsigned IPA with the required Payload directory
@@ -662,7 +653,6 @@ jobs:
           unzip -l dist/Lazer-iOS-aarch64.ipa | grep 'Payload/Runner.app/Info.plist'
           # Gate on the binary from the finished IPA, not only the build tree.
           python3 ci/verify-ios-bundle.py --ipa dist/Lazer-iOS-aarch64.ipa
-          python3 ci/verify-ios-audio.py --ipa dist/Lazer-iOS-aarch64.ipa
           python3 ci/verify-package-contents.py dist/Lazer-iOS-aarch64.ipa
           (cd dist && shasum -a 256 Lazer-iOS-aarch64.ipa > Lazer-iOS-aarch64.ipa.sha256)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

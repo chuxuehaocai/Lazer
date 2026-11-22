@@ -4,10 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_abi.dart';
 import 'package:lazer_nextgen/audio/native/lazer_audio_library.dart';
 
-/// The iOS engine is a static archive force-loaded into Runner and reached
-/// through `DynamicLibrary.process()`. There is no file to inspect, so the only
-/// thing that can tell a working link from a broken one is the symbol list this
-/// loader requires — and the same list the build and package checks use.
+/// The native engine is loaded from a platform library on supported desktop
+/// and Android hosts. iOS uses the platform audio plugin instead.
 void main() {
   test('the required ABI list matches the C header contract', () {
     final String header = File(
@@ -49,10 +47,7 @@ void main() {
     }
   });
 
-  test('iOS is offered the native path without a loadable file', () {
-    // The reason a host is supported is a backend, not a file name: iOS has the
-    // RemoteIO backend and links the engine in, so an empty candidate list there
-    // is not a downgrade.
+  test('iOS uses the platform audio path', () {
     if (!Platform.isIOS) {
       expect(
         LazerAudioLoader.isSupportedHost,
@@ -61,9 +56,6 @@ void main() {
       );
       return;
     }
-    expect(LazerAudioLoader.isSupportedHost, isTrue);
-    final LazerAudioAvailability availability = LazerAudioLoader.load();
-    expect(availability.api, isNotNull, reason: availability.reason);
-    expect(availability.reason, isNull);
+    expect(LazerAudioLoader.isSupportedHost, isFalse);
   });
 }

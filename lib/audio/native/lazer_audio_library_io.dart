@@ -25,10 +25,7 @@ enum LazerAudioEngineSource {
   environment('environment'),
 
   /// The image shipped with the app or staged by the development build.
-  bundled('bundled'),
-
-  /// The image linked into the executable (iOS).
-  linked('linked');
+  bundled('bundled');
 
   const LazerAudioEngineSource(this.label);
 
@@ -739,11 +736,10 @@ class LazerAudioBridgeApi {
 
 /// The ABI entry points a load must find before the engine is offered at all.
 ///
-/// Kept in step with `ci/verify-ios-audio.py` (`ABI_SYMBOLS`) and
-/// `ci/build-ios-audio.sh`, which fail the build when one is absent from the
-/// archive. `lazer_audio_set_automix`, `lazer_audio_read_log` and the device
-/// catalogs are additive: an engine without them still plays, so they are looked
-/// up optionally instead of gating the path.
+/// The required ABI list gates the native loader. `lazer_audio_set_automix`,
+/// `lazer_audio_read_log` and the device catalogs are additive: an engine
+/// without them still plays, so they are looked up optionally instead of
+/// gating the path.
 const List<String> requiredEngineSymbols = <String>[
   // Called before the list is checked, because the version it returns decides
   // whether any other struct may be read at all.
@@ -794,16 +790,9 @@ abstract final class LazerAudioLoader {
 
   /// Whether the host platform has an engine backend at all.
   ///
-  /// Windows (WASAPI), Linux (ALSA), macOS (CoreAudio), 64-bit Android (AAudio)
-  /// and iOS (RemoteIO) share this ABI. Other hosts keep the system engine.
-  static bool get isSupportedHost =>
-      Platform.isIOS || _engineFileNames.isNotEmpty;
-
-  /// Whether the engine is linked into this process instead of loaded from a
-  /// file. iOS refuses `dlopen` for an image the app was not shipped with, so
-  /// the engine, its bridge and FFmpeg are static archives linked into the app
-  /// and reached through `DynamicLibrary.process()`.
-  static bool get _isInProcess => Platform.isIOS;
+  /// Windows (WASAPI), Linux (ALSA), macOS (CoreAudio), and 64-bit Android
+  /// (AAudio) use the native engine. iOS uses the platform audio plugin.
+  static bool get isSupportedHost => _engineFileNames.isNotEmpty;
 
   /// File names to try, most specific first.
   ///
@@ -844,9 +833,7 @@ abstract final class LazerAudioLoader {
   }
 
   static LazerAudioAvailability _load() {
-    final bool inProcess = _isInProcess;
-    if (!inProcess &&
-        !Platform.isWindows &&
+    if (!Platform.isWindows &&
         !Platform.isLinux &&
         !Platform.isMacOS &&
         !Platform.isAndroid) {
@@ -856,18 +843,9 @@ abstract final class LazerAudioLoader {
     }
     final List<String> engineFileNames = _engineFileNames;
     final List<String> bridgeFileNames = _bridgeFileNames;
-    if (!inProcess && (engineFileNames.isEmpty || bridgeFileNames.isEmpty)) {
+    if (engineFileNames.isEmpty || bridgeFileNames.isEmpty) {
       return LazerAudioAvailability.unavailable(
         'unsupported architecture ${Abi.current()}',
-      );
-    }
-    if (inProcess) {
-      return _loadCandidate(
-        null,
-        bridgeFileNames,
-        inProcess: true,
-        source: LazerAudioEngineSource.linked,
-        sourceLabel: 'lazer-audio',
       );
     }
     final String? explicitPath = importedLibraryPath?.trim();
@@ -971,9 +949,8 @@ abstract final class LazerAudioLoader {
   }
 
   static LazerAudioAvailability _loadCandidate(
-    Uri? enginePath,
+    Uri enginePath,
     List<String> bridgeFileNames, {
-    bool inProcess = false,
     required LazerAudioEngineSource source,
     required String sourceLabel,
   }) {
@@ -985,12 +962,10 @@ abstract final class LazerAudioLoader {
     // is what makes both a staged `build/native-audio` and a `flutter run` from the
     // repository root work. A packaged bundle has them next to the executable
     // already, and the attempt is harmless there.
-    if (!inProcess) _preloadDependencies(enginePath!);
+    _preloadDependencies(enginePath);
     final DynamicLibrary library;
     try {
-      library = inProcess
-          ? DynamicLibrary.process()
-          : DynamicLibrary.open(enginePath!.toFilePath());
+      library = DynamicLibrary.open(enginePath.toFilePath());
     } catch (error) {
       return LazerAudioAvailability.unavailable(
         'loading $engineFileName failed: '
@@ -1035,38 +1010,22 @@ abstract final class LazerAudioLoader {
     // it just cannot stream. A load failure is reported through
     // `supportsStreaming` rather than downgrading the whole engine.
     LazerAudioBridgeApi? bridge;
-    if (inProcess) {
+    final Uri? bridgePath = _resolve(
+      fileNames: bridgeFileNames,
+      environmentVariable: bridgeOverrideVariable,
+      siblingDirectory: File(enginePath.toFilePath()).parent.path,
+    );
+    if (bridgePath != null) {
       try {
-        bridge = LazerAudioBridgeApi(library);
+        bridge = LazerAudioBridgeApi(
+          DynamicLibrary.open(bridgePath.toFilePath()),
+        );
       } catch (error) {
-        // In-process there is no path to report: the bridge is linked into the
-        // same image, so a failure here is a build problem that also removes
-        // network playback. Say so instead of leaving the user with a silently
-        // local-only engine.
         developer.log(
-          'the linked reader bridge is not usable, network sources will not '
-          'play: ${_safeError(error, null, sourceLabel)}',
+          'reader bridge for $engineFileName could not be loaded: '
+          '${_safeError(error, bridgePath, _basename(bridgePath.toFilePath()))}',
           name: 'lazer-audio',
         );
-      }
-    } else {
-      final Uri? bridgePath = _resolve(
-        fileNames: bridgeFileNames,
-        environmentVariable: bridgeOverrideVariable,
-        siblingDirectory: File(enginePath!.toFilePath()).parent.path,
-      );
-      if (bridgePath != null) {
-        try {
-          bridge = LazerAudioBridgeApi(
-            DynamicLibrary.open(bridgePath.toFilePath()),
-          );
-        } catch (error) {
-          developer.log(
-            'reader bridge for $engineFileName could not be loaded: '
-            '${_safeError(error, bridgePath, _basename(bridgePath.toFilePath()))}',
-            name: 'lazer-audio',
-          );
-        }
       }
     }
     return LazerAudioAvailability.available(

@@ -51,37 +51,9 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   bridge; `ci/verify-android-audio.py` then re-checks the APK itself.
 - The release job reads the uploaded desktop archives and refuses to publish one
   that does not contain the engine, the bridge and all four FFmpeg libraries.
-- iOS links `liblazer-audio.a`, `liblazer-audio-bridge.a` and the four FFmpeg
-  archives into the Runner binary through `ios/Flutter/LazerAudio.xcconfig`,
-  which `ci/ios-audio-xcconfig.sh` generates for the archives supplied by CI.
-  Its override is scoped to the selected SDK, so preparing device libraries
-  does not redirect a subsequent Simulator build to incompatible arm64 objects.
-  Local Xcode and Flutter builds use `ios/Flutter/LazerAudio.defaults.xcconfig`
-  and the Runner's **Prepare Audio Engine** phase instead: it builds the
-  engine automatically on the first build, keeps device and simulator archives
-  separate, and reuses them until native sources or the Xcode SDK change.
-  The first local build requires CMake and network access to the pinned FFmpeg
-  sources. An incomplete engine build fails the build instead of producing
-  an IPA that silently selects `just_audio`. The `ios` job builds the device
-  archives for arm64, verifies their Mach-O platform metadata as well as
-  symbols, and links them into the app it packages.
-  Running `integration_test/ios_native_engine_test.dart` against the Simulator
-  archives is a local step only; CI no longer schedules it and it does not gate
-  the IPA. That suite covers in-process FFI loading, the Dart worker, PCM at
-  44.1/96/192 kHz, DSD-to-PCM decoding, HiFi DSP and HTTP reader
-  playback/seek, plus two cases that inject legacy `bitPerfect` and `requireDoP`
-  settings. Simulator runs do not establish USB DAC negotiation, physical sound
-  quality or bit-perfect delivery on real hardware.
-  iOS does not expose exclusive output, strict PCM/Bit-perfect or DoP. RemoteIO
-  shared output remains the only product path, and DSD sources are converted to
-  PCM. The dormant native strict USB implementation and ABI values do not create
-  a user-visible capability; see [ios-audio.md](ios-audio.md).
-  The IPA job verifies the built executable's dynamic export trie, then repeats
-  the check on the executable read from the finished IPA before uploading it.
-  Both gates require the engine's 19 ABI symbols and all eleven reader bridge
-  exports. `dyld_info -exports` reads the trie the dynamic loader uses; an empty
-  trie or a failed inspection cannot pass through an ordinary symbol-table
-  fallback. All four FFmpeg components must be statically linked as well.
+- iOS builds use Flutter's platform audio plugin and do not build or link the
+  desktop native HiFi engine. The IPA job verifies the app and extension bundle
+  metadata and packages the unsigned archive.
 
 Release packages exclude FFmpeg source archives, license files and build metadata.
 `ci/verify-package-contents.py` checks the staged desktop apps and release archives.
@@ -184,4 +156,4 @@ Extract the whole Windows ZIP before launching the EXE. Downloaded AppImages nee
 `chmod +x`. macOS Apps are ad-hoc signed, not Developer ID signed/notarized. The
 unsigned IPA needs your own signing before installation.
 For per-target provisioning profiles and Windows/macOS signing commands, see
-[iOS signing and installation](ios-audio.md#重签名与安装).
+[iOS signing and installation](ios-widget-and-resigning.md).

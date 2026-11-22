@@ -13,8 +13,8 @@ library;
 
 /// Which playback path a launch runs on.
 enum AudioEnginePath {
-  /// The native HiFi engine (FFmpeg decode + WASAPI/ALSA/CoreAudio/AAudio/
-  /// RemoteIO output).
+  /// The native HiFi engine (FFmpeg decode + WASAPI/ALSA/CoreAudio/AAudio
+  /// output).
   native,
 
   /// `just_audio`/media_kit: the explicit, always-reported fallback.

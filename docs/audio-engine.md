@@ -325,7 +325,7 @@ Status of this port:
 | ReplayGain | Supported per source by the ABI; the app does not compute or pass it yet. |
 | Linux/macOS playback | Not run. The code is the master branch's, unchanged, but ALSA/CoreAudio device behaviour is unverified here. |
 | Android | Wired at the build and load layers: CI builds the engine for `arm64-v8a` and `armeabi-v7a`, stages them into `jniLibs` and verifies the APK, and `LazerAudioLoader` resolves `liblazer-audio.so` on `androidArm64`/`androidX64`. See `docs/android-audio.md`. **`armeabi-v7a` is not in the loader's candidate list**, so a 32-bit ARM build ships the engine without ever selecting it; Android has no exclusive/bit-perfect/DSD path (AAudio shared PCM only). |
-| iOS | The Runner statically links the arm64 engine, reader bridge and FFmpeg; Dart uses `DynamicLibrary.process()`. Product output is RemoteIO shared playback with native DSP, and DSD sources are converted to PCM. iOS does **not** expose exclusive output, strict PCM/Bit-perfect or DoP. The conditional strict USB PCM/DoP implementation and format-selection values `13/14` (introduced under ABI 30) are retained as dormant, product-unreachable code for engineering history; they are not a current capability or pending release feature. See [iOS implementation and validation](ios-audio.md). |
+| iOS | just_audio platform audio | System audio route; native HiFi controls are unavailable |
 
 Nothing here is evidence that a DAC received the source bits unaltered: the engine
 reports what the platform endpoint accepted, which is necessary but not sufficient, and
@@ -381,11 +381,3 @@ labelled as such instead of silently behaving like the fallback.
    format" into a bit-exactness result.
 3. Feed ReplayGain from the local-library metadata into `LazerOpenSettings`.
 4. Verify on Linux (ALSA `hw:`) and macOS (CoreAudio HAL, Hog Mode).
-5. Run `flutter test integration_test/ios_native_engine_test.dart -d <ios-device>`
-   on macOS to verify factory selection, worker startup, 24-bit high-rate PCM,
-   DSD64-to-PCM, measured preamp attenuation, EQ/crossfeed, HTTP reader playback,
-   pause, seek and stop through the linked iOS engine. It also injects legacy
-   `bitPerfect` and `requireDoP` settings and verifies that they are normalized to
-   shared RemoteIO playback with DSD-to-PCM before playback succeeds. CI runs the
-   same target on an isolated Simulator; USB DAC, background and route behavior
-   still need hardware validation.
