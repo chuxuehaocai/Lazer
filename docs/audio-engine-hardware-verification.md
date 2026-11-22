@@ -237,7 +237,9 @@ iOS 的引擎是**静态链接**进 `Runner` 二进制的（`liblazer-audio.a` +
 现有 CI 的通过记录包含六个 arm64 静态归档；`Runner` 的**动态导出表**具有引擎的
 19 个符号与 reader bridge 的 11 个导出，包内没有额外 FFmpeg 动态库。
 本轮进一步增加 Mach-O 真机/模拟器平台检查，以及 `ios-flutter-integration` 任务，
-直接运行 Dart FFI、worker、HiFi 控制器和实际音频输出测试；后者成为 IPA 的依赖任务。
+直接运行 Dart FFI、worker、HiFi 控制器和实际音频输出测试；后者当时是 IPA 的依赖任务。
+该集成任务此后已从 CI 移除，`ci/run-ios-flutter-audio.py` 只作为本地运行器保留，
+IPA 现在仅依赖 `check`。
 新增任务已在提交 `655e816` 的 [CI 44236700237](https://github.com/chuxuehaocai/Lazer/actions/runs/44236700237)
 通过全部 5 项真实 iOS 模拟器基础播放检查；该次原生播放记录为
 `PASS file=330ms reader=365ms ABI=29`。这仍不能代替下表的物理设备验收。

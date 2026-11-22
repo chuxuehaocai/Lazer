@@ -78,7 +78,8 @@ NK1 获得严格 PCM、Bit-perfect 或 DoP 能力。厂家标称的 384 kHz PCM 
 - 原生 DSP/输出拒绝不再被当作设置成功；失败后可重试相同配置。
 - iOS 构建覆盖按 SDK 区分 device 和 simulator；检查 Mach-O 平台，避免仅凭 arm64
   将真机归档交给模拟器链接。完整导出检查在原生归档构建阶段执行。
-- 增加 Flutter iOS 集成 CI 任务，作为 IPA 产出前置条件。运行器创建独立模拟器，
+- 曾增加 Flutter iOS 集成 CI 任务，作为 IPA 产出前置条件。该任务已从 CI 移除，
+  IPA 只依赖 `check`；`ci/run-ios-flutter-audio.py` 保留为本地运行器，创建独立模拟器、
   保留日志、限制超时并清理其创建的实例；失败不保留旧 PASS 文件。
 
 Apple 文档说明了 [IO 单元最大渲染帧数](https://developer.apple.com/documentation/audiotoolbox/kaudiounitproperty_maximumframesperslice)
@@ -101,7 +102,7 @@ python3 ci/run-ios-flutter-audio.py
 前级 −12 dB 的遥测变化、EQ/串扰播放、HTTP reader 与暂停/seek/恢复。
 另有两个平台能力用例：分别写入 `bitPerfect: true` 与 `requireDoP` 的旧设置，确认
 `HifiController` 将其规范化为普通共享输出和 DSD 转 PCM，随后 RemoteIO 仍能正常播放。
-CI 模拟器应执行全部 7 项。
+在本地模拟器上应执行全部 7 项；CI 不再调度该集成任务，IPA 也不以它为前置条件。
 高采样率测试允许路由授予较低速率，不把模拟器当作高采样率 DAC。
 DSP 测试信号约为 −66 dBFS，其余播放夹具静音。
 

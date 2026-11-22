@@ -62,20 +62,16 @@ loudly instead of producing a bundle that quietly falls back to `just_audio`:
   separate, and reuses them until native sources or the Xcode SDK change.
   The first local build requires CMake and network access to the pinned FFmpeg
   sources. An incomplete engine build fails the build instead of producing
-  an IPA that silently selects `just_audio`. The `ios-native` job builds both
-  device and Simulator archives for arm64, verifies their Mach-O platform
-  metadata as well as symbols, and plays file/reader fixtures in a UIKit app.
-  The `ios-flutter-integration` job then builds the actual Flutter app against
-  the Simulator archives and runs `integration_test/ios_native_engine_test.dart`.
-  It covers in-process FFI loading, the Dart worker, PCM at 44.1/96/192 kHz,
-  DSD-to-PCM decoding, HiFi DSP and HTTP reader playback/seek. Two additional
-  cases inject legacy `bitPerfect` and `requireDoP` settings, verify that the
-  iOS controller normalizes them to shared output and DSD-to-PCM, and then play
-  through RemoteIO. It creates and
-  deletes its own Simulator, bounds setup and execution, and uploads logs and
-  the result as `ios-flutter-audio-integration`. An unsuccessful integration
-  run blocks the IPA job. These Simulator checks do not establish USB DAC
-  negotiation, physical sound quality or bit-perfect delivery on real hardware.
+  an IPA that silently selects `just_audio`. The `ios` job builds the device
+  archives for arm64, verifies their Mach-O platform metadata as well as
+  symbols, and links them into the app it packages.
+  Running `integration_test/ios_native_engine_test.dart` against the Simulator
+  archives is a local step only; CI no longer schedules it and it does not gate
+  the IPA. That suite covers in-process FFI loading, the Dart worker, PCM at
+  44.1/96/192 kHz, DSD-to-PCM decoding, HiFi DSP and HTTP reader
+  playback/seek, plus two cases that inject legacy `bitPerfect` and `requireDoP`
+  settings. Simulator runs do not establish USB DAC negotiation, physical sound
+  quality or bit-perfect delivery on real hardware.
   iOS does not expose exclusive output, strict PCM/Bit-perfect or DoP. RemoteIO
   shared output remains the only product path, and DSD sources are converted to
   PCM. The dormant native strict USB implementation and ABI values do not create
