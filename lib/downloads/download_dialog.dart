@@ -58,6 +58,10 @@ Future<void> showTrackActions(
       Overlay.of(context).context.findRenderObject() as RenderBox?;
   final bool hasImportedLyrics = await state.importedLyrics.has(track);
   if (!context.mounted || overlay == null) return;
+  // Queue edits need a queue to edit, and the song already playing is not a
+  // candidate for "play next".
+  final bool hasQueue = state.queue.isNotEmpty;
+  final bool notCurrent = hasQueue && state.current?.id != track.id;
   final String? action = await showMenu<String>(
     context: context,
     position: RelativeRect.fromRect(
@@ -65,6 +69,17 @@ Future<void> showTrackActions(
       Offset.zero & overlay.size,
     ),
     items: <PopupMenuEntry<String>>[
+      PopupMenuItem<String>(
+        value: 'play-next',
+        enabled: notCurrent,
+        child: TrText('下一首播放'),
+      ),
+      PopupMenuItem<String>(
+        value: 'enqueue',
+        enabled: hasQueue,
+        child: TrText('添加到队列'),
+      ),
+      const PopupMenuDivider(),
       if (downloadable)
         PopupMenuItem<String>(value: 'download', child: TrText('下载歌曲')),
       if (!downloadable)
@@ -81,6 +96,10 @@ Future<void> showTrackActions(
   );
   if (!context.mounted) return;
   switch (action) {
+    case 'play-next':
+      state.queueNext(track);
+    case 'enqueue':
+      state.enqueueTrack(track);
     case 'download':
       if (downloadable) {
         await downloadTracks(context, state, <Track>[track]);

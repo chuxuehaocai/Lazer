@@ -13,6 +13,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../data/catalog.dart';
 import '../data/models.dart';
+import '../downloads/download_dialog.dart';
 import '../gateway/music_models.dart';
 import '../l10n/app_localizations.dart';
 import '../local/local_music_import.dart';
@@ -25,6 +26,7 @@ import '../widgets/apple_ui.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/playlist_picker_dialog.dart';
 import '../widgets/ui_scaling.dart';
+import 'home_pages.dart';
 import 'login.dart';
 import 'listening_statistics_page.dart';
 import 'page_utils.dart';
@@ -123,6 +125,19 @@ class AppLibraryPage extends StatelessWidget {
                         padding: const EdgeInsets.fromLTRB(0, 12, 0, 18),
                       ),
                       _householdEntries(context, apple, wide: wide),
+                      if (state.recentTracks.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 30),
+                        const AppSectionHeader(title: '最近播放'),
+                        const SizedBox(height: 14),
+                        HomeRecentTrackShelf(
+                          currentTrackId: state.current?.id,
+                          tracks: state.recentTracks,
+                          onPlay: (List<Track> tracks, int index) =>
+                              state.playQueue(tracks, startIndex: index),
+                          onMenuRequested: (Track track, Offset position) =>
+                              showTrackActions(context, state, track, position),
+                        ),
+                      ],
                       if (mine.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 30),
                         AppSectionHeader(

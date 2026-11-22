@@ -277,6 +277,9 @@ class _QueueRowState extends State<_QueueRow> with BuildSafeState<_QueueRow> {
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: feedbackAction(context, widget.onTap),
+                onSecondaryTapDown: (TapDownDetails details) =>
+                    _openMenu(details.globalPosition),
+                onLongPress: _openMenuAtRow,
                 onFocusChange: (bool value) => setState(() => _focused = value),
                 child: Stack(
                   children: <Widget>[
@@ -383,6 +386,54 @@ class _QueueRowState extends State<_QueueRow> with BuildSafeState<_QueueRow> {
         );
       },
     );
+  }
+
+  /// Opens the row menu at the pointer (right-click).
+  Future<void> _openMenu(Offset globalPosition) async {
+    final AppState state = widget.state;
+    final bool current = widget.isCurrent;
+    final String? choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        globalPosition & const Size(1, 1),
+        Offset.zero & MediaQuery.sizeOf(context),
+      ),
+      items: <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          value: 'play',
+          height: 36,
+          child: const SizedBox(width: 148, child: TrText('立即播放')),
+        ),
+        PopupMenuItem<String>(
+          value: 'next',
+          height: 36,
+          enabled: !current,
+          child: const SizedBox(width: 148, child: TrText('下一首播放')),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem<String>(
+          value: 'remove',
+          height: 36,
+          enabled: !current,
+          child: const SizedBox(width: 148, child: TrText('从队列移除')),
+        ),
+      ],
+    );
+    if (choice == null || !mounted) return;
+    final VoidCallback? run = switch (choice) {
+      'play' => () => state.playTrackAt(widget.index),
+      'next' => () => state.queueNext(widget.track),
+      'remove' => () => state.removeQueuedAt(widget.index),
+      _ => null,
+    };
+    feedbackAction(context, run)?.call();
+  }
+
+  /// Opens the row menu at the row itself (long-press, which carries no point).
+  void _openMenuAtRow() {
+    final RenderBox? box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    _openMenu(box.localToGlobal(box.size.center(Offset.zero)));
   }
 }
 

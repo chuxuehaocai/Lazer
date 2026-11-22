@@ -4655,6 +4655,71 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
   }
 
+  /// Puts [track] right after the current song without interrupting playback.
+  ///
+  /// Returns false when nothing moved: an empty queue has nothing to insert
+  /// into (play the song instead), the song already playing changes nothing,
+  /// and a song that is already the successor stays where it is. A song queued
+  /// further ahead moves up instead of appearing twice, because asking for it
+  /// again means "sooner", not "one more copy".
+  bool queueNext(Track track) {
+    if (_queue.isEmpty || current == null) return false;
+    if (track.id == current?.id) return false;
+    final int existing = _queue.indexWhere(
+      (Track queued) => queued.id == track.id,
+    );
+    if (existing > _queueIndex) {
+      if (existing == _queueIndex + 1) return false;
+      _queue.removeAt(existing);
+    }
+    _queue.insert(_queueIndex + 1, track);
+    // Everything after the current song shifted, so the shuffle bag's position
+    // bookkeeping no longer describes these songs.
+    _shuffleOrder.reset();
+    _markQueueChanged();
+    unawaited(_saveQueue());
+    // The prepared successor either moved or was displaced; rebuild it from the
+    // edited order so the next hand-off plays what the listener now expects.
+    _refreshQueueSuccessor();
+    notifyListeners();
+    return true;
+  }
+
+  /// Appends [track] to the end of the queue, keeping the current song playing.
+  ///
+  /// Appending leaves every existing position untouched, so the shuffle bag
+  /// stays valid. A song that is already queued may be added again: the
+  /// listener asked for one more copy, not for it to jump forward.
+  bool enqueueTrack(Track track) {
+    if (_queue.isEmpty) return false;
+    _queue.add(track);
+    _markQueueChanged();
+    unawaited(_saveQueue());
+    if (!_engineHoldsSuccessor) _refreshQueueSuccessor();
+    notifyListeners();
+    return true;
+  }
+
+  /// Drops the queue entry at [index], which has to be after the current song.
+  ///
+  /// Returns false for the current entry and for indices outside the queue:
+  /// the song that is playing is stopped by [stop], not by editing the list
+  /// underneath it.
+  bool removeQueuedAt(int index) {
+    if (index <= _queueIndex || index >= _queue.length) return false;
+    // Dropping the prepared successor, or anything ahead of it, invalidates the
+    // index the engine already holds.
+    final int? successor = _queuedNextIndex;
+    final bool movedSuccessor = successor != null && index <= successor;
+    _queue.removeAt(index);
+    _shuffleOrder.reset();
+    _markQueueChanged();
+    unawaited(_saveQueue());
+    if (movedSuccessor) _refreshQueueSuccessor();
+    notifyListeners();
+    return true;
+  }
+
   /// Local files win over the network so downloads and scanned songs keep
   /// playing offline. Missing files fall through to the service.
   Future<String?> _trackUrl(
