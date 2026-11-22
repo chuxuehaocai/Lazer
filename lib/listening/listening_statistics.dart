@@ -146,7 +146,7 @@ class ListeningStatisticsController extends ChangeNotifier
         !_sessionCounted && _sessionHeard >= const Duration(seconds: 1);
     if (countedNow) {
       _sessionCounted = true;
-      _day(now).track(_track!).plays++;
+      _day(now).played(_track!);
     }
     _changed(forceNotify: countedNow);
   }
@@ -161,7 +161,7 @@ class ListeningStatisticsController extends ChangeNotifier
         _sessionHeard <= Duration.zero) {
       return;
     }
-    _day(_now()).track(track).skips++;
+    _day(_now()).skipped(track);
     _changed(forceNotify: true);
   }
 
@@ -240,9 +240,7 @@ class ListeningStatisticsController extends ChangeNotifier
       );
       final until = nextHour.isBefore(end) ? nextHour : end;
       final ms = until.difference(cursor).inMilliseconds;
-      final day = _day(cursor);
-      day.hours[cursor.hour] += ms;
-      day.track(track).milliseconds += ms;
+      _day(cursor).listened(cursor.hour, track, ms);
       cursor = until;
     }
   }
@@ -274,7 +272,13 @@ class ListeningStatisticsController extends ChangeNotifier
     try {
       final raw = await _read();
       if (raw != null) {
-        final decoded = jsonDecode(raw);
+        final decoded = raw.length < 65536
+            ? jsonDecode(raw)
+            : await compute(
+                _decodeStatistics,
+                raw,
+                debugLabel: 'listening-statistics',
+              );
         if (decoded is Map && decoded['version'] == 1) {
           final recorded = decoded['firstRecordedAt'];
           final first = recorded is String ? DateTime.tryParse(recorded) : null;
@@ -328,28 +332,48 @@ class ListeningStatisticsController extends ChangeNotifier
     await _writer.request();
   }
 
+  static const int _encodeBatch = 256;
+  final Map<String, String> _trackEntries = <String, String>{};
+
+  void _encodeDay(String date, _Day day) {
+    for (final total in day.tracks.values) {
+      _trackEntries.putIfAbsent(
+        total.track.id,
+        () =>
+            '${jsonEncode(total.track.id)}:'
+            '${jsonEncode(total.track.toJson()..remove('localPath'))}',
+      );
+    }
+    day.entry(date);
+  }
+
   Future<void> _persist() async {
     try {
-      final tracks = <String, Object?>{};
-      for (final day in _days.values) {
-        for (final total in day.tracks.values) {
-          tracks.putIfAbsent(
-            total.track.id,
-            () => total.track.toJson()..remove('localPath'),
-          );
+      var encoded = 0;
+      for (final entry in _days.entries.toList()) {
+        if (!entry.value.changed) continue;
+        _encodeDay(entry.key, entry.value);
+        encoded += entry.value.tracks.length;
+        if (encoded >= _encodeBatch) {
+          encoded = 0;
+          await Future<void>.delayed(Duration.zero);
         }
       }
-      final payload = <String, Object?>{
-        'version': 1,
-        'firstRecordedAt': _firstRecordedAt?.toIso8601String(),
-        'tracks': tracks,
-        'days': _days.map((key, day) => MapEntry(key, day.encode())),
-      };
+      for (final entry in _days.entries) {
+        if (entry.value.changed) _encodeDay(entry.key, entry.value);
+      }
+      final raw = StringBuffer('{"version":1,"firstRecordedAt":')
+        ..write(jsonEncode(_firstRecordedAt?.toIso8601String()))
+        ..write(',"tracks":{')
+        ..writeAll(_trackEntries.values, ',')
+        ..write('},"days":{')
+        ..writeAll(
+          _days.entries.map((entry) => entry.value.entry(entry.key)),
+          ',',
+        )
+        ..write('}}');
       _dirty = false;
-      final raw = _days.length > 30
-          ? await compute(_encodeStatistics, payload)
-          : _encodeStatistics(payload);
-      await _write(raw);
+      await _write(raw.toString());
     } catch (_) {
       _dirty = true;
     }
@@ -367,21 +391,44 @@ class ListeningStatisticsController extends ChangeNotifier
 class _Day {
   final List<int> hours = List.filled(24, 0);
   final Map<String, _TrackTotal> tracks = {};
-  _TrackTotal track(Track track) => tracks[track.id] ??= _TrackTotal(track);
+  String? _entry;
+  _TrackTotal _track(Track track) => tracks[track.id] ??= _TrackTotal(track);
+
+  bool get changed => _entry == null;
+
+  void listened(int hour, Track track, int milliseconds) {
+    hours[hour] += milliseconds;
+    _track(track).milliseconds += milliseconds;
+    _entry = null;
+  }
+
+  void played(Track track) {
+    _track(track).plays++;
+    _entry = null;
+  }
+
+  void skipped(Track track) {
+    _track(track).skips++;
+    _entry = null;
+  }
 
   void add(_Day other) {
     for (var hour = 0; hour < 24; hour++) {
       hours[hour] += other.hours[hour];
     }
     for (final total in other.tracks.values) {
-      track(total.track).add(total);
+      _track(total.track).add(total);
     }
+    _entry = null;
   }
 
   Map<String, Object> encode() => {
     'hours': hours,
     'tracks': tracks.map((key, total) => MapEntry(key, total.encode())),
   };
+
+  String entry(String date) =>
+      _entry ??= '${jsonEncode(date)}:${jsonEncode(encode())}';
 
   static _Day decode(dynamic raw, Map<String, Track> metadata) {
     final result = _Day();
@@ -429,4 +476,4 @@ class _TrackTotal {
 
 int _count(dynamic value) => value is num && value >= 0 ? value.toInt() : 0;
 
-String _encodeStatistics(Map<String, Object?> value) => jsonEncode(value);
+Object? _decodeStatistics(String raw) => jsonDecode(raw);

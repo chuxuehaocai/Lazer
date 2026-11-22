@@ -203,17 +203,8 @@ class AudioCache {
     return _findKey(trackId);
   }
 
-  Future<File?> _findKey(String key) async {
-    for (final extension in _formats) {
-      final file = await disk.find(
-        CacheBucket.audio,
-        key,
-        extension: extension,
-      );
-      if (file != null) return file;
-    }
-    return null;
-  }
+  Future<File?> _findKey(String key) =>
+      disk.findFirst(CacheBucket.audio, key, _formats);
 
   Future<File?> store(
     String trackId,

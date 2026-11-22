@@ -49,32 +49,64 @@ class DiskCache {
     }
   }();
 
-  Future<File?> _path(CacheBucket bucket, String key, String extension) async {
+  Future<File?> _file(CacheBucket bucket, String key, String extension) async {
     final root = await _open();
     if (root == null) return null;
-    final dir = await Directory(
-      '${root.path}/${bucket.name}',
-    ).create(recursive: true);
     final hash = sha256.convert(utf8.encode(key));
-    return File('${dir.path}/$hash.$extension');
+    return File('${root.path}/${bucket.name}/$hash.$extension');
+  }
+
+  Future<File?> _path(CacheBucket bucket, String key, String extension) async {
+    final file = await _file(bucket, key, extension);
+    if (file == null) return null;
+    await file.parent.create(recursive: true);
+    return file;
   }
 
   Future<File?> find(
     CacheBucket bucket,
     String key, {
     String extension = 'bin',
-  }) => _trackFileOperation(_find(bucket, key, extension));
+  }) => _trackFileOperation(_find(bucket, key, <String>[extension]));
 
-  Future<File?> _find(CacheBucket bucket, String key, String extension) async {
+  Future<File?> findFirst(
+    CacheBucket bucket,
+    String key,
+    List<String> extensions,
+  ) => _trackFileOperation(_find(bucket, key, extensions));
+
+  Future<File?> _find(
+    CacheBucket bucket,
+    String key,
+    List<String> extensions,
+  ) async {
     try {
-      final file = await _path(bucket, key, extension);
-      if (file == null || !await file.exists() || await file.length() == 0) {
-        return null;
-      }
+      final root = await _open();
+      if (root == null) return null;
+      final hash = sha256.convert(utf8.encode(key));
+      final List<File> candidates = <File>[
+        for (final String extension in extensions)
+          File('${root.path}/${bucket.name}/$hash.$extension'),
+      ];
+      final List<bool> stored = await Future.wait(<Future<bool>>[
+        for (final File candidate in candidates) _isStored(candidate),
+      ]);
+      final int index = stored.indexOf(true);
+      if (index < 0) return null;
+      final File file = candidates[index];
       await file.setLastModified(DateTime.now());
       return file;
     } catch (_) {
       return null;
+    }
+  }
+
+  static Future<bool> _isStored(File file) async {
+    try {
+      final FileStat stat = await file.stat();
+      return stat.type == FileSystemEntityType.file && stat.size > 0;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -103,7 +135,7 @@ class DiskCache {
 
   Future<void> _remove(CacheBucket bucket, String key, String extension) async {
     try {
-      final file = await _path(bucket, key, extension);
+      final file = await _file(bucket, key, extension);
       if (file != null && await file.exists()) await file.delete();
     } catch (_) {}
   }

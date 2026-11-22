@@ -83,12 +83,31 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       .map((plugin) => plugin.layout)
       .whereType<LazerLayoutDefinition>()
       .firstOrNull;
-  int get skinRevision => Object.hash(
-    activeTheme?.toJson().toString(),
-    activeLayout?.toJson().toString(),
-  );
+  LazerThemeTokens? _hashedTheme;
+  LazerLayoutDefinition? _hashedLayout;
+  int? _skinRevision;
+  int get skinRevision {
+    final LazerThemeTokens? theme = activeTheme;
+    final LazerLayoutDefinition? layout = activeLayout;
+    final int? cached = _skinRevision;
+    if (cached != null &&
+        identical(theme, _hashedTheme) &&
+        identical(layout, _hashedLayout)) {
+      return cached;
+    }
+    _hashedTheme = theme;
+    _hashedLayout = layout;
+    return _skinRevision = Object.hash(
+      theme?.toJson().toString(),
+      layout?.toJson().toString(),
+    );
+  }
+
   bool busy = false;
   Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+
+  bool get hasPlayerEventListeners =>
+      _plugins.any((plugin) => plugin.enabled && plugin.runtime != null);
 
   void broadcastPlayerEvent(String type, Map<String, dynamic> data) {
     for (final plugin in _plugins) {
