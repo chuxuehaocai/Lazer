@@ -270,7 +270,7 @@ local stats = host.user({operation="statistics", range="last7Days"}) -- history
 页面控件变化通过 `page_event` 操作接收，菜单项目点击后通过 `player_menu` 操作接收当前歌曲的通用
 `track` 对象。页面布局和控件始终由 Flutter 宿主创建，Lua 只提供数据描述，不能传入 Widget 或执行
 Flutter 代码。
-宿主还会在切歌、队列变化、歌词更新与播放状态变化时向所有激活插件派发 `player_event` 操作（支持外部推流与挂件联动）。
+宿主还会在切歌、队列变化、歌词更新与播放状态变化时向在清单或 `describe` 的 `capabilities` 中声明了 `player_events` 的激活插件派发 `player_event` 操作（支持外部推流与挂件联动；未声明的纯音源插件不会接收广播，避免无意义的并发与状态拥堵）。
 
 ```lua
 -- 播放控制示例：
