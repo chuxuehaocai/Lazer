@@ -106,15 +106,24 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   bool busy = false;
   Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
 
-  bool get hasPlayerEventListeners =>
-      _plugins.any((plugin) => plugin.enabled && plugin.runtime != null);
+  static bool _listensToPlayerEvents(InstalledPlugin plugin) {
+    if (!plugin.enabled || plugin.runtime == null) return false;
+    final caps = plugin.manifest.capabilities;
+    return caps.contains('player_events') || caps.contains('player-events');
+  }
+
+  bool get hasPlayerEventListeners => _plugins.any(_listensToPlayerEvents);
 
   void broadcastPlayerEvent(String type, Map<String, dynamic> data) {
     for (final plugin in _plugins) {
-      if (!plugin.enabled || plugin.runtime == null) continue;
+      if (!_listensToPlayerEvents(plugin)) continue;
       unawaited(
         plugin.runtime!
-            .invoke('player_event', {'type': type, 'data': data, ...data})
+            .invoke(
+              'player_event',
+              {'type': type, 'data': data, ...data},
+              const Duration(milliseconds: 1500),
+            )
             .catchError((Object _) => null),
       );
     }
