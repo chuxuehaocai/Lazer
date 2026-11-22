@@ -16,6 +16,10 @@ const stillAliveAudioAsset = 'assets/easter_eggs/frums_credits/credits.mp3';
 abstract interface class StillAlivePlayback implements Listenable {
   bool get ready;
   bool get playing;
+
+  /// True once the soundtrack reached its end. The page pauses on it rather
+  /// than letting the score loop away from the finished track.
+  bool get completed;
   Duration get position;
   Duration? get duration;
   String? get error;
@@ -108,6 +112,8 @@ class StillAliveAudio extends ChangeNotifier
   bool get ready => _ready && !_closed;
   @override
   bool get playing => _playing && !_closed;
+  @override
+  bool get completed => _completed && !_closed;
   @override
   Duration? get duration => _duration;
   @override

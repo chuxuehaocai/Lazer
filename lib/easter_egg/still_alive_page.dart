@@ -43,10 +43,15 @@ class _StillAlivePageState extends State<StillAlivePage>
   FrumsCreditsScore? _score;
   Object? _loadError;
   String _frame = '';
+  String? _lastVisible;
+  bool _finished = false;
+  bool _pausedAudio = false;
+  bool _returning = false;
 
   @override
   void initState() {
     super.initState();
+    _audio.addListener(_onAudioReport);
     unawaited(_loadCredits());
     unawaited(_startAudio());
   }
@@ -66,11 +71,15 @@ class _StillAlivePageState extends State<StillAlivePage>
     try {
       final score = await FrumsCreditsScore.load();
       if (!mounted) return;
+      final first = score.frameAt(Duration.zero);
       setState(() {
         _score = score;
-        _frame = score.frameAt(Duration.zero);
+        _frame = _lastVisible ?? first;
+        if (first.trim().isNotEmpty) _lastVisible = first;
       });
-      _ticker.start();
+      // A soundtrack that already reported its end must not start a ticker
+      // that would immediately freeze the credits again.
+      if (!_finished) _ticker.start();
     } catch (error) {
       if (!mounted) return;
       setState(() => _loadError = error);
@@ -79,15 +88,69 @@ class _StillAlivePageState extends State<StillAlivePage>
 
   void _tick(Duration elapsed) {
     final score = _score;
-    if (!mounted || score == null) return;
+    if (!mounted || score == null || _finished) return;
+    // One pass through the score: frameAt() wraps by design, so a running
+    // ticker would restart the credits from the opening bar forever.
+    if (elapsed >= score.duration) {
+      _stopScore();
+      return;
+    }
     final frame = score.frameAt(elapsed);
     if (frame == _frame) return;
+    if (frame.trim().isNotEmpty) _lastVisible = frame;
     setState(() => _frame = frame);
+  }
+
+  void _onAudioReport() {
+    if (!mounted) return;
+    // The soundtrack is the part that outlasts the score, so its end is what
+    // finishes the easter egg: the credits stop and playback is paused instead
+    // of being left to run on, or to loop, behind the finished page.
+    if (_audioEnded) {
+      _finishAndReturn();
+    }
+  }
+
+  /// True once the soundtrack reached its end. A player can also settle at its
+  /// final position without a completion report, so that counts as the end too.
+  bool get _audioEnded {
+    if (_audio.completed) return true;
+    final end = _audio.duration;
+    return end != null && end > Duration.zero && _audio.position >= end;
+  }
+
+  /// Stops the credits on the last frame that showed anything. The score's
+  /// closing bars are blank by design, so keeping the frame already on screen
+  /// leaves the credits card visible instead of a black page.
+  void _stopScore() {
+    if (_finished || !mounted) return;
+    _finished = true;
+    _ticker.stop();
+    if (_lastVisible != null) {
+      setState(() => _frame = _lastVisible!);
+    }
+  }
+
+  /// Pauses the soundtrack once, when it has run out.
+  void _pauseAudio() {
+    if (_pausedAudio) return;
+    _pausedAudio = true;
+    unawaited(_audio.pause());
+  }
+
+  /// Returns to the page that opened the easter egg after the soundtrack ends.
+  void _finishAndReturn() {
+    if (_returning || !mounted) return;
+    _returning = true;
+    _stopScore();
+    _pauseAudio();
+    unawaited(Navigator.of(context).maybePop());
   }
 
   @override
   void dispose() {
     _ticker.dispose();
+    _audio.removeListener(_onAudioReport);
     _audio.dispose();
     super.dispose();
   }
@@ -103,7 +166,7 @@ class _StillAlivePageState extends State<StillAlivePage>
         autofocus: true,
         child: PopScope(
           onPopInvokedWithResult: (didPop, _) {
-            if (didPop) unawaited(_audio.pause());
+            if (didPop) _pauseAudio();
           },
           child: Theme(
             data: ThemeData(
@@ -160,26 +223,9 @@ class _StillAlivePageState extends State<StillAlivePage>
                                   28,
                                   16,
                                 ),
-                                child: Column(
-                                  children: <Widget>[
-                                    const Text(
-                                      'FRUMS CREDITS',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: _foreground,
-                                        fontSize: 28,
-                                        fontWeight: FontWeight.w700,
-                                        letterSpacing: 2.4,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Expanded(
-                                      child: _FrumsCreditsViewport(
-                                        frame: _frame,
-                                        error: _loadError,
-                                      ),
-                                    ),
-                                  ],
+                                child: _FrumsCreditsViewport(
+                                  frame: _frame,
+                                  error: _loadError,
                                 ),
                               ),
                             ),

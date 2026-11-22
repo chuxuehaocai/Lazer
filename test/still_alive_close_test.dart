@@ -46,6 +46,8 @@ class _SilentPlayback extends ChangeNotifier implements StillAlivePlayback {
   @override
   bool get playing => false;
   @override
+  bool get completed => false;
+  @override
   Duration get position => Duration.zero;
   @override
   Duration? get duration => const Duration(minutes: 3);
