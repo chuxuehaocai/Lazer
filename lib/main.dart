@@ -1,6 +1,7 @@
 import 'widgets/build_safe_state.dart';
 import 'dart:async';
 import 'storage/app_storage.dart';
+import 'storage/desktop_preferences.dart';
 import 'animation/apple_spring.dart';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -135,6 +136,7 @@ Future<void> main(List<String> args) async {
       // another. Start them together so a platform round trip does not postpone
       // opening the audio engine and restoring the usable application.
       try {
+        installDesktopPreferences();
         final Future<void> windowReady = initWindowFrame(preventClose: true);
         // The television input model (D-pad focus) needs this before the first
         // frame: a television with no pointer would otherwise boot into a screen

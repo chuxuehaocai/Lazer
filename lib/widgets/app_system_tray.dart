@@ -5,7 +5,7 @@ import 'dart:async';
 import 'dart:io' show Directory, File, Platform;
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart' show Locale, WidgetsBinding;
 import 'package:tray_manager/src/menu.dart';
@@ -34,6 +34,14 @@ class AppSystemTray with TrayListener {
   AppState? _state;
   bool _initialized = false;
   bool _updating = false;
+  bool _menuStale = false;
+  Object? _menuSignature;
+
+  @visibleForTesting
+  static Object menuSignature(AppState state) {
+    final track = state.current;
+    return (track?.title, track?.artist, state.playing, state.language);
+  }
 
   Future<void> initialize(AppState state) async {
     if (!kSupportsSystemTray || _initialized) return;
@@ -50,10 +58,16 @@ class AppSystemTray with TrayListener {
     } catch (_) {}
 
     state.addListener(_onStateChanged);
+    _menuSignature = menuSignature(state);
     await _updateMenu();
   }
 
   void _onStateChanged() {
+    final AppState? state = _state;
+    if (state == null) return;
+    final Object signature = menuSignature(state);
+    if (signature == _menuSignature) return;
+    _menuSignature = signature;
     unawaited(_updateMenu());
   }
 
@@ -101,7 +115,11 @@ class AppSystemTray with TrayListener {
   }
 
   Future<void> _updateMenu() async {
-    if (!kSupportsSystemTray || !_initialized || _updating) return;
+    if (!kSupportsSystemTray || !_initialized) return;
+    if (_updating) {
+      _menuStale = true;
+      return;
+    }
     _updating = true;
     try {
       final AppState? state = _state;
@@ -167,6 +185,10 @@ class AppSystemTray with TrayListener {
     } catch (_) {
     } finally {
       _updating = false;
+      if (_menuStale) {
+        _menuStale = false;
+        unawaited(_updateMenu());
+      }
     }
   }
 
@@ -185,6 +207,11 @@ class AppSystemTray with TrayListener {
   }
 
   static Future<void> exitApp() async {
+    try {
+      await instance._state?.flushPersistence().timeout(
+        const Duration(seconds: 2),
+      );
+    } catch (_) {}
     try {
       if (kSupportsSystemTray) {
         await TrayManager.instance.destroy();
@@ -239,6 +266,8 @@ class AppSystemTray with TrayListener {
   Future<void> dispose() async {
     _state?.removeListener(_onStateChanged);
     _state = null;
+    _menuSignature = null;
+    _menuStale = false;
     if (_initialized) {
       TrayManager.instance.removeListener(this);
       try {

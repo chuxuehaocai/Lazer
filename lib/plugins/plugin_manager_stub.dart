@@ -51,6 +51,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   int get skinRevision => 0;
   bool busy = false;
   Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+  bool get hasPlayerEventListeners => false;
   void broadcastPlayerEvent(String type, Map<String, dynamic> data) {}
 
   /// Completes once every installed plugin has released its worker.

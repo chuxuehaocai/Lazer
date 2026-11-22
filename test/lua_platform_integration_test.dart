@@ -253,6 +253,20 @@ void main() {
         expect(app.pluginTheme?.displayWeight, 850);
         expect(app.pluginLayout?.id, 'fixture.layout');
         expect(app.pluginLayout?.compactInset, 20);
+        final revision = plugins.skinRevision;
+        expect(
+          revision,
+          Object.hash(
+            app.pluginTheme!.toJson().toString(),
+            app.pluginLayout!.toJson().toString(),
+          ),
+        );
+        expect(plugins.skinRevision, revision);
+        expect(app.pluginSkinRevision, revision);
+        await plugins.setEnabled('fixture.multiple', false);
+        expect(app.pluginTheme, isNull);
+        expect(plugins.skinRevision, Object.hash(null, null));
+        expect(plugins.skinRevision, isNot(revision));
       } finally {
         app.dispose();
       }

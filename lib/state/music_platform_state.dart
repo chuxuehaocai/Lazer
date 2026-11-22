@@ -644,26 +644,30 @@ class _MusicPlatformState {
         translatedTitle: updated.translatedTitle ?? entry.translatedTitle,
         localPath: entry.localPath,
       );
-      final queueChanged = state._queue.any((entry) => entry.id == track.id);
-      final recentChanged = state._recentTracks.any(
-        (entry) => entry.id == track.id,
-      );
-      state._queue = [
-        for (final entry in state._queue)
-          if (entry.id == track.id) merge(entry) else entry,
-      ];
-      state._recentTracks = [
-        for (final entry in state._recentTracks)
-          if (entry.id == track.id) merge(entry) else entry,
-      ];
+      List<Track>? refreshed(List<Track> tracks) {
+        List<Track>? next;
+        for (var index = 0; index < tracks.length; index++) {
+          final Track entry = tracks[index];
+          if (entry.id != track.id) continue;
+          final Track merged = merge(entry);
+          if (_sameTrackMetadata(entry, merged)) continue;
+          (next ??= List<Track>.of(tracks))[index] = merged;
+        }
+        return next;
+      }
+
+      final List<Track>? queue = refreshed(state._queue);
+      final List<Track>? recent = refreshed(state._recentTracks);
+      if (queue != null) state._queue = queue;
+      if (recent != null) state._recentTracks = recent;
       state._metadataLoaded.add(track.id);
-      if (queueChanged) {
+      if (queue != null) {
         state._markQueueChanged();
         unawaited(state.refreshArtworkSeed());
         unawaited(state._saveQueue());
       }
-      if (recentChanged) unawaited(state._saveRecentTracks());
-      if (queueChanged || recentChanged) state.notifyListeners();
+      if (recent != null) unawaited(state._saveRecentTracks());
+      if (queue != null || recent != null) state.notifyListeners();
     } catch (_) {
       // Metadata can retry when the account is reconnected.
     } finally {
@@ -692,4 +696,34 @@ class _MusicPlatformState {
       // A removed plugin must not interrupt local listening.
     }
   }
+}
+
+bool _sameTrackMetadata(Track a, Track b) {
+  if (identical(a, b)) return true;
+  if (a.id != b.id ||
+      a.title != b.title ||
+      a.artist != b.artist ||
+      a.album != b.album ||
+      a.duration != b.duration ||
+      a.coverSeed != b.coverSeed ||
+      a.accent != b.accent ||
+      a.coverUrl != b.coverUrl ||
+      a.albumId != b.albumId ||
+      a.albumKey != b.albumKey ||
+      a.translatedTitle != b.translatedTitle ||
+      a.localPath != b.localPath ||
+      a.artists.length != b.artists.length) {
+    return false;
+  }
+  for (var index = 0; index < a.artists.length; index++) {
+    final ArtistRef left = a.artists[index];
+    final ArtistRef right = b.artists[index];
+    if (left.id != right.id ||
+        left.name != right.name ||
+        left.coverUrl != right.coverUrl ||
+        left.platformKey != right.platformKey) {
+      return false;
+    }
+  }
+  return true;
 }

@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:flutter/foundation.dart' show compute;
 
 import 'app_storage.dart';
 
@@ -22,7 +25,16 @@ class ListeningStatisticsStore {
     await directory.create(recursive: true);
     final file = File('${directory.path}/$fileName');
     final temporary = File('${file.path}.tmp');
-    await temporary.writeAsString(raw, flush: true);
+    final List<int> bytes = raw.length < 262144
+        ? utf8.encode(raw)
+        : await compute(
+            _encodeSnapshot,
+            raw,
+            debugLabel: 'listening-statistics-write',
+          );
+    await temporary.writeAsBytes(bytes, flush: true);
     await temporary.rename(file.path);
   }
 }
+
+List<int> _encodeSnapshot(String raw) => utf8.encode(raw);

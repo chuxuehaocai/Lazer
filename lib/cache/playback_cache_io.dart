@@ -16,12 +16,22 @@ import 'media_cache.dart';
 enum PlaybackCacheMode { recent, intelligent }
 
 class _ListeningHistory {
-  _ListeningHistory(this.track, this.plays, {int? lastPlayed})
+  _ListeningHistory(this._track, this.plays, {int? lastPlayed})
     : lastPlayed = lastPlayed ?? (plays.isEmpty ? 0 : plays.last);
 
-  Track track;
+  Track _track;
+  String? _trackJson;
   final List<int> plays;
   int lastPlayed;
+
+  Track get track => _track;
+  set track(Track value) {
+    if (identical(value, _track)) return;
+    _track = value;
+    _trackJson = null;
+  }
+
+  String get trackJson => _trackJson ??= jsonEncode(_track.toJson());
 }
 
 /// Keeps complete playback downloads in the local library. Explicit downloads
@@ -351,23 +361,29 @@ class PlaybackCacheController extends ChangeNotifier with BuildSafeNotifier {
     final File? manifest = _manifest;
     if (manifest == null || _disposed) return;
     try {
-      final String json = jsonEncode(<String, Object>{
-        'version': 1,
-        'pendingDeletes': <Map<String, String>>[
-          for (final MapEntry<String, String> entry in _pendingDeletes.entries)
-            <String, String>{'path': entry.key, 'id': entry.value},
-        ],
-        'history': <Map<String, Object>>[
-          for (final _ListeningHistory history in _history.values)
-            <String, Object>{
-              'track': history.track.toJson(),
-              'plays': history.plays,
-              'lastPlayed': history.lastPlayed,
-            },
-        ],
-      });
+      final String pendingDeletes = jsonEncode(<Map<String, String>>[
+        for (final MapEntry<String, String> entry in _pendingDeletes.entries)
+          <String, String>{'path': entry.key, 'id': entry.value},
+      ]);
+      final StringBuffer json = StringBuffer(
+        '{"version":1,"pendingDeletes":$pendingDeletes,"history":[',
+      );
+      bool first = true;
+      for (final _ListeningHistory history in _history.values) {
+        if (!first) json.write(',');
+        first = false;
+        json
+          ..write('{"track":')
+          ..write(history.trackJson)
+          ..write(',"plays":')
+          ..write(jsonEncode(history.plays))
+          ..write(',"lastPlayed":')
+          ..write(history.lastPlayed)
+          ..write('}');
+      }
+      json.write(']}');
       final File temporary = File('${manifest.path}.tmp');
-      await temporary.writeAsString(json, flush: true);
+      await temporary.writeAsString(json.toString(), flush: true);
       await temporary.rename(manifest.path);
     } catch (_) {}
   }

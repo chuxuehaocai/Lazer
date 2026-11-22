@@ -30,6 +30,7 @@ import '../local/local_library.dart';
 import '../network/network_sources_controller.dart';
 import '../platform/system_widgets.dart';
 import '../scrolling/scroll_motion.dart';
+import '../storage/desktop_preferences.dart';
 import '../l10n/app_language.dart';
 import '../data/models.dart';
 import '../data/track_transition.dart';
@@ -3302,33 +3303,37 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool? _lastBroadcastPlaying;
   int _lastBroadcastQueueRevision = -1;
 
-  Map<String, dynamic> _pluginTrack(Track track) => {
-    'id': track.id,
-    'name': track.title,
-    'title': track.title,
-    'artist': track.artist,
-    'artists': [
-      for (final artist in track.artists)
-        {
-          'id': artist.id,
-          'name': artist.name,
-          if (artist.coverUrl != null)
-            'coverUrl': _pluginArtwork(artist.coverUrl),
-          if (artist.platformKey != null) 'platformKey': artist.platformKey,
-        },
-    ],
-    'album': track.album,
-    'albumName': track.album,
-    'albumId': track.albumId,
-    if (track.albumKey != null) 'albumKey': track.albumKey,
-    'cover': _pluginArtwork(track.coverUrl) ?? '',
-    'coverOriginal': _pluginArtwork(track.coverUrl) ?? '',
-    'coverUrl': _pluginArtwork(track.coverUrl) ?? '',
-    'picUrl': _pluginArtwork(track.coverUrl) ?? '',
-    'duration': track.duration.inMilliseconds,
-    'durationMs': track.duration.inMilliseconds,
-    if (track.translatedTitle != null) 'translatedTitle': track.translatedTitle,
-  };
+  Map<String, dynamic> _pluginTrack(Track track) {
+    final String cover = _pluginArtwork(track.coverUrl) ?? '';
+    return {
+      'id': track.id,
+      'name': track.title,
+      'title': track.title,
+      'artist': track.artist,
+      'artists': [
+        for (final artist in track.artists)
+          {
+            'id': artist.id,
+            'name': artist.name,
+            if (artist.coverUrl != null)
+              'coverUrl': _pluginArtwork(artist.coverUrl),
+            if (artist.platformKey != null) 'platformKey': artist.platformKey,
+          },
+      ],
+      'album': track.album,
+      'albumName': track.album,
+      'albumId': track.albumId,
+      if (track.albumKey != null) 'albumKey': track.albumKey,
+      'cover': cover,
+      'coverOriginal': cover,
+      'coverUrl': cover,
+      'picUrl': cover,
+      'duration': track.duration.inMilliseconds,
+      'durationMs': track.duration.inMilliseconds,
+      if (track.translatedTitle != null)
+        'translatedTitle': track.translatedTitle,
+    };
+  }
 
   Map<String, dynamic> _pluginQueue() => {
     'index': queueIndex,
@@ -3509,13 +3514,16 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   }
 
   void _broadcastPluginPlayerState({bool force = false}) {
-    if (_presentationDisposed) return;
+    if (_presentationDisposed || !pluginManager.hasPlayerEventListeners) return;
     final track = current;
     if (track?.id != _lastBroadcastTrackId) {
       _lastBroadcastTrackId = track?.id;
+      final Map<String, dynamic>? payload = track == null
+          ? null
+          : _pluginTrack(track);
       pluginManager.broadcastPlayerEvent('track', {
-        'track': track == null ? null : _pluginTrack(track),
-        if (track != null) ..._pluginTrack(track),
+        'track': payload,
+        ...?payload,
       });
     }
     if (_lastBroadcastQueueRevision != queueRevision) {
@@ -5594,6 +5602,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {
       // Play history is best-effort too.
     }
+    try {
+      await flushDesktopPreferences();
+    } catch (_) {}
   }
 
   Future<void> _resumeAudio() async {
