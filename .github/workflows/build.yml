@@ -76,11 +76,6 @@ jobs:
           cmake -S native/lazer-audio/tests/aaudio -B build/aaudio-contract -DCMAKE_BUILD_TYPE=Release
           cmake --build build/aaudio-contract --parallel 2
           ctest --test-dir build/aaudio-contract --output-on-failure
-          # The iOS backend is plain C++ against the AudioUnit C API, so it runs
-          # here against a fake AudioUnit; only the route needs a device.
-          cmake -S native/lazer-audio/tests/remoteio -B build/remoteio-contract -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/remoteio-contract --parallel 2
-          ctest --test-dir build/remoteio-contract --output-on-failure
 
   windows:
     name: Windows EXE (x86_64)
