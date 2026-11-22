@@ -357,7 +357,7 @@ abstract interface class FailureReportingAudioEngine {
 引擎在自己的解码线程上同步调用——`dart:ffi` 无法服务阻塞回调，所以字节源必须在原生侧
 （`docs/audio-engine.md:76-85`、`lib/audio/native/lazer_audio_reader.dart`）。
 
-### 5.3 Dart 已镜像但**从未读取**的原生字段（阶段 2/3 的现成抓手）
+### 5.3 Dart 已镜像但**从未读取**的原生字段（阶段 2/3 的可用入口）
 
 | 字段 | 原生定义 | Dart 镜像 | 现状 |
 | --- | --- | --- | --- |

@@ -119,7 +119,7 @@ class _PluginManagerViewState extends State<PluginManagerView>
             ApplePageTitle(
               title: '插件管理',
               subtitle: manager.plugins.isEmpty
-                  ? '导入一个插件开始使用'
+                  ? '还没有导入插件'
                   : '${manager.plugins.length} 个插件已安装',
               padding: const EdgeInsets.fromLTRB(0, 12, 0, 18),
             ),
@@ -149,7 +149,7 @@ class _PluginManagerViewState extends State<PluginManagerView>
               const AppleGroupedCard(
                 margin: EdgeInsets.zero,
                 child: AppleEmptyState(
-                  message: '还没有安装插件。导入一个音乐平台插件开始使用。',
+                  message: '还没有安装插件。先导入一个音乐平台插件。',
                   icon: Icons.extension_off_rounded,
                 ),
               )

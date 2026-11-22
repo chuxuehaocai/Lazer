@@ -410,13 +410,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     notifyListeners();
   }
 
-  void cancelSleepTimer() {
+  void _clearSleepTimer({required bool notify}) {
     if (_sleepTimer == null && _sleepTimerDeadline == null) return;
     _sleepTimer?.cancel();
     _sleepTimer = null;
     _sleepTimerDeadline = null;
-    notifyListeners();
+    if (notify) notifyListeners();
   }
+
+  void cancelSleepTimer() => _clearSleepTimer(notify: true);
 
   void _expireSleepTimer() {
     _sleepTimer = null;
@@ -435,6 +437,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _audioResourcesSuppressed = true;
     }
     unawaited(audioEngine?.stop() ?? Future<void>.value());
+    _schedulePlaybackSnapshot(immediate: true);
     notifyListeners();
   }
 
@@ -2356,8 +2359,34 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   bool get isGuest => _user.isGuest;
   bool get signedIn => !_user.isGuest;
 
+  Future<void>? _bootstrapOperation;
+  Completer<void>? _playbackQueueReady;
+  Completer<void>? _playbackCatalogReady;
+
+  /// The startup work that restores the queue before remote media commands run.
+  ///
+  /// The Android media service can deliver a play command while the Flutter
+  /// activity is still being created. This future covers queue and provider
+  /// restoration, then leaves the home feed free to load in the background.
+  Future<void> get playbackBootstrapReady {
+    final queue = _playbackQueueReady;
+    final catalog = _playbackCatalogReady;
+    if (queue == null || catalog == null) return Future<void>.value();
+    return Future.wait<void>(<Future<void>>[queue.future, catalog.future]);
+  }
+
   /// Restores any persisted gateway session, then loads the home feed.
-  Future<void> bootstrap() async {
+  Future<void> bootstrap() {
+    final existing = _bootstrapOperation;
+    if (existing != null) return existing;
+    _playbackQueueReady = Completer<void>();
+    _playbackCatalogReady = Completer<void>();
+    final Future<void> operation = _bootstrap();
+    _bootstrapOperation = operation;
+    return operation;
+  }
+
+  Future<void> _bootstrap() async {
     final bootClock = Stopwatch()..start();
     AppLog.shared.event('app', 'bootstrap_started');
     final int initialQueueActivity = _queueActivity;
@@ -2555,10 +2584,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         // written, so a mode that never had a value keeps falling back to its
         // own default instead of looking like a listener's choice.
         if (storedBrowseOpacity != null) {
-          await prefs.setDouble(
-            'lazer_background_opacity',
-            backgroundOpacity,
-          );
+          await prefs.setDouble('lazer_background_opacity', backgroundOpacity);
         }
         if (storedPlayerOpacity != null) {
           await prefs.setDouble(
@@ -2770,13 +2796,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       position: () => position,
       listenable: all,
     );
+    final Future<void> restorePlayback = _restorePlaybackSnapshot(
+      initialQueueActivity,
+    );
+    final Future<void> restoreCatalog = _restoreCatalogSession();
+    unawaited(_resumeRestoredPlayback(restorePlayback));
     await Future.wait<void>(<Future<void>>[
       localLibrary.load(),
       networkSources.load(),
       playbackCache.load(),
       audioEngine?.setVolume(_volume) ?? Future<void>.value(),
-      _restorePlaybackSnapshot(initialQueueActivity),
-      _restoreCatalogSession(),
+      restorePlayback,
+      restoreCatalog,
     ]);
     _systemWidgetsReady = true;
     _updateSystemWidget();
@@ -2814,24 +2845,66 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     ]);
   }
 
+  void _completePlaybackQueueRestore() {
+    final completer = _playbackQueueReady;
+    if (completer != null && !completer.isCompleted) completer.complete();
+  }
+
+  void _completePlaybackCatalogRestore() {
+    final completer = _playbackCatalogReady;
+    if (completer != null && !completer.isCompleted) completer.complete();
+  }
+
+  Future<void> _resumeRestoredPlayback(Future<void> restorePlayback) async {
+    try {
+      await restorePlayback;
+      await (_playbackCatalogReady?.future ?? Future<void>.value());
+    } catch (_) {
+      return;
+    }
+    if (!_resumeAfterRestore || _presentationDisposed || current == null) {
+      return;
+    }
+    // A user action received while the snapshot was loading owns playback now.
+    if (_playing) {
+      _resumeAfterRestore = false;
+      return;
+    }
+    _resumeAfterRestore = false;
+    final Duration? resumeAt = _position > Duration.zero ? _position : null;
+    _playing = true;
+    _ensureTicker();
+    notifyListeners();
+    unawaited(_startAudio(resumeAt: resumeAt));
+  }
+
   Future<void> _restorePlaybackSnapshot(int initialQueueActivity) async {
-    await _restoreRecentTracks();
-    await _restoreQueue(initialQueueActivity);
-    if (_presentationDisposed) return;
-    unawaited(_loadCurrentArtwork());
-    unawaited(ensureCurrentLyrics());
+    try {
+      await _restoreRecentTracks();
+      await _restoreQueue(initialQueueActivity);
+      if (_presentationDisposed) return;
+      unawaited(_loadCurrentArtwork());
+      unawaited(ensureCurrentLyrics());
+    } finally {
+      _completePlaybackQueueRestore();
+    }
   }
 
   Future<void> _restoreCatalogSession() async {
-    await pluginManager.restore();
-    if (_presentationDisposed) return;
-    await _musicPlatforms.synchronizePlugins(refresh: false);
-    if (_presentationDisposed) return;
-    await _musicPlatforms.restore();
-    if (_presentationDisposed) return;
-    if (signedIn) unawaited(_flushPlayUploads());
-    unawaited(_refreshMissingArtwork());
-    await refreshHome();
+    try {
+      await pluginManager.restore();
+      if (_presentationDisposed) return;
+      await _musicPlatforms.synchronizePlugins(refresh: false);
+      if (_presentationDisposed) return;
+      await _musicPlatforms.restore();
+      if (_presentationDisposed) return;
+      _completePlaybackCatalogRestore();
+      if (signedIn) unawaited(_flushPlayUploads());
+      unawaited(_refreshMissingArtwork());
+      await refreshHome();
+    } finally {
+      _completePlaybackCatalogRestore();
+    }
   }
 
   Future<void> refreshHome({bool force = false}) async {
@@ -3295,6 +3368,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   int _listeningRevision = 0;
   int? _pendingListeningSeek;
   int _queueActivity = 0;
+  bool _resumeAfterRestore = false;
+  Timer? _playbackSnapshotTimer;
 
   final SystemWidgetsBridge _systemWidgets;
   bool _systemWidgetsReady = false;
@@ -3599,6 +3674,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         'pureMusic': lyricsPureMusic,
       });
     }
+
     try {
       WidgetsBinding.instance.addPostFrameCallback((_) => publish());
     } on FlutterError {
@@ -4046,6 +4122,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   void _replaceQueue(List<Track> tracks, {int startIndex = 0}) {
     checkScheduledPause();
     if (tracks.isEmpty) return;
+    _clearSleepTimer(notify: false);
     _resumeAudioResources();
     _finishListening(
       manualTarget: tracks[startIndex.clamp(0, tracks.length - 1)],
@@ -4057,13 +4134,14 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _markQueueChanged();
     _queueIndex = startIndex.clamp(0, tracks.length - 1);
     _unavailableSkipCount = 0;
-    unawaited(_saveQueue());
     _position = Duration.zero;
     _resumePositionOnOpen = false;
+    _resumeAfterRestore = false;
     playbackError = null;
+    _playing = true;
+    unawaited(_saveQueue());
     unawaited(_loadLyrics());
     _ensureTicker();
-    _playing = true;
     unawaited(_startAudio());
     notifyListeners();
   }
@@ -4091,6 +4169,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       _ticker?.cancel();
       if (_realActive) unawaited(audioEngine!.pause());
     }
+    _schedulePlaybackSnapshot(immediate: true);
     notifyListeners();
   }
 
@@ -4106,6 +4185,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } else {
       _openForPlayback();
     }
+    _schedulePlaybackSnapshot(immediate: true);
     notifyListeners();
   }
 
@@ -4139,6 +4219,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     // Pausing is a settled moment: nothing is competing for the plugin lane, so
     // the queue that just grew can be drained now instead of on a later tick.
     unawaited(_flushPlayUploads(force: true));
+    _schedulePlaybackSnapshot(immediate: true);
     notifyListeners();
   }
 
@@ -4183,6 +4264,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   void stop() {
     AppLog.shared.event('playback', 'stop');
+    _resumeAfterRestore = false;
+    _clearSleepTimer(notify: false);
     _finishListening();
     _finishPlaySession();
     ++_generation;
@@ -4196,6 +4279,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _ticker?.cancel();
     unawaited(audioEngine?.stop() ?? Future<void>.value());
     _audioResourcesSuppressed = false;
+    _schedulePlaybackSnapshot(immediate: true);
     notifyListeners();
   }
 
@@ -5593,6 +5677,9 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _queue = snapshot.tracks;
     _markQueueChanged();
     _queueIndex = snapshot.index;
+    _position = snapshot.position;
+    _resumePositionOnOpen = _position > Duration.zero;
+    _resumeAfterRestore = snapshot.playing && _queue.isNotEmpty;
     currentArtwork.update(current);
     notifyListeners();
   }
@@ -5638,9 +5725,43 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {}
   }
 
+  Duration get _playbackSnapshotPosition {
+    if (_realActive && audioEngine?.active == true) return precisePosition;
+    return _position;
+  }
+
   Future<void> _saveQueue() {
     _queueActivity++;
-    return _queueStore.save(_queue, _queueIndex, _queueRevision);
+    return _queueStore.save(
+      _queue,
+      _queueIndex,
+      _queueRevision,
+      playing: _playing,
+      position: _playbackSnapshotPosition,
+    );
+  }
+
+  Future<void> _persistPlaybackSnapshot() => _queueStore.save(
+    _queue,
+    _queueIndex,
+    _queueRevision,
+    playing: _playing,
+    position: _playbackSnapshotPosition,
+  );
+
+  void _schedulePlaybackSnapshot({bool immediate = false}) {
+    if (_presentationDisposed) return;
+    if (immediate) {
+      _playbackSnapshotTimer?.cancel();
+      _playbackSnapshotTimer = null;
+      unawaited(_persistPlaybackSnapshot());
+      return;
+    }
+    if (_playbackSnapshotTimer != null) return;
+    _playbackSnapshotTimer = Timer(const Duration(seconds: 1), () {
+      _playbackSnapshotTimer = null;
+      unawaited(_persistPlaybackSnapshot());
+    });
   }
 
   /// Writes the state the next launch restores before the app is backgrounded
@@ -6005,6 +6126,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _ticker?.cancel();
     playbackError = message;
     unawaited(audioEngine?.stop() ?? Future<void>.value());
+    _schedulePlaybackSnapshot(immediate: true);
     notifyListeners();
   }
 
@@ -6240,6 +6362,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     _realActive = false;
     _ticker?.cancel();
     engine.stop();
+    _schedulePlaybackSnapshot(immediate: true);
     notifyListeners();
   }
 
@@ -6284,6 +6407,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         _checkStreamStall();
       }
       _position = position;
+      _schedulePlaybackSnapshot();
       _sampleListening();
       _trackPlaySession(t);
       // A native duration/position is a second completion signal for backends
@@ -6601,6 +6725,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   @override
   void dispose() {
     _sleepTimer?.cancel();
+    _playbackSnapshotTimer?.cancel();
     _playFlushTimer?.cancel();
     _developerConsole?.dispose();
     _sampleListening();

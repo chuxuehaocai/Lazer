@@ -486,7 +486,7 @@ class _LocalMusicPageState extends State<LocalMusicPage>
                           ),
                         if (playable.isEmpty && missing.isEmpty)
                           AppleEmptyState(
-                            message: '还没有本地音乐。\n选几首存在这台设备上的歌吧。',
+                            message: '还没有本地音乐。\n可以从这台设备导入。',
                             icon: Icons.folder_open_rounded,
                             action: Wrap(
                               spacing: 10,

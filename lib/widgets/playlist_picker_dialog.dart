@@ -296,7 +296,7 @@ class _AddToPlaylistDialogState extends State<_AddToPlaylistDialog>
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
                 child: Text(
-                  context.tr('还没有创建的歌单，先新建一个吧。'),
+                  context.tr('还没有创建的歌单。'),
                   style: Theme.of(
                     context,
                   ).textTheme.bodySmall?.copyWith(color: apple.secondaryLabel),

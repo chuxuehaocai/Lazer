@@ -755,7 +755,7 @@ class _NetworkSourcesPageState extends State<NetworkSourcesPage>
                     vertical: 22,
                   ),
                   child: Text(
-                    context.tr('还没有网络存储。添加一个 NAS 地址后，就能直接播放里面的音乐。'),
+                    context.tr('还没有网络存储。添加 NAS 地址后可以直接播放其中的音乐。'),
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppleSemanticColors.of(context).secondaryLabel,
@@ -969,7 +969,7 @@ class _NetworkSourcesPageState extends State<NetworkSourcesPage>
                     vertical: 22,
                   ),
                   child: Text(
-                    context.tr('还没有播客订阅。粘贴一个 RSS 地址就能开始。'),
+                    context.tr('还没有播客订阅。粘贴 RSS 地址来订阅。'),
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: AppleSemanticColors.of(context).secondaryLabel,

@@ -95,7 +95,7 @@ Android TV gets its own composition rather than the desktop shell at ten feet.
 `设置 → 界面 → 设备形态` can force `大屏幕模式`; otherwise a Leanback or
 touch-less Android device selects it automatically and boots into it. The
 large-screen mode draws a floating destination capsule, shelves of captioned
-artwork (为你打造 and 排行榜 reuse the desktop/mobile cards), a rail-and-grid
+artwork (为你推荐 and 排行榜 reuse the desktop/mobile cards), a rail-and-grid
 library and a rounded transport card that floats over the page, keeps the
 standard interface scale, insets chrome for overscan, and turns every card,
 row and transport glyph into a D-pad focus stop with a white-on-black focus

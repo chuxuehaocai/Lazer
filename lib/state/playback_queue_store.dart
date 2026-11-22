@@ -15,9 +15,17 @@ typedef QueueReader = Future<String?> Function();
 typedef QueueDecoder = Future<PlaybackQueueSnapshot?> Function(String value);
 
 class PlaybackQueueSnapshot {
-  const PlaybackQueueSnapshot(this.tracks, this.index);
+  const PlaybackQueueSnapshot(
+    this.tracks,
+    this.index, {
+    this.playing = false,
+    this.position = Duration.zero,
+  });
+
   final List<Track> tracks;
   final int index;
+  final bool playing;
+  final Duration position;
 }
 
 /// Serializes queue writes and reuses the track payload when only the index
@@ -41,6 +49,8 @@ class PlaybackQueueStore {
   int? _revision;
   int? _encodedRevision;
   String? _encodedTracks;
+  bool? _playing;
+  int? _positionMs;
   int _index = 0;
   int _request = 0;
   Future<void>? _pending;
@@ -54,13 +64,23 @@ class PlaybackQueueStore {
     }
   }
 
-  Future<void> save(List<Track> tracks, int index, int revision) {
+  Future<void> save(
+    List<Track> tracks,
+    int index,
+    int revision, {
+    bool? playing,
+    Duration? position,
+  }) {
     if (_revision != revision) {
       // A station can append in place while an isolate is encoding.
       _tracks = List<Track>.of(tracks);
       _revision = revision;
     }
     _index = index;
+    if (playing != null) _playing = playing;
+    if (position != null) {
+      _positionMs = position.inMilliseconds < 0 ? 0 : position.inMilliseconds;
+    }
     _request++;
     return _pending ??= _flush();
   }
@@ -77,10 +97,20 @@ class PlaybackQueueStore {
             _encodedTracks = encoded;
             _encodedRevision = revision;
           }
-          // The index may have changed while the payload was being encoded.
+          // The index or playback state may have changed while the payload was
+          // being encoded.
           final int writeRequest = _request;
           final int index = _index;
-          await _write('{"index":$index,"tracks":$_encodedTracks}');
+          final StringBuffer value = StringBuffer(
+            '{"index":$index,"tracks":$_encodedTracks',
+          );
+          if (_playing != null) {
+            value
+              ..write(',"playing":$_playing')
+              ..write(',"positionMs":${_positionMs ?? 0}');
+          }
+          value.write('}');
+          await _write(value.toString());
           if (writeRequest == _request) return;
         } catch (_) {
           // Persistence is best-effort. A later request retries; do not lose a
@@ -168,5 +198,11 @@ PlaybackQueueSnapshot? _decodeQueue(String raw) {
     0,
     tracks.isEmpty ? 0 : tracks.length - 1,
   );
-  return PlaybackQueueSnapshot(tracks, index);
+  final int storedPosition = (json['positionMs'] as num?)?.toInt() ?? 0;
+  return PlaybackQueueSnapshot(
+    tracks,
+    index,
+    playing: json['playing'] == true,
+    position: Duration(milliseconds: storedPosition < 0 ? 0 : storedPosition),
+  );
 }

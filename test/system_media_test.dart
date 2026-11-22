@@ -412,6 +412,21 @@ void main() {
       await Future<void>.delayed(Duration.zero);
     },
   );
+  test('removing the task keeps active playback alive', () async {
+    final engine = _Engine();
+    final state = AppState(catalog: _Catalog(), audioEngine: engine);
+    state.playQueue(_tracks);
+    await Future<void>.delayed(Duration.zero);
+    final handler = LazerMediaHandler(state, artwork: (_) async => null);
+    await handler.onTaskRemoved();
+    expect(state.playing, isTrue);
+    expect(engine.active, isTrue);
+    expect(handler.playbackState.value.playing, isTrue);
+    handler.close();
+    state.dispose();
+    engine.dispose();
+    await Future<void>.delayed(Duration.zero);
+  });
   test('late artwork cannot replace the new song metadata', () async {
     final engine = _Engine();
     final state = AppState(catalog: _Catalog(), audioEngine: engine);

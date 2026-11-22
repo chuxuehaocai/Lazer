@@ -338,7 +338,7 @@ class _LargeScreenHomePageState extends State<LargeScreenHomePage>
           children: <Widget>[
             Padding(
               padding: EdgeInsets.symmetric(horizontal: inset),
-              child: const LargeScreenSectionHeader(title: '为你打造'),
+              child: const LargeScreenSectionHeader(title: '为你推荐'),
             ),
             const SizedBox(height: 16),
             Padding(

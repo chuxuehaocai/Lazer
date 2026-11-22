@@ -51,7 +51,7 @@ class _AppListeningStatisticsPageState extends State<AppListeningStatisticsPage>
               ),
               children: <Widget>[
                 ApplePageTitle(
-                  title: '你的音乐足迹',
+                  title: '播放统计',
                   subtitle: date == null ? '记录从首次播放开始' : '开始记录于 $date',
                   padding: const EdgeInsets.only(top: 12, bottom: 20),
                 ),
@@ -74,7 +74,7 @@ class _AppListeningStatisticsPageState extends State<AppListeningStatisticsPage>
                       key: const ValueKey('listening-statistics-empty'),
                       margin: EdgeInsets.zero,
                       child: const AppleEmptyState(
-                        message: '这段时间还没有听歌记录。播放一首喜欢的歌，让音乐足迹慢慢积累。',
+                        message: '这段时间还没有播放记录。',
                         icon: Icons.insights_rounded,
                       ),
                     )
@@ -509,7 +509,7 @@ class _RankingCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
               child: TrText(
-                skipped ? '这段时间没有主动切歌记录。' : '播放记录正在慢慢积累。',
+                skipped ? '这段时间没有主动切歌记录。' : '还没有播放记录。',
                 style: text.bodyMedium?.copyWith(color: apple.secondaryLabel),
               ),
             ),

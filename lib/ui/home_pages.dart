@@ -52,7 +52,7 @@ Playlist dailyRecommendationsPlaylist(
     coverSeed: tracks.firstOrNull?.coverSeed ?? 0,
     coverUrl: tracks.firstOrNull?.coverUrl,
     trackCount: tracks.length,
-    description: serverLibrary ? '探索服务器里的音乐' : '今日限定好歌',
+    description: serverLibrary ? '从服务器曲库随机挑选' : '今天推荐的歌',
   );
 }
 
@@ -425,13 +425,13 @@ class HomeActionShelf extends StatelessWidget {
         <({String title, String subtitle, IconData icon, VoidCallback? tap})>[
           (
             title: serverLibrary ? '随机发现' : '每日推荐', // i18n:key
-            subtitle: serverLibrary ? '探索服务器里的音乐' : '今日限定好歌', // i18n:key
+            subtitle: serverLibrary ? '从服务器曲库随机挑选' : '今天推荐的歌', // i18n:key
             icon: Icons.calendar_today_rounded,
             tap: onDaily,
           ),
           (
             title: '私人漫游', // i18n:key
-            subtitle: '发现没听过的音乐', // i18n:key
+            subtitle: '随机播放没听过的歌', // i18n:key
             icon: Icons.waves_rounded,
             tap: onFm,
           ),
@@ -1576,7 +1576,7 @@ class _StationStrip extends StatelessWidget {
         <({String title, String detail, IconData icon, VoidCallback? tap})>[
           (
             title: '私人漫游', // i18n:key
-            detail: '算法探索', // i18n:key
+            detail: '根据收听推荐', // i18n:key
             icon: Icons.radar_rounded,
             tap: enabled ? onFm : null,
           ),

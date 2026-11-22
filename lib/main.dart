@@ -223,6 +223,10 @@ Future<void> main(List<String> args) async {
           hifiPathNotice: selection.path.notice,
         );
         _activeAppState = state;
+        // Start queue restoration before the media service can deliver a cold
+        // media-button command. The activity still boots normally while this
+        // shared startup future runs in the background.
+        unawaited(state.bootstrap());
         final session = PlaybackSession(state, audio);
         final media = SystemMediaController(state);
         final discord = DiscordRpcController(state);

@@ -278,7 +278,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
     setState(() {
       _sendingCode = false;
       if (outcome.ok) {
-        _notice = '验证码已发送，请注意查收。'; // i18n:key
+        _notice = '验证码已发送。'; // i18n:key
         _resendSeconds = _resendCooldown;
       } else if (_mode == _Mode.sms) {
         _error = outcome.error ?? '验证码发送失败，请稍后重试。'; // i18n:key
@@ -544,7 +544,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                       child: TrText(
                         state.musicProvider.id == 'local'
                             ? '本地音乐无需登录，其他平台的账号会继续保留。'
-                            : '安装并启用音乐平台插件后即可登录。',
+                            : '先安装并启用音乐平台插件，再登录。',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: apple.secondaryLabel,
                           height: 1.5,

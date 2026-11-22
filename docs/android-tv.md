@@ -71,7 +71,7 @@ The large-screen mode is its own composition, not the desktop shell stretched:
   设置 / 正在播放 plus a magnifier, with the selected destination inverted
   (dark-on-light, light-on-dark) and the account avatar at the left. A back
   pill appears in front of the avatar while a detail is open;
-- **shelves** of large artwork: 为你打造 shortcuts (four larger cards across,
+- **shelves** of large artwork: 为你推荐 shortcuts (four larger cards across,
   drawn with the same edge-to-edge cover mosaic, gradient and two-line caption
   as the 电台 strip, so the shortcut row reads as artwork rather than a second
   navigation bar), 精选推荐 cards whose captions sit on a dark plate,

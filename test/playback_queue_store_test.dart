@@ -139,6 +139,20 @@ void main() {
     expect(saved['tracks'][0]['durationMs'], 180000);
   });
 
+  test('queue snapshots restore playback intent and position', () async {
+    final store = PlaybackQueueStore();
+    await store.save(
+      [track('resume')],
+      0,
+      1,
+      playing: true,
+      position: const Duration(seconds: 42),
+    );
+    final restored = await store.load();
+    expect(restored?.playing, isTrue);
+    expect(restored?.position, const Duration(seconds: 42));
+  });
+
   test('network, radio and podcast tracks survive a restart', () async {
     final store = PlaybackQueueStore();
     await store.save(
@@ -152,10 +166,11 @@ void main() {
       1,
     );
     final snapshot = await store.load();
-    expect(
-      snapshot!.tracks.map((Track item) => item.id),
-      <String>['network:abc', 'radio:rs-1', 'podcast:pe-1'],
-    );
+    expect(snapshot!.tracks.map((Track item) => item.id), <String>[
+      'network:abc',
+      'radio:rs-1',
+      'podcast:pe-1',
+    ]);
     expect(snapshot.index, 1);
     expect(snapshot.tracks.first.title, 'Song network:abc');
   });

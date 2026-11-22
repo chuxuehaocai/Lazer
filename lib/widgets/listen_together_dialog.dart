@@ -102,7 +102,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    context.tr('和朋友同步听歌，一起发现好音乐。'),
+                    context.tr('和朋友同步播放同一首歌。'),
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 18),

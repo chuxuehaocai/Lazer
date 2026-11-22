@@ -29,6 +29,7 @@ import kotlin.math.roundToInt
 class MainActivity : AudioServiceActivity() {
     private var vibrator: Vibrator? = null
     private var permissionResult: MethodChannel.Result? = null
+    private var notificationStartResult: MethodChannel.Result? = null
     private var storageResult: MethodChannel.Result? = null
     private var logExportResult: MethodChannel.Result? = null
     private var logExportText: String? = null
@@ -44,19 +45,7 @@ class MainActivity : AudioServiceActivity() {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
-                try {
-                    val intent = Intent(this, AudioService::class.java)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        // Start from the visible activity so Android 17 grants
-                        // the media service while-in-use audio capability.
-                        ContextCompat.startForegroundService(this, intent)
-                    } else {
-                        startService(intent)
-                    }
-                    result.success(null)
-                } catch (error: Exception) {
-                    result.error("audio_service_start_failed", error.message, null)
-                }
+                startAudioServiceWhenAllowed(result)
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.naominet.lazer/logs")
             .setMethodCallHandler { call, result ->
@@ -162,6 +151,42 @@ class MainActivity : AudioServiceActivity() {
                     }
                 }
             }
+    }
+
+    private fun startAudioServiceWhenAllowed(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            if (notificationStartResult != null) {
+                // The first request owns the permission dialog. The service can
+                // still be started for a concurrent playback transition.
+                startAudioService(result)
+                return
+            }
+            notificationStartResult = result
+            requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                NOTIFICATION_REQUEST,
+            )
+            return
+        }
+        startAudioService(result)
+    }
+
+    private fun startAudioService(result: MethodChannel.Result) {
+        try {
+            val intent = Intent(this, AudioService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Start from the visible activity so Android 17 grants
+                // the media service while-in-use audio capability.
+                ContextCompat.startForegroundService(this, intent)
+            } else {
+                startService(intent)
+            }
+            result.success(null)
+        } catch (error: Exception) {
+            result.error("audio_service_start_failed", error.message, null)
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -329,6 +354,12 @@ class MainActivity : AudioServiceActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == NOTIFICATION_REQUEST) {
+            val pending = notificationStartResult
+            notificationStartResult = null
+            if (pending != null) startAudioService(pending)
+            return
+        }
         if (requestCode == STORAGE_REQUEST) {
             storageResult?.success(hasAllFilesAccess())
             storageResult = null
@@ -376,6 +407,7 @@ class MainActivity : AudioServiceActivity() {
         const val UPDATES_CHANNEL = "dev.naominet.lazer/updates"
         const val SYSTEM_WIDGETS_CHANNEL = "dev.naominet.lazer/system_widgets"
         const val TELEVISION_FEATURE = "android.hardware.type.television"
+        const val NOTIFICATION_REQUEST = 4100
         const val PERMISSION_REQUEST = 4101
         const val STORAGE_REQUEST = 4103
     }

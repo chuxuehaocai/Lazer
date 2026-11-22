@@ -1814,7 +1814,7 @@ class _EmptyNowPlaying extends StatelessWidget {
           TrText('没有正在播放的曲目', style: context.type.subheading),
           const SizedBox(height: AppSpacing.sm),
           TrText(
-            '回到曲库，翻开一页吧。',
+            '去曲库选一首歌。',
             style: context.type.bodyMuted.copyWith(fontSize: 16),
           ),
           const SizedBox(height: AppSpacing.lg),

@@ -5,11 +5,11 @@
 <h1 align="center">Lazer</h1>
 
 <h3 align="center">
-  Community: <a href="https://qm.qq.com/q/JJJfE0QV00">神秘交流群 (QQ group) · 1063238023</a>
+  Community: <a href="https://qm.qq.com/q/FR8H7OzrCQ">Join the Take lazer QQ group · 1137280545</a>
 </h3>
 
 <p align="center">
-  <a href="https://qm.qq.com/q/JJJfE0QV00"><img alt="QQ group: 1063238023" src="https://img.shields.io/badge/QQ%E7%BE%A4-1063238023-12B7F5?style=for-the-badge&logo=tencentqq&logoColor=white"></a>
+  <a href="https://qm.qq.com/q/FR8H7OzrCQ"><img alt="QQ group: 1137280545" src="https://img.shields.io/badge/QQ%E7%BE%A4-1137280545-12B7F5?style=for-the-badge&logo=tencentqq&logoColor=white"></a>
 </p>
 
 <p align="center">

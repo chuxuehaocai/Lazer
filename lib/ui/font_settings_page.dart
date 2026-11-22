@@ -97,7 +97,7 @@ class FontSettingsView extends StatelessWidget {
                   desktop: desktop,
                   label: '歌词',
                   detail: '正在播放页面的歌词',
-                  sample: '让音乐陪伴每一个瞬间',
+                  sample: '窗外的雨停了 街灯还亮着',
                   style: TextStyle(
                     fontSize: state.lyricFontSize,
                     fontWeight:

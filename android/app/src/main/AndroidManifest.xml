@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
@@ -54,7 +55,7 @@
         </activity>
         <service android:name="com.ryanheise.audioservice.AudioService"
             android:foregroundServiceType="mediaPlayback" android:exported="true"
-            tools:ignore="Instantiatable">
+            android:stopWithTask="false" tools:ignore="Instantiatable">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>

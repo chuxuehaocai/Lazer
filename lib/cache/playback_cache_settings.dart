@@ -32,11 +32,11 @@ class PlaybackCacheSettings extends StatelessWidget {
                 items: <DropdownMenuItem<PlaybackCacheMode>>[
                   DropdownMenuItem(
                     value: PlaybackCacheMode.recent,
-                    child: Text(context.tr('最近缓存')),
+                    child: Text(context.tr('最近播放优先')),
                   ),
                   DropdownMenuItem(
                     value: PlaybackCacheMode.intelligent,
-                    child: Text(context.tr('智能缓存')),
+                    child: Text(context.tr('收听次数优先')),
                   ),
                 ],
                 onChanged: (value) {

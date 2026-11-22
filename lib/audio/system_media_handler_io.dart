@@ -170,6 +170,7 @@ class LazerMediaHandler extends BaseAudioHandler {
   final MediaArtworkResolver _artwork;
   Timer? _clock;
   bool _enabled;
+  bool _playRequestedWhileDisabled = false;
   bool get _acceptCommands =>
       !_closed && _enabled && !state.independentPlayback;
 
@@ -199,6 +200,7 @@ class LazerMediaHandler extends BaseAudioHandler {
     _lyricLine = null;
     _lastPlayback = null;
     if (!enabled) {
+      _playRequestedWhileDisabled = false;
       _clock?.cancel();
       _clock = null;
       playbackState.add(
@@ -213,6 +215,10 @@ class LazerMediaHandler extends BaseAudioHandler {
       _lastQueueRevision = -1;
       _track = null;
       _stateChanged();
+      if (_playRequestedWhileDisabled) {
+        _playRequestedWhileDisabled = false;
+        unawaited(play());
+      }
     }
   }
 
@@ -409,6 +415,19 @@ class LazerMediaHandler extends BaseAudioHandler {
 
   @override
   Future<void> play() async {
+    if (_closed ||
+        state.independentPlayback ||
+        state.audioResourcesSuppressed) {
+      return;
+    }
+    if (!_enabled) {
+      // A media-button broadcast can wake the service before the shared Dart
+      // handler has finished being enabled. Keep the command until that short
+      // hand-off completes instead of dropping the only cold-start Play event.
+      _playRequestedWhileDisabled = true;
+      return;
+    }
+    await state.playbackBootstrapReady;
     if (_acceptCommands) state.play();
   }
 
@@ -471,7 +490,12 @@ class LazerMediaHandler extends BaseAudioHandler {
   }
 
   @override
-  Future<void> onTaskRemoved() => stop();
+  Future<void> onTaskRemoved() async {
+    // Removing the launcher task is a UI action. The foreground media service
+    // owns the audio session and must keep the queue, notification and session
+    // alive so playback continues after the activity disappears.
+  }
+
   void close() {
     _closed = true;
     ++_artGeneration;
