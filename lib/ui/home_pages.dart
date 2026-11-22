@@ -1,6 +1,7 @@
 import '../gateway/music_models.dart';
 import '../widgets/build_safe_state.dart';
 import '../animation/apple_spring.dart';
+import '../animation/view_transitions.dart';
 import '../widgets/spring_buttons.dart';
 import 'dart:async';
 
@@ -12,10 +13,13 @@ import '../data/catalog.dart';
 import '../data/models.dart';
 import '../downloads/download_dialog.dart';
 import '../l10n/app_localizations.dart';
+import '../local/local_library.dart';
+import '../local/local_music_scan.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import '../widgets/app_scroll_behavior.dart';
+import '../widgets/apple_ui.dart';
 import '../widgets/catalog_links.dart';
 import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
@@ -27,6 +31,7 @@ import 'widgets.dart';
 
 import 'page_utils.dart';
 import 'login.dart';
+import 'plugin_manager_page.dart';
 
 double _phoneCoverCardHeight(BuildContext context, double minimum) => math.max(
   minimum,
@@ -944,8 +949,21 @@ class LocalRecentHome extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: Listenable.merge([state, state.localLibrary]),
     builder: (context, _) {
-      final recent = state.recentTracks;
       final inset = pageInset(context);
+      final List<LocalTrack> local = state.localLibrary.tracks;
+      if (local.isEmpty) {
+        return _LocalLibraryIntro(state: state, topInset: topInset);
+      }
+      final recent = state.recentTracks;
+      // Nothing played yet on a fresh install, so the shelf falls back to the
+      // library itself instead of showing an empty page next to a full one.
+      final bool fromRecent = recent.isNotEmpty;
+      final List<Track> tracks = fromRecent
+          ? recent
+          : <Track>[
+              for (final LocalTrack entry in local)
+                if (!entry.missing) entry.track,
+            ];
       return Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(
@@ -960,15 +978,18 @@ class LocalRecentHome extends StatelessWidget {
               28 + MediaQuery.paddingOf(context).bottom,
             ),
             children: [
-              const AppSectionHeader(title: '最近播放'),
+              AppSectionHeader(
+                title: fromRecent ? '最近播放' : '本地音乐',
+                subtitle: fromRecent ? null : '${tracks.length} 首',
+              ),
               const SizedBox(height: 14),
-              if (recent.isEmpty)
+              if (tracks.isEmpty)
                 const AppNotice(message: '还没有最近播放记录')
               else
                 HomeRecentTrackShelf(
                   compact: compactBrowsePresentation(context),
                   currentTrackId: state.current?.id,
-                  tracks: recent,
+                  tracks: tracks,
                   onPlay: onPlayTrack,
                   onMenuRequested: (track, position) =>
                       showTrackActions(context, state, track, position),
@@ -979,6 +1000,58 @@ class LocalRecentHome extends StatelessWidget {
       );
     },
   );
+}
+
+/// Shown on the home page of a library that holds nothing yet. Both ways to
+/// put music in it live one tap away: the folder on this device, or a music
+/// platform plugin.
+class _LocalLibraryIntro extends StatelessWidget {
+  const _LocalLibraryIntro({required this.state, required this.topInset});
+  final AppState state;
+  final double topInset;
+
+  @override
+  Widget build(BuildContext context) {
+    final double inset = pageInset(context);
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: adaptiveContentMaxWidth(context, 1180),
+        ),
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(inset, 40 + topInset, inset, 40),
+          children: [
+            AppleEmptyState(
+              message: '这台设备上还没有音乐。\n扫描本机音乐文件夹，或者装一个音乐平台插件。',
+              icon: Icons.library_music_rounded,
+              action: Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: <Widget>[
+                  SpringFilledButton(
+                    key: const ValueKey<String>('local-home-scan'),
+                    onPressed: () => unawaited(scanSystemMusic(context, state)),
+                    child: const TrText('扫描本机音乐'),
+                  ),
+                  SpringOutlinedButton.icon(
+                    key: const ValueKey<String>('local-home-plugins'),
+                    onPressed: () => Navigator.of(context).push(
+                      ApplePageRoute<void>(
+                        builder: (_) => PluginManagerPage(state: state),
+                      ),
+                    ),
+                    icon: const Icon(Icons.extension_rounded, size: 18),
+                    label: const TrText('音乐平台插件'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Recent listening is laid out in reading order. Sparse history takes only
