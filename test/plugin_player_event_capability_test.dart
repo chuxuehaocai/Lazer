@@ -8,7 +8,7 @@ void main() {
     final tempDir = await Directory.systemTemp.createTemp('lazer-pe-test-');
     addTearDown(() => tempDir.delete(recursive: true));
 
-    final manager = PluginManager(rootDirectory: tempDir.path);
+    final manager = PluginManager(rootDirectory: tempDir);
     addTearDown(manager.dispose);
 
     expect(manager.hasPlayerEventListeners, isFalse);
