@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:lazer/plugins/plugin_manager_io.dart';
-import 'package:lazer/plugins/plugin_manifest.dart';
+import 'package:lazer_nextgen/plugins/plugin_manager_io.dart';
+import 'package:lazer_nextgen/plugins/plugin_manifest.dart';
 
 void main() {
   test('PluginManager only broadcasts player_event to plugins declaring player_events capability', () async {
