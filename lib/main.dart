@@ -32,6 +32,7 @@ import 'theme/apple_design.dart';
 import 'theme/adaptive_app_theme.dart';
 import 'theme/lazer_theme.dart';
 import 'state/app_state.dart';
+import 'local/local_autoscan.dart';
 import 'state/ui_preferences.dart';
 import 'plugins/plugin_manager.dart';
 import 'theme/font_preferences.dart';
@@ -377,7 +378,13 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
       onHide: () => unawaited(_state.flushPersistence()),
       onDetach: () => unawaited(_state.flushPersistence()),
     );
-    _state.bootstrap();
+    // A fresh install has no music connection until a plugin is added, so the
+    // first launch also picks up whatever already sits in the music folder.
+    unawaited(
+      _state.bootstrap().then(
+        (_) => autoScanLocalMusicOnce(_state.localLibrary),
+      ),
+    );
     _desktopLyrics = DesktopLyricsController(_state);
     if (supportsConsoleWindow) _consoleWindow = ConsoleWindowController(_state);
     _remote = LanRemoteController(_state);

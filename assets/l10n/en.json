@@ -453,6 +453,8 @@
   "还没有播放中的歌曲。": "No song is playing yet.",
   "还没有最近播放记录": "No recently played tracks yet",
   "还没有本地音乐。\n可以从这台设备导入。": "No local music yet.\nYou can import from this device.",
+  "这台设备上还没有音乐。\n扫描本机音乐文件夹，或者装一个音乐平台插件。": "This device has no music yet.\nScan a music folder, or add a music platform plugin.",
+  "音乐平台插件": "Music platform plugin",
   "这一期暂时载入失败，请稍后重试。": "Couldn't load this issue. Please try again later.",
   "这个歌单还没有可播放的曲目。": "This playlist has no playable tracks yet.",
   "这个目录不可写，请换一个位置": "This folder isn't writable; choose another location",
