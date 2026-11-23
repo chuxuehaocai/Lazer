@@ -39,8 +39,29 @@ enum DesktopNowPlayingPane { lyrics, comments, queue, none }
 /// Breathing room below the cover and metadata group on the desktop canvas.
 const double kDesktopArtworkBottomInset = 24;
 
+/// The player's own header row: the back control's leading inset on the left, a
+/// 4 dp breath under the window edge, and the capsule's end inset on the right,
+/// so the page capsule stops exactly where the floating one does.
+const EdgeInsets kDesktopPlayerHeaderInset = EdgeInsets.fromLTRB(
+  16,
+  4,
+  kWindowChromeEnd,
+  4,
+);
+
 bool _usesWindowCapsule(BuildContext context) =>
     WindowChromeScope.maybeLayoutOf(context)?.inline == true &&
+    !TvScope.isActive(context);
+
+/// Whether the player's action row is painted inside a window capsule.
+///
+/// Two presentations wear one capsule: the frame's floating capsule in Inline
+/// mode, and the capsule the page draws for itself under a classic title bar.
+/// The buttons take the capsule's ink in both — [WindowChromeActions] owns that
+/// material — and keep the player's own ink only on a television, which retains
+/// the in-page toolbar.
+bool _usesCapsuleInk(BuildContext context) =>
+    WindowChromeScope.maybeLayoutOf(context) != null &&
     !TvScope.isActive(context);
 
 /// Desktop listening workspace with an unscrolled, collapsible transport dock.
@@ -81,6 +102,7 @@ class DesktopNowPlaying extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool tv = TvScope.isActive(context);
     final bool inlineChrome = _usesWindowCapsule(context);
+    final bool capsuleInk = _usesCapsuleInk(context);
     final bool inlineFrame =
         WindowChromeScope.maybeLayoutOf(context)?.inline == true;
     // The listening canvas starts below the floating capsule: the page keeps
@@ -217,7 +239,7 @@ class DesktopNowPlaying extends StatelessWidget {
                   right: 0,
                   child: WindowChromeHeader(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 20, 4),
+                      padding: kDesktopPlayerHeaderInset,
                       child: Row(
                         children: [
                           WindowChromeCollapse(
@@ -249,7 +271,7 @@ class DesktopNowPlaying extends StatelessWidget {
                                     : () => unawaited(
                                         searchInOsu(context, track),
                                       ),
-                                color: inlineChrome
+                                color: capsuleInk
                                     ? null
                                     : context.colors.onPlayer,
                                 icon: const Icon(Icons.search_rounded),
@@ -283,6 +305,7 @@ class _AddToPlaylistButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool cloud = track.isServiceTrack && track.localPath == null;
     final bool inlineChrome = _usesWindowCapsule(context);
+    final bool capsuleInk = _usesCapsuleInk(context);
     return AccessibleIconButton(
       key: const ValueKey('desktop-add-to-playlist'),
       // See the capsule's close button: a tooltip would nest a second overlay
@@ -294,7 +317,7 @@ class _AddToPlaylistButton extends StatelessWidget {
           ? () =>
                 unawaited(showAddToPlaylistDialog(context, state, track: track))
           : null,
-      color: inlineChrome ? null : context.colors.onPlayer,
+      color: capsuleInk ? null : context.colors.onPlayer,
       icon: const Icon(Icons.playlist_add_rounded),
     );
   }
@@ -312,6 +335,7 @@ class _DownloadButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool inlineChrome = _usesWindowCapsule(context);
+    final bool capsuleInk = _usesCapsuleInk(context);
     // Local files (imports, scans and downloads played back from the library)
     // have no service id to resolve.
     if (!track.isServiceTrack || track.localPath != null) {
@@ -320,7 +344,7 @@ class _DownloadButton extends StatelessWidget {
         tooltip: inlineChrome ? null : '本地歌曲无需下载',
         semanticLabel: inlineChrome ? '本地歌曲无需下载' : null,
         onPressed: null,
-        color: inlineChrome ? null : context.colors.cloudDark,
+        color: capsuleInk ? null : context.colors.cloudDark,
         icon: const Icon(Icons.download_rounded),
       );
     }
@@ -346,7 +370,7 @@ class _DownloadButton extends StatelessWidget {
                 ? showDownloadQueueSheet(context, state)
                 : downloadTracks(context, state, <Track>[track]),
           ),
-          color: inlineChrome
+          color: capsuleInk
               ? null
               : queued
               ? context.colors.clayDeep
@@ -357,7 +381,7 @@ class _DownloadButton extends StatelessWidget {
                   child: CircularProgressIndicator(
                     value: task?.progress,
                     strokeWidth: 2.4,
-                    color: inlineChrome
+                    color: capsuleInk
                         ? Theme.of(context).colorScheme.onSurfaceVariant
                         : context.colors.clayDeep,
                   ),

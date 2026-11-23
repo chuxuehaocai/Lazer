@@ -1,6 +1,9 @@
+import 'dart:ui' as ui;
+
 import '../state/build_safe_notifier.dart';
 import 'build_safe_state.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../ui/background.dart';
 import '../state/app_state.dart';
@@ -9,12 +12,55 @@ import '../theme/apple_design.dart';
 import 'windows_backdrop.dart';
 
 class BrowseBackgroundScope extends InheritedWidget {
-  const BrowseBackgroundScope({super.key, required super.child});
+  const BrowseBackgroundScope({super.key, this.capture, required super.child});
+
+  /// Freezes the canvas painted below the navigator into an image the caller
+  /// owns, or null when this host paints no canvas of its own (Windows mica
+  /// is composited by the window manager).
+  ///
+  /// Interactive navigation previews need the pixels that sit under the
+  /// navigator: the page that is leaving has to stay opaque over the page it
+  /// uncovers, but a flat surface colour would replace the backdrop the
+  /// revealed page is supposed to keep. [source] names the region to freeze,
+  /// so the copy lines up with the page that paints it.
+  final ui.Image? Function(RenderBox? source)? capture;
+
+  static BrowseBackgroundScope? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<BrowseBackgroundScope>();
   static bool contains(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<BrowseBackgroundScope>() !=
       null;
   @override
-  bool updateShouldNotify(BrowseBackgroundScope oldWidget) => false;
+  bool updateShouldNotify(BrowseBackgroundScope oldWidget) =>
+      capture != oldWidget.capture;
+}
+
+/// A boundary around everything painted behind the navigator, so the live
+/// canvas can be captured without the page content above it.
+class _BrowseCaptureBoundary extends RepaintBoundary {
+  const _BrowseCaptureBoundary({super.key, required super.child});
+  @override
+  _RenderBrowseCaptureBoundary createRenderObject(BuildContext context) =>
+      _RenderBrowseCaptureBoundary();
+}
+
+class _RenderBrowseCaptureBoundary extends RenderRepaintBoundary {
+  /// The pixels painted by the last frame, without forcing a new paint.
+  ///
+  /// [bounds] is expressed in this boundary's coordinates, which lets a caller
+  /// capture exactly the region one page covers.
+  ui.Image? captureLastPaint(double pixelRatio, [Rect? bounds]) {
+    final painted = layer;
+    if (painted is! OffsetLayer || !hasSize || size.isEmpty) return null;
+    try {
+      return painted.toImageSync(
+        bounds ?? (Offset.zero & size),
+        pixelRatio: pixelRatio,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// One persistent canvas below the navigator, shared by every browsing route.
@@ -37,6 +83,7 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
     with BuildSafeState<SharedBrowseBackground> {
   late Object _signature;
   late Listenable _motion;
+  final GlobalKey _backdropKey = GlobalKey(debugLabel: 'browse-backdrop');
 
   Object get _backgroundSignature {
     final state = widget.state;
@@ -100,8 +147,31 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
     super.dispose();
   }
 
+  /// See [BrowseBackgroundScope.capture].
+  ui.Image? _captureBackdrop(RenderBox? source) {
+    if (!mounted ||
+        widget.state.backgroundMode == AppBackgroundMode.windowsMica) {
+      return null;
+    }
+    final boundary = _backdropKey.currentContext?.findRenderObject();
+    if (boundary is! _RenderBrowseCaptureBoundary) return null;
+    // Capture the slice that sits under the requesting page instead of the
+    // whole window: the page paints its copy 1:1, and a window-sized image
+    // squeezed into a smaller box would put the canvas out of phase with the
+    // live one at the page's edges.
+    Rect? region;
+    if (source != null && source.attached && source.hasSize) {
+      region =
+          boundary.globalToLocal(source.localToGlobal(Offset.zero)) &
+          source.size;
+    }
+    final double ratio = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1;
+    return boundary.captureLastPaint(ratio.clamp(1.0, 2.0), region);
+  }
+
   @override
   Widget build(BuildContext context) => BrowseBackgroundScope(
+    capture: _captureBackdrop,
     child: AnimatedBuilder(
       // Likes, downloads, volume and account updates do not change these
       // pixels. Only the background selection and route visibility do.
@@ -125,46 +195,56 @@ class _SharedBrowseBackgroundState extends State<SharedBrowseBackground>
         return Stack(
           fit: StackFit.expand,
           children: [
-            if (!playerMica && !mica) ColoredBox(color: canvas),
-            if (!playerMica && mica)
-              MicaSurface(opacity: state.backgroundOpacity),
-            if (!playerMica && painted && !mica)
-              Opacity(
-                key: const ValueKey('browse-background-opacity'),
-                opacity: state.backgroundOpacity,
-                child: TickerMode(
-                  enabled:
-                      !state.playerPresented.value &&
-                      !(state.browseTransitionActive.value &&
-                          navigation.rootVisible.value &&
-                          !navigation.moving.value),
-                  child: AlbumBlurFlowCanvas(
-                    track: state.current,
-                    mode: state.backgroundMode,
-                    pageColor: Colors.transparent,
-                    animationsEnabled:
-                        state.backgroundMode ==
-                        AppBackgroundMode.nowPlayingDynamic,
-                    imagePath: state.backgroundImagePath,
-                    imageAlignmentX: state.backgroundImageAlignmentX,
-                    imageAlignmentY: state.backgroundImageAlignmentY,
-                    imageScale: state.backgroundImageScale,
-                    blurSigma: state.backgroundBlurEnabled
-                        ? state.backgroundBlur
-                        : 0,
-                    darkEdge: state.backgroundDarkEdgeEnabled,
-                    quality: state.dynamicBackgroundQuality,
-                    frameRate: state.browseBackgroundFps,
-                    solidColor: state.browseBackgroundColor,
-                  ),
-                ),
+            // One boundary around every painted backdrop pixel: a navigation
+            // preview freezes exactly this, never the page content above it.
+            _BrowseCaptureBoundary(
+              key: _backdropKey,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (!playerMica && !mica) ColoredBox(color: canvas),
+                  if (!playerMica && mica)
+                    MicaSurface(opacity: state.backgroundOpacity),
+                  if (!playerMica && painted && !mica)
+                    Opacity(
+                      key: const ValueKey('browse-background-opacity'),
+                      opacity: state.backgroundOpacity,
+                      child: TickerMode(
+                        enabled:
+                            !state.playerPresented.value &&
+                            !(state.browseTransitionActive.value &&
+                                navigation.rootVisible.value &&
+                                !navigation.moving.value),
+                        child: AlbumBlurFlowCanvas(
+                          track: state.current,
+                          mode: state.backgroundMode,
+                          pageColor: Colors.transparent,
+                          animationsEnabled:
+                              state.backgroundMode ==
+                              AppBackgroundMode.nowPlayingDynamic,
+                          imagePath: state.backgroundImagePath,
+                          imageAlignmentX: state.backgroundImageAlignmentX,
+                          imageAlignmentY: state.backgroundImageAlignmentY,
+                          imageScale: state.backgroundImageScale,
+                          blurSigma: state.backgroundBlurEnabled
+                              ? state.backgroundBlur
+                              : 0,
+                          darkEdge: state.backgroundDarkEdgeEnabled,
+                          quality: state.dynamicBackgroundQuality,
+                          frameRate: state.browseBackgroundFps,
+                          solidColor: state.browseBackgroundColor,
+                        ),
+                      ),
+                    ),
+                  if (!playerMica && painted && !mica)
+                    IgnorePointer(
+                      child: ColoredBox(
+                        color: apple.background.withValues(alpha: .60),
+                      ),
+                    ),
+                ],
               ),
-            if (!playerMica && painted && !mica)
-              IgnorePointer(
-                child: ColoredBox(
-                  color: apple.background.withValues(alpha: .60),
-                ),
-              ),
+            ),
             Opacity(
               key: const ValueKey('browse-content-opacity'),
               // The player separates its own canvas from its controls. Other

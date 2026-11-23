@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../animation/apple_spring.dart';
@@ -99,6 +100,50 @@ class _WindowFrameState extends State<WindowFrame>
   bool _revealTarget = true;
   double _extensionWidth = 0;
 
+  /// Serialized capsule paint settings. The frame owns the material every
+  /// capsule in the window paints, so a page that draws its own capsule has to
+  /// be rebuilt when the listener changes the tint, the opacity or the blur —
+  /// and must not be rebuilt on every unrelated state notification, which would
+  /// re-run the backdrop filter for nothing.
+  late String _capsuleKey = _currentCapsuleKey();
+  bool _capsuleRebuildScheduled = false;
+
+  String _currentCapsuleKey() {
+    final AppState? state = widget.state;
+    if (state == null) return '';
+    // The tint resolves from [windowChromeColor] or the theme's own background,
+    // which is fixed per brightness: neither the accent nor the palette mode
+    // repaints a capsule, and both already rebuild the app root.
+    return <Object?>[
+      state.windowChromeBlurEnabled,
+      state.windowChromeBlur,
+      state.windowChromeOpacity,
+      state.windowChromeColor?.toARGB32(),
+    ].join('|');
+  }
+
+  void _onStateChanged() {
+    if (!mounted) return;
+    final String key = _currentCapsuleKey();
+    if (key == _capsuleKey) return;
+    _capsuleKey = key;
+    // Pages report state from build. Calling setState on the frame while the
+    // framework is already building throws, so take that report on the frame
+    // that is running instead.
+    final SchedulerPhase phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks) {
+      if (_capsuleRebuildScheduled) return;
+      _capsuleRebuildScheduled = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _capsuleRebuildScheduled = false;
+        if (mounted) setState(() {});
+      });
+      return;
+    }
+    setState(() {});
+  }
+
   bool get _inline =>
       widget.state?.titleBarStyle == DesktopTitleBarStyle.inline &&
       !usesNativeWindowButtons;
@@ -125,6 +170,7 @@ class _WindowFrameState extends State<WindowFrame>
   @override
   void initState() {
     super.initState();
+    widget.state?.addListener(_onStateChanged);
     _chrome.addListener(_chromeChanged);
     // The pill's leading extension travels with the handover: it narrows
     // behind the command that is leaving and only grows again once the next
@@ -162,6 +208,11 @@ class _WindowFrameState extends State<WindowFrame>
   @override
   void didUpdateWidget(covariant WindowFrame oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.state != oldWidget.state) {
+      oldWidget.state?.removeListener(_onStateChanged);
+      widget.state?.addListener(_onStateChanged);
+      _capsuleKey = _currentCapsuleKey();
+    }
     _retarget();
   }
 
@@ -177,6 +228,7 @@ class _WindowFrameState extends State<WindowFrame>
 
   @override
   void dispose() {
+    widget.state?.removeListener(_onStateChanged);
     _chrome.removeListener(_chromeChanged);
     _chrome.handover?.removeListener(_chromeChanged);
     _reveal.removeListener(_revealChanged);
@@ -225,6 +277,7 @@ class _WindowFrameState extends State<WindowFrame>
       inline: inline && showChrome,
       reveal: inline && showChrome ? _reveal : null,
       chromeTheme: Theme.of(context),
+      capsule: windowChromeCapsuleStyleOf(widget.state),
       child: Directionality(
         textDirection: TextDirection.ltr,
         child: Overlay.wrap(

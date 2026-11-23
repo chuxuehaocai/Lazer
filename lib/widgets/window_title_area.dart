@@ -7,7 +7,6 @@ import 'package:window_manager/window_manager.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
-import '../theme/apple_design.dart';
 import 'app_system_tray.dart';
 import 'window_chrome.dart';
 
@@ -69,24 +68,6 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
   bool _focused = true;
   bool _closePromptOpen = false;
 
-  /// Serialized capsule paint settings. The frame must repaint the capsule when
-  /// the listener changes its tint, opacity or blur, but rebuilding it on every
-  /// unrelated state notification would re-run the backdrop filter for nothing.
-  late String _paintKey = _currentPaintKey();
-
-  String _currentPaintKey() {
-    final AppState? state = widget.state;
-    if (state == null) return '';
-    return <Object?>[
-      state.windowChromeBlurEnabled,
-      state.windowChromeBlur,
-      state.windowChromeOpacity,
-      state.windowChromeColor?.toARGB32(),
-      state.accentColor?.toARGB32(),
-      state.paletteMode.name,
-    ].join('|');
-  }
-
   @override
   void initState() {
     super.initState();
@@ -119,17 +100,13 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
     if (widget.state != oldWidget.state) {
       oldWidget.state?.removeListener(_onStateChanged);
       widget.state?.addListener(_onStateChanged);
-      _paintKey = _currentPaintKey();
       _syncPreventClose();
     }
   }
 
-  void _onStateChanged() {
-    _syncPreventClose();
-    final String key = _currentPaintKey();
-    if (key == _paintKey || !mounted) return;
-    setState(() => _paintKey = key);
-  }
+  /// The capsule's material is [WindowChromeScope.capsule], published by the
+  /// frame; this listener only keeps the native close event in Flutter.
+  void _onStateChanged() => _syncPreventClose();
 
   void _syncPreventClose() {
     try {
@@ -334,8 +311,9 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
   /// The material follows the listener's settings: tint colour, tint opacity and
   /// whether (and how strongly) the capsule filters the page behind it.
   Widget _floatingCapsule(BuildContext context, String middleLabel) {
-    final AppState? state = widget.state;
-    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final WindowChromeCapsuleStyle capsule =
+        WindowChromeScope.maybeLayoutOf(context)?.capsule ??
+        windowChromeCapsuleStyleOf(widget.state);
     return WindowDragArea(
       child: SizedBox(
         height: kWindowTitleAreaHeight,
@@ -353,16 +331,8 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
                 height: kWindowChromeHeight,
               ),
             ),
-            WindowChromeSurface(
-              inline: true,
-              tint: windowChromeTint(
-                apple,
-                custom: state?.windowChromeColor,
-                opacity:
-                    state?.windowChromeOpacity ?? kWindowChromeOpacityDefault,
-              ),
-              blurEnabled: state?.windowChromeBlurEnabled ?? true,
-              blurSigma: state?.windowChromeBlur ?? kWindowChromeBlurDefault,
+            capsule.surface(
+              context: context,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
@@ -442,12 +412,9 @@ class _WindowTitleAreaState extends State<WindowTitleArea>
                 top: 0,
                 end: 0,
                 bottom: 0,
-                child: WindowChromeSurface(
-                  inline: false,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: _captions(context, middleLabel),
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: _captions(context, middleLabel),
                 ),
               ),
           ],

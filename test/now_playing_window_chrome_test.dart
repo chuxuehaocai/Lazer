@@ -398,41 +398,163 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
 
-  testWidgets(
-    'a classic title bar keeps its band while the player idles out',
-    (tester) async {
-      final harness = _PlayerFrameHarness(
-        tester,
-        chromeStyle: DesktopTitleBarStyle.classic,
-      );
-      try {
-        await harness.mount();
-        await tester.pump();
-        final player = find.byType(NowPlayingPage);
-        // The strip owns a real band: the page starts below it.
-        expect(tester.getTopLeft(player).dy, kWindowTitleAreaHeight);
-        expect(_controlsVisible(tester), isTrue);
-        _expectClassicCaption(tester);
+  testWidgets('a classic title bar keeps its band while the player idles out', (
+    tester,
+  ) async {
+    final harness = _PlayerFrameHarness(
+      tester,
+      chromeStyle: DesktopTitleBarStyle.classic,
+    );
+    try {
+      await harness.mount();
+      await tester.pump();
+      final player = find.byType(NowPlayingPage);
+      // The strip owns a real band: the page starts below it.
+      expect(tester.getTopLeft(player).dy, kWindowTitleAreaHeight);
+      expect(_controlsVisible(tester), isTrue);
+      _expectClassicCaption(tester);
 
-        // The idle countdown folds the dock away. It may not take the window's
-        // own strip with it, nor move the page up into the strip's band.
-        await tester.pump(const Duration(seconds: 2));
-        expect(_controlsVisible(tester), isFalse);
-        expect(tester.getTopLeft(player).dy, kWindowTitleAreaHeight);
-        _expectClassicCaption(tester);
-        await tester.tap(find.byKey(_minimizeKey));
-        await tester.pump();
+      // The idle countdown folds the dock away. It may not take the window's
+      // own strip with it, nor move the page up into the strip's band.
+      await tester.pump(const Duration(seconds: 2));
+      expect(_controlsVisible(tester), isFalse);
+      expect(tester.getTopLeft(player).dy, kWindowTitleAreaHeight);
+      _expectClassicCaption(tester);
+      await tester.tap(find.byKey(_minimizeKey));
+      await tester.pump();
+      expect(
+        harness.windowCalls.where((call) => call == 'minimize'),
+        hasLength(1),
+      );
+      expect(tester.takeException(), isNull);
+    } finally {
+      await harness.dispose();
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('the classic title bar leaves the player capsule to the page', (
+    tester,
+  ) async {
+    final harness = _PlayerFrameHarness(
+      tester,
+      chromeStyle: DesktopTitleBarStyle.classic,
+    );
+    try {
+      await harness.mount();
+      // The frame reads the window's native state in a zero-delay timer when it
+      // mounts; give that frame a duration so it lands before the assertions.
+      await tester.pump(const Duration(milliseconds: 16));
+      // One capsule on screen, painted by the page: under the classic strip
+      // the window owns no capsule of its own. It is the player's own action
+      // row that sits on it.
+      expect(find.byType(WindowChromeSurface), findsOneWidget);
+      final Finder capsule = find.byKey(_actionsKey);
+      expect(tester.widget(capsule), isA<WindowChromeSurface>());
+      final Rect rect = tester.getRect(capsule);
+      expect(rect.height, kWindowChromeHeight);
+      expect(rect.width, closeTo(kWindowChromeButtonWidth * 3, .05));
+      expect(rect.right, 1280 - kWindowChromeEnd);
+      // It sits on the header row's centre line, level with the page's own
+      // back control, instead of inventing a second row.
+      expect(
+        rect.center.dy,
+        tester.getCenter(find.byKey(const ValueKey('desktop-close'))).dy,
+      );
+      // The capsule wears the window's theme, not the player canvas's forced
+      // dark one: switching title bar styles must not flip one capsule from
+      // white glass to dark glass on the same page.
+      expect(
+        Theme.of(tester.element(capsule)).brightness,
+        Theme.of(tester.element(find.byType(WindowTitleArea))).brightness,
+      );
+      // Same material as the capsule the frame floats in Inline mode: one
+      // pill radius, the listener's tint at the configured opacity, the
+      // backdrop blur and no hairline ring.
+      final AppleGlass glass = tester.widget<AppleGlass>(
+        find.descendant(of: capsule, matching: find.byType(AppleGlass)).first,
+      );
+      expect(
+        glass.borderRadius,
+        BorderRadius.circular(kWindowChromeHeight / 2),
+      );
+      expect(glass.border, isNull);
+      expect(
+        glass.color,
+        windowChromeTint(
+          AppleSemanticColors.of(tester.element(capsule)),
+          opacity: kWindowChromeOpacityDefault,
+        ),
+      );
+      expect(glass.blurSigma, kWindowChromeBlurDefault);
+      // Every action takes a capsule cell and the capsule's ink, and the pill
+      // is the surface those cells paint on.
+      for (final Key key in <Key>[_searchKey, _addKey, _downloadKey]) {
         expect(
-          harness.windowCalls.where((call) => call == 'minimize'),
-          hasLength(1),
+          find.descendant(of: capsule, matching: find.byKey(key)),
+          findsOneWidget,
         );
-        expect(tester.takeException(), isNull);
-      } finally {
-        await harness.dispose();
+        expect(tester.getSize(find.byKey(key)), const Size(46, 40));
+        expect(tester.getRect(find.byKey(key)).center.dy, rect.center.dy);
       }
-    },
-    variant: TargetPlatformVariant.only(TargetPlatform.windows),
-  );
+      expect(find.byKey(_actionsKey), findsOneWidget);
+      expect(tester.getSize(find.byKey(_actionsKey)), rect.size);
+      expect(find.byKey(_searchKey).hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    } finally {
+      await harness.dispose();
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('the page capsule follows the listener capsule settings', (
+    tester,
+  ) async {
+    const Color custom = Color(0xFF3366FF);
+    final harness = _PlayerFrameHarness(
+      tester,
+      chromeStyle: DesktopTitleBarStyle.classic,
+    );
+    Finder capsuleGlass() => find.descendant(
+      of: find.byKey(_actionsKey),
+      matching: find.byType(AppleGlass),
+    );
+    try {
+      await harness.mount();
+      await tester.pump();
+      await harness.state.setWindowChromeColor(custom);
+      await harness.state.setWindowChromeOpacity(.5);
+      await harness.state.setWindowChromeBlur(24);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AppleGlass>(capsuleGlass()).color,
+        custom.withValues(alpha: .5),
+      );
+      expect(tester.widget<AppleGlass>(capsuleGlass()).blurSigma, 24);
+
+      // Blur off paints the same tint without a backdrop filter at all.
+      await harness.state.setWindowChromeBlurEnabled(false);
+      await tester.pumpAndSettle();
+      expect(capsuleGlass(), findsNothing);
+      final Finder tinted = find.descendant(
+        of: find.byKey(_actionsKey),
+        matching: find.byWidgetPredicate(
+          (Widget widget) =>
+              widget is DecoratedBox &&
+              widget.decoration is BoxDecoration &&
+              (widget.decoration as BoxDecoration).color ==
+                  custom.withValues(alpha: .5),
+        ),
+      );
+      expect(tinted, findsOneWidget);
+      final DecoratedBox box = tester.widget<DecoratedBox>(tinted);
+      expect(
+        (box.decoration as BoxDecoration).color,
+        custom.withValues(alpha: .5),
+      );
+      expect(tester.takeException(), isNull);
+    } finally {
+      await harness.dispose();
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets(
     'both player controls stay aligned to the caption as the page slides',

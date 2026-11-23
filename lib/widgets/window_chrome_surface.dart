@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import 'apple_ui.dart';
@@ -72,22 +73,89 @@ Color windowChromeTint(
   return (custom ?? apple.background).withValues(alpha: alpha);
 }
 
-/// The shared surface for floating caption and player-action capsules. Inline
-/// mode paints the same translucent material as the phone's navigation capsule —
-/// glass tint plus a backdrop blur — with the tint, the blur and the blur
-/// strength coming from the listener's settings.
+/// The capsule material the listener configured: tint, backdrop blur and blur
+/// strength.
+///
+/// The frame publishes one through `WindowChromeScope`, and every capsule in
+/// the window resolves it against its own theme: the floating capsule Inline
+/// mode draws, and the capsule a page draws for itself under a classic title
+/// bar, read as the same material in the same window.
+@immutable
+class WindowChromeCapsuleStyle {
+  const WindowChromeCapsuleStyle({
+    this.custom,
+    this.opacity = kWindowChromeOpacityDefault,
+    this.blurEnabled = true,
+    this.blurSigma = kWindowChromeBlurDefault,
+  });
+
+  /// Nothing configured: the theme's own background at the default strength.
+  static const WindowChromeCapsuleStyle defaults = WindowChromeCapsuleStyle();
+
+  /// A listener-picked tint; null follows the surface's background colour.
+  final Color? custom;
+  final double opacity;
+  final bool blurEnabled;
+  final double blurSigma;
+
+  Color tintFor(AppleSemanticColors apple) =>
+      windowChromeTint(apple, custom: custom, opacity: opacity);
+
+  /// Paints [child] on the capsule material, with the capsule's own pill
+  /// geometry: [kWindowChromeHeight] tall, fully rounded and clipped.
+  Widget surface({
+    Key? key,
+    required BuildContext context,
+    required Widget child,
+  }) => WindowChromeSurface(
+    key: key,
+    tint: tintFor(AppleSemanticColors.of(context)),
+    blurEnabled: blurEnabled,
+    blurSigma: blurSigma,
+    child: child,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is WindowChromeCapsuleStyle &&
+      other.custom == custom &&
+      other.opacity == opacity &&
+      other.blurEnabled == blurEnabled &&
+      other.blurSigma == blurSigma;
+
+  @override
+  int get hashCode => Object.hash(custom, opacity, blurEnabled, blurSigma);
+}
+
+/// The capsule material [state] asks for. A frame without a listener state — a
+/// preview or a widget test — answers the defaults.
+WindowChromeCapsuleStyle windowChromeCapsuleStyleOf(AppState? state) =>
+    WindowChromeCapsuleStyle(
+      custom: state?.windowChromeColor,
+      opacity: state?.windowChromeOpacity ?? kWindowChromeOpacityDefault,
+      blurEnabled: state?.windowChromeBlurEnabled ?? true,
+      blurSigma: state?.windowChromeBlur ?? kWindowChromeBlurDefault,
+    );
+
+/// The shared surface for floating caption and player-action capsules: the same
+/// translucent material as the phone's navigation capsule — glass tint plus a
+/// backdrop blur — with the tint, the blur and the blur strength coming from the
+/// listener's settings.
+///
+/// Two owners paint it: the frame, for the caption and player-action capsule
+/// that floats over the page, and a page itself, for the capsule a classic title
+/// bar leaves to it. Both go through [WindowChromeCapsuleStyle] so the pill's
+/// radius, tint, blur and clipping stay one definition.
 class WindowChromeSurface extends StatelessWidget {
   const WindowChromeSurface({
     super.key,
     required this.child,
-    this.inline = true,
     this.tint,
     this.blurEnabled = true,
     this.blurSigma = kWindowChromeBlurDefault,
   });
 
   final Widget child;
-  final bool inline;
 
   /// Null falls back to the theme's glass tint.
   final Color? tint;
@@ -96,7 +164,6 @@ class WindowChromeSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!inline) return child;
     final BorderRadius radius = BorderRadius.circular(kWindowChromeHeight / 2);
     final Color color = tint ?? AppleSemanticColors.of(context).glass;
     // Blur off: paint the tint on its own. AppleGlass would still run its

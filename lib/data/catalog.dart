@@ -216,20 +216,59 @@ class Catalog {
   }
 
   // Private playlists and recommendations must not cross session boundaries.
-  String get _scope => activeGateway.cacheNamespace;
+  String get _scope => _sessionScope(activeGateway.cacheNamespace);
+
+  /// One cache generation per account namespace.
+  ///
+  /// A session that ends must not answer the next one. Snapshots written by
+  /// the previous sign-in otherwise satisfy every library and recommendation
+  /// read for the rest of their TTL, so logging out and back in showed the old
+  /// account data until the process was restarted. Rotating the generation
+  /// makes every account-scoped key miss exactly once; keys an in-flight read
+  /// still holds stay retired and cannot refill the cache behind the new
+  /// session.
+  final Map<String, int> _sessionGenerations = <String, int>{};
+
+  /// [namespace] qualified by the generation of the session that owns it.
+  String _sessionScope(String namespace) =>
+      '$namespace#${_sessionGenerations[namespace] ?? 0}';
+
+  /// Starts a new cache generation for [owner]'s account.
+  ///
+  /// Call this on every session boundary: signing in, signing out, and a
+  /// plugin that answers for the account being replaced. Everything the
+  /// previous session stored becomes unreachable, so the music library,
+  /// recommendations, favorites and play record are read from the service
+  /// again instead of being replayed from disk or memory.
+  void rotateSession(MusicGateway owner) {
+    final namespace = owner.cacheNamespace;
+    final retired = _sessionScope(namespace);
+    _sessionGenerations[namespace] = (_sessionGenerations[namespace] ?? 0) + 1;
+    _memory.removeWhere((key, _) => key.contains(retired));
+    _invalidatedKeys.removeWhere((key) => key.contains(retired));
+    _failedRequests.removeWhere((key, _) => key.contains(retired));
+    _savedAlbumGenerations.removeWhere((key, _) => key.contains(retired));
+    if (identical(owner, connections.active)) {
+      // The visible feed belongs to the session that just ended, and a home
+      // request still in flight must not repaint it once it answers.
+      _platformEpoch++;
+      _home = null;
+      _homeError = null;
+    }
+  }
 
   String _collectionsKey(int uid, {MusicGateway? connection}) =>
-      'collections:v3:${(connection ?? activeGateway).cacheNamespace}';
+      'collections:v3:${_sessionScope((connection ?? activeGateway).cacheNamespace)}';
 
   String _playlistKey(String playlistId) {
     final reference = MusicId.tryParse(playlistId);
     final namespace = reference == null
-        ? _scope
+        ? activeGateway.cacheNamespace
         : _platform.owner(reference).cacheNamespace;
     // v3 intentionally orphans v2 snapshots written before the Lua playlist
     // fetch/cache changes. Those old snapshots can hold a partial or stale
     // track list and must not mask a fresh load after upgrading.
-    return 'playlist-v3:$namespace:$playlistId';
+    return 'playlist-v3:${_sessionScope(namespace)}:$playlistId';
   }
 
   Future<T> _cached<T extends Object>(
@@ -420,7 +459,6 @@ class Catalog {
     MusicGateway owner, {
     String? playlistId,
   }) async {
-    final namespace = owner.cacheNamespace;
     final collectionsKey = _collectionsKey(0, connection: owner);
     final stored = await _storedSnapshot(collectionsKey, _decodeCollections);
     final ids = {
@@ -431,7 +469,7 @@ class Catalog {
       ?playlistId,
     };
     await Future.wait([
-      for (final id in ids) _expire('playlist-v3:$namespace:$id'),
+      for (final id in ids) _expire(_playlistKey(id)),
       _expire(collectionsKey),
     ]);
   }
@@ -460,7 +498,9 @@ class Catalog {
     await Future.wait(<Future<void>>[
       _expire('external-billboard-v1'),
       _expire('external-biliboard-v1'),
-      _expire('provider-charts:$_scope'),
+      // Charts describe the provider, not the account: they live outside the
+      // session generation that [providerCharts] keys them by.
+      _expire('provider-charts:${activeGateway.cacheNamespace}'),
     ]);
   }
 

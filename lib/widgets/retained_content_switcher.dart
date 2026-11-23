@@ -1,5 +1,6 @@
 import 'build_safe_state.dart';
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/physics.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/physics.dart';
 import '../animation/apple_spring.dart';
 import '../animation/motion_snapshot.dart';
 import 'cover_transition.dart';
+import 'shared_browse_background.dart';
 
 /// Keeps only the live navigation ancestors, at stable positions in the tree.
 /// Returning to a shelf therefore preserves its scroll offsets and image cache.
@@ -63,6 +65,13 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
         SingleTickerProviderStateMixin,
         BuildSafeState<RetainedContentSwitcher> {
   final Map<String, _RetainedPage> _pages = <String, _RetainedPage>{};
+
+  /// The backdrop under this switcher, frozen for the running preview.
+  ///
+  /// Owned here: it is captured when a preview needs it and released as soon
+  /// as the gesture ends, so a drag never keeps a full-window texture alive
+  /// between gestures.
+  ui.Image? _previewFrame;
   int _transitionGeneration = 0;
   bool _reportedMoving = false;
   late final AnimationController _motion = AnimationController.unbounded(
@@ -90,6 +99,33 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     // valid vsync ancestor.
     _motion;
     _pages[widget.currentKey] = _RetainedPage(widget.page);
+    widget.backProgress?.addListener(_onBackProgress);
+  }
+
+  void _onBackProgress() {
+    if (widget.backProgress?.value != null) return;
+    final ui.Image? frame = _previewFrame;
+    if (frame == null) return;
+    _previewFrame = null;
+    // This frame still paints the preview; the rebuild the notifier just
+    // scheduled is the one that stops using the texture.
+    WidgetsBinding.instance.addPostFrameCallback((_) => frame.dispose());
+    if (mounted) setState(() {});
+  }
+
+  /// The frozen canvas for the running preview, captured on first use.
+  ///
+  /// Only the page that is leaving needs it, and only while a page preview is
+  /// on screen, so nothing is captured for the player's own overlay gesture.
+  ui.Image? _previewBackdrop(BuildContext context) {
+    final ui.Image? captured = _previewFrame;
+    if (captured != null) return captured;
+    if (!mounted) return null;
+    final RenderObject? region = this.context.findRenderObject();
+    final ui.Image? frame = BrowseBackgroundScope.maybeOf(
+      this.context,
+    )?.capture?.call(region is RenderBox ? region : null);
+    return _previewFrame = frame;
   }
 
   double _value(_RetainedPage entry) =>
@@ -170,6 +206,10 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
   @override
   void didUpdateWidget(covariant RetainedContentSwitcher oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.backProgress != widget.backProgress) {
+      oldWidget.backProgress?.removeListener(_onBackProgress);
+      widget.backProgress?.addListener(_onBackProgress);
+    }
     if (oldWidget.currentKey == widget.currentKey) {
       _pages[widget.currentKey]!.page = widget.page;
       final outgoing = _pages.entries
@@ -290,6 +330,9 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
 
   @override
   void dispose() {
+    widget.backProgress?.removeListener(_onBackProgress);
+    _previewFrame?.dispose();
+    _previewFrame = null;
     _settleWatchdog?.cancel();
     _settleWatchdog = null;
     // The shell replaces this element outright when a layout-mode change or a
@@ -421,10 +464,10 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
                                 end: Offset.zero,
                               ),
                             ),
-                      child: ColoredBox(
-                        color: preview
-                            ? Theme.of(context).colorScheme.surface
-                            : Colors.transparent,
+                      child: _previewSurface(
+                        context,
+                        preview: preview,
+                        current: current,
                         child: MotionSnapshot(
                           animation: entry.transitioning
                               ? _motion
@@ -444,6 +487,52 @@ class _RetainedContentSwitcherState extends State<RetainedContentSwitcher>
     );
     if (parked) entry.parkedView = view;
     return view;
+  }
+
+  /// The opaque layer the outgoing page needs while it covers the destination.
+  ///
+  /// Only the page that is leaving gets one: the page being revealed must stay
+  /// transparent so the shared backdrop below the navigator keeps painting
+  /// through it. The leaving page gets the same backdrop, captured when the
+  /// gesture started, so the uncovered edges still meet a matching canvas
+  /// instead of a flat surface colour.
+  Widget _previewSurface(
+    BuildContext context, {
+    required bool preview,
+    required bool current,
+    required Widget child,
+  }) {
+    if (!preview) {
+      // Unchanged outside a gesture: a transparent box keeps the page's own
+      // hit-test surface exactly as it was.
+      return ColoredBox(color: Colors.transparent, child: child);
+    }
+    if (!current) return child;
+    final ui.Image? frame = _previewBackdrop(context);
+    if (frame == null) {
+      // No canvas to freeze (mica is composited by the window manager, and a
+      // host may paint none at all): keep the destination hidden the old way.
+      return ColoredBox(
+        color: Theme.of(context).colorScheme.surface,
+        child: child,
+      );
+    }
+    return Stack(
+      fit: StackFit.passthrough,
+      children: <Widget>[
+        Positioned.fill(
+          child: ExcludeSemantics(
+            child: RawImage(
+              key: const ValueKey<String>('browse-preview-backdrop'),
+              image: frame,
+              fit: BoxFit.fill,
+              filterQuality: FilterQuality.low,
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
   }
 }
 

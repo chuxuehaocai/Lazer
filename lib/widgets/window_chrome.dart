@@ -525,6 +525,7 @@ class WindowChromeScope extends InheritedWidget {
     this.inline = false,
     this.reveal,
     this.chromeTheme,
+    this.capsule = WindowChromeCapsuleStyle.defaults,
     required super.child,
   });
 
@@ -532,6 +533,14 @@ class WindowChromeScope extends InheritedWidget {
   final bool inline;
   final Animation<double>? reveal;
   final ThemeData? chromeTheme;
+
+  /// The material every capsule in this window paints.
+  ///
+  /// The frame owns the listener's tint, blur and blur strength; a page that
+  /// draws a capsule of its own — the classic title bar leaves the player's
+  /// action row to the page — reads them from here instead of inventing a
+  /// second surface, so both capsules read as one design.
+  final WindowChromeCapsuleStyle capsule;
 
   static WindowChromeScope? maybeLayoutOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<WindowChromeScope>();
@@ -544,7 +553,8 @@ class WindowChromeScope extends InheritedWidget {
       controller != oldWidget.controller ||
       inline != oldWidget.inline ||
       reveal != oldWidget.reveal ||
-      chromeTheme != oldWidget.chromeTheme;
+      chromeTheme != oldWidget.chromeTheme ||
+      capsule != oldWidget.capsule;
 }
 
 /// Reserves the floating capsule's band while its actions use the root overlay.
@@ -711,8 +721,10 @@ class WindowDragBand extends StatelessWidget {
   }
 }
 
-/// Song actions occupy the extending left half of the window capsule. The
-/// surface is painted once by WindowTitleArea; this portal paints only buttons.
+/// Song actions occupy the extending left half of the window capsule. Inline
+/// mode paints them through a root-overlay portal on a surface the frame owns;
+/// a classic title bar leaves the window's strip to the frame, so the same row
+/// paints its own capsule in the page (see [_pageCapsule]).
 class WindowChromeActions extends StatefulWidget {
   const WindowChromeActions({
     super.key,
@@ -813,38 +825,118 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
     super.dispose();
   }
 
+  /// The capsule a page draws for itself when the classic title bar owns the
+  /// window's strip.
+  ///
+  /// Same material, pill height, radius, button cells and hover language as the
+  /// capsule the frame floats in Inline mode; only the owner differs. It also
+  /// wears the same theme: the player canvas is forced dark, and resolving the
+  /// capsule against *that* theme would turn it into dark glass the moment a
+  /// listener switches title bar styles, on the same page and next to the same
+  /// white strip.
+  ///
+  /// A leading text command keeps its hairline and its measured width exactly as
+  /// it does in the floating capsule. No classic page hands one over today —
+  /// settings pages keep their command in the page header there — so the branch
+  /// is the widget's shape, not a live path.
+  Widget _pageCapsule(
+    BuildContext context,
+    WindowChromeCapsuleStyle capsule,
+    ThemeData chromeTheme,
+  ) {
+    if (widget.leading != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _measureLeading());
+    }
+    return Theme(
+      data: chromeTheme,
+      child: Builder(
+        builder: (BuildContext context) => _WindowChromeButtonTheme(
+          child: capsule.surface(
+            context: context,
+            key: const ValueKey('desktop-player-actions'),
+            child: SizedBox(
+              height: kWindowChromeHeight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  if (widget.leading != null) ...<Widget>[
+                    SizedBox(
+                      width: _leadingWidth,
+                      child: Center(
+                        child: OverflowBox(
+                          maxWidth: widget.leadingWidth,
+                          alignment: Alignment.center,
+                          child: KeyedSubtree(
+                            key: _leadingKey,
+                            child: widget.leading!,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const _WindowChromeActionDivider(),
+                  ],
+                  for (final Widget child in widget.children)
+                    SizedBox(
+                      width: kWindowChromeButtonWidth,
+                      height: kWindowChromeHeight,
+                      child: child,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The television toolbar: the player's own pill, read from ten feet. It keeps
+  /// the player's ink, its 24 dp glyphs and its own hairline ring instead of the
+  /// capsule's 18 dp window language.
+  Widget _pageToolbar(BuildContext context) => DecoratedBox(
+    key: const ValueKey('desktop-player-actions'),
+    decoration: BoxDecoration(
+      color: context.colors.onPlayer.withValues(alpha: .045),
+      borderRadius: BorderRadius.circular(28),
+      border: Border.all(color: context.colors.onPlayer.withValues(alpha: .18)),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (widget.leading != null) ...<Widget>[
+            widget.leading!,
+            const _WindowChromeActionDivider(),
+          ],
+          for (var i = 0; i < widget.children.length; i++) ...<Widget>[
+            if (i > 0) const SizedBox(width: 2),
+            widget.children[i],
+          ],
+        ],
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final layout = WindowChromeScope.maybeLayoutOf(context);
     final reveal = layout?.reveal;
     final double width = _width;
-    if (layout?.inline != true || reveal == null || TvScope.isActive(context)) {
+    final bool television = TvScope.isActive(context);
+    if (layout?.inline != true || reveal == null || television) {
       _register(null, 0, false);
-      return DecoratedBox(
-        key: const ValueKey('desktop-player-actions'),
-        decoration: BoxDecoration(
-          color: context.colors.onPlayer.withValues(alpha: .045),
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(
-            color: context.colors.onPlayer.withValues(alpha: .18),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (widget.leading != null) ...[
-                widget.leading!,
-                const _WindowChromeActionDivider(),
-              ],
-              for (var i = 0; i < widget.children.length; i++) ...[
-                if (i > 0) const SizedBox(width: 2),
-                widget.children[i],
-              ],
-            ],
-          ),
-        ),
+      // A television reads its controls from ten feet, so it keeps the player's
+      // own toolbar: the player's ink and 24 dp glyphs instead of the capsule's
+      // 18 dp ones.
+      if (television) return _pageToolbar(context);
+      // A classic title bar owns the window's strip, so the page draws the
+      // capsule itself. It is the same surface the frame floats in Inline mode —
+      // one pill height, one radius, one tint, one hover language.
+      return _pageCapsule(
+        context,
+        layout?.capsule ?? WindowChromeCapsuleStyle.defaults,
+        layout?.chromeTheme ?? Theme.of(context),
       );
     }
     final bool routeCurrent = ModalRoute.isCurrentOf(context) ?? true;

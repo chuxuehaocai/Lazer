@@ -11,6 +11,10 @@ class _MusicPlatformState {
   final Map<String, Set<String>> _likesByAccount = {};
   final Set<String> _likesHydrating = <String>{};
   final Set<String> _likesHydrated = <String>{};
+  // Bumped on every session boundary. A walk of the favorites pages that
+  // started before it must not publish the old account's hearts into the next
+  // session's set.
+  final Map<String, int> _likeSessions = <String, int>{};
   String? _lastSessionKey;
   Set<String> get liked => likesFor(state.catalog.activeGateway);
   Set<String> likesFor(MusicGateway gateway) =>
@@ -35,22 +39,21 @@ class _MusicPlatformState {
     if (_likesHydrated.contains(namespace) || !_likesHydrating.add(namespace)) {
       return;
     }
+    final int session = _likeSessions[namespace] ?? 0;
+    bool current() =>
+        !state._presentationDisposed &&
+        gateway.cacheNamespace == namespace &&
+        (_likeSessions[namespace] ?? 0) == session &&
+        gateway.user != null;
     try {
       var offset = 0;
       while (true) {
-        if (state._presentationDisposed ||
-            gateway.cacheNamespace != namespace ||
-            gateway.user == null) {
-          return;
-        }
+        if (!current()) return;
         final MusicPage<MusicSong> page = await gateway.favorites(
           limit: 100,
           offset: offset,
         );
-        if (state._presentationDisposed ||
-            gateway.cacheNamespace != namespace) {
-          return;
-        }
+        if (!current()) return;
         final Set<String> likes = likesFor(gateway);
         var changed = false;
         for (final MusicSong song in page.items) {
@@ -166,6 +169,10 @@ class _MusicPlatformState {
     final key = GatewayRegistry.keyOf(gateway);
     _sessions[key] = account;
     _lastSessionKey = key;
+    // The credentials that answer for this connection just changed. Retire the
+    // library, recommendations, favorites and play record stored by the
+    // previous session before anything can paint them again.
+    forgetAccount(gateway);
     // Signing in selects the account that was just authenticated when the
     // platform the listener started from is still visible. A late login for a
     // platform they switched away from must not steal focus from the current
@@ -175,27 +182,43 @@ class _MusicPlatformState {
         : state.activeConnectionKey == expectedActiveKey;
     if (stillSelected) {
       _activate(key);
-      _collectionsByAccount.remove(gateway.cacheNamespace);
       state._user = account;
       state.collections = UserCollections.empty;
       state._collectionsPending = null;
       state._collectionsGeneration++;
-      unawaited(state.refreshHome());
+      // Signing in must read the account now, not replay a snapshot that a
+      // previous session left behind: the listener just proved who they are.
+      unawaited(state.refreshHome(force: true));
     }
     unawaited(state._refreshMissingArtwork());
     unawaited(_save());
     state.notifyListeners();
   }
 
-  Future<void> signOut(MusicGateway owner) async {
-    final key = GatewayRegistry.keyOf(owner);
-    final namespace = owner.cacheNamespace;
-    cancelPending();
-    _sessions.remove(key);
+  /// Drops every snapshot and derived value cached for [gateway]'s account.
+  ///
+  /// A session boundary retires the account data in three places: the catalog
+  /// cache (its generation rotates, so disk and memory entries become
+  /// unreachable), the collections and hearts this state holds, and the
+  /// favorites walk, which is restarted for the next session instead of
+  /// appending to a retired set.
+  void forgetAccount(MusicGateway gateway) {
+    final String namespace = gateway.cacheNamespace;
     _collectionsByAccount.remove(namespace);
     _likesByAccount.remove(namespace);
     _likesHydrated.remove(namespace);
     _likesHydrating.remove(namespace);
+    _likeSessions[namespace] = (_likeSessions[namespace] ?? 0) + 1;
+    state.catalog.rotateSession(gateway);
+  }
+
+  Future<void> signOut(MusicGateway owner) async {
+    final key = GatewayRegistry.keyOf(owner);
+    cancelPending();
+    _sessions.remove(key);
+    // Retire the account's snapshots before the credentials are dropped, so
+    // signing the same account back in cannot be answered from them.
+    forgetAccount(owner);
     if (_lastSessionKey == key) _lastSessionKey = null;
     await removeConnectionPlayback(owner);
     try {
@@ -208,6 +231,9 @@ class _MusicPlatformState {
       owner.clearSession();
     }
     if (state._presentationDisposed) return;
+    // The signed-out feed is a session of its own: read it again instead of
+    // showing what an earlier guest session cached.
+    state.catalog.rotateSession(owner);
     if (identical(state.catalog.activeGateway, owner) ||
         state.catalog.activeGateway is LocalMusicGateway) {
       _activate(state.activeConnectionKey);
@@ -318,6 +344,11 @@ class _MusicPlatformState {
     for (final gateway in owned) {
       final key = GatewayRegistry.keyOf(gateway);
       _sessions.remove(key);
+      // The code that answers for this account is about to be replaced by the
+      // installed/updated plugin. Retire what it cached, otherwise the library
+      // and the recommendations keep replaying the previous build's snapshots
+      // until the app restarts.
+      forgetAccount(gateway);
       if (_lastSessionKey == key) _lastSessionKey = null;
     }
     if (ownsPlayback) {

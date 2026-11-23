@@ -521,11 +521,11 @@ class _SettingsOverview extends StatelessWidget {
                             (defaultTargetPlatform == TargetPlatform.windows ||
                                 defaultTargetPlatform == TargetPlatform.linux))
                           ...<Widget>[
-                            const _AppSectionLabel('内联窗口胶囊'),
+                            const _AppSectionLabel('窗口胶囊'),
                             _AppSwitchRow(
                               key: const ValueKey('window-chrome-blur-switch'),
                               label: '窗口胶囊模糊',
-                              subtitle: '让胶囊与后方的页面融合，只作用于 Inline 标题栏',
+                              subtitle: '让胶囊与后方的页面融合，Inline 与经典标题栏共用这套材质',
                               value: state.windowChromeBlurEnabled,
                               onChanged: (bool value) => unawaited(
                                 state.setWindowChromeBlurEnabled(value),
