@@ -51,6 +51,11 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   int get skinRevision => 0;
   bool busy = false;
   Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+
+  /// Applies a plugin's `appearance` palette request; the platform stub has no
+  /// VM to call it, but AppState wires it through the same field on every
+  /// platform so the callers stay identical.
+  Future<Object?> Function(Map<String, dynamic> spec)? onColors;
   bool get hasPlayerEventListeners => false;
   void broadcastPlayerEvent(String type, Map<String, dynamic> data) {}
 

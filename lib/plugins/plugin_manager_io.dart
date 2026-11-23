@@ -106,6 +106,10 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   bool busy = false;
   Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
 
+  /// Applies a plugin's `appearance` palette request; AppState injects this
+  /// because it owns the accent the settings page also edits.
+  Future<Object?> Function(Map<String, dynamic> spec)? onColors;
+
   static bool _listensToPlayerEvents(InstalledPlugin plugin) {
     if (!plugin.enabled || plugin.runtime == null) return false;
     final caps = plugin.manifest.capabilities;
@@ -561,6 +565,16 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
             if (record['data'] is Map) 'data': record['data'],
           };
           AppLog.shared.event('lua.plugin', level, fields);
+        },
+        onColors: (spec) {
+          if (!plugin.enabled || !_plugins.contains(plugin)) {
+            throw const PluginException('Plugin is disabled');
+          }
+          final apply = onColors;
+          if (apply == null) {
+            throw const PluginException('Color control is unavailable');
+          }
+          return apply(spec);
         },
       );
       plugin.runtime = runtime;

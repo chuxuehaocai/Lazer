@@ -34,6 +34,7 @@ class PluginManifest {
         (json['permissions'] as Map?)?['data'] as List? ?? [],
       ),
       storage = (json['permissions'] as Map?)?['storage'] == true,
+      appearance = (json['permissions'] as Map?)?['appearance'] == true,
       filesystem =
           (json['permissions'] as Map?)?['filesystem'] == true ||
           (json['permissions'] as Map?)?['files'] == true ||
@@ -129,6 +130,13 @@ class PluginManifest {
       websocketDomains;
   final List<String> socketServerBindings, websocketServerBindings;
   final bool storage, filesystem;
+
+  /// Whether the plugin may read and change the app's accent palette.
+  ///
+  /// Declared like [storage] rather than prompted for at runtime: the palette
+  /// is app-wide chrome, so the grant belongs to the install decision the
+  /// listener already makes, not to a mid-playback dialog.
+  final bool appearance;
   final List<String> dataPermissions;
   static const Set<String> dataScopes = {
     'library',
@@ -262,6 +270,7 @@ class PluginManifest {
       'data': dataPermissions,
       'storage': storage,
       'filesystem': filesystem,
+      'appearance': appearance,
     },
   };
 }

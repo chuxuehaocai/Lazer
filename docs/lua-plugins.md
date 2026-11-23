@@ -31,12 +31,15 @@ README.md
     "websocketServer": ["127.0.0.1:11444"],
     "storage": true,
     "filesystem": true,
+    "appearance": true,
     "data": ["library", "profile", "history"]
   }
 }
 ```
 
 `id`、`provider` 和版本号必须符合规范；入口与 Lua 模块路径只能使用正斜杠，不能包含 `..`。网络权限只允许 HTTPS，并且请求的主机必须精确匹配 `permissions.network`，或匹配以 `*.` 开头的子域规则。`host.http` 和 `host.http_json` 在真正发出请求前都必须获得网络权限；插件第一次访问声明的网络域名时，客户端会向用户申请网络权限，拒绝后请求不会发出。TCP Socket、WebSocket 连接和服务端监听分别使用各自的权限范围，也必须在建立连接或开始监听前获得用户授权。文件管理权限只允许访问插件自己的文件沙箱，首次读写前单独申请；沙箱禁止路径穿越和符号链接，并限制单文件 4 MB、总量 16 MB。插件 ZIP 最大 16 MB，解压后最大 8 MB，单个文件最大 2 MB。
+
+界面配色权限 `permissions.appearance` 让插件通过 `host.colors` 读取、通过 `host.set_colors` 修改全局强调色。它和设置页里的强调色选择是同一项设置：插件改完以后，设置页显示的就是插件选的颜色，用户手动再改也会立刻覆盖插件的结果。`set_colors{mode="fixed"}` 只切回默认配色，不会清掉用户已保存的自定义色。
 
 入口文件返回一个带 `call(operation, args)` 的表。`args` 和返回值只能是 `nil`、布尔值、数字、字符串、数组或字符串键表：
 
@@ -123,6 +126,7 @@ end
 | `host.player_control(spec)` | 控制播放器播放、暂停、上下首、进度跳转或调节音量；返回执行结果 |
 | `host.player_state()` / `host.player_status()` / `host.player_queue()` / `host.player_track()` | 查询当前歌曲、进度、音量、缓冲、队列索引和播放模式 |
 | `host.player_lyrics()` / `host.player_recent()` | 查询当前歌词和最近播放歌曲；最近播放需要 `history` 隐私权限 |
+| `host.colors()` / `host.set_colors({mode, accent})` | 读取或设置全局强调色，返回 `{ok=true, mode=..., accent="#RRGGBB"}`；需要清单声明 `permissions.appearance`，`mode` 取 `fixed`、`nowPlaying`、`custom`，`accent` 形如 `#RRGGBB` |
 | `host.permissions()` / `host.request_permission(scope)` | 查看本插件声明/已获准的数据权限，或主动请求一个权限；未声明的权限返回 `false` |
 | `host.library(spec)` / `host.search(spec)` | 在 `library` 权限下读取歌单、指定歌单/专辑曲目、本地音乐、搜索及按目录 ID 播放 |
 | `host.native(spec)` | 受限原生宿主能力：支持表、音频诊断、设备摘要和桌面歌词设置，见下节 |

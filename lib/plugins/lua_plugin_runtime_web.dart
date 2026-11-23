@@ -14,6 +14,7 @@ import 'package:lua_dardo_plus/lua.dart';
 import 'package:pointycastle/export.dart' as pc;
 
 import 'plugin_manifest.dart';
+import 'plugin_colors.dart';
 import 'plugin_event_scheduler.dart';
 import 'plugin_data_access.dart' show pluginFrontendLua;
 import 'plugin_socket_inbox.dart';
@@ -52,6 +53,7 @@ class LuaPluginRuntime {
     this.onPageAdded,
     this.onPageEdited,
     this.onPlayerControl,
+    this.onColors,
     this.onLog,
   }) : networkGranted = networkGranted ?? false;
 
@@ -80,6 +82,12 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)? onPageAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPageEdited;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+
+  /// Reads or applies the app's accent palette for this plugin.
+  ///
+  /// The browser build wires this exactly like the native one: the palette is
+  /// Dart-side shell state, so a plugin behaves the same on the web demo.
+  final Future<Object?> Function(Map<String, dynamic> spec)? onColors;
   final void Function(Map<String, dynamic> record)? onLog;
   late final _scheduler = PluginEventScheduler(
     (event, args) => _queueInvocation(event, args),
@@ -147,6 +155,10 @@ class LuaPluginRuntime {
             onPlayerControl == null
                 ? throw const FormatException('Player control is unavailable')
                 : await onPlayerControl!(spec),
+          'colors' =>
+            onColors == null
+                ? throw const FormatException('Color control is unavailable')
+                : await onColors!(spec),
           _ => throw const FormatException('Unknown plugin extension'),
         };
       },
@@ -523,6 +535,20 @@ class _WebPluginHost {
       );
       return 1;
     });
+    // The palette is app-wide chrome, not plugin-local state, so it crosses the
+    // same host-extension lane as player control. `appearance` gates reading as
+    // well as writing: which mode the listener chose is their information.
+    lua.registerAsync('_colors', (state) async {
+      _push(state, await _palette(PluginColors.query));
+      return 1;
+    });
+    lua.registerAsync('_set_colors', (state) async {
+      final spec = PluginColors.request(
+        state.isNoneOrNil(1) ? null : _read(state, 1),
+      );
+      _push(state, await _palette(spec));
+      return 1;
+    });
     lua.registerAsync('_sleep', (state) async {
       final requested = state.checkInteger(1) ?? 0;
       final milliseconds = requested.clamp(0, 60000);
@@ -706,6 +732,7 @@ class _WebPluginHost {
         player_status = _player_state, player_queue = _player_queue,
         player_track = _player_track, now_playing = _player_track,
         player_lyrics = _player_lyrics, player_recent = _player_recent,
+        colors = _colors, set_colors = _set_colors,
         file = _file, files = _file, sleep = _sleep }
       $pluginFrontendLua
       $moduleBuffers
@@ -754,6 +781,20 @@ class _WebPluginHost {
     });
   }
 
+  /// Sends one palette request to the host that owns the accent.
+  ///
+  /// Validation happens before this point, so a malformed table never reaches
+  /// the app and can never leave the shell half-repainted.
+  Future<Object?> _palette(Map<String, dynamic> spec) async {
+    if (!manifest.appearance) {
+      throw const FormatException('Appearance permission required');
+    }
+    if (uiExtensions == null) {
+      throw const FormatException('Color control is unavailable');
+    }
+    return await uiExtensions!('colors', spec);
+  }
+
   Map<String, dynamic> _hostInfo() => {
     'runtime': 'web',
     'plugin': manifest.id,
@@ -772,6 +813,7 @@ class _WebPluginHost {
       'data': manifest.dataPermissions,
       'storage': manifest.storage,
       'filesystem': manifest.filesystem,
+      'appearance': manifest.appearance,
     },
     'features': [
       'http',
@@ -791,6 +833,7 @@ class _WebPluginHost {
       'page_edit',
       'timer',
       'filesystem',
+      'appearance',
     ],
   };
 

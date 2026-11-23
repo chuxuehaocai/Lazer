@@ -238,6 +238,9 @@ class _PluginRow extends StatelessWidget {
     if (plugin.manifest.filesystem) {
       parts.add(context.tr('文件管理权限'));
     }
+    if (plugin.manifest.appearance) {
+      parts.add(context.tr('可更改界面配色'));
+    }
     if (parts.isEmpty) {
       return context.tr('无需特殊权限');
     }

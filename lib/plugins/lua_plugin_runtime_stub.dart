@@ -28,6 +28,7 @@ class LuaPluginRuntime {
     this.onPageAdded,
     this.onPageEdited,
     this.onPlayerControl,
+    this.onColors,
     this.onLog,
   });
   final PluginManifest manifest;
@@ -50,6 +51,7 @@ class LuaPluginRuntime {
   final Future<Object?> Function(Map<String, dynamic> spec)? onPageAdded;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPageEdited;
   final Future<Object?> Function(Map<String, dynamic> spec)? onPlayerControl;
+  final Future<Object?> Function(Map<String, dynamic> spec)? onColors;
   final void Function(Map<String, dynamic> record)? onLog;
   Future<void> start() =>
       Future.error(const PluginException('当前平台不支持 Lua 插件运行时。'));

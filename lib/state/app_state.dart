@@ -56,6 +56,7 @@ import '../theme/font_preferences.dart';
 import '../theme/imported_font.dart';
 import '../theme/lazer_theme.dart';
 import '../ui/layout_system.dart';
+import '../plugins/plugin_colors.dart';
 import '../plugins/plugin_native_api.dart';
 import '../plugins/plugin_native_audio_snapshot.dart';
 import '../plugins/plugin_manifest.dart' show PluginException;
@@ -272,6 +273,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     addListener(_updateSystemWidget);
     _tickNotifier.addListener(_broadcastPluginPlayerState);
     this.pluginManager.onPlayerControl = _handlePluginPlayerControl;
+    this.pluginManager.onColors = _handlePluginColors;
     this.pluginManager.beforeChange = _musicPlatforms.beforePluginChange;
     this.pluginManager.afterChange = _musicPlatforms.synchronizePlugins;
     this.pluginManager.addListener(_onPluginManagerChanged);
@@ -3421,6 +3423,35 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   };
 
   late final PluginNativeApi _pluginNativeApi = _createPluginNativeApi();
+
+  /// Applies a plugin's `appearance` palette request and reports the result.
+  ///
+  /// The runtime already validated the table, so this only maps the request
+  /// onto the same two setters the settings page uses: a plugin looking at
+  /// colours is looking at the listener's palette, and whatever it selects is
+  /// what the picker shows afterwards. `fixed` deliberately keeps the stored
+  /// accent — [accentSeed] already ignores it in that mode, and nothing in
+  /// AppState can clear it, so wiping the listener's colour would be the only
+  /// irreversible part of the contract.
+  Future<Object?> _handlePluginColors(Map<String, dynamic> spec) async {
+    if (spec['command'] == 'set') {
+      final accent = spec['accent'];
+      // The colour first: it has to be right before `custom` makes it visible.
+      if (accent is int) await setAppAccent(Color(accent));
+      switch (spec['mode']) {
+        case 'custom':
+          await setAppPalette(AppPaletteMode.custom);
+        case 'nowPlaying':
+          await setAppPalette(AppPaletteMode.nowPlaying);
+        case 'fixed':
+          await setAppPalette(AppPaletteMode.fixed);
+      }
+    }
+    return PluginColors.response(
+      paletteMode.name,
+      paletteMode == AppPaletteMode.custom ? accentColor?.toARGB32() : null,
+    );
+  }
 
   Future<Object?> _handlePluginPlayerControl(Map<String, dynamic> spec) async {
     final command = (spec['command'] ?? spec['op'] ?? spec['action'])
