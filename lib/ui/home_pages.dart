@@ -457,16 +457,28 @@ class HomeActionShelf extends StatelessWidget {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double gap = large ? 18 : 14;
+        // Width one card keeps when the row scrolls as a shelf.
+        final double shelfCardWidth = large ? 300 : 228;
         // Four cards fill a desktop row, including at 1280px window width.
         // Phone widths retain a swipeable shelf instead of tiny captions.
+        //
+        // Stretch only while the stretched card still spans the shelf's own
+        // width: below that the row matches the viewport exactly and has no
+        // scroll extent at all, so it looks like a shelf yet answers no swipe —
+        // a phone on its side got exactly that, with captions squeezed under
+        // the size this layout exists to protect. A ten-foot row keeps its fit
+        // unconditionally: a remote pages it, nobody drags it.
         final bool fitRow =
-            !phone && constraints.maxWidth >= (large ? 960 : 740);
+            !phone &&
+            constraints.maxWidth >= (large ? 960 : 740) &&
+            (large ||
+                (constraints.maxWidth - (items.length - 1) * gap) /
+                        math.max(1, items.length) >=
+                    shelfCardWidth);
         final double cardWidth = fitRow
             ? (constraints.maxWidth - (items.length - 1) * gap) /
                   math.max(1, items.length)
-            : large
-            ? 300
-            : 228;
+            : shelfCardWidth;
         final double tileHeight = large
             ? 216
             : phone
