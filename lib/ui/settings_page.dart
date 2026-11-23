@@ -136,7 +136,6 @@ class AppSettingsPage extends StatelessWidget {
 
 enum _SettingsCategory {
   interface,
-  appearance,
   playback,
   lyrics,
   storage,
@@ -152,7 +151,6 @@ extension _SettingsCategoryLabels on _SettingsCategory {
   // to the coverage checker even though the text sinks receive variables.
   String get label => switch (this) {
     _SettingsCategory.interface => '界面与布局', // i18n:key
-    _SettingsCategory.appearance => '外观与背景', // i18n:key
     _SettingsCategory.playback => '播放与滚动', // i18n:key
     _SettingsCategory.lyrics => '歌词', // i18n:key
     _SettingsCategory.storage => '存储与下载', // i18n:key
@@ -164,8 +162,7 @@ extension _SettingsCategoryLabels on _SettingsCategory {
   };
 
   String get detail => switch (this) {
-    _SettingsCategory.interface => '布局、字体和缩放', // i18n:key
-    _SettingsCategory.appearance => '主题、配色和动态背景', // i18n:key
+    _SettingsCategory.interface => '布局、字体、主题和背景', // i18n:key
     _SettingsCategory.playback => '音质、切歌衔接和滚动手感', // i18n:key
     _SettingsCategory.lyrics => '歌词显示、间距和歌词窗口', // i18n:key
     _SettingsCategory.storage => '本地音乐、缓存和下载任务', // i18n:key
@@ -181,7 +178,6 @@ extension _SettingsCategoryLabels on _SettingsCategory {
 
   IconData get icon => switch (this) {
     _SettingsCategory.interface => Icons.dashboard_customize_outlined,
-    _SettingsCategory.appearance => Icons.palette_outlined,
     _SettingsCategory.playback => Icons.play_circle_outline_rounded,
     _SettingsCategory.lyrics => Icons.lyrics_outlined,
     _SettingsCategory.storage => Icons.folder_open_outlined,
@@ -258,54 +254,63 @@ class _SettingsCategoryHome extends StatelessWidget {
                   children: <Widget>[
                     for (final _SettingsCategory category
                         in _SettingsCategory.values)
-                      SizedBox(
-                        width: width,
-                        child: AppleGroupedCard(
-                          margin: EdgeInsets.zero,
-                          child: TvFocusHighlight(
-                            borderRadius: BorderRadius.circular(12),
-                            child: AppleListTile(
-                              minHeight: compact
-                                  ? (twoColumns ? 88 : 76)
-                                  : (twoColumns ? 96 : 80),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
+                      // 关于 gets its own full-width row below the grid: the
+                      // category count is odd, so leaving it here would pair it
+                      // with empty space and turn a readable list into a ragged
+                      // last row.
+                      if (category != _SettingsCategory.about)
+                        SizedBox(
+                          width: width,
+                          child: AppleGroupedCard(
+                            margin: EdgeInsets.zero,
+                            child: TvFocusHighlight(
+                              borderRadius: BorderRadius.circular(12),
+                              child: AppleListTile(
+                                minHeight: compact
+                                    ? (twoColumns ? 88 : 76)
+                                    : (twoColumns ? 96 : 80),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                leading: AppleIconTile(
+                                  icon: category.icon,
+                                  color: apple.accent,
+                                ),
+                                title: context.tr(category.label),
+                                subtitle: context.tr(category.detail),
+                                trailing: const Icon(
+                                  Icons.chevron_right_rounded,
+                                ),
+                                onTap: () => _open(context, category),
                               ),
-                              leading: AppleIconTile(
-                                icon: category.icon,
-                                color: apple.accent,
-                              ),
-                              title: context.tr(category.label),
-                              subtitle: context.tr(category.detail),
-                              trailing: const Icon(Icons.chevron_right_rounded),
-                              onTap: () => _open(context, category),
                             ),
                           ),
                         ),
-                      ),
                   ],
                 );
               },
             ),
             const SizedBox(height: 14),
+            // The grid above holds the eight browsing categories; 关于 takes the
+            // full card width so it reads as the page's closing row.
             AppleGroupedCard(
               margin: EdgeInsets.zero,
               child: AppleListTile(
-                key: const ValueKey('open-github-project'),
+                key: const ValueKey('open-about-lazer'),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 12,
                 ),
                 minHeight: 72,
                 leading: AppleIconTile(
-                  icon: Icons.open_in_new_rounded,
+                  icon: _SettingsCategory.about.icon,
                   color: apple.accent,
                 ),
-                title: context.tr('GitHub 项目'),
-                subtitle: UpdateChecker.repositoryUrl,
+                title: context.tr(_SettingsCategory.about.label),
+                subtitle: context.tr(_SettingsCategory.about.detail),
                 trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => unawaited(_openProjectRepository(context)),
+                onTap: () => _open(context, _SettingsCategory.about),
               ),
             ),
           ],
@@ -377,6 +382,11 @@ class _SettingsOverview extends StatelessWidget {
     final double inset = pageInset(context);
     final double bodyTopInset = _settingsTopInset(context, topInset);
     bool show(_SettingsCategory value) => category == null || category == value;
+    // The desktop player bar already has a volume control; the phone layout has
+    // no persistent transport, so settings is the only place to reach it. Keyed
+    // to the layout rather than the platform so a narrow desktop window shows
+    // the same row it would on a phone.
+    final bool showAppVolume = compactBrowsePresentation(context);
     final String pageTitle = category?.label ?? '设置';
     final String pageSubtitle = category?.detail ?? '外观、界面和账户。'; // i18n:key
     return Center(
@@ -519,125 +529,119 @@ class _SettingsOverview extends StatelessWidget {
                           ),
                         if (!kIsWeb &&
                             (defaultTargetPlatform == TargetPlatform.windows ||
-                                defaultTargetPlatform == TargetPlatform.linux))
-                          ...<Widget>[
-                            const _AppSectionLabel('窗口胶囊'),
-                            _AppSwitchRow(
-                              key: const ValueKey('window-chrome-blur-switch'),
-                              label: '窗口胶囊模糊',
-                              subtitle: '让胶囊与后方的页面融合，Inline 与经典标题栏共用这套材质',
-                              value: state.windowChromeBlurEnabled,
-                              onChanged: (bool value) => unawaited(
-                                state.setWindowChromeBlurEnabled(value),
-                              ),
+                                defaultTargetPlatform ==
+                                    TargetPlatform.linux)) ...<Widget>[
+                          const _AppSectionLabel('窗口胶囊'),
+                          _AppSwitchRow(
+                            key: const ValueKey('window-chrome-blur-switch'),
+                            label: '窗口胶囊模糊',
+                            subtitle: '让胶囊与后方的页面融合，Inline 与经典标题栏共用这套材质',
+                            value: state.windowChromeBlurEnabled,
+                            onChanged: (bool value) => unawaited(
+                              state.setWindowChromeBlurEnabled(value),
                             ),
-                            _AppSliderRow(
-                              key: const ValueKey('window-chrome-blur-slider'),
-                              label: '窗口胶囊模糊强度',
-                              valueText:
-                                  '${state.windowChromeBlur.round()} px',
-                              subtitle: '数值越大，胶囊后方的背景越柔和',
-                              value: state.windowChromeBlur,
-                              min: kWindowChromeBlurMin,
-                              max: kWindowChromeBlurMax,
-                              divisions:
-                                  ((kWindowChromeBlurMax - kWindowChromeBlurMin) /
-                                          2)
-                                      .round(),
-                              onChanged: state.windowChromeBlurEnabled
-                                  ? (double value) =>
-                                        unawaited(state.setWindowChromeBlur(value))
+                          ),
+                          _AppSliderRow(
+                            key: const ValueKey('window-chrome-blur-slider'),
+                            label: '窗口胶囊模糊强度',
+                            valueText: '${state.windowChromeBlur.round()} px',
+                            subtitle: '数值越大，胶囊后方的背景越柔和',
+                            value: state.windowChromeBlur,
+                            min: kWindowChromeBlurMin,
+                            max: kWindowChromeBlurMax,
+                            divisions:
+                                ((kWindowChromeBlurMax - kWindowChromeBlurMin) /
+                                        2)
+                                    .round(),
+                            onChanged: state.windowChromeBlurEnabled
+                                ? (double value) => unawaited(
+                                    state.setWindowChromeBlur(value),
+                                  )
+                                : null,
+                            action: SpringTextButton(
+                              key: const ValueKey('window-chrome-blur-reset'),
+                              onPressed: state.windowChromeBlurEnabled
+                                  ? () => unawaited(
+                                      state.setWindowChromeBlur(
+                                        kWindowChromeBlurDefault,
+                                      ),
+                                    )
                                   : null,
-                              action: SpringTextButton(
-                                key: const ValueKey('window-chrome-blur-reset'),
-                                onPressed: state.windowChromeBlurEnabled
-                                    ? () => unawaited(
-                                        state.setWindowChromeBlur(
-                                          kWindowChromeBlurDefault,
-                                        ),
-                                      )
+                              child: const TrText('恢复默认'),
+                            ),
+                          ),
+                          _AppSliderRow(
+                            key: const ValueKey('window-chrome-opacity-slider'),
+                            label: '窗口胶囊背景不透明度',
+                            valueText:
+                                '${(state.windowChromeOpacity * 100).round()}%',
+                            subtitle: '只调整胶囊底色，不影响按钮与图标',
+                            value: state.windowChromeOpacity,
+                            min: kWindowChromeOpacityMin,
+                            max: kWindowChromeOpacityMax,
+                            divisions:
+                                ((kWindowChromeOpacityMax -
+                                            kWindowChromeOpacityMin) /
+                                        .05)
+                                    .round(),
+                            onChanged: (double value) =>
+                                unawaited(state.setWindowChromeOpacity(value)),
+                            action: SpringTextButton(
+                              key: const ValueKey(
+                                'window-chrome-opacity-reset',
+                              ),
+                              onPressed: () => unawaited(
+                                state.setWindowChromeOpacity(
+                                  kWindowChromeOpacityDefault,
+                                ),
+                              ),
+                              child: const TrText('恢复默认'),
+                            ),
+                          ),
+                          _AppSwitchRow(
+                            key: const ValueKey('window-chrome-color-switch'),
+                            label: '自定义背景颜色',
+                            subtitle: state.windowChromeColor == null
+                                ? '关闭时胶囊底色跟随界面背景色（暗色为深蓝 #191C23，亮色为白）'
+                                : '关闭后回到界面背景色',
+                            value: state.windowChromeColor != null,
+                            onChanged: (bool value) => unawaited(
+                              state.setWindowChromeColor(
+                                // Seed the palette with the colour it is
+                                // already showing, so switching the option on
+                                // does not repaint the capsule.
+                                value
+                                    ? AppleSemanticColors.of(context).background
                                     : null,
-                                child: const TrText('恢复默认'),
                               ),
                             ),
-                            _AppSliderRow(
-                              key: const ValueKey('window-chrome-opacity-slider'),
-                              label: '窗口胶囊背景不透明度',
-                              valueText:
-                                  '${(state.windowChromeOpacity * 100).round()}%',
-                              subtitle: '只调整胶囊底色，不影响按钮与图标',
-                              value: state.windowChromeOpacity,
-                              min: kWindowChromeOpacityMin,
-                              max: kWindowChromeOpacityMax,
-                              divisions:
-                                  ((kWindowChromeOpacityMax -
-                                              kWindowChromeOpacityMin) /
-                                          .05)
-                                      .round(),
-                              onChanged: (double value) => unawaited(
-                                state.setWindowChromeOpacity(value),
+                          ),
+                          if (state.windowChromeColor case final Color tint)
+                            _AppSettingRow(
+                              key: const ValueKey(
+                                'window-chrome-color-setting',
                               ),
-                              action: SpringTextButton(
+                              label: '窗口胶囊背景颜色',
+                              subtitle: _accentHex(tint),
+                              trailing: _AppAccentSwatch(
                                 key: const ValueKey(
-                                  'window-chrome-opacity-reset',
+                                  'window-chrome-color-swatch',
                                 ),
-                                onPressed: () => unawaited(
-                                  state.setWindowChromeOpacity(
-                                    kWindowChromeOpacityDefault,
-                                  ),
-                                ),
-                                child: const TrText('恢复默认'),
-                              ),
-                            ),
-                            _AppSwitchRow(
-                              key: const ValueKey('window-chrome-color-switch'),
-                              label: '自定义背景颜色',
-                              subtitle: state.windowChromeColor == null
-                                  ? '关闭时胶囊底色跟随界面背景色（暗色为深蓝 #191C23，亮色为白）'
-                                  : '关闭后回到界面背景色',
-                              value: state.windowChromeColor != null,
-                              onChanged: (bool value) => unawaited(
-                                state.setWindowChromeColor(
-                                  // Seed the palette with the colour it is
-                                  // already showing, so switching the option on
-                                  // does not repaint the capsule.
-                                  value
-                                      ? AppleSemanticColors.of(
-                                          context,
-                                        ).background
-                                      : null,
-                                ),
-                              ),
-                            ),
-                            if (state.windowChromeColor case final Color tint)
-                              _AppSettingRow(
-                                key: const ValueKey(
-                                  'window-chrome-color-setting',
-                                ),
-                                label: '窗口胶囊背景颜色',
-                                subtitle: _accentHex(tint),
-                                trailing: _AppAccentSwatch(
-                                  key: const ValueKey(
-                                    'window-chrome-color-swatch',
-                                  ),
-                                  color: tint,
-                                  onTap: () async {
-                                    final Color? chosen =
-                                        await showAppleDialog<Color>(
-                                          context: context,
-                                          builder: (_) => _AppAccentDialog(
-                                            initial: tint,
-                                          ),
-                                        );
-                                    if (chosen != null) {
-                                      await state.setWindowChromeColor(
-                                        chosen,
+                                color: tint,
+                                onTap: () async {
+                                  final Color? chosen =
+                                      await showAppleDialog<Color>(
+                                        context: context,
+                                        builder: (_) =>
+                                            _AppAccentDialog(initial: tint),
                                       );
-                                    }
-                                  },
-                                ),
+                                  if (chosen != null) {
+                                    await state.setWindowChromeColor(chosen);
+                                  }
+                                },
                               ),
-                          ],
+                            ),
+                        ],
                         const LanRemoteSettings(),
                         _AppSliderRow(
                           key: const ValueKey('dpi-scale-slider'),
@@ -727,7 +731,7 @@ class _SettingsOverview extends StatelessWidget {
                             child: const TrText('恢复默认'),
                           ),
                         ),
-                        const _AppSectionLabel('动态背景'),
+                        const _AppSectionLabel('应用背景设置'),
                         _AppSettingRow(
                           label: '背景',
                           subtitle: _availableBackgroundMode(
@@ -888,7 +892,10 @@ class _SettingsOverview extends StatelessWidget {
                     ),
                   ),
                 ],
-                if (show(_SettingsCategory.appearance)) ...[
+                // Theme and language sit on the same page as layout and
+                // background now; the two categories were merged, so this block
+                // keeps the interface guard.
+                if (show(_SettingsCategory.interface)) ...[
                   const _AppSectionLabel('外观'),
                   AppleGroupedCard(
                     margin: EdgeInsets.zero,
@@ -951,7 +958,11 @@ class _SettingsOverview extends StatelessWidget {
                       ],
                     ),
                   ),
-                  _AppSectionLabel(category == null ? '外观' : '动态背景'),
+                  // Named for what it configures: the player's own backdrop.
+                  // The old label reused 「外观」 in the combined view and
+                  // 「动态背景」 on the category page, which read as a duplicate
+                  // of 应用背景设置 above once the two pages were merged.
+                  const _AppSectionLabel('播放背景'),
                   AppleGroupedCard(
                     margin: EdgeInsets.zero,
                     child: _BackgroundPreferences(
@@ -967,6 +978,19 @@ class _SettingsOverview extends StatelessWidget {
                     margin: EdgeInsets.zero,
                     child: Column(
                       children: <Widget>[
+                        if (showAppVolume)
+                          _AppSliderRow(
+                            key: const ValueKey('app-volume'),
+                            label: '应用音量',
+                            valueText: '${(state.volume * 100).round()}%',
+                            subtitle: '只调节 Lazer 自己的音量，系统音量不受影响',
+                            value: state.volume,
+                            min: 0,
+                            max: 1,
+                            divisions: 20,
+                            onChanged: (double value) =>
+                                unawaited(state.setVolume(value)),
+                          ),
                         _AppSettingRow(
                           label: '播放音质',
                           subtitle: state.audioQualityDetail(
