@@ -236,6 +236,54 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   Timer? _hideTimer;
   final Set<int> _activeControlPointers = {};
 
+  /// The desktop canvas children, kept across playback reports.
+  ///
+  /// The page listens to [AppState], so every structural report — play state,
+  /// queue, lyric loads, artwork, downloads, account updates — rebuilds the
+  /// whole desktop canvas. Handing the reading pane, the comments wall, the
+  /// queue and the artwork to that rebuild as fresh widget instances made each
+  /// of those reports re-enter their layout, and the lyric sheet in particular
+  /// is the heaviest child on the page. All four already follow [AppState]
+  /// through their own listeners, so a report only has to hand the same
+  /// instances back; only a new song, new artwork or another state object
+  /// builds them again. Opening the player produces exactly that burst (a lyric
+  /// sheet landing, the artwork provider changing), on the frames the entrance
+  /// spring is trying to move.
+  Object? _desktopPaneKey;
+  Widget? _desktopLyrics;
+  Widget? _desktopComments;
+  Widget? _desktopQueue;
+  Widget? _desktopArtwork;
+
+  /// Rebuilds the desktop canvas children when anything they are built from
+  /// changed, and leaves them alone for every other report.
+  void _buildDesktopPane(Track track) {
+    final Object key = (
+      track.id,
+      track.coverUrl,
+      widget.state.currentArtwork.providerFor(track),
+      widget.state.trackChangeDirection,
+      _commentsController,
+    );
+    if (_desktopPaneKey == key) return;
+    _desktopPaneKey = key;
+    _desktopLyrics = _settledGate(
+      LyricViewport(
+        key: ValueKey<String>('desktop-lyrics-${track.id}'),
+        state: widget.state,
+        backdropKey: _backdropKey,
+        onSelectionChanged: (active) => _selectionChanged(track.id, active),
+      ),
+    );
+    _desktopComments = SongCommentsView(
+      state: widget.state,
+      track: track,
+      controller: _commentsController,
+    );
+    _desktopQueue = PlaybackQueueView(state: widget.state, showHeader: false);
+    _desktopArtwork = _cover(track);
+  }
+
   /// Whether the idle countdown is currently waiting to hide the controls.
   ///
   /// Read from the live timer instead of a remembered flag: the flag used to
@@ -302,6 +350,49 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     );
     widget.state.addListener(_preferencesChanged);
     widget.presentationActive?.addListener(_syncWindowChromePresentation);
+    _armLyricsRequest();
+  }
+
+  /// A last resort for [NowPlayingPage.entranceSettled] never flipping.
+  ///
+  /// The gate below only exists to keep the fetch off the entrance frames. A
+  /// page whose host never reports settling must still end up with its sheet,
+  /// so the wait has a ceiling instead of becoming a permanent condition.
+  static const Duration _lyricsGateFallback = Duration(milliseconds: 1200);
+  Timer? _lyricsGate;
+
+  /// Loads the current sheet once the entrance has landed.
+  ///
+  /// The reply resolves on this isolate: the sheet is parsed, kept, and then
+  /// reported through [AppState.notifyListeners], which rebuilds this page and
+  /// lays the lyric rows out once more. Asking for it from the first post-frame
+  /// callback put that burst in the middle of the entrance spring, on the same
+  /// frames that were already moving the whole page. Waiting for the settled
+  /// notifier costs nothing in the normal case, because the request starts when
+  /// a track is selected and this call is then a no-op.
+  void _armLyricsRequest() {
+    final ValueListenable<bool>? settled = widget.entranceSettled;
+    if (settled == null || settled.value) {
+      _requestLyrics();
+      return;
+    }
+    settled.addListener(_lyricsWhenSettled);
+    _lyricsGate = Timer(_lyricsGateFallback, _releaseLyricsGate);
+  }
+
+  void _lyricsWhenSettled() {
+    if (widget.entranceSettled?.value != true) return;
+    _releaseLyricsGate();
+  }
+
+  void _releaseLyricsGate() {
+    _lyricsGate?.cancel();
+    _lyricsGate = null;
+    widget.entranceSettled?.removeListener(_lyricsWhenSettled);
+    _requestLyrics();
+  }
+
+  void _requestLyrics() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(widget.state.ensureCurrentLyrics());
     });
@@ -511,6 +602,9 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _lyricsGate?.cancel();
+    _lyricsGate = null;
+    widget.entranceSettled?.removeListener(_lyricsWhenSettled);
     widget.presentationActive?.removeListener(_syncWindowChromePresentation);
     _windowChrome?.detach(_controlsVisibility);
     _controlsVisibility.dispose();
@@ -689,6 +783,16 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       _commentsController = SongCommentsController(
         widget.state.catalog.connections,
       );
+    }
+    // Every cached canvas child belongs to the previous state object or to the
+    // previous entrance host; rebuilding them on the next build is cheaper than
+    // deciding which of them may survive the swap.
+    _desktopPaneKey = null;
+    if (oldWidget.entranceSettled != widget.entranceSettled) {
+      oldWidget.entranceSettled?.removeListener(_lyricsWhenSettled);
+      _lyricsGate?.cancel();
+      _lyricsGate = null;
+      _armLyricsRequest();
     }
   }
 
@@ -1031,6 +1135,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                             });
                           }
                           if (!compact) {
+                            _buildDesktopPane(track);
                             return Stack(
                               fit: StackFit.expand,
                               children: <Widget>[
@@ -1044,27 +1149,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                                     key: const ValueKey('desktop-now-playing'),
                                     state: widget.state,
                                     track: track,
-                                    artwork: _cover(track),
-                                    lyrics: _settledGate(
-                                      LyricViewport(
-                                        key: ValueKey<String>(
-                                          'desktop-lyrics-${track.id}',
-                                        ),
-                                        state: widget.state,
-                                        backdropKey: _backdropKey,
-                                        onSelectionChanged: (active) =>
-                                            _selectionChanged(track.id, active),
-                                      ),
-                                    ),
-                                    comments: SongCommentsView(
-                                      state: widget.state,
-                                      track: track,
-                                      controller: _commentsController,
-                                    ),
-                                    queue: PlaybackQueueView(
-                                      state: widget.state,
-                                      showHeader: false,
-                                    ),
+                                    artwork: _desktopArtwork!,
+                                    lyrics: _desktopLyrics!,
+                                    comments: _desktopComments!,
+                                    queue: _desktopQueue!,
                                     pane: _desktopPane,
                                     onPaneChanged: _selectDesktopPane,
                                     onBack: _closePage,

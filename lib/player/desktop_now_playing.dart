@@ -826,7 +826,14 @@ class _DesktopDockTransitionState extends State<_DesktopDockTransition>
             child: FadeTransition(
               key: const ValueKey('desktop-dock-fade'),
               opacity: _opacity,
-              child: widget.child,
+              // The transport repaints ten times a second: both clocks and the
+              // seek bar follow the position tick. Without a boundary of its own
+              // those repaints climb to the player's outermost layer, which also
+              // holds the album canvas, the vignette gradients and the whole
+              // artwork column, so a clock tick re-rasterises the entire page.
+              // That is affordable at rest and plainly visible while the
+              // entrance spring is still moving that same page.
+              child: RepaintBoundary(child: widget.child),
             ),
           ),
         ),
