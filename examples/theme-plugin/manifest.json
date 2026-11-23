@@ -1,0 +1,11 @@
+{
+  "id": "example.theme-atelier",
+  "name": "Atelier 主题示例",
+  "version": "1.0.0",
+  "description": "Declarative typography, spacing, radius and lyric-motion tokens for Lazer. No provider, no network, no storage and no filesystem permission.",
+  "author": "Lazer example plugins",
+  "entry": "main.lua",
+  "apiVersion": 1,
+  "provider": "atelier",
+  "capabilities": []
+}

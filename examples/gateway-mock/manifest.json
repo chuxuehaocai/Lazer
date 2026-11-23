@@ -1,0 +1,25 @@
+{
+  "id": "example.gateway-mock",
+  "name": "Mockwave 模拟音源",
+  "version": "1.0.0",
+  "description": "Offline mock music gateway: deterministic catalogue, synthetic 24-second WAV streams over a loopback HTTP server, no network permission.",
+  "author": "Lazer example plugins",
+  "entry": "main.lua",
+  "apiVersion": 1,
+  "provider": "mockwave",
+  "capabilities": [
+    "homeFeed",
+    "search",
+    "browseAlbums",
+    "playlists",
+    "favorites",
+    "lyrics",
+    "radio",
+    "charts"
+  ],
+  "auth": ["password"],
+  "permissions": {
+    "storage": true,
+    "socketServer": ["127.0.0.1:0"]
+  }
+}

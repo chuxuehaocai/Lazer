@@ -557,57 +557,6 @@ void main() {
   );
 
   test(
-    'bundled Lua example imports without native work and runs user actions',
-    () async {
-      final archive = Archive();
-      for (final name in ['manifest.json', 'main.lua']) {
-        final file = File('examples/lua-native-diagnostics/$name');
-        final content = await file.readAsBytes();
-        archive.addFile(ArchiveFile(name, content.length, content));
-      }
-      final plugins = PluginManager(
-        rootDirectory: Directory('${root.path}/example'),
-      );
-      addTearDown(() async {
-        plugins.dispose();
-        await plugins.shutdownSettled;
-      });
-      final host = _Host();
-      plugins.onPlayerControl = host.api.dispatch;
-      final prompts = <String>[];
-      plugins.onPermissionRequest = (_, scope) async {
-        prompts.add(scope);
-        return true;
-      };
-      final plugin = await plugins.importZip(
-        Uint8List.fromList(ZipEncoder().encode(archive)),
-      );
-      expect(plugin.error, isNull);
-      expect(host.reads, 0);
-      expect(prompts, isEmpty);
-      await plugins.invokePluginSetting(
-        'example.native-diagnostics',
-        'diagnose',
-      );
-      expect(host.reads, 2);
-      expect(prompts, ['data.native_audio']);
-      await plugins.invokePluginSetting(
-        'example.native-diagnostics',
-        'floating',
-      );
-      expect(host.floating, true);
-      expect(prompts, ['data.native_audio', 'data.native_control']);
-      await plugins.invokePluginSetting('example.native-diagnostics', 'off');
-      expect(host.floating, false);
-      expect(host.desktop, false);
-      final result = plugins.pluginPages.single.elements.firstWhere(
-        (item) => item.id == 'result',
-      );
-      expect(result.text, contains('"ok":true'));
-    },
-  );
-
-  test(
     'old pending native consent cannot mutate after plugin suspension',
     () async {
       final access = PluginDataAccess(

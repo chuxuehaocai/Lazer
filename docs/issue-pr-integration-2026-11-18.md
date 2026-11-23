@@ -66,7 +66,7 @@ Windows 点击区域、锁定时钟、DPI 切换和显示器移除处理详见
 UI 与 Lua 共享歌词设置写入器，避免旧持久化写入覆盖新选择。
 
 协议、错误结果和平台限制见 [Lua 插件文档](lua-plugins.md)，
-可导入示例见 [Native diagnostics](../examples/lua-native-diagnostics/README.md)。
+可导入示例见 [examples](../examples/README.md)。
 
 ## 验证与边界
 

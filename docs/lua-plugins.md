@@ -190,9 +190,9 @@ local success, result = pcall(host.native, {
 })
 ```
 
-[完整示例](../examples/lua-native-diagnostics/README.md) 提供按需诊断页与歌词按钮，
-不注册轮询计时器；权限在首次用户操作时申请。独立前端若把这些操作转发给外部连接，
-仍须在自身桥接层验证调用者身份，并使用受限操作白名单。
+这些原生操作按需调用即可，不必注册轮询计时器；权限在首次用户操作时申请。
+独立前端若把这些操作转发给外部连接，仍须在自身桥接层验证调用者身份，
+并使用受限操作白名单。
 
 ### 独立前端与隐私资料
 
@@ -656,12 +656,11 @@ return {{synced=true,
 音译，保留原文与翻译。没有提供音译的行不占用额外空间，也不会自动生成罗马音。
 
 
-### 可运行的独立 HTML 前端
+### 独立 HTML 前端
 
-[examples/lua-frontend](../examples/lua-frontend/README.md) 提供完整 HTML/CSS/JS 页面与 Lua
-WebSocket 桥，支持播放控制、队列、歌词、歌单、搜索、用户信息与统计。直接打开本地 HTML
-即可连接原生 Lazer 后端；无需 WebView、远程 JavaScript 或 npm。打包、导入、启动和连接步骤
-以及真实 JS→WebSocket→Lua→AppState 的集成测试说明都在示例 README 中。
+独立 HTML 前端的做法见上文「独立前端与隐私资料」：把 HTML/CSS/JS 放进包里，用
+`host.resource` 读取，再通过已授权的 TCP / WebSocket 服务发给浏览器；不需要 WebView、
+远程 JavaScript 或 npm。仓库里现在只附带网关与主题两个示例，不含可运行的前端页面。
 
 后台服务可用 `host.timer({id="bridge",intervalMs=100})` 注册唤醒，收到
 `call("timer",{id="bridge"})` 后短暂轮询 socket。`operation="cancel"` 取消指定 ID，
