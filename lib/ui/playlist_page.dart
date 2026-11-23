@@ -236,20 +236,35 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
         return;
       }
 
-      // Replace the stale snapshot with the first live page, then append each
-      // following 100-song page as soon as it arrives. AppCover starts its own
-      // image request, so a slow cover CDN cannot delay the song rows.
+      // Rows the listener can already see: the previous walk's list, or the
+      // stored snapshot painted above. A refresh keeps them painted until the
+      // new walk has produced at least as many. Publishing the first 100-song
+      // page of a 500-song playlist pulled every row under it out of the list
+      // and clamped the scroll position to the shorter one, then grew back
+      // page by page — the list appeared to blank out and refill while a
+      // refresh the listener never asked for was running.
+      final int paintedRows = _tracks?.length ?? 0;
+      int shownRows = paintedRows;
       final fresh = <Track>[];
       await for (final page in catalog.playlistTrackPages(playlistId)) {
         if (!mounted || serial != _requestSerial) return;
         fresh.addAll(page);
-        setState(() {
-          _tracks = List<Track>.unmodifiable(fresh);
-          _metricsDirty = true;
-          _rowIndexTrackId = null;
-          _rowIndexCache = -1;
-        });
-        _scheduleLocateRefresh();
+        // Publishing something shorter than what is on screen is exactly the
+        // blanking this page must not do. A first visit has nothing to keep
+        // (or keeps a snapshot that is already the shorter list), so the first
+        // 100-song page still paints as soon as it arrives; AppCover starts
+        // its own image request, so a slow cover CDN cannot delay the rows.
+        if (fresh.length < paintedRows) continue;
+        _publishTracks(fresh);
+        shownRows = fresh.length;
+      }
+      // The walk ended. Either it never grew past the painted rows (songs were
+      // removed since the last visit), or nothing was painted yet (including a
+      // playlist the service reports as empty). The whole answer is known now,
+      // so it replaces the stale rows in one frame instead of a short one.
+      if (serial == _requestSerial &&
+          (_tracks == null || shownRows != fresh.length)) {
+        _publishTracks(fresh);
       }
     } catch (_) {
       if (!mounted || serial != _requestSerial) return;
@@ -262,6 +277,22 @@ class _AppPlaylistPageState extends State<AppPlaylistPage>
         setState(() => _error = null);
       }
     }
+  }
+
+  /// Makes [tracks] the visible list.
+  ///
+  /// A publish resets the measured row heights and the locator's cached index,
+  /// so it is one step per settled list: a streaming first load still calls it
+  /// per page, while a refresh calls it only once the new walk is known.
+  void _publishTracks(List<Track> tracks) {
+    if (!mounted) return;
+    setState(() {
+      _tracks = List<Track>.unmodifiable(tracks);
+      _metricsDirty = true;
+      _rowIndexTrackId = null;
+      _rowIndexCache = -1;
+    });
+    _scheduleLocateRefresh();
   }
 
   /// Natural height of one [AppTrackRow]: 44 px cover, up to three
