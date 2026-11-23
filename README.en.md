@@ -18,20 +18,21 @@
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.300-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
   <img alt="web demo" src="https://img.shields.io/badge/Web%20Demo-Vercel-000000">
+  <a href="https://lazer.naominet.dev/docs"><img alt="Lua plugin docs" src="https://img.shields.io/badge/Lua%20plugin%20docs-lazer.naominet.dev%2Fdocs-F04450"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-4C9A7A"></a>
 </p>
 
 <p align="center">
   <b>A NetEase Cloud Music client written by hand in Flutter.</b><br>
-  WEAPI / EAPI live inside the app — no third-party gateway —<br>
-  and the catalogue, lyrics, comments and daily picks come straight from the service.
+  WEAPI / EAPI live inside the app with no third-party gateway;<br>
+  the catalogue, lyrics, comments and daily picks come straight from the service.
 </p>
 
 <p align="center"><a href="README.md">简体中文</a> | English</p>
 
 ## What it does
 
-**The listening part**
+**Listening**
 
 - A real catalogue, search, recommended playlists, personal radar, accounts and favourites.
 - Artist pages with popular tracks and paged albums; album pages carry the description and the full track list — tap a name and you are there.
@@ -40,7 +41,7 @@
 - Network sources: WebDAV, SMB, SFTP and FTP reach the NAS directly — browse it, play a folder, scan it into the library. Internet radio and RSS podcast subscriptions live on the same page, and podcasts remember where each episode stopped.
 - System media controls on Windows, macOS, Linux, Android and iOS; the notification, lock screen and Dynamic Island carry the line being sung.
 
-**The lyric part**
+**Lyrics**
 
 - LRC / YRC parsing, per-grapheme emphasized springs, a 35% focus band, progressive masks and distance blur.
 - Font size and weight adjust with a live preview; copy several lines or export them as a PNG.
@@ -51,15 +52,15 @@
 - The desktop lyric's left handle drags it and remembers the position; playback progress syncs
   every 50 ms, and interludes show breathing dots.
 
-**The interface part**
+**Interface**
 
 - One Apple-style interface, theme and spring-motion system across platforms: semantic colours and type, translucent navigation, grouped lists and tints pulled from the cover art.
-- Desktop gets a sidebar and the full transport; phones get a tab bar and a mini-player — one page tree and one state, just a different posture.
+- Desktop gets a sidebar and the full transport; phones get a tab bar and a mini-player, over the same page tree and state.
 - Layout override (desktop / mobile), DPI 80–175%, and a car head-unit profile that starts at 135%.
 - Large screen mode: TVs and projectors start in it, and the D-pad moves by position across shelves, the library grid and the transport.
 - Simplified Chinese, Traditional Chinese, Japanese and English.
 
-**The fussy part**
+**Detail**
 
 - Adjustable scroll inertia and acceleration; haptic detents on the seek bar.
 - An uncached song gathers ten seconds of stream before it starts, so the opening bars no longer stutter; downloaded and cached tracks still start instantly.
@@ -92,6 +93,10 @@
 ## A tidy little cache
 
 Playback caching keeps up to 50 completed songs by default, with a configurable limit. Recent mode evicts the songs not played for the longest time; smart mode favours songs heard more often in the last 30 days. Manually downloaded and imported files are retained. Artwork and catalogue caches have their own bounds, and a failed network request can fall back to an earlier snapshot. Fully cached tracks play locally while new streams cache in the background.
+
+## Write a plugin
+
+Lazer ships without a streaming gateway: which platform you listen to is decided by a Lua plugin. The full contract lives at **[lazer.naominet.dev/docs](https://lazer.naominet.dev/docs)** — manifest fields, the `call()` operation table, the `host.*` API, the permission model, and how a release reaches the market. Installing plugins and browsing what others built is at [lazer.naominet.dev/plugin](https://lazer.naominet.dev/plugin).
 
 ## Build it yourself
 
@@ -166,7 +171,7 @@ artifacts are retained for 30 days. Extract the complete Windows ZIP before
 launching its EXE, run `chmod +x` on a downloaded AppImage, and note that macOS
 Apps are ad-hoc signed while the IPA needs your own signing.
 
-More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [scheduled pause](docs/scheduled-pause.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [password sign-in](docs/login-password.md) · [unified interface](docs/ui.md) · [network sources](docs/network-sources.md) · [third-party notices](THIRD-PARTY-NOTICES.md)
+More documentation: [build details](docs/builds.md) · [system media](docs/system-media.md) · [now playing](docs/now-playing.md) · [scheduled pause](docs/scheduled-pause.md) · [car head unit](docs/car-head-unit.md) · [large screen mode (Android TV)](docs/android-tv.md) · [plugin development](https://lazer.naominet.dev/docs) ([runtime notes](docs/lua-plugins.md)) · [QR sign-in](docs/login-qr.md) · [SMS sign-in](docs/login-sms.md) · [password sign-in](docs/login-password.md) · [unified interface](docs/ui.md) · [network sources](docs/network-sources.md) · [third-party notices](THIRD-PARTY-NOTICES.md)
 
 ## References and thanks
 

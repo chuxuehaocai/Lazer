@@ -18,6 +18,7 @@
   <img alt="version" src="https://img.shields.io/badge/Lazer-v2.0.300-8E7CC3">
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux%20%C2%B7%20Android%20%C2%B7%20iOS-7FB6A4">
   <img alt="web demo" src="https://img.shields.io/badge/Web%20Demo-Vercel-000000">
+  <a href="https://lazer.naominet.dev/docs"><img alt="Lua 插件文档" src="https://img.shields.io/badge/Lua%20plugin%20docs-lazer.naominet.dev%2Fdocs-F04450"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-4C9A7A"></a>
 </p>
 
@@ -31,7 +32,7 @@
 
 ## 它都会些什么
 
-**听歌这件事**
+**听歌**
 
 - 真实曲库、搜索、推荐歌单、私人雷达、账号与收藏。
 - 歌手主页有热门歌曲和分页专辑；专辑详情带简介与完整曲目，点名字就钻进去了。
@@ -40,7 +41,7 @@
 - 网络源：WebDAV、SMB、SFTP、FTP 直接连 NAS，浏览、整目录播放、扫描入库；网络电台和 RSS 播客订阅在同一页，播客记得每一集听到哪。
 - 系统媒体控件：Windows、macOS、Linux、Android、iOS 都认得它；通知、锁屏与灵动岛会跟着唱到哪一句。
 
-**歌词这件小事**
+**歌词**
 
 - LRC / YRC 解析、逐字 emphasized 弹簧、35% 焦点带、渐进遮罩与距离模糊。
 - 字号、字重随手调，改完立刻预览；多选复制、导出成 PNG 也可以。
@@ -49,15 +50,15 @@
   macOS / Linux / Windows 另有可拖动的悬浮歌词窗；默认 3 行，可设 1–5 行，共用同一套弹簧渲染。
 - 桌面歌词左侧把手可拖动位置并记住；播放进度每 50ms 同步一次，间奏显示呼吸小点。
 
-**界面这件事**
+**界面**
 
 - 全平台共用一套 Apple 风格界面、主题与弹簧动画：语义化系统色与字阶、玻璃导航、分组列表，还有从封面取色的主题。
-- 桌面是侧边栏 + 完整播放条，手机是底部标签栏 + 迷你播放器——同一套页面与状态，换个姿势陪你听。
+- 桌面是侧边栏加完整播放条，手机是底部标签栏加迷你播放器；两边是同一套页面和状态。
 - 布局可以强制桌面 / 移动，DPI 80–175%，车机形态自动放大到 135%。
 - 大屏幕模式：电视和投影自动进入，遥控器方向键在封面货架、资料库网格与播放条之间按位置移动。
 - 简体中文、繁体中文、日语、英语四种界面。
 
-**细节这件事**
+**细节**
 
 - 滚动惯性与加速度可调，进度条刻度带触感反馈。
 - 没缓存的歌先攒够十秒再开口，开头不再一顿一顿；已下载和已缓存的歌照旧秒开。
@@ -65,6 +66,13 @@
 - 浏览背景默认限制为 30fps，播放背景默认跟随屏幕刷新率，帧率和渲染精度分别设置；隐藏页面和静态背景停止持续绘制。设置里能打开实时帧率浮层。
 - 正在播放页有 AMLL 网格背景、封面与歌词互切、队列与评论面板，还有 M / L / Q / C / F 一把快捷键。
 - 定时停止支持多个每天重复的时间点。到点暂停一次并保留队列和进度，之后可手动继续。
+
+## 写个插件
+
+Lazer 不自带流媒体网关，接哪个平台由 Lua 插件决定。写插件看
+**[lazer.naominet.dev/docs](https://lazer.naominet.dev/docs)**：清单字段、`call()` 的操作表、
+`host.*` 接口、权限模型和上架流程都在那一份里。装插件、翻别人的插件在
+[lazer.naominet.dev/plugin](https://lazer.naominet.dev/plugin)。
 
 ## 开始折腾
 
@@ -145,7 +153,7 @@ vercel project protection disable lazer_demo --sso --yes
 Windows 请完整解压后运行；AppImage 下载后先 `chmod +x`；
 macOS 包使用 ad-hoc 签名，IPA 需要自行签名后安装。
 
-更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [Lua 插件开发](docs/lua-plugins.md) · [音乐平台架构](docs/music-gateways.md) · [网络源](docs/network-sources.md) · [统一界面](docs/ui.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
+更多说明书：[构建说明](docs/builds.md) · [系统媒体控件](docs/system-media.md) · [正在播放](docs/now-playing.md) · [定时停止](docs/scheduled-pause.md) · [车机形态](docs/car-head-unit.md) · [大屏幕模式（Android TV）](docs/android-tv.md) · [Lua 插件开发](https://lazer.naominet.dev/docs)（[运行时实现说明](docs/lua-plugins.md)） · [音乐平台架构](docs/music-gateways.md) · [网络源](docs/network-sources.md) · [统一界面](docs/ui.md) · [第三方声明](THIRD-PARTY-NOTICES.md)
 
 ## 参考与致谢
 
