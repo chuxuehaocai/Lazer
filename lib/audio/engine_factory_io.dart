@@ -7,6 +7,8 @@
 // `flutter run` from a checkout without a built engine behaves exactly as before.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
@@ -21,6 +23,18 @@ import 'native/lazer_audio_worker.dart';
 /// Whether [engine] is the native FFI session. Kept behind the platform
 /// factory so shared state never imports `dart:ffi` on the web.
 bool isNativeAudioEngine(AudioEngine engine) => engine is NativeAudioEngine;
+
+/// Deadline for one native session start-up.
+///
+/// The native engine reserves an output device for the lifetime of the process,
+/// and a hot restart never runs the previous isolate's teardown, so that
+/// reservation outlives the Dart code that made it. A second
+/// `lazer_audio_create` can therefore wait on a device nothing will release; the
+/// deadline turns that into a visible fallback instead of a window that never
+/// appears. The abandoned future may still finish and reserve the device — it
+/// cannot be cancelled from here — but an unreachable engine costs less than a
+/// start-up that never completes.
+const Duration _nativeStartupDeadline = Duration(seconds: 8);
 
 /// The engine plus, when present, the native session and its diagnostics.
 @immutable
@@ -78,7 +92,7 @@ Future<AudioEngineSelection> createAudioEngine({
     try {
       final NativeAudioEngine? native = await NativeAudioEngine.create(
         deviceSettings: deviceSettings,
-      );
+      ).timeout(_nativeStartupDeadline);
       if (native != null) {
         if (native.supportsAutoMix) {
           await native.setAutoMixEnabled(autoMixEnabled);
@@ -107,6 +121,17 @@ Future<AudioEngineSelection> createAudioEngine({
         NativeAudioEngine.lastStartupFailure ??
             'lazer_audio_create returned no engine',
       );
+    } on TimeoutException {
+      // Say what the listener can act on: a device held by a dead instance is
+      // only released by restarting the app, and playback is already working on
+      // the fallback path by the time this notice is read.
+      decision = AudioEnginePathDecision.fallback(
+        AudioPathFallback.sessionStartupFailed,
+        'native start-up did not finish in ${_nativeStartupDeadline.inSeconds}s '
+        '(an output device may still be held by the previous run); '
+        '${NativeAudioEngine.lastStartupFailure ?? "no engine reported"}',
+      );
+      debugPrint('Audio engine: native start-up timed out, falling back');
     } catch (error, stack) {
       decision = AudioEnginePathDecision.fallback(
         AudioPathFallback.sessionStartupFailed,

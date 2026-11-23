@@ -73,6 +73,15 @@ bool _isMutedLog(Object? line) {
 
 bool _debugPrintBridgeInstalled = false;
 
+/// How long a native start-up step may hold the first frame.
+///
+/// Windows plugin calls are answered on one thread shared by every window and
+/// engine in the process, including the ones an earlier `flutter run` isolate
+/// created and never disposed. A hot restart inherits that queue, so "slow" and
+/// "never" are the same failure from the listener's seat: the work is given a
+/// deadline, and whatever it was preparing is optional.
+const Duration _startupDeadline = Duration(seconds: 5);
+
 void _installDebugPrintBridge() {
   if (_debugPrintBridgeInstalled) return;
   _debugPrintBridgeInstalled = true;
@@ -138,7 +147,29 @@ Future<void> main(List<String> args) async {
       // opening the audio engine and restoring the usable application.
       try {
         installDesktopPreferences();
-        final Future<void> windowReady = initWindowFrame(preventClose: true);
+        // Every channel call below runs on the same platform thread as any
+        // window and engine an earlier run of this isolate left behind, so a
+        // hot restart can queue behind work that no longer has an owner. The
+        // window frame and the audio session therefore have deadlines: the app
+        // opens with the system title bar or on the fallback engine instead of
+        // never opening at all, and the reason lands in the log.
+        final Future<void> windowFrame = initWindowFrame(preventClose: true);
+        // A frame that gives up on the deadline must not leave its own failure
+        // unobserved: whatever arrives after the timeout is reported here instead
+        // of surfacing as an uncaught zone error.
+        unawaited(
+          windowFrame.catchError((Object error) {
+            debugPrint('startup: window frame setup failed: $error');
+          }),
+        );
+        final Future<void> windowReady = windowFrame.timeout(
+          _startupDeadline,
+          onTimeout: () => debugPrint(
+            'startup: window frame setup still waiting after '
+            '${_startupDeadline.inSeconds}s; drawing the first frame '
+            'without it',
+          ),
+        );
         // The television input model (D-pad focus) needs this before the first
         // frame: a television with no pointer would otherwise boot into a screen
         // where nothing can be operated.

@@ -20,7 +20,7 @@ class LazerWidgetsBinding extends WidgetsFlutterBinding {
   final SemanticsTransaction _transaction = SemanticsTransaction();
   Map<String, int> get semanticsDiagnostics => {
     'detached_updates_removed': _transaction.orphanUpdates,
-    'reattached_nodes_restored': _transaction.restoredNodes,
+    'tree_baselines': _transaction.baselines,
   };
 
   LazerWidgetsBinding() {

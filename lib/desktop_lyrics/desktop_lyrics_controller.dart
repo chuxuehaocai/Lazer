@@ -15,6 +15,9 @@ class DesktopLyricsController {
   DesktopLyricsController(this._state, {LyricsOverlayWindowHost? windowHost})
     : _host = windowHost ?? DesktopLyricsWindowHost() {
     _state.addListener(_scheduleSync);
+    // Started before the first sync so that a later [AppState.desktopLyricsEnabled]
+    // change cannot create this run's overlay before the previous run's is gone.
+    _orphanSweep = _closeOrphans();
     _scheduleSync();
   }
 
@@ -36,6 +39,9 @@ class DesktopLyricsController {
   bool _running = false;
   Future<void> _idle = Future<void>.value();
   Future<void> _closed = Future<void>.value();
+
+  /// Completes once the overlay windows of an earlier run are closed.
+  late final Future<void> _orphanSweep;
   Timer? _positionTimer;
   Timer? _retryTimer;
   final Set<(String, String)> _fontRegistrations = {};
@@ -137,10 +143,31 @@ class DesktopLyricsController {
     _updatePositionTimer();
   }
 
+  /// Overlay windows of an earlier run live in this process but outside this
+  /// isolate, so a hot restart changes nothing about them: they keep their own
+  /// engine and keep drawing. Closing them at start-up is what keeps one restart
+  /// from adding one more engine, and what stops a stale overlay from surviving
+  /// the setting being switched off.
+  Future<void> _closeOrphans() async {
+    // Typed as Object so the sweep is promoted: a host that cannot own orphan
+    // windows only implements the plain interface.
+    final Object host = _host;
+    if (host is! LyricsOverlayOrphanSweeper) return;
+    try {
+      await host.closeOrphans();
+    } catch (error) {
+      AppLog.shared.record('desktop lyrics: overlay sweep failed: $error');
+    }
+  }
+
   Future<void> _open(LyricsOverlayMode mode) async {
     if (!await _ensureReadyHandler() || _disposed || _desiredMode != mode) {
       return;
     }
+    // Order matters more than start-up speed here: this run must not create its
+    // overlay while the previous run's engine still draws one on top of it.
+    await _orphanSweep;
+    if (_disposed || _desiredMode != mode) return;
     final LyricsOverlayWindow window;
     final launchSettings = _settings;
     try {
