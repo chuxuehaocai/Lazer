@@ -483,6 +483,15 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
     final Color songTextColor = contrastingLabel(barSurface);
     final Track? track = widget.track;
     final bool highlighted = _hovering || _focused;
+    // 只跟歌手行有关：曲名与译文保持 textTheme 原样。
+    final LazerThemeTokens ui = LazerThemeTokens.of(context);
+    final double artistSize = ui.playerBarArtistSize > 0
+        ? ui.playerBarArtistSize
+        : 11;
+    final FontWeight artistWeight = ui.playerBarArtistWeight > 0
+        ? FontWeight
+              .values[(ui.playerBarArtistWeight / 100).round().clamp(1, 9) - 1]
+        : ui.labelFontWeight;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
@@ -557,6 +566,8 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelSmall?.copyWith(
+                              fontSize: artistSize,
+                              fontWeight: artistWeight,
                               color: songTextColor,
                             ),
                           ),

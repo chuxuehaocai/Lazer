@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../animation/apple_modal.dart';
 import '../l10n/app_localizations.dart';
+import '../plugins/plugin_manifest.dart';
 import '../plugins/plugin_manager.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
@@ -376,16 +377,22 @@ class _PluginDetailsSheet extends StatefulWidget {
 
 /// 插件卡片副标题里的「类型」。
 ///
-/// 以前这里直接印 `manifest.provider`，纯主题插件的 provider 是 `parchment`，
-/// 看起来就像注册了一个叫 parchment 的音乐平台。只有真的挂上网关时才显示平台名，
-/// 否则显示它实际提供的东西：主题 / 布局 / 插件。
+/// 由清单的 `type` 决定（没写的老插件按 gateway）：theme 插件只换皮、不会被
+/// 当成音乐平台；gateway 才显示它接的平台名。
 String _pluginKind(InstalledPlugin plugin) {
-  if (plugin.gateways.isNotEmpty) return plugin.manifest.provider;
-  final List<String> parts = <String>[
-    if (plugin.theme != null) '主题',
-    if (plugin.layout != null) '布局',
-  ];
-  return parts.isEmpty ? '插件' : parts.join(' · ');
+  switch (plugin.manifest.type) {
+    case PluginType.gateway:
+      final String provider = plugin.manifest.provider;
+      return provider.isEmpty ? '音乐平台' : provider;
+    case PluginType.theme:
+      final List<String> parts = <String>[
+        '主题',
+        if (plugin.layout != null) '布局',
+      ];
+      return parts.join(' · ');
+    case PluginType.other:
+      return '其他';
+  }
 }
 
 class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {

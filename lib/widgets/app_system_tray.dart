@@ -206,7 +206,17 @@ class AppSystemTray with TrayListener {
     } catch (_) {}
   }
 
+  /// 真正关窗口之前要先做完的事（现在用来先收掉悬浮歌词那个子窗口）。
+  ///
+  /// 主窗口先没的话，desktop_multi_window 的子引擎会被一起拽掉，
+  /// 那时它还在跑 ticker / 收发 channel，Windows 上就是一次 access violation
+  /// 弹窗（「指令引用了 … 内存」）。所以退出顺序是：先关子窗口，再关自己。
+  static Future<void> Function()? beforeExit;
+
   static Future<void> exitApp() async {
+    try {
+      await beforeExit?.call().timeout(const Duration(seconds: 3));
+    } catch (_) {}
     try {
       await instance._state?.flushPersistence().timeout(
         const Duration(seconds: 2),

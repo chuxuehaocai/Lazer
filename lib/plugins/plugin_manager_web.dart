@@ -443,9 +443,10 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       // 把 manifest 的 provider 名字升格成一个谁都没要的音乐平台。
       final declared = description is Map ? description['providers'] : null;
       final bool declaresNoProviders = declared is Map && declared.isEmpty;
+      final bool allowsGateway = plugin.manifest.type == PluginType.gateway;
       final providers = declared is List
           ? declared.whereType<Map>().toList()
-          : declaresNoProviders
+          : !allowsGateway || declaresNoProviders
           ? const <Map>[]
           : <Map>[
               <String, dynamic>{

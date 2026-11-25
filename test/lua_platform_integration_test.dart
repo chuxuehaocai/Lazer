@@ -249,10 +249,10 @@ void main() {
       try {
         await app.bootstrap();
         await plugins.importZip(_package(source: source));
-        // 设置里默认选的是内置主题（Mio），要显式切到「跟随插件皮肤」才轮到
-        // 插件提供的这一份 —— 以前是插件无条件接管，用户没有回头路。
+        // 皮肤只认设置里选中的那个 id：装好插件默认还是 Mio，要显式选中插件
+        // 提供的主题才会换皮 —— 启用插件本身不换皮。
         expect(app.pluginTheme?.id, 'builtin.mio');
-        await app.setBuiltinTheme(null);
+        await app.setActiveTheme('fixture.theme');
         expect(app.pluginTheme?.id, 'fixture.theme');
         expect(app.pluginTheme?.displayWeight, 850);
         expect(app.pluginLayout?.id, 'fixture.layout');
@@ -268,7 +268,9 @@ void main() {
         expect(plugins.skinRevision, revision);
         expect(app.pluginSkinRevision, revision);
         await plugins.setEnabled('fixture.multiple', false);
-        expect(app.pluginTheme, isNull);
+        // 插件被禁用后它提供的皮肤也随之消失，选中的 id 找不到就回落 Mio ——
+        // 不会因为「还有别的皮肤在」就随手换一份。
+        expect(app.pluginTheme?.id, 'builtin.mio');
         expect(plugins.skinRevision, Object.hash(null, null));
         expect(plugins.skinRevision, isNot(revision));
       } finally {

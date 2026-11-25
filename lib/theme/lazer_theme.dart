@@ -184,6 +184,10 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     this.compactPlayerBarHeight = 0,
     this.cornerScale = 1,
     this.capsuleRadius = -1,
+    this.pageTitleWeight = -1,
+    this.pageTitleSubtitleGap = -1,
+    this.playerBarArtistSize = -1,
+    this.playerBarArtistWeight = -1,
     this.navBarRadius = -1,
     this.nowPlayingArtworkMax = 0,
     this.nowPlayingArtworkMin = 0,
@@ -266,6 +270,20 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   /// 移动端底边栏那条玻璃药丸的圆角，单位 px，负值同 [capsuleRadius]。
   final double navBarRadius;
 
+  /// 页面大标题的字重（如 600 = 半粗）。负值表示没指定，用 [displayFontWeight]。
+  final double pageTitleWeight;
+
+  /// 大标题和副标题之间的空隙，单位 px。负值表示没指定（宿主默认 5 px）。
+  final double pageTitleSubtitleGap;
+
+  /// 播放条左侧歌手行的字号，单位 px。负值表示没指定（11）。曲名与译文不受
+  /// 这个值影响。
+  final double playerBarArtistSize;
+
+  /// 播放条左侧歌手行的字重（如 500 = 中）。负值表示没指定，用
+  /// [labelFontWeight]。
+  final double playerBarArtistWeight;
+
   /// Widest artwork square on the listening canvas; `0` keeps 440.
   final double nowPlayingArtworkMax;
 
@@ -316,98 +334,16 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
 
   static const LazerThemeTokens apple = LazerThemeTokens();
 
-  /// 内置主题：Mio。
+  /// 内置主题：Mio —— 客户端自己的默认外观。
   ///
-  /// 客户端自带的一号主题（默认选它）。名字是代号，不是皮肤来源：几何与
-  /// 调色板见 [builtinThemes]，它不走 Lua 插件。
+  /// 它**就是** [apple] 那一套：圆角卡片、半透明玻璃、专辑色流背景、默认字重。
+  /// 换句话说「选 Mio」= 回到客户端出厂的样子。纸面那一版（直角卡片、零模糊、
+  /// 羊皮纸调色板）由插件提供，名字叫 Early Development，两者必须看得出区别，
+  /// 所以这里不能照抄 parchment 的几何。
   static const LazerThemeTokens mio = LazerThemeTokens(
     id: 'builtin.mio',
     name: 'Mio',
     version: 1,
-    colors: <String, Color>{
-      'background': Color(0xFFF0EEE6),
-      'secondaryBackground': Color(0xFFFAF9F5),
-      'tertiaryBackground': Color(0xFFFAF9F5),
-      'groupedBackground': Color(0xFFF0EEE6),
-      'secondaryGroupedBackground': Color(0xFFFAF9F5),
-      'tertiaryGroupedBackground': Color(0xFFFAF9F5),
-      'label': Color(0xFF141413),
-      'secondaryLabel': Color(0xFF87867F),
-      'tertiaryLabel': Color(0xFFB0AEA5),
-      'quaternaryLabel': Color(0xFFCCCBC8),
-      'fill': Color(0xFFE3DACC),
-      'secondaryFill': Color(0xFFF5E3C7),
-      'tertiaryFill': Color(0xFFFAF9F5),
-      'separator': Color(0xFFCCCBC8),
-      'opaqueSeparator': Color(0xFF87867F),
-      'accent': Color(0xFFD97757),
-      'accentSoft': Color(0x26D97757),
-      'glass': Color(0xE6FAF9F5),
-      'glassStrong': Color(0xF2141413),
-    },
-    darkColors: <String, Color>{
-      'background': Color(0xFF191918),
-      'secondaryBackground': Color(0xFF242423),
-      'tertiaryBackground': Color(0xFF242423),
-      'groupedBackground': Color(0xFF191918),
-      'secondaryGroupedBackground': Color(0xFF242423),
-      'tertiaryGroupedBackground': Color(0xFF242423),
-      'label': Color(0xFFF0EEE6),
-      'secondaryLabel': Color(0xFFB5B2A9),
-      'tertiaryLabel': Color(0xFFA8A69E),
-      'quaternaryLabel': Color(0xFF454540),
-      'fill': Color(0xFF34312D),
-      'secondaryFill': Color(0xFF3E3329),
-      'tertiaryFill': Color(0xFF242423),
-      'separator': Color(0xFF454540),
-      'opaqueSeparator': Color(0xFFB5B2A9),
-      'accent': Color(0xFFE68E70),
-      'accentSoft': Color(0x26E68E70),
-      'glass': Color(0xE6242423),
-      'glassStrong': Color(0xF2141413),
-    },
-    groupedCardRadius: 0,
-    listTileMinHeight: 64,
-    listTileVerticalPadding: 10,
-    pageTitleCompactSize: 40,
-    pageTitleRegularSize: 56,
-    sectionHeaderSize: 12,
-    displayWeight: 400,
-    headingWeight: 700,
-    titleWeight: 600,
-    bodyWeight: 400,
-    labelWeight: 600,
-    lyricWeight: 500,
-    lyricTranslationWeight: 400,
-    lyricTranslationScale: .73,
-    lyricLineHeight: 1.5,
-    lyricTranslationLineHeight: 1.45,
-    lyricTranslationGap: 5,
-    lyricDimAlpha: .48,
-    lyricTranslationAlpha: .48,
-    lyricStaggerDelay: .05,
-    lyricStaggerDecay: 1.05,
-    lyricFocusScaleDelta: 3,
-    controlRadius: 12,
-    glassBlurSigma: 0,
-    capsuleRadius: 0,
-    navBarRadius: 0,
-    railWidth: 232,
-    playerBarHeight: 100,
-    compactPlayerBarHeight: 72,
-    nowPlayingArtworkFraction: .34,
-    nowPlayingArtworkMin: 240,
-    nowPlayingArtworkMax: 440,
-    nowPlayingSidePadding: 32,
-    nowPlayingSidePaddingMax: 32,
-    nowPlayingTitleSize: 30,
-    nowPlayingSubtitleSize: 15,
-    nowPlayingMetaSize: 18,
-    nowPlayingCoverRadius: 0,
-    backgroundOpacity: 1,
-    backgroundBlurSigma: 0,
-    backgroundVeilAlpha: 1,
-    backgroundPlayMode: 'off',
   );
 
   /// 客户端自带、可以在设置里挑的主题，按显示顺序。
@@ -463,6 +399,10 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       'cornerScale': cornerScale,
       'capsuleRadius': capsuleRadius,
       'navBarRadius': navBarRadius,
+      'pageTitleWeight': pageTitleWeight,
+      'pageTitleSubtitleGap': pageTitleSubtitleGap,
+      'playerBarArtistSize': playerBarArtistSize,
+      'playerBarArtistWeight': playerBarArtistWeight,
       'nowPlayingArtworkMax': nowPlayingArtworkMax,
       'nowPlayingArtworkMin': nowPlayingArtworkMin,
       'nowPlayingArtworkFraction': nowPlayingArtworkFraction,
@@ -582,6 +522,10 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       cornerScale: number('cornerScale', 1, max: 2),
       capsuleRadius: number('capsuleRadius', -1, max: 64),
       navBarRadius: number('navBarRadius', -1, max: 64),
+      pageTitleWeight: number('pageTitleWeight', -1, max: 900),
+      pageTitleSubtitleGap: number('pageTitleSubtitleGap', -1, max: 96),
+      playerBarArtistSize: number('playerBarArtistSize', -1, max: 48),
+      playerBarArtistWeight: number('playerBarArtistWeight', -1, max: 900),
       nowPlayingArtworkMax: number('nowPlayingArtworkMax', 0, max: 1200),
       nowPlayingArtworkMin: number('nowPlayingArtworkMin', 0, max: 1200),
       nowPlayingArtworkFraction: number(
@@ -653,6 +597,10 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     double? cornerScale,
     double? capsuleRadius,
     double? navBarRadius,
+    double? pageTitleWeight,
+    double? pageTitleSubtitleGap,
+    double? playerBarArtistSize,
+    double? playerBarArtistWeight,
     double? nowPlayingArtworkMax,
     double? nowPlayingArtworkMin,
     double? nowPlayingArtworkFraction,
@@ -715,6 +663,13 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     cornerScale: cornerScale ?? this.cornerScale,
     capsuleRadius: capsuleRadius ?? this.capsuleRadius,
     navBarRadius: navBarRadius ?? this.navBarRadius,
+    pageTitleWeight: pageTitleWeight ?? this.pageTitleWeight,
+    pageTitleSubtitleGap:
+        pageTitleSubtitleGap ?? this.pageTitleSubtitleGap,
+    playerBarArtistSize:
+        playerBarArtistSize ?? this.playerBarArtistSize,
+    playerBarArtistWeight:
+        playerBarArtistWeight ?? this.playerBarArtistWeight,
     nowPlayingArtworkMax: nowPlayingArtworkMax ?? this.nowPlayingArtworkMax,
     nowPlayingArtworkMin: nowPlayingArtworkMin ?? this.nowPlayingArtworkMin,
     nowPlayingArtworkFraction:
@@ -822,6 +777,19 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       cornerScale: mix(cornerScale, other.cornerScale),
       capsuleRadius: mix(capsuleRadius, other.capsuleRadius),
       navBarRadius: mix(navBarRadius, other.navBarRadius),
+      pageTitleWeight: mix(pageTitleWeight, other.pageTitleWeight),
+      pageTitleSubtitleGap: mix(
+        pageTitleSubtitleGap,
+        other.pageTitleSubtitleGap,
+      ),
+      playerBarArtistSize: mix(
+        playerBarArtistSize,
+        other.playerBarArtistSize,
+      ),
+      playerBarArtistWeight: mix(
+        playerBarArtistWeight,
+        other.playerBarArtistWeight,
+      ),
       nowPlayingArtworkMax: mix(
         nowPlayingArtworkMax,
         other.nowPlayingArtworkMax,

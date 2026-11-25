@@ -99,7 +99,10 @@ class ApplePageTitle extends StatelessWidget {
         height:
             (compact ? 41 : 38) /
             (compact ? ui.pageTitleCompactSize : ui.pageTitleRegularSize),
-        fontWeight: ui.displayFontWeight,
+        // 字重可以单独给：parchment 那一版的大标题是半粗，不是 display 的 400。
+        fontWeight: ui.pageTitleWeight > 0
+            ? FontWeight.values[(ui.pageTitleWeight / 100).round().clamp(1, 9) - 1]
+            : ui.displayFontWeight,
         letterSpacing: .37,
         color: apple.label,
       ),
@@ -125,7 +128,12 @@ class ApplePageTitle extends StatelessWidget {
                     ),
                   ),
                   if (subtitle != null && subtitle!.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 5),
+                    // 标题与副标题之间的空隙也归主题：负值表示没指定，用 5 px。
+                    SizedBox(
+                      height: ui.pageTitleSubtitleGap >= 0
+                          ? ui.pageTitleSubtitleGap
+                          : 5,
+                    ),
                     Text(
                       context.tr(subtitle!),
                       maxLines: 2,

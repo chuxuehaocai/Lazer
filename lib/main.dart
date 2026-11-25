@@ -408,7 +408,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _state.showFrameStats,
     _state.fontPreferences,
     _state.pluginSkinRevision,
-    _state.builtinThemeId,
+    _state.activeThemeId,
     _state.layoutStyle,
     _state.uiMode,
     _state.titleBarStyle,
@@ -444,6 +444,11 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
       ),
     );
     _desktopLyrics = DesktopLyricsController(_state);
+    // 退出时先把悬浮歌词窗口收干净，再关主窗口（见 AppSystemTray.beforeExit）。
+    AppSystemTray.beforeExit = () async {
+      _desktopLyrics.dispose();
+      await _desktopLyrics.closed;
+    };
     if (supportsConsoleWindow) _consoleWindow = ConsoleWindowController(_state);
     _remote = LanRemoteController(_state);
     unawaited(_remote.initialize());
@@ -481,6 +486,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _consoleWindow?.dispose();
     _remote.dispose();
     _browseNavigation.dispose();
+    if (AppSystemTray.beforeExit != null) AppSystemTray.beforeExit = null;
     _state.removeListener(_onRootUiChanged);
     _state.pluginManager.onPermissionRequest = null;
     widget.media.close();

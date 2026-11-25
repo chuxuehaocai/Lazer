@@ -2,6 +2,35 @@
 // plugin UI through `context.tr`.
 import 'dart:convert';
 
+/// 插件类型。
+///
+/// 客户端只按这里声明的意图决定它出现在哪里、能做什么：`theme` 插件只允许
+/// 提供主题/布局令牌，不会被当成音乐平台；`gateway` 才挂到账号与平台那一栏。
+/// 清单里没写这一项的老插件默认为 [gateway]。
+enum PluginType {
+  gateway('gateway'),
+  theme('theme'),
+  other('other');
+
+  const PluginType(this.id);
+
+  final String id;
+
+  static PluginType parse(Object? value) {
+    final String key = value is String ? value.trim().toLowerCase() : '';
+    for (final type in PluginType.values) {
+      if (type.id == key) return type;
+    }
+    return PluginType.gateway;
+  }
+
+  String get label => switch (this) {
+    PluginType.gateway => '音乐平台',
+    PluginType.theme => '主题',
+    PluginType.other => '其他',
+  };
+}
+
 /// The portable, versioned contract shipped at the root of a plugin ZIP.
 class PluginManifest {
   PluginManifest.fromJson(Map<String, dynamic> json)
@@ -13,6 +42,7 @@ class PluginManifest {
       entry = json['entry'] as String? ?? 'main.lua',
       apiVersion = (json['apiVersion'] as num?)?.toInt() ?? 0,
       provider = json['provider'] as String? ?? '',
+      type = PluginType.parse(json['type'] as String?),
       capabilities = List<String>.from(json['capabilities'] as List? ?? []),
       auth = List<String>.from(json['auth'] as List? ?? []),
       domains = List<String>.from(
@@ -39,9 +69,15 @@ class PluginManifest {
           (json['permissions'] as Map?)?['filesystem'] == true ||
           (json['permissions'] as Map?)?['files'] == true ||
           (json['permissions'] as Map?)?['file'] == true {
+    // provider 只对 gateway 有意义：纯主题插件不接平台，可以整个不写。
+    final bool providerOk = type == PluginType.gateway
+        ? RegExp(r'^[a-z][a-z0-9_-]{1,39}$').hasMatch(provider) &&
+              provider != 'local'
+        : provider.isEmpty ||
+              (RegExp(r'^[a-z][a-z0-9_-]{1,39}$').hasMatch(provider) &&
+                  provider != 'local');
     if (!RegExp(r'^[a-z][a-z0-9_.-]{2,79}$').hasMatch(id) ||
-        !RegExp(r'^[a-z][a-z0-9_-]{1,39}$').hasMatch(provider) ||
-        provider == 'local' ||
+        !providerOk ||
         name.trim().isEmpty ||
         name.length > 100 ||
         !RegExp(r'^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$').hasMatch(version) ||
@@ -122,6 +158,11 @@ class PluginManifest {
       PluginManifest.fromJson(jsonDecode(value) as Map<String, dynamic>);
 
   final String id, name, version, description, author, entry, provider;
+
+  /// 插件类型：`gateway`（接音乐平台）、`theme`（只换皮）、`other`。
+  ///
+  /// 老清单没有这个字段时按 `gateway` 处理，跟引入它之前的行为一致。
+  final PluginType type;
   final int apiVersion;
   final List<String> capabilities,
       auth,
@@ -259,6 +300,7 @@ class PluginManifest {
     'entry': entry,
     'apiVersion': apiVersion,
     'provider': provider,
+    'type': type.id,
     'capabilities': capabilities,
     'auth': auth,
     'permissions': {

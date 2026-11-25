@@ -77,15 +77,6 @@ double _cornerPx(AppState state, BuildContext context) => AppleShape.cardPxFor(
   theme: LazerThemeTokens.of(context),
 );
 
-/// 「跟随插件皮肤」在下拉里的哨兵值：String 型下拉不好放 null。
-const String _kFollowPluginSkin = '__plugin__';
-
-/// 已启用的插件皮肤名字（用来决定要不要给出「跟随插件皮肤」那一项）。
-List<String> _pluginSkins(AppState state) => <String>[
-  for (final plugin in state.pluginManager.plugins)
-    if (plugin.enabled && plugin.theme != null) plugin.theme!.name,
-];
-
 /// 两个「玻璃药丸」部件的圆角显示值。
 enum _CornerPart { capsule, navBar }
 
@@ -127,6 +118,22 @@ String _partSuffix(CornerSource source) => switch (source) {
   CornerSource.global => '（全局）',
   CornerSource.manual => '',
 };
+
+/// 设置页正文的顶部内距。
+///
+/// Inline 标题栏把胶囊浮在页面之上，而设置页是导航栈最底下那一页
+/// （`canPop()` 为 false），[SettingsDetailScaffold.topInsetOf] 对它答 0，
+/// 大标题就会从胶囊底下钻出来。这里按胶囊底边兜底：内容从胶囊下面 12 px 开始。
+/// 经典标题栏本来就有自己的一条横带，不加任何额外空隙。
+double _settingsBodyTopPadding(BuildContext context, double bodyTopInset) {
+  final double base =
+      8 + bodyTopInset + SettingsDetailScaffold.topInsetOf(context);
+  final bool inline =
+      WindowChromeScope.maybeLayoutOf(context)?.inline == true;
+  if (!inline) return base;
+  final double belowCapsule = kWindowChromeHeight + 12;
+  return base > belowCapsule ? base : belowCapsule;
+}
 
 double _settingsTopInset(BuildContext context, double topInset) {
   if (topInset <= 0 ||
@@ -293,7 +300,7 @@ class _SettingsCategoryHome extends StatelessWidget {
         child: ListView(
           padding: EdgeInsets.fromLTRB(
             inset,
-            8 + bodyTopInset + SettingsDetailScaffold.topInsetOf(context),
+            _settingsBodyTopPadding(context, bodyTopInset),
             inset,
             36 + MediaQuery.paddingOf(context).bottom,
           ),
@@ -457,7 +464,7 @@ class _SettingsOverview extends StatelessWidget {
           key: const PageStorageKey('settings-overview-scroll'),
           padding: EdgeInsets.fromLTRB(
             inset,
-            8 + bodyTopInset + SettingsDetailScaffold.topInsetOf(context),
+            _settingsBodyTopPadding(context, bodyTopInset),
             inset,
             36 + MediaQuery.paddingOf(context).bottom,
           ),
@@ -965,34 +972,24 @@ class _SettingsOverview extends StatelessWidget {
                         _AppSettingRow(
                           key: const ValueKey('theme-skin-setting'),
                           label: '主题风格',
-                          subtitle: state.builtinTheme == null
-                              ? '使用已启用的插件皮肤'
-                              : '内置主题，不依赖插件',
+                          subtitle: state.activeTheme.name,
                           trailing: SettingsChoice<String>(
-                            key: ValueKey<String>(
-                              state.builtinThemeId ?? 'plugin',
-                            ),
-                            value: state.builtinThemeId ?? _kFollowPluginSkin,
+                            key: ValueKey<String>(state.activeThemeId),
+                            value: state.activeThemeId,
                             items: <DropdownMenuItem<String>>[
+                              // 内置主题（Mio）+ 每个已启用主题插件提供的皮肤，
+                              // 都在这一个列表里按名字排。启用插件本身不换皮。
                               for (final LazerThemeTokens theme
-                                  in LazerThemeTokens.builtinThemes)
+                                  in state.themeChoices)
                                 DropdownMenuItem<String>(
                                   value: theme.id,
                                   child: TrText(theme.name),
                                 ),
-                              if (_pluginSkins(state).isNotEmpty)
-                                const DropdownMenuItem<String>(
-                                  value: _kFollowPluginSkin,
-                                  child: TrText('跟随插件皮肤'),
-                                ),
                             ],
                             onChanged: (String? value) {
-                              if (value == null) return;
-                              unawaited(
-                                state.setBuiltinTheme(
-                                  value == _kFollowPluginSkin ? null : value,
-                                ),
-                              );
+                              if (value != null) {
+                                unawaited(state.setActiveTheme(value));
+                              }
                             },
                           ),
                         ),

@@ -20,10 +20,11 @@ enum CornerSource {
 }
 
 extension CornerSourceLabels on CornerSource {
+  /// 设置页下拉里的三档名字，由 `TrText` 翻译。
   String get label => switch (this) {
-    CornerSource.theme => '跟随主题',
-    CornerSource.global => '跟随全局',
-    CornerSource.manual => '手动设置',
+    CornerSource.theme => '跟随主题', // i18n:key
+    CornerSource.global => '跟随全局', // i18n:key
+    CornerSource.manual => '手动设置', // i18n:key
   };
 
   static CornerSource parse(String? value) => CornerSource.values.firstWhere(

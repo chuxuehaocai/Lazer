@@ -585,6 +585,10 @@ end
 | `compactPlayerBarHeight` | 0（56/60） | 0–160 | 紧凑播放条最小高度 |
 | `cornerScale` | 1 | 0–2 | 全局圆角系数：每个 `BorderRadius` 都乘上它，`0` = 全直角，`2` = 加倍。用户在设置里选了「自行调节」时以用户值为准 |
 | `glassBlurSigma` | 16 | 0–48 | 玻璃模糊强度；`0` 即完全不模糊（纸面皮肤必设） |
+| `pageTitleWeight` | -1 | 100–900 | 页面大标题的字重；`-1` 用 `displayFontWeight` |
+| `pageTitleSubtitleGap` | -1 | -1–96 | 大标题与副标题之间的空隙（px）；`-1` 用 5 px |
+| `playerBarArtistSize` | -1 | -1–48 | 播放条左侧歌手行的字号（px）；曲名与译文不受影响 |
+| `playerBarArtistWeight` | -1 | -1–900 | 播放条左侧歌手行的字重；`-1` 用 `labelFontWeight` |
 | `capsuleRadius` | -1 | -1–64 | Inline 标题栏右上角那颗玻璃胶囊的圆角（px）。`-1` = 没指定，按 `cornerScale × 20` 折算出满圆；`0` = 直角 |
 | `navBarRadius` | -1 | -1–64 | 移动端底边栏那条玻璃药丸的圆角（px）。`-1` = 按 `cornerScale × 28`；`0` = 直角 |
 

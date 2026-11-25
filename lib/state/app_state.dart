@@ -342,41 +342,41 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   PluginMarket get pluginMarket => _pluginMarketInstance ??=
       _injectedPluginMarket ?? PluginMarket(pluginManager);
 
-  /// 设置里选中的内置主题（`LazerThemeTokens.builtinThemes` 的 id）。
+  /// 当前皮肤 id：内置主题（`LazerThemeTokens.builtinThemes`）或某个已启用插件
+  /// 提供的主题。默认是内置的 Mio。
   ///
-  /// 默认是 Mio。选中的内置主题**压过**插件皮肤：以前只要装了 Lua 主题插件，
-  /// 界面就无条件被它接管，用户在设置里根本没有「用回自带主题」这条路。
-  /// 选 null / 空串表示「跟随插件」。
-  String? builtinThemeId = LazerThemeTokens.mio.id;
+  /// 只认这一个值：**启用一个主题插件不会换皮**，只有在设置里选了它才换。
+  /// 选中的 id 找不到（插件被禁用/卸载）时回落到 Mio，而不是随手拿别的插件顶上。
+  String activeThemeId = LazerThemeTokens.mio.id;
 
-  /// 当前内置主题的令牌；选「跟随插件」时返回 null。
-  LazerThemeTokens? get builtinTheme {
-    final String? id = builtinThemeId;
-    if (id == null || id.isEmpty) return null;
-    for (final theme in LazerThemeTokens.builtinThemes) {
-      if (theme.id == id) return theme;
+  /// 设置里那份可选皮肤清单：内置主题在前，后面接已启用插件提供的主题。
+  List<LazerThemeTokens> get themeChoices => <LazerThemeTokens>[
+    ...LazerThemeTokens.builtinThemes,
+    for (final plugin in pluginManager.plugins)
+      if (plugin.enabled && plugin.theme != null) plugin.theme!,
+  ];
+
+  /// 当前生效的皮肤令牌；永远不会是 null（兜底 Mio）。
+  LazerThemeTokens get activeTheme {
+    for (final theme in themeChoices) {
+      if (theme.id == activeThemeId) return theme;
     }
-    return null;
+    return LazerThemeTokens.mio;
   }
 
-  Future<void> setBuiltinTheme(String? id) async {
-    final String? next = (id == null || id.isEmpty) ? null : id;
-    if (builtinThemeId == next) return;
-    builtinThemeId = next;
+  Future<void> setActiveTheme(String id) async {
+    if (activeThemeId == id) return;
+    activeThemeId = id;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    if (next == null) {
-      await prefs.remove('lazer_builtin_theme');
-    } else {
-      await prefs.setString('lazer_builtin_theme', next);
-    }
+    await prefs.setString('lazer_theme_skin', id);
   }
 
-  /// The active declarative UI overlay: the listener's built-in theme first,
-  /// then the first enabled plugin skin.
+  /// The active declarative UI overlay: the skin the listener picked.
   /// Music plugins remain isolated from Flutter widgets and can only provide
   /// bounded theme/layout data through the Lua theme engine.
-  LazerThemeTokens? get pluginTheme => builtinTheme ?? pluginManager.activeTheme;
+  LazerThemeTokens? get pluginTheme => activeTheme;
+
   LazerLayoutDefinition? get pluginLayout => pluginManager.activeLayout;
   int get pluginSkinRevision => pluginManager.skinRevision;
 
@@ -2623,11 +2623,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         (mode) => mode.name == prefs.getString('lazer_theme_mode'),
         orElse: () => ThemeMode.system,
       );
-      // 内置主题：没存过就是默认的 Mio；存成空串表示「跟随插件皮肤」。
-      final String? storedTheme = prefs.getString('lazer_builtin_theme');
-      builtinThemeId = storedTheme == null || storedTheme.isEmpty
-          ? (prefs.containsKey('lazer_builtin_theme') ? null : LazerThemeTokens.mio.id)
-          : storedTheme;
+      // 皮肤：新键优先；老版本写的是 lazer_builtin_theme（那时只有内置主题）。
+      final String? storedSkin = prefs.getString('lazer_theme_skin');
+      final String? legacySkin = prefs.getString('lazer_builtin_theme');
+      final String? picked = (storedSkin != null && storedSkin.isNotEmpty)
+          ? storedSkin
+          : (legacySkin != null && legacySkin.isNotEmpty ? legacySkin : null);
+      activeThemeId = picked ?? LazerThemeTokens.mio.id;
       language = AppLanguage.parse(prefs.getString('lazer_language'));
       backgroundMode = AppBackgroundModeLabels.parse(
         prefs.getString('lazer_legacy_background') ??
