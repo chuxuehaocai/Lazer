@@ -117,6 +117,7 @@ double _partPx(
         : AppleShape.navBarPxMax,
     themeScale: ui.cornerScale,
     globalPx: globalPx,
+    themePx: part == _CornerPart.capsule ? ui.capsuleRadius : ui.navBarRadius,
   );
 }
 

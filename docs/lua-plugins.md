@@ -585,6 +585,8 @@ end
 | `compactPlayerBarHeight` | 0（56/60） | 0–160 | 紧凑播放条最小高度 |
 | `cornerScale` | 1 | 0–2 | 全局圆角系数：每个 `BorderRadius` 都乘上它，`0` = 全直角，`2` = 加倍。用户在设置里选了「自行调节」时以用户值为准 |
 | `glassBlurSigma` | 16 | 0–48 | 玻璃模糊强度；`0` 即完全不模糊（纸面皮肤必设） |
+| `capsuleRadius` | -1 | -1–64 | Inline 标题栏右上角那颗玻璃胶囊的圆角（px）。`-1` = 没指定，按 `cornerScale × 20` 折算出满圆；`0` = 直角 |
+| `navBarRadius` | -1 | -1–64 | 移动端底边栏那条玻璃药丸的圆角（px）。`-1` = 按 `cornerScale × 28`；`0` = 直角 |
 
 ```lua
 if operation == "theme" then
@@ -644,14 +646,20 @@ end
 `lib/main.dart` 在 `MaterialApp` 外面包一层 `AppleShape`，`lib/theme/apple_design.dart` 的
 `buildAppleTheme(cornerScale:)` 覆盖 `ThemeData` 自带的形状（弹窗、输入框、按钮）。
 
+这两个玻璃药丸（窗口胶囊、移动端底边栏）还可以各写一个 px：`capsuleRadius` /
+`navBarRadius`。不给（`-1`）时按 `cornerScale × 满圆半径` 折算，给 `0` 就是直角 ——
+纸面皮肤通常要 `0`，因为满圆药丸不属于那一版的语言。用户在设置里还能把这两个部件
+单独设成「跟随主题 / 跟随全局 / 手动设置」；「跟随全局」用的就是「圆角大小」滑块上
+那个 px，不再按部件高度放大。
+
 皮肤作者不必关心用户选了什么：写 `groupedCardRadius` 表达「这一版卡片多圆」、
 `cornerScale` 表达「组件多圆」，用户想更方或更圆时自己会去滑块上调。桌面外壳、正在播放页、
 播放条、电视模式（十英尺界面）与所有弹窗都吃这套；歌词海报导出
 （`lib/lyrics/image_export.dart`）是设计成品，不跟随。
 
 ```lua
--- 直角皮肤：卡片、按钮、封面、弹窗一起方
-elements = { cornerScale = 0, groupedCardRadius = 0 }
+-- 直角皮肤：卡片、按钮、封面、弹窗、窗口胶囊一起方
+elements = { cornerScale = 0, groupedCardRadius = 0, capsuleRadius = 0, navBarRadius = 0 }
 ```
 
 皮肤令牌是启动时读一次的，但**改设置会重读**：用户在插件设置项或插件页面控件上

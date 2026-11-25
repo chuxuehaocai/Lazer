@@ -116,8 +116,9 @@ class AppleShape extends InheritedWidget {
 
   /// 胶囊 / 底边栏这一类「满圆 = 自身高度一半」的部件，按来源算实际 px。
   ///
-  /// * **跟随主题**：皮肤给的组件系数 × 这个部件的满圆半径 —— 皮肤说 0（全直角）
-  ///   就真的是直角，说 1 就是它设计时的满圆。
+  /// * **跟随主题**：皮肤可以就这个部件单独给一个 px（`capsuleRadius` /
+  ///   `navBarRadius`，负值表示没给）；没给时才退回「组件系数 × 满圆半径」。
+  ///   这样皮肤既能说「全直角」（0 px），也能保住老皮肤「就是满圆」的行为。
   /// * **跟随全局**：直接用全局圆角设置里那个 px 数，**不再乘任何东西**。
   ///   全局写 6 px，胶囊就是 6 px、底边栏也是 6 px —— 用户在同两个滑块之间
   ///   对比时看到的是同一个数，不会被「你自己高度一半」悄悄放大。
@@ -131,9 +132,12 @@ class AppleShape extends InheritedWidget {
     required double maxPx,
     required double themeScale,
     required double globalPx,
+    double themePx = -1,
   }) {
     final double px = switch (source) {
-      CornerSource.theme => (themeScale.isFinite ? themeScale : identity) * maxPx,
+      CornerSource.theme => themePx >= 0
+          ? (themePx.isFinite ? themePx : maxPx)
+          : (themeScale.isFinite ? themeScale : identity) * maxPx,
       CornerSource.global => globalPx.isFinite ? globalPx : maxPx,
       CornerSource.manual => customPx.isFinite ? customPx : maxPx,
     };
@@ -147,12 +151,14 @@ class AppleShape extends InheritedWidget {
     required double maxPx,
     required double themeScale,
     required double globalPx,
+    double themePx = -1,
   }) => resolvePartPx(
     source: source,
     customPx: customPx,
     maxPx: maxPx,
     themeScale: themeScale,
     globalPx: globalPx,
+    themePx: themePx,
   );
 
   /// 设置页显示的卡片圆角（px）：跟随主题时是皮肤自己的 `groupedCardRadius`，

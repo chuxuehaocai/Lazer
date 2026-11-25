@@ -695,6 +695,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
       maxPx: AppleShape.capsulePxMax,
       themeScale: ui.cornerScale,
       globalPx: globalCornerPx,
+      themePx: ui.capsuleRadius,
     );
     final double navBarPx = AppleShape.resolvePartPx(
       source: _state.navBarCornerSource,
@@ -702,6 +703,7 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
       maxPx: AppleShape.navBarPxMax,
       themeScale: ui.cornerScale,
       globalPx: globalCornerPx,
+      themePx: ui.navBarRadius,
     );
     return LanRemoteScope(
       controller: _remote,

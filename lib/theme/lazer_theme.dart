@@ -183,6 +183,8 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     this.playerBarHeight = 0,
     this.compactPlayerBarHeight = 0,
     this.cornerScale = 1,
+    this.capsuleRadius = -1,
+    this.navBarRadius = -1,
     this.nowPlayingArtworkMax = 0,
     this.nowPlayingArtworkMin = 0,
     this.nowPlayingArtworkFraction = 0,
@@ -256,6 +258,13 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   /// 用户可以在设置里选择「跟随主题设置」用这个值，或改用自己的滑块。
   /// 所有 BorderRadius 都乘上它（见 theme/shape_scale.dart）。
   final double cornerScale;
+
+  /// 窗口胶囊（Inline 标题栏右上角那颗玻璃药丸）的圆角，单位 px，负值表示
+  /// 「按 [cornerScale] × 满圆半径算」（老皮肤的行为）。0 = 直角。
+  final double capsuleRadius;
+
+  /// 移动端底边栏那条玻璃药丸的圆角，单位 px，负值同 [capsuleRadius]。
+  final double navBarRadius;
 
   /// Widest artwork square on the listening canvas; `0` keeps 440.
   final double nowPlayingArtworkMax;
@@ -381,6 +390,8 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     lyricFocusScaleDelta: 3,
     controlRadius: 12,
     glassBlurSigma: 0,
+    capsuleRadius: 0,
+    navBarRadius: 0,
     railWidth: 232,
     playerBarHeight: 100,
     compactPlayerBarHeight: 72,
@@ -450,6 +461,8 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       'playerBarHeight': playerBarHeight,
       'compactPlayerBarHeight': compactPlayerBarHeight,
       'cornerScale': cornerScale,
+      'capsuleRadius': capsuleRadius,
+      'navBarRadius': navBarRadius,
       'nowPlayingArtworkMax': nowPlayingArtworkMax,
       'nowPlayingArtworkMin': nowPlayingArtworkMin,
       'nowPlayingArtworkFraction': nowPlayingArtworkFraction,
@@ -567,6 +580,8 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       playerBarHeight: number('playerBarHeight', 0, max: 200),
       compactPlayerBarHeight: number('compactPlayerBarHeight', 0, max: 160),
       cornerScale: number('cornerScale', 1, max: 2),
+      capsuleRadius: number('capsuleRadius', -1, max: 64),
+      navBarRadius: number('navBarRadius', -1, max: 64),
       nowPlayingArtworkMax: number('nowPlayingArtworkMax', 0, max: 1200),
       nowPlayingArtworkMin: number('nowPlayingArtworkMin', 0, max: 1200),
       nowPlayingArtworkFraction: number(
@@ -636,6 +651,8 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     double? playerBarHeight,
     double? compactPlayerBarHeight,
     double? cornerScale,
+    double? capsuleRadius,
+    double? navBarRadius,
     double? nowPlayingArtworkMax,
     double? nowPlayingArtworkMin,
     double? nowPlayingArtworkFraction,
@@ -696,6 +713,8 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     compactPlayerBarHeight:
         compactPlayerBarHeight ?? this.compactPlayerBarHeight,
     cornerScale: cornerScale ?? this.cornerScale,
+    capsuleRadius: capsuleRadius ?? this.capsuleRadius,
+    navBarRadius: navBarRadius ?? this.navBarRadius,
     nowPlayingArtworkMax: nowPlayingArtworkMax ?? this.nowPlayingArtworkMax,
     nowPlayingArtworkMin: nowPlayingArtworkMin ?? this.nowPlayingArtworkMin,
     nowPlayingArtworkFraction:
@@ -801,6 +820,8 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
         other.compactPlayerBarHeight,
       ),
       cornerScale: mix(cornerScale, other.cornerScale),
+      capsuleRadius: mix(capsuleRadius, other.capsuleRadius),
+      navBarRadius: mix(navBarRadius, other.navBarRadius),
       nowPlayingArtworkMax: mix(
         nowPlayingArtworkMax,
         other.nowPlayingArtworkMax,

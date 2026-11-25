@@ -17,7 +17,31 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('resolvePartPx', () {
-    test('跟随主题用皮肤的 cornerScale × 满圆半径', () {
+    test('跟随主题：皮肤明确给了 px 就用它，没给才用系数折算', () {
+      // 皮肤说 0 = 直角（Early Development / Mio 都是这样）。
+      expect(
+        AppleShape.resolvePartPx(
+          source: CornerSource.theme,
+          customPx: 3,
+          maxPx: 20,
+          themeScale: 1,
+          globalPx: 0,
+          themePx: 0,
+        ),
+        0,
+      );
+      expect(
+        AppleShape.resolvePartPx(
+          source: CornerSource.theme,
+          customPx: 3,
+          maxPx: 28,
+          themeScale: 1,
+          globalPx: 0,
+          themePx: 0,
+        ),
+        0,
+      );
+      // 皮肤没给（负值）时保留老行为：cornerScale × 满圆半径。
       expect(
         AppleShape.resolvePartPx(
           source: CornerSource.theme,
