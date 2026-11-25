@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../diagnostics/app_log.dart';
 import '../diagnostics/console_session.dart';
+import '../diagnostics/developer_console.dart';
 import '../widgets/spring_buttons.dart';
 import '../widgets/accessible_controls.dart';
 import '../theme/apple_design.dart';
@@ -127,6 +128,64 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
     super.dispose();
   }
 
+  // A single block is re-laid out whenever its text changes, so the live tail
+  // stays bounded; copy and export still carry every filtered line.
+  static const _maximumRenderedLogLines = 1200;
+  static const _maximumRenderedLogCharacters = 160 * 1024;
+
+  /// The newest filtered lines the transcript paints, plus how many it dropped.
+  (List<String>, int) _renderedLogs(List<String> lines) {
+    var start = lines.length;
+    var characters = 0;
+    while (start > 0 && lines.length - start < _maximumRenderedLogLines) {
+      final next = characters + lines[start - 1].length + 1;
+      if (next > _maximumRenderedLogCharacters) break;
+      characters = next;
+      start--;
+    }
+    return (lines.sublist(start), start);
+  }
+
+  /// Paints the whole transcript as one text, not one box per line: a drag,
+  /// Shift+click, Ctrl+A and Ctrl+C then act on the log as a single block.
+  Widget _transcript(
+    BuildContext context,
+    TextStyle? mono,
+    List<ConsoleEntry> entries,
+    List<String> logLines,
+  ) {
+    final colors = Theme.of(context).colorScheme;
+    final spans = <InlineSpan>[];
+    if (_showLogs) {
+      if (logLines.isNotEmpty) spans.add(TextSpan(text: logLines.join('\n')));
+    } else {
+      for (var i = 0; i < entries.length; i++) {
+        final entry = entries[i];
+        spans.add(
+          TextSpan(
+            text: entry.input
+                ? '> ${context.tr(entry.text)}'
+                : context.tr(entry.text),
+            style: entry.error
+                ? TextStyle(color: colors.error)
+                : entry.input
+                ? TextStyle(color: colors.primary)
+                : null,
+          ),
+        );
+        if (i != entries.length - 1) spans.add(const TextSpan(text: '\n'));
+      }
+    }
+    return SelectionArea(
+      key: const ValueKey('developer-console-transcript'),
+      child: SingleChildScrollView(
+        controller: _scroll,
+        padding: const EdgeInsets.all(12),
+        child: Text.rich(TextSpan(children: spans), style: mono),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final enabled = _console.enabled;
@@ -134,12 +193,13 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
       context,
     ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace');
     final filter = _filter.text.toLowerCase();
-    final logLines = _showLogs
+    final List<String> filteredLogs = _showLogs
         ? _console.logs
               .split('\n')
               .where((line) => line.toLowerCase().contains(filter))
               .toList()
         : const <String>[];
+    final (logLines, hiddenLogLines) = _renderedLogs(filteredLogs);
     final entries = _console.entries;
     final double inset = SettingsDetailHost.isEmbedded(context) ? 32 : 20;
     // The page owns its heading, like every other page: the shared chrome keeps
@@ -210,7 +270,7 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
                             ClipboardData(
                               text: AppLog.redact(
                                 _showLogs
-                                    ? logLines.join('\n')
+                                    ? filteredLogs.join('\n')
                                     : entries
                                           .map(
                                             (entry) =>
@@ -261,6 +321,16 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),
+                    if (_showLogs && hiddenLogLines > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          context.tr(
+                            '仅显示最近的 $hiddenLogLines 行日志；复制与导出包含全部筛选结果。',
+                          ),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
                     Expanded(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
@@ -278,37 +348,7 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
                                   context.tr('输入 /help 查看指令，或尝试 1 + 2。'),
                                 ),
                               )
-                            : ListView.builder(
-                                controller: _scroll,
-                                padding: const EdgeInsets.all(12),
-                                itemCount: _showLogs
-                                    ? logLines.length
-                                    : entries.length,
-                                itemBuilder: (context, index) {
-                                  final entry = _showLogs
-                                      ? null
-                                      : entries[index];
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 6),
-                                    child: SelectableText(
-                                      _showLogs
-                                          ? logLines[index]
-                                          : '${entry!.input ? "> " : ""}${context.tr(entry.text)}',
-                                      style: mono?.copyWith(
-                                        color: entry?.error == true
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.error
-                                            : entry?.input == true
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.primary
-                                            : null,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
+                            : _transcript(context, mono, entries, logLines),
                       ),
                     ),
                     if (!_showLogs) ...[

@@ -1213,6 +1213,7 @@
   "用法：/seek <seconds>（非负秒数）": "Usage: /seek <seconds> (non-negative seconds)",
   "用法：/volume <0-100>": "Usage: /volume <0-100>",
   "筛选日志": "Filter logs",
+  "仅显示最近的 {count} 行日志；复制与导出包含全部筛选结果。": "Showing the most recent {count} log lines; copying and exporting still include every filtered line.",
   "输入 /help 查看指令，或尝试 1 + 2。": "Enter /help for commands, or try 1 + 2.",
   "输入 Lua 或 /help；Enter 执行，Shift+Enter 换行，↑↓ 浏览历史。": "Enter Lua or /help. Enter runs, Shift+Enter adds a line, ↑↓ browses history.",
   "输入 Lua 或指令": "Enter Lua or a command",
