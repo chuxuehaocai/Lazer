@@ -15,6 +15,7 @@ import 'copyable_song_title.dart';
 import 'interaction_feedback.dart';
 import 'plate_art.dart';
 import '../theme/shape_scale.dart';
+import '../theme/lazer_theme.dart';
 
 /// The same queue content fills the desktop side panel, the floating player
 /// card and the compact bottom sheet.
@@ -274,7 +275,7 @@ class _QueueRowState extends State<_QueueRow> with BuildSafeState<_QueueRow> {
                   : highlighted
                   ? apple.fill
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
+              borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: feedbackAction(context, widget.onTap),
@@ -374,7 +375,7 @@ class _QueueRowState extends State<_QueueRow> with BuildSafeState<_QueueRow> {
                       Positioned.fill(
                         child: IgnorePointer(
                           child: TvFocusOutline(
-                            borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
+                            borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
                             width: 2,
                           ),
                         ),

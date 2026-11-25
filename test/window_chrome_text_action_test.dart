@@ -90,53 +90,33 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Accounts & extensions'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('open-plugin-manager')).first);
+    final entry = find.byKey(const ValueKey('open-plugin-manager')).first;
+    await tester.ensureVisible(entry);
+    await tester.pumpAndSettle();
+    await tester.tap(entry);
     await tester.pumpAndSettle();
     return state;
   }
 
-  testWidgets('capsule text commands hover like the player top bar', (
+  testWidgets('capsule commands are icon buttons with no tooltip', (
     tester,
   ) async {
     await openManager(tester);
 
-    final market = find.byWidgetPredicate(
-      (widget) => widget is TrText && widget.data == '插件市场',
-    );
+    final market = find.byKey(const ValueKey('plugin-market-action'));
     expect(market, findsOneWidget);
-    final context = tester.element(market);
-    final style = TextButtonTheme.of(context).style!;
-    final scheme = Theme.of(context).colorScheme;
+    final importZip = find.byKey(const ValueKey('plugin-import-action'));
+    expect(importZip, findsOneWidget);
 
-    // One hover language for the capsule: the player's icon buttons paint the
-    // same fill, in the same square shape, on the same 40 dp band.
+    // 胶囊本身画在 overlay portal 里，再套一层 Tooltip 会触发深度断言，
+    // 所以这两颗按钮把名字放在语义标签上。
     expect(
-      style.backgroundColor!.resolve(<WidgetState>{WidgetState.hovered}),
-      scheme.onSurface.withValues(alpha: .07),
+      find.descendant(of: market, matching: find.byType(Tooltip)),
+      findsNothing,
     );
     expect(
-      style.backgroundColor!.resolve(<WidgetState>{WidgetState.pressed}),
-      scheme.onSurface.withValues(alpha: .13),
-    );
-    expect(
-      style.backgroundColor!.resolve(<WidgetState>{}),
-      scheme.onSurface.withValues(alpha: 0),
-    );
-    expect(
-      (style.shape!.resolve(<WidgetState>{})! as RoundedRectangleBorder)
-          .borderRadius,
-      BorderRadius.zero,
-    );
-    expect(style.minimumSize!.resolve(<WidgetState>{})!.height, 40);
-    expect(
-      style.textStyle!.resolve(<WidgetState>{})!.fontWeight,
-      FontWeight.w600,
-      reason: 'the capsule commands carry more weight than page buttons',
-    );
-    expect(
-      style.overlayColor!.resolve(<WidgetState>{WidgetState.hovered}),
-      Colors.transparent,
-      reason: 'one fill, not a fill plus a ripple',
+      find.descendant(of: importZip, matching: find.byType(Tooltip)),
+      findsNothing,
     );
 
     await _hover(tester, market);
@@ -149,11 +129,7 @@ void main() {
   testWidgets('hovering the market commands throws nothing', (tester) async {
     await openManager(tester);
 
-    await tester.tap(
-      find.byWidgetPredicate(
-        (widget) => widget is TrText && widget.data == '插件市场',
-      ),
-    );
+    await tester.tap(find.byKey(const ValueKey('plugin-market-action')));
     await tester.pumpAndSettle();
 
     final capsule = find.byKey(const ValueKey('settings-capsule-actions'));

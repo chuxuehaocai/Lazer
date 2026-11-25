@@ -7,10 +7,10 @@ import 'package:flutter/services.dart';
 
 import '../animation/apple_modal.dart';
 import '../l10n/app_localizations.dart';
-import '../gateway/gateway.dart';
 import '../plugins/plugin_manager.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
+import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/spring_buttons.dart';
@@ -91,20 +91,28 @@ class _PluginManagerViewState extends State<PluginManagerView>
       builder: (context, _) => SettingsDetailScaffold(
         title: context.tr('插件管理'),
         actions: [
-          SpringTextButton(
+          // 两个命令都只留图标：胶囊是窗口自己的 chrome，塞两段文字进去会跟
+          // 标题挤在一起。名字放语义标签里 —— 这里不能用 Tooltip：胶囊本身
+          // 画在 overlay portal 里，再套一层 tooltip 会触发深度断言。
+          AccessibleIconButton(
+            key: const ValueKey('plugin-market-action'),
+            semanticLabel: context.tr('插件市场'),
+            icon: const Icon(Icons.storefront_rounded),
+            iconSize: 20,
+            visualDensity: VisualDensity.compact,
             onPressed: () => SettingsDetailHost.open(
               context,
               page: (_) => PluginMarketPage(state: widget.state),
               view: (_) => PluginMarketView(state: widget.state),
             ),
-            child: const TrText('插件市场'),
           ),
-          // Both capsule commands read as text links: the capsule is the window's
-          // own chrome, so a filled button would put a second surface inside it
-          // next to the caption cluster.
-          SpringTextButton(
+          AccessibleIconButton(
+            key: const ValueKey('plugin-import-action'),
+            semanticLabel: context.tr('导入 ZIP'),
+            icon: const Icon(Icons.file_upload_outlined),
+            iconSize: 20,
+            visualDensity: VisualDensity.compact,
             onPressed: manager.busy || _picking ? null : _import,
-            child: TrText(_picking || manager.busy ? '正在导入…' : '导入 ZIP'),
           ),
         ],
         child: ListView(
@@ -164,31 +172,6 @@ class _PluginManagerViewState extends State<PluginManagerView>
                       _PluginRow(
                         plugin: manager.plugins[i],
                         manager: manager,
-                        active: manager.gateways
-                            .where(
-                              (gateway) =>
-                                  gateway.connectionId ==
-                                  manager.plugins[i].manifest.id,
-                            )
-                            .any(
-                              (gateway) =>
-                                  GatewayRegistry.keyOf(gateway) ==
-                                  widget.state.activeConnectionKey,
-                            ),
-                        onUse: () async {
-                          final gateway = manager.gateways
-                              .where(
-                                (gateway) =>
-                                    gateway.connectionId ==
-                                    manager.plugins[i].manifest.id,
-                              )
-                              .firstOrNull;
-                          if (gateway != null) {
-                            await widget.state.selectMusicConnection(
-                              GatewayRegistry.keyOf(gateway),
-                            );
-                          }
-                        },
                       ),
                     ],
                   ],
@@ -205,13 +188,10 @@ class _PluginRow extends StatelessWidget {
   const _PluginRow({
     required this.plugin,
     required this.manager,
-    required this.active,
-    required this.onUse,
+
   });
   final InstalledPlugin plugin;
   final PluginManager manager;
-  final bool active;
-  final Future<void> Function() onUse;
 
   String _permissionSummary(BuildContext context) {
     final parts = <String>[];
@@ -278,7 +258,7 @@ class _PluginRow extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${plugin.manifest.provider} · v${plugin.manifest.version}${plugin.error == null ? '' : ' · ${plugin.error}'}',
+                  '${_pluginKind(plugin)} · v${plugin.manifest.version}${plugin.error == null ? '' : ' · ${plugin.error}'}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -301,11 +281,6 @@ class _PluginRow extends StatelessWidget {
               ],
             ),
           ),
-          if (plugin.enabled && !active && plugin.error == null)
-            SpringTextButton(
-              onPressed: manager.busy ? null : () => unawaited(onUse()),
-              child: const TrText('使用'),
-            ),
           Switch(
             value: plugin.enabled,
             onChanged: manager.busy
@@ -399,6 +374,20 @@ class _PluginDetailsSheet extends StatefulWidget {
   State<_PluginDetailsSheet> createState() => _PluginDetailsSheetState();
 }
 
+/// 插件卡片副标题里的「类型」。
+///
+/// 以前这里直接印 `manifest.provider`，纯主题插件的 provider 是 `parchment`，
+/// 看起来就像注册了一个叫 parchment 的音乐平台。只有真的挂上网关时才显示平台名，
+/// 否则显示它实际提供的东西：主题 / 布局 / 插件。
+String _pluginKind(InstalledPlugin plugin) {
+  if (plugin.gateways.isNotEmpty) return plugin.manifest.provider;
+  final List<String> parts = <String>[
+    if (plugin.theme != null) '主题',
+    if (plugin.layout != null) '布局',
+  ];
+  return parts.isEmpty ? '插件' : parts.join(' · ');
+}
+
 class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
   @override
   Widget build(BuildContext context) {
@@ -435,7 +424,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${manifest.id} · v${manifest.version} · ${manifest.provider}',
+                      '${manifest.id} · v${manifest.version} · ${_pluginKind(widget.plugin)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: apple.secondaryLabel,
                       ),

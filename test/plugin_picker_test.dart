@@ -64,18 +64,29 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('导入 ZIP'));
+        await tester.tap(find.byKey(const ValueKey('plugin-import-action')));
         await tester.pump();
-        expect(find.text('正在导入…'), findsOneWidget);
+        // 按钮现在只有图标：忙碌时它自己变灰，不再换文案。
+        expect(
+          tester
+              .widget<IconButton>(
+                find.byKey(const ValueKey('plugin-import-action')),
+              )
+              .onPressed,
+          isNull,
+        );
         expect(requests, 1);
         await tester.pump(const Duration(milliseconds: 100));
         expect(tester.takeException(), isNull);
         pending.complete(null);
         await tester.pumpAndSettle();
-        expect(find.text('导入 ZIP'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('plugin-import-action')),
+          findsOneWidget,
+        );
         expect(manager.plugins, isEmpty);
         pending = Completer<Object?>();
-        await tester.tap(find.text('导入 ZIP'));
+        await tester.tap(find.byKey(const ValueKey('plugin-import-action')));
         await tester.pump();
         pending.completeError(
           PlatformException(
@@ -85,7 +96,10 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.textContaining('Picker failed'), findsOneWidget);
-        expect(find.text('导入 ZIP'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('plugin-import-action')),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
       },

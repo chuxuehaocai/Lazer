@@ -31,7 +31,11 @@ class InstalledPlugin {
   final Map<String, Object?> settingValues = <String, Object?>{};
   final List<LuaPluginSetting> settings = <LuaPluginSetting>[];
   final List<LuaPlayerMenuItem> playerMenuItems = <LuaPlayerMenuItem>[];
+  final List<LuaPluginPage> pages = <LuaPluginPage>[];
   LuaPluginRuntime? runtime;
+  // 桩实现没有 Lua 运行时，网关永远为空；类型用基类，跟 io/web 侧的\LuaMusicGateway\n  // 兼容（它是 MusicGateway 的子类）。
+  final List<MusicGateway> gateways = <MusicGateway>[];
+  MusicGateway? get gateway => null;
   LazerThemeTokens? theme;
   LazerLayoutDefinition? layout;
   String? error;

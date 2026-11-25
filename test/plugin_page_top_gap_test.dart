@@ -107,11 +107,7 @@ void main() {
       reason: 'the manager starts where every other settings subview does',
     );
 
-    await tester.tap(
-      find.byWidgetPredicate(
-        (widget) => widget is TrText && widget.data == '插件市场',
-      ),
-    );
+    await tester.tap(find.byKey(const ValueKey('plugin-market-action')));
     await tester.pumpAndSettle();
     expect(
       _titleTop(tester, '插件市场'),

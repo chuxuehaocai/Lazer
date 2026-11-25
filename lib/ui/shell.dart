@@ -2692,11 +2692,11 @@ class _RailPlaylistState extends State<_RailPlaylist>
         button: true,
         selected: widget.selected,
         child: TvFocusHighlight(
-          borderRadius: BorderRadius.circular(9 * AppleShape.scaleOf(context)),
+          borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
           child: InkWell(
             onTap: feedbackAction(context, widget.onTap),
             onFocusChange: (value) => setState(() => _focused = value),
-            borderRadius: BorderRadius.circular(9 * AppleShape.scaleOf(context)),
+            borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
               height: 40,
@@ -2708,7 +2708,7 @@ class _RailPlaylistState extends State<_RailPlaylist>
                     : _hovering || _focused
                     ? apple.tertiaryFill
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(9 * AppleShape.scaleOf(context)),
+                borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
                 border: Border.all(
                   color: _focused
                       ? apple.accent.withValues(alpha: .65)

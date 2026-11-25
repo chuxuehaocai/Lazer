@@ -384,7 +384,10 @@ class _AppTrackRowState extends State<AppTrackRow>
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final bool compact = compactBrowsePresentation(context);
     final bool wide = !compact && MediaQuery.sizeOf(context).width >= 940;
-    final radius = BorderRadius.circular((compact ? 8 : 10) * AppleShape.scaleOf(context));
+    // 行的悬浮高亮框跟卡片同一个圆角来源：主题的 groupedCardRadius，或
+    // 用户在「圆角大小」上拖的那个 px。以前这里乘的是组件系数，主题给 0 时
+    // 卡片是直角、悬浮框却还是圆的。
+    final radius = BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)));
     final bool highlighted = _hovering || _focused;
     final String? translated = widget.track.translatedTitle?.trim();
     final Color titleColor = widget.current ? apple.accent : apple.label;
@@ -684,11 +687,11 @@ class _AppRailItemState extends State<AppRailItem>
         button: true,
         selected: widget.selected,
         child: TvFocusHighlight(
-          borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
+          borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
           child: InkWell(
             onTap: feedbackAction(context, widget.onTap),
             onFocusChange: (value) => setState(() => _focused = value),
-            borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
+            borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               height: 38,
@@ -699,7 +702,7 @@ class _AppRailItemState extends State<AppRailItem>
                     : highlighted
                     ? apple.tertiaryFill
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
+                borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
                 border: Border.all(
                   color: _focused
                       ? apple.accent.withValues(alpha: .65)

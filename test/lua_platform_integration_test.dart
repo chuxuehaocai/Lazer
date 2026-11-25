@@ -249,6 +249,10 @@ void main() {
       try {
         await app.bootstrap();
         await plugins.importZip(_package(source: source));
+        // 设置里默认选的是内置主题（Mio），要显式切到「跟随插件皮肤」才轮到
+        // 插件提供的这一份 —— 以前是插件无条件接管，用户没有回头路。
+        expect(app.pluginTheme?.id, 'builtin.mio');
+        await app.setBuiltinTheme(null);
         expect(app.pluginTheme?.id, 'fixture.theme');
         expect(app.pluginTheme?.displayWeight, 850);
         expect(app.pluginLayout?.id, 'fixture.layout');
@@ -731,7 +735,7 @@ void main() {
           imported.complete();
         }
       });
-      await tester.tap(find.text('导入 ZIP'));
+      await tester.tap(find.byKey(const ValueKey('plugin-import-action')));
       final deadline = Stopwatch()..start();
       while (!imported.isCompleted && deadline.elapsed.inSeconds < 10) {
         // Native file I/O and widget-zone callbacks both need to make progress.

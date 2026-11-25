@@ -7,6 +7,7 @@ import '../theme/apple_design.dart';
 import '../tv/tv_mode.dart';
 import 'accessible_controls.dart';
 import '../theme/shape_scale.dart';
+import '../theme/lazer_theme.dart';
 
 /// An anchored selector with separate current-value and keyboard-focus states.
 ///
@@ -201,11 +202,11 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
                           _keyboardFocus = value && !_pointerDriven;
                         }),
                         onHover: (value) => setState(() => _hovered = value),
-                        borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
+                        borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             color: _hovered ? apple.secondaryFill : apple.fill,
-                            borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
+                            borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
                             border: Border.all(
                               color: _keyboardFocus || controller.isOpen
                                   ? apple.accent

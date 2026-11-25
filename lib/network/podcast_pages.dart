@@ -15,6 +15,7 @@ import 'network_sources_controller.dart';
 import 'network_widgets.dart';
 import 'podcast_feed.dart';
 import '../theme/shape_scale.dart';
+import '../theme/lazer_theme.dart';
 
 /// One podcast's episodes, with the listener's resume point.
 class PodcastEpisodesPage extends StatefulWidget {
@@ -385,7 +386,7 @@ class _EpisodeRowState extends State<_EpisodeRow>
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
             decoration: BoxDecoration(
               color: _hovering ? apple.fill : Colors.transparent,
-              borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
+              borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -541,7 +541,7 @@ class _NetworkFileRowState extends State<_NetworkFileRow>
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
             decoration: BoxDecoration(
               color: _hovering ? apple.fill : Colors.transparent,
-              borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
+              borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
             ),
             child: Row(
               children: <Widget>[

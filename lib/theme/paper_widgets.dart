@@ -8,6 +8,7 @@ import '../animation/apple_spring.dart';
 
 import 'design_tokens.dart';
 import 'shape_scale.dart';
+import 'lazer_theme.dart';
 
 // ---------------------------------------------------------------------------
 // Buttons — flat, no shadows. Filled variants wear the signature bottom-only
@@ -129,14 +130,14 @@ class _IvoryButtonState extends State<IvoryButton>
       child: TvTapTarget(
         onTap: feedbackAction(context, widget.onPressed),
         enabled: enabled,
-        borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
+        borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
         child: SpringPress(
           builder: (context, states) => Material(
             color: Colors.transparent,
             child: InkWell(
               statesController: states,
               canRequestFocus: !TvScope.isActive(context),
-              borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
+              borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
               onTap: feedbackAction(context, widget.onPressed),
               child: AnimatedContainer(
                 duration: MediaQuery.disableAnimationsOf(context)
