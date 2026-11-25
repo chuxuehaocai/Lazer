@@ -69,7 +69,8 @@ class DesktopLyricsController {
     return LyricsOverlaySettings(
       lineCount: _state.lyricsOverlayLines,
       fontSize: _state.lyricFontSize,
-      fontWeight: _state.lyricFontWeight,
+      // 皮肤令牌只是默认值；用户在字体设置里调过就用用户的。
+      fontWeight: _state.lyricWeightForSkin(_state.pluginTheme),
       fontFamily: family.resolvedFamily,
       fontPath: family.path,
       blurEnabled: _state.lyricBlurEnabled,

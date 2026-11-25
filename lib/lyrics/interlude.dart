@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'lyric_document.dart';
+import 'line_content.dart';
 import '../l10n/app_localizations.dart';
 
 /// The old player's timeline policy: preserve timed blanks, infer only long
@@ -151,6 +152,7 @@ class LyricInterludeDots extends StatelessWidget {
     required this.presence,
     required this.repaint,
     required this.diameter,
+    this.ink,
   });
   final LyricLine line;
   final Duration Function() position;
@@ -158,15 +160,37 @@ class LyricInterludeDots extends StatelessWidget {
   final Listenable repaint;
   final double diameter;
 
+  /// 三点的墨色，必须和这一屏的歌词正文一致。
+  ///
+  /// 传 null 时按当前画布自己解（[lyricCanvasInk]）：羊皮纸这种浅色主题里歌词
+  /// 是黑的，三点也必须是黑的。以前这里写死白色，在纸上等于隐形。之所以要
+  /// 在 build 里解而不是由调用方算好传进来：视口会把整行 Widget 缓存起来，颜色
+  /// 一旦烘进缓存的 Widget，切主题后那一行就还是旧色。
+  final Color? ink;
+
   @override
   Widget build(BuildContext context) => Semantics(
     label: context.tr('间奏'),
     child: CustomPaint(
-      painter: _InterludePainter(line, position, presence, diameter, repaint),
+      painter: _InterludePainter(
+        line,
+        position,
+        presence,
+        diameter,
+        ink ?? lyricCanvasInk(context),
+        repaint,
+      ),
       size: const Size(double.infinity, 52),
     ),
   );
 }
+
+/// 三点外围柔光的 alpha 系数。
+///
+/// 深墨（浅色主题）要收得很淡，否则圆点周围会在纸上糊出一团灰雾；浅墨（深色
+/// 主题、悬浮歌词）沿用原来的 .58，柔光是它「发光」的来源。
+double interludeHaloFactor(double inkLuminance) =>
+    inkLuminance > .5 ? .58 : .16;
 
 class _InterludePainter extends CustomPainter {
   _InterludePainter(
@@ -174,12 +198,14 @@ class _InterludePainter extends CustomPainter {
     this.position,
     this.presence,
     this.diameter,
+    this.ink,
     Listenable repaint,
   ) : super(repaint: repaint);
   final LyricLine line;
   final Duration Function() position;
   final double Function() presence;
   final double diameter;
+  final Color ink;
   int? _lastPosition;
 
   @override
@@ -201,6 +227,7 @@ class _InterludePainter extends CustomPainter {
     // the glow a small optical inset. The center follows the breathing scale
     // so the left edge remains fixed.
     final center = Offset(diameter * (.6 + 2.1 * scale), size.height / 2);
+    final double halo = interludeHaloFactor(ink.computeLuminance());
     for (var i = 0; i < 3; i++) {
       final alpha = (snapshot.dotOpacities[i] * snapshot.opacity * reveal)
           .clamp(0.0, 1.0);
@@ -210,18 +237,20 @@ class _InterludePainter extends CustomPainter {
         offset,
         diameter / 2 * scale,
         Paint()
-          ..color = Colors.white.withValues(alpha: alpha * .58)
+          ..color = ink.withValues(alpha: alpha * halo)
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 11),
       );
       canvas.drawCircle(
         offset,
         diameter / 2 * scale,
-        Paint()..color = Colors.white.withValues(alpha: alpha),
+        Paint()..color = ink.withValues(alpha: alpha),
       );
     }
   }
 
   @override
   bool shouldRepaint(_InterludePainter oldDelegate) =>
-      oldDelegate.line != line || oldDelegate.diameter != diameter;
+      oldDelegate.line != line ||
+      oldDelegate.diameter != diameter ||
+      oldDelegate.ink != ink;
 }

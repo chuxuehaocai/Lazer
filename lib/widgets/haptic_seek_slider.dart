@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../state/app_state.dart';
 import '../tv/tv_mode.dart';
 import 'accessible_controls.dart';
+import '../theme/shape_scale.dart';
 
 class HapticSeekSlider extends StatefulWidget {
   const HapticSeekSlider({super.key, required this.state});
@@ -147,7 +148,7 @@ class _HapticSeekSliderState extends State<HapticSeekSlider>
           if (_focused)
             Positioned.fill(
               child: IgnorePointer(
-                child: TvFocusOutline(borderRadius: BorderRadius.circular(8)),
+                child: TvFocusOutline(borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context))),
               ),
             ),
         ],

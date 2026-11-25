@@ -18,6 +18,7 @@ import '../local/local_music_scan.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
+import '../theme/lazer_theme.dart';
 import '../widgets/app_scroll_behavior.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/catalog_links.dart';
@@ -32,6 +33,7 @@ import 'widgets.dart';
 import 'page_utils.dart';
 import 'login.dart';
 import 'plugin_manager_page.dart';
+import '../theme/shape_scale.dart';
 
 double _phoneCoverCardHeight(BuildContext context, double minimum) => math.max(
   minimum,
@@ -873,7 +875,12 @@ class _MovingCoverMosaicState extends State<_MovingCoverMosaic>
         (index) => artwork[index % artwork.length],
       );
       final double travel = tile * artwork.length;
-      return ClipRect(
+      // 拼贴封面是装饰：既没有标签也没有动作。留着它们的话，每张封面都是一个
+      // `isImage` 语义节点，卡片每帧重排就会重建一批节点，Windows 的 UIA 桥接
+      // 于是每帧报一次「N will not be in the tree」。整块排除掉，卡片自己仍然
+      // 带着标题与点击语义。
+      return ExcludeSemantics(
+        child: ClipRect(
         child: AnimatedBuilder(
           animation: _phase,
           builder: (context, child) => Transform.translate(
@@ -892,11 +899,17 @@ class _MovingCoverMosaicState extends State<_MovingCoverMosaic>
                 direction: Axis.vertical,
                 children: <Widget>[
                   for (final url in repeated)
-                    AppCover(url: url, size: tile, radius: 0),
+                    AppCover(
+                      url: url,
+                      size: tile,
+                      radius: 0,
+                      followCornerSetting: false,
+                    ),
                 ],
               ),
             ),
           ),
+        ),
         ),
       );
     },
@@ -919,29 +932,33 @@ class _PhoneCoverMosaic extends StatelessWidget {
         .take(8)
         .toList(growable: false);
     if (artwork.isEmpty) return const SizedBox.expand();
-    return RepaintBoundary(
-      child: LayoutBuilder(
-        builder: (context, box) {
-          final rows = (box.maxHeight / tile).ceil();
-          final columns = (box.maxWidth / tile).ceil();
-          return ClipRect(
-            child: Stack(
-              children: [
-                for (var column = 0; column < columns; column++)
-                  for (var row = 0; row < rows; row++)
-                    Positioned(
-                      left: column * tile,
-                      top: row * tile,
-                      child: AppCover(
-                        url: artwork[(column * rows + row) % artwork.length],
-                        size: tile,
-                        radius: 0,
+    // 同 _MovingCoverMosaic：拼贴是装饰，别让每张封面各占一个 isImage 语义节点。
+    return ExcludeSemantics(
+      child: RepaintBoundary(
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final rows = (box.maxHeight / tile).ceil();
+            final columns = (box.maxWidth / tile).ceil();
+            return ClipRect(
+              child: Stack(
+                children: [
+                  for (var column = 0; column < columns; column++)
+                    for (var row = 0; row < rows; row++)
+                      Positioned(
+                        left: column * tile,
+                        top: row * tile,
+                        child: AppCover(
+                          url: artwork[(column * rows + row) % artwork.length],
+                          size: tile,
+                          radius: 0,
+                          followCornerSetting: false,
+                        ),
                       ),
-                    ),
-              ],
-            ),
-          );
-        },
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -1206,7 +1223,7 @@ class _HomeReleaseShelf extends StatelessWidget {
         builder: (GlobalKey coverKey) => SizedBox(
           width: size,
           child: InkWell(
-            borderRadius: BorderRadius.circular(11),
+            borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
             onTap: feedbackAction(context, () {
               rememberCoverTransition('playlist:${album.id}', coverKey);
               unawaited(openAlbumDetails(context, state, album));
@@ -1268,13 +1285,13 @@ class _EditorialPlaylistShelf extends StatelessWidget {
         builder: (GlobalKey coverKey) => SizedBox(
           width: compact ? 270 : 330,
           child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
             onTap: feedbackAction(context, () {
               rememberCoverTransition('playlist:${playlist.id}', coverKey);
               onOpen(playlist);
             }),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
               child: Stack(
                 fit: StackFit.expand,
                 children: <Widget>[
@@ -1285,6 +1302,7 @@ class _EditorialPlaylistShelf extends StatelessWidget {
                       url: playlist.coverUrl,
                       size: compact ? 270 : 330,
                       radius: 0,
+                      followCornerSetting: false,
                     ),
                   ),
                   const DecoratedBox(
@@ -1378,7 +1396,7 @@ class ChartShelf extends StatelessWidget {
               width: large ? 336 : (small ? 246 : 278),
               child: Material(
                 color: Colors.black,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: feedbackAction(context, open),
@@ -1511,7 +1529,7 @@ class ChartShelf extends StatelessWidget {
             return large
                 ? LargeScreenTapTarget(
                     onTap: feedbackAction(context, open),
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
                     focusScale: 1.035,
                     child: card,
                   )
@@ -1751,7 +1769,9 @@ class FilledCoverCard extends StatelessWidget {
     final VoidCallback? tap = onTap == null
         ? null
         : feedbackAction(context, onTap!);
-    final BorderRadius radius = BorderRadius.circular(large ? 18 : 16);
+    final BorderRadius radius = BorderRadius.circular(
+      AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)),
+    );
     return SizedBox(
       width: width,
       height: phone ? _phoneCoverCardHeight(context, height) : height,
@@ -1894,7 +1914,7 @@ class ChartLoadCard extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: large ? 24 : 18),
       decoration: BoxDecoration(
         color: AppleSemanticColors.of(context).secondaryGroupedBackground,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
       ),
       child: Row(
         children: <Widget>[

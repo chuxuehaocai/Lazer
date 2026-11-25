@@ -10,11 +10,13 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
+import '../theme/lazer_theme.dart';
 import '../animation/view_transitions.dart';
 import '../updates/open_external.dart';
 import '../gateway/gateway.dart';
 import 'plugin_manager_page.dart';
 import '../widgets/settings_choice.dart';
+import '../theme/shape_scale.dart';
 
 /// Present the sign-in card in the Apple sheet language.
 Future<void> showAppLoginDialog(BuildContext context, AppState state) {
@@ -28,6 +30,7 @@ Future<void> showAppLoginDialog(BuildContext context, AppState state) {
         brightness: brightness,
         seedAccent: accent,
         fonts: state.fontPreferences,
+        ui: state.pluginTheme ?? LazerThemeTokens.apple,
       ),
       child: _AppLoginDialog(state: state),
     ),
@@ -403,7 +406,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
         constraints: const BoxConstraints(maxWidth: 400),
         decoration: BoxDecoration(
           color: apple.tertiaryBackground,
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(28 * AppleShape.scaleOf(context)),
           border: Border.all(color: apple.separator, width: .5),
           boxShadow: <BoxShadow>[
             BoxShadow(
@@ -426,7 +429,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                     height: 42,
                     decoration: BoxDecoration(
                       color: apple.accentSoft,
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(14 * AppleShape.scaleOf(context)),
                     ),
                     child: Icon(
                       Icons.person_outline_rounded,
@@ -539,7 +542,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: apple.secondaryFill.withValues(alpha: .45),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
                       ),
                       child: TrText(
                         state.musicProvider.id == 'local'
@@ -556,7 +559,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(48),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
                         ),
                       ),
                       onPressed: () {
@@ -613,7 +616,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
             border: Border.all(color: apple.separator, width: .5),
           ),
           clipBehavior: Clip.antiAlias,
@@ -674,7 +677,7 @@ class _AppLoginDialogState extends State<_AppLoginDialog>
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: apple.tertiaryFill,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
               border: Border.all(color: apple.separator, width: .5),
             ),
             child: Row(

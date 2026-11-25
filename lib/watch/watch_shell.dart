@@ -12,6 +12,7 @@ import '../state/app_state.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/plate_art.dart';
 import 'watch_shape_list.dart';
+import '../theme/shape_scale.dart';
 
 /// A dedicated, low-motion surface for ordinary Android watches.
 /// Playback, accounts and storage continue to use the normal Android APIs.
@@ -368,7 +369,7 @@ class _WatchShellState extends State<WatchShell>
       message: context.tr('播放队列'),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(widget.round ? side / 2 : 12),
+        borderRadius: BorderRadius.circular((widget.round ? side / 2 : 12) * AppleShape.scaleOf(context)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => _openWatchTracks('播放队列', state.queue),
@@ -895,7 +896,7 @@ class _WatchShellState extends State<WatchShell>
       labelText: context.tr(hint),
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14 * AppleShape.scaleOf(context))),
     ),
   );
 
@@ -924,10 +925,10 @@ class _WatchShellState extends State<WatchShell>
     return Material(
       key: key,
       color: selected ? scheme.primaryContainer : scheme.surfaceContainer,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
       child: InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10),
           child: Row(

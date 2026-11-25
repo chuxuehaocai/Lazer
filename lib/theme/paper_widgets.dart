@@ -7,6 +7,7 @@ import '../widgets/interaction_feedback.dart';
 import '../animation/apple_spring.dart';
 
 import 'design_tokens.dart';
+import 'shape_scale.dart';
 
 // ---------------------------------------------------------------------------
 // Buttons — flat, no shadows. Filled variants wear the signature bottom-only
@@ -75,7 +76,7 @@ class _ClayButtonState extends State<ClayButton> {
               enabled ? Colors.white : context.colors.cloudDark,
             ),
             shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context))),
             ),
             overlayColor: const WidgetStatePropertyAll(Colors.transparent),
           ),
@@ -128,14 +129,14 @@ class _IvoryButtonState extends State<IvoryButton>
       child: TvTapTarget(
         onTap: feedbackAction(context, widget.onPressed),
         enabled: enabled,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
         child: SpringPress(
           builder: (context, states) => Material(
             color: Colors.transparent,
             child: InkWell(
               statesController: states,
               canRequestFocus: !TvScope.isActive(context),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
               onTap: feedbackAction(context, widget.onPressed),
               child: AnimatedContainer(
                 duration: MediaQuery.disableAnimationsOf(context)
@@ -225,14 +226,14 @@ class _OutlinedButton2State extends State<OutlinedButton2>
       child: TvTapTarget(
         onTap: feedbackAction(context, widget.onPressed),
         enabled: enabled,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
         child: SpringPress(
           builder: (context, states) => Material(
             color: Colors.transparent,
             child: InkWell(
               statesController: states,
               canRequestFocus: !TvScope.isActive(context),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
               onTap: feedbackAction(context, widget.onPressed),
               child: AnimatedContainer(
                 duration: MediaQuery.disableAnimationsOf(context)
@@ -321,14 +322,14 @@ class _TextLinkButtonState extends State<TextLinkButton>
       child: TvTapTarget(
         onTap: feedbackAction(context, widget.onPressed),
         enabled: enabled,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(6 * AppleShape.scaleOf(context)),
         child: SpringPress(
           builder: (context, states) => Material(
             color: Colors.transparent,
             child: InkWell(
               statesController: states,
               canRequestFocus: !TvScope.isActive(context),
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(6 * AppleShape.scaleOf(context)),
               onTap: feedbackAction(context, widget.onPressed),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),

@@ -14,6 +14,7 @@ import '../state/app_state.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/build_safe_state.dart';
 import '../widgets/settings_detail.dart';
+import '../theme/shape_scale.dart';
 
 class DeveloperConsolePage extends StatelessWidget {
   const DeveloperConsolePage({super.key, required this.state});
@@ -266,7 +267,7 @@ class _DeveloperConsoleViewState extends State<DeveloperConsoleView>
                           color: AppleSemanticColors.of(
                             context,
                           ).secondaryGroupedBackground,
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
                           border: Border.all(
                             color: Theme.of(context).dividerColor,
                           ),

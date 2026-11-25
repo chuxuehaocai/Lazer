@@ -439,9 +439,14 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
                 : const <Object?>[])
           if (rule is Map) Map<String, dynamic>.from(rule),
       ], permittedDomains: plugin.manifest.domains);
+      // 同 io 侧：纯皮肤插件的 `providers = {}` 到这边是一个空 Map，不能因此
+      // 把 manifest 的 provider 名字升格成一个谁都没要的音乐平台。
       final declared = description is Map ? description['providers'] : null;
+      final bool declaresNoProviders = declared is Map && declared.isEmpty;
       final providers = declared is List
           ? declared.whereType<Map>().toList()
+          : declaresNoProviders
+          ? const <Map>[]
           : <Map>[
               <String, dynamic>{
                 'id': plugin.manifest.provider,

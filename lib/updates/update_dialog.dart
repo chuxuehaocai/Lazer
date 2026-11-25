@@ -8,6 +8,7 @@ import '../state/app_state.dart';
 import '../tv/tv_mode.dart';
 import 'open_external.dart';
 import 'update_checker.dart';
+import '../theme/shape_scale.dart';
 
 /// The settings entry point: always checks, even for a skipped release.
 Future<void> checkUpdatesFromSettings(
@@ -105,7 +106,7 @@ class _UpdateDialog extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: scheme.primary.withValues(alpha: .14),
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(999 * AppleShape.scaleOf(context)),
               ),
               child: Text(
                 context.tr('预发布版本'),
@@ -145,7 +146,7 @@ class _UpdateDialog extends StatelessWidget {
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: scheme.surfaceContainerHighest.withValues(alpha: .5),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                   ),
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(12),

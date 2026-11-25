@@ -4,6 +4,7 @@ import '../animation/apple_modal.dart';
 import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
+import '../theme/shape_scale.dart';
 
 /// Wraps a song title with the long-press copy affordance.
 ///
@@ -39,7 +40,7 @@ Future<void> showCopySongTitleDialog(BuildContext context, String title) async {
       elevation: 24,
       shadowColor: Colors.black.withValues(alpha: .5),
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22 * AppleShape.scaleOf(context))),
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),

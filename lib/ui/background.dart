@@ -14,6 +14,7 @@ import '../state/ui_preferences.dart';
 import '../utils/artwork.dart';
 import '../theme/tokens.dart';
 import 'palette_pixels.dart';
+import '../theme/shape_scale.dart';
 
 export '../player/player_backdrop.dart' show AlbumBlurFlow, AlbumBlurFlowCanvas;
 export 'custom_image_backdrop.dart' show CustomImageBackdrop;
@@ -520,7 +521,7 @@ class _AlbumFlowBackgroundState extends State<AlbumFlowBackground>
     }
     return RepaintBoundary(
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(widget.cornerRadius),
+        borderRadius: BorderRadius.circular(widget.cornerRadius * AppleShape.scaleOf(context)),
         child: CustomPaint(
           key: ValueKey<String>(widget.solid ? 'solid' : 'flow'),
           painter: _cachedPainter,

@@ -21,6 +21,7 @@ import '../widgets/track_batch_bar.dart';
 import '../widgets/window_chrome.dart';
 import 'login.dart';
 import 'widgets.dart';
+import '../theme/shape_scale.dart';
 
 /// The liked-songs library entry.
 class AppLikesPage extends StatelessWidget {
@@ -766,7 +767,7 @@ class AppPlaylistHeader extends StatelessWidget {
         ? null
         : TvTapTarget(
             onTap: () => _showNote(context, note!, isData: noteIsData),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(6 * AppleShape.scaleOf(context)),
             child: GestureDetector(
               onTap: () => _showNote(context, note!, isData: noteIsData),
               child: MouseRegion(

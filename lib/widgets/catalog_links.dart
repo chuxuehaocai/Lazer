@@ -12,6 +12,7 @@ import '../theme/app_palette.dart';
 import 'interaction_feedback.dart';
 import '../tv/tv_mode.dart';
 import '../tv/large_screen_widgets.dart';
+import '../theme/shape_scale.dart';
 
 Future<void> openArtists(
   BuildContext context,
@@ -32,7 +33,7 @@ Future<void> openArtists(
             // The app theme squares off dialogs; the artist chooser wants
             // the rounded card shape the rest of the app uses.
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(20 * AppleShape.scaleOf(context)),
             ),
             backgroundColor: Theme.of(context).colorScheme.surface,
             title: const TrText('选择歌手'),
@@ -104,7 +105,7 @@ class CatalogTextLink extends StatelessWidget {
         link: true,
         child: LargeScreenTapTarget(
           onTap: feedbackAction(context, onTap),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
           focusScale: 1.02,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -119,7 +120,7 @@ class CatalogTextLink extends StatelessWidget {
         color: Colors.transparent,
         textStyle: style ?? DefaultTextStyle.of(context).style,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
           hoverColor: context.colors.oatWarm.withValues(alpha: .4),
           focusColor: context.colors.clay.withValues(alpha: .18),
           onTap: feedbackAction(context, onTap),

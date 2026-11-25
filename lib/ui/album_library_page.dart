@@ -18,6 +18,8 @@ import '../widgets/spring_buttons.dart';
 import '../widgets/ui_scaling.dart';
 import 'login.dart';
 import 'widgets.dart';
+import '../theme/lazer_theme.dart';
+import '../theme/shape_scale.dart';
 
 /// 收藏的专辑: the albums the signed-in account saved, in one place.
 ///
@@ -496,7 +498,9 @@ class _AppSavedAlbumsPageState extends State<AppSavedAlbumsPage>
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(
+          AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)),
+        ),
         onTap: feedbackAction(context, () {
           // The shell owns the album detail slot; naming the cover lets the
           // artwork fly from this card into the page it opens.

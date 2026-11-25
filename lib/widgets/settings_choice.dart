@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../theme/apple_design.dart';
 import '../tv/tv_mode.dart';
 import 'accessible_controls.dart';
+import '../theme/shape_scale.dart';
 
 /// An anchored selector with separate current-value and keyboard-focus states.
 ///
@@ -149,7 +150,7 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
                   ),
                   shape: WidgetStatePropertyAll(
                     RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
                       side: BorderSide(color: apple.separator, width: .5),
                     ),
                   ),
@@ -175,7 +176,7 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
                     ),
                 ],
                 builder: (context, controller, child) => TvFocusHighlight(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                   child: CallbackShortcuts(
                     // A closed TV selector must leave arrows available for
                     // page traversal; Select opens it before item navigation.
@@ -200,11 +201,11 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
                           _keyboardFocus = value && !_pointerDriven;
                         }),
                         onHover: (value) => setState(() => _hovered = value),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             color: _hovered ? apple.secondaryFill : apple.fill,
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                             border: Border.all(
                               color: _keyboardFocus || controller.isOpen
                                   ? apple.accent
@@ -284,7 +285,7 @@ class _ChoiceOption<T> extends StatelessWidget {
     return Semantics(
       selected: selected,
       child: TvFocusHighlight(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
         child: MenuItemButton(
           autofocus: autofocus,
           onPressed: item.enabled ? () => onSelected(item.value) : null,
@@ -316,7 +317,7 @@ class _ChoiceOption<T> extends StatelessWidget {
               ),
             ),
             shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context))),
             ),
           ),
           child: SizedBox(

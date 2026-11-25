@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../theme/shape_scale.dart';
 
 class ExperimentalMusicBadge extends StatelessWidget {
   const ExperimentalMusicBadge({super.key});
@@ -10,7 +11,7 @@ class ExperimentalMusicBadge extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.primary.withValues(alpha: .12),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(6 * AppleShape.scaleOf(context)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),

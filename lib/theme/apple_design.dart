@@ -252,6 +252,101 @@ class AppleSemanticColors extends ThemeExtension<AppleSemanticColors> {
   }
 }
 
+/// Applies a skin's semantic colour overrides on top of a built-in preset.
+///
+/// Only the slots the skin actually supplies are replaced. When a skin sets
+/// `label`/`background` but leaves the fill and separator roles out, those are
+/// re-derived from the supplied ink so highlights and hairlines stay coherent
+/// instead of inheriting the Apple tint.
+AppleSemanticColors applySemanticColorOverrides(
+  AppleSemanticColors base,
+  Map<String, Color> overrides, {
+  required bool dark,
+}) {
+  if (overrides.isEmpty) return base;
+  final Color label = overrides['label'] ?? base.label;
+  final Color background = overrides['background'] ?? base.background;
+  final bool ink = overrides.containsKey('label');
+  Color pick(String slot, [Color? fallback]) => overrides[slot] ?? fallback ?? base.label;
+  return base.copyWith(
+    background: background,
+    secondaryBackground: pick(
+      'secondaryBackground',
+      overrides['background'] == null
+          ? base.secondaryBackground
+          : Color.alphaBlend(
+              label.withValues(alpha: dark ? .08 : .03),
+              background,
+            ),
+    ),
+    tertiaryBackground: pick('tertiaryBackground', base.tertiaryBackground),
+    groupedBackground: pick(
+      'groupedBackground',
+      overrides['background'] ?? base.groupedBackground,
+    ),
+    secondaryGroupedBackground: pick(
+      'secondaryGroupedBackground',
+      overrides['background'] == null
+          ? base.secondaryGroupedBackground
+          : Color.alphaBlend(
+              label.withValues(alpha: dark ? .10 : .04),
+              background,
+            ),
+    ),
+    tertiaryGroupedBackground: pick(
+      'tertiaryGroupedBackground',
+      base.tertiaryGroupedBackground,
+    ),
+    label: label,
+    secondaryLabel: pick(
+      'secondaryLabel',
+      ink ? label.withValues(alpha: .72) : base.secondaryLabel,
+    ),
+    tertiaryLabel: pick(
+      'tertiaryLabel',
+      ink ? label.withValues(alpha: .50) : base.tertiaryLabel,
+    ),
+    quaternaryLabel: pick(
+      'quaternaryLabel',
+      ink ? label.withValues(alpha: .30) : base.quaternaryLabel,
+    ),
+    fill: pick(
+      'fill',
+      ink ? label.withValues(alpha: dark ? .14 : .06) : base.fill,
+    ),
+    secondaryFill: pick(
+      'secondaryFill',
+      ink ? label.withValues(alpha: dark ? .10 : .04) : base.secondaryFill,
+    ),
+    tertiaryFill: pick(
+      'tertiaryFill',
+      ink ? label.withValues(alpha: dark ? .07 : .03) : base.tertiaryFill,
+    ),
+    separator: pick(
+      'separator',
+      ink ? label.withValues(alpha: .18) : base.separator,
+    ),
+    opaqueSeparator: pick(
+      'opaqueSeparator',
+      ink ? label.withValues(alpha: .32) : base.opaqueSeparator,
+    ),
+    accent: pick('accent', base.accent),
+    accentSoft: pick('accentSoft', base.accentSoft),
+    glass: pick(
+      'glass',
+      overrides['background'] == null
+          ? base.glass
+          : background.withValues(alpha: dark ? .62 : .72),
+    ),
+    glassStrong: pick(
+      'glassStrong',
+      overrides['background'] == null
+          ? base.glassStrong
+          : background.withValues(alpha: dark ? .82 : .88),
+    ),
+  );
+}
+
 /// Apple HIG type ramp with bundled MiSans on every platform.
 const List<String> appleFontFallback = <String>[
   'SF Pro Display',
@@ -269,6 +364,8 @@ TextTheme appleTextTheme({
   Color? color,
   String? fontFamily = AppFonts.sans,
   LazerThemeTokens ui = LazerThemeTokens.apple,
+  /// 全局圆角强度（见 theme/shape_scale.dart）。主题层形状同样缩放。
+  double cornerScale = 1,
 }) {
   TextStyle s(
     double size,
@@ -319,18 +416,34 @@ ThemeData buildAppleTheme({
   Color? seedAccent,
   FontPreferences fonts = const FontPreferences(),
   LazerThemeTokens ui = LazerThemeTokens.apple,
+  /// 全局圆角强度（见 theme/shape_scale.dart）：主题层的卡片、对话框、输入框
+  /// 形状一起缩放。0 = 全直角，1 = 原样。
+  double cornerScale = 1,
 }) {
-  final AppleSemanticColors base = brightness == Brightness.dark
+  final bool dark = brightness == Brightness.dark;
+  final AppleSemanticColors preset = dark
       ? AppleSemanticColors.dark
       : AppleSemanticColors.light;
+  // A Lua skin supplies semantic colours; the host keeps ownership of
+  // contrast, focus and every widget, it only honours the tones.
+  // A skin may ship a separate dark set; without one its light colours are
+  // reused verbatim (a paper skin without a night variant still renders).
+  final Map<String, Color> skinColors = dark
+      ? (ui.darkColors.isEmpty ? ui.colors : ui.darkColors)
+      : ui.colors;
+  final AppleSemanticColors skinned = applySemanticColorOverrides(
+    preset,
+    skinColors,
+    dark: dark,
+  );
   final Color accent = seedAccent == null
-      ? base.accent
-      : adaptiveAccent(seedAccent, base.background);
-  final AppleSemanticColors apple = base.copyWith(
+      ? (skinColors['accent'] ?? skinned.accent)
+      : adaptiveAccent(seedAccent, skinned.background);
+  final AppleSemanticColors apple = skinned.copyWith(
     accent: accent,
-    accentSoft: accent.withValues(
-      alpha: brightness == Brightness.dark ? .18 : .12,
-    ),
+    accentSoft:
+        skinColors['accentSoft'] ??
+        accent.withValues(alpha: dark ? .18 : .12),
   );
   final ColorScheme scheme = ColorScheme(
     brightness: brightness,
@@ -438,13 +551,13 @@ ThemeData buildAppleTheme({
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * cornerScale)),
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: apple.tertiaryBackground,
       surfaceTintColor: Colors.transparent,
       elevation: 24,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20 * cornerScale)),
       titleTextStyle: text.headlineSmall,
       contentTextStyle: text.bodyMedium?.copyWith(color: apple.secondaryLabel),
     ),
@@ -455,8 +568,10 @@ ThemeData buildAppleTheme({
       elevation: 0,
       showDragHandle: true,
       dragHandleColor: apple.tertiaryLabel,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(20 * cornerScale),
+        ),
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
@@ -556,9 +671,9 @@ ThemeData buildAppleTheme({
         side: WidgetStatePropertyAll<BorderSide?>(
           BorderSide(color: apple.separator),
         ),
-        shape: const WidgetStatePropertyAll<OutlinedBorder>(
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
           RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(8)),
+            borderRadius: BorderRadius.all(Radius.circular(8 * cornerScale)),
           ),
         ),
         textStyle: WidgetStatePropertyAll<TextStyle?>(text.labelLarge),
@@ -606,15 +721,15 @@ ThemeData buildAppleTheme({
       hintStyle: hintText.bodyMedium,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(10 * cornerScale),
         borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(10 * cornerScale),
         borderSide: BorderSide.none,
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(10 * cornerScale),
         borderSide: BorderSide(color: apple.accent, width: 1.5),
       ),
     ),
@@ -622,7 +737,7 @@ ThemeData buildAppleTheme({
       color: apple.tertiaryBackground,
       surfaceTintColor: Colors.transparent,
       elevation: 18,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * cornerScale)),
       textStyle: text.bodyMedium,
     ),
     menuTheme: MenuThemeData(
@@ -634,9 +749,9 @@ ThemeData buildAppleTheme({
           Colors.transparent,
         ),
         elevation: const WidgetStatePropertyAll<double?>(18),
-        shape: const WidgetStatePropertyAll<OutlinedBorder>(
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
           RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderRadius: BorderRadius.all(Radius.circular(12 * cornerScale)),
           ),
         ),
       ),
@@ -647,14 +762,14 @@ ThemeData buildAppleTheme({
       actionTextColor: apple.accent,
       behavior: SnackBarBehavior.floating,
       elevation: 16,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * cornerScale)),
     ),
     tooltipTheme: TooltipThemeData(
       decoration: BoxDecoration(
         color: brightness == Brightness.dark
             ? const Color(0xF22C2C2E)
             : const Color(0xF2F2F2F7),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(6 * cornerScale),
         border: Border.all(color: apple.separator),
       ),
       textStyle: text.labelSmall?.copyWith(color: apple.label),
@@ -687,7 +802,7 @@ ThemeData buildAppleTheme({
       selectedColor: apple.accentSoft,
       surfaceTintColor: Colors.transparent,
       side: BorderSide.none,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8 * cornerScale)),
       labelStyle: text.labelLarge?.copyWith(color: apple.label),
       secondaryLabelStyle: text.labelLarge?.copyWith(color: apple.label),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -695,7 +810,7 @@ ThemeData buildAppleTheme({
     listTileTheme: ListTileThemeData(
       textColor: apple.label,
       iconColor: apple.accent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10 * cornerScale)),
     ),
     checkboxTheme: CheckboxThemeData(
       fillColor: WidgetStateProperty.resolveWith<Color?>(
@@ -704,7 +819,7 @@ ThemeData buildAppleTheme({
             : Colors.transparent,
       ),
       side: BorderSide(color: apple.separator),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4 * cornerScale)),
     ),
     cupertinoOverrideTheme: CupertinoThemeData(
       brightness: brightness,

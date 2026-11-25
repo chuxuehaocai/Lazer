@@ -13,6 +13,7 @@ import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
 import 'interaction_feedback.dart';
 import 'window_chrome.dart';
+import '../theme/shape_scale.dart';
 
 /// A translucent Apple material: blur plus a semantic glass tint and hairline.
 ///
@@ -49,15 +50,15 @@ class AppleGlass extends StatelessWidget {
     );
     // A 95%-opaque tint hides almost all of the blurred backdrop, but the
     // full-screen Gaussian still runs every time the flowing background
-    // repaints. Skip the layer when it cannot be seen.
-    if (tint.a >= .9) {
+    // repaints. Skip the layer when it cannot be seen — and skip it entirely
+    // when the skin turns glass off (`glassBlurSigma == 0`), which is what a
+    // paper design wants: no blur cost at all.
+    final double sigma = blurSigma ?? themeTokens.glassBlurSigma;
+    if (tint.a >= .9 || sigma <= 0) {
       return ClipRRect(borderRadius: borderRadius, child: decorated);
     }
     final Widget material = BackdropFilter(
-      filter: ui.ImageFilter.blur(
-        sigmaX: blurSigma ?? themeTokens.glassBlurSigma,
-        sigmaY: blurSigma ?? themeTokens.glassBlurSigma,
-      ),
+      filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
       child: decorated,
     );
     // The clip is not decoration: a BackdropFilter applies to the whole
@@ -182,11 +183,15 @@ class AppleSectionHeader extends StatelessWidget {
                     context.tr(title),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      color: apple.label,
-                      fontWeight: ui.titleFontWeight,
-                      fontSize: ui.sectionHeaderSize,
-                      letterSpacing: -.4,
+                    style: context.fonts.apply(
+                      FontCategory.controls,
+                      (theme.textTheme.titleLarge ?? const TextStyle())
+                          .copyWith(
+                            color: apple.label,
+                            fontWeight: ui.titleFontWeight,
+                            fontSize: ui.sectionHeaderSize,
+                            letterSpacing: -.4,
+                          ),
                     ),
                   ),
                 ),
@@ -240,7 +245,7 @@ class AppleGroupedCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: color ?? apple.secondaryGroupedBackground,
-        borderRadius: BorderRadius.circular(radius ?? ui.groupedCardRadius),
+        borderRadius: BorderRadius.circular(radius ?? AppleShape.cardRadiusOf(context, ui)),
         border: Border.all(color: apple.separator, width: .5),
       ),
       child: Padding(padding: padding, child: child),
@@ -313,9 +318,13 @@ class _AppleListTileState extends State<AppleListTile>
                       widget.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: apple.label,
-                        fontWeight: ui.bodyFontWeight,
+                      style: context.fonts.apply(
+                        FontCategory.title,
+                        (theme.textTheme.bodyLarge ?? const TextStyle())
+                            .copyWith(
+                              color: apple.label,
+                              fontWeight: ui.bodyFontWeight,
+                            ),
                       ),
                     ),
                     if (widget.subtitle != null &&
@@ -325,9 +334,13 @@ class _AppleListTileState extends State<AppleListTile>
                         widget.subtitle!,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: apple.secondaryLabel,
-                          fontWeight: ui.bodyFontWeight,
+                        style: context.fonts.apply(
+                          FontCategory.caption,
+                          (theme.textTheme.bodySmall ?? const TextStyle())
+                              .copyWith(
+                                color: apple.secondaryLabel,
+                                fontWeight: ui.bodyFontWeight,
+                              ),
                         ),
                       ),
                     ],
@@ -377,7 +390,7 @@ class _AppleListTileState extends State<AppleListTile>
                 Positioned.fill(
                   child: IgnorePointer(
                     child: TvFocusOutline(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                       width: 2,
                     ),
                   ),
@@ -425,7 +438,7 @@ class AppleIconTile extends StatelessWidget {
           end: Alignment.bottomCenter,
           colors: <Color>[Color.lerp(tileColor, iconColor, .15)!, tileColor],
         ),
-        borderRadius: BorderRadius.circular(radius),
+        borderRadius: BorderRadius.circular(radius * AppleShape.scaleOf(context)),
       ),
       child: Icon(icon, size: iconSize, color: iconColor),
     );

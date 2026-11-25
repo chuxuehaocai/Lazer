@@ -31,6 +31,7 @@ import '../state/app_state.dart';
 import '../state/detail_requests.dart';
 import '../state/song_comments_controller.dart';
 import '../theme/apple_design.dart';
+import '../theme/shape_scale.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/interaction_feedback.dart';
 import '../widgets/cover_transition.dart';
@@ -852,7 +853,7 @@ class _RailButtonState extends State<_RailButton>
       child: LargeScreenTapTarget(
         onTap: feedbackAction(context, widget.onTap),
         onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
         focusScale: 1.015,
         child: AnimatedContainer(
           curve: const AppleSpringCurve(),
@@ -868,7 +869,7 @@ class _RailButtonState extends State<_RailButton>
                 : _focused
                 ? apple.fill
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
           ),
           child: Row(
             children: <Widget>[

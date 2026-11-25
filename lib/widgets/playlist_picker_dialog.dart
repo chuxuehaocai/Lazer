@@ -10,7 +10,9 @@ import '../l10n/app_localizations.dart';
 import '../ui/login.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
+import '../theme/lazer_theme.dart';
 import 'artwork_image.dart';
+import '../theme/shape_scale.dart';
 
 /// The official client's "收藏到歌单" flow: pick one of the account's cloud
 /// playlists, or create a new one on the spot and add [track] to it.
@@ -32,6 +34,7 @@ Future<void> showAddToPlaylistDialog(
         brightness: brightness,
         seedAccent: accent,
         fonts: state.fontPreferences,
+        ui: state.pluginTheme ?? LazerThemeTokens.apple,
       ),
       child: _AddToPlaylistDialog(state: state, track: track),
     ),
@@ -56,6 +59,7 @@ Future<void> showCreateCloudPlaylistDialog(
         brightness: brightness,
         seedAccent: accent,
         fonts: state.fontPreferences,
+        ui: state.pluginTheme ?? LazerThemeTokens.apple,
       ),
       child: _AddToPlaylistDialog(state: state),
     ),
@@ -452,7 +456,7 @@ class _CreateTile extends StatelessWidget {
         height: 40,
         decoration: BoxDecoration(
           color: apple.tertiaryFill,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
         ),
         child: Icon(Icons.add_rounded, color: apple.label),
       ),
@@ -488,7 +492,7 @@ class _PlaylistTile extends StatelessWidget {
       leading: SizedBox.square(
         dimension: 40,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
           child: _PlaylistCover(url: playlist.coverUrl),
         ),
       ),

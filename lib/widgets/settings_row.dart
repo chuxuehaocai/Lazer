@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
 import '../tv/tv_mode.dart';
+import '../theme/shape_scale.dart';
 
 /// Shared spacing for settings rows and neighboring grouped cards.
 abstract final class SettingsSpacing {
@@ -67,7 +68,7 @@ class SettingsRow extends StatelessWidget {
     // name, which is how every settings switch in the app was announced.
     return MergeSemantics(
       child: TvFocusHighlight(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
         child: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             // Use the actual card width: settings can be shown in an inset

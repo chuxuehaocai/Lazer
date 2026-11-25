@@ -16,6 +16,8 @@ import '../widgets/artwork_image.dart';
 import '../widgets/artwork_reveal.dart';
 import '../widgets/copyable_song_title.dart';
 import '../widgets/cover_transition.dart';
+import '../theme/lazer_theme.dart';
+import '../theme/shape_scale.dart';
 
 /// `mm:ss` for transport labels.
 String formatDuration(Duration value) {
@@ -41,6 +43,10 @@ String artistNames(Track track) {
 double pageInset(BuildContext context) => lazerPageInset(context);
 
 /// Rounded album artwork with an Apple-like neutral placeholder.
+///
+/// 封面默认跟随「设置 → 圆角大小」：卡片圆角是多少，封面就是多少。
+/// 需要固定形状的地方（头像、拼贴里被外层裁掉的小块）显式传
+/// `followCornerSetting: false`，仍用 [radius] × 组件系数。
 class AppCover extends StatelessWidget {
   const AppCover({
     super.key,
@@ -49,6 +55,7 @@ class AppCover extends StatelessWidget {
     this.radius = 8,
     this.iconSize = 20,
     this.fadeIn = false,
+    this.followCornerSetting = true,
   });
 
   final String? url;
@@ -56,10 +63,19 @@ class AppCover extends StatelessWidget {
   final double radius;
   final double iconSize;
   final bool fadeIn;
+  final bool followCornerSetting;
 
   @override
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final double requested = followCornerSetting
+        ? AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))
+        : radius * AppleShape.scaleOf(context);
+    // 缩略图不让角撑满整张图：44 px 的列表小封面在 24 px 设置下会变成圆形。
+    // 上限取短边的四分之一，大封面（歌单/专辑）仍然完全跟着设置走。
+    final double corner = size == null
+        ? requested
+        : (requested > size! / 4 ? size! / 4 : requested);
     final String? resolved = artworkUrlForSize(
       url,
       logicalEdge: size ?? 1024,
@@ -72,7 +88,7 @@ class AppCover extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: <Color>[apple.tertiaryFill, apple.secondaryFill],
         ),
-        borderRadius: BorderRadius.circular(radius),
+        borderRadius: BorderRadius.circular(corner),
       ),
       child: Center(
         child: Icon(
@@ -106,14 +122,14 @@ class AppCover extends StatelessWidget {
                     fallback,
           );
     final Widget clipped = ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
+      borderRadius: BorderRadius.circular(corner),
       child: size == null ? art : SizedBox.square(dimension: size, child: art),
     );
     // A whisper of a border keeps white cover art from dissolving into the
     // light grouped background, matching the Hairline Apple applies to media.
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(radius),
+        borderRadius: BorderRadius.circular(corner),
         border: Border.all(
           color: apple.separator.withValues(alpha: .35),
           width: .5,
@@ -218,7 +234,7 @@ class _AppPlaylistCardState extends State<AppPlaylistCard>
       child: TvTapTarget(
         onTap: feedbackAction(context, _open),
         onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
         child: GestureDetector(
           onTap: feedbackAction(context, _open),
           behavior: HitTestBehavior.opaque,
@@ -368,7 +384,7 @@ class _AppTrackRowState extends State<AppTrackRow>
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final bool compact = compactBrowsePresentation(context);
     final bool wide = !compact && MediaQuery.sizeOf(context).width >= 940;
-    final radius = BorderRadius.circular(compact ? 8 : 10);
+    final radius = BorderRadius.circular((compact ? 8 : 10) * AppleShape.scaleOf(context));
     final bool highlighted = _hovering || _focused;
     final String? translated = widget.track.translatedTitle?.trim();
     final Color titleColor = widget.current ? apple.accent : apple.label;
@@ -668,11 +684,11 @@ class _AppRailItemState extends State<AppRailItem>
         button: true,
         selected: widget.selected,
         child: TvFocusHighlight(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
           child: InkWell(
             onTap: feedbackAction(context, widget.onTap),
             onFocusChange: (value) => setState(() => _focused = value),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
               height: 38,
@@ -683,7 +699,7 @@ class _AppRailItemState extends State<AppRailItem>
                     : highlighted
                     ? apple.tertiaryFill
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                 border: Border.all(
                   color: _focused
                       ? apple.accent.withValues(alpha: .65)
@@ -782,7 +798,10 @@ class _AppArtistTrackCardState extends State<AppArtistTrackCard>
   Widget build(BuildContext context) {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     final bool compact = widget.compact ?? compactBrowsePresentation(context);
-    final radius = BorderRadius.circular(compact ? 10 : 12);
+    // 「最近播放」这类小卡片整张都走同一个圆角设置，和封面保持一致。
+    final radius = BorderRadius.circular(
+      AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)),
+    );
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),

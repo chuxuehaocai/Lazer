@@ -10,6 +10,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../animation/apple_spring.dart';
 import 'cover_morph_surface.dart';
+import '../theme/shape_scale.dart';
 
 part 'cover_transition_text.dart';
 
@@ -658,7 +659,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget>
         RepaintBoundary(
           key: const ValueKey<String>('cover-transition-flight'),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(widget.radius),
+            borderRadius: BorderRadius.circular(widget.radius * AppleShape.scaleOf(context)),
             child: widget.child,
           ),
         ),
@@ -854,7 +855,7 @@ class _CoverTransitionTargetState extends State<CoverTransitionTarget>
       RepaintBoundary(
         key: const ValueKey<String>('cover-transition-return-flight'),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(widget.radius),
+          borderRadius: BorderRadius.circular(widget.radius * AppleShape.scaleOf(context)),
           child: widget.child,
         ),
       ),

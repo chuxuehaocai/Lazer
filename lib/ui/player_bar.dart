@@ -11,6 +11,8 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
+import '../theme/adaptive_contrast.dart';
+import '../theme/lazer_theme.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/copyable_song_title.dart';
@@ -18,6 +20,7 @@ import '../widgets/interaction_feedback.dart';
 import '../widgets/playback_queue_view.dart';
 import '../widgets/player_seek_bar.dart';
 import 'widgets.dart';
+import '../theme/shape_scale.dart';
 
 /// Shared transport for the shell and pushed catalog details.
 /// Narrow containers use the same phone controls on every platform.
@@ -227,7 +230,7 @@ class _AppPlayerBarState extends State<AppPlayerBar>
       final AppleSemanticColors apple = AppleSemanticColors.of(context);
       return AppleGlass(
         borderRadius: widget.floating
-            ? BorderRadius.circular(999)
+            ? BorderRadius.circular(999 * AppleShape.scaleOf(context))
             : BorderRadius.zero,
         blurSigma: 16,
         color: apple.glassStrong,
@@ -252,7 +255,9 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                       artworkSize: widget.floating ? 36 : 42,
                       showTranslation: !widget.floating,
                       borderRadius: BorderRadius.circular(
-                        widget.floating ? 999 : 14,
+                        widget.floating
+                            ? 999
+                            : 14 * AppleShape.scaleOf(context),
                       ),
                     ),
                   ),
@@ -282,11 +287,14 @@ class _AppPlayerBarState extends State<AppPlayerBar>
       );
     }
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final ui = LazerThemeTokens.of(context);
     return AppleGlass(
       // This dock spans the window edge to edge and meets the sidebar above.
       // Square corners keep the shared edge continuous.
       borderRadius: BorderRadius.zero,
-      blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica ? 0 : 16,
+      blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica
+          ? 0
+          : ui.glassBlurSigma,
       color: state.backgroundMode == AppBackgroundMode.windowsMica
           ? apple.glassStrong.withValues(alpha: .58)
           : apple.glassStrong,
@@ -294,7 +302,9 @@ class _AppPlayerBarState extends State<AppPlayerBar>
       child: _withErrorStrip(
         apple,
         ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 92),
+          constraints: BoxConstraints(
+            minHeight: ui.playerBarHeight > 0 ? ui.playerBarHeight : 92,
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
@@ -462,7 +472,15 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
+    final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    // The player bar owns its glass surface, so the shell's text color is not
+    // a reliable foreground here. Resolve the visible tint against the page
+    // canvas and choose an opaque label with readable contrast.
+    final Color barSurface = Color.alphaBlend(
+      apple.glassStrong,
+      apple.background,
+    );
+    final Color songTextColor = contrastingLabel(barSurface);
     final Track? track = widget.track;
     final bool highlighted = _hovering || _focused;
     return MouseRegion(
@@ -483,7 +501,10 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
             borderRadius: widget.borderRadius,
             child: ColoredBox(
               color: highlighted
-                  ? scheme.surfaceContainerHighest.withValues(alpha: 0.55)
+                  // 播放条本身是深色 #141413，而这里的 scheme 是浅色的，
+                  // 用 surfaceContainerHighest 会在深色条上糊出一块浅灰卡片，
+                  // 深色标题压在上面几乎读不出来。改成中性白色微洗。
+                  ? Colors.white.withValues(alpha: 0.08)
                   : Colors.transparent,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -505,7 +526,9 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
                                   context.tr('未选择曲目'),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleSmall,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    color: songTextColor,
+                                  ),
                                 )
                               : CopyableSongTitle(
                                   title: track.title,
@@ -513,7 +536,9 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
                                     track.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.titleSmall,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      color: songTextColor,
+                                    ),
                                   ),
                                 ),
                           if (widget.showTranslation &&
@@ -524,7 +549,7 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
+                                color: songTextColor,
                               ),
                             ),
                           Text(
@@ -532,7 +557,7 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
+                              color: songTextColor,
                             ),
                           ),
                         ],
@@ -767,7 +792,9 @@ class _VerticalVolumeBarState extends State<_VerticalVolumeBar>
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: scheme.onSurfaceVariant.withValues(alpha: 0.22),
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(
+                          999 * AppleShape.scaleOf(context),
+                        ),
                       ),
                       child: const SizedBox(width: 3),
                     ),
@@ -779,7 +806,9 @@ class _VerticalVolumeBarState extends State<_VerticalVolumeBar>
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: scheme.primary,
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(
+                          999 * AppleShape.scaleOf(context),
+                        ),
                       ),
                       child: const SizedBox(width: 3),
                     ),
@@ -800,7 +829,9 @@ class _VerticalVolumeBarState extends State<_VerticalVolumeBar>
                     Positioned.fill(
                       child: IgnorePointer(
                         child: TvFocusOutline(
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.circular(
+                            6 * AppleShape.scaleOf(context),
+                          ),
                           width: 2,
                         ),
                       ),
@@ -919,7 +950,9 @@ class _VolumeButtonState extends State<_VolumeButton>
                 ),
                 decoration: BoxDecoration(
                   color: scheme.surface.withValues(alpha: 0.98),
-                  borderRadius: BorderRadius.circular(26),
+                  borderRadius: BorderRadius.circular(
+                    26 * AppleShape.scaleOf(context),
+                  ),
                   boxShadow: <BoxShadow>[
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.26),
@@ -980,7 +1013,9 @@ class _VolumeButtonState extends State<_VolumeButton>
               ? TvTapTarget(
                   focusNode: _buttonFocus,
                   onTap: _toggle,
-                  borderRadius: BorderRadius.circular(15),
+                  borderRadius: BorderRadius.circular(
+                    15 * AppleShape.scaleOf(context),
+                  ),
                   focusScale: 1.12,
                   child: Semantics(
                     button: true,
@@ -1095,7 +1130,9 @@ class _AppQueueButtonState extends State<AppQueueButton>
                   clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
                     color: scheme.surface.withValues(alpha: 0.98),
-                    borderRadius: BorderRadius.circular(22),
+                    borderRadius: BorderRadius.circular(
+                      22 * AppleShape.scaleOf(context),
+                    ),
                     boxShadow: <BoxShadow>[
                       BoxShadow(
                         color: Colors.black.withValues(alpha: 0.32),

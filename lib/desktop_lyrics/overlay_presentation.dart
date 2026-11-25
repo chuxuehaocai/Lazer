@@ -26,8 +26,10 @@ extension _OverlayPresentation on _LyricsOverlayAppState {
         ],
       ),
       _settings.fontSize * scale,
+      // 悬浮歌词的字重由主进程算好（皮肤默认 + 用户覆盖），这里不要再套一遍令牌。
       _settings.fontWeight,
       theme: theme,
+      honorThemeWeight: false,
     );
   }
 
@@ -327,7 +329,7 @@ extension _OverlayPresentation on _LyricsOverlayAppState {
                   color: Colors.white.withValues(
                     alpha: _dragHovered ? .18 : .06,
                   ),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                 ),
                 child: const Icon(
                   Icons.drag_indicator_rounded,

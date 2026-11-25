@@ -5,6 +5,143 @@ import 'package:flutter/material.dart';
 /// A Lua skin will eventually provide the same JSON-shaped values. It never
 /// receives a Flutter context or a Widget callback; the host remains in charge
 /// of accessibility, focus, hit testing and platform-specific rendering.
+// ---------------------------------------------------------------------------
+// Skin colours
+// ---------------------------------------------------------------------------
+
+/// Semantic colour slots a skin may override.
+///
+/// They are the same roles the built-in Apple palette uses, so a skin changes
+/// tones without the host losing contrast, focus or accessibility guarantees.
+const Set<String> skinColorSlots = <String>{
+  'background',
+  'secondaryBackground',
+  'tertiaryBackground',
+  'groupedBackground',
+  'secondaryGroupedBackground',
+  'tertiaryGroupedBackground',
+  'label',
+  'secondaryLabel',
+  'tertiaryLabel',
+  'quaternaryLabel',
+  'fill',
+  'secondaryFill',
+  'tertiaryFill',
+  'separator',
+  'opaqueSeparator',
+  'accent',
+  'accentSoft',
+  'glass',
+  'glassStrong',
+};
+
+/// Aliases let a paper-style skin speak its own vocabulary.
+///
+/// `canvas`, `ink`, `hairline` and `playerSurface` are the names the parchment
+/// design system uses; they resolve to the semantic slots above.
+const Map<String, String> skinColorAliases = <String, String>{
+  'page': 'background',
+  'canvas': 'background',
+  'ivory': 'background',
+  'ivorymedium': 'background',
+  'surface': 'secondaryGroupedBackground',
+  'card': 'secondaryGroupedBackground',
+  'ivorylight': 'secondaryGroupedBackground',
+  'panel': 'secondaryGroupedBackground',
+  'grouped': 'groupedBackground',
+  'ink': 'label',
+  'text': 'label',
+  'slatedark': 'label',
+  'muted': 'secondaryLabel',
+  'secondaryink': 'secondaryLabel',
+  'clouddark': 'secondaryLabel',
+  'dim': 'tertiaryLabel',
+  'tertiaryink': 'tertiaryLabel',
+  'cloudmedium': 'tertiaryLabel',
+  'hairline': 'separator',
+  'stone': 'separator',
+  'highlight': 'fill',
+  'oatwarm': 'fill',
+  'playerbar': 'glassStrong',
+  'playersurface': 'glassStrong',
+  'glassstrong': 'glassStrong',
+  'glass': 'glass',
+  'clay': 'accent',
+  'accent': 'accent',
+};
+
+/// Resolves a skin colour key (slot or alias, case-insensitive) to a slot.
+String? canonicalColorSlot(Object? name) {
+  if (name is! String) return null;
+  final key = name.trim().toLowerCase();
+  if (key.isEmpty) return null;
+  if (skinColorSlots.contains(name.trim())) return name.trim();
+  final alias = skinColorAliases[key];
+  if (alias != null) return alias;
+  for (final slot in skinColorSlots) {
+    if (slot.toLowerCase() == key) return slot;
+  }
+  return null;
+}
+
+/// Parses `#rgb`, `#rrggbb`, `#aarrggbb`, `0xAARRGGBB` or an integer ARGB.
+Color? parseSkinColor(Object? value) {
+  if (value is num) {
+    final int argb = value.toInt();
+    if (argb < 0 || argb > 0xFFFFFFFF) return null;
+    return Color(argb);
+  }
+  if (value is! String) return null;
+  var text = value.trim();
+  if (text.isEmpty) return null;
+  if (text.startsWith('#')) text = text.substring(1);
+  if (text.startsWith('0x') || text.startsWith('0X')) text = text.substring(2);
+  if (text.length == 3) {
+    text = text.split('').map((c) => '$c$c').join();
+  }
+  if (text.length == 6) text = 'FF$text';
+  if (text.length != 8) return null;
+  final int? parsed = int.tryParse(text, radix: 16);
+  if (parsed == null) return null;
+  return Color(parsed);
+}
+
+/// Parses the `colors` map of a skin; unknown keys and bad values are ignored.
+Map<String, Color> parseSkinColors(Object? raw) {
+  if (raw is! Map) return const <String, Color>{};
+  final out = <String, Color>{};
+  for (final entry in raw.entries) {
+    final slot = canonicalColorSlot(entry.key);
+    final color = parseSkinColor(entry.value);
+    if (slot == null || color == null) continue;
+    out[slot] = color;
+  }
+  return out;
+}
+
+/// `#AARRGGBB`, the format [parseSkinColor] accepts back.
+String formatSkinColor(Color color) =>
+    '#${color.toARGB32().toRadixString(16).padLeft(8, '0').toUpperCase()}';
+
+
+/// Normalises `backgroundPlayMode`; unknown values mean "keep the user setting".
+String skinMode(Object? value) {
+  if (value is! String) return '';
+  switch (value.trim()) {
+    case 'off':
+    case 'none':
+      return 'off';
+    case 'nowPlayingStatic':
+    case 'static':
+      return 'nowPlayingStatic';
+    case 'nowPlayingDynamic':
+    case 'dynamic':
+      return 'nowPlayingDynamic';
+    default:
+      return '';
+  }
+}
+
 @immutable
 class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   const LazerThemeTokens({
@@ -40,7 +177,29 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     this.lyricFocusScaleDelta = 3,
     this.controlRadius = 12,
     this.glassBlurSigma = 16,
+    this.colors = const <String, Color>{},
+    this.darkColors = const <String, Color>{},
+    this.railWidth = 0,
+    this.playerBarHeight = 0,
+    this.compactPlayerBarHeight = 0,
+    this.cornerScale = 1,
+    this.nowPlayingArtworkMax = 0,
+    this.nowPlayingArtworkMin = 0,
+    this.nowPlayingArtworkFraction = 0,
+    this.nowPlayingSidePadding = 0,
+    this.nowPlayingSidePaddingMax = 0,
+    this.nowPlayingTitleSize = 0,
+    this.nowPlayingSubtitleSize = 0,
+    this.nowPlayingMetaSize = 0,
+    this.nowPlayingDockHeight = 0,
+    this.nowPlayingCoverRadius = 0,
+    this.backgroundOpacity = 1,
+    this.backgroundBlurSigma = -1,
+    this.backgroundVeilAlpha = -1,
+    this.backgroundPlayMode = '',
+    this.artworkRadius = 0,
   });
+
 
   final String id;
   final String name;
@@ -75,7 +234,175 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   final double controlRadius;
   final double glassBlurSigma;
 
+  /// Semantic colour overrides keyed by [skinColorSlots]. Empty keeps the
+  /// built-in palette; aliases are normalised by [parseSkinColors].
+  final Map<String, Color> colors;
+
+  /// Colour overrides used when the host renders its dark theme. Empty keeps
+  /// [colors] for both brightnesses, which is what a light-only skin wants.
+  final Map<String, Color> darkColors;
+
+  /// Sidebar rail width in logical pixels; `0` keeps the adaptive metric.
+  final double railWidth;
+
+  /// Desktop player-bar minimum height; `0` keeps the built-in 92.
+  final double playerBarHeight;
+
+  /// Compact player-bar minimum height; `0` keeps the built-in 56/60.
+  final double compactPlayerBarHeight;
+
+  /// 全局圆角强度，0 = 全直角，1 = 主题原本的圆角。
+  ///
+  /// 用户可以在设置里选择「跟随主题设置」用这个值，或改用自己的滑块。
+  /// 所有 BorderRadius 都乘上它（见 theme/shape_scale.dart）。
+  final double cornerScale;
+
+  /// Widest artwork square on the listening canvas; `0` keeps 440.
+  final double nowPlayingArtworkMax;
+
+  /// Narrowest artwork square; `0` keeps 240.
+  final double nowPlayingArtworkMin;
+
+  /// Share of the canvas the artwork column takes; `0` keeps .34.
+  final double nowPlayingArtworkFraction;
+
+  /// Base horizontal padding of the listening canvas; `0` keeps 28.
+  final double nowPlayingSidePadding;
+
+  /// Upper clamp of that padding; `0` keeps 80.
+  final double nowPlayingSidePaddingMax;
+
+  /// Track title size on the listening canvas; `0` keeps the built-in ramp.
+  final double nowPlayingTitleSize;
+
+  /// Translator line size; `0` keeps the built-in ramp.
+  final double nowPlayingSubtitleSize;
+
+  /// Artist / album line size; `0` keeps the built-in ramp.
+  final double nowPlayingMetaSize;
+
+  /// Height of the transport dock; `0` keeps the built-in metric.
+  final double nowPlayingDockHeight;
+
+  /// Artwork corner radius on the listening canvas; `0` is square.
+  final double nowPlayingCoverRadius;
+
+  /// Artwork corner radius everywhere else; `0` is square.
+  final double artworkRadius;
+
+  /// Opacity of the painted backdrop, 1 keeps it fully drawn.
+  final double backgroundOpacity;
+
+  /// Backdrop blur; negative keeps the host preference, `0` disables it.
+  final double backgroundBlurSigma;
+
+  /// Strength of the veil painted over the backdrop; negative keeps the host
+  /// default (.60), `1` hides the backdrop completely.
+  final double backgroundVeilAlpha;
+
+  /// Backdrop mode the skin wants: `''` keeps the user setting, `off` paints a
+  /// flat canvas (what a paper design needs), `nowPlayingStatic` /
+  /// `nowPlayingDynamic` keep the album flow.
+  final String backgroundPlayMode;
+
   static const LazerThemeTokens apple = LazerThemeTokens();
+
+  /// 内置主题：Mio。
+  ///
+  /// 客户端自带的一号主题（默认选它）。名字是代号，不是皮肤来源：几何与
+  /// 调色板见 [builtinThemes]，它不走 Lua 插件。
+  static const LazerThemeTokens mio = LazerThemeTokens(
+    id: 'builtin.mio',
+    name: 'Mio',
+    version: 1,
+    colors: <String, Color>{
+      'background': Color(0xFFF0EEE6),
+      'secondaryBackground': Color(0xFFFAF9F5),
+      'tertiaryBackground': Color(0xFFFAF9F5),
+      'groupedBackground': Color(0xFFF0EEE6),
+      'secondaryGroupedBackground': Color(0xFFFAF9F5),
+      'tertiaryGroupedBackground': Color(0xFFFAF9F5),
+      'label': Color(0xFF141413),
+      'secondaryLabel': Color(0xFF87867F),
+      'tertiaryLabel': Color(0xFFB0AEA5),
+      'quaternaryLabel': Color(0xFFCCCBC8),
+      'fill': Color(0xFFE3DACC),
+      'secondaryFill': Color(0xFFF5E3C7),
+      'tertiaryFill': Color(0xFFFAF9F5),
+      'separator': Color(0xFFCCCBC8),
+      'opaqueSeparator': Color(0xFF87867F),
+      'accent': Color(0xFFD97757),
+      'accentSoft': Color(0x26D97757),
+      'glass': Color(0xE6FAF9F5),
+      'glassStrong': Color(0xF2141413),
+    },
+    darkColors: <String, Color>{
+      'background': Color(0xFF191918),
+      'secondaryBackground': Color(0xFF242423),
+      'tertiaryBackground': Color(0xFF242423),
+      'groupedBackground': Color(0xFF191918),
+      'secondaryGroupedBackground': Color(0xFF242423),
+      'tertiaryGroupedBackground': Color(0xFF242423),
+      'label': Color(0xFFF0EEE6),
+      'secondaryLabel': Color(0xFFB5B2A9),
+      'tertiaryLabel': Color(0xFFA8A69E),
+      'quaternaryLabel': Color(0xFF454540),
+      'fill': Color(0xFF34312D),
+      'secondaryFill': Color(0xFF3E3329),
+      'tertiaryFill': Color(0xFF242423),
+      'separator': Color(0xFF454540),
+      'opaqueSeparator': Color(0xFFB5B2A9),
+      'accent': Color(0xFFE68E70),
+      'accentSoft': Color(0x26E68E70),
+      'glass': Color(0xE6242423),
+      'glassStrong': Color(0xF2141413),
+    },
+    groupedCardRadius: 0,
+    listTileMinHeight: 64,
+    listTileVerticalPadding: 10,
+    pageTitleCompactSize: 40,
+    pageTitleRegularSize: 56,
+    sectionHeaderSize: 12,
+    displayWeight: 400,
+    headingWeight: 700,
+    titleWeight: 600,
+    bodyWeight: 400,
+    labelWeight: 600,
+    lyricWeight: 500,
+    lyricTranslationWeight: 400,
+    lyricTranslationScale: .73,
+    lyricLineHeight: 1.5,
+    lyricTranslationLineHeight: 1.45,
+    lyricTranslationGap: 5,
+    lyricDimAlpha: .48,
+    lyricTranslationAlpha: .48,
+    lyricStaggerDelay: .05,
+    lyricStaggerDecay: 1.05,
+    lyricFocusScaleDelta: 3,
+    controlRadius: 12,
+    glassBlurSigma: 0,
+    railWidth: 232,
+    playerBarHeight: 100,
+    compactPlayerBarHeight: 72,
+    nowPlayingArtworkFraction: .34,
+    nowPlayingArtworkMin: 240,
+    nowPlayingArtworkMax: 440,
+    nowPlayingSidePadding: 32,
+    nowPlayingSidePaddingMax: 32,
+    nowPlayingTitleSize: 30,
+    nowPlayingSubtitleSize: 15,
+    nowPlayingMetaSize: 18,
+    nowPlayingCoverRadius: 0,
+    backgroundOpacity: 1,
+    backgroundBlurSigma: 0,
+    backgroundVeilAlpha: 1,
+    backgroundPlayMode: 'off',
+  );
+
+  /// 客户端自带、可以在设置里挑的主题，按显示顺序。
+  ///
+  /// 默认只有 [mio] 一个；Lua 皮肤不走这张表（它们由插件管理器提供）。
+  static const List<LazerThemeTokens> builtinThemes = <LazerThemeTokens>[mio];
 
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
@@ -111,6 +438,33 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       'lyricFocusScaleDelta': lyricFocusScaleDelta,
       'controlRadius': controlRadius,
       'glassBlurSigma': glassBlurSigma,
+      'colors': <String, Object?>{
+        for (final entry in colors.entries)
+          entry.key: formatSkinColor(entry.value),
+      },
+      'darkColors': <String, Object?>{
+        for (final entry in darkColors.entries)
+          entry.key: formatSkinColor(entry.value),
+      },
+      'railWidth': railWidth,
+      'playerBarHeight': playerBarHeight,
+      'compactPlayerBarHeight': compactPlayerBarHeight,
+      'cornerScale': cornerScale,
+      'nowPlayingArtworkMax': nowPlayingArtworkMax,
+      'nowPlayingArtworkMin': nowPlayingArtworkMin,
+      'nowPlayingArtworkFraction': nowPlayingArtworkFraction,
+      'nowPlayingSidePadding': nowPlayingSidePadding,
+      'nowPlayingSidePaddingMax': nowPlayingSidePaddingMax,
+      'nowPlayingTitleSize': nowPlayingTitleSize,
+      'nowPlayingSubtitleSize': nowPlayingSubtitleSize,
+      'nowPlayingMetaSize': nowPlayingMetaSize,
+      'nowPlayingDockHeight': nowPlayingDockHeight,
+      'nowPlayingCoverRadius': nowPlayingCoverRadius,
+      'artworkRadius': artworkRadius,
+      'backgroundOpacity': backgroundOpacity,
+      'backgroundBlurSigma': backgroundBlurSigma,
+      'backgroundVeilAlpha': backgroundVeilAlpha,
+      'backgroundPlayMode': backgroundPlayMode,
     },
   };
 
@@ -207,6 +561,35 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       lyricFocusScaleDelta: number('lyricFocusScaleDelta', 3, min: .5, max: 20),
       controlRadius: number('controlRadius', 12, max: 40),
       glassBlurSigma: number('glassBlurSigma', 16, max: 48),
+      colors: parseSkinColors(elements['colors']),
+      darkColors: parseSkinColors(elements['darkColors']),
+      railWidth: number('railWidth', 0, max: 420),
+      playerBarHeight: number('playerBarHeight', 0, max: 200),
+      compactPlayerBarHeight: number('compactPlayerBarHeight', 0, max: 160),
+      cornerScale: number('cornerScale', 1, max: 2),
+      nowPlayingArtworkMax: number('nowPlayingArtworkMax', 0, max: 1200),
+      nowPlayingArtworkMin: number('nowPlayingArtworkMin', 0, max: 1200),
+      nowPlayingArtworkFraction: number(
+        'nowPlayingArtworkFraction',
+        0,
+        max: .9,
+      ),
+      nowPlayingSidePadding: number('nowPlayingSidePadding', 0, max: 200),
+      nowPlayingSidePaddingMax: number(
+        'nowPlayingSidePaddingMax',
+        0,
+        max: 400,
+      ),
+      nowPlayingTitleSize: number('nowPlayingTitleSize', 0, max: 96),
+      nowPlayingSubtitleSize: number('nowPlayingSubtitleSize', 0, max: 72),
+      nowPlayingMetaSize: number('nowPlayingMetaSize', 0, max: 72),
+      nowPlayingDockHeight: number('nowPlayingDockHeight', 0, max: 240),
+      nowPlayingCoverRadius: number('nowPlayingCoverRadius', 0, max: 64),
+      artworkRadius: number('artworkRadius', 0, max: 64),
+      backgroundOpacity: number('backgroundOpacity', 1, max: 1),
+      backgroundBlurSigma: number('backgroundBlurSigma', -1, min: -1, max: 96),
+      backgroundVeilAlpha: number('backgroundVeilAlpha', -1, min: -1, max: 1),
+      backgroundPlayMode: skinMode(elements['backgroundPlayMode']),
     );
   }
 
@@ -247,6 +630,27 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     double? lyricFocusScaleDelta,
     double? controlRadius,
     double? glassBlurSigma,
+    Map<String, Color>? colors,
+    Map<String, Color>? darkColors,
+    double? railWidth,
+    double? playerBarHeight,
+    double? compactPlayerBarHeight,
+    double? cornerScale,
+    double? nowPlayingArtworkMax,
+    double? nowPlayingArtworkMin,
+    double? nowPlayingArtworkFraction,
+    double? nowPlayingSidePadding,
+    double? nowPlayingSidePaddingMax,
+    double? nowPlayingTitleSize,
+    double? nowPlayingSubtitleSize,
+    double? nowPlayingMetaSize,
+    double? nowPlayingDockHeight,
+    double? nowPlayingCoverRadius,
+    double? artworkRadius,
+    double? backgroundOpacity,
+    double? backgroundBlurSigma,
+    double? backgroundVeilAlpha,
+    String? backgroundPlayMode,
   }) => LazerThemeTokens(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -285,6 +689,33 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     lyricFocusScaleDelta: lyricFocusScaleDelta ?? this.lyricFocusScaleDelta,
     controlRadius: controlRadius ?? this.controlRadius,
     glassBlurSigma: glassBlurSigma ?? this.glassBlurSigma,
+    colors: colors ?? this.colors,
+    darkColors: darkColors ?? this.darkColors,
+    railWidth: railWidth ?? this.railWidth,
+    playerBarHeight: playerBarHeight ?? this.playerBarHeight,
+    compactPlayerBarHeight:
+        compactPlayerBarHeight ?? this.compactPlayerBarHeight,
+    cornerScale: cornerScale ?? this.cornerScale,
+    nowPlayingArtworkMax: nowPlayingArtworkMax ?? this.nowPlayingArtworkMax,
+    nowPlayingArtworkMin: nowPlayingArtworkMin ?? this.nowPlayingArtworkMin,
+    nowPlayingArtworkFraction:
+        nowPlayingArtworkFraction ?? this.nowPlayingArtworkFraction,
+    nowPlayingSidePadding:
+        nowPlayingSidePadding ?? this.nowPlayingSidePadding,
+    nowPlayingSidePaddingMax:
+        nowPlayingSidePaddingMax ?? this.nowPlayingSidePaddingMax,
+    nowPlayingTitleSize: nowPlayingTitleSize ?? this.nowPlayingTitleSize,
+    nowPlayingSubtitleSize:
+        nowPlayingSubtitleSize ?? this.nowPlayingSubtitleSize,
+    nowPlayingMetaSize: nowPlayingMetaSize ?? this.nowPlayingMetaSize,
+    nowPlayingDockHeight: nowPlayingDockHeight ?? this.nowPlayingDockHeight,
+    nowPlayingCoverRadius:
+        nowPlayingCoverRadius ?? this.nowPlayingCoverRadius,
+    artworkRadius: artworkRadius ?? this.artworkRadius,
+    backgroundOpacity: backgroundOpacity ?? this.backgroundOpacity,
+    backgroundBlurSigma: backgroundBlurSigma ?? this.backgroundBlurSigma,
+    backgroundVeilAlpha: backgroundVeilAlpha ?? this.backgroundVeilAlpha,
+    backgroundPlayMode: backgroundPlayMode ?? this.backgroundPlayMode,
   );
 
   @override
@@ -361,6 +792,57 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       ),
       controlRadius: mix(controlRadius, other.controlRadius),
       glassBlurSigma: mix(glassBlurSigma, other.glassBlurSigma),
+      colors: t < .5 ? colors : other.colors,
+      darkColors: t < .5 ? darkColors : other.darkColors,
+      railWidth: mix(railWidth, other.railWidth),
+      playerBarHeight: mix(playerBarHeight, other.playerBarHeight),
+      compactPlayerBarHeight: mix(
+        compactPlayerBarHeight,
+        other.compactPlayerBarHeight,
+      ),
+      cornerScale: mix(cornerScale, other.cornerScale),
+      nowPlayingArtworkMax: mix(
+        nowPlayingArtworkMax,
+        other.nowPlayingArtworkMax,
+      ),
+      nowPlayingArtworkMin: mix(
+        nowPlayingArtworkMin,
+        other.nowPlayingArtworkMin,
+      ),
+      nowPlayingArtworkFraction: mix(
+        nowPlayingArtworkFraction,
+        other.nowPlayingArtworkFraction,
+      ),
+      nowPlayingSidePadding: mix(
+        nowPlayingSidePadding,
+        other.nowPlayingSidePadding,
+      ),
+      nowPlayingSidePaddingMax: mix(
+        nowPlayingSidePaddingMax,
+        other.nowPlayingSidePaddingMax,
+      ),
+      nowPlayingTitleSize: mix(nowPlayingTitleSize, other.nowPlayingTitleSize),
+      nowPlayingSubtitleSize: mix(
+        nowPlayingSubtitleSize,
+        other.nowPlayingSubtitleSize,
+      ),
+      nowPlayingMetaSize: mix(nowPlayingMetaSize, other.nowPlayingMetaSize),
+      nowPlayingDockHeight: mix(
+        nowPlayingDockHeight,
+        other.nowPlayingDockHeight,
+      ),
+      nowPlayingCoverRadius: mix(
+        nowPlayingCoverRadius,
+        other.nowPlayingCoverRadius,
+      ),
+      artworkRadius: mix(artworkRadius, other.artworkRadius),
+      backgroundOpacity: mix(backgroundOpacity, other.backgroundOpacity),
+      backgroundBlurSigma: mix(backgroundBlurSigma, other.backgroundBlurSigma),
+      backgroundVeilAlpha: mix(
+        backgroundVeilAlpha,
+        other.backgroundVeilAlpha,
+      ),
+      backgroundPlayMode: t < .5 ? backgroundPlayMode : other.backgroundPlayMode,
     );
   }
 
@@ -400,6 +882,9 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
 class LazerThemeRegistry {
   LazerThemeRegistry({Iterable<LazerThemeTokens> themes = const []}) {
     register(LazerThemeTokens.apple);
+    for (final theme in LazerThemeTokens.builtinThemes) {
+      register(theme);
+    }
     for (final theme in themes) {
       register(theme);
     }

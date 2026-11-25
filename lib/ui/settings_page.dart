@@ -59,6 +59,8 @@ import 'plugin_settings.dart';
 import 'developer_console_page.dart';
 import 'custom_image_backdrop.dart';
 import 'web_egress_settings.dart';
+import '../theme/shape_scale.dart';
+import '../theme/lazer_theme.dart';
 
 // Preferences may have been restored from another platform. Keep a portable
 // theme fallback selected rather than an unavailable dropdown entry.
@@ -66,6 +68,64 @@ AppBackgroundMode _availableBackgroundMode(AppBackgroundMode mode) =>
     mode == AppBackgroundMode.windowsMica && !supportsWindowsMica
     ? AppBackgroundMode.off
     : mode;
+
+/// 设置页显示的圆角数值（px）：跟随主题时是皮肤自己的卡片圆角，
+/// 自行调节时是用户的滑块 —— 显示的必须是真正生效的那个数。
+double _cornerPx(AppState state, BuildContext context) => AppleShape.cardPxFor(
+  followTheme: state.cornerFollowsTheme,
+  customPx: state.cornerPx,
+  theme: LazerThemeTokens.of(context),
+);
+
+/// 「跟随插件皮肤」在下拉里的哨兵值：String 型下拉不好放 null。
+const String _kFollowPluginSkin = '__plugin__';
+
+/// 已启用的插件皮肤名字（用来决定要不要给出「跟随插件皮肤」那一项）。
+List<String> _pluginSkins(AppState state) => <String>[
+  for (final plugin in state.pluginManager.plugins)
+    if (plugin.enabled && plugin.theme != null) plugin.theme!.name,
+];
+
+/// 两个「玻璃药丸」部件的圆角显示值。
+enum _CornerPart { capsule, navBar }
+
+/// 药丸部件真正生效的圆角（px）。
+///
+/// 和卡片一样：跟随某一来源时显示那个来源算出的数，手动时显示用户滑块。
+/// 「跟随全局」用的是上面那行「圆角大小」显示的同一个数，不做任何换算 ——
+/// 全局 6 px，胶囊和底边栏的读数就都是 6 px。
+double _partPx(
+  AppState state,
+  BuildContext context, {
+  required _CornerPart part,
+}) {
+  final LazerThemeTokens ui = LazerThemeTokens.of(context);
+  final double globalPx = AppleShape.cardPxFor(
+    followTheme: state.cornerFollowsTheme,
+    customPx: state.cornerPx,
+    theme: ui,
+  );
+  return AppleShape.partPxFor(
+    source: part == _CornerPart.capsule
+        ? state.capsuleCornerSource
+        : state.navBarCornerSource,
+    customPx: part == _CornerPart.capsule
+        ? state.capsuleCornerPx
+        : state.navBarCornerPx,
+    maxPx: part == _CornerPart.capsule
+        ? AppleShape.capsulePxMax
+        : AppleShape.navBarPxMax,
+    themeScale: ui.cornerScale,
+    globalPx: globalPx,
+  );
+}
+
+/// 「（主题）」「（全局）」这类后缀：只在跟随来源时出现，手动时留空。
+String _partSuffix(CornerSource source) => switch (source) {
+  CornerSource.theme => '（主题）',
+  CornerSource.global => '（全局）',
+  CornerSource.manual => '',
+};
 
 double _settingsTopInset(BuildContext context, double topInset) {
   if (topInset <= 0 ||
@@ -264,7 +324,7 @@ class _SettingsCategoryHome extends StatelessWidget {
                           child: AppleGroupedCard(
                             margin: EdgeInsets.zero,
                             child: TvFocusHighlight(
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
                               child: AppleListTile(
                                 minHeight: compact
                                     ? (twoColumns ? 88 : 76)
@@ -902,6 +962,40 @@ class _SettingsOverview extends StatelessWidget {
                     child: Column(
                       children: <Widget>[
                         _AppSettingRow(
+                          key: const ValueKey('theme-skin-setting'),
+                          label: '主题风格',
+                          subtitle: state.builtinTheme == null
+                              ? '使用已启用的插件皮肤'
+                              : '内置主题，不依赖插件',
+                          trailing: SettingsChoice<String>(
+                            key: ValueKey<String>(
+                              state.builtinThemeId ?? 'plugin',
+                            ),
+                            value: state.builtinThemeId ?? _kFollowPluginSkin,
+                            items: <DropdownMenuItem<String>>[
+                              for (final LazerThemeTokens theme
+                                  in LazerThemeTokens.builtinThemes)
+                                DropdownMenuItem<String>(
+                                  value: theme.id,
+                                  child: TrText(theme.name),
+                                ),
+                              if (_pluginSkins(state).isNotEmpty)
+                                const DropdownMenuItem<String>(
+                                  value: _kFollowPluginSkin,
+                                  child: TrText('跟随插件皮肤'),
+                                ),
+                            ],
+                            onChanged: (String? value) {
+                              if (value == null) return;
+                              unawaited(
+                                state.setBuiltinTheme(
+                                  value == _kFollowPluginSkin ? null : value,
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        _AppSettingRow(
                           label: '主题',
                           subtitle: switch (state.themeMode) {
                             ThemeMode.system => '跟随系统',
@@ -931,6 +1025,161 @@ class _SettingsOverview extends StatelessWidget {
                               }
                             },
                           ),
+                        ),
+                        _AppSettingRow(
+                          key: const ValueKey('corner-mode-setting'),
+                          label: '圆角设置',
+                          subtitle: '选择主题圆角或自行调节',
+                          trailing: SettingsChoice<bool>(
+                            key: const ValueKey('corner-mode-choice'),
+                            value: state.cornerFollowsTheme,
+                            items: const <DropdownMenuItem<bool>>[
+                              DropdownMenuItem<bool>(
+                                value: true,
+                                child: TrText('跟随主题设置'),
+                              ),
+                              DropdownMenuItem<bool>(
+                                value: false,
+                                child: TrText('自行调节'),
+                              ),
+                            ],
+                            onChanged: (bool? value) {
+                              if (value != null) {
+                                unawaited(state.setCornerFollowsTheme(value));
+                              }
+                            },
+                          ),
+                        ),
+                        // 滑块一直在：跟随主题时它显示主题的角（拖动即切到自行调节），
+                        // 自行调节时显示用户的 px。以前它只在「自行调节」下出现，
+                        // 结果大部分用户根本看不到这个设置。
+                        _AppSliderRow(
+                          key: const ValueKey('corner-strength-slider'),
+                          label: '圆角大小',
+                          valueText:
+                              '${_cornerPx(state, context).round()} px'
+                              '${state.cornerFollowsTheme ? '（主题）' : ''}',
+                          value: _cornerPx(state, context),
+                          min: kCornerPxMin,
+                          max: kCornerPxMax,
+                          divisions: kCornerPxMax.round(),
+                          onChanged: (double value) => unawaited(
+                            state.setCornerPxAndFollow(value),
+                          ),
+                          action: state.cornerFollowsTheme
+                              ? null
+                              : SpringTextButton(
+                                  key: const ValueKey('corner-px-reset'),
+                                  onPressed: () => unawaited(
+                                    state.setCornerPx(kCornerPxDefault),
+                                  ),
+                                  child: const TrText('恢复默认'),
+                                ),
+                        ),
+                        // 窗口胶囊与移动端底边栏是整块玻璃药丸：满圆半径由自身
+                        // 高度决定（40 dp 的胶囊 = 20 px，56 dp 的底边栏 = 28 px），
+                        // 所以它们比全局多一档「跟随全局」，并且各有自己的 px。
+                        _AppSettingRow(
+                          key: const ValueKey('capsule-corner-source'),
+                          label: '窗口胶囊圆角',
+                          subtitle: 'Inline 内联标题栏右上角那颗玻璃胶囊',
+                          trailing: SettingsChoice<CornerSource>(
+                            key: ValueKey<CornerSource>(
+                              state.capsuleCornerSource,
+                            ),
+                            value: state.capsuleCornerSource,
+                            items: <DropdownMenuItem<CornerSource>>[
+                              for (final CornerSource source
+                                  in CornerSource.values)
+                                DropdownMenuItem<CornerSource>(
+                                  value: source,
+                                  child: TrText(source.label),
+                                ),
+                            ],
+                            onChanged: (CornerSource? value) {
+                              if (value != null) {
+                                unawaited(
+                                  state.setCapsuleCornerSource(value),
+                                );
+                              }
+                            },
+                          ),
+                        ),
+                        _AppSliderRow(
+                          key: const ValueKey('capsule-corner-slider'),
+                          label: '胶囊圆角大小',
+                          valueText:
+                              '${_partPx(state, context, part: _CornerPart.capsule).round()} px'
+                              '${_partSuffix(state.capsuleCornerSource)}',
+                          value: _partPx(
+                            state,
+                            context,
+                            part: _CornerPart.capsule,
+                          ),
+                          min: 0,
+                          max: AppleShape.capsulePxMax,
+                          divisions: AppleShape.capsulePxMax.round(),
+                          onChanged: (double value) => unawaited(
+                            state.setCapsuleCornerPxAndManual(value),
+                          ),
+                          action: state.capsuleCornerSource == CornerSource.manual
+                              ? SpringTextButton(
+                                  key: const ValueKey('capsule-corner-reset'),
+                                  onPressed: () => unawaited(
+                                    state.setCapsuleCornerPx(
+                                      AppleShape.capsulePxDefault,
+                                    ),
+                                  ),
+                                  child: const TrText('恢复默认'),
+                                )
+                              : null,
+                        ),
+                        _AppSettingRow(
+                          key: const ValueKey('navbar-corner-source'),
+                          label: '底边栏圆角',
+                          subtitle: '手机 / 平板底部那条玻璃导航药丸',
+                          trailing: SettingsChoice<CornerSource>(
+                            key: ValueKey<CornerSource>(state.navBarCornerSource),
+                            value: state.navBarCornerSource,
+                            items: <DropdownMenuItem<CornerSource>>[
+                              for (final CornerSource source
+                                  in CornerSource.values)
+                                DropdownMenuItem<CornerSource>(
+                                  value: source,
+                                  child: TrText(source.label),
+                                ),
+                            ],
+                            onChanged: (CornerSource? value) {
+                              if (value != null) {
+                                unawaited(state.setNavBarCornerSource(value));
+                              }
+                            },
+                          ),
+                        ),
+                        _AppSliderRow(
+                          key: const ValueKey('navbar-corner-slider'),
+                          label: '底边栏圆角大小',
+                          valueText:
+                              '${_partPx(state, context, part: _CornerPart.navBar).round()} px'
+                              '${_partSuffix(state.navBarCornerSource)}',
+                          value: _partPx(state, context, part: _CornerPart.navBar),
+                          min: 0,
+                          max: AppleShape.navBarPxMax,
+                          divisions: AppleShape.navBarPxMax.round(),
+                          onChanged: (double value) => unawaited(
+                            state.setNavBarCornerPxAndManual(value),
+                          ),
+                          action: state.navBarCornerSource == CornerSource.manual
+                              ? SpringTextButton(
+                                  key: const ValueKey('navbar-corner-reset'),
+                                  onPressed: () => unawaited(
+                                    state.setNavBarCornerPx(
+                                      AppleShape.navBarPxDefault,
+                                    ),
+                                  ),
+                                  child: const TrText('恢复默认'),
+                                )
+                              : null,
                         ),
                         _AppSettingRow(
                           label: '语言',
@@ -1740,7 +1989,7 @@ class _SettingsOverview extends StatelessWidget {
                           ),
                           const SizedBox(height: 14),
                           ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
                             child: Image.asset(
                               'assets/antiresell.png',
                               width: double.infinity,
@@ -1966,7 +2215,7 @@ class _VersionSecretTileState extends State<_VersionSecretTile> {
       subtitle: context.tr('提交 ${BuildInfo.shortCommit}'),
       onTap: _tap,
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(7 * AppleShape.scaleOf(context)),
         child: Image.asset(
           'assets/app_icon.png',
           width: 30,
@@ -2182,7 +2431,7 @@ class _AppSliderRow extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return TvFocusHighlight(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
       child: Container(
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: apple.separator, width: .5)),
@@ -2360,7 +2609,7 @@ class _BackgroundImageCropDialogState
                 final double width = constraints.maxWidth;
                 final double height = width * .56;
                 return ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(14 * AppleShape.scaleOf(context)),
                   child: SizedBox(
                     width: width,
                     height: height,
@@ -2705,7 +2954,7 @@ class _AppAccentSwatch extends StatelessWidget {
         cursor: SystemMouseCursors.click,
         child: TvTapTarget(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(15 * AppleShape.scaleOf(context)),
           focusScale: 1.12,
           child: GestureDetector(
             onTap: onTap,
@@ -2772,7 +3021,7 @@ class _AppAccentDialogState extends State<_AppAccentDialog>
                 height: 54,
                 decoration: BoxDecoration(
                   color: _color,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
                   border: Border.all(color: apple.separator, width: .5),
                 ),
               ),
@@ -2942,7 +3191,7 @@ class _AppGradientSlider extends StatelessWidget {
                     height: 14,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(colors: colors),
-                      borderRadius: BorderRadius.circular(7),
+                      borderRadius: BorderRadius.circular(7 * AppleShape.scaleOf(context)),
                       border: Border.all(color: apple.separator, width: .5),
                     ),
                   ),

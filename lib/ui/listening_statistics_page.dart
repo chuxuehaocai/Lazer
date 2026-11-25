@@ -11,6 +11,7 @@ import '../widgets/apple_ui.dart';
 import '../widgets/settings_detail.dart';
 import '../widgets/ui_scaling.dart';
 import 'widgets.dart';
+import '../theme/shape_scale.dart';
 
 /// The device's own listening history, including local and streamed music.
 class AppListeningStatisticsPage extends StatefulWidget {
@@ -385,7 +386,7 @@ class _HourlyCardState extends State<_HourlyCard>
                 excludeSemantics: true,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(6 * AppleShape.scaleOf(context)),
                     border: Border.all(
                       color: _focused ? apple.accent : Colors.transparent,
                     ),
@@ -432,9 +433,7 @@ class _HourlyCardState extends State<_HourlyCard>
                                               : apple.accent.withValues(
                                                   alpha: .38,
                                                 ),
-                                          borderRadius: BorderRadius.circular(
-                                            3,
-                                          ),
+                                          borderRadius: BorderRadius.circular(3 * AppleShape.scaleOf(context)),
                                         ),
                                       ),
                                     ),

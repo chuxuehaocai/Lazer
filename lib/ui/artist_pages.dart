@@ -16,6 +16,8 @@ import '../widgets/catalog_links.dart';
 import '../widgets/cover_transition.dart';
 import '../widgets/interaction_feedback.dart';
 import 'widgets.dart';
+import '../theme/lazer_theme.dart';
+import '../theme/shape_scale.dart';
 
 /// Apple Music-inspired artist overview that lives inside the shell's content
 /// pane. It deliberately keeps the hero compact and lets releases carry the
@@ -292,6 +294,7 @@ class _ArtistHero extends StatelessWidget {
               url: artist.coverUrl,
               size: 180,
               radius: 0,
+              followCornerSetting: false,
               iconSize: 50,
             ),
           ),
@@ -355,7 +358,9 @@ class _ArtistReleaseShelf extends StatelessWidget {
             builder: (GlobalKey coverKey) => SizedBox(
               width: 160,
               child: InkWell(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(
+                  AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)),
+                ),
                 onTap: feedbackAction(context, () {
                   rememberCoverTransition('playlist:${album.id}', coverKey);
                   unawaited(openAlbumDetails(context, state, album));
@@ -559,7 +564,9 @@ class _AppArtistReleasesPageState extends State<AppArtistReleasesPage>
                         return Material(
                           color: Colors.transparent,
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(
+                  AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)),
+                ),
                             onTap: feedbackAction(context, () {
                               rememberCoverTransition(
                                 'playlist:${album.id}',

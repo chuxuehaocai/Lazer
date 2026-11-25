@@ -9,6 +9,7 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import 'download_manager.dart';
+import '../theme/shape_scale.dart';
 
 /// Opens the queue as a dialog on wide screens and as a bottom sheet on phones.
 Future<void> showDownloadQueueSheet(BuildContext context, AppState state) {
@@ -212,7 +213,7 @@ class _DownloadRow extends StatelessWidget {
                 if (task.status == DownloadStatus.downloading) ...<Widget>[
                   const SizedBox(height: 6),
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
+                    borderRadius: BorderRadius.circular(3 * AppleShape.scaleOf(context)),
                     child: LinearProgressIndicator(
                       value: task.progress,
                       minHeight: 4,

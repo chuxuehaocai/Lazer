@@ -15,6 +15,7 @@ import '../widgets/apple_ui.dart';
 import 'local_library.dart';
 import 'local_music_import.dart';
 import 'local_music_scan.dart';
+import '../theme/shape_scale.dart';
 
 /// Runs one import pass and reports it in a snack bar.
 ///
@@ -384,7 +385,7 @@ class _LocalMusicPageState extends State<LocalMusicPage>
       color: apple.tertiaryBackground,
       surfaceTintColor: Colors.transparent,
       elevation: 18,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context))),
       items: <PopupMenuEntry<String>>[
         PopupMenuItem<String>(value: 'play', child: TrText('播放')),
         if (playable[index].isDownload || playable[index].isCache)

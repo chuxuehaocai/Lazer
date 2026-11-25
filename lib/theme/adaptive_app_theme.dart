@@ -5,6 +5,7 @@ import '../state/ui_preferences.dart';
 import '../tv/tv_mode.dart';
 import 'apple_design.dart';
 import 'lazer_theme.dart';
+import 'shape_scale.dart';
 
 /// Applied below UiScaling, above the navigator so pushed pages and dialogs
 /// use the same phone palette as the shell at its effective layout width.
@@ -33,6 +34,12 @@ class AdaptiveAppTheme extends StatelessWidget {
               seedAccent: state.accentSeed,
               fonts: state.fontPreferences,
               ui: state.pluginTheme ?? LazerThemeTokens.apple,
+              // 圆角强度是用户级偏好：跟随主题令牌，或用用户滑块。
+              cornerScale: AppleShape.resolve(
+                followTheme: state.cornerFollowsTheme,
+                customPx: state.cornerPx,
+                theme: state.pluginTheme ?? LazerThemeTokens.apple,
+              ),
             )
           : inherited,
       child: child,

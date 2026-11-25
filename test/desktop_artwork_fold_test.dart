@@ -229,8 +229,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('reduced motion folds without animation', (tester) async {
-    tester.view.physicalSize = const Size(1280, 1000);
+  testWidgets('reduced motion folds without animation', (tester) async {    tester.view.physicalSize = const Size(1280, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final state = AppState();
@@ -249,6 +248,76 @@ void main() {
     expect(folded.center.dx, closeTo(_canvasRect(tester).center.dx, .6));
     await tester.pumpAndSettle();
     expect(_artRect(tester), folded);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  // 竖发丝线属于两栏版式：歌词收起后它必须一起消失（淡出，不是硬切）。
+  //
+  // 线的存在由皮肤给（parchment 的 nowPlayingArtworkFraction > 0 才画分隔线），
+  // 所以这里直接测版式组件，把一条 seek 线交给它。
+  testWidgets('the divider fades out with the lyrics and comes back', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final pane = ValueNotifier(DesktopNowPlayingPane.lyrics);
+    addTearDown(pane.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppleTheme(brightness: Brightness.dark),
+        home: Scaffold(
+          body: ValueListenableBuilder<DesktopNowPlayingPane>(
+            valueListenable: pane,
+            builder: (context, current, _) => DesktopArtworkLayout(
+              paneVisible: current != DesktopNowPlayingPane.none,
+              leftFraction: .34,
+              leftMin: 240,
+              leftMax: 440,
+              columnGap: 32,
+              dividerGap: 16,
+              divider: const SizedBox(
+                key: ValueKey('fold-divider'),
+                width: 1,
+              ),
+              artwork: const ColoredBox(key: _art, color: Colors.blue),
+              pane: const ColoredBox(key: _lyrics, color: Colors.red),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final Finder fade = find.byKey(const ValueKey('desktop-divider-fade'));
+    expect(fade, findsOneWidget);
+    expect(
+      tester.widget<FadeTransition>(fade).opacity.value,
+      closeTo(1, .01),
+      reason: '两栏时线要实',
+    );
+
+    pane.value = DesktopNowPlayingPane.none;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    final double mid = tester.widget<FadeTransition>(fade).opacity.value;
+    expect(mid, lessThan(1), reason: '收起时是淡出，不是瞬间消失');
+    expect(mid, greaterThan(0), reason: '动画还没走完');
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<FadeTransition>(fade).opacity.value,
+      closeTo(0, .01),
+      reason: '歌词不在时线也不该在',
+    );
+
+    pane.value = DesktopNowPlayingPane.lyrics;
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<FadeTransition>(fade).opacity.value,
+      closeTo(1, .01),
+      reason: '展开后线回来',
+    );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

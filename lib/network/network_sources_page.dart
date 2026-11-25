@@ -25,6 +25,7 @@ import 'podcast_pages.dart';
 import 'radio_pages.dart';
 import 'radio_station.dart';
 import 'remote_source.dart';
+import '../theme/shape_scale.dart';
 
 /// 音乐库 → 网络源: the row that opens NAS shares, internet radio and podcast
 /// subscriptions. Kept above the playlists (and available to guests) like
@@ -612,7 +613,7 @@ class _NetworkSourcesPageState extends State<NetworkSourcesPage>
       color: AppleSemanticColors.of(context).tertiaryBackground,
       surfaceTintColor: Colors.transparent,
       elevation: 18,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context))),
       items: <PopupMenuEntry<String>>[
         const PopupMenuItem<String>(value: 'play', child: TrText('播放')),
         const PopupMenuItem<String>(value: 'remove', child: TrText('从索引移除')),
@@ -665,7 +666,7 @@ class _NetworkSourcesPageState extends State<NetworkSourcesPage>
             ])
           TvTapTarget(
             key: ValueKey<String>('network-tab-${entry.$1.name}'),
-            borderRadius: BorderRadius.circular(11),
+            borderRadius: BorderRadius.circular(11 * AppleShape.scaleOf(context)),
             onTap: () => setState(() => _tab = entry.$1),
             child: SpringPress(
               pressedScale: .97,
@@ -682,7 +683,7 @@ class _NetworkSourcesPageState extends State<NetworkSourcesPage>
                         color: _tab == entry.$1
                             ? apple.accentSoft
                             : apple.secondaryGroupedBackground,
-                        borderRadius: BorderRadius.circular(11),
+                        borderRadius: BorderRadius.circular(11 * AppleShape.scaleOf(context)),
                         border: Border.all(color: apple.separator, width: .5),
                       ),
                       child: Row(

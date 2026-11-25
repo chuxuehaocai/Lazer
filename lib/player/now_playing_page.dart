@@ -20,7 +20,9 @@ import '../state/app_state.dart';
 import '../state/media_shortcuts.dart';
 import '../state/song_comments_controller.dart';
 import '../state/ui_preferences.dart';
+import '../theme/adaptive_contrast.dart';
 import '../theme/app_palette.dart';
+import '../theme/lazer_theme.dart';
 import '../theme/apple_design.dart';
 import '../theme/design_tokens.dart';
 import '../theme/paper_widgets.dart';
@@ -44,6 +46,7 @@ import 'desktop_now_playing.dart';
 import 'artwork_lyrics_layout.dart';
 import '../theme/font_preferences.dart';
 import 'osu_search.dart';
+import '../theme/shape_scale.dart';
 
 typedef _PlayerSheetAction = FutureOr<void> Function();
 
@@ -314,7 +317,8 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   Color? _themeSeed;
   FontPreferences? _themeFonts;
   ThemeData? _cachedPlayerTheme;
-  (Color, FontPreferences, bool)? _cachedPlayerThemeKey;
+  (Color, FontPreferences, bool, String, int, Brightness, bool, double)?
+  _cachedPlayerThemeKey;
 
   ThemeData _playerTheme(BuildContext context) {
     final Color accent =
@@ -326,14 +330,41 @@ class _NowPlayingPageState extends State<NowPlayingPage>
           MediaQuery.sizeOf(context).width,
           layoutStyle: widget.state.layoutStyle,
         );
-    final key = (accent, widget.state.fontPreferences, compact);
-    if (_cachedPlayerThemeKey != key) {
-      _cachedPlayerThemeKey = key;
+    // skin: 沉浸式播放页默认强制深色（封面之上对比度最好）。纸面皮肤关掉了
+    // 专辑色流（backgroundPlayMode == 'off'）时，整页就是一张羊皮纸，必须跟随
+    // 应用当前明暗；否则浅色皮肤会得到一块黑画布。
+    final LazerThemeTokens skin =
+        widget.state.pluginTheme ??
+        Theme.of(context).extension<LazerThemeTokens>() ??
+        LazerThemeTokens.apple;
+    final bool flatPaper = skin.backgroundPlayMode == 'off';
+    final Brightness brightness = flatPaper
+        ? Theme.of(context).brightness
+        : Brightness.dark;
+    final double cornerScale = AppleShape.resolve(
+      followTheme: widget.state.cornerFollowsTheme,
+      customPx: widget.state.cornerPx,
+      theme: skin,
+    );
+    final themeKey = (
+      accent,
+      widget.state.fontPreferences,
+      compact,
+      skin.id,
+      skin.version,
+      brightness,
+      widget.state.cornerFollowsTheme,
+      cornerScale,
+    );
+    if (_cachedPlayerThemeKey != themeKey) {
+      _cachedPlayerThemeKey = themeKey;
       _cachedPlayerTheme = buildAppleTheme(
-        brightness: Brightness.dark,
+        brightness: brightness,
         seedAccent: accent,
         fonts: widget.state.fontPreferences,
         compact: compact,
+        ui: skin,
+        cornerScale: cornerScale,
       );
     }
     return _cachedPlayerTheme!;
@@ -409,23 +440,29 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   /// in the transport, so it stays reachable until the error clears.
   bool get _idleAllowsHide => _desktopLayout == true || widget.state.playing;
 
-  bool get _canAutoHide =>
-      _foreground &&
-      (widget.presentationActive?.value ?? true) &&
-      !TvScope.isActive(context) &&
-      _idleAllowsHide &&
-      widget.state.playbackError == null &&
-      _activeControlPointers.isEmpty &&
-      !_selectionOpen &&
-      !_commentsOpen &&
-      !_queueOpen &&
-      !_moreOpen &&
-      !_artworkActionOpen &&
-      (_desktopLayout == true
-          ? _desktopPane == DesktopNowPlayingPane.lyrics
-          : _lyricsMode) &&
-      !widget.state.lyricsLoading &&
-      widget.state.lyrics.isNotEmpty;
+  bool get _canAutoHide {
+    // skin: 纸面皮肤的参考实现里，桌面 dock 是常驻的，没有自动隐藏。淡出后的
+    // 图标在白纸画布上对比度太低（截图里几乎看不见），所以直接关掉这套淡出。
+    if (LazerThemeTokens.of(context).backgroundPlayMode == 'off') {
+      return false;
+    }
+    return _foreground &&
+        (widget.presentationActive?.value ?? true) &&
+        !TvScope.isActive(context) &&
+        _idleAllowsHide &&
+        widget.state.playbackError == null &&
+        _activeControlPointers.isEmpty &&
+        !_selectionOpen &&
+        !_commentsOpen &&
+        !_queueOpen &&
+        !_moreOpen &&
+        !_artworkActionOpen &&
+        (_desktopLayout == true
+            ? _desktopPane == DesktopNowPlayingPane.lyrics
+            : _lyricsMode) &&
+        !widget.state.lyricsLoading &&
+        widget.state.lyrics.isNotEmpty;
+  }
 
   @override
   void didChangeDependencies() {
@@ -896,6 +933,12 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     return _EntranceTickerGate(settled: settled, child: child);
   }
 
+  /// skin: nowPlayingCoverRadius —— 0 时封面是直角，纸面皮肤也不要投影。
+  double _coverRadius(BuildContext context) {
+    final LazerThemeTokens ui = LazerThemeTokens.of(context);
+    return ui.nowPlayingCoverRadius > 0 ? ui.nowPlayingCoverRadius : 12;
+  }
+
   Widget _cover(Track track, {bool compact = false}) {
     return Semantics(
       label: context.tr('歌曲封面，长按保存'),
@@ -915,8 +958,11 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                 : const Duration(milliseconds: 420),
             curve: const AppleSpringCurve(),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: _lyricsMode && compact
+              // skin: nowPlayingCoverRadius（0 = 直角；纸面皮肤同时去掉封面投影）
+              borderRadius: BorderRadius.circular(
+                _coverRadius(context) * AppleShape.scaleOf(context),
+              ),
+              boxShadow: _lyricsMode && compact || _coverRadius(context) == 0
                   ? const []
                   : [
                       BoxShadow(
@@ -928,7 +974,9 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                     ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(
+                12 * AppleShape.scaleOf(context),
+              ),
               child: KeyedSubtree(
                 key: const ValueKey('now-playing-cover'),
                 child: AnimatedTrackCover(
@@ -1332,76 +1380,77 @@ class _ArtworkTrackDetails extends StatelessWidget {
   final AppState state;
 
   @override
-  Widget build(BuildContext context) => Row(
-    key: const ValueKey('artwork-track-details'),
-    children: [
-      Expanded(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CopyableSongTitle(
-              title: track.title,
-              child: Text(
-                track.title,
-                key: const ValueKey('artwork-track-title'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.fonts.apply(
-                  FontCategory.playerTitle,
-                  const TextStyle(
-                    fontSize: 21,
-                    height: 1.2,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+  Widget build(BuildContext context) {
+    final Color playerInk = contrastingLabel(
+      AppleSemanticColors.of(context).background,
+    );
+    return Row(
+      key: const ValueKey('artwork-track-details'),
+      children: [
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CopyableSongTitle(
+                title: track.title,
+                child: Text(
+                  track.title,
+                  key: const ValueKey('artwork-track-title'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.fonts.apply(
+                    FontCategory.playerTitle,
+                    TextStyle(
+                      fontSize: 21,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
+                      color: playerInk,
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 5),
-            ArtistNameLink(
-              key: const ValueKey('artwork-track-artist'),
-              state: state,
-              artists: track.artists,
-              fallback: track.artist,
-              style: context.fonts.apply(
-                FontCategory.playerArtist,
-                const TextStyle(
-                  fontSize: 16,
-                  height: 1.2,
-                  color: Color(0xCCFFFFFF),
+              const SizedBox(height: 5),
+              ArtistNameLink(
+                key: const ValueKey('artwork-track-artist'),
+                state: state,
+                artists: track.artists,
+                fallback: track.artist,
+                style: context.fonts.apply(
+                  FontCategory.playerArtist,
+                  TextStyle(fontSize: 16, height: 1.2, color: playerInk),
                 ),
               ),
-            ),
-            if (state.likeError != null)
-              TrText(
-                state.likeError!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.type.caption.copyWith(
-                  color: context.colors.clayDeep,
+              if (state.likeError != null)
+                TrText(
+                  state.likeError!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.type.caption.copyWith(
+                    color: context.colors.clayDeep,
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
-      const SizedBox(width: 4),
-      AccessibleIconButton(
-        tooltip: state.signedIn ? '收藏歌曲' : '登录后收藏',
-        onPressed: state.signedIn
-            ? () => unawaited(state.toggleLikeCurrent())
-            : null,
-        icon: Icon(
-          state.currentLiked
-              ? Icons.favorite_rounded
-              : Icons.favorite_border_rounded,
-          color: state.currentLiked
-              ? context.colors.clayDeep
-              : context.colors.cloudDark,
+        const SizedBox(width: 4),
+        AccessibleIconButton(
+          tooltip: state.signedIn ? '收藏歌曲' : '登录后收藏',
+          onPressed: state.signedIn
+              ? () => unawaited(state.toggleLikeCurrent())
+              : null,
+          icon: Icon(
+            state.currentLiked
+                ? Icons.favorite_rounded
+                : Icons.favorite_border_rounded,
+            color: state.currentLiked
+                ? context.colors.clayDeep
+                : context.colors.cloudDark,
+          ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _PlaybackTransport extends StatelessWidget {
@@ -1415,7 +1464,7 @@ class _PlaybackTransport extends StatelessWidget {
   final bool edgeToEdge;
   @override
   Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(16),
+    borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
     child: DecoratedBox(
       decoration: const BoxDecoration(color: Colors.transparent),
       child: Padding(
@@ -1529,7 +1578,7 @@ class _ControlIconState extends State<_ControlIcon>
         onTap: widget.onTap,
         enabled: enabled,
         onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(24 * AppleShape.scaleOf(context)),
         focusScale: 1.1,
         child: GestureDetector(
           onTap: feedbackAction(context, widget.onTap),
@@ -1557,35 +1606,40 @@ class _BigPlayPause extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => AccessibleIconButton(
-    key: const ValueKey('now-playing-play'),
-    tooltip: playing ? '暂停' : '播放',
-    onPressed: onTap,
-    iconSize: 38,
-    padding: EdgeInsets.zero,
-    constraints: const BoxConstraints.tightFor(width: 68, height: 68),
-    color: context.colors.onPlayer,
-    style: IconButton.styleFrom(
-      backgroundColor: Colors.transparent,
-      foregroundColor: context.colors.onPlayer,
-      hoverColor: Colors.transparent,
-      highlightColor: Colors.transparent,
-      minimumSize: const Size(68, 68),
-      shape: const CircleBorder(),
-    ),
-    icon: AnimatedSwitcher(
-      switchInCurve: const AppleSpringCurve(),
-      switchOutCurve: const AppleSpringCurve(),
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : AppleSpring.responsive.duration,
-      child: Icon(
-        playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-        key: ValueKey(playing),
-        size: 38,
+  Widget build(BuildContext context) {
+    final Color playerInk = contrastingLabel(
+      AppleSemanticColors.of(context).background,
+    );
+    return AccessibleIconButton(
+      key: const ValueKey('now-playing-play'),
+      tooltip: playing ? '暂停' : '播放',
+      onPressed: onTap,
+      iconSize: 38,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 68, height: 68),
+      color: playerInk,
+      style: IconButton.styleFrom(
+        backgroundColor: Colors.transparent,
+        foregroundColor: playerInk,
+        hoverColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        minimumSize: const Size(68, 68),
+        shape: const CircleBorder(),
       ),
-    ),
-  );
+      icon: AnimatedSwitcher(
+        switchInCurve: const AppleSpringCurve(),
+        switchOutCurve: const AppleSpringCurve(),
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : AppleSpring.responsive.duration,
+        child: Icon(
+          playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          key: ValueKey(playing),
+          size: 38,
+        ),
+      ),
+    );
+  }
 }
 
 /// What sits behind [更多]: the song's details on top, every action the phone
@@ -1658,7 +1712,9 @@ class _NowPlayingMoreSheet extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(
+                      12 * AppleShape.scaleOf(context),
+                    ),
                     child: SizedBox.square(
                       dimension: 64,
                       child: AnimatedTrackCover(
@@ -1862,7 +1918,7 @@ class _MoreAction extends StatelessWidget {
         : context.colors.slateDark;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
         child: Row(
@@ -2028,6 +2084,15 @@ class _PlayerBackdropHostState extends State<_PlayerBackdropHost> {
   @override
   Widget build(BuildContext context) {
     final AppState state = widget.state;
+    // skin: backgroundPlayMode == 'off' —— 纸面皮肤要的是一块纯色监听画布：
+    // 不建专辑色流、不铺黑底，直接用皮肤给的 background（浅色羊皮纸 / 深色夜读）。
+    final LazerThemeTokens ui = LazerThemeTokens.of(context);
+    if (ui.backgroundPlayMode == 'off') {
+      return ColoredBox(
+        key: widget.boundaryKey,
+        color: AppleSemanticColors.of(context).background,
+      );
+    }
     if (state.playerBackground == AppBackgroundMode.windowsMica) {
       return RepaintBoundary(
         key: widget.boundaryKey,

@@ -23,6 +23,13 @@ const double kBackgroundImageScaleMin = 1;
 const double kBackgroundImageScaleMax = 3;
 const double kBackgroundBlurMin = 0;
 const double kBackgroundBlurMax = 32;
+/// 全局圆角大小，单位 px：0 = 全直角，16 = 组件原本的圆角，32 = 加倍。
+///
+/// 内部仍然是系数（px / 16，见 theme/shape_scale.dart），但设置页显示 px：
+/// 「16 px」比「100%」更容易判断自己调到了多圆。
+const double kCornerPxMin = 0;
+const double kCornerPxMax = 32;
+const double kCornerPxDefault = 16;
 const double kHeaderOpacityMin = 0.25;
 const double kHeaderOpacityMax = 1;
 const double kHeaderOpacityDefault = 0.72;

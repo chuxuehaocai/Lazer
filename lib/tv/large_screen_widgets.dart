@@ -20,6 +20,7 @@ import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
+import '../theme/shape_scale.dart';
 import '../theme/font_preferences.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/copyable_song_title.dart';
@@ -287,8 +288,8 @@ class LargeScreenArtwork extends StatelessWidget {
           );
     return ClipRRect(
       borderRadius: circular
-          ? BorderRadius.circular(size / 2)
-          : BorderRadius.circular(radius),
+          ? BorderRadius.circular(AppleShape.r(context, size / 2))
+          : BorderRadius.circular(AppleShape.r(context, radius)),
       child: SizedBox(width: size, height: artHeight, child: art),
     );
   }
@@ -343,7 +344,7 @@ class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard>
       child: LargeScreenTapTarget(
         onTap: feedbackAction(context, widget.onTap == null ? null : _open),
         onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(18 * AppleShape.scaleOf(context)),
         focusScale: 1.035,
         child: AnimatedContainer(
           duration: MediaQuery.disableAnimationsOf(context)
@@ -353,7 +354,7 @@ class _LargeScreenFeatureCardState extends State<LargeScreenFeatureCard>
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: const Color(0xFF1C1C1E),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(18 * AppleShape.scaleOf(context)),
             boxShadow: <BoxShadow>[
               BoxShadow(
                 color: Colors.black.withValues(alpha: _focused ? .34 : .2),
@@ -479,7 +480,7 @@ class _LargeScreenMediaCardState extends State<LargeScreenMediaCard>
       child: LargeScreenTapTarget(
         onTap: feedbackAction(context, widget.onTap == null ? null : _open),
         onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
         focusScale: 1.05,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -491,7 +492,7 @@ class _LargeScreenMediaCardState extends State<LargeScreenMediaCard>
                   : AppleSpring.responsive.duration,
               curve: const AppleSpringCurve(),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
                 boxShadow: <BoxShadow>[
                   if (_focused)
                     BoxShadow(
@@ -741,7 +742,7 @@ class _LargeScreenTrackRowState extends State<LargeScreenTrackRow>
       onTap: feedbackAction(context, widget.onTap),
       onFocusChange: _setFocused,
       focusNode: _focusNode,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
       focusScale: 1.008,
       child: GestureDetector(
         onLongPress: widget.onLongPress,
@@ -763,7 +764,7 @@ class _LargeScreenTrackRowState extends State<LargeScreenTrackRow>
                 : _focused
                 ? apple.fill
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
           ),
           child: Row(
             children: <Widget>[
@@ -882,14 +883,14 @@ class LargeScreenPrimaryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return LargeScreenTapTarget(
       onTap: feedbackAction(context, onTap),
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(24 * AppleShape.scaleOf(context)),
       focusScale: 1.04,
       child: Container(
         height: 48,
         padding: const EdgeInsets.symmetric(horizontal: 24),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(24 * AppleShape.scaleOf(context)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -927,14 +928,14 @@ class LargeScreenSecondaryButton extends StatelessWidget {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return LargeScreenTapTarget(
       onTap: feedbackAction(context, onTap),
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(24 * AppleShape.scaleOf(context)),
       focusScale: 1.04,
       child: Container(
         height: 48,
         padding: const EdgeInsets.symmetric(horizontal: 22),
         decoration: BoxDecoration(
           color: apple.fill,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(24 * AppleShape.scaleOf(context)),
           border: Border.all(color: apple.separator, width: .5),
         ),
         child: Row(
@@ -973,7 +974,7 @@ class LargeScreenChoiceChip extends StatelessWidget {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return LargeScreenTapTarget(
       onTap: feedbackAction(context, onTap),
-      borderRadius: BorderRadius.circular(21),
+      borderRadius: BorderRadius.circular(21 * AppleShape.scaleOf(context)),
       focusScale: 1.05,
       child: AnimatedContainer(
         curve: const AppleSpringCurve(),
@@ -984,7 +985,7 @@ class LargeScreenChoiceChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 22),
         decoration: BoxDecoration(
           color: selected ? apple.label : apple.fill,
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(22 * AppleShape.scaleOf(context)),
         ),
         child: Center(
           child: Text(

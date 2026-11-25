@@ -54,6 +54,7 @@ import '../player/player_page_motion.dart';
 import 'pages.dart';
 import 'player_bar.dart';
 import 'widgets.dart';
+import '../theme/shape_scale.dart';
 
 /// The app shell, rebuilt around Apple's adaptive navigation model.
 ///
@@ -267,7 +268,12 @@ class _AppShellState extends State<AppShell>
   /// The decision has always carried a notice; until now only the diagnostics
   /// log saw it, so a fallback was indistinguishable from a HiFi session for a
   /// listener who never opened the engine settings.
+  ///
+  /// 用户自己在设置里挑了系统音频引擎时不提示：那条「已选择系统音频引擎，
+  /// 当前非 HiFi 路径」只是复述他刚做过的选择，弹出来只会挡住播放条。
+  /// 真正的故障（原生引擎起不来、运行中断开）仍然提示。
   void _announceHifiFallback() {
+    if (state.hifiFallbackIsUserChoice) return;
     final String? notice = state.hifiPathNotice;
     if (notice == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1184,6 +1190,10 @@ class _AppShellState extends State<AppShell>
     final bool sharedBackground = BrowseBackgroundScope.contains(context);
     final Brightness brightness = Theme.of(context).brightness;
     final Color? accent = state.accentSeed;
+    final LazerThemeTokens ui =
+        state.pluginTheme ??
+        Theme.of(context).extension<LazerThemeTokens>() ??
+        LazerThemeTokens.apple;
     return Theme(
       data:
           buildAppleTheme(
@@ -1197,10 +1207,12 @@ class _AppShellState extends State<AppShell>
                 ),
             seedAccent: accent,
             fonts: state.fontPreferences,
-            ui:
-                state.pluginTheme ??
-                Theme.of(context).extension<LazerThemeTokens>() ??
-                LazerThemeTokens.apple,
+            ui: ui,
+            cornerScale: AppleShape.resolve(
+              followTheme: state.cornerFollowsTheme,
+              customPx: state.cornerPx,
+              theme: ui,
+            ),
           ).copyWith(
             scaffoldBackgroundColor: sharedBackground
                 ? Colors.transparent
@@ -1219,6 +1231,10 @@ class _AppShellState extends State<AppShell>
             }
           }
           final AppleSemanticColors apple = AppleSemanticColors.of(context);
+          final LazerThemeTokens ui = LazerThemeTokens.of(context);
+          // skin: backgroundPlayMode —— 'off' 时整块专辑色流与遮罩都不参与构建，
+          // 画布直接使用皮肤给的 background（纸面皮肤要的正是这一条）。
+          final bool skinFlatBackground = ui.backgroundPlayMode == 'off';
           final Size window = MediaQuery.sizeOf(context);
           final bool largeScreen = _isLargeScreen(context);
           final bool compact = useCompactLayout(
@@ -1232,10 +1248,14 @@ class _AppShellState extends State<AppShell>
             layoutStyle: state.layoutStyle,
           );
           final bool paintedBackdrop =
+              !skinFlatBackground &&
               state.backgroundMode != AppBackgroundMode.off;
           // The "follow the song" palette still needs the artwork seed when
           // the backdrop is off, so the widget stays mounted to extract it.
-          final bool needsSeed = state.paletteMode == AppPaletteMode.nowPlaying;
+          // A flat paper skin opts out of the seed too: nothing is tinted.
+          final bool needsSeed =
+              !skinFlatBackground &&
+              state.paletteMode == AppPaletteMode.nowPlaying;
           // With no artwork behind it, pure black reads as a hole in the
           // window; the dark theme lifts that empty canvas to a deep warm
           // grey instead.
@@ -1289,7 +1309,8 @@ class _AppShellState extends State<AppShell>
                         TickerMode(
                           enabled: !_contentSwitching,
                           child: Opacity(
-                            opacity: state.backgroundOpacity,
+                            // skin: backgroundOpacity
+                            opacity: ui.backgroundOpacity,
                             child: AlbumBlurFlowCanvas(
                               track: state.current,
                               mode: state.backgroundMode,
@@ -1301,7 +1322,10 @@ class _AppShellState extends State<AppShell>
                               imageAlignmentX: state.backgroundImageAlignmentX,
                               imageAlignmentY: state.backgroundImageAlignmentY,
                               imageScale: state.backgroundImageScale,
-                              blurSigma: state.backgroundBlurEnabled
+                              // skin: backgroundBlurSigma（<0 = 沿用用户偏好）
+                              blurSigma: ui.backgroundBlurSigma >= 0
+                                  ? ui.backgroundBlurSigma
+                                  : state.backgroundBlurEnabled
                                   ? state.backgroundBlur
                                   : 0,
                               darkEdge: state.backgroundDarkEdgeEnabled,
@@ -1320,8 +1344,13 @@ class _AppShellState extends State<AppShell>
                           state.backgroundMode != AppBackgroundMode.windowsMica)
                         Positioned.fill(
                           child: ColoredBox(
+                            // skin: backgroundVeilAlpha（<0 = 内置 .60）
                             color: paintedBackdrop
-                                ? apple.background.withValues(alpha: .60)
+                                ? apple.background.withValues(
+                                    alpha: ui.backgroundVeilAlpha >= 0
+                                        ? ui.backgroundVeilAlpha
+                                        : .60,
+                                  )
                                 : canvas,
                           ),
                         ),
@@ -1826,17 +1855,23 @@ class _AppShellState extends State<AppShell>
   // -- sidebar and toolbars -------------------------------------------------
 
   Widget _sidebar(AppleSemanticColors apple) {
+    // A skin may pin the rail width and turn the sidebar glass off entirely.
+    final ui = LazerThemeTokens.of(context);
     return AppleGlass(
       key: const ValueKey('desktop-sidebar'),
       borderRadius: BorderRadius.zero,
-      blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica ? 0 : 16,
+      blurSigma: state.backgroundMode == AppBackgroundMode.windowsMica
+          ? 0
+          : ui.glassBlurSigma,
       color: apple.glass.withValues(
         alpha: state.backgroundMode == AppBackgroundMode.windowsMica
             ? .42
             : .80,
       ),
       child: SizedBox(
-        width: (MediaQuery.sizeOf(context).width * .166).clamp(216.0, 264.0),
+        width: ui.railWidth > 0
+            ? ui.railWidth
+            : (MediaQuery.sizeOf(context).width * .166).clamp(216.0, 264.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -2135,7 +2170,7 @@ class _AppShellState extends State<AppShell>
       color: apple.tertiaryBackground,
       surfaceTintColor: Colors.transparent,
       elevation: 18,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context))),
       onSelected: _onAccountSelected,
       itemBuilder: (BuildContext context) => _accountMenuItems(context, apple),
       child: Padding(
@@ -2179,7 +2214,7 @@ class _AppShellState extends State<AppShell>
         ),
       ),
     );
-    return _remoteAccountFocus(button, BorderRadius.circular(12));
+    return _remoteAccountFocus(button, BorderRadius.circular(12 * AppleShape.scaleOf(context)));
   }
 
   Widget _accountButton(AppleSemanticColors apple, {double radius = 15}) {
@@ -2190,7 +2225,7 @@ class _AppShellState extends State<AppShell>
       color: apple.tertiaryBackground,
       surfaceTintColor: Colors.transparent,
       elevation: 18,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context))),
       onSelected: _onAccountSelected,
       itemBuilder: (BuildContext context) => _accountMenuItems(context, apple),
       child: _Avatar(
@@ -2203,7 +2238,7 @@ class _AppShellState extends State<AppShell>
     );
     return _remoteAccountFocus(
       button,
-      BorderRadius.circular(radius + 6),
+      BorderRadius.circular((radius + 6) * AppleShape.scaleOf(context)),
       padding: const EdgeInsets.all(6),
     );
   }
@@ -2461,7 +2496,7 @@ class _ToolbarButtonState extends State<_ToolbarButton>
         message: context.tr(widget.tooltip),
         child: TvTapTarget(
           onTap: feedbackAction(context, widget.onPressed),
-          borderRadius: BorderRadius.circular(17),
+          borderRadius: BorderRadius.circular(17 * AppleShape.scaleOf(context)),
           focusScale: 1.08,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -2528,7 +2563,7 @@ class _LibraryRefreshButtonState extends State<_LibraryRefreshButton>
     button: true,
     child: TvTapTarget(
       onTap: () => unawaited(_refresh()),
-      borderRadius: BorderRadius.circular(9),
+      borderRadius: BorderRadius.circular(9 * AppleShape.scaleOf(context)),
       focusScale: 1.15,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -2657,11 +2692,11 @@ class _RailPlaylistState extends State<_RailPlaylist>
         button: true,
         selected: widget.selected,
         child: TvFocusHighlight(
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(9 * AppleShape.scaleOf(context)),
           child: InkWell(
             onTap: feedbackAction(context, widget.onTap),
             onFocusChange: (value) => setState(() => _focused = value),
-            borderRadius: BorderRadius.circular(9),
+            borderRadius: BorderRadius.circular(9 * AppleShape.scaleOf(context)),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
               height: 40,
@@ -2673,7 +2708,7 @@ class _RailPlaylistState extends State<_RailPlaylist>
                     : _hovering || _focused
                     ? apple.tertiaryFill
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(9 * AppleShape.scaleOf(context)),
                 border: Border.all(
                   color: _focused
                       ? apple.accent.withValues(alpha: .65)
@@ -2816,7 +2851,12 @@ class _BottomTrackCover extends StatelessWidget {
               children: <Widget>[
                 Padding(
                   padding: const EdgeInsets.all(2),
-                  child: AppCover(url: track.coverUrl, size: 44, radius: 22),
+                  child: AppCover(
+                    url: track.coverUrl,
+                    size: 44,
+                    radius: 22,
+                    followCornerSetting: false,
+                  ),
                 ),
                 ExcludeSemantics(
                   child: AnimatedBuilder(

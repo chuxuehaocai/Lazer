@@ -311,7 +311,7 @@ class _LuaPluginPageElementView extends StatelessWidget {
         title: context.tr(element.title),
         initialValue: element.value is String ? element.value as String : '',
         maxLines: element.maxLines,
-        maxLength: 2048,
+        maxLength: kMaxPluginPageTextFieldChars,
         hintText: element.placeholder.isEmpty
             ? context.tr('输入内容')
             : context.tr(element.placeholder),

@@ -55,6 +55,7 @@ import 'sleep_timer.dart';
 import '../theme/font_preferences.dart';
 import '../theme/imported_font.dart';
 import '../theme/lazer_theme.dart';
+import '../theme/shape_scale.dart';
 import '../ui/layout_system.dart';
 import '../plugins/plugin_colors.dart';
 import '../plugins/plugin_native_api.dart';
@@ -250,6 +251,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.hifiSettings = const HifiSettings(),
     this.hifi,
     this.hifiPathNotice,
+    this.hifiFallbackIsUserChoice = false,
     this.artworkSeedLoader = albumSeedForCover,
     this.startupBufferTarget = startupBuffer,
     this.startupBufferDeadline = startupBufferTimeout,
@@ -340,10 +342,41 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   PluginMarket get pluginMarket => _pluginMarketInstance ??=
       _injectedPluginMarket ?? PluginMarket(pluginManager);
 
-  /// The first enabled plugin skin is the active declarative UI overlay.
+  /// 设置里选中的内置主题（`LazerThemeTokens.builtinThemes` 的 id）。
+  ///
+  /// 默认是 Mio。选中的内置主题**压过**插件皮肤：以前只要装了 Lua 主题插件，
+  /// 界面就无条件被它接管，用户在设置里根本没有「用回自带主题」这条路。
+  /// 选 null / 空串表示「跟随插件」。
+  String? builtinThemeId = LazerThemeTokens.mio.id;
+
+  /// 当前内置主题的令牌；选「跟随插件」时返回 null。
+  LazerThemeTokens? get builtinTheme {
+    final String? id = builtinThemeId;
+    if (id == null || id.isEmpty) return null;
+    for (final theme in LazerThemeTokens.builtinThemes) {
+      if (theme.id == id) return theme;
+    }
+    return null;
+  }
+
+  Future<void> setBuiltinTheme(String? id) async {
+    final String? next = (id == null || id.isEmpty) ? null : id;
+    if (builtinThemeId == next) return;
+    builtinThemeId = next;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (next == null) {
+      await prefs.remove('lazer_builtin_theme');
+    } else {
+      await prefs.setString('lazer_builtin_theme', next);
+    }
+  }
+
+  /// The active declarative UI overlay: the listener's built-in theme first,
+  /// then the first enabled plugin skin.
   /// Music plugins remain isolated from Flutter widgets and can only provide
   /// bounded theme/layout data through the Lua theme engine.
-  LazerThemeTokens? get pluginTheme => pluginManager.activeTheme;
+  LazerThemeTokens? get pluginTheme => builtinTheme ?? pluginManager.activeTheme;
   LazerLayoutDefinition? get pluginLayout => pluginManager.activeLayout;
   int get pluginSkinRevision => pluginManager.skinRevision;
 
@@ -1174,6 +1207,23 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   double backgroundBlur = 0;
   bool backgroundBlurEnabled = false;
 
+  /// 全局圆角是否跟随主题令牌（true）还是用用户自己的滑块（false）。
+  bool cornerFollowsTheme = true;
+
+  /// 用户自定义的圆角大小，单位 px：0 = 全直角，16 = 组件原本的圆角，32 = 加倍。
+  double cornerPx = kCornerPxDefault;
+
+  /// Inline 窗口胶囊的圆角来源：跟随主题 / 跟随全局 / 手动设置。
+  ///
+  /// 这类部件是整块玻璃药丸（40 dp 高），满圆半径只有 20 px，直接套全局 px 会
+  /// 在 16 px 以上就顶到上限。所以它有自己的来源选择和自己的 px。
+  CornerSource capsuleCornerSource = CornerSource.global;
+  double capsuleCornerPx = AppleShape.capsulePxDefault;
+
+  /// 移动端底边栏（玻璃导航药丸）的圆角来源，规则同上；满圆半径 28 px。
+  CornerSource navBarCornerSource = CornerSource.global;
+  double navBarCornerPx = AppleShape.navBarPxDefault;
+
   /// Whether the flowing canvas paints its radial dark edge (vignette).
   /// The vertical scrim stays: it is what keeps the page's text readable.
   bool backgroundDarkEdgeEnabled = true;
@@ -1372,6 +1422,103 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       player ? 'lazer_player_background_blur' : 'lazer_background_blur',
       next,
     );
+  }
+
+  /// 在「跟随主题设置」和「自行调节」之间切换。
+  Future<void> setCornerFollowsTheme(bool value) async {
+    if (cornerFollowsTheme == value) return;
+    cornerFollowsTheme = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      'lazer_corner_follows_theme',
+      value,
+    );
+  }
+
+  /// 用户自定义的圆角大小，单位 px（0–32，16 = 组件原本的圆角）。
+  Future<void> setCornerPx(double value) async {
+    if (!value.isFinite) return;
+    final double next = (value.clamp(kCornerPxMin, kCornerPxMax) * 100).round() /
+        100;
+    if (cornerPx == next) return;
+    cornerPx = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_corner_px',
+      next,
+    );
+  }
+
+  /// 拖动滑块即视为「自行调节」：避免拖了没反应（还在跟随主题）。
+  Future<void> setCornerPxAndFollow(double value) async {
+    if (cornerFollowsTheme) await setCornerFollowsTheme(false);
+    await setCornerPx(value);
+  }
+
+  /// Inline 窗口胶囊的圆角来源。
+  Future<void> setCapsuleCornerSource(CornerSource value) async {
+    if (capsuleCornerSource == value) return;
+    capsuleCornerSource = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_capsule_corner_source',
+      value.name,
+    );
+  }
+
+  /// 窗口胶囊手动圆角，单位 px（0–20）。
+  Future<void> setCapsuleCornerPx(double value) async {
+    if (!value.isFinite) return;
+    final double next =
+        (value.clamp(0, AppleShape.capsulePxMax) * 100).round() / 100;
+    if (capsuleCornerPx == next) return;
+    capsuleCornerPx = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_capsule_corner_px',
+      next,
+    );
+  }
+
+  /// 拖胶囊滑块即视为「手动设置」。
+  Future<void> setCapsuleCornerPxAndManual(double value) async {
+    if (capsuleCornerSource != CornerSource.manual) {
+      await setCapsuleCornerSource(CornerSource.manual);
+    }
+    await setCapsuleCornerPx(value);
+  }
+
+  /// 移动端底边栏的圆角来源。
+  Future<void> setNavBarCornerSource(CornerSource value) async {
+    if (navBarCornerSource == value) return;
+    navBarCornerSource = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setString(
+      'lazer_nav_bar_corner_source',
+      value.name,
+    );
+  }
+
+  /// 底边栏手动圆角，单位 px（0–28）。
+  Future<void> setNavBarCornerPx(double value) async {
+    if (!value.isFinite) return;
+    final double next =
+        (value.clamp(0, AppleShape.navBarPxMax) * 100).round() / 100;
+    if (navBarCornerPx == next) return;
+    navBarCornerPx = next;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setDouble(
+      'lazer_nav_bar_corner_px',
+      next,
+    );
+  }
+
+  /// 拖底边栏滑块即视为「手动设置」。
+  Future<void> setNavBarCornerPxAndManual(double value) async {
+    if (navBarCornerSource != CornerSource.manual) {
+      await setNavBarCornerSource(CornerSource.manual);
+    }
+    await setNavBarCornerPx(value);
   }
 
   Future<void> setBackgroundBlurEnabled(
@@ -1765,6 +1912,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   double lyricFontSize = 22;
   int lyricFontWeight = 600;
+
+  /// 用户是否亲手调过「歌词字重」。
+  ///
+  /// 皮肤的 `elements.lyricWeight` 只是默认值：没动过滑块时皮肤说话，动过之后
+  /// 用户说了算，否则装个插件就会把字体设置里的选择悄悄改掉。
+  bool lyricFontWeightCustomized = false;
   FontPreferences fontPreferences = const FontPreferences();
   int _fontGeneration = 0;
   final ValueNotifier<bool> playerPresented = BuildSafeValueNotifier(false);
@@ -1899,11 +2052,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     fontPreferences = const FontPreferences();
     lyricFontSize = 22;
     lyricFontWeight = 600;
+    lyricFontWeightCustomized = false;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('lazer_font_preferences');
     await prefs.remove('lazer_lyric_font_size');
     await prefs.remove('lazer_lyric_font_weight');
+    await prefs.remove('lazer_lyric_font_weight_custom');
   }
 
   Future<void> setFontFamily(FontFamilyPreference value) async {
@@ -2009,11 +2164,18 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<void> setLyricFontWeight(int value) async {
     lyricFontWeight = normalizeLyricWeight(value);
+    lyricFontWeightCustomized = true;
     notifyListeners();
-    await (await SharedPreferences.getInstance()).setInt(
-      'lazer_lyric_font_weight',
-      lyricFontWeight,
-    );
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('lazer_lyric_font_weight', lyricFontWeight);
+    await prefs.setBool('lazer_lyric_font_weight_custom', true);
+  }
+
+  /// 歌词字重最终用哪个值：用户调过就用用户的，否则听皮肤令牌的。
+  int lyricWeightForSkin(LazerThemeTokens? skin) {
+    if (lyricFontWeightCustomized) return lyricFontWeight;
+    final int? token = skin?.lyricWeight;
+    return token == null || token < 0 ? lyricFontWeight : token;
   }
 
   double scrollRetention = ScrollMotion.defaultRetention;
@@ -2181,6 +2343,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// downgrade that only reached the log looks exactly like a HiFi session to
   /// the person listening.
   String? hifiPathNotice;
+
+  /// [hifiPathNotice] 只是「你自己选了系统音频引擎」——不是故障。
+  ///
+  /// 这种情况不再弹提示条：用户刚在设置里选完，回头又被横幅念一遍「当前非 HiFi
+  /// 路径」纯属噪音。真正的失败（原生引擎初始化失败、运行中断开）照旧提示。
+  bool hifiFallbackIsUserChoice = false;
 
   /// Whether the native HiFi engine is the running playback path.
   bool get hifiPathIsNative => hifiPathNotice == null;
@@ -2455,6 +2623,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         (mode) => mode.name == prefs.getString('lazer_theme_mode'),
         orElse: () => ThemeMode.system,
       );
+      // 内置主题：没存过就是默认的 Mio；存成空串表示「跟随插件皮肤」。
+      final String? storedTheme = prefs.getString('lazer_builtin_theme');
+      builtinThemeId = storedTheme == null || storedTheme.isEmpty
+          ? (prefs.containsKey('lazer_builtin_theme') ? null : LazerThemeTokens.mio.id)
+          : storedTheme;
       language = AppLanguage.parse(prefs.getString('lazer_language'));
       backgroundMode = AppBackgroundModeLabels.parse(
         prefs.getString('lazer_legacy_background') ??
@@ -2508,6 +2681,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       backgroundBlurEnabled =
           prefs.getBool('lazer_background_blur_enabled') ?? false;
+      cornerFollowsTheme =
+          prefs.getBool('lazer_corner_follows_theme') ?? true;
+      // 老版本把「圆角强度」存成 0–2 的系数（`lazer_corner_strength`）；
+      // 现在单位是 px，读到时按 16 px = 1 换算一次，之后就只写 `lazer_corner_px`。
+      final double? storedPx = prefs.getDouble('lazer_corner_px');
+      final double? legacyScale = prefs.getDouble('lazer_corner_strength');
+      cornerPx =
+          (storedPx ?? (legacyScale == null ? null : legacyScale * kCornerPxDefault) ??
+                  kCornerPxDefault)
+              .clamp(kCornerPxMin, kCornerPxMax);
+      capsuleCornerSource = CornerSourceLabels.parse(
+        prefs.getString('lazer_capsule_corner_source'),
+      );
+      capsuleCornerPx = (prefs.getDouble('lazer_capsule_corner_px') ??
+              AppleShape.capsulePxDefault)
+          .clamp(0.0, AppleShape.capsulePxMax);
+      navBarCornerSource = CornerSourceLabels.parse(
+        prefs.getString('lazer_nav_bar_corner_source'),
+      );
+      navBarCornerPx =
+          (prefs.getDouble('lazer_nav_bar_corner_px') ??
+                  AppleShape.navBarPxDefault)
+              .clamp(0.0, AppleShape.navBarPxMax);
       backgroundDarkEdgeEnabled =
           prefs.getBool('lazer_background_dark_edge') ?? true;
       playerBackgroundImageAlignmentX =
@@ -2725,6 +2921,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       lyricFontWeight = normalizeLyricWeight(
         prefs.getInt('lazer_lyric_font_weight') ?? 600,
       );
+      lyricFontWeightCustomized =
+          prefs.getBool('lazer_lyric_font_weight_custom') ?? false;
       fontPreferences = FontPreferences.decode(
         prefs.getString('lazer_font_preferences'),
       );

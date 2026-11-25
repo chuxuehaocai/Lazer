@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../theme/apple_design.dart';
+import '../theme/shape_scale.dart';
 import '../widgets/copyable_song_title.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/interaction_feedback.dart';
@@ -107,7 +108,10 @@ class LargeScreenNavBar extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: apple.fill.withValues(alpha: .5),
                       borderRadius: BorderRadius.circular(
-                        LargeScreenMetrics.navBarHeight / 2,
+                        AppleShape.r(
+                          context,
+                          LargeScreenMetrics.navBarHeight / 2,
+                        ),
                       ),
                       border: Border.all(
                         color: apple.separator.withValues(alpha: .55),
@@ -208,7 +212,7 @@ class LargeScreenNowPlaying extends StatelessWidget {
         value: track?.title,
         child: LargeScreenTapTarget(
           key: const ValueKey<String>('large-screen-now-playing'),
-          borderRadius: BorderRadius.circular(29),
+          borderRadius: BorderRadius.circular(29 * AppleShape.scaleOf(context)),
           focusScale: 1.08,
           onTap: feedbackAction(context, onOpen),
           child: SizedBox.square(
@@ -236,7 +240,7 @@ class LargeScreenNowPlaying extends StatelessWidget {
                   },
                 ),
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(21),
+                  borderRadius: BorderRadius.circular(21 * AppleShape.scaleOf(context)),
                   child: SizedBox.square(
                     dimension: 42,
                     child: url == null || url.isEmpty
@@ -306,7 +310,7 @@ class _NavChipState extends State<_NavChip> with BuildSafeState<_NavChip> {
     return LargeScreenTapTarget(
       onTap: feedbackAction(context, widget.onTap),
       onFocusChange: (bool value) => setState(() => _focused = value),
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(24 * AppleShape.scaleOf(context)),
       focusScale: 1.06,
       child: AnimatedContainer(
         duration: MediaQuery.disableAnimationsOf(context)
@@ -322,7 +326,7 @@ class _NavChipState extends State<_NavChip> with BuildSafeState<_NavChip> {
               : _focused
               ? apple.fill
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(23),
+          borderRadius: BorderRadius.circular(23 * AppleShape.scaleOf(context)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -359,14 +363,14 @@ class _NavBackButton extends StatelessWidget {
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
     return LargeScreenTapTarget(
       onTap: feedbackAction(context, onTap),
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(22 * AppleShape.scaleOf(context)),
       focusScale: 1.08,
       child: Container(
         height: 44,
         padding: const EdgeInsets.fromLTRB(8, 0, 18, 0),
         decoration: BoxDecoration(
           color: apple.fill,
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(22 * AppleShape.scaleOf(context)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -412,7 +416,7 @@ class LargeScreenTransport extends StatelessWidget {
     // left the 88dp bar looking like a rounded rectangle on large screens,
     // while half the height keeps both ends fully circular.
     final BorderRadius radius = BorderRadius.circular(
-      LargeScreenMetrics.transportHeight / 2,
+      AppleShape.r(context, LargeScreenMetrics.transportHeight / 2),
     );
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: inset),
@@ -490,7 +494,7 @@ class _TransportMeta extends StatelessWidget {
     final String artist = state.current?.artist ?? context.tr('从任何一张封面开始播放');
     return LargeScreenTapTarget(
       onTap: feedbackAction(context, state.current == null ? null : onOpen),
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(14 * AppleShape.scaleOf(context)),
       focusScale: 1.01,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -613,7 +617,9 @@ class _TransportGlyphState extends State<_TransportGlyph>
     return LargeScreenTapTarget(
       onTap: feedbackAction(context, widget.onTap),
       onFocusChange: (bool value) => setState(() => _focused = value),
-      borderRadius: BorderRadius.circular(widget.size / 2),
+      borderRadius: BorderRadius.circular(
+        AppleShape.r(context, widget.size / 2),
+      ),
       focusScale: 1.1,
       child: AnimatedContainer(
         curve: const AppleSpringCurve(),

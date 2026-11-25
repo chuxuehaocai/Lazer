@@ -10,11 +10,14 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'theme/lazer_theme.dart';
+import 'theme/shape_scale.dart';
 import 'utils/system_http.dart';
 import 'utils/web_egress_preferences.dart';
 
 import 'audio/audio_engine.dart';
 import 'audio/engine_factory.dart';
+import 'audio/native/engine_selection.dart';
 import 'audio/hifi_controller.dart';
 import 'audio/system_media_handler.dart';
 import 'audio/native/lazer_audio_library.dart';
@@ -30,7 +33,6 @@ import 'diagnostics/crash_dump.dart';
 import 'ui/shell.dart';
 import 'theme/apple_design.dart';
 import 'theme/adaptive_app_theme.dart';
-import 'theme/lazer_theme.dart';
 import 'state/app_state.dart';
 import 'local/local_autoscan.dart';
 import 'state/ui_preferences.dart';
@@ -253,6 +255,10 @@ Future<void> main(List<String> args) async {
           // Null on the native engine. Otherwise the player shows this verbatim,
           // so a fallback this launch cannot be mistaken for a HiFi session.
           hifiPathNotice: selection.path.notice,
+          // 「自己在设置里选了系统引擎」不算故障，别再弹一条横幅提醒一遍。
+          hifiFallbackIsUserChoice:
+              selection.path.fallback ==
+              AudioPathFallback.userSelectedSystemEngine,
         );
         _activeAppState = state;
         // Start queue restoration before the media service can deliver a cold
@@ -356,9 +362,23 @@ typedef _RootUiSignature = (
   bool,
   FontPreferences,
   int,
+  // 选中的内置主题：换了主题要重建根，否则 MaterialApp.builder 里的
+  // AppleShape / Theme 还挂着旧令牌。
+  String?,
   AppLayoutStyle,
   AppUiMode,
   DesktopTitleBarStyle,
+  // 圆角设置进签名，否则 AppleShape 不会被替换，滑块就「改了没反应」：
+  // 页面自己会重建（它监听 state），但包在 MaterialApp.builder 里的
+  // AppleShape 只在根重建时才会拿到新的 scale / cardPx。
+  bool,
+  double,
+  // 窗口胶囊 / 底边栏各自的来源与 px：同样要进签名，否则调了不重建根，
+  // 药丸形状不会跟着变。
+  CornerSource,
+  double,
+  CornerSource,
+  double,
 );
 
 class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
@@ -388,9 +408,16 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     _state.showFrameStats,
     _state.fontPreferences,
     _state.pluginSkinRevision,
+    _state.builtinThemeId,
     _state.layoutStyle,
     _state.uiMode,
     _state.titleBarStyle,
+    _state.cornerFollowsTheme,
+    _state.cornerPx,
+    _state.capsuleCornerSource,
+    _state.capsuleCornerPx,
+    _state.navBarCornerSource,
+    _state.navBarCornerPx,
   );
 
   @override
@@ -646,11 +673,42 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
     // The 配色 setting can seed the whole scheme from the current cover or a
     // colour the listener picked.
     final Color? seed = _state.accentSeed;
+    final LazerThemeTokens ui =
+        _state.pluginTheme ?? LazerThemeTokens.apple;
+    final double cornerScale = AppleShape.resolve(
+      followTheme: _state.cornerFollowsTheme,
+      customPx: _state.cornerPx,
+      theme: ui,
+    );
+    // 窗口胶囊与移动端底边栏是「满圆 = 自身高度一半」的玻璃药丸，各自有
+    // 跟随主题 / 跟随全局 / 手动设置三档。
+    // 「跟随全局」用的就是设置页「圆角大小」显示的那个 px 数，不再乘任何系数 ——
+    // 全局 6 px，胶囊和底边栏就都是 6 px。
+    final double globalCornerPx = AppleShape.cardPxFor(
+      followTheme: _state.cornerFollowsTheme,
+      customPx: _state.cornerPx,
+      theme: ui,
+    );
+    final double capsulePx = AppleShape.resolvePartPx(
+      source: _state.capsuleCornerSource,
+      customPx: _state.capsuleCornerPx,
+      maxPx: AppleShape.capsulePxMax,
+      themeScale: ui.cornerScale,
+      globalPx: globalCornerPx,
+    );
+    final double navBarPx = AppleShape.resolvePartPx(
+      source: _state.navBarCornerSource,
+      customPx: _state.navBarCornerPx,
+      maxPx: AppleShape.navBarPxMax,
+      themeScale: ui.cornerScale,
+      globalPx: globalCornerPx,
+    );
     return LanRemoteScope(
       controller: _remote,
       child: InteractionFeedback(
         feedback: _state.feedback,
-        child: MaterialApp(
+        child: _SemanticsWarmup(
+          child: MaterialApp(
           title: 'Lazer',
           debugShowCheckedModeBanner: false,
           navigatorKey: _navigatorKey,
@@ -663,13 +721,15 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
             brightness: Brightness.light,
             seedAccent: seed,
             fonts: _state.fontPreferences,
-            ui: _state.pluginTheme ?? LazerThemeTokens.apple,
+            ui: ui,
+            cornerScale: cornerScale,
           ),
           darkTheme: buildAppleTheme(
             brightness: Brightness.dark,
             seedAccent: seed,
             fonts: _state.fontPreferences,
-            ui: _state.pluginTheme ?? LazerThemeTokens.apple,
+            ui: ui,
+            cornerScale: cornerScale,
           ),
           themeMode: _state.themeMode,
           locale: _state.language.locale,
@@ -701,23 +761,41 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                   child: AdaptiveAppTheme(
                     state: _state,
                     child: CarMetrics(
-                      child: WindowFrame(
-                        enabled: widget.windowFrameEnabled,
-                        state: _state,
-                        navigatorKey: _navigatorKey,
-                        child: Builder(
-                          builder: (context) => Theme(
-                            data: Theme.of(context).copyWith(
-                              scaffoldBackgroundColor: Colors.transparent,
-                            ),
-                            child: SharedBrowseBackground(
-                              state: _state,
-                              navigation: _browseNavigation,
-                              // Pages consume the frame's safe inset themselves.
-                              // The desktop rail extends into the Inline row;
-                              // reserving it for the whole Navigator would push
-                              // both the logo and page padding down a second time.
-                              child: child!,
+                      // AppleShape 必须在 WindowFrame **外面**：
+                      // Inline 标题栏那颗玻璃胶囊是 WindowFrame 自己画的，它一旦
+                      // 在 provider 里侧就查不到 AppleShape，圆角会永远回落到满圆
+                      // 20 px —— 设置页显示 0 px、药丸却还是全圆，看起来就是
+                      // 「圆角强度调了没用」。放大一层之后，框架、页面、底边栏
+                      // 读到的是同一份圆角。
+                      child: AppleShape(
+                        scale: AppleShape.resolve(
+                          followTheme: _state.cornerFollowsTheme,
+                          customPx: _state.cornerPx,
+                          theme: LazerThemeTokens.of(context),
+                        ),
+                        cardPx: _state.cornerPx,
+                        manual: !_state.cornerFollowsTheme,
+                        capsulePx: capsulePx,
+                        navBarPx: navBarPx,
+                        child: WindowFrame(
+                          enabled: widget.windowFrameEnabled,
+                          state: _state,
+                          navigatorKey: _navigatorKey,
+                          child: Builder(
+                            builder: (context) => Theme(
+                              data: Theme.of(context).copyWith(
+                                scaffoldBackgroundColor: Colors.transparent,
+                              ),
+                              child: SharedBrowseBackground(
+                                state: _state,
+                                navigation: _browseNavigation,
+                                // Pages consume the frame's safe inset
+                                // themselves. The desktop rail extends into the
+                                // Inline row; reserving it for the whole
+                                // Navigator would push both the logo and page
+                                // padding down a second time.
+                                child: child!,
+                              ),
                             ),
                           ),
                         ),
@@ -747,9 +825,55 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
                   ),
           ),
         ),
+        ),
       ),
     );
   }
+}
+
+/// Keeps the accessibility tree out of the first, still-moving frames.
+///
+/// Flutter 的 Windows 桥接只要收到一次无障碍查询，就会一直把语义树同步给 UIA。
+/// 启动后的头几帧里，外壳、皮肤、布局、播放状态会同时落位，节点被反复重新挂到
+/// 别的父节点下；引擎那边就会先报 `Node N is already pending for creation`，然后
+/// 把整棵树卡在 pending 状态，此后每一帧都刷一条
+/// `Failed to update ui::AXTree, error: Nodes left pending by the update: 6 7 … 16`
+/// —— 日志里几分钟就能攒上万行。
+///
+/// 这里让前 [warmup] 走 `ExcludeSemantics`：真正稳定的树只建一次，桥接拿到的第一批
+/// 就是自洽的。屏幕阅读器最多晚 [warmup] 看到内容，视觉上没有任何变化。
+class _SemanticsWarmup extends StatefulWidget {
+  const _SemanticsWarmup({required this.child});
+
+  final Widget child;
+
+  static const Duration warmup = Duration(milliseconds: 1200);
+
+  @override
+  State<_SemanticsWarmup> createState() => _SemanticsWarmupState();
+}
+
+class _SemanticsWarmupState extends State<_SemanticsWarmup> {
+  bool _settled = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(_SemanticsWarmup.warmup, () {
+      if (mounted) setState(() => _settled = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      _settled ? widget.child : ExcludeSemantics(child: widget.child);
 }
 
 /// The smallest usable surface when start-up failed before the real app existed.

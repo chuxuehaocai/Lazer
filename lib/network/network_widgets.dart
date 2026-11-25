@@ -9,6 +9,7 @@ import '../widgets/spring_buttons.dart';
 import '../widgets/text_input_dialog.dart';
 import 'podcast_feed.dart';
 import 'remote_source.dart';
+import '../theme/shape_scale.dart';
 
 /// Glyph that identifies a protocol in every list and editor.
 IconData networkKindIcon(NetworkSourceKind kind) => switch (kind) {
@@ -137,15 +138,15 @@ class NetworkField extends StatelessWidget {
                 vertical: 11,
               ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                 borderSide: BorderSide(color: apple.separator, width: .5),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                 borderSide: BorderSide(color: apple.separator, width: .5),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                 borderSide: BorderSide(color: apple.accent, width: 1.4),
               ),
             ),

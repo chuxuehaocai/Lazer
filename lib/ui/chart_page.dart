@@ -17,6 +17,7 @@ import 'widgets.dart';
 import 'playlist_page.dart';
 
 import 'home_pages.dart' show ChartLoadCard, chartEntryCover;
+import '../theme/shape_scale.dart';
 
 class AppChartPage extends StatefulWidget {
   const AppChartPage({super.key, required this.state, required this.chart});
@@ -388,7 +389,7 @@ class _ChartIssuePicker extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: AppleSemanticColors.of(context).fill,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(999 * AppleShape.scaleOf(context)),
           border: Border.all(
             color: AppleSemanticColors.of(context).separator,
             width: .5,
@@ -468,7 +469,7 @@ class _ChartTrackRow extends StatelessWidget {
             horizontal: 8,
             vertical: 3,
           ),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context))),
           tileColor: selected ? apple.accentSoft : Colors.transparent,
           onTap: onTap == null ? null : feedbackAction(context, onTap!),
           onLongPress: onLongPress,

@@ -12,6 +12,7 @@ import '../state/build_safe_notifier.dart';
 import '../theme/app_palette.dart';
 import '../tv/tv_mode.dart';
 import 'window_chrome_surface.dart';
+import '../theme/shape_scale.dart';
 
 export 'window_chrome_surface.dart';
 
@@ -897,7 +898,7 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
     key: const ValueKey('desktop-player-actions'),
     decoration: BoxDecoration(
       color: context.colors.onPlayer.withValues(alpha: .045),
-      borderRadius: BorderRadius.circular(28),
+      borderRadius: BorderRadius.circular(28 * AppleShape.scaleOf(context)),
       border: Border.all(color: context.colors.onPlayer.withValues(alpha: .18)),
     ),
     child: Padding(
@@ -1007,8 +1008,12 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
                           width: width * math.max(0, progress),
                           height: kWindowChromeHeight,
                           child: ClipRRect(
-                            borderRadius: const BorderRadius.horizontal(
-                              left: Radius.circular(kWindowChromeHeight / 2),
+                            // 动作区只接到胶囊的左半端：左上角是胶囊的圆角，
+                            // 左下角只沿用它一半（动作区会被向右裁切）。
+                            borderRadius: BorderRadius.horizontal(
+                              left: Radius.circular(
+                                AppleShape.capsuleRadiusOf(context),
+                              ),
                             ),
                             child: ClipRect(
                               child: OverflowBox(
@@ -1179,8 +1184,9 @@ class _WindowChromeCollapseState extends State<WindowChromeCollapse> {
                 data: layout.chromeTheme ?? Theme.of(context),
                 child: _WindowChromeButtonTheme(
                   child: ClipRRect(
+                    // 胶囊自己的圆角设置（见 AppleShape.capsuleRadiusOf）。
                     borderRadius: BorderRadius.circular(
-                      kWindowChromeHeight / 2,
+                      AppleShape.capsuleRadiusOf(context),
                     ),
                     child: SizedBox(
                       width: kWindowChromeButtonWidth,

@@ -10,6 +10,8 @@ import '../state/app_state.dart';
 import '../theme/apple_design.dart';
 import '../theme/font_preferences.dart';
 import '../theme/imported_font.dart';
+import '../theme/lazer_theme.dart';
+import '../theme/shape_scale.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/apple_ui.dart';
 import '../widgets/settings_detail.dart';
@@ -36,6 +38,14 @@ class FontSettingsView extends StatelessWidget {
         brightness: Theme.of(context).brightness,
         seedAccent: state.accentSeed,
         fonts: state.fontPreferences,
+        // 这一页以前只带 fonts，: 皮肤的颜色与字号令牌全被丢掉，看起来像
+        // 「插件把字体/配色改了」。带上 ui 与圆角，预览就是真实结果。
+        ui: state.pluginTheme ?? LazerThemeTokens.apple,
+        cornerScale: AppleShape.resolve(
+          followTheme: state.cornerFollowsTheme,
+          customPx: state.cornerPx,
+          theme: state.pluginTheme ?? LazerThemeTokens.apple,
+        ),
       ),
       child: Builder(
         builder: (context) => SettingsDetailScaffold(

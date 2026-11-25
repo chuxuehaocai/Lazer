@@ -333,6 +333,36 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {}
   }
 
+  /// Re-reads a plugin's declarative skin after a setting or page change.
+  ///
+  /// Skin tokens (`cornerScale`, `railWidth`, colours …) are host-side data that
+  /// was loaded exactly once in [_start], so a plugin that keeps a slider for one
+  /// of them had no way to make the change visible without a restart. The host
+  /// now re-runs the plugin's `theme`/`describe` pair and repaints in place; a
+  /// failed reload keeps the previous skin instead of flashing the default theme.
+  Future<void> _reloadSkin(InstalledPlugin plugin) async {
+    final runtime = plugin.runtime;
+    if (runtime == null || plugin.error != null) return;
+    if (!plugin.enabled || !_plugins.contains(plugin)) return;
+    try {
+      final description = await runtime.invoke('describe');
+      final skin = await LuaThemeEngine.load(runtime, description);
+      if (skin == null) return;
+      if (identical(skin.theme, plugin.theme) &&
+          identical(skin.layout, plugin.layout)) {
+        return;
+      }
+      plugin.theme = skin.theme;
+      plugin.layout = skin.layout;
+      _notify();
+    } catch (e) {
+      AppLog.shared.event('lua.plugin', 'skin-reload-failed', <String, Object?>{
+        'plugin': plugin.manifest.id,
+        'error': '$e',
+      });
+    }
+  }
+
   Future<void> setPluginSetting(
     String pluginId,
     String settingId,
@@ -357,6 +387,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     } catch (_) {
       // The value is host-owned and remains available after a plugin restart.
     }
+    await _reloadSkin(plugin);
   }
 
   Future<void> invokePluginSetting(String pluginId, String settingId) async {
@@ -368,6 +399,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       'id': settingId,
       'value': null,
     });
+    await _reloadSkin(plugin);
   }
 
   Future<void> invokePlayerMenu(
@@ -415,6 +447,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       'id': elementId,
       'value': value,
     });
+    await _reloadSkin(plugin);
   }
 
   Future<Directory> get root async => rootDirectory ??= Directory(
@@ -590,9 +623,17 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
                 : const [])
           if (rule is Map) Map<String, dynamic>.from(rule),
       ], permittedDomains: plugin.manifest.domains);
+      // A skin-only plugin declares `providers = {}`. Lua encodes an empty table
+      // as `{}`, which arrives here as an empty **Map**, not a List — the old
+      // `declared is List` check therefore failed and the manifest's `provider`
+      // string was promoted into a gateway nobody asked for. Treat an empty map
+      // as "no providers" instead of inventing one.
       final declared = description is Map ? description['providers'] : null;
+      final bool declaresNoProviders = declared is Map && declared.isEmpty;
       final providers = declared is List
           ? declared.whereType<Map>().toList()
+          : declaresNoProviders
+          ? const <Map>[]
           : [
               {
                 'id': plugin.manifest.provider,
@@ -638,7 +679,14 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
         );
       }
       plugin.error = null;
-    } catch (_) {
+    } catch (e, st) {
+      // Skin failures otherwise collapse into a generic "plugin failed" state and
+      // leave the UI on the default theme, so keep the real cause in the log.
+      AppLog.shared.event('lua.plugin', 'skin-failed', <String, Object?>{
+        'plugin': plugin.manifest.id,
+        'error': '$e',
+        'stack': '$st',
+      });
       MediaRequestRules.remove(plugin.manifest.id);
       plugin.dataAccess.suspend();
       await plugin.runtime?.shutdown();

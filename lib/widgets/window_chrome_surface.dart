@@ -4,6 +4,7 @@ import '../state/app_state.dart';
 import '../state/ui_preferences.dart';
 import '../theme/apple_design.dart';
 import 'apple_ui.dart';
+import '../theme/shape_scale.dart';
 
 const double kWindowChromeHeight = 40.0;
 const double kWindowChromeButtonWidth = 46.0;
@@ -164,7 +165,11 @@ class WindowChromeSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final BorderRadius radius = BorderRadius.circular(kWindowChromeHeight / 2);
+    // 药丸的圆角来自它自己的设置（跟随主题 / 跟随全局 / 手动 px），上限是
+    // 胶囊高度的一半 —— 超过 20 px 画不出更圆的胶囊。
+    final BorderRadius radius = BorderRadius.circular(
+      AppleShape.capsuleRadiusOf(context),
+    );
     final Color color = tint ?? AppleSemanticColors.of(context).glass;
     // Blur off: paint the tint on its own. AppleGlass would still run its
     // backdrop filter, and a near-opaque tint would make that work invisible.

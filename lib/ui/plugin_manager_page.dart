@@ -17,6 +17,7 @@ import '../widgets/spring_buttons.dart';
 import '../widgets/build_safe_state.dart';
 import '../plugins/plugin_package.dart';
 import 'plugin_market_page.dart';
+import '../theme/shape_scale.dart';
 
 String _errorText(Object error) =>
     error is FormatException ? error.message : '$error';
@@ -259,7 +260,7 @@ class _PluginRow extends StatelessWidget {
             height: 40,
             decoration: BoxDecoration(
               color: apple.accent.withValues(alpha: .13),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
             ),
             child: Icon(Icons.extension_rounded, color: apple.accent),
           ),
@@ -368,7 +369,7 @@ Future<void> _showPluginDetails(
       context: context,
       builder: (BuildContext context) => Dialog(
         clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context))),
         child: SizedBox(
           width: 480,
           child: _PluginDetailsSheet(plugin: plugin, manager: manager),
@@ -417,7 +418,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                 height: 44,
                 decoration: BoxDecoration(
                   color: apple.accent.withValues(alpha: .13),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
                 ),
                 child: Icon(Icons.extension_rounded, color: apple.accent, size: 24),
               ),
@@ -475,7 +476,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                   Container(
                     decoration: BoxDecoration(
                       color: apple.tertiaryFill,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                       border: Border.all(color: apple.separator, width: .5),
                     ),
                     padding: const EdgeInsets.all(12),
@@ -555,7 +556,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                   Container(
                     decoration: BoxDecoration(
                       color: apple.tertiaryFill,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                       border: Border.all(color: apple.separator, width: .5),
                     ),
                     padding: const EdgeInsets.all(12),
@@ -600,7 +601,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                   Container(
                     decoration: BoxDecoration(
                       color: apple.tertiaryFill,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                       border: Border.all(color: apple.separator, width: .5),
                     ),
                     padding: const EdgeInsets.all(12),
@@ -654,7 +655,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                   Container(
                     decoration: BoxDecoration(
                       color: apple.tertiaryFill,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                       border: Border.all(color: apple.separator, width: .5),
                     ),
                     padding: const EdgeInsets.all(12),
@@ -699,7 +700,7 @@ class _PluginDetailsSheetState extends State<_PluginDetailsSheet> {
                   Container(
                     decoration: BoxDecoration(
                       color: apple.tertiaryFill,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
                       border: Border.all(color: apple.separator, width: .5),
                     ),
                     padding: const EdgeInsets.all(12),

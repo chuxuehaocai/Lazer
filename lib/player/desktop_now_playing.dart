@@ -15,7 +15,11 @@ import '../downloads/download_manager.dart';
 import '../downloads/download_queue_sheet.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
+import '../theme/adaptive_contrast.dart';
 import '../theme/app_palette.dart';
+import '../theme/apple_design.dart';
+import '../theme/lazer_theme.dart';
+import '../theme/paper_widgets.dart';
 import '../tv/tv_mode.dart';
 import '../widgets/accessible_controls.dart';
 import '../widgets/animated_notice.dart';
@@ -29,6 +33,7 @@ import '../widgets/window_chrome.dart';
 import 'osu_search.dart';
 import 'desktop_artwork_layout.dart';
 import '../theme/font_preferences.dart';
+import '../theme/shape_scale.dart';
 
 /// Which surface fills the desktop player's reading column.
 ///
@@ -48,6 +53,10 @@ const EdgeInsets kDesktopPlayerHeaderInset = EdgeInsets.fromLTRB(
   kWindowChromeEnd,
   4,
 );
+
+/// Height the classic title-bar player reserves above the cover for its own
+/// back/actions row, so the artwork never sits under the button.
+const double _kClassicHeaderRowHeight = 52;
 
 bool _usesWindowCapsule(BuildContext context) =>
     WindowChromeScope.maybeLayoutOf(context)?.inline == true &&
@@ -111,7 +120,19 @@ class DesktopNowPlaying extends StatelessWidget {
     final double chromeInset = inlineFrame ? kInlineChromeInset : 0;
     // Lists and their controls sit inside the canvas, which already carries the
     // band; only the classic strip needs room for its own collapse row.
-    final double paneTopInset = inlineChrome ? 0 : 64;
+    // 只有「确实存在经典标题栏」时页面才自己画返回按钮：没有 WindowChromeScope
+    // 的宿主（网页版、测试、非桌面）不需要这条带子，否则白扣一块高度。
+    final bool pageHeaderRow =
+        WindowChromeScope.maybeLayoutOf(context) != null &&
+        !inlineFrame &&
+        !tv;
+    final double headerRowInset = pageHeaderRow ? _kClassicHeaderRowHeight : 0;
+    // 经典标题栏时头部那一条已经在外层让出真实高度了，这里扣掉，免得歌词区
+    // 被推两次（原来 64 是「浮在封面上的头部」需要的避让量）。
+    final double paneTopInset = math.max(
+      0,
+      (inlineChrome ? 0 : 64) - headerRowInset,
+    );
     // The top band behaves like every browse page's header: dragging there
     // moves the window, double-clicking it restores or maximizes. Desktop only —
     // this widget *is* the desktop layout, and the band is inert everywhere
@@ -146,14 +167,26 @@ class DesktopNowPlaying extends StatelessWidget {
                 // below the center of the listening canvas.
                 Positioned.fill(
                   child: Padding(
-                    padding: EdgeInsets.only(top: chromeInset),
+                    // 经典标题栏下这条返回按钮是页面自己画的，它要占真实空间：
+                    // 之前封面顶到窗口左上角，按钮正好压在封面上。让出这条高度后
+                    // 可用高度变小，封面连同下面的标题/歌手一起等比缩小 ->
+                    // tools/capture 的截图里就是「缩小封面给按钮腾位置」。
+                    padding: EdgeInsets.only(
+                      top: chromeInset + headerRowInset,
+                    ),
                     child: Column(
                       children: [
                         Expanded(
                           child: LayoutBuilder(
                             builder: (context, box) {
-                              final double sidePadding = (box.maxWidth * .04)
-                                  .clamp(28.0, 80.0);
+                              // skin: nowPlayingSidePadding（0 = 内置 4% clamp 28–80）
+                              final LazerThemeTokens skin = LazerThemeTokens.of(
+                                context,
+                              );
+                              final double sidePadding =
+                                  skin.nowPlayingSidePadding > 0
+                                  ? skin.nowPlayingSidePadding
+                                  : (box.maxWidth * .04).clamp(28.0, 80.0);
                               return Padding(
                                 padding: EdgeInsets.symmetric(
                                   horizontal: sidePadding,
@@ -173,7 +206,22 @@ class DesktopNowPlaying extends StatelessWidget {
                                         MediaQuery.textScalerOf(
                                           context,
                                         ).scale(1);
+                                    // skin: 正在播放的版心几何（parchment = 0.34W /
+                                    // 240–440 / gap 32 / 竖线 1px / 再 16）
+                                    final bool skinnedCanvas =
+                                        skin.nowPlayingArtworkFraction > 0;
                                     return DesktopArtworkLayout(
+                                      // 经典标题栏的那条页面头已经在外层让出高度了，
+                                      // 这里不再重复扣，避免封面被压两次。
+                                      leftFraction:
+                                          skin.nowPlayingArtworkFraction,
+                                      leftMin: skin.nowPlayingArtworkMin,
+                                      leftMax: skin.nowPlayingArtworkMax,
+                                      columnGap: skinnedCanvas ? 32 : 0,
+                                      dividerGap: skinnedCanvas ? 16 : 0,
+                                      divider: skinnedCanvas
+                                          ? const Hairline(vertical: true)
+                                          : null,
                                       paneVisible:
                                           pane != DesktopNowPlayingPane.none,
                                       paneTopInset:
@@ -409,7 +457,11 @@ class _PaneTab extends StatelessWidget {
   final VoidCallback onPressed;
   @override
   Widget build(BuildContext context) {
-    final Color activeColor = context.colors.onPlayer;
+    // The paper skin can make the reading canvas light while the legacy
+    // onPlayer role remains white. Resolve the active glyph against the actual
+    // page surface so the selected lower-left tab stays readable.
+    final Color pageSurface = AppleSemanticColors.of(context).background;
+    final Color activeColor = contrastingLabel(pageSurface);
     final Color mutedColor = context.colors.cloudDark;
     return Semantics(
       button: true,
@@ -419,14 +471,16 @@ class _PaneTab extends StatelessWidget {
         message: context.tr(label),
         child: TvTapTarget(
           onTap: onPressed,
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(11 * AppleShape.scaleOf(context)),
           focusScale: 1.08,
           child: Material(
             color: Colors.transparent,
             child: InkWell(
               onTap: feedbackAction(context, onPressed),
               canRequestFocus: !TvScope.isActive(context),
-              borderRadius: BorderRadius.circular(11),
+              borderRadius: BorderRadius.circular(
+                11 * AppleShape.scaleOf(context),
+              ),
               child: AnimatedContainer(
                 duration: MediaQuery.disableAnimationsOf(context)
                     ? Duration.zero
@@ -437,9 +491,11 @@ class _PaneTab extends StatelessWidget {
                   // The selected pane keeps a soft chip around its glyph, the
                   // way the mobile player marks the active tab.
                   color: active
-                      ? Colors.white.withValues(alpha: 0.16)
+                      ? activeColor.withValues(alpha: 0.14)
                       : Colors.transparent,
-                  borderRadius: BorderRadius.circular(11),
+                  borderRadius: BorderRadius.circular(
+                    11 * AppleShape.scaleOf(context),
+                  ),
                 ),
                 child: Icon(
                   icon,
@@ -516,98 +572,106 @@ class _Presentation extends StatelessWidget {
     BuildContext context, {
     bool compact = false,
     bool tight = false,
-  }) => Column(
-    key: const ValueKey('desktop-player-metadata'),
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: CopyableSongTitle(
-              title: track.title,
-              child: Text(
-                track.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textWidthBasis: TextWidthBasis.longestLine,
-                style: context.fonts.apply(
-                  FontCategory.playerTitle,
-                  TextStyle(
-                    fontSize: compact ? 22 : (tight ? 26 : 32),
-                    fontWeight: FontWeight.w700,
-                    height: 1.2,
-                    color: context.colors.slateDark,
+  }) {
+    // skin: nowPlayingTitleSize / SubtitleSize / MetaSize（0 = 内置档位）
+    final LazerThemeTokens skin = LazerThemeTokens.of(context);
+    final double titleSize = skin.nowPlayingTitleSize > 0
+        ? skin.nowPlayingTitleSize
+        : (compact ? 22 : (tight ? 26 : 32));
+    final double subtitleSize = skin.nowPlayingSubtitleSize > 0
+        ? skin.nowPlayingSubtitleSize
+        : (compact ? 12 : (tight ? 14 : 15));
+    final double metaSize = skin.nowPlayingMetaSize > 0
+        ? skin.nowPlayingMetaSize
+        : (compact ? 14 : (tight ? 17 : 19));
+    return Column(
+      key: const ValueKey('desktop-player-metadata'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: CopyableSongTitle(
+                title: track.title,
+                child: Text(
+                  track.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textWidthBasis: TextWidthBasis.longestLine,
+                  style: context.fonts.apply(
+                    FontCategory.playerTitle,
+                    TextStyle(
+                      fontSize: titleSize,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                      color: context.colors.slateDark,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          if (state.supportsMusic(MusicCapability.listenTogether))
+            if (state.supportsMusic(MusicCapability.listenTogether))
+              AccessibleIconButton(
+                tooltip: '一起听',
+                onPressed: () =>
+                    unawaited(showListenTogetherDialog(context, state)),
+                icon: const Icon(Icons.group_rounded),
+              ),
             AccessibleIconButton(
-              tooltip: '一起听',
-              onPressed: () =>
-                  unawaited(showListenTogetherDialog(context, state)),
-              icon: const Icon(Icons.group_rounded),
+              tooltip: state.signedIn ? '收藏歌曲' : '登录后收藏',
+              onPressed: state.signedIn
+                  ? () => unawaited(state.toggleLikeCurrent())
+                  : null,
+              icon: Icon(
+                state.currentLiked
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                color: state.currentLiked
+                    ? context.colors.clayDeep
+                    : context.colors.cloudDark,
+              ),
             ),
-          AccessibleIconButton(
-            tooltip: state.signedIn ? '收藏歌曲' : '登录后收藏',
-            onPressed: state.signedIn
-                ? () => unawaited(state.toggleLikeCurrent())
-                : null,
-            icon: Icon(
-              state.currentLiked
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
-              color: state.currentLiked
-                  ? context.colors.clayDeep
-                  : context.colors.cloudDark,
+          ],
+        ),
+        if (track.translatedTitle?.isNotEmpty ?? false)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              track.translatedTitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.type.bodySmMuted.copyWith(fontSize: subtitleSize),
             ),
           ),
-        ],
-      ),
-      if (track.translatedTitle?.isNotEmpty ?? false)
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            track.translatedTitle!,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: context.type.bodySmMuted.copyWith(
+        SizedBox(height: compact || tight ? 8 : 12),
+        ArtistNameLink(
+          state: state,
+          artists: track.artists,
+          fallback: track.artist,
+          maxLines: 1,
+          style: context.fonts.apply(
+            FontCategory.playerArtist,
+            TextStyle(fontSize: metaSize, color: context.colors.slateDark),
+          ),
+        ),
+        SizedBox(height: compact || tight ? 4 : 6),
+        AlbumNameLink(
+          state: state,
+          track: track,
+          style: context.fonts.apply(
+            FontCategory.playerArtist,
+            TextStyle(
               fontSize: compact ? 12 : (tight ? 14 : 15),
+              color: context.colors.cloudDark,
             ),
           ),
         ),
-      SizedBox(height: compact || tight ? 8 : 12),
-      ArtistNameLink(
-        state: state,
-        artists: track.artists,
-        fallback: track.artist,
-        maxLines: 1,
-        style: context.fonts.apply(
-          FontCategory.playerArtist,
-          TextStyle(
-            fontSize: compact ? 14 : (tight ? 17 : 19),
-            color: context.colors.slateDark,
-          ),
-        ),
-      ),
-      SizedBox(height: compact || tight ? 4 : 6),
-      AlbumNameLink(
-        state: state,
-        track: track,
-        style: context.fonts.apply(
-          FontCategory.playerArtist,
-          TextStyle(
-            fontSize: compact ? 12 : (tight ? 14 : 15),
-            color: context.colors.cloudDark,
-          ),
-        ),
-      ),
-      AnimatedNotice(message: state.likeError),
-    ],
-  );
+        AnimatedNotice(message: state.likeError),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -866,7 +930,7 @@ class _DesktopDock extends StatelessWidget {
         key: const ValueKey('desktop-dock-content'),
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(16 * AppleShape.scaleOf(context)),
           child: DecoratedBox(
             decoration: const BoxDecoration(color: Colors.transparent),
             child: Padding(
@@ -1106,7 +1170,7 @@ class _DesktopPlayPauseButton extends StatelessWidget {
       onTap: feedbackAction(context, state.togglePlay),
       autofocus: remote,
       focusNode: remote ? focusNode : null,
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(24 * AppleShape.scaleOf(context)),
       focusScale: 1.06,
       child: ExcludeFocus(
         excluding: remote,

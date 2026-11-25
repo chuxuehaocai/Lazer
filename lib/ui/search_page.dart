@@ -17,6 +17,7 @@ import '../widgets/catalog_links.dart';
 import 'widgets.dart';
 import 'playlist_grid.dart';
 import '../animation/view_transitions.dart';
+import '../theme/shape_scale.dart';
 
 export 'playlist_grid.dart' show AppPlaylistGrid;
 
@@ -528,7 +529,7 @@ class _SearchTabButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           minimumSize: const Size(44, 44),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(10 * AppleShape.scaleOf(context)),
           ),
         ),
         child: Text(

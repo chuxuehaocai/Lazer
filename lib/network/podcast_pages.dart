@@ -14,6 +14,7 @@ import '../widgets/spring_buttons.dart';
 import 'network_sources_controller.dart';
 import 'network_widgets.dart';
 import 'podcast_feed.dart';
+import '../theme/shape_scale.dart';
 
 /// One podcast's episodes, with the listener's resume point.
 class PodcastEpisodesPage extends StatefulWidget {
@@ -130,7 +131,7 @@ class _PodcastEpisodesPageState extends State<PodcastEpisodesPage>
       color: AppleSemanticColors.of(context).tertiaryBackground,
       surfaceTintColor: Colors.transparent,
       elevation: 18,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context))),
       items: <PopupMenuEntry<String>>[
         const PopupMenuItem<String>(value: 'play', child: TrText('从上次位置播放')),
         const PopupMenuItem<String>(value: 'restart', child: TrText('从头播放')),
@@ -361,7 +362,7 @@ class _EpisodeRowState extends State<_EpisodeRow>
       if (position.isNotEmpty) context.tr('听到 $position'),
     ].join(' · ');
     return TvTapTarget(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
       onTap: widget.onTap,
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovering = true),
@@ -384,7 +385,7 @@ class _EpisodeRowState extends State<_EpisodeRow>
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
             decoration: BoxDecoration(
               color: _hovering ? apple.fill : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -434,7 +435,7 @@ class _EpisodeRowState extends State<_EpisodeRow>
                           episode.duration! > Duration.zero) ...<Widget>[
                         const SizedBox(height: 6),
                         ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
+                          borderRadius: BorderRadius.circular(2 * AppleShape.scaleOf(context)),
                           child: LinearProgressIndicator(
                             value:
                                 (progress.position.inMilliseconds /

@@ -20,7 +20,9 @@ class SemanticsPortal extends StatelessWidget {
   final Widget child;
   @override
   Widget build(BuildContext context) => Semantics(
-    container: true,
+    // 不建独立语义容器：容器节点在页面重建/隐藏时最容易变成孤立 AX 节点，
+    // 引擎就会刷 "will not be in the tree"。标签合并到最近的可聚焦节点即可。
+    container: false,
     child: Overlay.wrap(
       alwaysSizeToContent: true,
       clipBehavior: Clip.none,
@@ -317,7 +319,8 @@ class AccessibleIconButton extends IconButton {
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      container: true,
+      // 同上：容器节点会在按钮重建时产生孤立 AX 节点。
+      container: false,
       label: semanticLabel == null ? null : context.tr(semanticLabel!),
       child: TvFocusHighlight(
         child: SpringPress(

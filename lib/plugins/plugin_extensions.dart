@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
 
+/// 插件页面 `text_field` 里 `value` 的长度上限。
+///
+/// 原来是 2048：皮肤类插件想把令牌 JSON 回显到页面上，很容易就超了，而超限
+/// 不是截断——整张页面被拒（`Plugin page text is too long`），插件随之启动
+/// 失败，主题也就不会应用。抬到 16384 够放一份完整令牌表。
+const int kMaxPluginPageTextFieldChars = 16384;
+
 /// The small, data-only controls a Lua plugin may add to the Settings page.
 ///
 /// Plugins describe controls with JSON-shaped tables. The host validates those
@@ -689,7 +696,7 @@ class LuaPluginPageElement {
       throw const FormatException('Invalid plugin page element value');
     }
     if (type == LuaPluginPageElementType.textField &&
-        (value as String).length > 2048) {
+        (value as String).length > kMaxPluginPageTextFieldChars) {
       throw const FormatException('Plugin page text is too long');
     }
     final maxLines = spec['maxLines'] is num
@@ -806,7 +813,8 @@ class LuaPluginPageElement {
   bool accepts(Object? candidate) =>
       _accepts(type, candidate, options, min, max) &&
       (type != LuaPluginPageElementType.textField ||
-          (candidate is String && candidate.length <= 2048));
+          (candidate is String &&
+              candidate.length <= kMaxPluginPageTextFieldChars));
 
   static bool _accepts(
     LuaPluginPageElementType type,

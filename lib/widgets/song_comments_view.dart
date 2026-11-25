@@ -16,6 +16,7 @@ import 'accessible_controls.dart';
 import 'animated_notice.dart';
 import 'artwork_image.dart';
 import 'interaction_feedback.dart';
+import '../theme/shape_scale.dart';
 
 /// Lazy rows, pagination and reactions listen only to the comment controller.
 class SongCommentsView extends StatefulWidget {
@@ -449,7 +450,7 @@ class _CommentRow extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: scheme.surface.withValues(alpha: .55),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14 * AppleShape.scaleOf(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

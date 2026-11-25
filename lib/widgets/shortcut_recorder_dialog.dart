@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../l10n/app_localizations.dart';
 import '../state/media_shortcuts.dart';
 import '../theme/apple_design.dart';
+import '../theme/shape_scale.dart';
 
 /// What the recorder returns. A null result means the dialog was dismissed.
 class ShortcutSelection {
@@ -154,7 +155,7 @@ class _ShortcutRecorderDialogState extends State<_ShortcutRecorderDialog>
                 ),
                 decoration: BoxDecoration(
                   color: apple.secondaryFill,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context)),
                   border: Border.all(
                     color: _listening
                         ? Theme.of(context).colorScheme.primary

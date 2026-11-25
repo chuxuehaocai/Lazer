@@ -29,6 +29,7 @@ import '../widgets/lyric_edge_fade.dart';
 import 'line_content.dart';
 import 'timed_line.dart' show lyricWordMotionEnd;
 import '../widgets/lyric_text_hit_region.dart';
+import '../theme/apple_design.dart';
 import '../theme/lazer_theme.dart';
 
 /// children stay cached while the ticker only updates their transforms.
@@ -669,8 +670,10 @@ class _LyricViewportState extends State<LyricViewport>
   TextStyle get _originalStyle => lyricTextStyle(
     context.type.bodySm,
     widget.state.lyricFontSize * _theme.lyricFontScale,
-    widget.state.lyricFontWeight,
+    // 皮肤只提供默认值：用户在字体设置里动过滑块就以用户为准。
+    widget.state.lyricWeightForSkin(_theme),
     theme: _theme,
+    honorThemeWeight: false,
   );
   TextStyle get _translationStyle => lyricTextStyle(
     context.type.bodySm,
@@ -1199,6 +1202,9 @@ class _LyricViewportState extends State<LyricViewport>
           presence: () => _presence(index),
           repaint: rowFrames,
           diameter: widget.state.lyricFontSize * _theme.lyricFontScale * .3,
+          // 颜色在组件内部按当前画布解（line_content.lyricCanvasInk），
+          // 不要在这里算好传进去：这一整行 Widget 会被 _rowCache 缓存，
+          // 烘死的颜色在切主题后不会更新，浅色主题里三点就会继续是白的。
         ),
       );
     }
@@ -1208,7 +1214,19 @@ class _LyricViewportState extends State<LyricViewport>
             .clamp(0.0, 1.0);
     double mainAlpha() =>
         _theme.lyricDimAlpha + emphasis() * (1 - _theme.lyricDimAlpha);
-    final style = _originalStyle.copyWith(color: Colors.white);
+    // Resolve lyric ink against the paper/dark canvas. A custom skin can set a
+    // label that is too close to its background, so keep the contrast floor
+    // explicit instead of assuming the light/dark preset is in use.
+    final Color ink = lyricCanvasInk(context);
+    final Color surface = AppleSemanticColors.of(context).background;
+    // 罗马音与翻译是副行：既不跟主行走高亮，也不允许在深色画布上退回全不透明墨
+    // （那样它们会和当前行一样亮，看起来像被高亮了）。见 lyricSecondaryInk。
+    final Color translationInk = lyricSecondaryInk(
+      ink,
+      surface,
+      _theme.lyricTranslationAlpha,
+    );
+    final style = _originalStyle.copyWith(color: ink);
     return SizedBox(
       width: _textWidth,
       height: _baseHeights[index],
@@ -1220,11 +1238,7 @@ class _LyricViewportState extends State<LyricViewport>
             builder: (context, child) => ColorFiltered(
               key: ValueKey('lyric-color-$index'),
               colorFilter: ColorFilter.mode(
-                Color.lerp(
-                  Colors.white.withValues(alpha: mainAlpha()),
-                  Colors.white,
-                  selected,
-                )!,
+                Color.lerp(ink.withValues(alpha: mainAlpha()), ink, selected)!,
                 BlendMode.srcIn,
               ),
               child: child,
@@ -1252,9 +1266,10 @@ class _LyricViewportState extends State<LyricViewport>
               animation: _emphasisFrames,
               builder: (context, child) => ColorFiltered(
                 colorFilter: ColorFilter.mode(
-                  Colors.white.withValues(
-                    alpha: mainAlpha() * _theme.lyricTranslationAlpha,
-                  ),
+                  // Keep the requested hierarchy when it remains readable;
+                  // otherwise use opaque ink so the translation survives on
+                  // the paper canvas instead of fading into it.
+                  translationInk,
                   BlendMode.srcIn,
                 ),
                 child: child,
@@ -1326,10 +1341,21 @@ class _LyricViewportState extends State<LyricViewport>
     // Manual browsing may visit an entire long transcript without changing
     // the playback line. Retain widgets only for rows that are still mounted.
     _rowCache.removeWhere((index, _) => !visible.contains(index));
-    return Stack(
-      fit: StackFit.expand,
-      clipBehavior: Clip.none,
-      children: [for (final index in visible) _positionedRow(index)],
+    // 每行一个稳定的语义节点：屏幕阅读器能在行上点按跳转、长按取词。整块只留
+    // 一个 live region 的写法会更省引擎，但那会把每一行的动作一起吞掉。
+    //
+    // 外面这层 explicitChildNodes 是给 Windows 的 UIA 桥接用的：行随滚动进出
+    // 视口时，节点是挂在一个**稳定存在**的父节点下面被摘除的，引擎收到的是
+    // 「某个已知父节点的子节点没了」；没有这一层时，行的父节点自己也随滚动换，
+    // 引擎就会报 `N will not be in the tree and is not the new root`。
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: Stack(
+        fit: StackFit.expand,
+        clipBehavior: Clip.none,
+        children: [for (final index in visible) _positionedRow(index)],
+      ),
     );
   }
 

@@ -8,6 +8,7 @@ import '../animation/apple_spring.dart';
 import '../theme/apple_design.dart';
 import 'apple_ui.dart';
 import 'interaction_feedback.dart';
+import '../theme/shape_scale.dart';
 
 /// Floating navigation with an inline label on the selected tab only.
 class CapsuleNavigationBar extends StatefulWidget {
@@ -121,7 +122,11 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
             (constraints.maxWidth.isFinite && constraints.maxWidth < 280);
         return RepaintBoundary(
           child: AppleGlass(
-            borderRadius: BorderRadius.circular(999),
+            // 药丸的圆角来自它自己的设置（跟随主题 / 跟随全局 / 手动 px），
+            // 上限是药丸高度的一半，见 AppleShape.navBarRadiusOf。
+            borderRadius: BorderRadius.circular(
+              AppleShape.navBarRadiusOf(context),
+            ),
             color: widget.blurEnabled ? apple.glass : apple.glassStrong,
             blurSigma: widget.blurSigma,
             child: Padding(
@@ -149,7 +154,11 @@ class _CapsuleNavigationBarState extends State<CapsuleNavigationBar>
                           key: const ValueKey('capsule-navigation-indicator'),
                           decoration: BoxDecoration(
                             color: selectedColor,
-                            borderRadius: BorderRadius.circular(999),
+                            // 选中指示条跟着药丸一起圆，但绝不会超过药丸自己：
+                            // 手动调小药丸圆角时，指示条也一起变方。
+                            borderRadius: BorderRadius.circular(
+                              AppleShape.navBarRadiusOf(context),
+                            ),
                           ),
                         ),
                       ),

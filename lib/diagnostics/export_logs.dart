@@ -11,8 +11,6 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import 'app_log.dart';
 import 'build_info.dart';
-import '../accessibility/lazer_binding.dart';
-
 String diagnosticReport(AppState state) => AppLog.redact(
   [
     'Lazer ${BuildInfo.displayVersion} (${BuildInfo.commit})',
@@ -24,8 +22,6 @@ String diagnosticReport(AppState state) => AppLog.redact(
     'Background: ${state.backgroundMode.name}, ${_backgroundFrameRate(state.browseBackgroundFps)}',
     'Player background: ${state.playerBackground.name}, ${_backgroundFrameRate(state.playerBackgroundFps)}',
     'Queue length: ${state.queueLength}',
-    if (WidgetsBinding.instance is LazerWidgetsBinding)
-      'Accessibility: ${(WidgetsBinding.instance as LazerWidgetsBinding).semanticsDiagnostics}',
     'Playback error: ${state.playbackError ?? "none"}',
     '',
     AppLog.shared.snapshot(),

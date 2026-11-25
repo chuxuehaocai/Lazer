@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme/apple_design.dart';
+import '../theme/shape_scale.dart';
 
 /// A compact floating action strip, matching the lyric selection affordance.
 class TrackBatchBar extends StatelessWidget {
@@ -34,7 +35,7 @@ class TrackBatchBar extends StatelessWidget {
           elevation: 12,
           shadowColor: Colors.black.withValues(alpha: .2),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(22 * AppleShape.scaleOf(context)),
             side: BorderSide(color: apple.separator.withValues(alpha: .45)),
           ),
           child: Padding(

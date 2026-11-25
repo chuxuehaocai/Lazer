@@ -442,6 +442,11 @@ end
 `text_field`，交互元素必须提供唯一 `id`。`icon` 使用有限的 Material 图标名称，未知名称
 显示扩展图标。插件页面和菜单项目只会在插件启用且运行成功时出现。
 
+`text_field` 的 `value` 上限是 **16384 字符**（`kMaxPluginPageTextFieldChars`）。
+注意这是**硬拒绝**而不是截断：声明页面、替换元素或运行时更新控件时一旦超限，
+操作都会失败；页面初始声明超限时整张页面注册失败，插件随之启动失败，它的主题也不会
+被应用。要展示长文本（例如令牌 JSON）时，插件自己先截断并给出获取完整内容的地址。
+
 `host.http` 是异步函数，插件调用时可以直接使用返回值；嵌套函数、循环和 `pcall` 均支持等待 HTTP。
 返回 `{status,headers,body}`，其中 body 是字符串，多个 Set-Cookie 用换行分隔。
 `host.crypto` 的 RSA 运算支持 `inputEncoding="utf8"` 和 `reverse=true`，用于原始 RSA
@@ -521,6 +526,194 @@ end
 `displayWeight`、`headingWeight`、`titleWeight`、`bodyWeight` 和 `labelWeight` 会覆盖
 对应的 Material 文本层级；宿主会把数值限制在 100–900 并映射到 Flutter 可用字重。
 主题操作失败只会忽略皮肤，不会让音乐平台启动失败。
+
+**字重/字体是「默认值」，用户的选择优先。** 字体自定义（`设置 → 界面与布局 → 字体自定义`）
+里的字体族、每个分类的字号缩放与字重、以及歌词字重，一旦用户动过，就压过皮肤令牌：
+
+| 用户设置 | 皮肤对应令牌 | 谁生效 |
+| --- | --- | --- |
+| 字体族（MiSans / 系统 / 导入字体） | 无（皮肤不能指定字体族） | 永远是用户 |
+| 某分类的字重 | `displayWeight` / `titleWeight` / `bodyWeight` / `labelWeight` | 用户设过就用户，没设过才用皮肤 |
+| 某分类的字号缩放 | 无 | 永远是用户 |
+| 歌词字重 | `lyricWeight`（页面主歌词） | 用户拖过滑块就用户，否则皮肤 |
+
+皮肤作者照常写 `titleWeight = 600` 这类令牌即可，它表达的是「这一版默认多粗」；
+用户改过之后宿主不会再用它去覆盖。实现落点：`lib/theme/font_preferences.dart` 的
+`FontPreferences.applyTo` / `weightFor`，`lib/widgets/apple_ui.dart` 的各处标题
+（都走 `context.fonts.apply(category, …)`），`lib/lyrics/line_content.dart` 的
+`honorThemeWeight`，以及 `AppState.lyricWeightForSkin()`。
+
+#### 颜色令牌（`elements.colors` / `elements.darkColors`）
+
+皮肤可以覆盖宿主的语义颜色，宿主仍然掌管对比度、焦点、语义树与全部 Widget。
+槽位名与内置 Apple 调色板一致；`darkColors` 缺省时沿用 `colors`（只做浅色的皮肤
+不用写两遍）。
+
+| 槽位 | 用途 | 浅色默认（Apple） |
+| --- | --- | --- |
+| `background` | 页面画布 | 系统分组背景 |
+| `secondaryBackground` | 画布上浮一层 | |
+| `tertiaryBackground` | 第三层容器 | |
+| `groupedBackground` | 分组列表底 | |
+| `secondaryGroupedBackground` | 卡片 / 分组行 | |
+| `tertiaryGroupedBackground` | 卡片内嵌层 | |
+| `label` | 主文字、图标 | 近黑 |
+| `secondaryLabel` / `tertiaryLabel` / `quaternaryLabel` | 逐级弱化文字 | |
+| `fill` / `secondaryFill` / `tertiaryFill` | 控件填充与 hover | |
+| `separator` / `opaqueSeparator` | 发丝线 / 实心分隔 | |
+| `accent` / `accentSoft` | 强调色与它的柔化底 | 系统蓝 |
+| `glass` / `glassStrong` | 玻璃面板 / 播放条底色 | |
+
+取值格式：`#rgb`、`#rrggbb`、`#aarrggbb`、`0xAARRGGBB` 或整数 ARGB；无法解析的值
+与未知槽位会被忽略。除槽位名外还接受一组别名（大小写不敏感），方便纸感/手帐类
+皮肤用自己的词汇：`canvas`/`page`/`ivory`/`ivoryMedium` → `background`，
+`surface`/`card`/`ivoryLight`/`panel` → `secondaryGroupedBackground`，
+`ink`/`text`/`slateDark` → `label`，`muted`/`cloudDark` → `secondaryLabel`，
+`dim`/`cloudMedium` → `tertiaryLabel`，`hairline`/`stone` → `separator`，
+`highlight`/`oatWarm` → `fill`，`clay` → `accent`，
+`playerBar`/`playerSurface`/`glassStrong` → `glassStrong`。
+
+只给 `label` 与 `background` 时，宿主会用 ink 的透明度派生 `fill`/`separator`，
+并用画布色派生 `glass`/`glassStrong`，所以五个颜色也能得到一个自洽的皮肤。
+
+#### 组件几何令牌
+
+| 令牌 | 默认 | 范围 | 作用 |
+| --- | --- | --- | --- |
+| `railWidth` | 0（自适应 216–264） | 0–420 | 桌面侧栏宽度；`0` 跟随窗口比例 |
+| `playerBarHeight` | 0（92） | 0–200 | 桌面播放条最小高度 |
+| `compactPlayerBarHeight` | 0（56/60） | 0–160 | 紧凑播放条最小高度 |
+| `cornerScale` | 1 | 0–2 | 全局圆角系数：每个 `BorderRadius` 都乘上它，`0` = 全直角，`2` = 加倍。用户在设置里选了「自行调节」时以用户值为准 |
+| `glassBlurSigma` | 16 | 0–48 | 玻璃模糊强度；`0` 即完全不模糊（纸面皮肤必设） |
+
+```lua
+if operation == "theme" then
+  return {
+    theme = {
+      id = "community.example.paper",
+      name = "Paper",
+      elements = {
+        glassBlurSigma = 0,
+        railWidth = 232,
+        playerBarHeight = 100,
+        groupedCardRadius = 0,
+        cornerScale = 0,
+        colors = {
+          canvas = "#F0EEE6",
+          surface = "#FAF9F5",
+          ink = "#141413",
+          muted = "#87867F",
+          hairline = "#CCCBC8",
+          highlight = "#E3DACC",
+          clay = "#D97757",
+          playerSurface = "#141413",
+        },
+        darkColors = {
+          canvas = "#191918",
+          surface = "#242423",
+          ink = "#F0EEE6",
+          muted = "#B5B2A9",
+          hairline = "#454540",
+          clay = "#E68E70",
+        },
+      },
+    },
+  }
+end
+```
+
+#### 圆角设置（用户侧，`groupedCardRadius` / `cornerScale` 的上位开关）
+
+卡片圆角归皮肤令牌 `groupedCardRadius`（px），组件圆角（按钮、胶囊）归 `cornerScale`
+（系数）。用户可以在 **设置 → 外观 → 圆角设置** 里改主意，所以皮肤给的值不是最终值：
+
+| 选项 | 卡片（`groupedCardRadius`） | 组件（`cornerScale`） |
+| --- | --- | --- |
+| 跟随主题设置（默认） | 用皮肤的 px，设置页显示同一个数（皮肤写 0 → 「0 px（主题）」） | 用皮肤的值 |
+| 自行调节 | 用户的滑块 0–32 px **直接替换**（不是乘在皮肤的 0 上） | `px / 16` 缩放 |
+
+`0 px` = 全直角，`16 px` = 组件原本的圆角，`32 px` = 加倍。滑块**一直都在**（以前只在
+「自行调节」下出现，多数人根本找不到这个设置）；跟随主题时它显示生效中的角，往里一拖
+就自动切到「自行调节」。
+
+为什么手动模式是「替换」而不是「相乘」：皮肤写 `groupedCardRadius = 0` 时，`0 × 任何系数`
+仍是 0，滑块就会看起来完全没用。
+
+实现落点：`lib/theme/shape_scale.dart` 的 `AppleShape`（`resolve(followTheme:, customPx:, theme:)`
+算组件系数、`cardRadiusOf(context, theme)` 给卡片圆角、`cardPxFor()` 给设置页显示），
+`lib/main.dart` 在 `MaterialApp` 外面包一层 `AppleShape`，`lib/theme/apple_design.dart` 的
+`buildAppleTheme(cornerScale:)` 覆盖 `ThemeData` 自带的形状（弹窗、输入框、按钮）。
+
+皮肤作者不必关心用户选了什么：写 `groupedCardRadius` 表达「这一版卡片多圆」、
+`cornerScale` 表达「组件多圆」，用户想更方或更圆时自己会去滑块上调。桌面外壳、正在播放页、
+播放条、电视模式（十英尺界面）与所有弹窗都吃这套；歌词海报导出
+（`lib/lyrics/image_export.dart`）是设计成品，不跟随。
+
+```lua
+-- 直角皮肤：卡片、按钮、封面、弹窗一起方
+elements = { cornerScale = 0, groupedCardRadius = 0 }
+```
+
+皮肤令牌是启动时读一次的，但**改设置会重读**：用户在插件设置项或插件页面控件上
+动一下，宿主会在 `setting_changed` / `page_event` 之后重新调用插件的 `describe` +
+`theme`，把新的 `theme`/`layout` 换上并重绘（`PluginManager._reloadSkin`）。所以
+`cornerScale` 这类「用户会调的令牌」请在插件里每次现算，不要把值缓存在模块级变量里；
+重新读失败时宿主保留上一份皮肤，不会闪回默认主题。
+
+#### 布局令牌（`layout`）
+
+| 字段 | 默认 | 范围 | 作用 |
+| --- | --- | --- | --- |
+| `compactInset` | 16 | 0–80 | 紧凑层左右留白 |
+| `regularInset` | 24 | 0–120 | 常规层左右留白 |
+| `maxContentWidth` | 1180 | 0–3000 | 内容列上限；`0` 跟随窗口 |
+| `tabletBreakpoint` | 700 | 320–1600 | 平板断点 |
+| `tvInsetFactor` / `tvMaxContentWidth` | .043 / 1560 | 0–.25 / 0–3000 | 电视层 |
+
+#### 正在播放页令牌（`elements`）
+
+监听画布的版心：左栏封面、间距、竖发丝线、右栏阅读面。全部为 `0` 时沿用
+内置的等比两栏。
+
+| 字段 | 默认 | 范围 | 作用 |
+| --- | --- | --- | --- |
+| `nowPlayingArtworkFraction` | .34 | 0–.9 | 左栏宽 = `clamp(W × fraction, min, max)`；`0` 关闭皮肤版心 |
+| `nowPlayingArtworkMin` / `nowPlayingArtworkMax` | 240 / 440 | 0–1200 | 上面那条 `clamp` 的下限与上限 |
+| `nowPlayingSidePadding` | 0 | 0–200 | 监听画布左右留白；`0` 跟随 4% clamp 28–80 |
+| `nowPlayingSidePaddingMax` | 0 | 0–400 | 留白上限 |
+| `nowPlayingTitleSize` | 0 | 0–96 | 曲名字号；`0` 跟随 22/26/32 档位 |
+| `nowPlayingSubtitleSize` | 0 | 0–72 | 翻译行字号；`0` 跟随 12/14/15 |
+| `nowPlayingMetaSize` | 0 | 0–72 | 歌手行字号；`0` 跟随 14/17/19 |
+| `nowPlayingCoverRadius` | 0 | 0–64 | 封面圆角；`0` 是直角，同时去掉封面投影 |
+| `nowPlayingDockHeight` | 0 | 0–240 | 底部传输 dock 高度；`0` 跟随内置值 |
+
+#### 应用背景令牌（`elements`）
+
+| 字段 | 默认 | 范围 | 作用 |
+| --- | --- | --- | --- |
+| `backgroundPlayMode` | `''` | `''` / `off` / `nowPlayingStatic` / `nowPlayingDynamic` | `off` 时**完全不构建**专辑色流的绘制层，画布直接铺 `colors.background` |
+| `backgroundOpacity` | 1 | 0–1 | 背景绘制层不透明度 |
+| `backgroundBlurSigma` | -1 | -1–96 | `-1` 沿用用户偏好，`0` 关闭背景模糊 |
+| `backgroundVeilAlpha` | -1 | -1–1 | `-1` 沿用内置 `.60` 遮罩，`1` 完全盖住背景 |
+
+纸面皮肤（无毛玻璃、无专辑色流、封面直角）：
+
+```lua
+elements = {
+  backgroundPlayMode = 'off',
+  backgroundBlurSigma = 0,
+  backgroundVeilAlpha = 1,
+  glassBlurSigma = 0,
+  nowPlayingArtworkFraction = .34,
+  nowPlayingArtworkMin = 240,
+  nowPlayingArtworkMax = 440,
+  nowPlayingSidePadding = 32,
+  nowPlayingTitleSize = 30,
+  nowPlayingMetaSize = 18,
+  nowPlayingCoverRadius = 0,
+}
+```
+
 
 `artistSongs({id,limit,offset})` 返回歌手歌曲当前页。评论使用字符串 ID：
 `{id,content,author,authorId,avatarUrl,time,location,liked,likedCount,replies}`，

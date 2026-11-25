@@ -17,6 +17,7 @@ import 'network_source.dart';
 import 'network_sources_controller.dart';
 import 'network_widgets.dart';
 import 'remote_source.dart';
+import '../theme/shape_scale.dart';
 
 /// Folder browser for one network source: folders first, then the files this
 /// app can play. Tapping a song queues the whole folder from that point.
@@ -193,7 +194,7 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
       color: AppleSemanticColors.of(context).tertiaryBackground,
       surfaceTintColor: Colors.transparent,
       elevation: 18,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12 * AppleShape.scaleOf(context))),
       items: <PopupMenuEntry<String>>[
         const PopupMenuItem<String>(value: 'play', child: TrText('播放')),
         const PopupMenuItem<String>(
@@ -344,9 +345,7 @@ class _NetworkBrowsePageState extends State<NetworkBrowsePage>
                       sliver: DecoratedSliver(
                         decoration: BoxDecoration(
                           color: apple.secondaryGroupedBackground,
-                          borderRadius: BorderRadius.circular(
-                            LazerThemeTokens.of(context).groupedCardRadius,
-                          ),
+                          borderRadius: BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context))),
                           border: Border.all(color: apple.separator, width: .5),
                         ),
                         sliver: SliverList.builder(
@@ -513,7 +512,7 @@ class _NetworkFileRowState extends State<_NetworkFileRow>
       if (size.isNotEmpty) size,
     ].join(' · ');
     return TvTapTarget(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
       onTap: widget.onTap,
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovering = true),
@@ -542,7 +541,7 @@ class _NetworkFileRowState extends State<_NetworkFileRow>
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
             decoration: BoxDecoration(
               color: _hovering ? apple.fill : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context)),
             ),
             child: Row(
               children: <Widget>[

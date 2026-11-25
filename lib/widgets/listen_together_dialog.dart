@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/listen_together.dart';
+import '../theme/shape_scale.dart';
 
 /// Opens the 一起听 room sheet from any platform's player header or settings.
 Future<void> showListenTogetherDialog(BuildContext context, AppState state) =>
@@ -67,7 +68,7 @@ class _ListenTogetherDialogState extends State<_ListenTogetherDialog> {
       shadowColor: Colors.black.withValues(alpha: .55),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(_radius),
+        borderRadius: BorderRadius.circular(_radius * AppleShape.scaleOf(context)),
       ),
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(

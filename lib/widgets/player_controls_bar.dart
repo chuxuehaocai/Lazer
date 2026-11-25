@@ -9,6 +9,7 @@ import '../theme/design_tokens.dart';
 import 'interaction_feedback.dart';
 import 'plate_art.dart';
 import '../ui/player_bar.dart';
+import '../theme/shape_scale.dart';
 
 class PlayerControlsBar extends StatelessWidget {
   const PlayerControlsBar({
@@ -89,7 +90,7 @@ class _TrackRowState extends State<TrackRow> with BuildSafeState<TrackRow> {
                 SizedBox.square(
                   dimension: 40,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(6 * AppleShape.scaleOf(context)),
                     child: PlateArt(
                       seed: track.coverSeed,
                       coverUrl: track.coverUrl,

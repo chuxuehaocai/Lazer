@@ -31,6 +31,8 @@ import 'login.dart';
 import 'listening_statistics_page.dart';
 import 'page_utils.dart';
 import 'widgets.dart';
+import '../theme/lazer_theme.dart';
+import '../theme/shape_scale.dart';
 
 /// Library: local files first, then owned playlists and public
 /// recommendations. Local music sits above the playlists so a guest can import
@@ -1179,7 +1181,9 @@ class _PlaylistDragStill extends StatelessWidget {
         children: <Widget>[
           DecoratedBox(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(
+                AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)),
+              ),
               boxShadow: <BoxShadow>[
                 BoxShadow(
                   color: Colors.black.withValues(alpha: .34),

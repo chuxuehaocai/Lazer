@@ -7,6 +7,7 @@ import '../animation/apple_spring.dart';
 import '../data/models.dart';
 import '../theme/font_preferences.dart';
 import '../widgets/animated_track_cover.dart';
+import '../theme/shape_scale.dart';
 
 /// The artwork keeps one element while travelling between the reading pane
 /// and the transport. Animation ticks only relayout these cached children.
@@ -415,7 +416,7 @@ class PlayerTrackSummary extends StatelessWidget {
           SizedBox.square(
             dimension: 44,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(6 * AppleShape.scaleOf(context)),
               child: AnimatedTrackCover(track: track, direction: 0, size: 44),
             ),
           ),
