@@ -19,6 +19,7 @@ import 'plugin_data_access.dart' show pluginFrontendLua;
 import 'plugin_sockets_io.dart';
 import 'plugin_websockets_io.dart';
 import 'lua_console_evaluator.dart';
+import 'lua_vm_probe.dart';
 import '../diagnostics/app_log.dart';
 import '../utils/system_http.dart';
 
@@ -239,6 +240,16 @@ class LuaPluginRuntime {
       } else if (message is Map && message['hostLog'] is Map) {
         onLog?.call(Map<String, dynamic>.from(message['hostLog'] as Map));
       } else if (message is Map && message['startupError'] != null) {
+        // The isolate already reduced the failure to a one-line description.
+        // Keep it in the log: "check the Lua source" without the message the
+        // interpreter produced leaves the reader with nothing to check. The
+        // exception below stays the translated key the UI already carries.
+        AppLog.shared.event('lua', 'startup_error', <String, Object?>{
+          'plugin': manifest.id,
+          'error': '${message['startupError']}',
+          if (message['startupStack'] != null)
+            'stack': '${message['startupStack']}',
+        });
         if (!ready.isCompleted) {
           ready.completeError(const PluginException('插件启动失败，请检查 Lua 源码。'));
         }
@@ -620,10 +631,12 @@ Future<void> _runPlugin(Map<String, dynamic> config) async {
   try {
     await host.initialize();
     output.send(commands.sendPort);
-  } catch (error) {
+  } catch (error, stack) {
     await host.closeSockets();
     host.client.close(force: true);
-    output.send({'startupError': '$error'});
+    // The frame list is what turns "null check operator" into a line of Lua the
+    // author can open; it carries no request data of its own.
+    output.send({'startupError': '$error', 'startupStack': '$stack'});
     commands.close();
     return;
   }
@@ -1106,6 +1119,7 @@ end
     if (!await lua.doStringAsync(bootstrap)) {
       throw const FormatException('Bootstrap failed');
     }
+    await requireAsyncHostCalls(lua);
     final source = sources[manifest.entry];
     if (source == null || lua.loadString(source) != ThreadStatus.luaOk) {
       throw const FormatException('Invalid entry');

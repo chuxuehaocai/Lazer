@@ -19,6 +19,7 @@ import 'plugin_event_scheduler.dart';
 import 'plugin_data_access.dart' show pluginFrontendLua;
 import 'plugin_socket_inbox.dart';
 import 'lua_console_evaluator.dart';
+import 'lua_vm_probe.dart';
 import 'web_plugin_http_proxy.dart';
 import '../diagnostics/app_log.dart';
 import '../utils/system_http.dart';
@@ -750,6 +751,7 @@ class _WebPluginHost {
     if (!await lua.doStringAsync(bootstrap)) {
       throw const FormatException('Bootstrap failed');
     }
+    await requireAsyncHostCalls(lua);
     final source = sources[manifest.entry];
     if (source == null || lua.loadString(source) != ThreadStatus.luaOk) {
       throw const FormatException('Invalid entry');

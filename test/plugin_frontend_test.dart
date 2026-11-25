@@ -35,7 +35,11 @@ Uint8List _package(List<String> scopes) {
     'frontend/app.css': 'main { color: white; }',
     'main.lua': '''
 return {call=function(op,args)
-  if op == "describe" then return {providers={}} end
+  if op == "describe" then
+    -- 声明一个平台：这个测试要验证插件读不到自己平台的私有数据，没有 gateway
+    -- 就没有「自己平台」可试。
+    return {providers={{id="frontend", name="Frontend"}}}
+  end
   if op == "asset" then return host.resource(args.path or "frontend/index.html") end
   if op == "permissions" then return host.permissions() end
   if op == "request" then return host.request_permission(args.scope) end
