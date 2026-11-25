@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../animation/apple_spring.dart';
 import '../diagnostics/app_log.dart';
+import '../l10n/app_localizations.dart';
 import '../lyrics/interlude.dart';
 import '../lyrics/line_content.dart';
 import '../lyrics/lyric_document.dart';
@@ -237,6 +238,9 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   bool _windowConfigured = false;
   bool _resizeRunning = false;
   Size? _pendingSize;
+  /// 第一轮尺寸定稿后再量一次行高的机会（整个生命周期只补一次）。
+  bool _settlePending = false;
+  bool _settled = false;
   bool _visible = true;
   bool _reducedMotion = false;
   bool _lifecycleVisible = true;
@@ -265,6 +269,10 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     _windowSize = lyricsOverlayWindowSize(widget.launch);
     _windowConfigured = true;
     _applyAnimationSpeed(_settings);
+    // 行高要在「有内容、且这一帧已经画过」时量才准：字体可能还没就绪、主题也可能
+    // 还是默认值。重量放在 [_applyPayload] 的首帧回调，以及第一次真正改尺寸后的
+    // [_settlePending] 里；在 initState 再补一次只会抢在内容之前把窗口尺寸定死，
+    // 反而让后面每一轮尺寸都变成「没变化」。
     widget.bridge.handler = _handle;
     unawaited(_announceReady());
   }
@@ -386,6 +394,16 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
     _seekPending = false;
     unawaited(_loadFont(payload.settings));
     unawaited(_resizeOverlay());
+    // 首帧里的 slot 是「这一轮 build 之前」量的：窗口还没按新内容定尺寸，
+    // 字体也可能还没就绪。用它定位会让整块歌词偏低、底部被裁，要等切歌重排
+    // 才回到正确位置。这里等这一帧画完再量一次并重新摆位。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _invalidateLayout();
+      _retarget(instant: true);
+      unawaited(_resizeOverlay());
+      _frames.value++;
+    });
     _ensureTicker();
     _frames.value++;
   }
@@ -595,6 +613,8 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
         _pendingSize = null;
         final previous = _windowSize;
         if (size == previous) continue;
+        // 第一次真正改变尺寸：这一轮的 slot 可能是在旧几何下量的。
+        if (previous != null && !_settled) _settlePending = true;
         try {
           if (_mode == LyricsOverlayMode.floating) {
             final position = await windowManager.getPosition();
@@ -625,6 +645,16 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
       }
     } finally {
       _resizeRunning = false;
+    }
+    // 行高是拿窗口里的字量出来的。窗口尺寸刚定稿那一轮，缓存里可能还留着
+    // 「字体还没加载好 / 主题还没换过来」时量的 slot，行会整体偏下、底部被裁，
+    // 以前得等切歌重排才恢复。这里补一次重测 + 立即摆位（只补一次，不会递归）。
+    if (_settlePending && mounted) {
+      _settlePending = false;
+      _settled = true;
+      _invalidateLayout();
+      _retarget(instant: true);
+      unawaited(_resizeOverlay());
     }
   }
 

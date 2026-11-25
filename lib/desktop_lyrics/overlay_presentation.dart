@@ -63,27 +63,75 @@ extension _OverlayPresentation on _LyricsOverlayAppState {
               _row(_focus + offset, slot, inset),
       ],
     );
+    // One accessibility node for the whole panel, and the moving rows kept out of
+    // the semantics tree entirely.
+    //
+    // Every row moves on each vsync — a spring `Transform.translate`, an
+    // `Opacity` ramp, the word mask — so a semantics node per row meant the
+    // engine rebuilt those nodes on every frame. On Windows the accessibility
+    // bridge then failed on each one: `Failed to update ui::AXTree, error:
+    // Nodes left pending by the update`, followed by `<id> will not be in the
+    // tree and is not the new root` — the ids drifted faster than the bridge
+    // could reconcile. The overlay is a read-along mirror of lyrics the app
+    // window already exposes, so the rows owe a screen reader nothing beyond the
+    // current line.
+    //
+    // The label node is a **sibling** of the rows, not their ancestor: a
+    // boundary above them would inherit their per-frame geometry and republish
+    // itself just as often. As siblings, the rows dirty nothing this node owns,
+    // so it is updated only when the focus line changes.
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          IgnorePointer(child: block),
-          for (final Rect rect in regions.skip(1))
-            Positioned.fromRect(
-              rect: rect,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.move,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) => unawaited(_startDrag()),
-                ),
-              ),
+          Semantics(
+            container: true,
+            label: _overlaySemanticLabel(context),
+            child: const SizedBox.expand(),
+          ),
+          ExcludeSemantics(
+            child: Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                IgnorePointer(child: block),
+                for (final Rect rect in regions.skip(1))
+                  Positioned.fromRect(
+                    rect: rect,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.move,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanStart: (_) => unawaited(_startDrag()),
+                      ),
+                    ),
+                  ),
+                if (regions.isNotEmpty) _desktopDragHandle(window.height),
+              ],
             ),
-          if (regions.isNotEmpty) _desktopDragHandle(window.height),
+          ),
         ],
       ),
     );
+  }
+
+  /// What a screen reader hears from the panel: the focused line, or the notice
+  /// shown while there is no lyric to read.
+  String _overlaySemanticLabel(BuildContext context) {
+    final int index = _focus.clamp(0, math.max(0, _lines.length - 1));
+    if (_lines.isNotEmpty && _lines[index].text.trim().isNotEmpty) {
+      return lyricSemanticLabel(
+        _lines[index],
+        showRomanization: _settings.showRomanization,
+      );
+    }
+    if (_lines.isNotEmpty) return context.tr('间奏');
+    final payload = _payload;
+    return <String>[
+      if ((payload?.title ?? '').isNotEmpty) payload!.title,
+      if ((payload?.artist ?? '').isNotEmpty) payload!.artist,
+      if ((payload?.notice ?? '').isNotEmpty) payload!.notice!,
+    ].join('\n');
   }
 
   List<Rect> _lyricHitBounds(Size size) {
@@ -168,51 +216,47 @@ extension _OverlayPresentation on _LyricsOverlayAppState {
                 theme.lyricFocusScaleDelta)
             .clamp(0.0, 1.0);
     final line = _lines[index];
-    final Widget text = Semantics(
-      container: true,
-      excludeSemantics: true,
-      label: lyricSemanticLabel(
-        line,
-        showRomanization: _settings.showRomanization,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          LyricLineContent(
-            line: line,
-            style: _lyricStyle,
-            active: active,
-            position: () =>
-                Duration(microseconds: (_currentPositionMs * 1000).round()),
-            repaint: _wordFrame(index),
-            emphasis: emphasis,
+    // No per-row Semantics here: the panel publishes one node (see
+    // [_buildOverlay]). A node per row meant one semantics node per moving
+    // layer, and every spring frame then pushed an AXTree update the Windows
+    // accessibility bridge could not reconcile.
+    final Widget text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        LyricLineContent(
+          line: line,
+          style: _lyricStyle,
+          active: active,
+          position: () =>
+              Duration(microseconds: (_currentPositionMs * 1000).round()),
+          repaint: _wordFrame(index),
+          emphasis: emphasis,
+          maxLines: 1,
+        ),
+        for (final secondary in <String?>[
+          if (_settings.showRomanization) line.romanization,
+          line.translation,
+        ].whereType<String>()) ...[
+          SizedBox(height: theme.lyricTranslationGap),
+          Text(
+            secondary,
             maxLines: 1,
-          ),
-          for (final secondary in <String?>[
-            if (_settings.showRomanization) line.romanization,
-            line.translation,
-          ].whereType<String>()) ...[
-            SizedBox(height: theme.lyricTranslationGap),
-            Text(
-              secondary,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: _lyricStyle.copyWith(
-                fontSize: (_settings.fontSize * theme.lyricTranslationScale)
-                    .clamp(12, 30),
-                height: theme.lyricTranslationLineHeight,
-                fontWeight: theme.lyricTranslationFontWeight(
-                  _settings.fontWeight,
-                ),
-                color: Colors.white.withValues(
-                  alpha: theme.lyricTranslationAlpha,
-                ),
+            overflow: TextOverflow.ellipsis,
+            style: _lyricStyle.copyWith(
+              fontSize: (_settings.fontSize * theme.lyricTranslationScale)
+                  .clamp(12, 30),
+              height: theme.lyricTranslationLineHeight,
+              fontWeight: theme.lyricTranslationFontWeight(
+                _settings.fontWeight,
+              ),
+              color: Colors.white.withValues(
+                alpha: theme.lyricTranslationAlpha,
               ),
             ),
-          ],
+          ),
         ],
-      ),
+      ],
     );
     final double activeY = _verticalPadding + (_settings.lineCount ~/ 2) * slot;
     return Positioned(
