@@ -1206,8 +1206,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                                     onBack: _closePage,
                                     onSaveArtwork: () =>
                                         unawaited(_saveArtwork(track)),
-                                    onFullscreen: () =>
-                                        unawaited(_toggleFullscreen()),
                                     controlsVisible: _controlsVisible,
                                     playPauseFocus: _playPauseFocus,
                                     onActivity: _controlsActivity,

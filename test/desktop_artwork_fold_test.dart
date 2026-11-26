@@ -46,7 +46,6 @@ Widget _host(
           onPaneChanged: (value) => pane.value = value,
           onBack: () {},
           onSaveArtwork: () {},
-          onFullscreen: () {},
           controlsVisible: true,
           onActivity: () {},
         ),

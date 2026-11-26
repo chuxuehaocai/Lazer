@@ -68,7 +68,6 @@ void main() {
                 onPaneChanged: (_) {},
                 onBack: () {},
                 onSaveArtwork: () {},
-                onFullscreen: () {},
                 controlsVisible: true,
                 onActivity: () {},
                 playPauseFocus: playFocus,
@@ -98,10 +97,36 @@ void main() {
         find.byType(VolumeControl),
         mode.largeScreen ? findsNothing : findsOneWidget,
       );
-      expect(
-        find.byKey(const ValueKey('desktop-fullscreen')),
-        mode.largeScreen ? findsNothing : findsOneWidget,
-      );
+      // The player has no fullscreen button: the volume slider closes the row.
+      // Fullscreen stays on the keyboard (F) and on the window controls.
+      expect(find.byKey(const ValueKey('desktop-fullscreen')), findsNothing);
+      if (!mode.largeScreen) {
+        // With the fullscreen icon gone, the slider is the trailing control and
+        // it ends flush with the dock's content edge: the window inset (16) plus
+        // the transport's own padding (24). Before, that last 48 dp belonged to
+        // the fullscreen button, so the slider stopped short of it.
+        final Rect volume = tester.getRect(find.byType(VolumeControl));
+        final double contentRight =
+            tester.view.physicalSize.width / tester.view.devicePixelRatio -
+            16 -
+            24;
+        expect(volume.right, closeTo(contentRight, .5));
+        // Full width of the slider's own cap, not the shrunken 48 dp form it
+        // falls back to when its slot is too narrow.
+        expect(volume.width, greaterThan(100));
+        // Nothing of the player's own sits to the right of it any more.
+        for (final Finder other in <Finder>[
+          find.byKey(const ValueKey('desktop-play-pause')),
+          find.byKey(const ValueKey('desktop-queue')),
+        ]) {
+          expect(other, findsOneWidget);
+          expect(
+            tester.getRect(other).right,
+            lessThanOrEqualTo(volume.left),
+            reason: 'the volume slider has to be the trailing control',
+          );
+        }
+      }
 
       playFocus.requestFocus();
       await tester.pump();

@@ -115,7 +115,6 @@ class DesktopNowPlaying extends StatelessWidget {
     required this.onPaneChanged,
     required this.onBack,
     required this.onSaveArtwork,
-    required this.onFullscreen,
     required this.controlsVisible,
     required this.onActivity,
     this.onPointerStart,
@@ -127,7 +126,7 @@ class DesktopNowPlaying extends StatelessWidget {
   final Widget artwork, lyrics, comments, queue;
   final DesktopNowPlayingPane pane;
   final ValueChanged<DesktopNowPlayingPane> onPaneChanged;
-  final VoidCallback onBack, onSaveArtwork, onFullscreen;
+  final VoidCallback onBack, onSaveArtwork;
   final bool controlsVisible;
   final VoidCallback onActivity;
   final ValueChanged<int>? onPointerStart, onPointerEnd;
@@ -322,7 +321,6 @@ class DesktopNowPlaying extends StatelessWidget {
                           visible: controlsVisible,
                           pane: pane,
                           onPaneChanged: onPaneChanged,
-                          onFullscreen: onFullscreen,
                         ),
                       ],
                     ),
@@ -961,14 +959,12 @@ class _DesktopDock extends StatelessWidget {
     required this.visible,
     required this.pane,
     required this.onPaneChanged,
-    required this.onFullscreen,
     this.playPauseFocus,
   });
   final AppState state;
   final bool visible;
   final DesktopNowPlayingPane pane;
   final ValueChanged<DesktopNowPlayingPane> onPaneChanged;
-  final VoidCallback onFullscreen;
   final FocusNode? playPauseFocus;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -1144,23 +1140,14 @@ class _DesktopDock extends StatelessWidget {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            if (!largeScreenModeOf(context)) ...[
-                              Flexible(child: VolumeControl(state: state)),
-                              const SizedBox(width: 2),
-                              AccessibleIconButton(
-                                key: const ValueKey('desktop-fullscreen'),
-                                tooltip: '全屏 (F)',
-                                color: context.colors.slateDark,
-                                iconSize: 22,
-                                constraints: const BoxConstraints(
-                                  minWidth: 40,
-                                  minHeight: 48,
-                                ),
-                                padding: const EdgeInsets.all(8),
-                                onPressed: onFullscreen,
-                                icon: const Icon(Icons.fullscreen_rounded),
-                              ),
-                            ],
+                            if (!largeScreenModeOf(context))
+                              // The volume slider now closes the row: the player
+                              // no longer offers a fullscreen button (F still
+                              // toggles it). It keeps its own bounded width, so
+                              // it is placed rather than stretched — a Flexible
+                              // would hand it the whole slot and then paint the
+                              // slider at the slot's leading edge.
+                              VolumeControl(state: state),
                           ],
                         ),
                       ),

@@ -178,7 +178,6 @@ void main() {
                 onPaneChanged: (_) {},
                 onBack: () {},
                 onSaveArtwork: () {},
-                onFullscreen: () {},
                 controlsVisible: true,
                 onActivity: () {},
               ),
@@ -187,10 +186,9 @@ void main() {
         ),
       );
       expect(find.byType(VolumeControl), tv ? findsNothing : findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('desktop-fullscreen')),
-        tv ? findsNothing : findsOneWidget,
-      );
+      // The fullscreen button is gone from the player's control row; the volume
+      // slider is what closes it now.
+      expect(find.byKey(const ValueKey('desktop-fullscreen')), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(
         MaterialApp(
