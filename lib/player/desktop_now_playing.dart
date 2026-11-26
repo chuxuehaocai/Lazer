@@ -123,9 +123,7 @@ class DesktopNowPlaying extends StatelessWidget {
     // 只有「确实存在经典标题栏」时页面才自己画返回按钮：没有 WindowChromeScope
     // 的宿主（网页版、测试、非桌面）不需要这条带子，否则白扣一块高度。
     final bool pageHeaderRow =
-        WindowChromeScope.maybeLayoutOf(context) != null &&
-        !inlineFrame &&
-        !tv;
+        WindowChromeScope.maybeLayoutOf(context) != null && !inlineFrame && !tv;
     final double headerRowInset = pageHeaderRow ? _kClassicHeaderRowHeight : 0;
     // 经典标题栏时头部那一条已经在外层让出真实高度了，这里扣掉，免得歌词区
     // 被推两次（原来 64 是「浮在封面上的头部」需要的避让量）。
@@ -171,9 +169,7 @@ class DesktopNowPlaying extends StatelessWidget {
                     // 之前封面顶到窗口左上角，按钮正好压在封面上。让出这条高度后
                     // 可用高度变小，封面连同下面的标题/歌手一起等比缩小 ->
                     // tools/capture 的截图里就是「缩小封面给按钮腾位置」。
-                    padding: EdgeInsets.only(
-                      top: chromeInset + headerRowInset,
-                    ),
+                    padding: EdgeInsets.only(top: chromeInset + headerRowInset),
                     child: Column(
                       children: [
                         Expanded(

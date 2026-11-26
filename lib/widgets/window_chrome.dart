@@ -36,9 +36,7 @@ class WindowChromeController extends ValueNotifier<bool>
   /// The incoming half of a capsule handover: the set taking over.
   static const Duration handoverIn = Duration(milliseconds: _handoverInMs);
 
-  static const AppleSpring _outSpring = AppleSpring(
-    duration: handoverOut,
-  );
+  static const AppleSpring _outSpring = AppleSpring(duration: handoverOut);
   static const AppleSpring _inSpring = AppleSpring(duration: handoverIn);
 
   /// Presence this close to zero counts as gone: the next set may arrive.
@@ -781,9 +779,7 @@ class _WindowChromeActionsState extends State<WindowChromeActions> {
 
   double get _width =>
       kWindowChromeButtonWidth * widget.children.length +
-      (widget.leading == null
-          ? 0
-          : _leadingWidth + kWindowChromeActionDivider);
+      (widget.leading == null ? 0 : _leadingWidth + kWindowChromeActionDivider);
 
   void _measureLeading() {
     if (widget.leading == null || !mounted) return;
@@ -1183,15 +1179,27 @@ class _WindowChromeCollapseState extends State<WindowChromeCollapse> {
               child: Theme(
                 data: layout.chromeTheme ?? Theme.of(context),
                 child: _WindowChromeButtonTheme(
-                  child: ClipRRect(
-                    // 胶囊自己的圆角设置（见 AppleShape.capsuleRadiusOf）。
-                    borderRadius: BorderRadius.circular(
-                      AppleShape.capsuleRadiusOf(context),
-                    ),
-                    child: SizedBox(
-                      width: kWindowChromeButtonWidth,
-                      height: kWindowChromeHeight,
-                      child: widget.child,
+                  // The back command wears the same pill the caption and the
+                  // song actions do. Without it the glyph sat directly on the
+                  // page: on the Mio player the backdrop is a dark cover, while
+                  // the ink comes from the (light) chrome theme, so the arrow was
+                  // a dim grey shape on a dark, noisy image. Same material, same
+                  // ink, same hover fill as every other capsule command.
+                  child: Builder(
+                    builder: (BuildContext context) => layout.capsule.surface(
+                      context: context,
+                      child: SizedBox(
+                        width: kWindowChromeButtonWidth,
+                        height: kWindowChromeHeight,
+                        child: ClipRRect(
+                          // 胶囊自己的圆角设置（见
+                          // AppleShape.capsuleRadiusOf）。
+                          borderRadius: BorderRadius.circular(
+                            AppleShape.capsuleRadiusOf(context),
+                          ),
+                          child: widget.child,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1252,7 +1260,9 @@ class _WindowChromeButtonTheme extends StatelessWidget {
                 .copyWith(fontWeight: FontWeight.w600),
           ),
           foregroundColor: foreground,
-          backgroundColor: fill((alpha) => scheme.onSurface.withValues(alpha: alpha)),
+          backgroundColor: fill(
+            (alpha) => scheme.onSurface.withValues(alpha: alpha),
+          ),
           overlayColor: const WidgetStatePropertyAll(Colors.transparent),
         ),
       ),
