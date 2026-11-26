@@ -37,6 +37,9 @@ dependencies:
   # Use the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   window_manager: ^0.5.2
+  # 悬浮歌词要把座位恢复到上次的位置；屏幕几何必须能查，才能在显示器被拔掉
+  # 之后把窗口拉回可见区域。它本来只是 window_manager 的传递依赖。
+  screen_retriever: ^0.2.2
 
   # Shared HTTP and cryptographic primitives for sandboxed Lua providers.
   crypto: ^3.0.6

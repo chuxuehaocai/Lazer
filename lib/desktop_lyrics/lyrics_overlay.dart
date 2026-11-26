@@ -23,6 +23,7 @@ import '../lyrics/spring.dart';
 import '../lyrics/timed_line.dart' show lyricWordMotionEnd;
 import '../theme/lazer_theme.dart';
 import '../state/app_state.dart' show AppState;
+import 'overlay_seat.dart';
 import 'overlay_protocol.dart';
 import 'overlay_motion.dart';
 import 'overlay_font_loader.dart';
@@ -185,11 +186,14 @@ Future<void> _configureOverlayWindow(LyricsOverlayLaunch launch) async {
         await windowManager.setPosition(
           position - const Offset(0, _floatingBottomGap),
         );
-      } else if (_isSeatPlausible(seat)) {
-        await windowManager.setPosition(seat);
       } else {
-        // Nothing usable was remembered; keep the default bottom seat.
-        await windowManager.setAlignment(Alignment.bottomCenter);
+        // A seat on a display that has since been unplugged would reopen the
+        // overlay somewhere the listener cannot see or reach it, and the floating
+        // mode is the one the listener drags. Pull it back onto the nearest
+        // visible area instead of trusting the stored point.
+        await windowManager.setPosition(
+          await reachableFloatingSeat(seat, size),
+        );
       }
       await windowManager.show(inactive: true);
     }
@@ -219,15 +223,6 @@ Future<Offset?> _savedFloatingSeat() async {
     return null;
   }
 }
-
-/// Whether a remembered seat still looks like somewhere a window can open.
-///
-/// A seat saved on a monitor that has since been unplugged would otherwise
-/// reopen off-screen with no way back except locking and unlocking the overlay.
-/// Without enumerating displays only a gross sanity check is possible; anything
-/// this rejects falls back to the default seat, which is always reachable.
-bool _isSeatPlausible(Offset seat) =>
-    seat.dx.isFinite && seat.dy.isFinite && seat.dx >= 0 && seat.dy >= 0;
 
 Future<void> _rememberFloatingSeat() async {
   try {
