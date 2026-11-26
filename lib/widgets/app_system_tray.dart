@@ -13,6 +13,7 @@ import 'package:tray_manager/src/tray_listener.dart';
 import 'package:tray_manager/src/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../data/models.dart';
 import '../l10n/app_language.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
@@ -114,6 +115,38 @@ class AppSystemTray with TrayListener {
     }
   }
 
+  /// 托盘右键菜单。
+  ///
+  /// 每一项的动作只挂在 `key` 上，**不带 `onClick`**：tray_manager 的
+  /// `_onMenuItemClicked` 先调 `menuItem.onClick`，再遍历所有 `TrayListener`
+  /// 调 `onTrayMenuItemClick`。两处都接的话一次点击会执行两遍 —— 菜单里的
+  /// 「暂停」于是先 `pause()` 再 `play()`，歌曲接着放；「下一首」一口气跳两首。
+  /// 这就是「右键菜单里按暂停，歌不会停」的原因。
+  ///
+  /// 派发点只有 [onTrayMenuItemClick] 一处，见
+  /// `test/app_system_tray_signature_test.dart` 里的不变式用例。
+  @visibleForTesting
+  static Menu buildContextMenu({
+    required String playPauseLabel,
+    required String previousLabel,
+    required String nextLabel,
+    required String showWindowLabel,
+    required String exitAppLabel,
+    required String trackLabel,
+  }) => Menu(
+    items: <MenuItem>[
+      MenuItem(key: 'track_info', label: trackLabel, disabled: true),
+      MenuItem.separator(),
+      MenuItem(key: 'toggle_play', label: playPauseLabel),
+      MenuItem(key: 'previous', label: previousLabel),
+      MenuItem(key: 'next', label: nextLabel),
+      MenuItem.separator(),
+      MenuItem(key: 'show_window', label: showWindowLabel),
+      MenuItem.separator(),
+      MenuItem(key: 'exit_app', label: exitAppLabel),
+    ],
+  );
+
   Future<void> _updateMenu() async {
     if (!kSupportsSystemTray || !_initialized) return;
     if (_updating) {
@@ -125,55 +158,19 @@ class AppSystemTray with TrayListener {
       final AppState? state = _state;
       if (state == null) return;
 
-      final track = state.current;
+      final Track? track = state.current;
       final bool isPlaying = state.playing;
-      final l10n = await _getLocalizations();
+      final AppLocalizations l10n = await _getLocalizations();
 
-      final String playPauseLabel = l10n.text(isPlaying ? '暂停' : '播放');
-      final String prevLabel = l10n.text('上一首');
-      final String nextLabel = l10n.text('下一首');
-      final String showWindowLabel = l10n.text('显示主界面');
-      final String exitAppLabel = l10n.text('退出 Lazer');
-      final String noTrackLabel = l10n.text('暂未播放歌曲');
-
-      final menu = Menu(
-        items: <MenuItem>[
-          MenuItem(
-            key: 'track_info',
-            label: track != null
-                ? '${track.title} · ${track.artist}'
-                : noTrackLabel,
-            disabled: true,
-          ),
-          MenuItem.separator(),
-          MenuItem(
-            key: 'toggle_play',
-            label: playPauseLabel,
-            onClick: (_) => state.togglePlay(),
-          ),
-          MenuItem(
-            key: 'previous',
-            label: prevLabel,
-            onClick: (_) => state.previous(),
-          ),
-          MenuItem(
-            key: 'next',
-            label: nextLabel,
-            onClick: (_) => state.next(),
-          ),
-          MenuItem.separator(),
-          MenuItem(
-            key: 'show_window',
-            label: showWindowLabel,
-            onClick: (_) => unawaited(showWindow()),
-          ),
-          MenuItem.separator(),
-          MenuItem(
-            key: 'exit_app',
-            label: exitAppLabel,
-            onClick: (_) => unawaited(exitApp()),
-          ),
-        ],
+      final Menu menu = buildContextMenu(
+        playPauseLabel: l10n.text(isPlaying ? '暂停' : '播放'),
+        previousLabel: l10n.text('上一首'),
+        nextLabel: l10n.text('下一首'),
+        showWindowLabel: l10n.text('显示主界面'),
+        exitAppLabel: l10n.text('退出 Lazer'),
+        trackLabel: track != null
+            ? '${track.title} · ${track.artist}'
+            : l10n.text('暂未播放歌曲'),
       );
 
       await TrayManager.instance.setContextMenu(menu);
@@ -255,22 +252,38 @@ class AppSystemTray with TrayListener {
     unawaited(TrayManager.instance.popUpContextMenu());
   }
 
+  /// Runs one tray menu click.
+  ///
+  /// The single dispatch point: see [buildContextMenu] for why the items carry
+  /// no `onClick` of their own. Keeping the mapping here also makes 「菜单里的
+  /// 暂停真的暂停」a plain unit test instead of a manual tray exercise.
+  @visibleForTesting
+  static bool dispatchMenuKey(AppState state, String? key) {
+    switch (key) {
+      case 'toggle_play':
+        state.togglePlay();
+        return true;
+      case 'previous':
+        state.previous();
+        return true;
+      case 'next':
+        state.next();
+        return true;
+      case 'show_window':
+        unawaited(showWindow());
+        return true;
+      case 'exit_app':
+        unawaited(exitApp());
+        return true;
+    }
+    return false;
+  }
+
   @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     final state = _state;
     if (state == null) return;
-    switch (menuItem.key) {
-      case 'toggle_play':
-        state.togglePlay();
-      case 'previous':
-        state.previous();
-      case 'next':
-        state.next();
-      case 'show_window':
-        unawaited(showWindow());
-      case 'exit_app':
-        unawaited(exitApp());
-    }
+    dispatchMenuKey(state, menuItem.key);
   }
 
   Future<void> dispose() async {

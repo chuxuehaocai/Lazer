@@ -180,6 +180,22 @@ class AppleShape extends InheritedWidget {
     return theme.groupedCardRadius;
   }
 
+  /// 方形缩略图（播放队列/列表里的 44 px 小封面、播放条上的 56 px 封面）的
+  /// 圆角（px）。
+  ///
+  /// 跟随全局圆角设置，但吃一个「短边四分之一」的上限：给到 32 px 时，44 px 的
+  /// 列表封面会变成圆形，看起来像头像而不是专辑。大封面（歌单/专辑详情/正在播放
+  /// 页）不走这个上限，完全跟着设置。
+  static double thumbnailRadiusOf(
+    BuildContext context,
+    LazerThemeTokens theme,
+    double edge,
+  ) {
+    final double requested = cardRadiusOf(context, theme);
+    if (!edge.isFinite || edge <= 0) return requested;
+    return requested > edge / 4 ? edge / 4 : requested;
+  }
+
   /// Inline 窗口胶囊当前生效的圆角（px）。
   static double capsuleRadiusOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppleShape>()?.capsulePx ??

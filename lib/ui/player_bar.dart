@@ -254,11 +254,11 @@ class _AppPlayerBarState extends State<AppPlayerBar>
                       onTap: track == null ? null : widget.onOpen,
                       artworkSize: widget.floating ? 36 : 42,
                       showTranslation: !widget.floating,
-                      borderRadius: BorderRadius.circular(
-                        widget.floating
-                            ? 999
-                            : 14 * AppleShape.scaleOf(context),
-                      ),
+                      // 悬浮胶囊里的这块是个药丸，整条都是满圆；嵌在底边栏里的
+                      // compact 行则是普通卡片，跟圆角设置走（null = 读全局）。
+                      borderRadius: widget.floating
+                          ? const BorderRadius.all(Radius.circular(999))
+                          : null,
                     ),
                   ),
                   _CompactIcon(
@@ -448,7 +448,7 @@ class _NowPlayingTile extends StatefulWidget {
     this.onTap,
     required this.artworkSize,
     this.showTranslation = true,
-    this.borderRadius = const BorderRadius.all(Radius.circular(14)),
+    this.borderRadius,
   });
 
   final Track? track;
@@ -458,7 +458,13 @@ class _NowPlayingTile extends StatefulWidget {
   final VoidCallback? onTap;
   final double artworkSize;
   final bool showTranslation;
-  final BorderRadius borderRadius;
+
+  /// Null asks the tile to follow 「设置 → 圆角大小」.
+  ///
+  /// It used to default to a literal `14`, so this was the one card on the
+  /// desktop player that stayed the same shape whatever the listener picked —
+  /// the floating (compact) bar passed a radius explicitly, this one did not.
+  final BorderRadius? borderRadius;
 
   @override
   State<_NowPlayingTile> createState() => _NowPlayingTileState();
@@ -473,6 +479,10 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final LazerThemeTokens tokens = LazerThemeTokens.of(context);
+    final BorderRadius tileRadius =
+        widget.borderRadius ??
+        BorderRadius.circular(AppleShape.cardRadiusOf(context, tokens));
     // The player bar owns its glass surface, so the shell's text color is not
     // a reliable foreground here. Resolve the visible tint against the page
     // canvas and choose an opaque label with readable contrast.
@@ -484,7 +494,7 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
     final Track? track = widget.track;
     final bool highlighted = _hovering || _focused;
     // 只跟歌手行有关：曲名与译文保持 textTheme 原样。
-    final LazerThemeTokens ui = LazerThemeTokens.of(context);
+    final LazerThemeTokens ui = tokens;
     final double artistSize = ui.playerBarArtistSize > 0
         ? ui.playerBarArtistSize
         : 11;
@@ -501,13 +511,14 @@ class _NowPlayingTileState extends State<_NowPlayingTile>
       child: TvTapTarget(
         onTap: widget.onTap,
         onFocusChange: (bool value) => setState(() => _focused = value),
-        borderRadius: widget.borderRadius,
+        borderRadius: tileRadius,
         focusScale: 1.004,
         child: GestureDetector(
           onTap: widget.onTap,
           behavior: HitTestBehavior.opaque,
           child: ClipRRect(
-            borderRadius: widget.borderRadius,
+            key: const ValueKey('player-now-playing-tile'),
+            borderRadius: tileRadius,
             child: ColoredBox(
               color: highlighted
                   // 播放条本身是深色 #141413，而这里的 scheme 是浅色的，

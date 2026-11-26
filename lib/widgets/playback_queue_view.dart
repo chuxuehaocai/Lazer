@@ -7,7 +7,6 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../state/build_safe_notifier.dart';
 import '../theme/apple_design.dart';
-import '../theme/tokens.dart';
 import '../tv/tv_mode.dart';
 import 'accessible_controls.dart';
 import 'apple_ui.dart';
@@ -312,7 +311,16 @@ class _QueueRowState extends State<_QueueRow> with BuildSafeState<_QueueRow> {
                           ),
                           const SizedBox(width: 8),
                           ClipRRect(
-                            borderRadius: AppShape.smRadius,
+                            // 队列小封面跟「设置 → 圆角大小」走。写死 8 的时候
+                            // 用户把圆角调成 0（直角）或 20（更圆），这一列表
+                            // 格是唯一不动的地方。
+                            borderRadius: BorderRadius.circular(
+                              AppleShape.thumbnailRadiusOf(
+                                context,
+                                LazerThemeTokens.of(context),
+                                44,
+                              ),
+                            ),
                             child: SizedBox.square(
                               dimension: 44,
                               child: PlateArt(
