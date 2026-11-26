@@ -15,6 +15,7 @@ import '../downloads/download_manager.dart';
 import '../downloads/download_queue_sheet.dart';
 import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
+import '../state/ui_preferences.dart';
 import '../theme/adaptive_contrast.dart';
 import '../theme/app_palette.dart';
 import '../theme/apple_design.dart';
@@ -40,6 +41,31 @@ import '../theme/shape_scale.dart';
 /// [none] folds that column away: the artwork takes the middle of the canvas
 /// instead of sharing it with lyrics, comments or the queue.
 enum DesktopNowPlayingPane { lyrics, comments, queue, none }
+
+/// The tone the listening canvas actually resolves to, for chrome that has to sit
+/// on it without material of its own.
+///
+/// Not `AppleSemanticColors.background`: that token describes the card surface the
+/// chrome theme is built from, and in the Mio player it is white while the canvas
+/// underneath is cover art on black. Reading it gave the back arrow black ink on
+/// a dark image — the reason it disappeared.
+Color playerBackdropInk(
+  BuildContext context,
+  AppBackgroundMode mode,
+) => switch (mode) {
+  // No backdrop at all: the page itself is the canvas.
+  AppBackgroundMode.off =>
+    Theme.of(context).brightness == Brightness.dark
+        ? AppleSemanticColors.dark
+        : AppleSemanticColors.light,
+  // Every other mode composites over a black edge (`pageColor: Colors.black` in
+  // the player backdrop), and the cover-driven flow is dark in practice.
+  AppBackgroundMode.solidColor ||
+  AppBackgroundMode.customImage ||
+  AppBackgroundMode.windowsMica ||
+  AppBackgroundMode.nowPlayingStatic ||
+  AppBackgroundMode.nowPlayingDynamic => AppleSemanticColors.dark,
+}.background;
 
 /// Breathing room below the cover and metadata group on the desktop canvas.
 const double kDesktopArtworkBottomInset = 24;
@@ -114,6 +140,31 @@ class DesktopNowPlaying extends StatelessWidget {
     final bool capsuleInk = _usesCapsuleInk(context);
     final bool inlineFrame =
         WindowChromeScope.maybeLayoutOf(context)?.inline == true;
+    // Ink for the one command that has no material of its own.
+    //
+    // The floating back button sits straight on the listening canvas — the
+    // backdrop the player composes over the cover art, not the card surface
+    // `AppleSemanticColors.background` describes. Resolving against that token
+    // was the bug: it is white in the Mio player's chrome theme, so the arrow
+    // came out black on a black-and-cover-art canvas.
+    final Color backInk = contrastingLabel(
+      playerBackdropInk(context, state.playerBackground),
+    );
+    // Nothing is painted behind the glyph, so it needs the shadow on every canvas
+    // the player has — including the classic title bar, where the button sits on
+    // the same cover art.
+    final List<Shadow> backShadows = <Shadow>[
+      // The glyph can land on any part of the cover art. A glow in the opposite
+      // direction is what keeps one ink readable across it: a dark glow behind
+      // light ink, a light glow behind dark ink.
+      Shadow(
+        color: backInk.computeLuminance() > .5
+            ? const Color(0x73000000)
+            : const Color(0x59FFFFFF),
+        blurRadius: 4,
+        offset: const Offset(0, 1),
+      ),
+    ];
     // The listening canvas starts below the floating capsule: the page keeps
     // the same band of space every browse page keeps, instead of the artwork
     // running up against the window's top edge.
@@ -296,8 +347,10 @@ class DesktopNowPlaying extends StatelessWidget {
                               tooltip: inlineChrome ? null : '返回',
                               semanticLabel: inlineChrome ? '返回' : null,
                               onPressed: onBack,
-                              icon: const Icon(
+                              color: backInk,
+                              icon: Icon(
                                 Icons.keyboard_arrow_down_rounded,
+                                shadows: backShadows,
                               ),
                             ),
                           ),

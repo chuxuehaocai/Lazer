@@ -12,7 +12,9 @@ import 'package:lazer_nextgen/player/now_playing_page.dart';
 import 'package:lazer_nextgen/state/app_state.dart';
 import 'package:lazer_nextgen/state/ui_preferences.dart';
 import 'package:lazer_nextgen/tv/tv_mode.dart';
+import 'package:lazer_nextgen/theme/adaptive_contrast.dart';
 import 'package:lazer_nextgen/theme/apple_design.dart';
+import 'package:lazer_nextgen/theme/lazer_theme.dart';
 import 'package:lazer_nextgen/updates/open_external.dart';
 import 'package:lazer_nextgen/widgets/apple_ui.dart';
 import 'package:lazer_nextgen/widgets/window_chrome.dart';
@@ -27,17 +29,35 @@ const _minimizeKey = ValueKey('window-title-minimize');
 const _windowChannel = MethodChannel('window_manager');
 
 class _LyricsState extends AppState {
-  _LyricsState() {
+  _LyricsState({this.paperSkin = false}) {
     autoDpiScale = false;
     layoutStyle = AppLayoutStyle.desktop;
     titleBarStyle = DesktopTitleBarStyle.inline;
-    playerBackground = AppBackgroundMode.solidColor;
+    // A paper skin paints no backdrop at all, so the page itself is the canvas.
+    playerBackground = paperSkin
+        ? AppBackgroundMode.off
+        : AppBackgroundMode.solidColor;
     lyricControlsSeconds = 1;
     lyrics = const [
       LyricLine(Duration.zero, 'The first lyric'),
       LyricLine(Duration(seconds: 10), 'The second lyric'),
     ];
   }
+
+  /// A skin that turns the album-colour flow off: the listening canvas then
+  /// follows the app's own brightness instead of forcing itself dark, which is
+  /// what flips the adaptive chrome ink.
+  final bool paperSkin;
+
+  @override
+  LazerThemeTokens get activeTheme => paperSkin
+      ? const LazerThemeTokens(
+          id: 'fixture.paper',
+          name: 'Paper',
+          version: 1,
+          backgroundPlayMode: 'off',
+        )
+      : LazerThemeTokens.mio;
 
   @override
   bool get playing => true;
@@ -66,7 +86,8 @@ class _PlayerFrameHarness {
     this.television = false,
     this.windowDrag,
     this.chromeStyle = DesktopTitleBarStyle.inline,
-  }) {
+    bool paperSkin = false,
+  }) : state = _LyricsState(paperSkin: paperSkin) {
     state.titleBarStyle = chromeStyle;
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -96,7 +117,7 @@ class _PlayerFrameHarness {
   /// When set, `startDragging` stays pending until the test releases the
   /// button the way the OS move loop would.
   final Completer<void>? windowDrag;
-  final state = _LyricsState();
+  final _LyricsState state;
   final open = ValueNotifier(true);
   final presentationActive = ValueNotifier(true);
   final windowCalls = <String>[];
@@ -170,6 +191,15 @@ double _actionsWidth(WidgetTester tester) =>
 
 Finder _actionAncestors(Type type) =>
     find.ancestor(of: find.byKey(_searchKey), matching: find.byType(type));
+
+/// Whether two colours are the same ink, ignoring alpha.
+///
+/// `IconButton` paints the scheme colour at a slightly lower alpha than the
+/// scheme holds, so the resolved glyph never compares equal to the raw token.
+bool _sameInk(Color a, Color b) =>
+    (a.r - b.r).abs() < .001 &&
+    (a.g - b.g).abs() < .001 &&
+    (a.b - b.b).abs() < .001;
 
 /// WCAG relative contrast between two colours.
 ///
@@ -250,35 +280,20 @@ void _expectActionsAtRest(WidgetTester tester) {
   expect(_actionsTranslation(tester), closeTo(0, .02));
 }
 
-/// Both capsules: the way back on the left of the row and the caption + player
-/// actions on the right. Neither floats bare on the page — a capsule's ink is
-/// only guaranteed to read against capsule material, not against whatever the
-/// page paints underneath.
+/// The one floating capsule: the caption buttons, then the player's action cells.
 ///
-/// [backVisible] is false while a modal route covers the player: the back
-/// command belongs to the page underneath, so it goes with it, while the window's
-/// own caption stays.
-void _expectSingleSurface(
-  WidgetTester tester, {
-  double actionWidth = 138,
-  bool backVisible = true,
-}) {
+/// The way back is *not* on capsule material any more — it takes the listening
+/// canvas's adaptive ink instead (see the two ink tests below). It is still
+/// asserted to be on the row and reachable, just not behind a plate.
+void _expectSingleSurface(WidgetTester tester, {double actionWidth = 138}) {
   final Finder surfaces = find.byType(WindowChromeSurface);
-  expect(surfaces, findsNWidgets(backVisible ? 2 : 1));
+  expect(surfaces, findsOneWidget);
   // The trailing pill: caption buttons, then the player's action cells.
-  final Rect surfaceRect = tester.getRect(surfaces.last);
+  final Rect surfaceRect = tester.getRect(surfaces);
   expect(surfaceRect.top, 12);
   expect(surfaceRect.right, 1260);
   expect(surfaceRect.width, closeTo(138 + actionWidth, .05));
   expect(surfaceRect.height, 40);
-  if (backVisible) {
-    // The leading pill: the way back, one cell wide, on the same row.
-    final Rect backRect = tester.getRect(surfaces.first);
-    expect(backRect.top, 12);
-    expect(backRect.left, 16);
-    expect(backRect.width, 46);
-    expect(backRect.height, 40);
-  }
   for (final element in surfaces.evaluate()) {
     // Inline chrome paints the same material as the phone's navigation capsule:
     // a theme-accent tint at the configured opacity over a backdrop blur, with
@@ -597,7 +612,41 @@ void main() {
     }
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
-  testWidgets('the back command is legible because it sits on capsule material', (
+  testWidgets('the player backdrop token is dark wherever art is painted', (
+    tester,
+  ) async {
+    final harness = _PlayerFrameHarness(tester);
+    try {
+      await harness.mount();
+      await tester.pump(const Duration(seconds: 1));
+      final BuildContext context = tester.element(
+        find.byKey(const ValueKey('desktop-close')),
+      );
+      // The contract the adaptive ink rests on. These used to resolve from
+      // `AppleSemanticColors.background`, which describes the card surface the
+      // chrome theme is built from — white in the Mio player while the canvas
+      // underneath is cover art. That mismatch is what made the arrow black on
+      // black, so pin the mapping itself rather than one theme's colours.
+      for (final mode in <AppBackgroundMode>[
+        AppBackgroundMode.solidColor,
+        AppBackgroundMode.customImage,
+        AppBackgroundMode.windowsMica,
+        AppBackgroundMode.nowPlayingStatic,
+        AppBackgroundMode.nowPlayingDynamic,
+      ]) {
+        expect(
+          playerBackdropInk(context, mode).computeLuminance(),
+          lessThan(.2),
+          reason: '$mode composes over a dark edge',
+        );
+      }
+      expect(tester.takeException(), isNull);
+    } finally {
+      await harness.dispose();
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('the back command adapts its ink to the listening canvas', (
     tester,
   ) async {
     final harness = _PlayerFrameHarness(tester);
@@ -606,58 +655,89 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
 
       final Finder back = find.byKey(const ValueKey('desktop-close'));
-      final Finder pill = find.ancestor(
-        of: back,
-        matching: find.byType(WindowChromeSurface),
-      );
-      // The player canvas is dark, but the capsule's ink comes from the
-      // (light) chrome theme. Without material behind it the arrow was a dim
-      // grey glyph on a dark, cover-driven backdrop — the Mio player's
-      // top-left corner. It has to be painted by a capsule like every other
-      // window command.
+      // No plate behind it: the corner of the cover keeps showing the artwork.
       expect(
-        pill,
-        findsOneWidget,
-        reason: 'the back command must not float bare on the page',
+        find.ancestor(of: back, matching: find.byType(WindowChromeSurface)),
+        findsNothing,
+        reason: 'a second capsule in the corner is worse than the problem',
       );
-      final AppleGlass glass = tester.widget<AppleGlass>(
-        find.descendant(of: pill, matching: find.byType(AppleGlass)).first,
-      );
-      final Color material =
-          glass.color ?? AppleSemanticColors.of(tester.element(back)).glass;
-      // The same pill as the trailing capsule: one tint, one radius, no ring.
-      expect(
-        material,
-        windowChromeTint(
-          AppleSemanticColors.of(tester.element(back)),
-          opacity: kWindowChromeOpacityDefault,
-        ),
-      );
-      expect(glass.borderRadius, BorderRadius.circular(20));
-      expect(glass.border, isNull);
 
-      // And the glyph reads against that material. The ink is whatever the
-      // player's icon theme resolves to — near-black here — so legibility is a
-      // property of the pair, not of the ink alone: paint the same glyph on the
-      // page's dark backdrop and it is invisible. That is the bug this covers.
-      final Color glyph =
-          tester
-              .widget<Icon>(
-                find.descendant(of: back, matching: find.byType(Icon)),
-              )
-              .color ??
-          IconTheme.of(tester.element(back)).color!;
+      final Icon glyph = tester.widget<Icon>(
+        find.descendant(of: back, matching: find.byType(Icon)),
+      );
+      final BuildContext page = tester.element(back);
+      final Color ink = glyph.color ?? IconTheme.of(page).color!;
+      // The canvas the glyph is actually on: the composed player backdrop, not
+      // the chrome theme's card surface.
+      final Color canvas = playerBackdropInk(
+        page,
+        harness.state.playerBackground,
+      );
       expect(
-        _contrast(glyph, material),
+        canvas.computeLuminance(),
+        lessThan(.2),
+        reason: 'the Mio player composes its canvas over dark art',
+      );
+
+      // The ink is decided by that canvas, exactly like the transport and the
+      // pane tabs: dark art resolves the arrow to near-white. It used to inherit
+      // the (light) chrome theme's card surface instead — white here — and went
+      // black on black.
+      expect(
+        _sameInk(ink, contrastingLabel(canvas)),
+        isTrue,
+        reason: 'the back command has to follow the adaptive player ink',
+      );
+      expect(
+        _contrast(ink, canvas),
         greaterThanOrEqualTo(3),
-        reason: 'the back glyph has to read against its capsule',
+        reason: 'legible against the canvas it sits on',
       );
-      // Without the capsule it would not: the page underneath is dark art.
+
+      // One shadow, in the direction that helps: a dark glow under light ink, a
+      // light glow under dark ink. That is what carries it across a busy cover.
+      expect(glyph.shadows, hasLength(1));
+      final Shadow shadow = glyph.shadows!.single;
+      expect(shadow.blurRadius, inInclusiveRange(2, 6));
+      final bool lightInk = ink.computeLuminance() > .5;
+      final bool lightGlow = shadow.color.computeLuminance() > .5;
       expect(
-        _contrast(glyph, const Color(0xFF1A1033)),
-        lessThan(3),
-        reason: 'this is why the bare button disappeared on the Mio player',
+        lightGlow,
+        !lightInk,
+        reason: 'the glow has to oppose the ink, not match it',
       );
+      expect(tester.takeException(), isNull);
+    } finally {
+      await harness.dispose();
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('a light canvas flips the back command to dark ink', (
+    tester,
+  ) async {
+    final harness = _PlayerFrameHarness(tester, paperSkin: true);
+    try {
+      await harness.mount();
+      await tester.pump(const Duration(seconds: 1));
+
+      final Finder back = find.byKey(const ValueKey('desktop-close'));
+      final Icon glyph = tester.widget<Icon>(
+        find.descendant(of: back, matching: find.byType(Icon)),
+      );
+      final BuildContext page = tester.element(back);
+      // A skin with the colour flow off paints no backdrop, so the canvas is the
+      // app's own surface — the light half of the adaptive rule.
+      final Color canvas = playerBackdropInk(
+        page,
+        harness.state.playerBackground,
+      );
+      final Color ink = glyph.color ?? IconTheme.of(page).color!;
+      expect(_sameInk(ink, contrastingLabel(canvas)), isTrue);
+      expect(_contrast(ink, canvas), greaterThanOrEqualTo(3));
+      // The shadow flips with the ink, so the glyph still survives a bright or a
+      // busy cover on either canvas.
+      final bool lightInk = ink.computeLuminance() > .5;
+      expect(glyph.shadows!.single.color.computeLuminance() > .5, !lightInk);
       expect(tester.takeException(), isNull);
     } finally {
       await harness.dispose();
@@ -853,7 +933,6 @@ void main() {
         _expectSingleSurface(
           tester,
           actionWidth: tester.getSize(hiddenActions).width,
-          backVisible: false,
         );
         expect(
           tester
@@ -905,9 +984,9 @@ void main() {
           hasLength(1),
         );
         await tester.pump(const Duration(seconds: 1));
-        // The dialog covers the player, so the page's back command is gone with
-        // it; the window's own caption capsule stays where it is.
-        _expectSingleSurface(tester, actionWidth: 0, backVisible: false);
+        // The dialog covers the player, so the page's own controls are gone with
+        // it; the window's caption capsule stays where it is.
+        _expectSingleSurface(tester, actionWidth: 0);
 
         Navigator.of(pageContext).pop();
         await tester.pump();
@@ -936,7 +1015,7 @@ void main() {
         // The trailing pill only: the back command went with the dialog-covering
         // page, and the assertion is about the caption shell's own spring.
         final returningShellWidth = tester
-            .getSize(find.byType(WindowChromeSurface).last)
+            .getSize(find.byType(WindowChromeSurface))
             .width;
         expect(returningShellWidth, inExclusiveRange(138, 276));
         Navigator.of(pageContext).pop();
@@ -944,7 +1023,7 @@ void main() {
         await tester.pump();
         await reversingDialog;
         expect(
-          tester.getSize(find.byType(WindowChromeSurface).last).width,
+          tester.getSize(find.byType(WindowChromeSurface)).width,
           closeTo(returningShellWidth, .0001),
           reason: 'Dismissing a modal retargets the current shell spring.',
         );

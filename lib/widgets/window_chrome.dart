@@ -1176,33 +1176,15 @@ class _WindowChromeCollapseState extends State<WindowChromeCollapse> {
                   ),
                 );
               },
-              child: Theme(
-                data: layout.chromeTheme ?? Theme.of(context),
-                child: _WindowChromeButtonTheme(
-                  // The back command wears the same pill the caption and the
-                  // song actions do. Without it the glyph sat directly on the
-                  // page: on the Mio player the backdrop is a dark cover, while
-                  // the ink comes from the (light) chrome theme, so the arrow was
-                  // a dim grey shape on a dark, noisy image. Same material, same
-                  // ink, same hover fill as every other capsule command.
-                  child: Builder(
-                    builder: (BuildContext context) => layout.capsule.surface(
-                      context: context,
-                      child: SizedBox(
-                        width: kWindowChromeButtonWidth,
-                        height: kWindowChromeHeight,
-                        child: ClipRRect(
-                          // 胶囊自己的圆角设置（见
-                          // AppleShape.capsuleRadiusOf）。
-                          borderRadius: BorderRadius.circular(
-                            AppleShape.capsuleRadiusOf(context),
-                          ),
-                          child: widget.child,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+              // No `chromeTheme` here: the theme describes the capsule material,
+              // and this command paints none. Wrapping it in that theme was how
+              // the arrow ended up with the light chrome theme's near-black ink
+              // on top of dark cover art — the page supplies its own adaptive
+              // colour and a shadow for the glyph instead.
+              child: SizedBox(
+                width: kWindowChromeButtonWidth,
+                height: kWindowChromeHeight,
+                child: widget.child,
               ),
             ),
           ),
