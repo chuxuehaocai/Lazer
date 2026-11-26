@@ -17,6 +17,7 @@ import 'widgets.dart';
 import 'playlist_page.dart';
 
 import 'home_pages.dart' show ChartLoadCard, chartEntryCover;
+import '../theme/lazer_theme.dart';
 import '../theme/shape_scale.dart';
 
 class AppChartPage extends StatefulWidget {
@@ -389,7 +390,9 @@ class _ChartIssuePicker extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: AppleSemanticColors.of(context).fill,
-          borderRadius: BorderRadius.circular(999 * AppleShape.scaleOf(context)),
+          borderRadius: BorderRadius.circular(
+            999 * AppleShape.scaleOf(context),
+          ),
           border: Border.all(
             color: AppleSemanticColors.of(context).separator,
             width: .5,
@@ -469,7 +472,13 @@ class _ChartTrackRow extends StatelessWidget {
             horizontal: 8,
             vertical: 3,
           ),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8 * AppleShape.scaleOf(context))),
+          // 悬浮高亮（和选中底色）跟着设置的圆角走。原来写死 8 * scaleOf：
+          // 缩放能变，用户选的圆角大小进不来，所以这一行的高亮永远是同一个角。
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(
+              AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)),
+            ),
+          ),
           tileColor: selected ? apple.accentSoft : Colors.transparent,
           onTap: onTap == null ? null : feedbackAction(context, onTap!),
           onLongPress: onLongPress,

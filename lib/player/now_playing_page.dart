@@ -933,10 +933,19 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     return _EntranceTickerGate(settled: settled, child: child);
   }
 
-  /// skin: nowPlayingCoverRadius —— 0 时封面是直角，纸面皮肤也不要投影。
+  /// 正在播放页封面的圆角（px）。
+  ///
+  /// 以前只读皮肤令牌 `nowPlayingCoverRadius`，把设置页里的圆角设置整个绕过去
+  /// 了：用户在「主题风格 / 圆角设置」里调到多少，封面都不动。而裁剪那张图的
+  /// `ClipRRect` 又写死了 12 —— 所以连皮肤自己的 0（直角）也落不到画面上。
+  ///
+  /// 现在：皮肤明确给了正数就用它（皮肤可以对封面单独说话），否则交给全局圆角
+  /// 设置；`AppleShape.cardRadiusOf` 在手动模式下直接是用户 px，跟随主题时是
+  /// 皮肤值。
   double _coverRadius(BuildContext context) {
     final LazerThemeTokens ui = LazerThemeTokens.of(context);
-    return ui.nowPlayingCoverRadius > 0 ? ui.nowPlayingCoverRadius : 12;
+    if (ui.nowPlayingCoverRadius > 0) return ui.nowPlayingCoverRadius;
+    return AppleShape.cardRadiusOf(context, ui);
   }
 
   Widget _cover(Track track, {bool compact = false}) {
@@ -959,9 +968,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             curve: const AppleSpringCurve(),
             decoration: BoxDecoration(
               // skin: nowPlayingCoverRadius（0 = 直角；纸面皮肤同时去掉封面投影）
-              borderRadius: BorderRadius.circular(
-                _coverRadius(context) * AppleShape.scaleOf(context),
-              ),
+              // 不要再乘 AppleShape.scaleOf：手动模式下 cardRadiusOf 已经是用户
+              // 选的 px（见 shape_scale.dart），再乘一次「组件系数」就把 8 px
+              // 放大/缩小成别的数，滑块上的数字和实际形状对不上。
+              borderRadius: BorderRadius.circular(_coverRadius(context)),
               boxShadow: _lyricsMode && compact || _coverRadius(context) == 0
                   ? const []
                   : [
@@ -974,9 +984,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                     ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(
-                12 * AppleShape.scaleOf(context),
-              ),
+              // 同一颗圆角：外层投影用 _coverRadius，裁剪却写死 12，于是这里的
+              // 12 才是真正生效的那个，设置里的封面圆角一直没落到画面上（方角
+              // 封面就是这么来的）。两处都读同一个来源。
+              borderRadius: BorderRadius.circular(_coverRadius(context)),
               child: KeyedSubtree(
                 key: const ValueKey('now-playing-cover'),
                 child: AnimatedTrackCover(

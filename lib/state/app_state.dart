@@ -1438,8 +1438,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// 用户自定义的圆角大小，单位 px（0–32，16 = 组件原本的圆角）。
   Future<void> setCornerPx(double value) async {
     if (!value.isFinite) return;
-    final double next = (value.clamp(kCornerPxMin, kCornerPxMax) * 100).round() /
-        100;
+    final double next =
+        (value.clamp(kCornerPxMin, kCornerPxMax) * 100).round() / 100;
     if (cornerPx == next) return;
     cornerPx = next;
     notifyListeners();
@@ -1831,12 +1831,29 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   static const String desktopLyricsKey = 'lazer_desktop_lyrics';
   static const String lyricsOverlayLinesKey = 'lazer_lyrics_overlay_lines';
   static const String lyricLineSpacingKey = 'lazer_lyric_line_spacing';
+  static const String floatingLyricsPositionKey =
+      'lazer_floating_lyrics_position';
 
   bool floatingLyricsEnabled = false;
   bool floatingLyricsLocked = false;
   bool desktopLyricsEnabled = false;
   int lyricsOverlayLines = kLyricsOverlayDefaultLines;
   double lyricLineSpacing = kLyricsLineSpacingDefault;
+
+  /// Where the listener last dragged the floating overlay, in window coordinates.
+  ///
+  /// The overlay used to re-centre itself at the bottom of the screen on every
+  /// launch, so a position the listener picked was gone the moment the overlay
+  /// was closed and reopened. Null means "never placed": the overlay keeps its
+  /// default bottom-centre seat.
+  ///
+  /// Two scalars rather than an `Offset`: this layer stays free of `dart:ui`
+  /// geometry types, and the overlay reconstructs the point where it needs one.
+  double? floatingLyricsPositionX;
+  double? floatingLyricsPositionY;
+
+  bool get hasFloatingLyricsPosition =>
+      floatingLyricsPositionX != null && floatingLyricsPositionY != null;
 
   bool get desktopLyricsSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -1855,7 +1872,35 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     await prefs.setBool(desktopLyricsKey, snapshot.desktop);
     await prefs.setBool('lazer_floating_lyrics_locked', snapshot.locked);
     await prefs.setInt(lyricsOverlayLinesKey, snapshot.lines);
+    final double? seatX = floatingLyricsPositionX;
+    final double? seatY = floatingLyricsPositionY;
+    if (seatX == null || seatY == null) {
+      // The pair is what is stored, so the pair is what has to go. Removing the
+      // bare prefix left `_x`/`_y` behind, and a cleared seat came back on the
+      // next launch.
+      await prefs.remove('${floatingLyricsPositionKey}_x');
+      await prefs.remove('${floatingLyricsPositionKey}_y');
+    } else {
+      await prefs.setDouble('${floatingLyricsPositionKey}_x', seatX);
+      await prefs.setDouble('${floatingLyricsPositionKey}_y', seatY);
+    }
   });
+
+  /// Remember where the floating overlay was dragged to, so reopening it puts it
+  /// back instead of re-centring it.
+  Future<void> setFloatingLyricsPosition(double x, double y) async {
+    if (floatingLyricsPositionX == x && floatingLyricsPositionY == y) return;
+    floatingLyricsPositionX = x;
+    floatingLyricsPositionY = y;
+    await _lyricsOverlayWriter.request();
+  }
+
+  Future<void> clearFloatingLyricsPosition() async {
+    if (!hasFloatingLyricsPosition) return;
+    floatingLyricsPositionX = null;
+    floatingLyricsPositionY = null;
+    await _lyricsOverlayWriter.request();
+  }
 
   Future<void> setFloatingLyricsEnabled(bool value) async {
     if (floatingLyricsEnabled == value && (!value || !desktopLyricsEnabled)) {
@@ -2683,22 +2728,25 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       );
       backgroundBlurEnabled =
           prefs.getBool('lazer_background_blur_enabled') ?? false;
-      cornerFollowsTheme =
-          prefs.getBool('lazer_corner_follows_theme') ?? true;
+      cornerFollowsTheme = prefs.getBool('lazer_corner_follows_theme') ?? true;
       // 老版本把「圆角强度」存成 0–2 的系数（`lazer_corner_strength`）；
       // 现在单位是 px，读到时按 16 px = 1 换算一次，之后就只写 `lazer_corner_px`。
       final double? storedPx = prefs.getDouble('lazer_corner_px');
       final double? legacyScale = prefs.getDouble('lazer_corner_strength');
       cornerPx =
-          (storedPx ?? (legacyScale == null ? null : legacyScale * kCornerPxDefault) ??
+          (storedPx ??
+                  (legacyScale == null
+                      ? null
+                      : legacyScale * kCornerPxDefault) ??
                   kCornerPxDefault)
               .clamp(kCornerPxMin, kCornerPxMax);
       capsuleCornerSource = CornerSourceLabels.parse(
         prefs.getString('lazer_capsule_corner_source'),
       );
-      capsuleCornerPx = (prefs.getDouble('lazer_capsule_corner_px') ??
-              AppleShape.capsulePxDefault)
-          .clamp(0.0, AppleShape.capsulePxMax);
+      capsuleCornerPx =
+          (prefs.getDouble('lazer_capsule_corner_px') ??
+                  AppleShape.capsulePxDefault)
+              .clamp(0.0, AppleShape.capsulePxMax);
       navBarCornerSource = CornerSourceLabels.parse(
         prefs.getString('lazer_nav_bar_corner_source'),
       );
@@ -2949,6 +2997,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       floatingLyricsEnabled = prefs.getBool(floatingLyricsKey) ?? false;
       floatingLyricsLocked =
           prefs.getBool('lazer_floating_lyrics_locked') ?? false;
+      floatingLyricsPositionX = prefs.getDouble(
+        '${floatingLyricsPositionKey}_x',
+      );
+      floatingLyricsPositionY = prefs.getDouble(
+        '${floatingLyricsPositionKey}_y',
+      );
       desktopLyricsEnabled =
           desktopLyricsSupported && (prefs.getBool(desktopLyricsKey) ?? false);
       if (desktopLyricsEnabled) floatingLyricsEnabled = false;

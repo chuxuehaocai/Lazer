@@ -9,6 +9,7 @@ import '../theme/shape_scale.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../animation/apple_spring.dart';
@@ -21,6 +22,7 @@ import '../lyrics/spacing.dart';
 import '../lyrics/spring.dart';
 import '../lyrics/timed_line.dart' show lyricWordMotionEnd;
 import '../theme/lazer_theme.dart';
+import '../state/app_state.dart' show AppState;
 import 'overlay_protocol.dart';
 import 'overlay_motion.dart';
 import 'overlay_font_loader.dart';
@@ -173,15 +175,74 @@ Future<void> _configureOverlayWindow(LyricsOverlayLaunch launch) async {
       );
       await windowManager.setAsFrameless();
       await windowManager.setAlwaysOnTop(true);
-      await windowManager.setAlignment(Alignment.bottomCenter);
-      final Offset position = await windowManager.getPosition();
-      await windowManager.setPosition(
-        position - const Offset(0, _floatingBottomGap),
-      );
+      // Put the overlay back where the listener left it. It used to re-centre
+      // itself at the bottom of the screen on every launch, so closing and
+      // reopening the floating lyrics threw the position away.
+      final Offset? seat = await _savedFloatingSeat();
+      if (seat == null) {
+        await windowManager.setAlignment(Alignment.bottomCenter);
+        final Offset position = await windowManager.getPosition();
+        await windowManager.setPosition(
+          position - const Offset(0, _floatingBottomGap),
+        );
+      } else if (_isSeatPlausible(seat)) {
+        await windowManager.setPosition(seat);
+      } else {
+        // Nothing usable was remembered; keep the default bottom seat.
+        await windowManager.setAlignment(Alignment.bottomCenter);
+      }
       await windowManager.show(inactive: true);
     }
   } catch (error, stack) {
     AppLog.shared.record('desktop lyrics window: $error\n$stack');
+  }
+}
+
+/// The seat the floating overlay was last dragged to, or null if it never was.
+///
+/// The overlay reads the preference itself rather than receiving it over the
+/// launch payload: only the floating mode has a seat, and the payload is a
+/// schema every mode shares.
+Future<Offset?> _savedFloatingSeat() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final double? x = prefs.getDouble(
+      '${AppState.floatingLyricsPositionKey}_x',
+    );
+    final double? y = prefs.getDouble(
+      '${AppState.floatingLyricsPositionKey}_y',
+    );
+    if (x == null || y == null) return null;
+    return Offset(x, y);
+  } catch (error) {
+    AppLog.shared.record('desktop lyrics seat read: $error');
+    return null;
+  }
+}
+
+/// Whether a remembered seat still looks like somewhere a window can open.
+///
+/// A seat saved on a monitor that has since been unplugged would otherwise
+/// reopen off-screen with no way back except locking and unlocking the overlay.
+/// Without enumerating displays only a gross sanity check is possible; anything
+/// this rejects falls back to the default seat, which is always reachable.
+bool _isSeatPlausible(Offset seat) =>
+    seat.dx.isFinite && seat.dy.isFinite && seat.dx >= 0 && seat.dy >= 0;
+
+Future<void> _rememberFloatingSeat() async {
+  try {
+    final Offset position = await windowManager.getPosition();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(
+      '${AppState.floatingLyricsPositionKey}_x',
+      position.dx,
+    );
+    await prefs.setDouble(
+      '${AppState.floatingLyricsPositionKey}_y',
+      position.dy,
+    );
+  } catch (error) {
+    AppLog.shared.record('desktop lyrics seat write: $error');
   }
 }
 
@@ -238,6 +299,7 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
   bool _windowConfigured = false;
   bool _resizeRunning = false;
   Size? _pendingSize;
+
   /// 第一轮尺寸定稿后再量一次行高的机会（整个生命周期只补一次）。
   bool _settlePending = false;
   bool _settled = false;
@@ -819,7 +881,10 @@ class _LyricsOverlayAppState extends State<LyricsOverlayApp>
             false;
         if (moved) return;
       }
+      // `startDragging` only returns once the OS move loop ends, so this is the
+      // drop, not the grab: remember the seat the listener chose.
       await windowManager.startDragging();
+      if (_mode == LyricsOverlayMode.floating) await _rememberFloatingSeat();
     } catch (error) {
       AppLog.shared.record('desktop lyrics drag: $error');
     } finally {
