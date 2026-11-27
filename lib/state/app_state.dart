@@ -63,6 +63,7 @@ import '../plugins/plugin_native_audio_snapshot.dart';
 import '../plugins/plugin_manifest.dart' show PluginException;
 import '../plugins/plugin_manager.dart';
 import '../plugins/plugin_market.dart';
+import '../platform/android_system_ui.dart';
 
 part 'music_platform_state.dart';
 part 'plugin_frontend_state.dart';
@@ -246,6 +247,8 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     this.skipUnavailableSongs = true,
     this.enableExternalCharts = false,
     this.deviceIsTelevision = false,
+    this.deviceIsTablet = false,
+    this.androidStatusBarHidden = false,
     this.deviceIsWatch = false,
     this.deviceIsRoundWatch = false,
     this.hifiSettings = const HifiSettings(),
@@ -377,8 +380,23 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// bounded theme/layout data through the Lua theme engine.
   LazerThemeTokens? get pluginTheme => activeTheme;
 
-  LazerLayoutDefinition? get pluginLayout => pluginManager.activeLayout;
-  int get pluginSkinRevision => pluginManager.skinRevision;
+  /// Layout follows the listener's selected Lua skin. An unrelated enabled
+  /// plugin must not replace the current page geometry.
+  LazerLayoutDefinition? get pluginLayout {
+    if (activeThemeId.startsWith('builtin.')) return null;
+    for (final plugin in pluginManager.plugins) {
+      if (!plugin.enabled || plugin.runtime == null) continue;
+      if (plugin.theme?.id == activeThemeId) return plugin.layout;
+    }
+    return null;
+  }
+
+  /// Stable content revision for the selected skin only. Plugin lifecycle
+  /// notifications for an unselected skin must not rebuild the root theme.
+  int get pluginSkinRevision => Object.hash(
+    pluginTheme?.toJson().toString(),
+    pluginLayout?.toJson().toString(),
+  );
 
   void _onPluginManagerChanged() {
     if (!_presentationDisposed) notifyListeners();
@@ -541,6 +559,11 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
   /// TELEVISION` / no touch screen). It selects the television profile in
   /// automatic mode and turns every tap target into a D-pad focus stop.
   final bool deviceIsTelevision;
+  final bool deviceIsTablet;
+
+  /// Whether Android currently hides the system status bar.
+  bool androidStatusBarHidden;
+
   final bool deviceIsWatch;
   final bool deviceIsRoundWatch;
 
@@ -1130,6 +1153,17 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       'lazer_layout_style',
       value.name,
     );
+  }
+
+  Future<void> setAndroidStatusBarHidden(bool value) async {
+    if (androidStatusBarHidden == value) return;
+    androidStatusBarHidden = value;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      androidImmersiveStatusBarPreferenceKey,
+      value,
+    );
+    await applyAndroidStatusBarHidden(value);
   }
 
   Future<void> setTitleBarStyle(DesktopTitleBarStyle value) async {
@@ -2668,6 +2702,10 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         (mode) => mode.name == prefs.getString('lazer_theme_mode'),
         orElse: () => ThemeMode.system,
       );
+      androidStatusBarHidden =
+          prefs.getBool(androidImmersiveStatusBarPreferenceKey) ??
+          deviceIsTablet;
+      unawaited(applyAndroidStatusBarHidden(androidStatusBarHidden));
       // 皮肤：新键优先；老版本写的是 lazer_builtin_theme（那时只有内置主题）。
       final String? storedSkin = prefs.getString('lazer_theme_skin');
       final String? legacySkin = prefs.getString('lazer_builtin_theme');

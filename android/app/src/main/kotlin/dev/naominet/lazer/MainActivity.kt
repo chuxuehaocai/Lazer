@@ -12,6 +12,9 @@ import android.os.Environment
 import android.provider.Settings
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.os.VibratorManager
 import androidx.core.content.ContextCompat
 import com.ryanheise.audioservice.AudioService
@@ -33,6 +36,7 @@ class MainActivity : AudioServiceActivity() {
     private var storageResult: MethodChannel.Result? = null
     private var logExportResult: MethodChannel.Result? = null
     private var logExportText: String? = null
+    private var statusBarHidden = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -100,6 +104,20 @@ class MainActivity : AudioServiceActivity() {
                         "watch" to isWatch(),
                         "round" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && resources.configuration.isScreenRound)
                     ))
+                    else -> result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SYSTEM_UI_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isTablet" -> result.success(
+                        resources.configuration.smallestScreenWidthDp >= TABLET_SMALLEST_WIDTH_DP
+                    )
+                    "setStatusBarHidden" -> {
+                        statusBarHidden = call.argument<Boolean>("hidden") == true
+                        applyStatusBarVisibility()
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -187,6 +205,38 @@ class MainActivity : AudioServiceActivity() {
         } catch (error: Exception) {
             result.error("audio_service_start_failed", error.message, null)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyStatusBarVisibility()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyStatusBarVisibility()
+    }
+
+    private fun applyStatusBarVisibility() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val controller = window.insetsController ?: return
+            if (statusBarHidden) {
+                controller.hide(WindowInsets.Type.statusBars())
+            } else {
+                controller.show(WindowInsets.Type.statusBars())
+            }
+            controller.systemBarsBehavior =
+                WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            return
+        }
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            if (statusBarHidden) {
+                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            } else {
+                0
+            }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -406,7 +456,9 @@ class MainActivity : AudioServiceActivity() {
         const val APP_LIFECYCLE_CHANNEL = "dev.naominet.lazer/app_lifecycle"
         const val UPDATES_CHANNEL = "dev.naominet.lazer/updates"
         const val SYSTEM_WIDGETS_CHANNEL = "dev.naominet.lazer/system_widgets"
+        const val SYSTEM_UI_CHANNEL = "dev.naominet.lazer/system_ui"
         const val TELEVISION_FEATURE = "android.hardware.type.television"
+        const val TABLET_SMALLEST_WIDTH_DP = 600
         const val NOTIFICATION_REQUEST = 4100
         const val PERMISSION_REQUEST = 4101
         const val STORAGE_REQUEST = 4103

@@ -37,6 +37,23 @@ void main() {
     expect(bundle.layout!.maxContentWidth, 980);
   });
 
+  test('freshly decoded unchanged skin compares by value', () {
+    final response = {
+      'theme': {
+        'id': 'lua.demo',
+        'name': 'Demo',
+        'elements': {'groupedCardRadius': 18},
+      },
+      'layout': {'id': 'lua.compact', 'name': 'Compact'},
+    };
+    final first = LuaThemeEngine.decode(response);
+    final second = LuaThemeEngine.decode(response);
+    expect(first, isNotNull);
+    expect(second, isNotNull);
+    expect(second!.theme, first!.theme);
+    expect(second.layout, first.layout);
+  });
+
   test('ignores malformed and empty skin responses', () {
     expect(LuaThemeEngine.decode(null), isNull);
     expect(LuaThemeEngine.decode({'theme': 'not-a-map'}), isNull);

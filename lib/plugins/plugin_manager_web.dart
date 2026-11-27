@@ -94,9 +94,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     final LazerThemeTokens? theme = activeTheme;
     final LazerLayoutDefinition? layout = activeLayout;
     final int? cached = _skinRevision;
-    if (cached != null &&
-        identical(theme, _hashedTheme) &&
-        identical(layout, _hashedLayout)) {
+    if (cached != null && theme == _hashedTheme && layout == _hashedLayout) {
       return cached;
     }
     _hashedTheme = theme;

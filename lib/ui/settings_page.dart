@@ -573,6 +573,17 @@ class _SettingsOverview extends StatelessWidget {
                           ),
                         ),
                         if (!kIsWeb &&
+                            defaultTargetPlatform == TargetPlatform.android)
+                          _AppSwitchRow(
+                            key: const ValueKey('android-status-bar-switch'),
+                            label: '平板全屏沉浸',
+                            subtitle: '隐藏系统状态栏，平板默认开启，也可手动切换',
+                            value: state.androidStatusBarHidden,
+                            onChanged: (bool value) => unawaited(
+                              state.setAndroidStatusBarHidden(value),
+                            ),
+                          ),
+                        if (!kIsWeb &&
                             (defaultTargetPlatform == TargetPlatform.windows ||
                                 defaultTargetPlatform == TargetPlatform.linux))
                           _AppSettingRow(

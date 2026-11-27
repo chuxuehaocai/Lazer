@@ -26,6 +26,30 @@ class LazerLayoutDefinition {
   final double tvMaxContentWidth;
   final double tabletBreakpoint;
 
+  @override
+  bool operator ==(Object other) =>
+      other is LazerLayoutDefinition &&
+      other.id == id &&
+      other.name == name &&
+      other.compactInset == compactInset &&
+      other.regularInset == regularInset &&
+      other.tvInsetFactor == tvInsetFactor &&
+      other.maxContentWidth == maxContentWidth &&
+      other.tvMaxContentWidth == tvMaxContentWidth &&
+      other.tabletBreakpoint == tabletBreakpoint;
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    name,
+    compactInset,
+    regularInset,
+    tvInsetFactor,
+    maxContentWidth,
+    tvMaxContentWidth,
+    tabletBreakpoint,
+  );
+
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
     'name': name,

@@ -51,6 +51,7 @@ import 'widgets/interaction_feedback.dart';
 import 'widgets/shared_browse_background.dart';
 import 'widgets/app_scroll_behavior.dart';
 import 'widgets/ui_scaling.dart';
+import 'platform/android_system_ui.dart';
 
 /// Lines the media backend prints that we cannot silence upstream.
 ///
@@ -180,6 +181,7 @@ Future<void> main(List<String> args) async {
         final Future<SharedPreferences> prefsFuture =
             SharedPreferences.getInstance();
         final Future<bool> televisionFuture = detectTelevision();
+        final Future<bool> tabletFuture = detectAndroidTablet();
         final watchFuture = detectWatch();
         final prefs = await prefsFuture;
         await AppStorage.shared.initialize(prefs);
@@ -193,8 +195,12 @@ Future<void> main(List<String> args) async {
           autoMixEnabled: prefs.getBool('lazer_automix_enabled') ?? false,
         );
         final bool television = await televisionFuture;
+        final bool tablet = await tabletFuture;
         final watch = await watchFuture;
         final AudioEngineSelection selection = await selectionFuture;
+        final bool androidStatusBarHidden =
+            prefs.getBool(androidImmersiveStatusBarPreferenceKey) ?? tablet;
+        await applyAndroidStatusBarHidden(androidStatusBarHidden);
         await windowReady;
         if (prefs.getBool('lazer_minimize_to_taskbar_on_close') ?? false) {
           await syncWindowPreventClose(true);
@@ -245,6 +251,8 @@ Future<void> main(List<String> args) async {
           audioEngine: audio,
           enableExternalCharts: true,
           deviceIsTelevision: television,
+          deviceIsTablet: tablet,
+          androidStatusBarHidden: androidStatusBarHidden,
           deviceIsWatch: watch.watch,
           deviceIsRoundWatch: watch.round,
           independentPlayback:
@@ -722,6 +730,9 @@ class _LazerAppState extends State<LazerApp> with BuildSafeState<LazerApp> {
           navigatorKey: _navigatorKey,
           navigatorObservers: [_browseNavigation],
           themeAnimationCurve: const AppleSpringCurve(),
+          // Skin data arrives asynchronously. A same-frame reload must not
+          // animate the whole semantics tree for the default 200 ms.
+          themeAnimationDuration: Duration.zero,
           // One Apple surface theme drives the custom window frame, root
           // dialogs and the adaptive shell. Pages refine their local player
           // theme where Apple Music intentionally switches to a dark canvas.

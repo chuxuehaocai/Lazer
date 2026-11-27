@@ -19,6 +19,13 @@ class AppThemePresentation extends ThemeExtension<AppThemePresentation> {
   final bool compact;
 
   @override
+  bool operator ==(Object other) =>
+      other is AppThemePresentation && other.compact == compact;
+
+  @override
+  int get hashCode => compact.hashCode;
+
+  @override
   AppThemePresentation copyWith({bool? compact}) =>
       AppThemePresentation(compact: compact ?? this.compact);
 
@@ -106,6 +113,52 @@ class AppleSemanticColors extends ThemeExtension<AppleSemanticColors> {
   final Color accentSoft;
   final Color glass;
   final Color glassStrong;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AppleSemanticColors &&
+      other.background == background &&
+      other.secondaryBackground == secondaryBackground &&
+      other.tertiaryBackground == tertiaryBackground &&
+      other.groupedBackground == groupedBackground &&
+      other.secondaryGroupedBackground == secondaryGroupedBackground &&
+      other.tertiaryGroupedBackground == tertiaryGroupedBackground &&
+      other.label == label &&
+      other.secondaryLabel == secondaryLabel &&
+      other.tertiaryLabel == tertiaryLabel &&
+      other.quaternaryLabel == quaternaryLabel &&
+      other.fill == fill &&
+      other.secondaryFill == secondaryFill &&
+      other.tertiaryFill == tertiaryFill &&
+      other.separator == separator &&
+      other.opaqueSeparator == opaqueSeparator &&
+      other.accent == accent &&
+      other.accentSoft == accentSoft &&
+      other.glass == glass &&
+      other.glassStrong == glassStrong;
+
+  @override
+  int get hashCode => Object.hash(
+    background,
+    secondaryBackground,
+    tertiaryBackground,
+    groupedBackground,
+    secondaryGroupedBackground,
+    tertiaryGroupedBackground,
+    label,
+    secondaryLabel,
+    tertiaryLabel,
+    quaternaryLabel,
+    fill,
+    secondaryFill,
+    tertiaryFill,
+    separator,
+    opaqueSeparator,
+    accent,
+    accentSoft,
+    glass,
+    glassStrong,
+  );
 
   static const AppleSemanticColors light = AppleSemanticColors(
     background: Color(0xFFFFFFFF),

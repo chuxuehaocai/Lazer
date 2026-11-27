@@ -150,6 +150,8 @@
   "歌单读取失败，请重试。": "Could not read playlist. Please retry.",
   "最小化": "Minimize",
   "全屏": "Full screen",
+  "平板全屏沉浸": "Tablet immersive mode",
+  "隐藏系统状态栏，平板默认开启，也可手动切换": "Hide the system status bar. Enabled by default on tablets and adjustable manually.",
   "还原窗口": "Restore window",
   "关闭窗口": "Close window",
   "关闭后最小化到系统托盘": "Minimize to system tray on close",

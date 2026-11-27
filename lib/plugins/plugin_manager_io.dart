@@ -90,9 +90,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     final LazerThemeTokens? theme = activeTheme;
     final LazerLayoutDefinition? layout = activeLayout;
     final int? cached = _skinRevision;
-    if (cached != null &&
-        identical(theme, _hashedTheme) &&
-        identical(layout, _hashedLayout)) {
+    if (cached != null && theme == _hashedTheme && layout == _hashedLayout) {
       return cached;
     }
     _hashedTheme = theme;
@@ -348,8 +346,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       final description = await runtime.invoke('describe');
       final skin = await LuaThemeEngine.load(runtime, description);
       if (skin == null) return;
-      if (identical(skin.theme, plugin.theme) &&
-          identical(skin.layout, plugin.layout)) {
+      if (skin.theme == plugin.theme && skin.layout == plugin.layout) {
         return;
       }
       plugin.theme = skin.theme;
@@ -375,19 +372,24 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     if (!setting.accepts(value)) {
       throw const PluginException('插件设置值无效。');
     }
-    plugin.settingValues[settingId] = value;
-    plugin.settings[index] = setting.copyWithValue(value);
-    await _persistSettingValues(plugin);
-    _notify();
+    _beginNotificationBatch();
     try {
-      await plugin.runtime?.invoke('setting_changed', {
-        'id': settingId,
-        'value': value,
-      });
-    } catch (_) {
-      // The value is host-owned and remains available after a plugin restart.
+      plugin.settingValues[settingId] = value;
+      plugin.settings[index] = setting.copyWithValue(value);
+      await _persistSettingValues(plugin);
+      _notify();
+      try {
+        await plugin.runtime?.invoke('setting_changed', {
+          'id': settingId,
+          'value': value,
+        });
+      } catch (_) {
+        // The value is host-owned and remains available after a plugin restart.
+      }
+      await _reloadSkin(plugin);
+    } finally {
+      _endNotificationBatch();
     }
-    await _reloadSkin(plugin);
   }
 
   Future<void> invokePluginSetting(String pluginId, String settingId) async {
@@ -395,11 +397,16 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     if (!plugin.settings.any((item) => item.id == settingId)) {
       throw const PluginException('插件设置不存在。');
     }
-    await plugin.runtime?.invoke('setting_changed', {
-      'id': settingId,
-      'value': null,
-    });
-    await _reloadSkin(plugin);
+    _beginNotificationBatch();
+    try {
+      await plugin.runtime?.invoke('setting_changed', {
+        'id': settingId,
+        'value': null,
+      });
+      await _reloadSkin(plugin);
+    } finally {
+      _endNotificationBatch();
+    }
   }
 
   Future<void> invokePlayerMenu(
@@ -440,14 +447,19 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     }
     final elements = [...page.elements];
     elements[elementIndex] = element.copyWithValue(value);
-    plugin.pages[pageIndex] = page.copyWithElements(elements);
-    _notify();
-    await plugin.runtime?.invoke('page_event', {
-      'page': pageId,
-      'id': elementId,
-      'value': value,
-    });
-    await _reloadSkin(plugin);
+    _beginNotificationBatch();
+    try {
+      plugin.pages[pageIndex] = page.copyWithElements(elements);
+      _notify();
+      await plugin.runtime?.invoke('page_event', {
+        'page': pageId,
+        'id': elementId,
+        'value': value,
+      });
+      await _reloadSkin(plugin);
+    } finally {
+      _endNotificationBatch();
+    }
   }
 
   Future<Directory> get root async => rootDirectory ??= Directory(
@@ -512,6 +524,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
   }
 
   Future<void> _start(InstalledPlugin plugin) async {
+    _beginNotificationBatch();
     try {
       plugin.settings.clear();
       plugin.playerMenuItems.clear();
@@ -698,6 +711,8 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
       plugin.playerMenuItems.clear();
       plugin.pages.clear();
       plugin.error = '插件启动失败，请检查插件版本或重新导入。';
+    } finally {
+      _endNotificationBatch();
     }
   }
 
@@ -841,6 +856,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     final plugin = _plugins.firstWhere((v) => v.manifest.id == id);
     busy = true;
     _notify();
+    _beginNotificationBatch();
     try {
       plugin.dataAccess.suspend();
       await beforeChange?.call(id);
@@ -861,6 +877,7 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     } finally {
       busy = false;
       _notify();
+      _endNotificationBatch();
     }
   }
 
@@ -1068,7 +1085,29 @@ class PluginManager extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
+  int _notificationBatchDepth = 0;
+  bool _notificationPending = false;
+
+  void _beginNotificationBatch() => _notificationBatchDepth++;
+
+  void _endNotificationBatch() {
+    if (_notificationBatchDepth == 0) return;
+    _notificationBatchDepth--;
+    if (_notificationBatchDepth == 0 && _notificationPending) {
+      _notificationPending = false;
+      _notifyNow();
+    }
+  }
+
   void _notify() {
+    if (_notificationBatchDepth > 0) {
+      _notificationPending = true;
+      return;
+    }
+    _notifyNow();
+  }
+
+  void _notifyNow() {
     if (!_disposed) notifyListeners();
   }
 

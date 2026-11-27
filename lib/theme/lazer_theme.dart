@@ -332,6 +332,16 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   /// `nowPlayingDynamic` keep the album flow.
   final String backgroundPlayMode;
 
+  // Lua describe/theme calls decode fresh token objects. Value equality keeps
+  // an unchanged skin from looking like a new ThemeExtension on every reload.
+  @override
+  bool operator ==(Object other) =>
+      other is LazerThemeTokens &&
+      other.toJson().toString() == toJson().toString();
+
+  @override
+  int get hashCode => toJson().toString().hashCode;
+
   static const LazerThemeTokens apple = LazerThemeTokens();
 
   /// 内置主题：Mio —— 客户端自己的默认外观。
