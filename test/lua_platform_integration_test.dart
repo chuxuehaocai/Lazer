@@ -252,7 +252,7 @@ void main() {
           .replaceFirst(
             '  if op == "session" then',
             '''  if op == "theme" then return {
-    theme={id="fixture.theme",name="Fixture Theme",elements={displayWeight=850}},
+    theme={id="fixture.theme",name="Fixture Theme",elements={displayWeight=850,trackHoverDurationMs=240}},
     layout={id="fixture.layout",name="Fixture Layout",compactInset=20}
   } end
   if op == "session" then''',
@@ -268,6 +268,7 @@ void main() {
         await app.setActiveTheme('fixture.theme');
         expect(app.pluginTheme?.id, 'fixture.theme');
         expect(app.pluginTheme?.displayWeight, 850);
+         expect(app.pluginTheme?.trackHoverDurationMs, 240);
         expect(app.pluginLayout?.id, 'fixture.layout');
         expect(app.pluginLayout?.compactInset, 20);
         final revision = plugins.skinRevision;

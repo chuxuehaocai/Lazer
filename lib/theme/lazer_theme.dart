@@ -151,6 +151,7 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     this.groupedCardRadius = 14,
     this.listTileMinHeight = 50,
     this.listTileVerticalPadding = 11,
+    this.trackHoverDurationMs = 120,
     this.pageTitleCompactSize = 34,
     this.pageTitleRegularSize = 32,
     this.sectionHeaderSize = 20,
@@ -213,6 +214,9 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
   final double groupedCardRadius;
   final double listTileMinHeight;
   final double listTileVerticalPadding;
+
+  /// Hover highlight transition for track rows, in milliseconds.
+  final double trackHoverDurationMs;
   final double pageTitleCompactSize;
   final double pageTitleRegularSize;
   final double sectionHeaderSize;
@@ -369,6 +373,7 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       'groupedCardRadius': groupedCardRadius,
       'listTileMinHeight': listTileMinHeight,
       'listTileVerticalPadding': listTileVerticalPadding,
+      'trackHoverDurationMs': trackHoverDurationMs,
       'pageTitleCompactSize': pageTitleCompactSize,
       'pageTitleRegularSize': pageTitleRegularSize,
       'sectionHeaderSize': sectionHeaderSize,
@@ -478,6 +483,12 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       groupedCardRadius: number('groupedCardRadius', 14, max: 40),
       listTileMinHeight: number('listTileMinHeight', 50, max: 160),
       listTileVerticalPadding: number('listTileVerticalPadding', 11, max: 48),
+      trackHoverDurationMs: number(
+        'trackHoverDurationMs',
+        120,
+        min: 40,
+        max: 1000,
+      ),
       pageTitleCompactSize: number('pageTitleCompactSize', 34, max: 72),
       pageTitleRegularSize: number('pageTitleRegularSize', 32, max: 72),
       sectionHeaderSize: number('sectionHeaderSize', 20, max: 48),
@@ -573,6 +584,7 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     double? groupedCardRadius,
     double? listTileMinHeight,
     double? listTileVerticalPadding,
+    double? trackHoverDurationMs,
     double? pageTitleCompactSize,
     double? pageTitleRegularSize,
     double? sectionHeaderSize,
@@ -634,6 +646,7 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
     listTileMinHeight: listTileMinHeight ?? this.listTileMinHeight,
     listTileVerticalPadding:
         listTileVerticalPadding ?? this.listTileVerticalPadding,
+    trackHoverDurationMs: trackHoverDurationMs ?? this.trackHoverDurationMs,
     pageTitleCompactSize: pageTitleCompactSize ?? this.pageTitleCompactSize,
     pageTitleRegularSize: pageTitleRegularSize ?? this.pageTitleRegularSize,
     sectionHeaderSize: sectionHeaderSize ?? this.sectionHeaderSize,
@@ -718,6 +731,10 @@ class LazerThemeTokens extends ThemeExtension<LazerThemeTokens> {
       listTileVerticalPadding: mix(
         listTileVerticalPadding,
         other.listTileVerticalPadding,
+      ),
+      trackHoverDurationMs: mix(
+        trackHoverDurationMs,
+        other.trackHoverDurationMs,
       ),
       pageTitleCompactSize: mix(
         pageTitleCompactSize,

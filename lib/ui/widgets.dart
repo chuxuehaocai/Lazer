@@ -382,12 +382,13 @@ class _AppTrackRowState extends State<AppTrackRow>
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AppleSemanticColors apple = AppleSemanticColors.of(context);
+    final LazerThemeTokens ui = LazerThemeTokens.of(context);
     final bool compact = compactBrowsePresentation(context);
     final bool wide = !compact && MediaQuery.sizeOf(context).width >= 940;
     // 行的悬浮高亮框跟卡片同一个圆角来源：主题的 groupedCardRadius，或
     // 用户在「圆角大小」上拖的那个 px。以前这里乘的是组件系数，主题给 0 时
     // 卡片是直角、悬浮框却还是圆的。
-    final radius = BorderRadius.circular(AppleShape.cardRadiusOf(context, LazerThemeTokens.of(context)));
+    final radius = BorderRadius.circular(AppleShape.cardRadiusOf(context, ui));
     final bool highlighted = _hovering || _focused;
     final String? translated = widget.track.translatedTitle?.trim();
     final Color titleColor = widget.current ? apple.accent : apple.label;
@@ -427,7 +428,9 @@ class _AppTrackRowState extends State<AppTrackRow>
                         );
                       }),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
+              duration: MotionTiming.scale(
+                Duration(milliseconds: ui.trackHoverDurationMs.round()),
+              ),
               margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
               padding: EdgeInsets.symmetric(
                 horizontal: compact ? 8 : 10,
