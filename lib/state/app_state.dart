@@ -2635,6 +2635,15 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     return operation;
   }
 
+  /// Authentication can be opened while the shell is still restoring plugins
+  /// and persisted sessions. Wait for that already-started restore before
+  /// changing the active account, otherwise its final selection can put the
+  /// just-authenticated gateway back into the guest state.
+  Future<void> _waitForBootstrapIfStarted() async {
+    final pending = _bootstrapOperation;
+    if (pending != null) await pending;
+  }
+
   Future<void> _bootstrap() async {
     final bootClock = Stopwatch()..start();
     AppLog.shared.event('app', 'bootstrap_started');
@@ -3303,6 +3312,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<AuthOutcome> signInWithCookie(String cookie) async {
     try {
+      await _waitForBootstrapIfStarted();
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
         final expectedActiveKey = activeConnectionKey;
@@ -3310,7 +3320,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
         if (user == null) {
           return const AuthOutcome(false, error: '这个 Cookie 无效或已过期。');
         }
-        return _adoptAccountLogin(
+        return await _adoptAccountLogin(
           user,
           AuthMethod.cookie,
           active.provider.name,
@@ -3330,11 +3340,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     String countryCode = '86',
   }) async {
     try {
+      await _waitForBootstrapIfStarted();
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
         final expectedActiveKey = activeConnectionKey;
         final user = await active.loginWithPassword(phone, password);
-        return _adoptAccountLogin(
+        return await _adoptAccountLogin(
           user,
           AuthMethod.password,
           _maskPhone(phone),
@@ -3350,11 +3361,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   Future<AuthOutcome> signInWithEmail(String email, String password) async {
     try {
+      await _waitForBootstrapIfStarted();
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
         final expectedActiveKey = activeConnectionKey;
         final user = await active.loginWithPassword(email, password);
-        return _adoptAccountLogin(
+        return await _adoptAccountLogin(
           user,
           AuthMethod.password,
           _maskEmail(email),
@@ -3396,11 +3408,12 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     String captcha,
   ) async {
     try {
+      await _waitForBootstrapIfStarted();
       final active = catalog.activeGateway;
       if (active is MusicAccountGateway) {
         final expectedActiveKey = activeConnectionKey;
         final user = await active.loginWithCaptcha(phone, captcha);
-        return _adoptAccountLogin(
+        return await _adoptAccountLogin(
           user,
           AuthMethod.sms,
           _maskPhone(phone),
@@ -3427,13 +3440,13 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
     }
   }
 
-  AuthOutcome _adoptAccountLogin(
+  Future<AuthOutcome> _adoptAccountLogin(
     MusicUser? user,
     AuthMethod method,
     String detail, {
     required MusicAccountGateway owner,
     String? expectedActiveKey,
-  }) {
+  }) async {
     if (user == null) return const AuthOutcome(false, error: '登录失败，请稍后再试。');
     if (_presentationDisposed ||
         !musicConnections.contains(owner) ||
@@ -3450,7 +3463,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
       signature: user.signature,
       membership: user.membership,
     );
-    _musicPlatforms.adoptLogin(
+    await _musicPlatforms.adoptLogin(
       owner,
       account,
       expectedActiveKey: expectedActiveKey,
@@ -3460,6 +3473,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
 
   /// Starts a QR session and returns the scan URL, or null on failure.
   Future<String?> beginQrLogin() async {
+    await _waitForBootstrapIfStarted();
     _qrConfirmed = false;
     qrPollError = null;
     qrStartError = null;
@@ -3513,7 +3527,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             return 800;
           }
           if (user != null) {
-            _adoptAccountLogin(
+            await _adoptAccountLogin(
               user,
               AuthMethod.qrcode,
               owner.provider.name,
@@ -3537,7 +3551,7 @@ class AppState extends ChangeNotifier with BuildSafeNotifier {
             return 800;
           }
           if (user == null) return 802;
-          _adoptAccountLogin(
+          await _adoptAccountLogin(
             user,
             AuthMethod.qrcode,
             owner.provider.name,

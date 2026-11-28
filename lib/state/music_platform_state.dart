@@ -161,11 +161,11 @@ class _MusicPlatformState {
     return Map.unmodifiable(result);
   }
 
-  void adoptLogin(
+  Future<void> adoptLogin(
     MusicGateway gateway,
     SessionUser account, {
     String? expectedActiveKey,
-  }) {
+  }) async {
     final key = GatewayRegistry.keyOf(gateway);
     _sessions[key] = account;
     _lastSessionKey = key;
@@ -188,7 +188,7 @@ class _MusicPlatformState {
       state._collectionsGeneration++;
       // Signing in must read the account now, not replay a snapshot that a
       // previous session left behind: the listener just proved who they are.
-      unawaited(state.refreshHome(force: true));
+      await state.refreshHome(force: true);
     }
     unawaited(state._refreshMissingArtwork());
     unawaited(_save());

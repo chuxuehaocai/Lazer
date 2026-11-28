@@ -77,6 +77,19 @@ final _musicSource = _source
   return {}
 ''');
 
+final _homeSource = _musicSource
+    .replaceFirst(
+      'capabilities={"playlists","favorites","lyrics","scrobble"}',
+      'capabilities={"homeFeed","playlists","favorites","lyrics","scrobble"}',
+    )
+    .replaceFirst('  local function song()', '''  if op == "homeFeed" then
+    local authenticated = host.storage_get("session_"..platform) ~= nil
+    if not authenticated then host.sleep(80) end
+    local prefix = authenticated and "auth" or "guest"
+    return {quick={{id=prefix.."-home-song",title=prefix.." home",artists={},durationMs=180000}}}
+  end
+  local function song()''');
+
 CachedLyricsStore _noLyricsDisk() => CachedLyricsStore(
   supportDirectory: () async =>
       throw const FileSystemException('lyrics tested separately'),
@@ -319,6 +332,30 @@ void main() {
         expect(signedOut.isGuest, isTrue);
       } finally {
         signedOut.dispose();
+      }
+    },
+  );
+
+  test(
+    'a first plugin login returns authenticated home data before closing',
+    () async {
+      final plugins = manager();
+      final app = AppState(
+        pluginManager: plugins,
+        catalog: _MusicCatalog(Directory('${directory.path}/collection')),
+        artworkSeedLoader: (_) async => null,
+      );
+      try {
+        await app.bootstrap();
+        await plugins.importZip(_package(source: _homeSource));
+        expect(app.musicProvider.id, 'alpha');
+
+        final outcome = await app.signInWithCookie('alpha-fixture');
+        expect(outcome.ok, isTrue);
+        expect(app.activeMusicSignedIn, isTrue);
+        expect(app.home?.quick.single.title, 'auth home');
+      } finally {
+        app.dispose();
       }
     },
   );
