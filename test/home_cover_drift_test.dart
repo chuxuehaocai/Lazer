@@ -100,6 +100,21 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('the phone collage keeps a repeated strip beyond the card', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_card(tickersEnabled: true, compact: true));
+    await tester.pump();
+
+    final strip = find.byKey(
+      const ValueKey<String>('phone-cover-mosaic-strip'),
+    );
+    expect(tester.getSize(strip).width, greaterThan(240));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('a muted phone card stops its timer', (tester) async {
     await tester.pumpWidget(_card(tickersEnabled: true, compact: true));
     await tester.pump();

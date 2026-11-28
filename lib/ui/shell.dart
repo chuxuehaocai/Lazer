@@ -2855,7 +2855,7 @@ class _BottomTrackCover extends StatelessWidget {
                     url: track.coverUrl,
                     size: 44,
                     radius: 22,
-                    followCornerSetting: false,
+                    followCornerSetting: true,
                   ),
                 ),
                 ExcludeSemantics(

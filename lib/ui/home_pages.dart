@@ -1051,22 +1051,34 @@ class _PhoneCoverMosaicState extends State<_PhoneCoverMosaic>
                   offset: Offset(-(_phase.value * travel), 0),
                   child: child,
                 ),
-                child: Stack(
-                  children: [
-                    for (var column = 0; column < columns; column++)
-                      for (var row = 0; row < rows; row++)
-                        Positioned(
-                          left: column * widget.tile,
-                          top: row * widget.tile,
-                          child: AppCover(
-                            url:
-                                artwork[(column * rows + row) % artwork.length],
-                            size: widget.tile,
-                            radius: 0,
-                            followCornerSetting: false,
-                          ),
-                        ),
-                  ],
+                child: OverflowBox(
+                  alignment: Alignment.topLeft,
+                  minWidth: 0,
+                  maxWidth: double.infinity,
+                  child: SizedBox(
+                    key: const ValueKey<String>('phone-cover-mosaic-strip'),
+                    width: columns * widget.tile,
+                    height: rows * widget.tile,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        for (var column = 0; column < columns; column++)
+                          for (var row = 0; row < rows; row++)
+                            Positioned(
+                              left: column * widget.tile,
+                              top: row * widget.tile,
+                              child: AppCover(
+                                url:
+                                    artwork[(column * rows + row) %
+                                        artwork.length],
+                                size: widget.tile,
+                                radius: 0,
+                                followCornerSetting: false,
+                              ),
+                            ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             );
